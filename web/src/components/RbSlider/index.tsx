@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:23:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 16:16:49
+ * @Last Modified time: 2026-05-21 16:14:53
  */
 /**
  * RbSlider Component
@@ -29,6 +29,7 @@ interface RbSliderProps extends SliderSingleProps {
   size?: 'small' | 'default';
   className?: string;
   prefix?: string | ReactNode;
+  suffix?: string | ReactNode;
   inputClassName?: string;
 }
 
@@ -44,6 +45,7 @@ const RbSlider: FC<RbSliderProps> = ({
   isInput = false,
   className = 'rb:pl-1!',
   prefix,
+  suffix,
   inputClassName,
   disabled,
   ...rest
@@ -76,10 +78,9 @@ const RbSlider: FC<RbSliderProps> = ({
       className={`rb:rounded-[5px] ${className}`}
     >
       {/* Slider with fixed width */}
-      <Slider 
+      <Slider
         style={{
-          overflow: 'inherit',
-          width: '384px'
+          flex: '1'
         }}
         {...rest}
         min={min}
@@ -103,6 +104,7 @@ const RbSlider: FC<RbSliderProps> = ({
           disabled={disabled}
           onChange={handleInputChange}
           prefix={prefix}
+          suffix={suffix}
           className={`${inputClassName || '' } rb:w-20!`}
           placeholder={t('common.pleaseEnter')}
         />

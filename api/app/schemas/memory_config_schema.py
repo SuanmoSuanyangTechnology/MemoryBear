@@ -417,9 +417,12 @@ class MemoryConfig:
     offset: float = 0.0
     
     # Pipeline config: Pruning
-    pruning_enabled: bool = False
+    pruning_enabled: bool = True
     pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
+    
+    # Pipeline config: Emotion extraction
+    emotion_enabled: bool = False
     
     # Ontology scene association
     scene_id: Optional[UUID] = None

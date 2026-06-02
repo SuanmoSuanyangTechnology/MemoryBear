@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 18:23:31
+ * @Last Modified time: 2026-05-29 19:46:16
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
+
 import AddNode from './components/Nodes/AddNode';
 import ConditionNode from './components/Nodes/ConditionNode';
 import GroupStartNode from './components/Nodes/GroupStartNode';
@@ -16,6 +17,26 @@ import NoteNode from './components/Nodes/NoteNode';
 import { memoryConfigListUrl } from '@/api/memory';
 import type { NodeLibrary } from './types';
 
+// Nodes with Data Processing in Execution Results
+export const hasProcessNodes = [
+  'llm',
+  'knowledge-retrieval',
+  'parameter-extractor',
+  'memory-read',
+  'memory-write',
+  'question-classifier',
+  'if-else',
+  'assigner',
+  'http-request',
+  'tool',
+  'code',
+  'document-extractor',
+]
+// support single run node
+export const cannotRunNodes = [
+  'end',
+  'output',
+]
 /**
  * Workflow node library configuration
  * Defines all available node types, their icons, and configuration schemas
@@ -28,40 +49,44 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           variables: {
             type: 'define',
-            sys: [
-              {
-                name: "message",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "conversation_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "execution_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "workspace_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "user_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "files",
-                type: "array[file]",
-                readonly: true
-              },
-            ],
             defaultValue: []
           }
+        }
+      },
+      { type: "trigger", icon: 'rb:bg-[url("@/assets/images/workflow/trigger.svg")]',
+        config: {
+          trigger_type: {
+            type: 'define',
+            required: true,
+          },
+          cron: {
+            type: 'define',
+            required: true,
+          },
+          enabled: {
+            type: 'define',
+            defaultValue: true
+          },
+          // frequency: {
+          //   type: 'define',
+          //   defaultValue: 'daily'
+          // },
+          // minute: {
+          //   type: 'define',
+          //   defaultValue: 0,
+          // },
+          // time: {
+          //   type: 'define',
+          //   defaultValue: '12:00 AM',
+          // },
+          // week_days: {
+          //   type: 'define',
+          //   defaultValue: []
+          // },
+          // month_days: {
+          //   type: 'define',
+          //   defaultValue: []
+          // },
         }
       },
       { type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
@@ -96,24 +121,109 @@ export const nodeLibrary: NodeLibrary[] = [
             valueKey: 'id',
             labelKey: 'name',
           },
+          // 温度参数
           temperature: {
             type: 'define',
-            max: 2, 
-            min: 0, 
-            step: 0.1,
             defaultValue: 0.7
           },
           max_tokens: { 
             type: 'define',
-            max: 32000, 
-            min: 256, 
-            step: 1, 
             defaultValue: 2000 
           },
           json_output: {
             type: 'define',
             defaultValue: false
           },
+          // Top P 采样参数
+          top_p: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 0.8
+            }
+          },
+          // 取样数量
+          top_k: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 50
+            }
+          },
+          // 随机种子
+          seed: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 1234
+            }
+          },
+          // 重复惩罚
+          repetition_penalty: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 1.0
+            }
+          },
+          // 联网搜索
+          // enable_search: {
+          //   type: 'define',
+          //   defaultValue: false
+          // },
+          // 思考模式
+          thinking: {
+            type: 'define',
+            defaultValue: {
+              budget: {
+                  enable: false,
+                  value: 256
+              },
+              enable: false
+            }
+          },
+          // 回复格式
+          response_format: {
+            type: 'define',
+            options: [
+              { label: 'text', value: 'text' },
+              { label: 'json_object', value: 'json_object' },
+            ],
+            defaultValue: 'text',
+          },
+          // 额外请求头，字符串格式
+          extra_headers: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: undefined
+            }
+          },
+          // 停止序列, 输入序列并按 Tab 键
+          stop: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: []
+            }
+          },
+          // 存在惩罚
+          presence_penalty: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 0
+            }
+          },
+          // 频率惩罚
+          frequency_penalty: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 0
+            }
+          },
+
           context: {
             type: 'variableList',
             placeholder: 'workflow.config.llm.contextPlaceholder'
@@ -144,6 +254,27 @@ export const nodeLibrary: NodeLibrary[] = [
           vision_input: {
             type: 'variableList',
             onFilterVariableType: ['array[file]', 'file']
+          },
+          // 启用推理标签分离
+          enable_reasoning_content_extraction: {
+            type: 'switch',
+            tip: 'workflow.config.llm.enable_reasoning_content_extraction_tip',
+            defaultValue: false
+          },
+          // 失败重试
+          retry: {
+            type: 'retry',
+            defaultValue: {
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 100,
+            }
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
           }
         }
       },
@@ -151,6 +282,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           query: {
             type: 'variableList',
+            required: true,
           },
           knowledge_retrieval: {
             type: 'knowledge',
@@ -181,6 +313,14 @@ export const nodeLibrary: NodeLibrary[] = [
             titleVariant: 'borderless',
             placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
           },
+          inference_mode: {
+            type: 'define',
+            defaultValue: 'prompt',
+            options: [
+              { value: 'function_calling', label: 'workflow.config.parameter-extractor.function_calling' },
+              { value: 'prompt', label: 'workflow.config.parameter-extractor.promptCall' },
+            ]
+          }
         }
       }
     ]
@@ -267,6 +407,13 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'variableList',
             required: true,
           },
+          vision: {
+            type: 'switch'
+          },
+          vision_input: {
+            type: 'variableList',
+            onFilterVariableType: ['array[file]', 'file']
+          },
           categories: {
             type: 'categoryList',
             required: true,
@@ -288,8 +435,16 @@ export const nodeLibrary: NodeLibrary[] = [
           input: {
             type: 'variableList',
             required: true,
-            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
-            filterVariableNames: ['message']
+            filterNodeTypes: ['start', 'knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
+            // filterVariableNames: ['message']
+          },
+          output_type: {
+            type: 'define',
+          },
+          output: {
+            type: 'variableList',
+            required: true,
+            filterChildNodes: true
           },
           parallel: {
             type: 'switch',
@@ -304,18 +459,20 @@ export const nodeLibrary: NodeLibrary[] = [
             dependsOn: 'parallel',
             dependsOnValue: true
           },
+          error_response: {
+            type: 'select',
+            defaultValue: 'stop',
+            needTranslation: true,
+            options: [
+              { label: 'workflow.config.iteration.stop', value: 'stop' },
+              { label: 'workflow.config.iteration.ignore_error', value: 'ignore_error' },
+              { label: 'workflow.config.iteration.remove_error', value: 'remove_error' },
+            ],
+          },
           flatten: { // Flatten output
             type: 'switch',
             defaultValue: false
           },
-          output: {
-            type: 'variableList',
-            required: true,
-            filterChildNodes: true
-          },
-          output_type: {
-            type: 'define',
-          }
         },
       },
       { type: "loop", icon: 'rb:bg-[url("@/assets/images/workflow/loop.svg")]',
@@ -423,7 +580,9 @@ export const nodeLibrary: NodeLibrary[] = [
           retry: {
             type: 'switch',
             defaultValue: {
-              enable: false
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 1000,
             }
           },
           error_handle: {
@@ -472,6 +631,20 @@ export const nodeLibrary: NodeLibrary[] = [
             required: true,
             defaultValue: [{name: 'result', type: 'string'}]
           },
+          retry: {
+            type: 'retry',
+            defaultValue: {
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 1000,
+            }
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
+          }
         }
       },
       { type: "jinja-render", icon: 'rb:bg-[url("@/assets/images/workflow/template_rendering.svg")]',
@@ -825,6 +998,15 @@ export const defaultPortItems = [
  * Maps node types to their visual and structural properties
  */
 export const graphNodeLibrary: Record<string, NodeConfig> = {
+  'trigger': {
+    width: nodeWidth,
+    height: 76,
+    shape: 'normal-node',
+    ports: {
+      groups: { right: defaultPortGroup },
+      items: [defaultPortItems[1]],
+    },
+  },
   iteration: {
     width: nodeWidth,
     height: 140,
@@ -948,6 +1130,15 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     width: nodeWidth,
     height: 120,
     shape: 'notes-node',
+  },
+  output: {
+    width: nodeWidth,
+    height: 76,
+    shape: 'normal-node',
+    ports: {
+      groups: { left: leftPortGroup },
+      items: [defaultPortItems[0]],
+    },
   }
 }
 
@@ -963,11 +1154,6 @@ export interface OutputVariable {
   }>;
   /** Dynamically defined variable keys */
   define?: string[];
-  /** System-level output variables */
-  sys?: Array<{
-    name: string;
-    type: string;
-  }>;
   /** Error-related output variables */
   error?: Array<{
     name: string;

@@ -29,7 +29,7 @@ _TYPE_ALIASES_UPPER: Dict[str, set[str]] = {
     # 活动/技能近义：统一到 ACTIVITY，放宽“技术活动/技能”的同类判断
     "ACTIVITY": {s.upper() for s in {"活动", "技术活动", "技能", "ACTIVITY", "SKILL"}},
     # 常见类别，按需扩展
-    "PERSON": {s.upper() for s in {"人物", "人", "个人", "人名", "PERSON"}},
+    "PERSON": {s.upper() for s in {"生命体", "人物", "人", "个人", "人名", "PERSON"}},
     "LOCATION": {s.upper() for s in {"地点", "位置", "LOCATION", "城市", "CITY", "国家", "COUNTRY"}},
     "SOFTWARE": {s.upper() for s in {"软件", "SOFTWARE"}},
     "EVENT": {s.upper() for s in {"事件", "EVENT"}},

@@ -12,7 +12,6 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
-from app.models.app_model import App
 from app.models.app_model import AppType
 from app.models.app_release_model import AppRelease
 from app.repositories import knowledge_repository
@@ -69,7 +68,7 @@ def _checkAppConfig(release: AppRelease):
     elif release.type == AppType.MULTI_AGENT:
         if not release.config:
             raise BusinessException("Multi-Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-    elif release.type == AppType.WORKFLOW:
+    elif release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         if not release.config:
             raise BusinessException("工作流应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
     else:
@@ -85,7 +84,7 @@ async def chat(
         conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
         app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
         app_service: Annotated[AppService, Depends(get_app_service)] = None,
-        message: str = Body(..., description="聊天消息内容"),
+        message: str | None = Body(None, description="聊天消息内容"),
 ):
     """
     Agent/Workflow 聊天接口
@@ -152,14 +151,19 @@ async def chat(
     # check app config
     _checkAppConfig(active_release)
 
-    # 获取或创建会话（提前验证）
-    conversation = conversation_service.create_or_get_conversation(
-        app_id=app.id,
-        workspace_id=workspace_id,
-        user_id=end_user_id,
-        is_draft=False,
-        conversation_id=payload.conversation_id
-    )
+    if app_type != AppType.PURE_WORKFLOW and not payload.message:
+        raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
+
+    # pure_workflow 不强制创建会话；传入 conversation_id 时仍支持复用。
+    conversation = None
+    if app_type != AppType.PURE_WORKFLOW or payload.conversation_id:
+        conversation = conversation_service.create_or_get_conversation(
+            app_id=app.id,
+            workspace_id=workspace_id,
+            user_id=end_user_id,
+            is_draft=False,
+            conversation_id=payload.conversation_id
+        )
 
     if app_type == AppType.AGENT:
 
@@ -175,9 +179,9 @@ async def chat(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.agnet_chat_stream(
+                async for event in app_chat_service.agent_chat_stream(
                         message=payload.message,
-                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        conversation_id=conversation.id if conversation else None,
                         user_id=end_user_id,  # 转换为字符串
                         variables=payload.variables,
                         web_search=web_search,
@@ -201,7 +205,7 @@ async def chat(
             )
 
         # 非流式返回
-        result = await app_chat_service.agnet_chat(
+        result = await app_chat_service.agent_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=end_user_id,  # 转换为字符串
@@ -211,7 +215,7 @@ async def chat(
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            workspace_id=workspace_id,
+            workspace_id=str(workspace_id),
             files=payload.files  # 传递多模态文件
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
@@ -258,7 +262,7 @@ async def chat(
         )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
-    elif app_type == AppType.WORKFLOW:
+    elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         # 多 Agent 流式返回
         config = workflow_config_4_app_release(active_release)
         if payload.stream:
@@ -296,11 +300,11 @@ async def chat(
                 }
             )
 
-        # 多 Agent 非流式返回
+        # workflow 非流式返回
         result = await app_chat_service.workflow_chat(
 
             message=payload.message,
-            conversation_id=conversation.id,  # 使用已创建的会话 ID
+            conversation_id=conversation.id if conversation else None,
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             config=config,

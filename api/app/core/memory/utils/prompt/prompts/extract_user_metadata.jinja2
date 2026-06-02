@@ -1,140 +1,772 @@
 ===Task===
-Extract user metadata changes from the following conversation statements spoken by the user.
-
 {% if language == "zh" %}
-**"三度原则"判断标准：**
-- 复用度：该信息是否会被多个功能模块使用？
-- 约束度：该信息是否会影响系统行为？
-- 时效性：该信息是长期稳定的还是临时的？仅提取长期稳定信息。
+你是一个用户画像 metadata 增量提取助手。你的任务是根据输入的用户 `description` 列表，提取值得长期保留、适合挂在“用户节点”下的新增 metadata。
 
-**提取规则：**
-- **只提取关于"用户本人"的画像信息**，忽略用户提到的第三方人物（如朋友、同事、家人）的信息
-- 仅提取文本中明确提到的信息，不要推测
-- **输出语言必须与输入文本的语言一致**（输入中文则输出中文值，输入英文则输出英文值）
+你会同时收到：
 
-**增量模式（重要）：**
-你只需要输出**本次对话引起的变更操作**，不要输出完整的元数据。每个变更是一个对象，包含：
-- `field_path`：字段路径，用点号分隔（如 `profile.role`、`profile.expertise`）
-- `action`：操作类型
-  * `set`：新增或修改一个字段的值
-  * `remove`：移除一个字段的值
-- `value`：字段的新值（`action="set"` 时必填，`action="remove"` 时填要移除的元素值）
-  * 所有字段均为列表类型，每个元素一条变更记录
+- `description`: 一组待分析的描述字符串
+- `existing_metadata`: 用户当前已经存在的 metadata
 
-**判断规则：**
-- 用户提到新信息 → `action="set"`，填入新值
-- 用户明确否定已有信息（如"我不再做老师了"、"我已经不学Python了"）→ `action="remove"`，`value` 填要移除的元素值
-- 如果本次对话没有任何可提取的变更，返回空的 `metadata_changes` 数组 `[]`
-- **不要为未被提及的字段生成任何变更操作**
+你的目标不是重建完整 metadata，而是只输出“新增内容”：
 
-{% if existing_metadata %}
-**已有元数据（仅供参考，用于判断是否需要变更）：**
-请对比已有数据和用户最新发言，只输出差异部分的变更操作。
-- 如果用户说的信息和已有数据一致，不需要输出变更
-- 如果用户否定了已有数据中的某个值，输出 `remove` 操作
-- 如果用户提到了新信息，输出 `set` 操作
-{% endif %}
+- 只能输出从 `description` 中能够支持的新增 metadata
+- 不要重复输出已经出现在 `existing_metadata` 里的内容
+- 不允许修改、重写、删除或纠正已有 metadata
+- 所有字段一律输出为字符串数组
+  {% else %}
+  You are an assistant for incremental user metadata extraction. Your task is to extract durable, user-node-level new metadata from the input `description` list.
 
-**字段说明：**
-- profile.role：用户的职业或角色（列表），如 教师、医生、后端工程师，一个人可以有多个角色
-- profile.domain：用户所在领域（列表），如 教育、医疗、软件开发，一个人可以涉及多个领域
-- profile.expertise：用户擅长的技能或工具（列表），如 Python、心理咨询、高中物理
-- profile.interests：用户主动表达兴趣的话题或领域标签（列表）
+You will receive:
 
-**用户别名变更（增量模式）：**
-- **aliases_to_add**：本次新发现的用户别名，包括：
-  * 用户主动自我介绍：如"我叫张三"、"我的名字是XX"、"我的网名是XX"
-  * 他人对用户的称呼：如"同事叫我陈哥"、"大家叫我小张"、"领导叫我老陈"
-  * 只提取原文中逐字出现的名字，严禁推测或创造
-  * 禁止提取：用户给 AI 取的名字、第三方人物自身的名字、"用户"/"我" 等占位词
-  * 如果没有新别名，返回空数组 `[]`
-- **aliases_to_remove**：用户明确否认的别名，包括：
-  * 用户说"我不叫XX了"、"别叫我XX"、"我改名了，不叫XX" → 将 XX 放入此数组
-  * **严格限制**：只将用户原文中**逐字提到**的被否认名字放入，不要推断关联的其他别名
-  * 如果没有要移除的别名，返回空数组 `[]`
-{% if existing_aliases %}
-- 已有别名：{{ existing_aliases | tojson }}（仅供参考，不需要在输出中重复）
-{% endif %}
-{% else %}
-**"Three-Degree Principle" criteria:**
-- Reusability: Will this information be used by multiple functional modules?
-- Constraint: Will this information affect system behavior?
-- Timeliness: Is this information long-term stable or temporary? Only extract long-term stable information.
+- `description`: a list of descriptions to analyze
+- `existing_metadata`: the user's existing metadata
 
-**Extraction rules:**
-- **Only extract profile information about the user themselves**, ignore information about third parties (friends, colleagues, family) mentioned by the user
-- Only extract information explicitly mentioned in the text, do not speculate
-- **Output language must match the input text language**
+Your goal is not to rebuild the full metadata. You must output only new metadata:
 
-**Incremental mode (important):**
-You should only output **the change operations caused by this conversation**, not the complete metadata. Each change is an object containing:
-- `field_path`: Field path separated by dots (e.g. `profile.role`, `profile.expertise`)
-- `action`: Operation type
-  * `set`: Add or update a field value
-  * `remove`: Remove a field value
-- `value`: The new value for the field (required when `action="set"`, for `action="remove"` fill in the element value to remove)
-  * All fields are list types, one change record per element
+- Output only metadata supported by `description`
+- Do not repeat anything already present in `existing_metadata`
+- Do not modify, rewrite, delete, or correct existing metadata
+- Every field must be an array of strings
+  {% endif %}
 
-**Decision rules:**
-- User mentions new information → `action="set"`, fill in the new value
-- User explicitly negates existing info (e.g. "I'm no longer a teacher", "I stopped learning Python") → `action="remove"`, `value` is the element to remove
-- If this conversation has no extractable changes, return an empty `metadata_changes` array `[]`
-- **Do NOT generate any change operations for fields not mentioned in the conversation**
+===Inputs===
+{% if language == "zh" %}
+输入 JSON 包含以下字段：
 
-{% if existing_metadata %}
-**Existing metadata (for reference only, to determine if changes are needed):**
-Compare existing data with the user's latest statements, and only output change operations for the differences.
-- If the user's statement matches existing data, no change is needed
-- If the user negates a value in existing data, output a `remove` operation
-- If the user mentions new information, output a `set` operation
-{% endif %}
+- `description`: 字符串数组，表示关于用户的一组描述
+- `existing_metadata`: 现有 metadata 对象，字段固定为：
+  - `aliases`
+  - `core_facts`
+  - `traits`
+  - `relations`
+  - `goals`
+  - `interests`
+  - `beliefs_or_stances`
+  - `anchors`
+  - `events`
+    {% else %}
+    The input JSON contains:
+- `description`: an array of strings describing the user
+- `existing_metadata`: an existing metadata object with these fixed fields:
+  - `aliases`
+  - `core_facts`
+  - `traits`
+  - `relations`
+  - `goals`
+  - `interests`
+  - `beliefs_or_stances`
+  - `anchors`
+  - `events`
+    {% endif %}
 
-**Field descriptions:**
-- profile.role: User's occupation or role (list), e.g. teacher, doctor, software engineer. A person can have multiple roles
-- profile.domain: User's domain (list), e.g. education, healthcare, software development. A person can span multiple domains
-- profile.expertise: User's skills or tools (list), e.g. Python, counseling, physics
-- profile.interests: Topics or domain tags the user actively expressed interest in (list)
+Input JSON:
 
-**User alias changes (incremental mode):**
-- **aliases_to_add**: Newly discovered user aliases from this conversation, including:
-  * User self-introductions: e.g. "I'm John", "My name is XX", "My username is XX"
-  * How others address the user: e.g. "My colleagues call me Johnny", "People call me Mike"
-  * Only extract names that appear VERBATIM in the text — never infer or fabricate
-  * Do NOT extract: names the user gives to the AI, third-party people's own names, placeholder words like "User"/"I"
-  * If no new aliases, return empty array `[]`
-- **aliases_to_remove**: Aliases the user explicitly denies, including:
-  * User says "Don't call me XX anymore", "I'm not called XX", "I changed my name from XX" → put XX in this array
-  * **Strict rule**: Only include the exact name the user **verbatim mentions** as denied. Do NOT infer or remove related aliases
-  * If no aliases to remove, return empty array `[]`
-{% if existing_aliases %}
-- Existing aliases: {{ existing_aliases | tojson }} (for reference only, do not repeat in output)
-{% endif %}
-{% endif %}
-
-===User Statements===
-{% for stmt in statements %}
-- {{ stmt }}
-{% endfor %}
-
-{% if existing_metadata %}
-===Existing User Metadata===
 ```json
-{{ existing_metadata | tojson }}
+{{ input_json | default("{}") }}
 ```
+
+===Field Definitions===
+{% if language == "zh" %}
+
+- `aliases`
+  - 用户的别名、昵称、称呼、英文名、稳定使用的另一个名字
+- `core_facts`
+  - 用户相对稳定的基础事实，如身份、年龄、来源地、所在地、关系状态、家庭状态、长期背景
+- `traits`
+  - 用户相对稳定的人格特质、风格、气质、行为倾向
+- `relations`
+  - 用户与他人、群体、宠物、重要对象之间值得长期记忆的关系
+  - 保持字符串格式，可包含多个片段，常见格式如 `对象 | 关系/身份 | 补充信息`
+- `goals`
+  - 用户明确、稳定、值得长期保留的人生目标、长期计划、持续追求
+- `interests`
+  - 用户稳定的兴趣、偏好、长期爱好
+- `beliefs_or_stances`
+  - 用户稳定的信念、价值立场、政治、宗教或社会议题立场
+- `anchors`
+  - 对用户有长期意义的物品、收藏、纪念物、象征物
+  - 保持字符串格式，可包含多个片段，常见格式如 `对象 | 来源/关联 | 意义`
+- `events`
+  - 对用户画像有长期价值的个人经历、事件、里程碑
+  - 保持字符串格式，可包含多个片段，常见格式如 `事件 | 时间 | 补充说明`
+    {% else %}
+- `aliases`
+  - aliases, nicknames, stable alternative names, English names, or regular forms of address
+- `core_facts`
+  - stable basic facts such as identity, age, origin, residence, relationship status, family status, or long-term background
+- `traits`
+  - stable personality traits, style, temperament, or behavioral tendencies
+- `relations`
+  - durable relationships between the user and people, groups, pets, or important entities
+  - keep string format; common pattern: `entity | relation/identity | extra info`
+- `goals`
+  - explicit, stable, long-term goals or ongoing pursuits worth remembering
+- `interests`
+  - stable interests, preferences, or hobbies
+- `beliefs_or_stances`
+  - stable beliefs, values, political, religious, or social stances
+- `anchors`
+  - personally meaningful objects, collections, keepsakes, or symbols
+  - keep string format; common pattern: `object | source/association | meaning`
+- `events`
+  - durable personal experiences, milestones, or events worth preserving
+  - keep string format; common pattern: `event | time | extra note`
+    {% endif %}
+
+===Core Principles===
+{% if language == "zh" %}
+
+1. 只提取新增内容
+
+- 如果某条信息已经在 `existing_metadata` 中出现，不能再次输出
+- 即使 `description` 只是换了一种说法表达已有信息，也不要重复输出
+- 如果只是轻微改写、近义改写、语序调整，也视为重复
+
+2. 不修改已有内容
+
+- 不要纠正已有 metadata 的措辞
+- 不要补全已有 metadata 的结构
+- 不要把已有 metadata 中的短字符串改写成更长版本后再输出
+- 不要因为 `description` 出现了更精确表达，就把已有内容升级后重新输出
+
+3. 只保留对用户画像有长期价值的信息
+
+- 优先提取稳定身份、长期偏好、重要关系、重大目标、长期立场、重要锚点、关键事件
+- 不要提取纯闲聊、瞬时感受、一次性很弱的细节
+- 短暂情绪通常不单独提取，除非它是某个重要事件说明的一部分
+
+4. 最小语义完整单元
+
+- 每个 metadata 条目都应尽量保留“最小但语义完整”的信息
+- 不要退化成脱离上下文后意义不足的裸名词、裸地名、裸主题词、裸事件名
+- 也不要扩写成冗长整句
+- 目标是：该字符串单独拿出来时，仍然知道它在说什么
+- 优先保留类似 `在上海工作`、`来自湖南长沙`、`申请领养机构`、`参加 pride parade | 3 July 2023` 这样的形式
+- 避免输出类似 `上海`、`湖南长沙`、`家庭`、`pride parade` 这种信息残缺的条目
+
+5. 所有字段都必须是字符串数组
+
+- 不允许输出对象数组
+- 不允许输出嵌套结构
+- 不允许把 `events` 拆成 event/time/note 对象
+- 不允许把 `relations` 拆成结构化对象
+
+6. 可以保留多段信息在一个字符串里
+
+- `relations`、`anchors`、`events` 可以使用 `|` 连接多个片段
+- 只有在确实有助于保留结构时才这样做
+- 不必强行补满固定片段数，宁可简洁准确
+
+7. 证据边界
+
+- 只能依据 `description` 提取新增 metadata
+- `existing_metadata` 只用于去重和分类参考，不是新增内容来源
+- 不要从常识、推测或世界知识补充额外信息
+- 但允许从复合表述中识别并提取属于字段定义范围内的蕴含事实。例如 `single parent` 蕴含了关系状态和家庭状态，可以提取为 core_fact。但仅限于该蕴含信息本身属于某个字段的定义范围且具有长期画像价值。不要泛化提取所有修饰词或临时状态
+  {% else %}
+
+1. Extract only new content
+
+- If something already appears in `existing_metadata`, do not output it again
+- If a description merely paraphrases existing metadata, do not output it
+- Minor wording changes, synonym swaps, or reordered phrasing still count as duplicates
+
+2. Do not modify existing content
+
+- Do not correct wording in existing metadata
+- Do not expand existing metadata and re-output it
+- Do not upgrade an existing item into a more detailed version and emit it as new
+
+3. Keep only durable user-profile information
+
+- Prioritize stable identity, long-term preferences, important relationships, major goals, durable stances, meaningful anchors, and key events
+- Exclude casual chatter, fleeting states, and weak one-off details
+- Temporary emotions should usually not be extracted unless they are part of an important event description
+
+4. Minimal Semantically Complete Unit
+
+- Each metadata item should preserve the smallest semantically complete unit
+- Do not reduce items to bare nouns, bare place names, bare topic labels, or bare event names when that loses key meaning
+- Do not expand them into long full sentences either
+- The target is a short string that still makes sense on its own outside the original sentence
+- Prefer forms like `works in Shanghai`, `from Hunan Changsha`, `applied to adoption agencies`, or `attended pride parade | 3 July 2023`
+- Avoid low-information items like `Shanghai`, `Hunan Changsha`, `family`, or `pride parade` when they are semantically incomplete
+
+5. Every field must be an array of strings
+
+- No object arrays
+- No nested structure
+- Do not split `events` into event/time/note objects
+- Do not split `relations` into structured objects
+
+6. Multi-part strings are allowed
+
+- `relations`, `anchors`, and `events` may use `|` to join parts
+- Do this only when it helps preserve useful structure
+- Do not force a fixed number of parts
+
+7. Evidence boundary
+
+- Extract new metadata only from `description`
+- Use `existing_metadata` only for deduplication and category reference
+- Do not add unsupported information from world knowledge or inference beyond the text
+- However, you may extract implied facts from compound expressions when they fall within a field's defined scope. For example, `single parent` implies relationship status and family status, and may be extracted as a core_fact. This is allowed only when the implied information belongs to a field's definition and has durable profile value. Do not over-extract every modifier or transient state
+  {% endif %}
+
+===Deduplication Rules===
+{% if language == "zh" %}
+
+- 先理解 `description` 想表达的含义，再与 `existing_metadata` 做语义去重
+- 若以下任一情况成立，则视为已存在，不要输出：
+  - 完全相同
+  - 近义表达
+  - 更长或更短但语义相同
+  - 只是把已有多段字符串拆开或重新组合
+  - 只是把已有事件或关系中的时间或备注略作改写
+- 去重标准以“是否新增了值得保留的新事实”为准，而不是字面是否完全一致
+  {% else %}
+- First understand the meaning of the description, then deduplicate semantically against `existing_metadata`
+- Treat an item as already existing if any of these holds:
+  - exact match
+  - close paraphrase
+  - longer or shorter wording with the same meaning
+  - just a split or recombination of an existing multi-part string
+  - a lightly reworded time or note variant of an existing event or relation
+- The test is whether the item adds a genuinely new durable fact, not whether the wording is different
+  {% endif %}
+
+===Extraction Guidance By Field===
+{% if language == "zh" %}
+`aliases`
+
+- 只收稳定名字，不收临时调侃
+- 职业、身份、评价词不算 alias
+
+`core_facts`
+
+- 放稳定基础事实
+- 不要放短暂状态、一次性动作、弱情绪
+- 地点相关事实不能只保留裸地名
+- 要保留最小完整事实语义，例如：
+  - `来自湖南长沙` 好于 `湖南长沙`
+  - `在上海工作` 好于 `上海`
+  - `住在深圳` 好于 `深圳`
+
+`traits`
+
+- 只收相对稳定的人格或行为风格
+- 不要因为一次行为就推断 trait
+
+`relations`
+
+- 只保留长期关系、有记忆价值的关系
+- 可以写成 `对象 | 关系/身份 | 补充信息`
+- 不要收纯一次性互动
+
+`goals`
+
+- 只收长期目标
+- 不要把一时愿望、泛化口号、普通期待当作 goal
+- 不要只保留目标对象名词
+- 要尽量保留目标动作或目标结果的最小完整语义
+- 例如：
+  - `建立家庭并领养孩子` 好于 `家庭`
+  - `从事跨性别群体心理健康工作` 好于 `mental health work`
+
+`interests`
+
+- 只收稳定兴趣
+- 短期尝试一次某事，通常不算 interest
+
+`beliefs_or_stances`
+
+- 收稳定信念、价值观、政治、宗教、社会议题立场
+- 不要收普通瞬时意见
+- 这类字段允许短词形式，只要该短词本身语义充分，例如 `liberal`
+
+`anchors`
+
+- 收具有象征意义、纪念意义、长期陪伴意义的对象
+- 可写来源与意义
+- 不要只保留过于空泛的对象名
+- 如果来源或象征意义是关键，应尽量保留，例如 `项链 | 来自外婆 | 象征爱、信念与力量`
+
+`events`
+
+- 只收对用户画像有长期价值的事件或里程碑
+- 不要只保留裸事件名
+- 如果时间已知，优先一并保留时间；如果事件意义明显，也尽量保留
+- 例如：
+  - `参加 pride parade | 3 July 2023 | felt belonging` 好于 `pride parade`
+  - `通过领养机构面试 | October 2023 | excited and thankful` 好于 `领养面试`
+- 普通日常小事通常不收，除非它明显揭示重要关系、目标推进或身份背景
+  {% else %}
+  `aliases`
+- only stable names, not playful one-off labels
+- occupations, identities, and evaluations are not aliases
+
+`core_facts`
+
+- keep stable background facts
+- exclude temporary states, one-off actions, and weak emotions
+- location-related facts should not be reduced to a bare place name
+- keep the smallest complete fact, for example:
+  - `from Hunan Changsha` is better than `Hunan Changsha`
+  - `works in Shanghai` is better than `Shanghai`
+  - `lives in Shenzhen` is better than `Shenzhen`
+
+`traits`
+
+- only relatively stable traits or behavioral style
+- do not infer a trait from one isolated action
+
+`relations`
+
+- keep durable, memory-worthy relationships
+- may use `entity | relation/identity | extra info`
+- exclude one-off interactions
+
+`goals`
+
+- only long-term goals
+- do not treat temporary wishes or generic aspirations as goals
+- do not keep only the target noun
+- preserve the smallest complete goal action or outcome
+- for example:
+  - `build a family and adopt children` is better than `family`
+  - `pursue mental health work for transgender people` is better than `mental health work`
+
+`interests`
+
+- only stable interests
+- a one-time attempt usually does not qualify
+
+`beliefs_or_stances`
+
+- keep stable beliefs, values, political, religious, or social stances
+- exclude ordinary fleeting opinions
+- short label-like items are acceptable here when they are already semantically complete, such as `liberal`
+
+`anchors`
+
+- keep symbolic, commemorative, or personally meaningful objects
+- source and meaning may be included
+- do not keep an overly vague object name by itself when the source or symbolic meaning is what makes it memorable
+
+`events`
+
+- keep only events or milestones with durable profile value
+- do not keep only a bare event name
+- if time is known, prefer to preserve it; if the event meaning is clear and important, preserve that too
+- for example:
+  - `attended pride parade | 3 July 2023 | felt belonging` is better than `pride parade`
+  - `passed adoption agency interviews | October 2023 | excited and thankful` is better than `adoption interview`
+- exclude ordinary daily trivia unless it clearly advances an important goal, relationship, or identity arc
+  {% endif %}
+
+===Output Hard Constraints===
+{% if language == "zh" %}
+
+- 只输出新增 metadata，不要输出完整 metadata
+- 结果必须包含全部 9 个字段
+- 每个字段都必须是数组
+- 即使某字段没有新增内容，也必须输出空数组
+- 每个数组元素必须是字符串
+- 不要输出 `null`
+- 不要输出解释文字
+- 不要输出 markdown code fence
+- 不要输出字段之外的任何额外键
+- 如果没有任何新增 metadata，也必须返回所有字段都为空数组的 JSON
+  {% else %}
+- Output only new metadata, not the full metadata
+- The result must include all 9 fields
+- Every field must be an array
+- Use empty arrays when there is no new content
+- Every array element must be a string
+- Do not output `null`
+- Do not output explanation text
+- Do not wrap the result in markdown code fences
+- Do not output any keys beyond the required fields
+- If there is no new metadata, still return the full JSON shape with empty arrays
+  {% endif %}
+
+===Examples===
+{% if language == "zh" %}
+示例 1
+Input:
+
+- description:
+  - "She recently started volunteering for a trans youth hotline."
+- existing_metadata:
+  - goals: ["pursue counseling / mental health work for transgender people"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": [
+    "started volunteering for a trans youth hotline"
+  ]
+}
+
+示例 2
+Input:
+
+- description:
+  - "She is originally from Sweden."
+  - "She is not dating anyone right now."
+- existing_metadata:
+  - core_facts: ["from Sweden", "single"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+
+示例 3
+Input:
+
+- description:
+  - "Her sister Mia encouraged her to apply."
+- existing_metadata:
+  - relations: ["grandma | grandmother | from Sweden"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [
+    "Mia | sister"
+  ],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+
+示例 4
+Input:
+
+- description:
+  - "She keeps a journal from her first year after moving."
+- existing_metadata:
+  - anchors: []
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [
+    "journal | from first year after moving"
+  ],
+  "events": []
+}
+
+示例 5
+Input:
+
+- description:
+  - "Last month she attended a workshop on trauma-informed care and felt it clarified her future direction."
+- existing_metadata:
+  - goals: ["pursue counseling / mental health work for transgender people"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": [
+    "attended workshop on trauma-informed care | last month | clarified future direction"
+  ]
+}
+
+示例 6
+Input:
+
+- description:
+  - "当前在上海工作的说话者。"
+- existing_metadata:
+  - core_facts: []
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [
+    "在上海工作"
+  ],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+
+示例 7
+Input:
+
+- description:
+  - "老家在湖南长沙的说话者。"
+- existing_metadata:
+  - core_facts: []
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [
+    "来自湖南长沙"
+  ],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+{% else %}
+Example 1
+Input:
+
+- description:
+  - "She recently started volunteering for a trans youth hotline."
+- existing_metadata:
+  - goals: ["pursue counseling / mental health work for transgender people"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": [
+    "started volunteering for a trans youth hotline"
+  ]
+}
+
+Example 2
+Input:
+
+- description:
+  - "She is originally from Sweden."
+  - "She is not dating anyone right now."
+- existing_metadata:
+  - core_facts: ["from Sweden", "single"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+
+Example 3
+Input:
+
+- description:
+  - "Her sister Mia encouraged her to apply."
+- existing_metadata:
+  - relations: ["grandma | grandmother | from Sweden"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [
+    "Mia | sister"
+  ],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+
+Example 4
+Input:
+
+- description:
+  - "She keeps a journal from her first year after moving."
+- existing_metadata:
+  - anchors: []
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [
+    "journal | from first year after moving"
+  ],
+  "events": []
+}
+
+Example 5
+Input:
+
+- description:
+  - "Last month she attended a workshop on trauma-informed care and felt it clarified her future direction."
+- existing_metadata:
+  - goals: ["pursue counseling / mental health work for transgender people"]
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": [
+    "attended workshop on trauma-informed care | last month | clarified future direction"
+  ]
+}
+
+Example 6
+Input:
+
+- description:
+  - "The speaker currently works in Shanghai."
+- existing_metadata:
+  - core_facts: []
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [
+    "works in Shanghai"
+  ],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
+
+Example 7
+Input:
+
+- description:
+  - "The speaker is originally from Hunan Changsha."
+- existing_metadata:
+  - core_facts: []
+
+Output:
+{
+  "aliases": [],
+  "core_facts": [
+    "from Hunan Changsha"
+  ],
+  "traits": [],
+  "relations": [],
+  "goals": [],
+  "interests": [],
+  "beliefs_or_stances": [],
+  "anchors": [],
+  "events": []
+}
 {% endif %}
 
 ===Output Format===
-Return a JSON object with the following structure:
+===Output Language Rule===
+{% if language == "zh" %}
+metadata 字符串值的语言必须与输入 `description` 的主要语言一致。
+
+- 如果输入 `description` 主要是中文，则 metadata 字符串值用中文输出。
+- 如果输入 `description` 主要是英文，则 metadata 字符串值用英文输出。
+- 不要为了规范化而将提取的条目翻译成另一种语言。
+- JSON 键名、数组结构、分隔符（如 `|`）保持不变；只有 metadata 字符串值需要跟随输入语言。
+  {% else %}
+  The language of metadata string values MUST follow the primary language of the input `description`.
+- If the input `description` is primarily Chinese, output metadata string values in Chinese.
+- If the input `description` is primarily English, output metadata string values in English.
+- Do not translate extracted items into a different language just for normalization.
+- JSON keys, array structure, and separators such as `|` stay unchanged; only metadata string values need to follow the input language.
+  {% endif %}
+
+{% if language == "zh" %}
+输出必须是严格可解析的 JSON 对象，结构固定如下：
+{% else %}
+Return a strict JSON object with this exact structure:
+{% endif %}
+
 ```json
 {
-  "metadata_changes": [
-    {"field_path": "profile.role", "action": "set", "value": "后端工程师"},
-    {"field_path": "profile.expertise", "action": "set", "value": "Python"},
-    {"field_path": "profile.expertise", "action": "remove", "value": "Java"}
-  ],
-  "aliases_to_add": [],
-  "aliases_to_remove": []
+  "aliases": ["string"],
+  "core_facts": ["string"],
+  "traits": ["string"],
+  "relations": ["string"],
+  "goals": ["string"],
+  "interests": ["string"],
+  "beliefs_or_stances": ["string"],
+  "anchors": ["string"],
+  "events": ["string"]
 }
 ```
 
-{{ json_schema }}
+{% if language == "zh" %}
+JSON 要求：
+
+- 使用标准 ASCII 双引号 `"`
+- 不要使用中文引号
+- 不要在 JSON 外输出任何文字
+- 字符串内如果包含双引号，必须转义为 `\"`
+- 不要遗漏字段
+- 不要输出尾逗号
+- metadata 字符串语言必须与输入 `description` 的主要语言一致
+  {% else %}
+  JSON requirements:
+- Use standard ASCII double quotes `"`
+- No smart quotes
+- Output JSON only
+- Escape internal quotes as `\"`
+- Do not omit any field
+- Do not emit trailing commas
+- Metadata string language must match the primary language of the input `description`
+  {% endif %}

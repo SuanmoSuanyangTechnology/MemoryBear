@@ -95,7 +95,14 @@ export interface ParserConfig {
   auto_keywords?: number; // 自动关键词
   auto_questions?: number; // 自动问题
   html4excel?: boolean; // 是否为Excel文件
-  graphrag: GraphragConfig; // 知识图谱生成
+  graphrag?: GraphragConfig; // 知识图谱生成
+
+
+  parent_chunk_mode?: 'paragraph' | 'full-doc';
+  parent_chunk_delimiter?: string;
+  parent_chunk_token_num?: number;
+
+  doc_type?: string;
   
   // Web 类型特有字段
   entry_url?: string; // 入口网址
@@ -135,6 +142,7 @@ export interface KnowledgeBaseDocumentData { // 知识库文档数据
   status?: number; // 状态  1 可检索 0 不可检索
   created_at?: string; // 创建时间
   updated_at?: string; // 更新时间
+  qa_prompt?: string; // 提示词
 }
 export interface DocumentModalRef {
   handleOpen: (file?: KnowledgeBaseDocumentData | null) => void;

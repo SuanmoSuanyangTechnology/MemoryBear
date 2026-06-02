@@ -2,8 +2,9 @@
 Celery Worker 入口点
 用于启动 Celery Worker: celery -A app.celery_worker worker --loglevel=info
 """
+# 必须在导入任何使用 DashScope SDK 的模块之前应用补丁
+import app.utils.dashscope_patch  # noqa: F401
 from celery.signals import worker_process_init
-
 from app.celery_app import celery_app
 from app.core.logging_config import LoggingConfig, get_logger
 

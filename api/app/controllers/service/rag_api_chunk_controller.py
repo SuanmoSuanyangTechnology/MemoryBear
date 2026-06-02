@@ -3,7 +3,7 @@
 from typing import Any, Optional, Union
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Request, status, Query
+from fastapi import APIRouter, Body, Depends, File, Request, status, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.controllers import chunk_controller
@@ -16,6 +16,7 @@ from app.schemas import chunk_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
+from app.services.file_storage_service import FileStorageService, get_file_storage_service
 
 
 router = APIRouter(prefix="/chunks", tags=["V1 - RAG API"])
@@ -113,6 +114,33 @@ async def create_chunk(
                                                current_user=current_user)
 
 
+@router.post("/{kb_id}/{document_id}/chunk/batch", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def create_chunks_batch(
+    kb_id: uuid.UUID,
+    document_id: uuid.UUID,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    items: list = Body(..., description="chunk items list"),
+):
+    """
+    Batch create chunks (max 8)
+    """
+    body = await request.json()
+    batch_data = chunk_schema.ChunkBatchCreate(**body)
+    # 0. Obtain the creator of the api key
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    return await chunk_controller.create_chunks_batch(kb_id=kb_id,
+                                                      document_id=document_id,
+                                                      batch_data=batch_data,
+                                                      db=db,
+                                                      current_user=current_user)
+
+
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
 async def get_chunk(
@@ -176,6 +204,7 @@ async def delete_chunk(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
+    force_refresh: bool = Query(False, description="Force Elasticsearch refresh after deletion"),
 ):
     """
     delete document chunk
@@ -188,6 +217,7 @@ async def delete_chunk(
     return await chunk_controller.delete_chunk(kb_id=kb_id,
                                                document_id=document_id,
                                                doc_id=doc_id,
+                                               force_refresh=force_refresh,
                                                db=db,
                                                current_user=current_user)
 
@@ -218,4 +248,30 @@ async def retrieve_chunks(
     return await chunk_controller.retrieve_chunks(retrieve_data=retrieve_data,
                                                   db=db,
                                                   current_user=current_user)
+
+
+@router.post("/{kb_id}/import_qa", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def import_qa_new_doc(
+    kb_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """
+    导入 QA 问答对并新建文档（CSV/Excel），异步处理（API Key 认证）
+    """
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    return await chunk_controller.import_qa_new_doc(
+        kb_id=kb_id,
+        file=file,
+        db=db,
+        current_user=current_user,
+        storage_service=storage_service,
+    )
 

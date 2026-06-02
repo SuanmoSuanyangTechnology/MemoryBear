@@ -168,7 +168,7 @@ class Base(ABC):
         return [
             {
                 "role": "user",
-                "content": self._image_prompt(prompt if prompt else vision_llm_describe_prompt(), b64)
+                "content": self._image_prompt(prompt if prompt else vision_llm_describe_prompt(lang=self.lang), b64)
             }
         ]
 

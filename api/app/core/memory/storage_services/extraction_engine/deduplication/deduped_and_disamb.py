@@ -16,6 +16,7 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
 )
 from app.core.memory.models.variate_config import DedupConfig
+from app.core.memory.utils.data.ontology import get_type_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,13 @@ def _unify_entity_type(canonical: ExtractedEntityNode, losing: ExtractedEntityNo
     canonical_type = (getattr(canonical, "entity_type", "") or "").strip()
     losing_type = (getattr(losing, "entity_type", "") or "").strip()
     
+    new_type = None
     if suggested_type and suggested_type.strip():
         # 优先使用LLM建议的类型
-        canonical.entity_type = suggested_type.strip()
+        new_type = suggested_type.strip()
     elif canonical_type.upper() == "UNKNOWN" and losing_type.upper() != "UNKNOWN":
         # 如果canonical是UNKNOWN，使用losing的类型
-        canonical.entity_type = losing_type
+        new_type = losing_type
     elif canonical_type.upper() != "UNKNOWN" and losing_type.upper() == "UNKNOWN":
         # 如果losing是UNKNOWN，保持canonical的类型（无需操作）
         pass
@@ -55,14 +57,19 @@ def _unify_entity_type(canonical: ExtractedEntityNode, losing: ExtractedEntityNo
         
         if canonical_is_generic and not losing_is_generic:
             # canonical是通用类型，losing是具体类型，使用losing
-            canonical.entity_type = losing_type
+            new_type = losing_type
         elif not canonical_is_generic and losing_is_generic:
             # losing是通用类型，canonical是具体类型，保持canonical（无需操作）
             pass
         elif len(losing_type) > len(canonical_type):
             # 两者都是具体类型或都是通用类型，选择更长的（通常更具体）
-            canonical.entity_type = losing_type
+            new_type = losing_type
         # 否则保持canonical的类型
+
+    # 同步更新 entity_type 和 type_id
+    if new_type is not None:
+        canonical.entity_type = new_type
+        canonical.type_id = get_type_id(new_type)
 
 
 # 模块级属性融合工具函数（统一行为）
@@ -117,12 +124,18 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
     except Exception:
         pass
 
-    # 描述与事实摘要（保留更长者）
+    # 描述合并（去重拼接，分号分隔）
     try:
-        desc_a = getattr(canonical, "description", "") or ""
-        desc_b = getattr(ent, "description", "") or ""
-        if len(desc_b) > len(desc_a):
-            canonical.description = desc_b
+        desc_a = (getattr(canonical, "description", "") or "").strip()
+        desc_b = (getattr(ent, "description", "") or "").strip()
+        if desc_b and desc_b != desc_a:
+            if desc_a:
+                # 将已有 description 按分号拆分，检查新 description 是否已存在
+                existing_parts = {p.strip() for p in desc_a.replace("；", ";").split(";") if p.strip()}
+                if desc_b not in existing_parts:
+                    canonical.description = f"{desc_a}；{desc_b}"
+            else:
+                canonical.description = desc_b
         # 合并事实摘要：统一保留一个“实体: name”行，来源行去重保序
         # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
         # fact_a = getattr(canonical, "fact_summary", "") or ""
@@ -177,14 +190,8 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
 
     # 时间范围合并
     try:
-        # 统一使用 created_at / expired_at
         if getattr(ent, "created_at", None) and getattr(canonical, "created_at", None) and ent.created_at < canonical.created_at:
             canonical.created_at = ent.created_at
-        if getattr(ent, "expired_at", None) and getattr(canonical, "expired_at", None):
-            if canonical.expired_at is None:
-                canonical.expired_at = ent.expired_at
-            elif ent.expired_at and ent.expired_at > canonical.expired_at:
-                canonical.expired_at = ent.expired_at
     except Exception:
         pass
 
@@ -250,9 +257,11 @@ def _normalize_special_entity_names(
         if name_lower in _USER_PLACEHOLDER_NAMES:
             ent.name = _CANONICAL_USER_NAME
             ent.entity_type = _CANONICAL_USER_TYPE
+            ent.type_id = 1  # "生命体" 对应的本体 ID
         elif name_lower in _ASSISTANT_PLACEHOLDER_NAMES:
             ent.name = _CANONICAL_ASSISTANT_NAME
             ent.entity_type = _CANONICAL_ASSISTANT_TYPE
+            ent.type_id = 1  # "生命体" 对应的本体 ID
 
     # 第二步：清洗用户/AI助手之间的别名交叉污染（复用 clean_cross_role_aliases）
     clean_cross_role_aliases(entity_nodes)
@@ -451,182 +460,10 @@ def fuzzy_match(
     """
     fuzzy_merge_records: List[str] = []
 
-    # ========== 第一层：基础工具函数 ==========
-    
-    def _normalize_text(s: str) -> str:
-        """文本标准化：转小写、去除特殊字符、规范化空格"""
-        try:
-            return re.sub(r"\s+", " ", re.sub(r"[^\w\u4e00-\u9fff]+", " ", (s or "").lower())).strip()
-        except Exception:
-            return str(s).lower().strip()
-
-    def _tokenize(s: str) -> List[str]:
-        """分词：提取中文字符和英文数字单词"""
-        norm = _normalize_text(s)
-        tokens = re.findall(r"[\u4e00-\u9fff]+|[a-z0-9]+", norm)
-        return tokens
-
-    def _jaccard(a_tokens: List[str], b_tokens: List[str]) -> float:
-        """Jaccard相似度：计算两个token集合的交集/并集"""
-        try:
-            set_a, set_b = set(a_tokens), set(b_tokens)
-            if not set_a and not set_b:
-                return 0.0
-            inter = len(set_a & set_b)
-            union = len(set_a | set_b)
-            return inter / union if union > 0 else 0.0
-        except Exception:
-            return 0.0
-
-    def _cosine(a: List[float], b: List[float]) -> float:
-        """余弦相似度：计算两个向量的夹角余弦值"""
-        try:
-            if not a or not b or len(a) != len(b):
-                return 0.0
-            dot = sum(x * y for x, y in zip(a, b, strict=False))
-            na = sum(x * x for x in a) ** 0.5
-            nb = sum(y * y for y in b) ** 0.5
-            if na == 0 or nb == 0:
-                return 0.0
-            return dot / (na * nb)
-        except Exception:
-            return 0.0
-
-    # ========== 第二层：中层工具函数 ==========
-    
-    def _has_exact_alias_match(e1: ExtractedEntityNode, e2: ExtractedEntityNode) -> bool:
-        """检测两个实体之间是否存在完全别名匹配（case-insensitive）
-        
-        检查以下情况：
-        - e1的主名称与e2的某个别名完全匹配
-        - e2的主名称与e1的某个别名完全匹配
-        - e1和e2的别名列表有交集
-        
-        Args:
-            e1: 第一个实体
-            e2: 第二个实体
-            
-        Returns:
-            bool: 存在完全匹配返回True
-        """
-        def _simple_normalize(s: str) -> str:
-            return (s or "").strip().lower()
-        
-        # 获取e1的所有名称（主名称 + 别名）
-        names1 = set()
-        name1 = _simple_normalize(getattr(e1, "name", "") or "")
-        if name1:
-            names1.add(name1)
-        
-        aliases1 = getattr(e1, "aliases", []) or []
-        for alias in aliases1:
-            normalized = _simple_normalize(alias)
-            if normalized:
-                names1.add(normalized)
-        
-        # 获取e2的所有名称（主名称 + 别名）
-        names2 = set()
-        name2 = _simple_normalize(getattr(e2, "name", "") or "")
-        if name2:
-            names2.add(name2)
-        
-        aliases2 = getattr(e2, "aliases", []) or []
-        for alias in aliases2:
-            normalized = _simple_normalize(alias)
-            if normalized:
-                names2.add(normalized)
-        
-        # 检查是否有交集
-        if names1 & names2:
-            return True
-        
-        return False
-    
-    # ========== 第三层：高层综合函数 ==========
-    
-    def _name_similarity_with_aliases(e1: ExtractedEntityNode, e2: ExtractedEntityNode):
-        """名称相似度综合评分系统
-        
-        综合考虑主名称和别名，计算两个实体的相似度。
-        
-        算法：
-        1. 计算主名称的向量相似度和Token Jaccard相似度
-        2. 计算所有别名的Token Jaccard相似度
-        3. 找出所有名称间的最佳匹配
-        4. 使用 _has_exact_alias_match 检测是否存在完全匹配
-        
-        评分权重：
-        - 有完全匹配：embedding(40%) + primary_jaccard(20%) + max_alias_sim(40%)
-        - 无完全匹配：embedding(60%) + primary_jaccard(20%) + max_alias_sim(20%)
-        
-        Args:
-            e1: 第一个实体
-            e2: 第二个实体
-            
-        Returns:
-            tuple: (综合相似度, 向量相似度, 主名称Jaccard, 别名Jaccard, 
-                   最佳别名匹配度, 是否完全匹配)
-        """
-        # 1. 主名称向量相似度
-        emb_sim = _cosine(getattr(e1, "name_embedding", []) or [], getattr(e2, "name_embedding", []) or [])
-        
-        # 2. 主名称token相似度
-        
-        # 2. 主名称token相似度
-        tokens1 = set(_tokenize(getattr(e1, "name", "") or ""))
-        tokens2 = set(_tokenize(getattr(e2, "name", "") or ""))
-        j_primary = _jaccard(list(tokens1), list(tokens2))
-        
-        # 3. 获取所有别名
-        j_primary = _jaccard(list(tokens1), list(tokens2))
-        
-        # 3. 获取所有别名
-        aliases1 = getattr(e1, "aliases", []) or []
-        aliases2 = getattr(e2, "aliases", []) or []
-        
-        # 4. 计算所有别名的token集合（用于整体Jaccard）
-        
-        # 4. 计算所有别名的token集合（用于整体Jaccard）
-        alias_tokens1 = set(tokens1)
-        alias_tokens2 = set(tokens2)
-        for a in aliases1:
-            alias_tokens1 |= set(_tokenize(a))
-        for a in aliases2:
-            alias_tokens2 |= set(_tokenize(a))
-        j_alias = _jaccard(list(alias_tokens1), list(alias_tokens2))
-        
-        # 5. 使用 _has_exact_alias_match 检测完全匹配
-        has_exact_match = _has_exact_alias_match(e1, e2)
-        
-        # 6. 计算最佳别名匹配度（所有名称两两比较）
-        all_names1 = [getattr(e1, "name", "") or "", *aliases1]
-        all_names2 = [getattr(e2, "name", "") or "", *aliases2]
-        
-        max_alias_sim = 0.0
-        
-        if has_exact_match:
-            max_alias_sim = 1.0
-        else:
-            for n1 in all_names1:
-                if not n1:
-                    continue
-                tokens_n1 = set(_tokenize(n1))
-                
-                for n2 in all_names2:
-                    if not n2:
-                        continue
-                    
-                    tokens_n2 = set(_tokenize(n2))
-                    sim = _jaccard(list(tokens_n1), list(tokens_n2))
-                    max_alias_sim = max(max_alias_sim, sim)
-        
-        # 7. 综合评分
-        if has_exact_match:
-            s_name = 0.4 * emb_sim + 0.2 * j_primary + 0.4 * max_alias_sim
-        else:
-            s_name = 0.6 * emb_sim + 0.2 * j_primary + 0.2 * max_alias_sim
-        
-        return s_name, emb_sim, j_primary, j_alias, max_alias_sim, has_exact_match
+    # ========== 工具函数（从 utils.name_similarity 导入） ==========
+    from app.core.memory.utils.name_similarity_utils import (
+        name_similarity_with_aliases as _name_similarity_with_aliases,
+    )
     
     # ========== 类型相似度工具函数 ==========
     
@@ -637,7 +474,7 @@ def fuzzy_match(
             return ""
         t_up = t.upper()
         TYPE_ALIASES = {
-            "PERSON": {"人物", "人", "个人", "人名", "PERSON", "PEOPLE", "INDIVIDUAL"},
+            "PERSON": {"生命体", "人物", "人", "个人", "人名", "PERSON", "PEOPLE", "INDIVIDUAL"},
             "ORG": {"组织", "ORG"},
             "COMPANY": {"公司", "企业", "COMPANY"},
             "INSTITUTION": {"机构", "INSTITUTION"},
@@ -1112,6 +949,39 @@ async def deduplicate_entities_and_edges(
 # 在主流程这里 这里是之后关系去重和消歧的地方，方法可以写在其他地方
 # 此处统一对边进行处理，使用累积的 id_redirect 把边的 source/target 改成规范ID
     # 4) 边重定向与去重
+    # 4.0 预处理：将 "别名属于" 关系的 source.name/description 归并到 target 节点
+    #     必须在边重定向之前执行，此时 id_redirect 已包含精确/模糊/LLM 的合并结果
+    try:
+        entity_by_id: Dict[str, ExtractedEntityNode] = {e.id: e for e in deduped_entities}
+        for edge in entity_entity_edges:
+            if getattr(edge, "relation_type", "") != "别名属于":
+                continue
+            # 通过 id_redirect 找到合并后的规范节点
+            source_id = id_redirect.get(edge.source, edge.source)
+            target_id = id_redirect.get(edge.target, edge.target)
+            if source_id == target_id:
+                continue
+            source_node = entity_by_id.get(source_id)
+            target_node = entity_by_id.get(target_id)
+            if not source_node or not target_node:
+                continue
+
+            # 将 source.name 追加到 target.aliases（去重，忽略大小写）
+            source_name = (source_node.name or "").strip()
+            if source_name:
+                existing_lower = {a.lower() for a in (target_node.aliases or [])}
+                if source_name.lower() not in existing_lower and source_name.lower() != (target_node.name or "").lower():
+                    target_node.aliases = list(target_node.aliases or []) + [source_name]
+
+            # 将 source.description 追加到 target.description（分号分隔，去重）
+            src_desc = (source_node.description or "").strip()
+            if src_desc:
+                tgt_desc = (target_node.description or "").strip()
+                if src_desc not in tgt_desc:
+                    target_node.description = f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
+    except Exception:
+        pass
+
     # 4.1 语句→实体边：重复时优先保留 strong
     stmt_ent_map: Dict[str, StatementEntityEdge] = {}
     for edge in statement_entity_edges:

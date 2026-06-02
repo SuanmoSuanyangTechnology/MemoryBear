@@ -117,11 +117,23 @@ class DocExtractorNode(BaseNode):
             "images": VariableType.ARRAY_FILE,
         }
 
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        if isinstance(business_result, dict):
+            return {"process": {
+                "files_count": len(business_result.get("chunks", [])),
+                "total_chars": sum(len(c) for c in business_result.get("chunks", [])),
+                "images_count": len(business_result.get("images", [])),
+            }}
+        return {}
+
     def _extract_output(self, business_result: Any) -> Any:
         return business_result
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
-        return {"file_selector": self.config.get("file_selector")}
+        file_selector = self.config.get("file_selector", "")
+        # 将变量选择器（如 sys.files）解析为实际值
+        resolved = self.get_variable(file_selector, variable_pool, strict=False, default=file_selector)
+        return {"file_selector": resolved}
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         config = DocExtractorNodeConfig(**self.config)
@@ -182,7 +194,7 @@ class DocExtractorNode(BaseNode):
                                     mime_type=f"image/{ext}",
                                     is_file=True,
                                 ).model_dump())
-                                text = text + f"\n{placeholder}: {url}"
+                                text = text + f"\n{placeholder}: <img src=\"{url}\" data-url=\"{url}\">"
                             except Exception as e:
                                 logger.error(f"Node {self.node_id}: failed to save image {placeholder}: {e}")
 

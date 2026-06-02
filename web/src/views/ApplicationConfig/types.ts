@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 18:20:14
+ * @Last Modified time: 2026-05-29 17:34:11
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -438,13 +438,36 @@ interface FileSetttings {
   document_enabled: boolean;
   document_max_size_mb: number;
   document_allowed_extensions: string[];
-  document_image_recognition: boolean;
+  document_image_recognition?: boolean;
   video_enabled: boolean;
   video_max_size_mb: number;
   video_allowed_extensions: string[];
   max_file_count: number;
   allowed_transfer_methods: string[] | string;
 }
+export type ModerationType = 'openai' | 'keywords' | 'api';
+
+export interface ContentModerationConfig {
+  type: ModerationType;
+  config?: {
+    keywords?: string;
+  
+    api_key?: string;
+    api_name?: string;
+    api_endpoint?: string;
+
+    inputs_config?: {
+      enabled?: boolean;
+      preset_response?: string;
+    };
+    outputs_config?: {
+      enabled?: boolean;
+      preset_response?: string;
+    };
+  };
+  enabled: boolean;
+}
+
 export type FeaturesConfigForm = {
   file_upload: FileSetttings & {
     enabled: boolean;
@@ -471,6 +494,7 @@ export type FeaturesConfigForm = {
     enabled: boolean;
     search_engine: string | null;
   };
+  sensitive_word_avoidance: ContentModerationConfig;
 }
 /**
  * Function config modal ref methods
@@ -504,4 +528,36 @@ export interface LogItem {
 }
 export interface LogDetailModalRef {
   handleOpen: (vo: LogItem) => void;
+}
+export interface EmbedWebsiteModalRef {
+  handleOpen: () => void;
+}
+export interface AnnotationItem {
+  id: string;
+  question: string;
+  answer: string;
+  hit_count: number;
+  created_at: number;
+  updated_at: number;
+}
+export interface AnnotationSettingForm {
+  /** Similarity threshold */
+  similarity_threshold?: number;
+  /** Model configuration ID */
+  model_config_id?: string;
+  /** Whether enabled */
+  enabled: 1 | 0;
+}
+export interface AnnotationSettingModalRef {
+  handleOpen: () => void;
+}
+export interface AnnotationFormModalRef {
+  handleOpen: (vo?: AnnotationItem) => void;
+}
+export interface AnnotationForm {
+  question: string;
+  answer: string;
+}
+export interface HitHistoryDetailRef {
+  handleOpen: (id: string, annotation_id: string) => void;
 }

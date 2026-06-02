@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 13:57:30
+ * @Last Modified time: 2026-05-28 10:42:27
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -22,7 +22,7 @@ interface VariableSelectProps {
   placeholder?: string;
   variant?: 'outlined' | 'borderless' | 'filled';
   className?: string;
-  onChange?: (value: string | string[], option: Suggestion | Suggestion[] | undefined) => void;
+  onChange?: (value?: string | string[], option?: Suggestion | Suggestion[] | undefined) => void;
 }
 
 const VariableSelect: FC<VariableSelectProps> = ({
@@ -277,11 +277,14 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onChange?.(multiple ? [] : '', multiple ? [] : undefined);
+    onChange?.(multiple ? [] : undefined, multiple ? [] : undefined);
   };
   const sep = <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>;
-  const isConversation = (parentOfSelected ?? selectedSuggestion)?.group === 'CONVERSATION' ||
-    (selectedSuggestion ? filteredOptions.some(o => o.group === 'CONVERSATION' && o.children?.some(c => `{{${c.value}}}` === value)) : false);
+  const isConversation = (parentOfSelected ?? selectedSuggestion)?.group === 'CONVERSATION' || 
+    (parentOfSelected ?? selectedSuggestion)?.group === 'SYSTEM'
+    || (selectedSuggestion?.group === 'CONVERSATION' && selectedSuggestion?.children?.some(c => `{{${c.value}}}` === value))
+    || (selectedSuggestion?.group === 'SYSTEM' && selectedSuggestion?.children?.some(c => `{{${c.value}}}` === value))
+    || (selectedSuggestion ? filteredOptions.some(o => o.group === 'CONVERSATION' && o.children?.some(c => `{{${c.value}}}` === value)) : false);
   const nodeData = (parentOfSelected ?? selectedSuggestion)?.nodeData;
 
   return (

@@ -14,3 +14,10 @@ class Field(StrEnum):
     DOCUMENT_ID = "metadata.document_id"
     KNOWLEDGE_ID = "metadata.knowledge_id"
     SORT_ID = "metadata.sort_id"
+    # QA fields
+    CHUNK_TYPE = "chunk_type"  # "chunk" | "source" | "qa"
+    QUESTION = "question"
+    ANSWER = "answer"
+    SOURCE_CHUNK_ID = "source_chunk_id"
+    # Parent-child fields
+    PARENT_ID = "parent_id"

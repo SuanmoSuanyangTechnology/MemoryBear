@@ -26,7 +26,6 @@ async def _load_(data: List[Any]) -> List[Dict]:
         "end_user_id",
         "chunk_id",
         "created_at",
-        "expired_at",
         "valid_at",
         "invalid_at",
     ]
@@ -93,7 +92,6 @@ async def get_data(result):
                         rel_filtered['run_id'] = value.get('run_id')
                         rel_filtered['statement'] = value.get('statement')
                         rel_filtered['statement_id'] = value.get('statement_id')
-                        rel_filtered['expired_at'] = value.get('expired_at')
                         rel_filtered['created_at'] = value.get('created_at')
                     filtered_item[key] = value
                 elif key == 'entity2' and value is not None:

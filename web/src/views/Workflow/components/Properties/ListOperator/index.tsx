@@ -23,7 +23,7 @@ const ListOperator: FC<ListOperatorProps> = ({ options }) => {
   const variableOption = options.find(option => `{{${option.value}}}` === values?.input_list)
   const variableType = variableOption?.dataType
 
-  const handleChangeInputList = (value: string | string[]) => {
+  const handleChangeInputList = (value?: string | string[]) => {
     form.setFieldsValue({
       input_list: value,
       filter_by: {
@@ -74,7 +74,7 @@ const ListOperator: FC<ListOperatorProps> = ({ options }) => {
         <Switch />
       </Form.Item>
       {values?.order_by?.enabled &&
-        <Row gutter={8}>
+        <Row gutter={8} wrap={false}>
           {/* 仅 array[file]有效 */}
           {variableType === 'array[file]' &&
             <Col flex="200px">

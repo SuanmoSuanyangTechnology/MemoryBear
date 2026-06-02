@@ -50,8 +50,21 @@ class FileInput(BaseModel):
     _content = None
 
     def __init__(self, **data):
+        if "transfer_method" not in data:
+            if "upload_file_id" in data or "file_id" in data:
+                data["transfer_method"] = "local_file"
+            elif "url" in data and not str(data.get("url", "")).startswith("blob:"):
+                data["transfer_method"] = "remote_url"
+            else:
+                data["transfer_method"] = "local_file"
+
+        if str(data.get("url", "")).startswith("blob:"):
+            data.pop("url", None)
+
         if "type" in data:
-            data['file_type'] = data['type']
+            data["file_type"] = data["type"]
+        if "file_id" in data and "upload_file_id" not in data:
+            data["upload_file_id"] = data.pop("file_id")
         super().__init__(**data)
 
     def set_content(self, content: bytes):
@@ -205,6 +218,7 @@ class CitationConfig(BaseModel):
 
 class Citation(BaseModel):
     document_id: str
+    doc_id: str
     file_name: str
     knowledge_id: str
     score: float
@@ -250,7 +264,7 @@ class ModelParameters(BaseModel):
     n: int = Field(default=1, ge=1, le=10, description="生成的回复数量")
     stop: Optional[List[str]] = Field(default=None, description="停止序列")
     deep_thinking: bool = Field(default=False, description="是否启用深度思考模式（需模型支持，如 DeepSeek-R1、QwQ 等）")
-    thinking_budget_tokens: Optional[int] = Field(default=None, ge=1024, le=131072, description="深度思考 token 预算（仅部分模型支持）")
+    thinking_budget_tokens: Optional[int] = Field(default=None, ge=1, le=131072, description="深度思考 token 预算（仅部分模型支持）")
     json_output: bool = Field(default=False, description="是否强制 JSON 格式输出（需模型支持 json_output 能力）")
 
 
@@ -315,7 +329,7 @@ class AppCreate(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     icon_type: Optional[str] = None
-    type: str = Field(pattern=r"^(agent|workflow|multi_agent)$")
+    type: str = Field(pattern=r"^(agent|workflow|pure_workflow|multi_agent)$")
     visibility: Optional[str] = None
     status: Optional[str] = None
     tags: Optional[List[str]] = Field(default_factory=list)
@@ -618,7 +632,7 @@ class AppShare(BaseModel):
 # ---------- Draft Run Schemas ----------
 
 class AppChatRequest(BaseModel):
-    message: str = Field(..., description="用户消息")
+    message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
@@ -630,12 +644,13 @@ class AppChatRequest(BaseModel):
 
 class DraftRunRequest(BaseModel):
     """试运行请求"""
-    message: str = Field(..., description="用户消息")
+    message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
+    trigger_payload: Optional[Dict[str, Any]] = Field(default=None, description="触发器 payload，webhook 试运行时传入")
 
 
 class SuggestedQuestion(BaseModel):
@@ -703,6 +718,24 @@ class ModelCompareItem(BaseModel):
     )
 
 
+class NodeRunRequest(BaseModel):
+    """单节点试运行请求"""
+    # 扁平格式，支持:
+    #   节点变量:  {"node_id.var_name": value}
+    #   系统变量:  {"sys.message": "hello", "sys.files": [...]}
+    inputs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="节点输入变量，格式: {'node_id.var_name': value} 或 {'sys.message': 'hello'}",
+        examples=[{
+            "sys.message": "帮我写一首诗",
+            "sys.user_id": "user-123",
+            "sys.files": [],
+            "llm_node_abc.output": "上游输出内容",
+        }]
+    )
+    stream: bool = Field(default=False, description="是否流式返回")
+
+
 class DraftRunCompareRequest(BaseModel):
     """多模型对比试运行请求"""
     message: str = Field(..., description="用户消息")
@@ -750,3 +783,103 @@ class DraftRunCompareResponse(BaseModel):
 
     fastest_model: Optional[str] = None
     cheapest_model: Optional[str] = None
+
+
+# ========== 消息交互功能 Schema ==========
+
+class MessageFeedbackRequest(BaseModel):
+    """消息反馈请求（点赞/点踩）"""
+    feedback_type: str = Field(..., pattern="^(like|dislike)$", description="反馈类型: like/dislike")
+    feedback_content: Optional[str] = Field(None, description="反馈内容（点踩时填写原因）")
+
+
+class MessageFeedbackResponse(BaseModel):
+    """消息反馈响应"""
+    action: str = Field(..., description="操作: created/updated/cancelled")
+    feedback_type: Optional[str] = Field(None, description="当前反馈类型")
+
+
+class MessageReportRequest(BaseModel):
+    """消息举报请求（含选中反馈）"""
+    report_type: str = Field(
+        ...,
+        description="举报类型: politics/porn/violence/fake/ad/quality/other"
+    )
+    report_reason: Optional[str] = Field(None, description="举报原因详细描述")
+    text_start_offset: Optional[int] = Field(None, description="选中文本起始位置")
+    text_end_offset: Optional[int] = Field(None, description="选中文本结束位置")
+    selected_text: Optional[str] = Field(None, description="选中的违规文本片段")
+
+
+class MessageReportResponse(BaseModel):
+    """消息举报响应"""
+    report_id: str = Field(..., description="举报ID")
+    status: str = Field(..., description="状态: pending")
+
+
+class ShareConversationRequest(BaseModel):
+    """分享会话请求"""
+    password: Optional[str] = Field(None, description="访问密码（可选）")
+    expire_hours: Optional[int] = Field(None, ge=1, le=720, description="过期时长（小时）")
+    allow_copy: bool = Field(True, description="是否允许复制内容")
+
+
+class ShareConversationResponse(BaseModel):
+    """分享会话响应"""
+    share_id: str = Field(..., description="分享ID")
+    share_uuid: str = Field(..., description="分享唯一标识")
+    share_url: str = Field(..., description="分享链接")
+    expire_at: Optional[int] = Field(None, description="过期时间（毫秒时间戳）")
+    has_password: bool = Field(..., description="是否有密码")
+
+
+class MessageVersion(BaseModel):
+    """消息版本"""
+    message_id: uuid.UUID
+    version: int
+    is_current: bool
+    content: str
+    created_at: int
+
+
+class RegenerateRequest(BaseModel):
+    """重新生成请求"""
+    variables: Optional[Dict[str, Any]] = Field(default=None, description="变量参数")
+    web_search: bool = Field(default=False, description="是否启用网络搜索")
+    memory: bool = Field(default=True, description="是否启用长期记忆")
+    stream: bool = Field(default=False, description="是否流式返回")
+    thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
+
+
+class RegenerateResponse(BaseModel):
+    """重新生成响应"""
+    message_id: uuid.UUID
+    message: str
+    version: int
+    conversation_id: str
+
+
+# ========== 消息审核功能 Schema ==========
+
+class ReportListRequest(BaseModel):
+    """举报列表查询请求"""
+    status: Optional[str] = Field(None, description="状态过滤: pending/reviewed/resolved/rejected")
+    severity: Optional[str] = Field(None, description="严重程度过滤: low/medium/high/critical")
+    page: int = Field(default=1, ge=1, description="页码")
+    pagesize: int = Field(default=20, ge=1, le=100, description="每页数量")
+
+
+class ReportReviewRequest(BaseModel):
+    """举报审核请求"""
+    severity: str = Field(..., description="严重程度: low/medium/high/critical")
+    action_taken: str = Field(
+        ...,
+        description="处理措施: no_action/warning/content_removed/user_banned"
+    )
+    review_note: Optional[str] = Field(None, description="审核备注")
+
+
+class ReportStatisticsRequest(BaseModel):
+    """举报统计查询请求"""
+    start_date: Optional[datetime.datetime] = Field(None, description="开始日期")
+    end_date: Optional[datetime.datetime] = Field(None, description="结束日期")

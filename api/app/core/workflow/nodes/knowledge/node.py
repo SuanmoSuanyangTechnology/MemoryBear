@@ -49,7 +49,11 @@ class KnowledgeRetrievalNode(BaseNode):
         return []
 
     def _extract_extra_fields(self, business_result: Any) -> dict:
-        return {"citations": self._extract_citations(business_result)}
+        citations = self._extract_citations(business_result)
+        process: dict = {"citations": citations}
+        if isinstance(business_result, dict):
+            process["chunks_count"] = len(business_result.get("chunks", []))
+        return {"citations": citations, "process": process}
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         return {
@@ -363,11 +367,12 @@ class KnowledgeRetrievalNode(BaseNode):
             seen_doc_ids = set()
             for chunk in final_rs:
                 meta = chunk.metadata or {}
-                doc_id = meta.get("document_id") or meta.get("doc_id")
-                if doc_id and doc_id not in seen_doc_ids:
-                    seen_doc_ids.add(doc_id)
+                document_id = meta.get("document_id")
+                if document_id and document_id not in seen_doc_ids:
+                    seen_doc_ids.add(document_id)
                     citations.append({
-                        "document_id": str(doc_id),
+                        "document_id": str(document_id),
+                        "doc_id": meta.get("doc_id", ""),
                         "file_name": meta.get("file_name", ""),
                         "knowledge_id": str(meta.get("knowledge_id", kb_config.kb_id)),
                         "score": meta.get("score", 0.0),

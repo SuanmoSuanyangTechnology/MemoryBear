@@ -79,6 +79,7 @@ class DifyConverter(BaseConverter):
     def __init__(self):
         self.CONFIG_CONVERT_MAP = {
             NodeType.START: self.convert_start_node_config,
+            NodeType.TRIGGER: lambda x: x,
             NodeType.LLM: self.convert_llm_node_config,
             NodeType.END: self.convert_end_node_config,
             NodeType.OUTPUT: self.convert_output_node_config,
@@ -299,6 +300,15 @@ class DifyConverter(BaseConverter):
                     var.setdefault("required", var.get("required", False))
                     var.setdefault("label", var.get("label", ""))
                     raw_vars.append(var)
+
+        ui_type_map = {
+            "text-input": "text-input",
+            "paragraph": "paragraph",
+            "select": "select",
+            "checkbox": "checkbox",
+            "number": "number",
+        }
+
         for var in raw_vars:
             var_type = self.variable_type_map(var["type"])
             if not var_type:
@@ -313,33 +323,31 @@ class DifyConverter(BaseConverter):
                 )
                 continue
 
-            if var_type in [VariableType.FILE, VariableType.ARRAY_FILE]:
-                # 开始节点不支持文件变量，转为会话变量
-                self._file_vars_to_conv.append(SchemaVariableDefinition(
-                    name=var["variable"],
-                    type=var_type.value,
-                    required=var.get("required", False),
-                    default=None,
-                    description=var.get("label", ""),
-                ))
-                self.warnings.append(ExceptionDefinition(
-                    type=ExceptionType.VARIABLE,
-                    node_id=node["id"],
-                    node_name=node_data["title"],
-                    name=var["variable"],
-                    detail=f"File variable '{var['variable']}' is not supported in start node, moved to conversation variables"
-                ))
-                continue
+            source_type = var["type"]
+            ui_type_val = ui_type_map.get(source_type)
+            if var_type == VariableType.FILE:
+                ui_type_val = "file-upload"
+            elif var_type == VariableType.ARRAY_FILE:
+                ui_type_val = "file-list-upload"
+            elif var_type == VariableType.OBJECT:
+                ui_type_val = "json-editor"
+
+            max_length = var.get("max_length", 50 if ui_type_val == "text-input" else 2000)
+            if ui_type_val == "paragraph":
+                max_length = var.get("max_length", 2000)
 
             var_def = NodeVariableDefinition(
                 name=var["variable"],
                 type=var_type,
-                required=var["required"],
-                default=self.convert_variable_type(
-                    var_type, var.get("default")
-                ),
-                description=var["label"],
-                max_length=var.get("max_length", 50),
+                ui_type=ui_type_val,
+                required=var.get("required", False),
+                default=self.convert_variable_type(var_type, var.get("default")),
+                description=var.get("label", ""),
+                max_length=max_length,
+                options=var.get("options") if ui_type_val == "select" else None,
+                allowed_file_types=var.get("allowed_file_types") if ui_type_val in ("file-upload", "file-list-upload") else None,
+                max_file_count=var.get("max_file_count", 5) if ui_type_val == "file-list-upload" else None,
+                max_file_size_mb=var.get("max_file_size_mb", 50.0) if ui_type_val in ("file-upload", "file-list-upload") else None,
             )
             start_vars.append(var_def)
         result = StartNodeConfig.model_construct(
@@ -366,10 +374,17 @@ class DifyConverter(BaseConverter):
                 )
             )
 
+        vision = node_data.get("vision", {}).get("enabled", False)
+        vision_input = self._process_list_variable_literal(
+            node_data["vision"]["configs"]["variable_selector"]
+        ) if vision else None
+
         result = QuestionClassifierNodeConfig.model_construct(
             input_variable=self._process_list_variable_literal(node_data.get("query_variable_selector")),
             user_supplement_prompt=self.trans_variable_format(node_data.get("instructions", "")),
             categories=categories,
+            vision=vision,
+            vision_input=vision_input,
         ).model_dump()
         self.config_validate(node["id"], node["data"]["title"], QuestionClassifierNodeConfig, result)
         return result
@@ -790,7 +805,8 @@ class DifyConverter(BaseConverter):
         result = ParameterExtractorNodeConfig.model_construct(
             text=self._process_list_variable_literal(node_data["query"]),
             params=params,
-            prompt=node_data.get("instruction")
+            prompt=node_data.get("instruction"),
+            inference_mode="prompt",
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], ParameterExtractorNodeConfig, result)

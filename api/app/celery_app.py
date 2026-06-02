@@ -114,6 +114,15 @@ celery_app.conf.update(
         # Metadata extraction → memory_tasks queue
         'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'},
 
+        # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
+        'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
+
+        # Post-store dedup + alias merge → memory_tasks queue
+        'app.tasks.post_store_dedup_and_alias_merge': {'queue': 'memory_tasks'},
+
+        # Async metadata extraction → memory_tasks queue
+        'app.tasks.extract_metadata_batch': {'queue': 'memory_tasks'},
+
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
@@ -124,6 +133,8 @@ celery_app.conf.update(
 
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
+        'app.tasks.layer2_reflection_task': {'queue': 'periodic_tasks'},
+        'app.tasks.layer2_dedup_full_scan_task': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
@@ -131,6 +142,15 @@ celery_app.conf.update(
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
+
+        # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
+        'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
+        'app.tasks.flush_conversation': {'queue': 'memory_tasks'},
+
+        # Sliding window idle scan → periodic_tasks queue (Beat scheduler)
+        'app.tasks.scan_idle_conversations': {'queue': 'periodic_tasks'},
+        'app.tasks.scan_workflow_schedule_triggers': {'queue': 'periodic_tasks'},
+        'app.tasks.run_workflow_schedule_trigger': {'queue': 'workflow_trigger_tasks'},
     },
 )
 
@@ -156,14 +176,15 @@ implicit_emotions_update_schedule = crontab(
     hour=settings.IMPLICIT_EMOTIONS_UPDATE_HOUR,
     minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
 )
-
+layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
+layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
 # 构建定时任务配置
 beat_schedule_config = {
-    "run-workspace-reflection": {
-        "task": "app.tasks.workspace_reflection_task",
-        "schedule": workspace_reflection_schedule,
-        "args": (),
-    },
+    # "run-workspace-reflection": {
+    #     "task": "app.tasks.workspace_reflection_task",
+    #     "schedule": workspace_reflection_schedule,
+    #     "args": (),
+    # },
     "regenerate-memory-cache": {
         "task": "app.tasks.regenerate_memory_cache",
         "schedule": memory_cache_regeneration_schedule,
@@ -185,6 +206,26 @@ beat_schedule_config = {
         "task": "app.tasks.update_implicit_emotions_storage",
         "schedule": implicit_emotions_update_schedule,
         "args": (),
+    },
+    "run-layer2-reflection": {
+            "task": "app.tasks.layer2_reflection_task",
+            "schedule": layer2_reflection_schedule,
+            "args": (),
+    },
+    "run-layer2-dedup-full-scan": {
+        "task": "app.tasks.layer2_dedup_full_scan_task",
+        "schedule": layer2_dedup_full_scan_schedule,
+        "args": (),
+    },
+    "scan-idle-conversations": {
+        "task": "app.tasks.scan_idle_conversations",
+        "schedule": 60.0,
+        "options": {"queue": "periodic_tasks"},
+    },
+    "scan-workflow-schedule-triggers": {
+        "task": "app.tasks.scan_workflow_schedule_triggers",
+        "schedule": 60.0,
+        "options": {"queue": "periodic_tasks"},
     },
 }
 

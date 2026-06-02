@@ -348,6 +348,12 @@ body {
   min-height: 100%;
   max-height: 100%;
 }
+.x6-widget-selection-inner,
+.x6-widget-selection-box {
+  border-color: #171719;
+  border-width: 1px;
+  border-radius: 16px;
+}
 
 .ͼ2 .cm-gutters {
   background-color: transparent;
@@ -373,20 +379,27 @@ body {
 .cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
   color: #212332;
 }
+
+* {
+  scrollbar-width: auto !important;
+}
+div::-webkit-scrollbar,
 ::-webkit-scrollbar {
   width: 6px;
   height: 8px;
+  display: block !important;
 }
-
+div::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
+div::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb {
   background: #DFE4ED;
   border-radius: 3px;
 }
-
+div::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:hover {
   background: #DFE4ED;
 }
@@ -394,7 +407,7 @@ body {
 .ant-select-focused.ant-select-outlined:not(.ant-select-disabled):not(.ant-select-customize-input):not(.ant-pagination-size-changer) .ant-select-selector {
   box-shadow: none;
 }
-.ant-select-dropdown .ant-select-item {
+.ant-select-dropdown .ant-select-item:not(.ant-select-item-option-disabled) {
   color: #212332;
 }
 .ant-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
@@ -441,6 +454,10 @@ body {
 .ant-picker-outlined:focus-within {
   box-shadow: none;
 }
+:where(.css-dev-only-do-not-override-1jd96za).ant-picker-dropdown .ant-picker-time-panel-column >li.ant-picker-time-panel-cell-selected .ant-picker-time-panel-cell-inner {
+  background-color: #171719;
+  color: #E8F4FF;
+}
 .ͼ1.cm-focused {
   outline: none;
 }
@@ -468,3 +485,31 @@ input:-webkit-autofill:active {
   animation-duration: 1ms;
 }
 @keyframes onAutoFillStart { from {} to {} }
+/* Login input placeholder */
+.login-input input::placeholder {
+  color: #A8A9AA !important;
+}
+
+.login-input {
+  border-color: #A8A9AA;
+}
+
+/* Login input hover/focus border */
+.login-input:hover,
+.login-input:focus-within {
+  border-color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+/* Override browser autofill styles */
+.login-input input:-webkit-autofill,
+.login-input input:-webkit-autofill:hover,
+.login-input input:-webkit-autofill:focus,
+.login-input input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0px 1000px #0A0A0A inset !important;
+  -webkit-text-fill-color: #FFFFFF !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+}
+.ant-app {
+  height: 100%;
+}

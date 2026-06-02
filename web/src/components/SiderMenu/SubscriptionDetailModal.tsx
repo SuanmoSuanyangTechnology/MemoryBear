@@ -2,27 +2,32 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 12:28:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 15:46:35
+ * @Last Modified time: 2026-05-08 17:09:54
  */
 
 import { useState, forwardRef, useImperativeHandle } from 'react';
-import { Flex, Divider } from 'antd';
+import { Flex, Divider, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
+import { useNavigate } from 'react-router-dom';
 
 import RbModal from '@/components/RbModal';
 import type { Subscription } from './index'
 import { billingUnits } from '@/views/Package/constant'
 import { useI18n } from '@/store/locale'
 import { UnitWrapper } from '@/views/Package'
+import { formatDateTime } from '@/utils/format'
 
 export interface SubscriptionDetailModalRef {
   handleOpen: (subscription: Subscription | null) => void;
 }
 
-const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef>((_props, ref) => {
+const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef, { currentPackage: Subscription | null }>(({
+  currentPackage
+}, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const { language } = useI18n()
   const [detail, setDetail] = useState<Subscription | null>(null);
 
@@ -43,39 +48,66 @@ const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef>((_props, 
     return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
   }
 
+  // 续费套餐
+  const handleRenewal = () => {
+    setOpen(false);
+    navigate('/order-pay', { state: {
+      jumpFrom: 'renewal',
+      ...currentPackage,
+      ...currentPackage?.package_plan || {}
+    }});
+  }
+  // 升级套餐
+  const handleUpgrade = () => {
+    setOpen(false);
+    navigate('/upgrade');
+  }
   return (
     <RbModal
       title={[t('package.packageDetail'), detail?.package_plan?.[getKeyWithLanguage('name')]].filter(item => item).join(' - ')}
       open={open}
       onCancel={handleCancel}
-      footer={null}
+      footer={(detail?.package_plan?.billing_cycle === 'permanent_free' && detail?.package_plan?.tier_level === 0) || detail?.package_plan?.billing_cycle === 'local_deployment'
+        ? null
+        : detail?.package_plan?.billing_cycle === 'permanent_free'
+        ? [
+          <Button type="primary" onClick={handleUpgrade}>{t('pricing.upgrade')}</Button>
+        ]
+        : [
+          <Button onClick={handleRenewal}>{t('pricing.renewal')}</Button>,
+          <Button type="primary" onClick={handleUpgrade}>{t('pricing.upgrade')}</Button>
+        ]
+      }
     >
-      {/* Header */}
-      <h3 className="rb:text-[18px] rb:font-bold rb:text-[MiSans-Bold]" style={{ color: detail?.package_plan?.theme_color }}>
-        {String(detail?.package_plan?.[getKeyWithLanguage('name')] ?? '')}
-      </h3>
-
       {/* Subtitle */}
       <p className="rb:text-[#5B6167] rb:mb-3">
         {String(detail?.package_plan?.[getKeyWithLanguage('core_value')] ?? '')}
       </p>
 
-      {/* Price */}
-      <div className="rb:h-10">
-        {detail?.package_plan?.billing_cycle !== 'permanent_free' && <>
-          <span className="rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:mr-1">¥</span>
-          <span className="rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10">{detail?.package_plan?.price}</span>
-        </>}
-        {detail?.package_plan?.billing_cycle && (
-          <span className={clsx({
-            'rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10': detail?.package_plan?.billing_cycle === 'permanent_free',
-            'rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:ml-1': detail?.package_plan?.billing_cycle !== 'permanent_free'
-          })}>
-            {detail?.package_plan?.billing_cycle !== 'permanent_free' && ' /'}
-            {t(`package.${detail?.package_plan?.billing_cycle}`)}
-          </span>
-        )}
-      </div>
+      <Flex align="center" justify="space-between">
+        {/* Price */}
+        <div className="rb:h-10">
+          {detail?.package_plan?.billing_cycle !== 'permanent_free' && <>
+            <span className="rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:mr-1">¥</span>
+            <span className="rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10">{detail?.package_plan?.price}</span>
+          </>}
+          {detail?.package_plan?.billing_cycle && (
+            <span className={clsx({
+              'rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10': detail?.package_plan?.billing_cycle === 'permanent_free',
+              'rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:ml-1': detail?.package_plan?.billing_cycle !== 'permanent_free'
+            })}>
+              {detail?.package_plan?.billing_cycle !== 'permanent_free' && ' /'}
+              {t(`package.${detail?.package_plan?.billing_cycle}`)}
+            </span>
+          )}
+        </div>
+        {detail?.expired_at &&
+          <div className="rb:text-[#5B6167]">
+            {formatDateTime(detail.expired_at, 'YYYY-MM-DD')}
+            {t('package.expired')}
+          </div>
+        }
+      </Flex>
 
       <Divider className="rb:my-4" />
 

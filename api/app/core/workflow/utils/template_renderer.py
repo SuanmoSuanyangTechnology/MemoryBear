@@ -46,10 +46,18 @@ class TemplateRenderer:
     @staticmethod
     def normalize_template(template: str) -> str:
         """Normalize template syntax (convert numeric node reference to dict access)"""
-        return _NORMALIZE_PATTERN.sub(
+        template = _NORMALIZE_PATTERN.sub(
             r'{{ node["\1"].\2 }}',
             template
         )
+        # Handle node IDs with hyphens: convert {{node-id.var}} to {{node["node-id"].var}}
+        # This prevents Jinja2 from interpreting hyphen as subtraction
+        template = re.sub(
+            r'\{\{\s*([a-zA-Z_][\w-]*-[\w-]+)\.',
+            r'{{ node["\1"].',
+            template
+        )
+        return template
 
     def render(
             self,

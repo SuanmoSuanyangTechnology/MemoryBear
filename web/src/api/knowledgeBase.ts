@@ -154,6 +154,19 @@ export const uploadFile = async (data: FormData, options?: UploadFileOptions) =>
   });
   return response as UploadFileResponse;
 };
+// 上传 QA 文件
+export const uploadQaFile = async (data: FormData, options?: UploadFileOptions) => {
+  const { kb_id, parent_id, onUploadProgress, signal } = options || {};
+  const params: Record<string, string> = {};
+  if (kb_id) params.kb_id = kb_id;
+  if (parent_id) params.parent_id = parent_id;
+  const response = await request.uploadFile(`/chunks/${kb_id}/import_qa`, data, {
+    params,
+    onUploadProgress,
+    signal,
+  });
+  return response as UploadFileResponse;
+};
 
 // 下载文件
 export const downloadFile = async (fileId: string, fileName?: string) => {
@@ -293,7 +306,10 @@ export const updateDocumentChunk = async (kb_id:string, document_id:string, doc_
   const response = await request.put(`${apiPrefix}/chunks/${kb_id}/${document_id}/${doc_id}`, data);
   return response as any;
 };
-
+export const deleteDocumentChunk = async (kb_id: string, document_id: string, doc_id: string) => {
+  const response = await request.delete(`${apiPrefix}/chunks/${kb_id}/${document_id}/${doc_id}?force_refresh=true`);
+  return response as any;
+};
 // 文档块儿创建
 export const createDocumentChunk = async (kb_id:string, document_id:string, data: any) => {
   const response = await request.post(`${apiPrefix}/chunks/${kb_id}/${document_id}/chunk`, data);
@@ -325,3 +341,11 @@ export const rebuildKnowledgeGraph = async (kb_id: string) => {
   const response = await request.post(`${apiPrefix}/knowledges/${kb_id}/knowledge_graph`);
   return response;
 };
+export const batchDownloadFilesByKb = async (kb_id: string, fileName: string, callback: () => void) => {
+  const response = await request.downloadFile(`/knowledges/${kb_id}/batch-download`, fileName, undefined, callback);
+  return response;
+};
+// 知识库分块模式
+export const knowledgesChunkPolicy = async (kb_id: string) => {
+  return request.get(`/knowledges/${kb_id}/chunk-policy`);
+}

@@ -24,7 +24,7 @@ class MessageCreate(BaseModel):
 
 class ChatRequest(BaseModel):
     """聊天请求（基于 share_token）"""
-    message: str = Field(..., description="用户消息")
+    message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
     conversation_id: Optional[uuid.UUID] = Field(None, description="会话ID（多轮对话）")
     user_id: Optional[str] = Field(None, description="用户ID（外部系统）")
     variables: Optional[Dict[str, Any]] = Field(None, description="变量参数")
@@ -45,8 +45,16 @@ class Message(BaseModel):
     conversation_id: uuid.UUID
     role: str
     content: str
+    status: str
     meta_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
+    # 反馈信息（仅助手消息有效，由 controller 注入）
+    feedback_type: Optional[str] = Field(None, description="反馈类型: like/dislike")
+    feedback_content: Optional[str] = Field(None, description="反馈内容")
+    # 多版本支持
+    version: Optional[int] = Field(1, description="消息版本号")
+    is_current: Optional[bool] = Field(True, description="是否当前版本")
+    parent_message_id: Optional[uuid.UUID] = Field(None, description="父消息ID（assistant消息指向user消息）")
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):

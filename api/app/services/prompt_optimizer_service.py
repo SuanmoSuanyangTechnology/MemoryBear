@@ -1,10 +1,8 @@
-import os
 import re
 import uuid
 from typing import Any, AsyncGenerator
+import langid
 
-import json_repair
-from jinja2 import Template
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -24,6 +22,7 @@ from app.repositories.prompt_optimizer_repository import (
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
 from app.services.model_service import ModelApiKeyService
+from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
 
@@ -189,23 +188,22 @@ class PromptOptimizerService:
             capability=api_config.capability,
         ), type=ModelType(model_config.type))
         try:
-            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
-            with open(os.path.join(prompt_path, 'prompt_optimizer_system.jinja2'), 'r', encoding='utf-8') as f:
-                opt_system_prompt = f.read()
-            rendered_system_message = Template(opt_system_prompt).render(skill=skill)
-
-            with open(os.path.join(prompt_path, 'prompt_optimizer_user.jinja2'), 'r', encoding='utf-8') as f:
-                opt_user_prompt = f.read()
+            rendered_system_message = prompt_manager.render(
+                'prompt_optimizer_system',
+                skill=skill,
+                language=langid.classify(user_require)[0]
+            )
+            rendered_user_message = prompt_manager.render(
+                'prompt_optimizer_user',
+                current_prompt=current_prompt,
+                user_require=user_require
+            )
         except FileNotFoundError:
-            raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
-
+            logger.error("Prompt optimizer not found.", exc_info=True)
+            raise BusinessException(message="Pompt template not found", code=BizCode.NOT_FOUND)
         except Exception as e:
-            logger.error(f"Failed to load system prompt template: {e}")
+            logger.error(f"Failed to load prompt template.", exc_info=True)
             raise BusinessException(message="Internal server error", code=BizCode.INTERNAL_ERROR)
-        rendered_user_message = Template(opt_user_prompt).render(
-            current_prompt=current_prompt,
-            user_require=user_require
-        )
 
         # build message
         messages = [
@@ -223,6 +221,11 @@ class PromptOptimizerService:
         prompt_finished = False
         idx = 0
 
+        START_PROMPT_TAG = "<START_PROMPT>"
+        END_PROMPT_TAG = "<END_PROMPT>"
+        START_DESC_TAG = "<START_DESC>"
+        END_DESC_TAG = "<END_DESC>"
+
         async for chunk in llm.astream(messages):
             content = getattr(chunk, "content", chunk)
             if not content:
@@ -230,53 +233,124 @@ class PromptOptimizerService:
             if isinstance(content, str):
                 buffer += content
             elif isinstance(content, list):
-                for _ in content:
-                    buffer += _["text"]
+                for item in content:
+                    buffer += item["text"]
             else:
                 logger.error(f"Unsupported content type - {content}")
                 raise Exception("Unsupported content type")
-            cache = buffer[:-20]
-            last_idx = 19
-            while cache and cache[-1] == '\\' and last_idx > 0:
-                cache = buffer[:-last_idx]
-                last_idx -= 1
 
-            if prompt_finished:
-                continue
-
-            if not prompt_started:
-                m = re.search(r'"prompt"\s*:\s*"', cache)
-                if m:
-                    prompt_started = True
-                    prompt_index = m.end()
-                    idx = prompt_index
-            else:
-                m = re.search(r'"\s*,\s*\\?n?\s*"desc"\s*:\s*"', buffer)
-                if m:
-                    prompt_index = m.start()
-                    prompt_finished = True
-                    yield {"content": buffer[idx:prompt_index]}
+            # Phase 1: Stream prompt content between tags
+            if not prompt_finished:
+                if not prompt_started:
+                    if START_PROMPT_TAG in buffer:
+                        prompt_started = True
+                        idx = buffer.index(START_PROMPT_TAG) + len(START_PROMPT_TAG)
+                        # Check if end tag already in buffer
+                        if END_PROMPT_TAG in buffer[idx:]:
+                            end = buffer.index(END_PROMPT_TAG, idx)
+                            yield {"content": buffer[idx:end]}
+                            prompt_finished = True
+                        elif len(buffer) > idx:
+                            yield {"content": buffer[idx:]}
+                            idx = len(buffer)
                 else:
-                    yield {"content": cache[idx:]}
-                    if len(cache) != 0:
-                        idx = len(cache)
+                    if END_PROMPT_TAG in buffer[idx:]:
+                        end = buffer.index(END_PROMPT_TAG, idx)
+                        yield {"content": buffer[idx:end]}
+                        prompt_finished = True
+                    else:
+                        # Hold back enough chars to avoid splitting the end tag
+                        safe_end = len(buffer) - len(END_PROMPT_TAG)
+                        if safe_end > idx:
+                            yield {"content": buffer[idx:safe_end]}
+                            idx = safe_end
+            else:
+                # Phase 2: Wait for desc end tag, then stop
+                if END_DESC_TAG in buffer:
+                    break
 
-        # optim_resp = await llm.astream(messages)
-        logger.info(buffer)
-        optim_result = json_repair.repair_json(buffer, return_objects=True)
-        # prompt = optim_result.get("prompt")
-        desc = optim_result.get("desc")
+        # Extract prompt and desc from buffer using tags with strict validation
+        prompt_text = ""
+        desc_text = ""
+        parse_errors = []
+
+        # Validate prompt tags
+        has_prompt_start = START_PROMPT_TAG in buffer
+        has_prompt_end = END_PROMPT_TAG in buffer
+        if has_prompt_start and has_prompt_end:
+            p_start = buffer.index(START_PROMPT_TAG) + len(START_PROMPT_TAG)
+            p_end = buffer.index(END_PROMPT_TAG)
+            if p_start > p_end:
+                parse_errors.append(f"Malformed output: {END_PROMPT_TAG} appears before {START_PROMPT_TAG}")
+            else:
+                prompt_text = buffer[p_start:p_end].strip()
+        else:
+            missing = []
+            if not has_prompt_start:
+                missing.append(START_PROMPT_TAG)
+            if not has_prompt_end:
+                missing.append(END_PROMPT_TAG)
+            parse_errors.append(f"Missing prompt markers: {', '.join(missing)}")
+
+        # Validate desc tags
+        has_desc_start = START_DESC_TAG in buffer
+        has_desc_end = END_DESC_TAG in buffer
+        if has_desc_start and has_desc_end:
+            d_start = buffer.index(START_DESC_TAG) + len(START_DESC_TAG)
+            d_end = buffer.index(END_DESC_TAG)
+            if d_start > d_end:
+                parse_errors.append(f"Malformed output: {END_DESC_TAG} appears before {START_DESC_TAG}")
+            else:
+                desc_text = buffer[d_start:d_end].strip()
+        elif has_desc_start and not has_desc_end:
+            # Stream ended before <END_DESC> — likely max_tokens truncation
+            # Use everything after <START_DESC> as desc (best effort)
+            d_start = buffer.index(START_DESC_TAG) + len(START_DESC_TAG)
+            desc_text = buffer[d_start:].strip()
+            logger.warning(
+                f"Desc end marker missing (likely truncated), using content after {START_DESC_TAG} as desc"
+            )
+        else:
+            missing = []
+            if not has_desc_start:
+                missing.append(START_DESC_TAG)
+            if not has_desc_end:
+                missing.append(END_DESC_TAG)
+            parse_errors.append(f"Missing desc markers: {', '.join(missing)}")
+
+        # If prompt is missing, this is a hard failure — user got no streamed content or garbage
+        if not prompt_text:
+            error_detail = "; ".join(parse_errors) if parse_errors else "Prompt content is empty"
+            logger.error(
+                f"Prompt optimization output parsing failed: {error_detail}. "
+                f"Raw buffer (first 500 chars): {buffer[:500]}"
+            )
+            raise BusinessException(
+                message=f"优化结果解析失败: {error_detail}",
+                code=BizCode.INTERNAL_ERROR
+            )
+
+        # Desc missing is non-fatal but should be visible
+        if not desc_text:
+            warning_detail = "; ".join(parse_errors) if parse_errors else "Desc content is empty"
+            logger.warning(
+                f"Prompt optimization desc parsing issue: {warning_detail}. "
+                f"Falling back to default desc."
+            )
+            desc_text = "Prompt optimized successfully."
+
+        logger.info(f"Optimized prompt length: {len(prompt_text)}, desc: {desc_text}")
         ModelApiKeyService.record_api_key_usage(self.db, api_config.id)
         self.create_message(
             tenant_id=tenant_id,
             session_id=session_id,
             user_id=user_id,
             role=RoleType.ASSISTANT,
-            content=desc
+            content=desc_text
         )
-        variables = self.parser_prompt_variables(optim_result.get("prompt"))
+        variables = self.parser_prompt_variables(prompt_text)
         logger.info(f"Prompt optimization completed, user_id={user_id}, session_id={session_id}")
-        yield {"desc": optim_result.get("desc"), "variables": variables}
+        yield {"desc": desc_text, "variables": variables}
 
     @staticmethod
     def parser_prompt_variables(prompt: str):

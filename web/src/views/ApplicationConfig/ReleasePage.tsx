@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 17:02:07
+ * @Last Modified time: 2026-05-28 15:10:39
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
-import { Space, Input, Form, App, Flex } from 'antd';
+import { Space, Input, Form, App, Flex, Dropdown } from 'antd';
 import copy from 'copy-to-clipboard';
 
 import Tag, { type TagProps } from './components/Tag'
@@ -16,13 +16,16 @@ import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
 import AppSharingModal from './components/AppSharingModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef } from './types'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef, EmbedWebsiteModalRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import { useWorkflowStore } from '@/store/workflow'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import Markdown from '@/components/Markdown'
 import RbButton from '@/components/RbButton';
+import EmbedWebsiteModal from './components/EmbedWebsiteModal'
+import PublishAsToolModal from '@/views/ToolManagement/components/PublishAsToolModal'
+import type { WorkflowToolItem } from '@/views/ToolManagement/types'
 /**
  * Tag color mapping for release versions
  */
@@ -48,6 +51,8 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   const appSharingModalRef = useRef<AppSharingModalRef>(null)
   const [selectedVersion, setSelectedVersion] = useState<Release | null>(null);
   const [releaseList, setReleaseList] = useState<Release[]>([])
+  const embedWebsiteModalRef = useRef<EmbedWebsiteModalRef>(null)
+  const publishAsToolModalRef = useRef<{ handleOpen: (tool?: WorkflowToolItem) => void; handleClose: () => void }>(null);
 
   useEffect(() => {
     getData()
@@ -144,19 +149,41 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
               {selectedVersion && <>
                 {data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
                 {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
-                <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
-                {data?.type !== 'multi_agent' && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
+                {data?.type === 'workflow' && <>
+                  <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
+                  <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton>
+                </>}
+                {data.current_release_id !== selectedVersion.id &&<RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
+                {/* <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton> */}
+                {!['multi_agent', 'pure_workflow'].includes(data?.type) && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
               </>}
-              <RbButton type="primary" onClick={async () => {
-                if (data?.type === 'workflow') {
-                  const errors = getCheckResults(data.id)
-                  if (errors.length) {
-                    message.error(t('workflow.checkListHasErrors'))
-                    return
-                  }
-                }
-                releaseModalRef.current?.handleOpen()
-              }}>{t('application.release')}</RbButton>
+              {data?.type === 'pure_workflow'
+                ? <Dropdown
+                    menu={{ items: [
+                      { label: t('application.release'), key: 'release',
+                        onClick: async () => {
+                          const errors = getCheckResults(data.id)
+                          if (errors.length) {
+                            message.error(t('workflow.checkListHasErrors'))
+                            return
+                          }
+                          releaseModalRef.current?.handleOpen()
+                        }
+                      },
+                      { label: t('tool.publishAsTool'), key: 'publishAsTool',
+                        disabled: !selectedVersion,
+                        onClick: () => {
+                          publishAsToolModalRef.current?.handleOpen({
+                            name: data.name
+                          } as WorkflowToolItem)
+                        }
+                      },
+                    ] }}
+                  >
+                    <RbButton type="primary" >{t('application.release')}</RbButton>
+                  </Dropdown>
+                : <RbButton type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</RbButton>
+              }
             </Space>
           </Flex>
           {selectedVersion && 
@@ -222,6 +249,13 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
         ref={appSharingModalRef}
         appId={data.id}
         version={selectedVersion}
+      />
+      <EmbedWebsiteModal
+        ref={embedWebsiteModalRef}
+        version={selectedVersion}
+      />
+      <PublishAsToolModal
+        ref={publishAsToolModalRef}
       />
     </Flex>
   );

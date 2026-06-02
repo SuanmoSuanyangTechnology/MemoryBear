@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -21,6 +22,9 @@ from app.schemas.model_schema import ModelInfo
 from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
+
+# 匹配模板变量 {{xxx}} 的正则
+_TEMPLATE_PATTERN = re.compile(r"\{\{.*?\}\}")
 
 
 class NodeExecutionError(Exception):
@@ -314,6 +318,7 @@ class BaseNode(ABC):
                     chunk_count += 1
                     content = str(item.get("chunk"))
                     done = item.get("done", False)
+                    field = item.get("field", "output")
                     chunks.append(content)
 
                     # Send chunks for all nodes (including End nodes for suffix)
@@ -324,7 +329,8 @@ class BaseNode(ABC):
                         "type": "node_chunk",
                         "node_id": self.node_id,
                         "chunk": content,
-                        "done": done
+                        "done": done,
+                        "field": field
                     })
 
             elapsed_time = (time.time() - start_time) * 1000
@@ -503,10 +509,29 @@ class BaseNode(ABC):
             variable_pool: The variable pool used for reading and writing variables.
 
         Returns:
-            A dictionary containing the node's input data.
+            A dictionary containing the node's input data with all template
+            variables resolved to their actual runtime values.
         """
-        # Default implementation returns the node configuration
-        return {"config": self.config}
+        return {"config": self._resolve_config(self.config, variable_pool)}
+
+    @staticmethod
+    def _resolve_config(config: Any, variable_pool: VariablePool) -> Any:
+        """递归解析 config 中的模板变量，将 {{xxx}} 替换为实际值。
+
+        Args:
+            config: 节点的原始配置（可能包含模板变量）。
+            variable_pool: 变量池，用于解析模板变量。
+
+        Returns:
+            解析后的配置，所有字符串中的 {{变量}} 已被替换为真实值。
+        """
+        if isinstance(config, str) and _TEMPLATE_PATTERN.search(config):
+            return BaseNode._render_template(config, variable_pool, strict=False)
+        elif isinstance(config, dict):
+            return {k: BaseNode._resolve_config(v, variable_pool) for k, v in config.items()}
+        elif isinstance(config, list):
+            return [BaseNode._resolve_config(item, variable_pool) for item in config]
+        return config
 
     def _extract_output(self, business_result: Any) -> Any:
         """Extracts the actual output from the business result.

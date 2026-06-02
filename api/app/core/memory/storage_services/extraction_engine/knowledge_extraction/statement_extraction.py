@@ -12,16 +12,22 @@ from app.core.memory.utils.data.ontology import (
     TemporalInfo,
 )
 from app.core.memory.utils.prompt.prompt_utils import render_statement_extraction_prompt
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
 class ExtractedStatement(BaseModel):
     """Schema for extracted statement from LLM"""
-    statement: str = Field(..., description="The extracted statement text")
+    statement: str = Field(
+        ...,
+        validation_alias=AliasChoices("statement", "statement_text"),
+        description="The extracted statement text",
+    )
     statement_type: str = Field(..., description="FACT, OPINION, SUGGESTION or PREDICTION")
     temporal_type: str = Field(..., description="STATIC, DYNAMIC, ATEMPORAL")
-    relevence: str = Field(..., description="RELEVANT or IRRELEVANT")
+    # New prompt no longer outputs relevence; keep backward-compatible default.
+    relevence: str = Field("RELEVANT", description="RELEVANT or IRRELEVANT")
+    has_unsolved_reference: bool = Field(False, description="Whether the statement has unresolved references")
 
 class StatementExtractionResponse(BaseModel):
     statements: List[ExtractedStatement] = Field(default_factory=list, description="List of extracted statements")
@@ -40,7 +46,7 @@ class StatementExtractionResponse(BaseModel):
             valid_statements = []
             filtered_count = 0
             for i, stmt in enumerate(v):
-                if isinstance(stmt, dict) and stmt.get('statement'):
+                if isinstance(stmt, dict) and (stmt.get("statement") or stmt.get("statement_text")):
                     valid_statements.append(stmt)
                 elif isinstance(stmt, dict):
                     # Log which statement was filtered
@@ -95,6 +101,11 @@ class StatementExtractor:
         """
         chunk_content = chunk.content
         chunk_speaker = self._get_speaker_from_chunk(chunk)
+        logger.info(
+            "[LegacyStatementExtractor] chunk_id=%s content_len=%d",
+            getattr(chunk, "id", ""),
+            len(chunk_content or ""),
+        )
 
         if not chunk_content or len(chunk_content.strip()) < 5:
             logger.warning(f"Chunk {chunk.id} content too short or empty, skipping")
@@ -107,7 +118,18 @@ class StatementExtractor:
             granularity=self.config.statement_granularity,
             include_dialogue_context=self.config.include_dialogue_context,
             dialogue_content=dialogue_content,
-            max_dialogue_chars=self.config.max_dialogue_context_chars
+            max_dialogue_chars=self.config.max_dialogue_context_chars,
+            input_json={
+                "chunk_id": getattr(chunk, "id", ""),
+                "end_user_id": end_user_id or "",
+                "target_content": chunk_content,
+                "target_message_date": datetime.now().isoformat(),
+                "supporting_context": {
+                    "msgs": [
+                        {"role": "context", "msg": dialogue_content}
+                    ] if dialogue_content else []
+                },
+            },
         )
 
         # Simple system message
@@ -159,6 +181,8 @@ class StatementExtractor:
                     chunk_id=chunk.id,
                     end_user_id=end_user_id,
                     speaker=chunk_speaker,
+                    dialog_at=getattr(chunk, "dialog_at", None),
+                    has_unsolved_reference=getattr(extracted_stmt, "has_unsolved_reference", False),
                 )
                 
                 chunk_statements.append(chunk_statement)

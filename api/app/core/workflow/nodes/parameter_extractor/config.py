@@ -6,6 +6,11 @@ from pydantic import Field, BaseModel
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 
 
+class InferenceMode(StrEnum):
+    FUNCTION_CALLING = "function_calling"
+    PROMPT = "prompt"
+
+
 class ParamVariableType(StrEnum):
     """
     Enum for variable types that can be extracted as parameters.
@@ -61,4 +66,9 @@ class ParameterExtractorNodeConfig(BaseNodeConfig):
     prompt: str = Field(
         default="",
         description="User-provided supplemental prompt"
+    )
+
+    inference_mode: InferenceMode = Field(
+        default=InferenceMode.PROMPT,
+        description="Inference mode: function_calling or prompt"
     )

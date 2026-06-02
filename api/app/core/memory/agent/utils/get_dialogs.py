@@ -1,7 +1,4 @@
-import os
-import json
-from typing import List
-from datetime import datetime
+from typing import List, Optional
 
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
 from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
@@ -12,19 +9,30 @@ async def get_chunked_dialogs(
         end_user_id: str = "group_1",
         messages: list = None,
         ref_id: str = "",
-        config_id: str = None
+        config_id: str = None,
+        workspace_id=None,
+        snapshot=None,
+        context_before: Optional[List[dict]] = None,
+        context_after: Optional[List[dict]] = None,
 ) -> List[DialogData]:
     """Generate chunks from structured messages using the specified chunker strategy.
 
     Args:
         chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
         end_user_id: Group identifier
-        messages: Structured message list [{"role": "user", "content": "..."}, ...]
+        messages: Structured message list [{"role": "user", "content": "...", "dialog_at": "..."}]
         ref_id: Reference identifier
         config_id: Configuration ID for processing (used to load pruning config)
+        snapshot: Optional PipelineSnapshot instance for saving pruning output
+        context_before: Optional upstream context messages (already pruned), each dict with "role" and "content".
+            Defaults to None (treated as empty list). Used by sliding window write to inject SupportingContext.
+        context_after: Optional downstream context messages (already pruned), each dict with "role" and "content".
+            Defaults to None (treated as empty list). Used by sliding window write to inject SupportingContext.
 
     Returns:
-        List of DialogData objects with generated chunks
+        List of DialogData objects with generated chunks. When context_before or context_after is provided,
+        dialog_data.metadata["supporting_context"] will contain a List[MessageItem] in
+        [upstream messages..., downstream messages...] order.
     """
     from app.core.logging_config import get_agent_logger
     logger = get_agent_logger(__name__)
@@ -34,6 +42,7 @@ async def get_chunked_dialogs(
 
     conversation_messages = []
 
+# step1: 消息格式校验 role：user、assistant。content
     for idx, msg in enumerate(messages):
         if not isinstance(msg, dict) or 'role' not in msg or 'content' not in msg:
             raise ValueError(f"Message {idx} format error: must contain 'role' and 'content' fields")
@@ -46,7 +55,12 @@ async def get_chunked_dialogs(
             raise ValueError(f"Message {idx} role must be 'user' or 'assistant', got: {role}")
 
         if content.strip():
-            conversation_messages.append(ConversationMessage(role=role, msg=content.strip(), files=files))
+            conversation_messages.append(ConversationMessage(
+                role=role,
+                msg=content.strip(),
+                dialog_at=msg.get("dialog_at"),
+                files=files,
+            ))
 
     if not conversation_messages:
         raise ValueError("Message list cannot be empty after filtering")
@@ -56,12 +70,12 @@ async def get_chunked_dialogs(
         context=conversation_context,
         ref_id=ref_id,
         end_user_id=end_user_id,
-        config_id=config_id
+        config_id=config_id,
     )
     
-    # 语义剪枝步骤（在分块之前）
+# step2: 语义剪枝步骤（在分块之前）
     try:
-        from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import SemanticPruner
+        from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
         from app.core.memory.models.config_models import PruningConfig
         from app.db import get_db_context
         from app.services.memory_config_service import MemoryConfigService
@@ -76,6 +90,7 @@ async def get_chunked_dialogs(
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
                         config_id=config_id,
+                        workspace_id=workspace_id,
                         service_name="semantic_pruning"
                     )
                     
@@ -95,7 +110,16 @@ async def get_chunked_dialogs(
                             llm_client = factory.get_llm_client_from_config(memory_config)
                             
                             # 执行剪枝 - 使用 prune_dataset 支持消息级剪枝
-                            pruner = SemanticPruner(config=pruning_config, llm_client=llm_client)
+                            import re
+                            import langid
+                            user_text = " ".join(
+                                re.sub(r"<input-file-summary>.*?</input-file-summary>", "", m.msg, flags=re.DOTALL).strip()
+                                for m in dialog_data.context.msgs if m.role == "user" and m.msg
+                            )
+                            pruning_language = langid.classify(user_text)[0] if user_text else "zh"
+                            if pruning_language not in ("zh", "en"):
+                                pruning_language = "en"
+                            pruner = SemanticPruner(config=pruning_config, llm_client=llm_client, language=pruning_language, snapshot=snapshot)
                             original_msg_count = len(dialog_data.context.msgs)
                             
                             # 使用 prune_dataset 而不是 prune_dialog
@@ -107,6 +131,13 @@ async def get_chunked_dialogs(
                                 remaining_msg_count = len(dialog_data.context.msgs)
                                 deleted_count = original_msg_count - remaining_msg_count
                                 logger.info(f"[剪枝] 完成: 原始{original_msg_count}条 -> 保留{remaining_msg_count}条 (删除{deleted_count}条)")
+                                
+                                # 将剪枝记录挂到 metadata，供 graph_build_step 构建节点
+                                if pruner.pruning_records:
+                                    dialog_data.metadata["assistant_pruning_records"] = [
+                                        r.model_dump() for r in pruner.pruning_records
+                                    ]
+                                    logger.info(f"[剪枝] 收集到 {len(pruner.pruning_records)} 条剪枝记录")
                             else:
                                 logger.warning("[剪枝] prune_dataset 返回空列表")
                         else:
@@ -116,10 +147,23 @@ async def get_chunked_dialogs(
     except Exception as e:
         logger.warning(f"[剪枝] 执行失败，跳过剪枝: {e}", exc_info=True)
 
+# step3： 分块
     chunker = DialogueChunker(chunker_strategy)
     extracted_chunks = await chunker.process_dialogue(dialog_data)
     dialog_data.chunks = extracted_chunks
 
     logger.info(f"DialogData created with {len(extracted_chunks)} chunks")
+
+# step4: 注入结构化上下文（滑动窗口写入场景）
+    if context_before or context_after:
+        from app.core.memory.storage_services.extraction_engine.steps.schema.extraction_step_schema import MessageItem
+        supporting_msgs = []
+        for msg in (context_before or []):
+            supporting_msgs.append(MessageItem(role=msg["role"], msg=msg["content"]))
+        for msg in (context_after or []):
+            supporting_msgs.append(MessageItem(role=msg["role"], msg=msg["content"]))
+        dialog_data.metadata["supporting_context"] = supporting_msgs
+        logger.info(f"[SupportingContext] 注入 {len(supporting_msgs)} 条上下文消息 "
+                    f"(before={len(context_before or [])}, after={len(context_after or [])})")
 
     return [dialog_data]

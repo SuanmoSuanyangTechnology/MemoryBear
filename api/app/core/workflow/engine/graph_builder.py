@@ -2,6 +2,7 @@
 # Author: Eternity
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/10 13:33
+import json
 import logging
 import re
 import uuid
@@ -18,7 +19,9 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.stream_output_coordinator import OutputContent, StreamOutputConfig
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
-from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
+from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
+from app.core.workflow.nodes.llm import LLMNodeConfig
+from app.core.workflow.nodes.code import CodeNodeConfig
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
 from app.core.workflow.variable.base_variable import VariableType
@@ -132,7 +135,7 @@ class GraphBuilder:
                   complete before this node activates.
         """
         source_nodes = self._reverse_adj[target_node]
-        if not source_nodes and self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
+        if not source_nodes and self.get_node_type(target_node) in [NodeType.START, NodeType.TRIGGER, NodeType.CYCLE_START]:
             return tuple(), tuple()
 
         branch_nodes = []
@@ -140,10 +143,23 @@ class GraphBuilder:
         non_branch_nodes = []
 
         for node_info in source_nodes:
-            if self.get_node_type(node_info["id"]) in BRANCH_NODES:
-                branch_nodes.append(
-                    (node_info["id"], node_info["branch"])
-                )
+            node_type = self.get_node_type(node_info["id"])
+            node_config = self.node_map[node_info["id"]]["config"]
+            if node_type == NodeType.LLM and \
+                    LLMNodeConfig(**node_config).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
+            elif node_type == NodeType.CODE and \
+                    CodeNodeConfig(**node_config).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
+            elif node_type in BRANCH_NODES:
+                if node_info.get("branch") is not None:
+                    branch_nodes.append(
+                        (node_info["id"], node_info["branch"])
+                    )
             else:
                 if self.get_node_type(node_info["id"]) in (NodeType.END, NodeType.OUTPUT):
                     output_nodes.append(node_info["id"])
@@ -314,9 +330,12 @@ class GraphBuilder:
                 for idx in range(len(related_edge)):
                     # Generate a condition expression for each edge
                     # Used later to determine which branch to take based on the node's output
-                    # Assumes node output `node.<node_id>.output` matches the edge's label
-                    # For example, if node.123.output == 'CASE1', take the branch labeled 'CASE1'
-                    related_edge[idx]['condition'] = f"node['{node_id}']['output'] == '{related_edge[idx]['label']}'"
+                    # For LLM nodes, use branch_signal field for routing (output is dynamic text)
+                    # For other branch nodes (e.g. HTTP), use output field
+                    route_field = "branch_signal" if node_type in (NodeType.LLM, NodeType.CODE) else "output"
+                    related_edge[idx]['condition'] = (
+                        f"node['{node_id}']['{route_field}'] == '{related_edge[idx].get('label') or 'SUCCESS'}'"
+                    )
 
             if node_instance:
                 # Wrap node's run method to avoid closure issues
@@ -503,7 +522,7 @@ class GraphBuilder:
         for node in nodes:
             if (node.get("cycle") or '') == self.cycle:
                 node_type = node.get("type")
-                if node_type in [NodeType.START, NodeType.CYCLE_START]:
+                if node_type in [NodeType.START, NodeType.TRIGGER, NodeType.CYCLE_START]:
                     self.start_node_id = node.get("id")
                 elif node_type == NodeType.NOTES:
                     continue
@@ -530,7 +549,7 @@ class GraphBuilder:
         ]
         self._build_adj()
         self._find_upstream_activation_dep: Callable = lru_cache(
-            maxsize=len(self.nodes)*2
+            maxsize=len(self.nodes) * 2
         )(self._find_upstream_activation_dep)
 
         self.graph = StateGraph(WorkflowState)

@@ -32,6 +32,7 @@ export interface NodeConfig {
   cycle?: string;
   cycle_vars?: Array<{ name: string; type: string; value: string; input_type: string; }>
   required?: boolean;
+  tip?: string;
   [key: string]: unknown;
 }
 
@@ -113,4 +114,13 @@ export interface ChatVariable {
 }
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;
+}
+
+export type HistoryActionType = 'add' | 'remove' | 'change' | 'undo' | 'redo' | 'batch'
+
+export interface HistoryRecord {
+  type: HistoryActionType;
+  timestamp: number;
+  batchName?: string;
+  cellIds?: string[];
 }

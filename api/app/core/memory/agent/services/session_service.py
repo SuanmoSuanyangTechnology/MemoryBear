@@ -24,7 +24,7 @@ class SessionService:
             store: Redis session store instance
         """
         self.store = store
-        logger.info("SessionService initialized")
+        logger.debug("SessionService initialized")
     
     def resolve_user_id(self, session_string: str) -> str:
         """

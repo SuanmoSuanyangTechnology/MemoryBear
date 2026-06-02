@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, TypeVar
+from typing import Any, ClassVar, Dict, List, Optional, TypeVar
 
 from langchain_aws import ChatBedrock
 from langchain_community.chat_models import ChatTongyi
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.models.models_model import ModelProvider, ModelType
+from app.models.models_model import ModelProvider, ModelType, ModelCapability
 from app.core.models.compatible_chat import CompatibleChatOpenAI
 
 T = TypeVar("T")
@@ -37,17 +37,65 @@ class RedBearModelConfig(BaseModel):
     concurrency: int = 5  # 并发限流
     extra_params: Dict[str, Any] = {}
 
+    EXTRA_PARAMS_FIELD_MAP: ClassVar[dict] = {
+        "deep_thinking": "deep_thinking",
+        "thinking_budget_tokens": "thinking_budget_tokens",
+        "json_output": "json_output",
+        "streaming": None,
+        "enable_search": None,
+        "enable_thinking": None,
+        "response_format": None,
+    }
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_config_from_extra_params(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        extra_params = data.get("extra_params", {})
+        if not extra_params:
+            return data
+        for param_key, field_name in cls.EXTRA_PARAMS_FIELD_MAP.items():
+            if param_key in extra_params and field_name is not None:
+                if field_name not in data:
+                    data[field_name] = extra_params[param_key]
+        return data
+
     @model_validator(mode="after")
     def _resolve_capabilities(self) -> "RedBearModelConfig":
         from app.core.logging_config import get_business_logger
         logger = get_business_logger()
-        if self.deep_thinking and "thinking" not in self.capability:
+
+        has_thinking = ModelCapability.THINKING in self.capability
+        has_thinking_only = ModelCapability.THINKING_ONLY in self.capability
+
+        if self.deep_thinking and not has_thinking and not has_thinking_only:
             logger.warning(
-                f"模型 {self.model_name} 不支持深度思考（capability 中无 'thinking'），已自动关闭 deep_thinking"
+                f"模型 {self.model_name} 不支持深度思考（capability 中无 'thinking'/'thinking_only'），已自动关闭 deep_thinking"
             )
             self.deep_thinking = False
             self.thinking_budget_tokens = None
-        if self.json_output and "json_output" not in self.capability:
+
+        if not self.deep_thinking and self.thinking_budget_tokens is not None:
+            logger.warning(
+                f"模型 {self.model_name} 未启用深度思考，已自动清除 thinking_budget_tokens"
+            )
+            self.thinking_budget_tokens = None
+
+        # thinking_only 模型始终处于思考状态，deep_thinking 标志强制为 True
+        if has_thinking_only:
+            self.deep_thinking = True
+            # thinking_only 模型不支持 thinking_budget_tokens 参数，清除以防止误传
+            self.thinking_budget_tokens = None
+
+        # thinking_only 模型不支持 json_output，两者冲突会导致模型输出异常（如输出 "[1]"）
+        if self.json_output and has_thinking_only:
+            logger.warning(
+                f"模型 {self.model_name} 为 thinking_only 类型，不支持 json_output，已自动关闭 json_output"
+            )
+            self.json_output = False
+
+        if self.json_output and ModelCapability.JSON_OUTPUT not in self.capability:
             logger.warning(
                 f"模型 {self.model_name} 不支持 JSON 输出（capability 中无 'json_output'），已自动关闭 json_output"
             )
@@ -55,8 +103,51 @@ class RedBearModelConfig(BaseModel):
         return self
 
 
+def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> Optional[str]:
+    if budget_tokens is None:
+        return None
+    if budget_tokens <= 2048:
+        return "low"
+    elif budget_tokens <= 4096:
+        return "medium"
+    else:
+        return "high"
+
+
 class RedBearModelFactory:
     """模型工厂类"""
+
+    _CONFIG_ONLY_KEYS = {
+        "deep_thinking", "thinking_budget_tokens",
+        "enable_search", "enable_thinking", "response_format", "json_output",
+        "default_headers",
+    }
+
+    @staticmethod
+    def _extract_provider_specific_params(extra_params: Dict[str, Any]) -> tuple[Dict[str, Any], dict[str, Any]]:
+        """从 extra_params 中分离提供商特有参数和 RedBearModelConfig 专有字段，
+        返回 (过滤后的 extra_params, provider_specific dict)
+
+        provider_specific 包含需要按提供商路由的参数：
+        - top_k: 仅 Ollama/DashScope 支持，DashScope non-Omni 需通过 model_kwargs
+        - repetition_penalty: 仅 Ollama/DashScope 支持
+        - seed: 仅部分提供商支持，DashScope non-Omni 需通过 model_kwargs
+        - enable_search: 仅 DashScope 支持
+        - stop: 仅 OpenAI 兼容提供商支持顶级传递
+        - temperature: ChatTongyi 不接受顶级传递，需通过 model_kwargs
+        - max_tokens: ChatTongyi 不接受顶级传递，需通过 model_kwargs
+
+        config_only_keys 中的字段是 RedBearModelConfig 配置字段，
+        不应该被展开到最终 LLM 类的构造参数中。
+        """
+        provider_specific_keys = ("top_k", "repetition_penalty", "seed", "enable_search", "stop", "temperature", "max_tokens")
+        config_only_keys = RedBearModelFactory._CONFIG_ONLY_KEYS
+        provider_specific = {}
+        for key in provider_specific_keys:
+            if key in extra_params:
+                provider_specific[key] = extra_params[key]
+        filtered = {k: v for k, v in extra_params.items() if k not in config_only_keys and k not in provider_specific_keys}
+        return filtered, provider_specific
 
     @classmethod
     def get_model_params(cls, config: RedBearModelConfig) -> Dict[str, Any]:
@@ -67,6 +158,11 @@ class RedBearModelFactory:
         from app.core.logging_config import get_business_logger
         logger = get_business_logger()
         logger.debug(f"获取模型参数 - Provider: {provider}, Model: {config.model_name}, is_omni: {config.is_omni}, deep_thinking: {config.deep_thinking}")
+
+        filtered_extra_params, provider_specific = cls._extract_provider_specific_params(config.extra_params)
+        default_headers = config.extra_params.get("default_headers")
+        if default_headers:
+            logger.info(f"额外请求头已注入: {default_headers}")
 
         # dashscope 的 omni 模型使用 OpenAI 兼容模式
         if provider == ModelProvider.DASHSCOPE and config.is_omni:
@@ -86,25 +182,40 @@ class RedBearModelFactory:
                 "api_key": config.api_key,
                 "timeout": timeout_config,
                 "max_retries": config.max_retries,
-                **config.extra_params
+                **filtered_extra_params
             }
+            if default_headers:
+                params["default_headers"] = default_headers
             # 流式模式下启用 stream_usage 以获取 token 统计
             is_streaming = bool(config.extra_params.get("streaming"))
             if is_streaming:
                 params["stream_usage"] = True
-            # 支持 thinking 的模型始终传 enable_thinking，关闭时显式传 False 避免模型默认开启思考
-            if "thinking" in config.capability:
+            # thinking 参数处理：
+            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
+            # - thinking（A类）：混合思考，流式和非流式均可开关，非流式也支持 thinking_budget
+            if ModelCapability.THINKING in config.capability:
                 extra_body = params.setdefault("extra_body", {})
                 if config.deep_thinking:
-                    extra_body["enable_thinking"] = False
-                    if is_streaming:
-                        extra_body["enable_thinking"] = True
+                    extra_body["enable_thinking"] = True
                     if config.thinking_budget_tokens:
                         extra_body["thinking_budget"] = config.thinking_budget_tokens
+                else:
+                    extra_body["enable_thinking"] = False
+            # Omni uses OpenAI-compatible API: all provider-specific params
+            # are top-level args (temperature, max_tokens, seed, stop, etc.)
+            for key in ("temperature", "max_tokens", "seed", "stop", "repetition_penalty"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    if key == "repetition_penalty":
+                        extra_body = params.setdefault("extra_body", {})
+                        extra_body[key] = provider_specific[key]
+                    else:
+                        params[key] = provider_specific[key]
             # JSON 输出模式
+            # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
             if config.json_output:
-                model_kwargs = params.setdefault("model_kwargs", {})
-                model_kwargs["response_format"] = {"type": "json_object"}
+                if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
+                    model_kwargs = params.setdefault("model_kwargs", {})
+                    model_kwargs["response_format"] = {"type": "json_object"}
             return params
 
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA, ModelProvider.VOLCANO]:
@@ -118,39 +229,66 @@ class RedBearModelFactory:
                 write=60.0,  # 写入超时：60秒
                 pool=10.0,  # 连接池超时：10秒
             )
+            # OllamaLLM 有 top_k 原生字段，可直接传入顶层；
+            # ChatOpenAI/CompatibleChatOpenAI 不支持 top_k，OpenAI API 也无此参数，不能放入 model_kwargs
+            # 否则会透传到 AsyncCompletions.create() 导致 unexpected keyword argument 错误
+            if provider == ModelProvider.OLLAMA:
+                if "top_k" in provider_specific and provider_specific["top_k"] is not None:
+                    filtered_extra_params["top_k"] = provider_specific["top_k"]
+                if "repetition_penalty" in provider_specific and provider_specific["repetition_penalty"] is not None:
+                    filtered_extra_params["repetition_penalty"] = provider_specific["repetition_penalty"]
+
             params: Dict[str, Any] = {
                 "model": config.model_name,
                 "base_url": config.base_url,
                 "api_key": config.api_key,
                 "timeout": timeout_config,
                 "max_retries": config.max_retries,
-                **config.extra_params
+                **filtered_extra_params
             }
-            # 流式模式下启用 stream_usage 以获取 token 统计
+
+            # OpenAI-compatible providers: temperature, max_tokens, seed, stop
+            # are top-level params. Other provider-specific params (top_k,
+            # repetition_penalty) are already handled above for Ollama.
+            for key in ("temperature", "max_tokens", "seed", "stop"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    params[key] = provider_specific[key]
+
+            if default_headers and provider != ModelProvider.OLLAMA:
+                params["default_headers"] = default_headers
+
             is_streaming = bool(config.extra_params.get("streaming"))
             if is_streaming:
                 params["stream_usage"] = True
-            # 支持 thinking 的模型始终传 enable_thinking，关闭时显式传 False 避免模型默认开启思考
-            if "thinking" in config.capability:
-                # VOLCANO 深度思考仅流式支持
+            # thinking 参数处理：
+            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
+            # - thinking（A类）：混合思考，流式和非流式均可开关
+            if ModelCapability.THINKING in config.capability:
                 if provider == ModelProvider.VOLCANO:
-                    thinking_config: Dict[str, Any] = {"type": "enabled" if config.deep_thinking else "disabled"}
-                    if config.deep_thinking and config.thinking_budget_tokens:
-                        thinking_config["budget_tokens"] = config.thinking_budget_tokens
-                    params["extra_body"] = {"thinking": thinking_config}
+                    extra_body = params.setdefault("extra_body", {})
+                    if config.deep_thinking:
+                        extra_body["thinking"] = {"type": "enabled"}
+                        effort = _map_budget_to_reasoning_effort(config.thinking_budget_tokens)
+                        if effort is not None:
+                            params["reasoning_effort"] = effort
+                    else:
+                        extra_body["thinking"] = {"type": "disabled"}
                 else:
                     extra_body = params.setdefault("extra_body", {})
                     if config.deep_thinking:
-                        extra_body["enable_thinking"] = False
-                        if is_streaming:
-                            extra_body["enable_thinking"] = True
+                        extra_body["enable_thinking"] = True
                         if config.thinking_budget_tokens:
                             extra_body["thinking_budget"] = config.thinking_budget_tokens
+                    else:
+                        extra_body["enable_thinking"] = False
             # JSON 输出模式
             if config.json_output:
                 model_kwargs = params.setdefault("model_kwargs", {})
                 # VOLCANO 模型不支持 response_format，JSON 输出由 system prompt 注入实现
-                if provider != ModelProvider.VOLCANO:
+                # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
+                if provider != ModelProvider.VOLCANO and not (
+                    ModelCapability.THINKING in config.capability and config.deep_thinking
+                ):
                     model_kwargs["response_format"] = {"type": "json_object"}
             return params
         elif provider == ModelProvider.DASHSCOPE:
@@ -158,22 +296,35 @@ class RedBearModelFactory:
                 "model": config.model_name,
                 "dashscope_api_key": config.api_key,
                 "max_retries": config.max_retries,
-                **config.extra_params
+                **filtered_extra_params
             }
-            # 支持 thinking 的模型始终传 enable_thinking，关闭时显式传 False 避免模型默认开启思考
-            if "thinking" in config.capability:
+            # ChatTongyi 不接受 temperature/max_tokens/seed/stop/enable_search
+            # 等参数作为顶级构造器参数，需通过 model_kwargs 传递
+            model_kwargs = params.setdefault("model_kwargs", {})
+            for key in ("top_k", "repetition_penalty", "seed", "enable_search",
+                        "stop", "temperature", "max_tokens"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    model_kwargs[key] = provider_specific[key]
+            # thinking 参数处理：
+            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
+            # - thinking（A类）：混合思考，流式和非流式均可开关，非流式也支持 thinking_budget
+            if ModelCapability.THINKING in config.capability:
                 is_streaming = bool(config.extra_params.get("streaming"))
                 model_kwargs = params.setdefault("model_kwargs", {})
                 if config.deep_thinking:
-                    model_kwargs["enable_thinking"] = False
-                    if is_streaming:
-                        model_kwargs["enable_thinking"] = True
-                        model_kwargs["incremental_output"] = True
+                    model_kwargs["enable_thinking"] = True
                     if config.thinking_budget_tokens:
                         model_kwargs["thinking_budget"] = config.thinking_budget_tokens
+                    if is_streaming:
+                        model_kwargs["incremental_output"] = True
+                else:
+                    model_kwargs["enable_thinking"] = False
+            # JSON 输出模式
+            # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
             if config.json_output:
-                model_kwargs = params.setdefault("model_kwargs", {})
-                model_kwargs["response_format"] = {"type": "json_object"}
+                if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
+                    model_kwargs = params.setdefault("model_kwargs", {})
+                    model_kwargs["response_format"] = {"type": "json_object"}
             return params
         elif provider == ModelProvider.BEDROCK:
             # Bedrock 使用 AWS 凭证
@@ -196,8 +347,21 @@ class RedBearModelFactory:
             params = {
                 "model_id": model_id,
                 "config": boto_config,
-                **config.extra_params
+                **filtered_extra_params
             }
+            model_kwargs = params.setdefault("model_kwargs", {})
+            # Bedrock 专用参数路由：
+            # top_k, seed → model_kwargs 保持原名
+            # stop → model_kwargs 映射为 stop_sequences
+            # temperature, max_tokens → ChatBedrock 有顶级字段，直接传递
+            for key in ("top_k", "seed"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    model_kwargs[key] = provider_specific[key]
+            if "stop" in provider_specific and provider_specific["stop"] is not None:
+                model_kwargs["stop_sequences"] = provider_specific["stop"]
+            for key in ("temperature", "max_tokens"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    params[key] = provider_specific[key]
 
             # 解析 API key (格式: access_key_id:secret_access_key)
             if config.api_key and ":" in config.api_key:
@@ -216,14 +380,16 @@ class RedBearModelFactory:
             # 深度思考模式：Claude 3.7 Sonnet 等支持思考的模型
             # 通过 additional_model_request_fields 传递 thinking 块，关闭时不传（Bedrock 无 disabled 选项）
             if config.deep_thinking:
-                budget = config.thinking_budget_tokens or 10000
+                budget = config.thinking_budget_tokens or 1024
                 params["additional_model_request_fields"] = {
                     "thinking": {"type": "enabled", "budget_tokens": budget}
                 }
             # JSON 输出模式
+            # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
             if config.json_output:
-                model_kwargs = params.setdefault("model_kwargs", {})
-                model_kwargs["response_format"] = {"type": "json_object"}
+                if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
+                    model_kwargs = params.setdefault("model_kwargs", {})
+                    model_kwargs["response_format"] = {"type": "json_object"}
             return params
         else:
             raise BusinessException(f"不支持的提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)

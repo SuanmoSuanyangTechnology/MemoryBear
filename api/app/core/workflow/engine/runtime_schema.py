@@ -22,16 +22,16 @@ class ExecutionContext(BaseModel):
             cls,
             execution_id: str,
             workspace_id: str,
-            user_id: str,
-            conversation_id: str,
+            user_id: str | None,
+            conversation_id: str | None,
             memory_storage_type: str,
             user_rag_memory_id: str
     ):
         return cls(
             execution_id=execution_id,
             workspace_id=workspace_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
+            user_id=user_id or "",
+            conversation_id=conversation_id or "",
             memory_storage_type=memory_storage_type,
             user_rag_memory_id=user_rag_memory_id,
 
@@ -41,4 +41,3 @@ class ExecutionContext(BaseModel):
                 }
             )
         )
-

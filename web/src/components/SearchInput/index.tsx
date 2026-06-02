@@ -41,6 +41,7 @@ interface SearchInputProps extends InputProps {
   size?: InputProps['size']
   /** Maximum length of the input value */
   maxLength?: number;
+  hasPrefix?: boolean;
 }
 
 /** Search input component with debounce and throttle support */
@@ -52,6 +53,7 @@ const SearchInput: FC<SearchInputProps> = ({
   defaultValue = undefined,
   className = '',
   variant = 'filled',
+  hasPrefix = true,
   ...props
 }) => {
   const { t } = useTranslation();
@@ -111,7 +113,7 @@ const SearchInput: FC<SearchInputProps> = ({
   return (
     <Input
       allowClear
-      prefix={<div className="rb:size-4 rb:bg-[url('@/assets/images/search.svg')] rb:mr-1"></div>}
+      prefix={hasPrefix ? <div className="rb:size-4 rb:bg-[url('@/assets/images/search.svg')] rb:mr-1"></div> : null}
       placeholder={placeholder || t('user.searchPlaceholder')}
       value={value}
       onChange={handleChange}

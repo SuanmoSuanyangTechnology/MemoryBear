@@ -252,7 +252,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
         # TODO: fact_summary functionality temporarily disabled, will be enabled after future development
         fields_to_remove = {
             'invalid_at', 'valid_at', 'chunk_id_from_rel', 'entity_ids',
-            'expired_at', 'created_at', 'chunk_id', 'apply_id',
+            'created_at', 'chunk_id', 'apply_id',
             'user_id', 'statement_ids', 'updated_at', "chunk_ids", "fact_summary"
         }
         # 注意：'id' 字段保留，community 展开时需要用 community id 查询成员 statements

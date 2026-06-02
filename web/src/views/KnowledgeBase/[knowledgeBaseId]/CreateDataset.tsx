@@ -1,4 +1,4 @@
-import {  useMemo,useRef, useState, useEffect } from 'react';
+import { useMemo,useRef, useState, useEffect } from 'react';
 import { Button, Flex, Radio, Steps, Modal, Input, Checkbox, Select, Form, Progress, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -10,36 +10,37 @@ import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload } from '@/api/knowledgeBase';
+import { uploadFile, uploadQaFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload, knowledgesChunkPolicy } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 
 import SliderInput from '@/components/SliderInput';
 import DelimiterSelector from '../components/DelimiterSelector';
+import ParentChildBlockConfig, { parentChildBlockConfigValues, type ParentChildBlockConfigValues } from '../components/ParentChildBlockConfig';
 
 const { TextArea } = Input;
 
-  const style: React.CSSProperties = {
-    display: 'flex',
-    gap: 16,
-  };
-  const radioWrapperBaseStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'flex-start',
-    columnGap: 14, // Wider gap between dot and text
-    width: '100%',
-    border: '1px solid #E5E5E5',
-    borderRadius: 12,
-    padding: 16,
-  };
-  const getActiveRadioStyle = (active: boolean): React.CSSProperties => ({
-    ...radioWrapperBaseStyle,
-    border: active ? '1px solid #171719' : radioWrapperBaseStyle.border,
-    backgroundColor: active ? '#FAFAFA' : 'transparent',
-  });
+const style: React.CSSProperties = {
+  display: 'flex',
+  gap: 16,
+};
+const radioWrapperBaseStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  columnGap: 14, // Wider gap between dot and text
+  width: '100%',
+  border: '1px solid #E5E5E5',
+  borderRadius: 12,
+  padding: 16,
+};
+const getActiveRadioStyle = (active: boolean): React.CSSProperties => ({
+  ...radioWrapperBaseStyle,
+  border: active ? '1px solid #171719' : radioWrapperBaseStyle.border,
+  backgroundColor: active ? '#FAFAFA' : 'transparent',
+});
 
 
-type SourceType = 'local' | 'link' | 'text';
-type ProcessingMethod = 'directBlock' | 'qaExtract';
+type SourceType = 'local' | 'link' | 'text' | 'csv';
+type ProcessingMethod = 'directBlock' | 'qaExtract' | 'parentChildBlock';
 type ParameterSettings = 'defaultSettings' | 'customSettings';
 const stepKeys = ['selectFile', 'parameterSettings', 'dataPreview', 'confirmUpload'] as const;
 type StepKey = typeof stepKeys[number];
@@ -63,6 +64,8 @@ interface ContentFormData {
   title: string;
   content: string;
 }
+const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt', 'png', 'jpg', 'mp3', 'mp4', 'mov', 'wav']
+const csvFileType = ['csv']
 const CreateDataset = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -91,11 +94,14 @@ const CreateDataset = () => {
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
   const [blockSize, setBlockSize] = useState<number>(130);
+  const [qaPrompt, setQaPrompt] = useState<string | undefined>()
+  console.log('qaPrompt', qaPrompt)
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
   const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(true);
   const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('mineru');
-  const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg','mp3','mp4','mov','wav']
+  const [parentChildConfig, setParentChildConfig] = useState<ParentChildBlockConfigValues>(parentChildBlockConfigValues);
+  
   const steps = useMemo(
     () => [
       { title: t('knowledgeBase.selectFile') },
@@ -112,8 +118,11 @@ const CreateDataset = () => {
   const handleNext = async () => {
     // Temporarily hide step 3: adjust step index (0->1->2 corresponds to select file->parameter settings->confirm upload)
     let nextStep = current + 1;
+    if (current === 0 && source === 'csv') {
+      return
+    }
     
-    if(nextStep === 1 && source === 'local') {
+    if((nextStep === 1 && source === 'local') || (nextStep === 2 && source === 'csv')) {
       // Check if files have been uploaded
       if (rechunkFileIds.length === 0) {
         // If no files, prompt user to upload first
@@ -152,16 +161,24 @@ const CreateDataset = () => {
         // handlePreview(data[0],0) 
         if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || pdfEnhancementEnabled){
             rechunkFileIds.map((id) => {
-                const params = {
-                  progress: 0,
-                  parser_config: {
-                      layout_recognize: pdfEnhancementMethod || 'DeepDOC',
-                      delimiter: delimiter,
-                      chunk_token_num: blockSize,
-                      auto_questions: processingMethod === 'directBlock' ? 0 : 1,
-                  }
+              let parser_config = {
+                layout_recognize: pdfEnhancementMethod || 'DeepDOC',
+                delimiter: delimiter,
+                chunk_token_num: blockSize,
+                auto_questions: processingMethod === 'parentChildBlock' || processingMethod === 'directBlock' ? 0 : 1,
+                qa_prompt: qaPrompt,
+              }
+              if (processingMethod === 'parentChildBlock') {
+                parser_config = {
+                  ...parser_config,
+                  ...parentChildConfig || {}
                 }
-                updateDocument(id, params)
+              }
+              const params = {
+                progress: 0,
+                parser_config
+              }
+              updateDocument(id, params)
             })
         }
 
@@ -378,40 +395,67 @@ const CreateDataset = () => {
       formData.append('parent_id', parentId);
     }
 
-    uploadFile(formData, {
-      kb_id: knowledgeBaseId,
-      parent_id: parentId,
-      signal: abortController.signal,
-      onUploadProgress: (event) => {
-        if (!event.total) return;
-        const percent = Math.round((event.loaded / event.total) * 100);
-        onProgress?.({ percent }, file);
-      },
-    })
-      .then((res: UploadFileResponse) => {
-        // Upload successful, remove AbortController
-        abortControllersRef.current.delete(fileUid);
-        
-        onSuccess?.(res, new XMLHttpRequest());
-        if (res?.id) {
-          setRechunkFileIds((prev) => {
-            if (prev.includes(res.id)) return prev;
-            const next = [...prev, res.id];
-            return next;
-          });
-        }
+    if (source === 'csv') {
+      uploadQaFile(formData, {
+        kb_id: knowledgeBaseId,
+        parent_id: parentId,
+        signal: abortController.signal,
       })
-      .catch((error) => {
-        // Remove AbortController
-        abortControllersRef.current.delete(fileUid);
-        
-        // If user actively cancelled, don't show error message
-        if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-          console.log('Upload cancelled:', (file as File).name);
-          return;
-        }
-        onError?.(error as Error);
-      });
+        .then((res: UploadFileResponse) => {
+          // Upload successful, remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          onSuccess?.(res, new XMLHttpRequest());
+          messageApi.success(t('knowledgeBase.uploadSuccess'))
+          handleBack()
+        })
+        .catch((error) => {
+          // Remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          // If user actively cancelled, don't show error message
+          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+            console.log('Upload cancelled:', (file as File).name);
+            return;
+          }
+          onError?.(error as Error);
+        });
+    } else {
+      uploadFile(formData, {
+        kb_id: knowledgeBaseId,
+        parent_id: parentId,
+        signal: abortController.signal,
+        onUploadProgress: (event) => {
+          if (!event.total) return;
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress?.({ percent }, file);
+        },
+      })
+        .then((res: UploadFileResponse) => {
+          // Upload successful, remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          onSuccess?.(res, new XMLHttpRequest());
+          if (res?.id) {
+            setRechunkFileIds((prev) => {
+              if (prev.includes(res.id)) return prev;
+              const next = [...prev, res.id];
+              return next;
+            });
+          }
+        })
+        .catch((error) => {
+          // Remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          // If user actively cancelled, don't show error message
+          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+            console.log('Upload cancelled:', (file as File).name);
+            return;
+          }
+          onError?.(error as Error);
+        });
+    }
   };
 
 
@@ -508,6 +552,20 @@ const CreateDataset = () => {
       messageApi.error(`${t('common.deleteFailed')}`);
     }
   };
+
+  const [isParentChildMode, setIsParentChildMode] = useState<boolean | null>(null)
+  const getKbChunkPolicy = () => {
+    if (!knowledgeBaseId) return
+    knowledgesChunkPolicy(knowledgeBaseId)
+      .then(res => {
+        setIsParentChildMode((res as { parent_child_mode: boolean | null }).parent_child_mode)
+      })
+
+  }
+  useEffect(() => {
+    getKbChunkPolicy()
+  },[knowledgeBaseId])
+
   // When navigating from other pages with fileIds, load corresponding document data
   // useEffect(() => {
   //   if (initialFileIds.length > 0 && initialStepKey !== 'selectFile' && knowledgeBaseId && parentId) {
@@ -557,116 +615,126 @@ const CreateDataset = () => {
           <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
           <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
       </div>
-      <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-xl'>
+      {source !== 'csv' && <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-xl'>
           <Steps current={current} items={steps} className="custom-steps" />
-      </div>  
+      </div> } 
       <div className='rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3'>
 
-        {current === 0 && (
+        {current === 0 && (<>
           <div className='rb:flex rb:w-full rb:p-6'>
-              {source && source === 'local' && (
-                  <UploadFiles 
-                    ref={uploadRef}
-                    isCanDrag={true} 
-                    fileSize={100} 
-                    multiple={true} 
-                    maxCount={99} 
-                    fileType={fileType} 
-                    customRequest={handleUpload}
-                    onChange={(fileList) => {
-                      console.log('File list changed:', fileList);
-                    }}
-                    onRemove={async (file) => {
-                        // 如果文件正在上传，取消上传
-                        const fileUid = file.uid;
-                        const abortController = abortControllersRef.current.get(fileUid);
-                        if (abortController) {
-                          abortController.abort();
-                          abortControllersRef.current.delete(fileUid);
-                          console.log('Upload cancelled:', (file as any).name);
-                          // 取消上传后直接返回 true，允许移除文件
-                          return true;
-                        }
-                        
-                        // Only delete server file when file upload was successful (has response.id)
-                        if (file.response?.id) {
-                          try {
-                            await deleteDocument(file.response.id);
-                            setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
-                            console.log('Server file deleted:', file.response.id);
-                            return true;
-                          } catch (error) {
-                            console.error('Failed to delete file:', error);
-                            messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
-                            return false; // Don't remove file when deletion fails
-                          }
-                        }
-                        
-                        // Also allow removal in other cases (such as failed uploads)
-                        return true;
-                      }} />
-              )}
-              {source && source === 'link' && (
-                  <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
+            {source && (source === 'local' || source === 'csv') && (
+              <UploadFiles 
+                ref={uploadRef}
+                isCanDrag={true} 
+                fileSize={100} 
+                multiple={source !== 'csv'} 
+                maxCount={source === 'csv' ? 1 : 99}
+                fileType={source === 'csv' ? csvFileType : fileType} 
+                customRequest={handleUpload}
+                onChange={(fileList) => {
+                  console.log('File list changed:', fileList);
+                }}
+                onRemove={async (file) => {
+                  // 如果文件正在上传，取消上传
+                  const fileUid = file.uid;
+                  const abortController = abortControllersRef.current.get(fileUid);
+                  if (abortController) {
+                    abortController.abort();
+                    abortControllersRef.current.delete(fileUid);
+                    console.log('Upload cancelled:', (file as any).name);
+                    // 取消上传后直接返回 true，允许移除文件
+                    return true;
+                  }
+                  
+                  // Only delete server file when file upload was successful (has response.id)
+                  if (file.response?.id) {
+                    try {
+                      await deleteDocument(file.response.id);
+                      setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
+                      console.log('Server file deleted:', file.response.id);
+                      return true;
+                    } catch (error) {
+                      console.error('Failed to delete file:', error);
+                      messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
+                      return false; // Don't remove file when deletion fails
+                    }
+                  }
+                  
+                  // Also allow removal in other cases (such as failed uploads)
+                  return true;
+                }}
+              />
+            )}
+            {source && source === 'link' && (
+              <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
 
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.webLink')}
-                    </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
-                    <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
-                        {t('knowledgeBase.webLinkDesc',{count: 5})}
-                    </div>
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                        {t('knowledgeBase.selectorTutorial')}
-                    </div>
-                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                    {t('knowledgeBase.webLink')}
                 </div>
+                <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
+                <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
+                    {t('knowledgeBase.webLinkDesc',{count: 5})}
+                </div>
+                <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                    {t('knowledgeBase.selectorTutorial')}
+                </div>
+                <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+              </div>
             )}
             {source && source === 'text' && (
-                <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-20'>
-                    <Form 
-                      form={form} 
-                      layout="vertical"
-                      onValuesChange={() => {
-                        // 检查表单字段是否都已填写
-                        const values = form.getFieldsValue();
-                        const isValid = !!(values.title?.trim() && values.content?.trim());
-                        setTextFormValid(isValid);
-                      }}
+              <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-20'>
+                <Form 
+                  form={form} 
+                  layout="vertical"
+                  onValuesChange={() => {
+                    // 检查表单字段是否都已填写
+                    const values = form.getFieldsValue();
+                    const isValid = !!(values.title?.trim() && values.content?.trim());
+                    setTextFormValid(isValid);
+                  }}
+                >
+                    <Form.Item
+                      name="title"
+                      label={t('knowledgeBase.title')}
+                      rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
                     >
-                        <Form.Item
-                          name="title"
-                          label={t('knowledgeBase.title')}
-                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
-                        >
-                          <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
-                        </Form.Item>
+                      <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
+                    </Form.Item>
 
-                        <Form.Item
-                          name="content"
-                          label={t('knowledgeBase.customContent')}
-                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
-                        >
-                          <Input.TextArea
-                            placeholder={t('knowledgeBase.pleaseEnterContent')}
-                            rows={8}
-                            showCount
-                            maxLength={5000}
-                          />
-                        </Form.Item>
-                      </Form>
-                    {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.customText')}
-                    </div>
-                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                        {t('knowledgeBase.customContent')}
-                    </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
+                    <Form.Item
+                      name="content"
+                      label={t('knowledgeBase.customContent')}
+                      rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
+                    >
+                      <Input.TextArea
+                        placeholder={t('knowledgeBase.pleaseEnterContent')}
+                        rows={8}
+                        showCount
+                        maxLength={5000}
+                      />
+                    </Form.Item>
+                  </Form>
+                {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                    {t('knowledgeBase.customText')}
                 </div>
+                <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                    {t('knowledgeBase.customContent')}
+                </div>
+                <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
+              </div>
             )}
-        </div>
-        )}
+          </div>
+          {source === 'csv' &&
+            <a
+              href="csv_template.csv"
+              download="csv_template.csv"
+              className='rb:mx-6 rb:text-sm rb:font-medium rb:text-gray-800 rb:-mt-6!'
+            >
+                {t('knowledgeBase.csvTemplate')}
+            </a>
+          }
+        </>)}
 
         {current === 1 && (
           <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
@@ -721,24 +789,31 @@ const CreateDataset = () => {
                   {t('knowledgeBase.processingMethod')}
               </div>
               <Radio.Group
-                  value={processingMethod}
-                  onChange={(e) => setProcessingMethod(e.target.value)}
-                  style={style}
+                value={processingMethod}
+                onChange={(e) => setProcessingMethod(e.target.value)}
+                style={style}
               >
-                  <Radio value='directBlock' style={getActiveRadioStyle(processingMethod === 'directBlock')}>
-                      <Flex gap='small' vertical>
-                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                              {t('knowledgeBase.directBlock')}
-                          </span>
-                      </Flex>
-                  </Radio>
-                  <Radio value='qaExtract' style={getActiveRadioStyle(processingMethod === 'qaExtract')}>
-                      <Flex gap='small' vertical>
-                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                          {t('knowledgeBase.qaExtract')}
-                          </span>
-                      </Flex>
-                  </Radio>
+                <Radio value='directBlock' disabled={isParentChildMode === true} style={getActiveRadioStyle(processingMethod === 'directBlock')}>
+                    <Flex gap='small' vertical>
+                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                            {t('knowledgeBase.directBlock')}
+                        </span>
+                    </Flex>
+                </Radio>
+                <Radio value='qaExtract' disabled={isParentChildMode === true} style={getActiveRadioStyle(processingMethod === 'qaExtract')}>
+                    <Flex gap='small' vertical>
+                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                        {t('knowledgeBase.qaExtract')}
+                        </span>
+                    </Flex>
+                </Radio>
+                <Radio value='parentChildBlock' disabled={isParentChildMode === false} style={getActiveRadioStyle(processingMethod === 'parentChildBlock')}>
+                  <Flex gap='small' vertical>
+                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                      {t('knowledgeBase.parentChildBlock')}
+                    </span>
+                  </Flex>
+                </Radio>
               </Radio.Group>
               <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
                   {t('knowledgeBase.parameterSettings')}
@@ -765,18 +840,26 @@ const CreateDataset = () => {
                       </Flex>
                   </Radio>
               </Radio.Group>
-              {parameterSettings === 'customSettings' && ( 
+              {parameterSettings === 'customSettings' && processingMethod !== 'parentChildBlock' && (<>
                 <div className='rb:grid rb:grid-cols-2 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
-                <div>
-                  <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
-                    {t('knowledgeBase.delimiter')}
-                  </div>
-                  <DelimiterSelector value={delimiter} onChange={setDelimiter} />
+                  <div>
+                    <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
+                      {t('knowledgeBase.delimiter')}
+                    </div>
+                    <DelimiterSelector value={delimiter} onChange={setDelimiter} />
                   </div>
                   <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
                 </div>
-                
-              )}
+                <div>
+                  <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2 rb:mt-4'>
+                    {t('knowledgeBase.qaPrompt')}
+                  </div>
+                  <Input.TextArea value={qaPrompt} rows={6} onChange={(e) => setQaPrompt(e.target.value)} />
+                </div>
+              </>)}
+              {parameterSettings === 'customSettings' && processingMethod === 'parentChildBlock' &&
+                <ParentChildBlockConfig initialValue={parentChildConfig} onChange={setParentChildConfig} />
+              }
           </div>
         )}
 
@@ -853,7 +936,7 @@ const CreateDataset = () => {
               {t('common.previous') || 'Prev'}
               </Button>
           )}
-          <Button 
+          {source !== 'csv' && <Button 
             type='primary' 
             onClick={current === 2 ? handleStartUpload : handleNext}
             disabled={
@@ -863,7 +946,7 @@ const CreateDataset = () => {
             }
           >
             {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
-          </Button>
+          </Button>}
         </div>
       </div>
     </div>

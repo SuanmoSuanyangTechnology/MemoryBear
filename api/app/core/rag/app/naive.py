@@ -22,6 +22,7 @@ from app.core.rag.deepdoc.parser.figure_parser import VisionFigureParser,vision_
 from app.core.rag.deepdoc.parser.pdf_parser import PlainParser, VisionParser
 from app.core.rag.deepdoc.parser.mineru_parser import MinerUParser
 from app.core.rag.app.textin_parser import TextLnParser
+from app.core.rag.common.token_utils import num_tokens_from_string
 from app.core.rag.nlp import concat_img, find_codec, naive_merge, naive_merge_with_images, naive_merge_docx, tokenize, rag_tokenizer, tokenize_chunks, tokenize_chunks_with_images, tokenize_table
 
 def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None, **kwargs):
@@ -47,7 +48,7 @@ def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
     mineru_api = os.environ.get("MINERU_APISERVER", "http://host.docker.internal:9987")
     pdf_parser = MinerUParser(mineru_path=mineru_executable, mineru_api=mineru_api)
 
-    if not pdf_parser.check_installation():
+    if not pdf_parser.check_installation()[0]:
         callback(-1, "MinerU not found.")
         return None, None, pdf_parser
 
@@ -619,36 +620,36 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
         if not sections and not tables:
             return []
 
-        if name in ["mineru", "textln"]:
+        if name in ["mineru", "textln"] and not kwargs.get("_keep_chunk_token_num"):
             parser_config["chunk_token_num"] = 0
 
         res = tokenize_table(tables, doc, is_english)
         callback(0.8, "Finish parsing.")
 
-    elif re.search(r"\.(pptx|ppt?)$", filename, re.IGNORECASE):
-        # 方法1.Aspose.Slides是商业级库，其核心功能（如幻灯片创建、动画处理、格式转换等）需通过付费许可证使用。尽管它为符合条件的开源项目提供免费许可证（需申请），但商业闭源项目必须购买授权
-        # if not binary:
-        #     with open(filename, "rb") as f:
-        #         binary = f.read()
-        # from app.core.rag.app.presentation import Ppt
-        # ppt_parser = Ppt()
-        # for pn, (txt, img) in enumerate(ppt_parser(
-        #         filename if not binary else binary, from_page, to_page, callback)):
-        #     d = copy.deepcopy(doc)
-        #     pn += from_page
-        #     d["image"] = img
-        #     d["doc_type_kwd"] = "image"
-        #     d["page_num_int"] = [pn + 1]
-        #     d["top_int"] = [0]
-        #     d["position_int"] = [(pn + 1, 0, img.size[0], 0, img.size[1])]
-        #     tokenize(d, txt, is_english)
-        #     res.append(d)
-        # return res
-        # 方法2.提交任务-文件转换为pdf
-        future = async_convert_to_pdf(filename)
-        dest_pdf_path = future.result()
-        # 解析pdf
-        return chunk(dest_pdf_path, binary=None, lang=lang, callback=callback, vision_model=vision_model, **kwargs)
+    elif re.search(r"\.(pptx|ppt)$", filename, re.IGNORECASE):
+        # 方法2.提交任务-文件转换为pdf（LibreOffice 需要真实磁盘文件）
+        import tempfile
+        tmp_file = None
+        dest_pdf_path = None
+        try:
+            suffix = os.path.splitext(filename)[1] or ".pptx"
+            tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            if binary:
+                tmp_file.write(binary)
+            else:
+                with open(filename, "rb") as f:
+                    tmp_file.write(f.read())
+            tmp_file.close()
+
+            future = async_convert_to_pdf(tmp_file.name)
+            dest_pdf_path = future.result()
+            # 解析pdf
+            return chunk(dest_pdf_path, binary=None, lang=lang, callback=callback, vision_model=vision_model, **kwargs)
+        finally:
+            if tmp_file and os.path.exists(tmp_file.name):
+                os.unlink(tmp_file.name)
+            if dest_pdf_path and os.path.exists(dest_pdf_path):
+                os.unlink(dest_pdf_path)
 
     elif re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", filename, re.IGNORECASE):
         if not binary:
@@ -731,7 +732,21 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     elif re.search(r"\.(json|jsonl|ldjson)$", filename, re.IGNORECASE):
         callback(0.1, "Start to parse.")
         chunk_token_num = int(parser_config.get("chunk_token_num", 128))
-        sections = JsonParser(chunk_token_num)(filename)
+        # JsonParser.from_file needs a real path; when binary is provided, write to temp file
+        if binary:
+            import tempfile
+            tmp_file = None
+            try:
+                suffix = os.path.splitext(filename)[1] or ".json"
+                tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb")
+                tmp_file.write(binary)
+                tmp_file.close()
+                sections = JsonParser(chunk_token_num)(tmp_file.name)
+            finally:
+                if tmp_file and os.path.exists(tmp_file.name):
+                    os.unlink(tmp_file.name)
+        else:
+            sections = JsonParser(chunk_token_num)(filename)
         sections = [(_, "") for _ in sections if _]
         callback(0.8, "Finish parsing.")
 
@@ -740,8 +755,8 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
 
         try:
             import tika
-            os.environ['TIKA_SERVER_JAR'] = "/tmp/tika-server.jar"
-            os.environ['TIKA_SERVER_PORT'] = '9998'
+            os.environ.setdefault('TIKA_SERVER_JAR', '/opt/tika/tika-server.jar')
+            os.environ.setdefault('TIKA_SERVER_PORT', '9998')
             # java11 Initialize Tika 3.1.0.jar  service url：http://localhost:9998  view process：lsof -i :9998
             tika.initVM()
             from tika import parser as tika_parser
@@ -750,7 +765,24 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
             logging.warning(f"tika not available: {e}. Unsupported .doc parsing for {filename}.")
             return []
 
-        doc_parsed = tika_parser.from_file(filename)
+        # tika.from_file requires a real file path; write binary to a temp file
+        import tempfile
+        tmp_file = None
+        try:
+            suffix = os.path.splitext(filename)[1] or ".doc"
+            tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            if binary:
+                tmp_file.write(binary)
+            else:
+                with open(filename, "rb") as f:
+                    tmp_file.write(f.read())
+            tmp_file.close()
+
+            doc_parsed = tika_parser.from_file(tmp_file.name)
+        finally:
+            if tmp_file and os.path.exists(tmp_file.name):
+                os.unlink(tmp_file.name)
+
         if doc_parsed.get('content', None) is not None:
             sections = doc_parsed['content'].split('\n')
             sections = [(_, "") for _ in sections if _]
@@ -809,6 +841,103 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     if url_res:
         res.extend(url_res)
     return res
+
+
+FULL_DOC_MAX_CHARS = 10000
+
+
+def truncate_to_chars(text: str, max_chars: int) -> str:
+    """按字符数截断文本，保留前半部分。"""
+    return text if len(text) <= max_chars else text[:max_chars]
+
+
+def chunk_parent_child(
+    filename, binary=None, from_page=0, to_page=100000,
+    lang="Chinese", callback=None, vision_model=None, **kwargs
+):
+    """
+    Parent-child chunking mode.
+
+    Calls chunk() once at child granularity, then builds parent chunks
+    by merging consecutive children until token budget is reached.
+    This avoids double-parsing the document and guarantees accurate
+    child→parent mapping.
+
+    Returns:
+        (child_res, parent_res, parent_id_map)
+        - parent_id_map: dict mapping child index → parent index
+    """
+    parser_config = kwargs.get("parser_config", {})
+    child_token_num = int(parser_config.get("chunk_token_num", 128))
+    parent_token_num = int(parser_config.get("parent_chunk_token_num", 1024))
+
+    if parent_token_num <= child_token_num:
+        logging.warning(
+            f"parent_chunk_token_num({parent_token_num}) <= chunk_token_num({child_token_num}), "
+            f"falling back to default 1024"
+        )
+        parent_token_num = 1024
+
+    # Single parse → child chunks
+    child_res = chunk(
+        filename, binary=binary, from_page=from_page, to_page=to_page,
+        lang=lang, callback=callback, vision_model=vision_model,
+        **kwargs
+    )
+    logging.info(f"[ParentChild] child: token_num={child_token_num}, chunk_count={len(child_res)}")
+
+    parent_chunk_mode = parser_config.get("parent_chunk_mode", "paragraph")
+
+    # Full-doc mode: single parent chunk, truncated to FULL_DOC_MAX_TOKENS
+    if parent_chunk_mode == "full-doc":
+        all_texts = [child["content_with_weight"] for child in child_res]
+        full_text = "\n\n".join(all_texts)
+        truncated = truncate_to_chars(full_text, FULL_DOC_MAX_CHARS)
+        parent_res = [{"content_with_weight": truncated, "image": None}]
+        parent_id_map = {i: 0 for i in range(len(child_res))}
+        logging.info(f"[ParentChild] parent: mode=full-doc, max_chars={FULL_DOC_MAX_CHARS}, chunk_count=1")
+        return child_res, parent_res, parent_id_map
+
+    # Paragraph mode (default): merge consecutive children up to parent_token_num
+    parent_res: list[dict] = []
+    parent_id_map: dict[int, int] = {}
+    buf_texts: list[str] = []
+    buf_images: list = []
+    buf_tokens = 0
+
+    def flush_parent():
+        nonlocal buf_texts, buf_images, buf_tokens
+        merged = "\n\n".join(buf_texts)
+        merged_image = None
+        for img in buf_images:
+            merged_image = concat_img(merged_image, img) if merged_image else img
+        parent_res.append({
+            "content_with_weight": merged,
+            "image": merged_image,
+        })
+        buf_texts = []
+        buf_images = []
+        buf_tokens = 0
+
+    for child_idx, child in enumerate(child_res):
+        text = child["content_with_weight"]
+        image = child.get("image")
+        tkn = num_tokens_from_string(text)
+
+        if buf_texts and buf_tokens + tkn > parent_token_num:
+            flush_parent()
+
+        buf_texts.append(text)
+        if image is not None:
+            buf_images.append(image)
+        buf_tokens += tkn
+        parent_id_map[child_idx] = len(parent_res)
+
+    if buf_texts:
+        flush_parent()
+
+    logging.info(f"[ParentChild] parent: mode=paragraph, token_num={parent_token_num}, chunk_count={len(parent_res)}")
+    return child_res, parent_res, parent_id_map
 
 
 if __name__ == "__main__":

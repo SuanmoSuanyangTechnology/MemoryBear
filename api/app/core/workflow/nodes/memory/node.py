@@ -1,7 +1,6 @@
 import re
 from typing import Any
 
-from app.celery_task_scheduler import scheduler
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.workflow.engine.state_manager import WorkflowState
@@ -18,6 +17,10 @@ class MemoryReadNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: MemoryReadNodeConfig | None = None
+        self._process: dict = {}
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": self._process}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -40,10 +43,14 @@ class MemoryReadNode(BaseNode):
                 end_user_id=end_user_id,
                 user_rag_memory_id=state["user_rag_memory_id"],
             )
+            query = self._render_template(self.typed_config.message, variable_pool)
+            self._process = {"query": query, "config_id": str(self.typed_config.config_id)}
+            # TODO: Historical Messages -> Used to refer to coreference resolution
             search_result = await memory_service.read(
-                self._render_template(self.typed_config.message, variable_pool),
+                query,
                 search_switch=SearchStrategy(self.typed_config.search_switch)
             )
+            self._process["memories_count"] = len(search_result.memories)
             return {
                 "answer": search_result.content,
                 "intermediate_outputs": [_.model_dump() for _ in search_result.memories]
@@ -65,6 +72,10 @@ class MemoryWriteNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: MemoryWriteNodeConfig | None = None
+        self._process: dict = {}
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": self._process}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {"output": VariableType.STRING}
@@ -85,6 +96,7 @@ class MemoryWriteNode(BaseNode):
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryWriteNodeConfig(**self.config)
         end_user_id = self.get_variable("sys.user_id", variable_pool)
+        conversation_id = self.get_variable("sys.conversation_id", variable_pool) or ""
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
@@ -110,7 +122,7 @@ class MemoryWriteNode(BaseNode):
                         upload_file_id=instence.value.file_id,
                         url=instence.value.url,
                         file_type=instence.value.origin_file_type
-                    ).model_dump())
+                    ).model_dump(mode="json"))
                 elif isinstance(instence, ArrayVariable) and instence.child_type == FileVariable:
                     for file_instence in instence.value:
                         file_info.append(FileInput(
@@ -119,30 +131,19 @@ class MemoryWriteNode(BaseNode):
                             upload_file_id=file_instence.value.file_id,
                             url=file_instence.value.url,
                             file_type=file_instence.value.origin_file_type
-                        ).model_dump())
+                        ).model_dump(mode="json"))
             messages.append({
                 "role": message.role,
                 "content": self._render_template(content, variable_pool),
                 "files": file_info
             })
 
-        scheduler.push_task(
-            "app.core.memory.agent.write_message",
-            end_user_id,
-            {
-                "end_user_id": end_user_id,
-                "message": messages,
-                "config_id": str(self.typed_config.config_id),
-                "storage_type": state["memory_storage_type"],
-                "user_rag_memory_id": state["user_rag_memory_id"]
-            }
+        await MemoryService.write_workflow_messages(
+            conversation_id=conversation_id,
+            messages=messages,
+            config_id=str(self.typed_config.config_id),
+            end_user_id=end_user_id,
+            workspace_id=str(state.get("workspace_id", "") or ""),
         )
-        # write_message_task.delay(
-        #     end_user_id=end_user_id,
-        #     message=messages,
-        #     config_id=str(self.typed_config.config_id),
-        #     storage_type=state["memory_storage_type"],
-        #     user_rag_memory_id=state["user_rag_memory_id"]
-        # )
 
         return "success"

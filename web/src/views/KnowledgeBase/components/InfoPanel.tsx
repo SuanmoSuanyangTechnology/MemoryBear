@@ -7,11 +7,12 @@
  * @LastEditTime: 2025-11-19 19:59:36
  */
 import { Divider } from 'antd';
+import type { ReactElement } from 'react';
 
 export interface InfoItem {
   key: string;
   label: string;
-  value: string | number | undefined;
+  value: string | number | undefined | ReactElement;
   icon?: string;
 }
 

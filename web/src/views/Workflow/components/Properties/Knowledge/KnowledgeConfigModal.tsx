@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Select, InputNumber, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -65,15 +65,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
     handleClose
   }));
 
-  useEffect(() => {
-    if (values?.retrieve_type) {
-      const fieldsToReset = Object.keys(values).filter(key => 
-        key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
-      ) as (keyof KnowledgeConfigForm)[];
-      form.resetFields(fieldsToReset);
-    }
-  }, [values?.retrieve_type])
-
   return (
     <RbModal
       title={t('application.knowledgeConfig')}
@@ -91,7 +82,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           <Flex align="center" justify="space-between" className="rb:mb-6! rb-border rb:rounded-lg rb:p-[17px_16px]! rb:cursor-pointer rb:bg-[#F0F3F8] rb:text-[#212332]">
             <div className="rb:text-[16px] rb:leading-5.5">
               {data.name}
-              <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', {include_count: data.doc_num})}</div>
+              <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', { include_count: data.doc_num })}</div>
             </div>
             <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{formatDateTime(data.updated_at, 'YYYY-MM-DD HH:mm:ss')}</div>
           </Flex>
@@ -104,13 +95,12 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           extra={t('application.retrieve_type_desc')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
-          
+
           <Select
             options={retrieveTypes.map(key => ({
               label: t(`application.${key}`),
               value: key,
             }))}
-            // onChange={handleChange}
           />
         </FormItem>
         {/* Top K */}
@@ -124,72 +114,39 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             style={{ width: '100%' }}
             min={1}
             max={20}
-            // onChange={(value) => form.setFieldValue('top_k', value)}
+            onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {/* 语义相似度阈值 similarity_threshold */}
-        {values?.retrieve_type === 'semantic' && (
+        {!['semantic', 'graph'].includes(values?.retrieve_type || '') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}
-            extra={t('application.similarity_threshold_desc')}
+            extra={t('application.similarity_threshold_desc1')}
             initialValue={0.5}
           >
-            <RbSlider 
+            <RbSlider
               max={1.0}
               step={0.1}
               min={0.0}
               isInput={true}
             />
           </FormItem>
-        )}
-        {/* 分词匹配度阈值 vector_similarity_weight */}
-        {values?.retrieve_type === 'participle' && (
+        }
+        {!['participle', 'graph'].includes(values?.retrieve_type || '') &&
           <FormItem
             name="vector_similarity_weight"
             label={t('application.vector_similarity_weight')}
-            extra={t('application.vector_similarity_weight_desc')}
+            extra={t('application.vector_similarity_weight_desc1')}
             initialValue={0.5}
           >
-            <RbSlider 
+            <RbSlider
               max={1.0}
               step={0.1}
               min={0.0}
               isInput={true}
             />
           </FormItem>
-        )}
-        {/* 混合检索权重 */}
-        {values?.retrieve_type === 'hybrid' && (
-          <>
-            <FormItem
-              name="similarity_threshold"
-              label={t('application.similarity_threshold')}
-              extra={t('application.similarity_threshold_desc1')}
-              initialValue={0.5}
-            >
-              <RbSlider 
-                max={1.0}
-                step={0.1}
-                min={0.0}
-                isInput={true}
-              />
-            </FormItem>
-            <FormItem
-              name="vector_similarity_weight"
-              label={t('application.vector_similarity_weight')}
-              extra={t('application.vector_similarity_weight_desc1')}
-              initialValue={0.5}
-            >
-              <RbSlider 
-                max={1.0}
-                step={0.1}
-                min={0.0}
-                isInput={true}
-              />
-            </FormItem>
-          </>
-        )}
+        }
       </Form>
     </RbModal>
   );

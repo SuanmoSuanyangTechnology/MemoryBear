@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:38:13
+ * @Last Modified time: 2026-05-28 10:03:51
  */
 /**
  * Application Management Page
@@ -29,6 +29,8 @@ import MySharing from './MySharing'
 import RbCard from '@/components/RbCard'
 import RbButton from '@/components/RbButton'
 import RbDescriptions from '@/components/RbDescriptions'
+import OverflowTags from '@/components/OverflowTags'
+import Tag from '@/components/Tag'
 
 
 const tabKeys = ['apps', 'sharing', 'myShare']
@@ -126,6 +128,17 @@ const ApplicationManagement: React.FC = () => {
       }
     });
   }
+  const [focus, setFocus] = useState(false)
+
+  const formatQuery = () => {
+    const { search_type = 'search', search, ...rest } = query || {}
+    return {
+      ...rest,
+      shared_only: activeTab === 'sharing',
+      include_shared: activeTab !== 'apps',
+      [search_type || 'search']: search
+    } as Query
+  }
   return (
     <>
       <Flex justify="space-between" className="rb:mb-4!">
@@ -137,6 +150,9 @@ const ApplicationManagement: React.FC = () => {
 
         <Form
           form={form}
+          initialValues={{
+            search_type: 'search'
+          }}
         >
           {activeTab !== 'myShare' &&
             <Space size={8}>
@@ -152,12 +168,36 @@ const ApplicationManagement: React.FC = () => {
                   className="rb:w-30!"
                 />
               </Form.Item>
-              <Form.Item name="search" noStyle>
-                <SearchInput
-                  placeholder={t('application.searchPlaceholder')}
-                  className="rb:w-75!"
-                />
-              </Form.Item>
+              <Flex
+                className={clsx("rb-border rb:rounded-lg rb:bg-[#FFFFFF]", {
+                  'rb:border-[#171719]!': focus
+                })}
+                onMouseEnter={() => setFocus(true)}
+                onMouseLeave={() => setFocus(false)}
+              >
+                <Form.Item name="search_type" noStyle>
+                  <Select
+                    options={[
+                      { value: 'search', label: t('application.name') },
+                      { value: 'tag_search', label: t('application.tags') },
+                    ]}
+                    variant="borderless"
+                    className="rb:w-20!"
+                    onFocus={() => setFocus(true)}
+                    onBlur={() => setFocus(false)}
+                  />
+                </Form.Item>
+                <Form.Item name="search" noStyle>
+                  <SearchInput
+                    hasPrefix={false}
+                    placeholder={t('application.searchPlaceholder')}
+                    className="rb:w-75!"
+                    variant="borderless"
+                    onFocus={() => setFocus(true)}
+                    onBlur={() => setFocus(false)}
+                  />
+                </Form.Item>
+              </Flex>
               {activeTab === 'apps' && <Space size={10}>
                 <Dropdown
                   menu={{
@@ -186,7 +226,7 @@ const ApplicationManagement: React.FC = () => {
           ref={scrollListRef}
           url={getApplicationListUrl}
           needLoading={false}
-          query={{ ...query, shared_only: activeTab === 'sharing', include_shared: activeTab !== 'apps' }}
+          query={formatQuery()}
           renderItem={(item) => (
             <RbCard
               title={item.name}
@@ -194,7 +234,7 @@ const ApplicationManagement: React.FC = () => {
               avatarClassName={clsx({
                 'rb:bg-[#155EEF]': item.type === 'agent',
                 'rb:bg-[#9C6FFF]!': item.type === 'multi_agent',
-                'rb:bg-[#171719]': item.type === 'workflow',
+                'rb:bg-[#171719]': item.type.includes('workflow'),
               })}
               footer={
                 item.is_shared
@@ -209,7 +249,7 @@ const ApplicationManagement: React.FC = () => {
               }
             >
               <RbDescriptions
-                items={['type', 'source', 'created_at'].map(key => ({
+                items={['type', 'source', 'tags', 'created_at'].map(key => ({
                   key,
                   label: t(`application.${key}`),
                   children: <span className={clsx('rb:font-medium', {
@@ -221,7 +261,11 @@ const ApplicationManagement: React.FC = () => {
                         ? t('application.configuration')
                         : key === 'created_at'
                           ? formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')
-                          : t(`application.${item[key as keyof Application]}`)
+                          : key === 'tags'
+                            ? <OverflowTags
+                              items={item.tags.map(tag => <Tag>{tag}</Tag>)}
+                            />
+                            : t(`application.${item[key as keyof Application]}`)
                     }
                   </span>
                 }))}

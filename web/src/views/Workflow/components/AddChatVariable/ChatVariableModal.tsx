@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-30 13:59:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 15:26:33
+ * @Last Modified time: 2026-05-19 15:10:23
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
 import { Form, Input, Select, InputNumber, Button, Row, Col, Flex } from 'antd';
@@ -21,6 +21,7 @@ import { transform_file_type } from '@/views/Conversation/components/FileUpload'
 import RadioGroupBtn from '../Properties/RadioGroupBtn';
 import CodeMirrorEditor from '@/components/CodeMirrorEditor';
 import FileList from '@/components/Chat/FileList'
+import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
 const FormItem = Form.Item;
 
@@ -46,6 +47,7 @@ const array_object_placeholder = `# example
 interface ChatVariableModalProps {
   refresh: (value: ChatVariable, editIndex?: number) => void;
   variables?: ChatVariable[];
+  fileUploadConfig?: FeaturesConfigForm['file_upload'];
 }
 
 const types = [
@@ -87,7 +89,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
   const video_allowed_extensions = Form.useWatch('video_allowed_extensions', form);
   const max_file_count = Form.useWatch('max_file_count', form);
 
-  const featureConfig = useMemo(() => ({
+  const featureConfig: FeaturesConfigForm['file_upload'] = useMemo(() => ({
     enabled: true,
     allowed_transfer_methods,
     max_file_count,
@@ -286,25 +288,24 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
             />
             <Form.Item name="defaultValue" hidden noStyle />
             <Form.Item label={t('workflow.config.parameter-extractor.default')}>
-              
-                <Row gutter={8}>
-                  <Col span={12}>
-                    <UploadFiles
-                      featureConfig={featureConfig}
-                      onChange={fileChange}
-                      block={true}
-                      textType="button"
-                      disabled={type === 'file' && fileList.length > 0}
-                    />
-                  </Col>
-                  <Col span={12}>
-                    <Button block
-                      disabled={type === 'file' && fileList.length > 0}
-                      onClick={() => uploadFileListModalRef.current?.handleOpen()}>
-                      {t('memoryConversation.addRemoteFile')}
-                    </Button>
-                  </Col>
-                </Row>
+              <Row gutter={8}>
+                <Col span={12}>
+                  <UploadFiles
+                    featureConfig={featureConfig}
+                    onChange={fileChange}
+                    block={true}
+                    textType="button"
+                    disabled={type === 'file' && fileList.length > 0}
+                  />
+                </Col>
+                <Col span={12}>
+                  <Button block
+                    disabled={type === 'file' && fileList.length > 0}
+                    onClick={() => uploadFileListModalRef.current?.handleOpen()}>
+                    {t('memoryConversation.addRemoteFile')}
+                  </Button>
+                </Col>
+              </Row>
               {previewFileList.length > 0 && (
                 <FileList wrap="wrap" fileList={previewFileList} onDelete={handleDelete} className="rb:mt-2!" />
               )}

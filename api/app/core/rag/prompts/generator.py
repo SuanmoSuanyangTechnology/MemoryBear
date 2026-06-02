@@ -131,18 +131,52 @@ def keyword_extraction(chat_mdl, content, topn=3):
 
 
 def question_proposal(chat_mdl, content, topn=3):
-    template = PROMPT_JINJA_ENV.from_string(QUESTION_PROMPT_TEMPLATE)
-    rendered_prompt = template.render(content=content, topn=topn)
-
-    msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
-    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
-    kwd = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.2})
-    if isinstance(kwd, tuple):
-        kwd = kwd[0]
-    kwd = re.sub(r"^.*</think>", "", kwd, flags=re.DOTALL)
-    if kwd.find("**ERROR**") >= 0:
+    """生成问题（向后兼容，返回纯文本问题列表）"""
+    pairs = qa_proposal(chat_mdl, content, topn)
+    if not pairs:
         return ""
-    return kwd
+    return "\n".join([p["question"] for p in pairs])
+
+
+def qa_proposal(chat_mdl, content, topn=3, custom_prompt=None):
+    """生成 QA 对，返回 [{"question": ..., "answer": ...}, ...]
+    
+    Args:
+        chat_mdl: LLM 模型
+        content: 文本内容
+        topn: 生成 QA 对数量
+        custom_prompt: 自定义 prompt 模板（支持 Jinja2，可用变量: content, topn）
+    """
+    if custom_prompt:
+        template = PROMPT_JINJA_ENV.from_string(custom_prompt)
+        sys_prompt = template.render(topn=topn)
+    else:
+        sys_prompt = QUESTION_PROMPT_TEMPLATE
+    msg = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": content}]
+    _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
+    raw = chat_mdl.chat(sys_prompt, msg[1:], {"temperature": 0.2})
+    if isinstance(raw, tuple):
+        raw = raw[0]
+    raw = re.sub(r"^.*</think>", "", raw, flags=re.DOTALL)
+    if raw.find("**ERROR**") >= 0:
+        return []
+    return parse_qa_pairs(raw)
+
+
+def parse_qa_pairs(text: str) -> list:
+    """解析 LLM 返回的 QA 对文本，格式: Q: xxx A: xxx"""
+    pairs = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # 匹配 Q: ... A: ... 格式
+        match = re.match(r'^Q:\s*(.+?)\s+A:\s*(.+)$', line, re.IGNORECASE)
+        if match:
+            q, a = match.group(1).strip(), match.group(2).strip()
+            if q and a:
+                pairs.append({"question": q, "answer": a})
+    return pairs
 
 
 def graph_entity_types(chat_mdl, scenario):
@@ -238,15 +272,15 @@ def content_tagging(chat_mdl, content, all_tags, examples, topn=3):
     return res
 
 
-def vision_llm_describe_prompt(page=None) -> str:
+def vision_llm_describe_prompt(page=None, lang="Chinese") -> str:
     template = PROMPT_JINJA_ENV.from_string(VISION_LLM_DESCRIBE_PROMPT)
 
-    return template.render(page=page)
+    return template.render(page=page, lang=lang)
 
 
-def vision_llm_figure_describe_prompt() -> str:
+def vision_llm_figure_describe_prompt(lang="Chinese") -> str:
     template = PROMPT_JINJA_ENV.from_string(VISION_LLM_FIGURE_DESCRIBE_PROMPT)
-    return template.render()
+    return template.render(lang=lang)
 
 
 def tool_schema(tools_description: list[dict], complete_task=False):

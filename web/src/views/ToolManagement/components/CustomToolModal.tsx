@@ -87,7 +87,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           tool_type: 'custom'
         })
         request.then(() => {
-          message.success(t('tool.addServiceSuccess'));
+          message.success(editVo?.id ? t('common.updateSuccess') : t('common.createSuccess'));
           handleClose();
           refresh()
         })
@@ -101,6 +101,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
       });
   };
   const formatSchema = (value: string) => {
+    if (!value || value.trim() === '') return
     setParseSchemaData({} as ParseSchemaData)
     parseSchema({ schema_content: value })
       .then(res => {

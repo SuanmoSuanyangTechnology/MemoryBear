@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 17:55:15
+ * @Last Modified time: 2026-05-26 10:52:44
  */
 /**
  * RbTable Component
@@ -18,7 +18,7 @@
  * @component
  */
 
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Table } from 'antd';
 import type { TableProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -57,6 +57,8 @@ interface TableComponentProps<T = Record<string, unknown>, Q = Record<string, un
   scrollY?: number | string;
   /** Key name for current page in API params */
   currentPageKey?: string;
+  /** Auto fill parent container height, tbody scrolls when content overflows */
+  fillHeight?: boolean;
 }
 
 /** Ref methods exposed to parent component */
@@ -95,6 +97,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   scrollX,
   scrollY,
   currentPageKey = 'page',
+  fillHeight = false,
   ...props
 }: TableComponentProps<T, Q>, ref: React.Ref<TableRef>) => {
   const { t } = useTranslation();
@@ -105,6 +108,31 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     pagesize: typeof pagination === 'object' ? (pagination.pagesize || 20) : 20,
   });
   const [total, setTotal] = useState(0);
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [computedScrollY, setComputedScrollY] = useState<number | undefined>(undefined)
+  const debounceTimerRef = useRef<number | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // fillHeight 模式：用 ResizeObserver 动态计算 tbody 可用高度
+  const measureHeight = useCallback(() => {
+    if (!fillHeight || !wrapperRef.current) return
+    const wrapper = wrapperRef.current
+    const wrapperHeight = wrapper.clientHeight
+    // 找到 thead 和 pagination 的高度
+    const thead = wrapper.querySelector('.ant-table-thead') as HTMLElement | null
+    const pagination = wrapper.querySelector('.ant-pagination') as HTMLElement | null
+    const theadH = thead?.offsetHeight ?? 0
+    const paginationH = pagination ? (pagination.offsetHeight + 16) : 0 // 16 = margin
+    setComputedScrollY(wrapperHeight - theadH - paginationH - 2)
+  }, [fillHeight])
+
+  useEffect(() => {
+    if (!fillHeight || !wrapperRef.current) return
+    const ro = new ResizeObserver(measureHeight)
+    ro.observe(wrapperRef.current)
+    measureHeight()
+    return () => ro.disconnect()
+  }, [fillHeight, measureHeight])
 
   /** Sync initial data when provided without API */
   useEffect(() => {
@@ -113,14 +141,19 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     }
   }, [initialData, apiUrl])
 
-  /** Initialize table and load data from first page */
+  /** Initialize table and load data from first page with debounce */
   const loadData = () => {
-    if (apiUrl) {
+    if (!apiUrl) return
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    debounceTimerRef.current = setTimeout(() => {
       getList({
         ...currentPagination,
         page: 1
       })
-    }
+    }, 300)
   }
 
   /** Fetch data from API with pagination */
@@ -128,6 +161,14 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     if (!apiUrl) {
       return
     }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     let params = dealSo(apiParams || {})
     if (pagination) {
       setCurrentPagination({
@@ -138,7 +179,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     }
     setLoading(true)
     /** Build query parameters and call API */
-    request.get(apiUrl, params)
+    request.get(apiUrl, params, { signal: abortController.signal })
       .then((res: any) => {
         /** Support two response formats: direct total or total in page object */
         const totalCount = res.page?.total ?? res.total ?? 0;
@@ -147,7 +188,9 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
         setLoading(false)
       })
       .catch(err => {
-        console.log('err', err)
+        if (err.name !== 'AbortError') {
+          console.log('err', err)
+        }
         setLoading(false)
       })
   }
@@ -183,10 +226,14 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   useImperativeHandle(ref, () => ({
     loadData,
     getList,
+    total: total,
   }));
 
   /** Calculate scroll configuration based on props */
   const getScrollConfig = () => {
+    if (fillHeight) {
+      return { x: 'max-content' as const, y: computedScrollY }
+    }
     if (!isScroll && !scrollX && !scrollY) return undefined;
 
     const config: { x?: number | string | true; y?: number | string } = {};
@@ -207,7 +254,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     return Object.keys(config).length > 0 ? config : undefined;
   };
 
-  return (
+  const tableNode = (
     <Table<T>
       {...props}
       rowKey={rowKey}
@@ -220,7 +267,17 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
       scroll={getScrollConfig()}
       tableLayout="auto"
     />
-  );
+  )
+
+  if (fillHeight) {
+    return (
+      <div ref={wrapperRef} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {tableNode}
+      </div>
+    )
+  }
+
+  return tableNode
 }) as <T = Record<string, unknown>, Q = Record<string, unknown>>(props: TableComponentProps<T, Q> & { ref?: React.Ref<TableRef> }) => React.ReactElement;
 
 export default RbTable;

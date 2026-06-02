@@ -24,6 +24,9 @@ class Document(Base):
                                "auto_keywords": 0,
                                "auto_questions": 0,
                                "html4excel": False,
+                               "parent_child_mode": False,
+                               "parent_chunk_token_num": 1024,
+                               "parent_delimiter": "\n",
                                "graphrag": {
                                     "use_graphrag": False,
                                     "scene_name": "",
@@ -48,3 +51,12 @@ class Document(Base):
     status = Column(Integer, default=1, comment="is it validate(0: wasted, 1: validate)")
     created_at = Column(DateTime, default=datetime.datetime.now)
     updated_at = Column(DateTime, default=datetime.datetime.now)
+
+    @property
+    def is_parent_child_mode(self) -> bool:
+        """获取文档是否使用父子分块模式"""
+        # parent_child_mode 显式存在时，以它的值为准
+        if "parent_child_mode" in self.parser_config:
+            return self.parser_config["parent_child_mode"]
+        # 不存在时，fallback 到 parent_chunk_mode 判断
+        return self.parser_config.get("parent_chunk_mode", None) in ["paragraph", "full-doc"]

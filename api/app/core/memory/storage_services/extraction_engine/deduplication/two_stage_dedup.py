@@ -85,7 +85,7 @@ async def dedup_layers_and_merge_and_return(
     try:
         if end_user_id:
             if connector:
-                fused_entity_nodes, fused_statement_entity_edges, fused_entity_entity_edges = await second_layer_dedup_and_merge_with_neo4j(
+                fused_entity_nodes, fused_statement_entity_edges, fused_entity_entity_edges, _ = await second_layer_dedup_and_merge_with_neo4j(
                     connector=connector,
                     end_user_id=end_user_id,
                     entity_nodes=dedup_entity_nodes,

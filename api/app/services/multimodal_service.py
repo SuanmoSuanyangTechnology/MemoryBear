@@ -34,6 +34,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.models import ModelApiKey
 from app.models.file_metadata_model import FileMetadata
+from app.models.models_model import ModelCapability
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
@@ -377,14 +378,14 @@ class MultimodalService:
             if not file.url:
                 file.url = await self.get_file_url(file)
             try:
-                if file.type == FileType.IMAGE and "vision" in self.capability:
+                if file.type == FileType.IMAGE and ModelCapability.VISION in self.capability:
                     is_support, content = await self._process_image(file, strategy)
                     result.append(content)
                 elif file.type == FileType.DOCUMENT:
                     is_support, content = await self._process_document(file, strategy)
                     result.append(content)
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
-                    if document_image_recognition and "vision" in self.capability:
+                    if document_image_recognition and ModelCapability.VISION in self.capability:
                         img_infos = await self.extract_document_images(file)
                         from app.models.workspace_model import Workspace as WorkspaceModel
                         ws = self.db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
@@ -400,7 +401,7 @@ class MultimodalService:
                                 # 在文本内容中追加图片位置标记
                                 if result and result[-1].get("type") in ("text", "document"):
                                     key = "text" if "text" in result[-1] else list(result[-1].keys())[-1]
-                                    result[-1][key] = result[-1].get(key, "") + f"\n[图片 {placeholder}]: {img_url}"
+                                    result[-1][key] = result[-1].get(key, "") + f"\n[图片 {placeholder}]: <img src=\"{img_url}\" data-url=\"{img_url}\">"
                                 # 将图片以视觉格式追加到消息内容中
                                 img_file = FileInput(
                                     type=FileType.IMAGE,

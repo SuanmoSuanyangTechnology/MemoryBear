@@ -1,23 +1,26 @@
 import uuid
 import io
+import json
 from typing import Optional, Annotated
 
 import yaml
-from fastapi import APIRouter, Depends, Path, Form, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User
+from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas import app_schema
+from app.schemas import app_schema, tool_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
 from app.schemas.workflow_schema import WorkflowConfigUpdate, WorkflowImportSave
@@ -25,6 +28,7 @@ from app.services import app_service, workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_service import AppService
 from app.services.app_statistics_service import AppStatisticsService
+from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
@@ -54,6 +58,7 @@ def list_apps(
         visibility: str | None = None,
         status: str | None = None,
         search: str | None = None,
+        tag_search: str | None = None,
         include_shared: bool = True,
         shared_only: bool = False,
         page: int = 1,
@@ -68,6 +73,7 @@ def list_apps(
     - 设置 include_shared=false 可以只查看本工作空间的应用
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
     - search 参数支持：应用名称模糊搜索、API Key 精确搜索
+    - tag_search 参数支持：应用标签模糊搜索
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey
@@ -112,6 +118,7 @@ def list_apps(
         visibility=visibility,
         status=status,
         search=search,
+        tag_search=tag_search,
         include_shared=include_shared,
         shared_only=shared_only,
         page=page,
@@ -312,7 +319,7 @@ def get_opening(
     # 根据应用类型获取 features
     from app.models.app_model import App as AppModel
     app = db.get(AppModel, app_id)
-    if app and app.type == "workflow":
+    if app and app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
         features = cfg.features or {}
     else:
@@ -573,7 +580,6 @@ async def draft_run(
     from app.services.multi_agent_service import MultiAgentService
     from app.models import AgentConfig, ModelConfig, AppRelease
     from sqlalchemy import select
-    from app.core.exceptions import BusinessException
     from app.services.draft_run_service import AgentRunService
 
     service = AppService(db)
@@ -581,8 +587,11 @@ async def draft_run(
 
     # 1. 验证应用
     app = service._get_app_or_404(app_id)
-    if app.type != AppType.AGENT and app.type != AppType.MULTI_AGENT and app.type != AppType.WORKFLOW:
+    if app.type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         raise BusinessException("只有 Agent , Workflow 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+    if app.type != AppType.PURE_WORKFLOW and not payload.message:
+        raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
 
     # 只读操作，允许访问共享应用
     service._validate_app_accessible(app, workspace_id)
@@ -597,14 +606,15 @@ async def draft_run(
         )
         payload.user_id = str(new_end_user.id)
 
-    # 处理会话ID（创建或验证）
-    conversation_id = await draft_service._ensure_conversation(
-        conversation_id=payload.conversation_id,
-        app_id=app_id,
-        workspace_id=workspace_id,
-        user_id=payload.user_id
-    )
-    payload.conversation_id = conversation_id
+    # pure_workflow 不强制会话；其他类型仍沿用会话逻辑。
+    if app.type != AppType.PURE_WORKFLOW or payload.conversation_id:
+        conversation_id = await draft_service._ensure_conversation(
+            conversation_id=payload.conversation_id,
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=payload.user_id
+        )
+        payload.conversation_id = conversation_id
 
     if app.type == AppType.AGENT:
         service._check_agent_config(app_id)
@@ -636,6 +646,7 @@ async def draft_run(
 
         # 流式返回
         if payload.stream:
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
             async def event_generator():
 
                 async for event in draft_service.run_stream(
@@ -648,7 +659,8 @@ async def draft_run(
                         variables=payload.variables,
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id,
-                        files=payload.files  # 传递多模态文件
+                        files=payload.files,  # 传递多模态文件
+                        source=source
                 ):
                     yield event
 
@@ -667,7 +679,7 @@ async def draft_run(
             "开始非流式试运行",
             extra={
                 "app_id": str(app_id),
-                "message_length": len(payload.message),
+                "message_length": len(payload.message or ""),
                 "has_conversation_id": bool(payload.conversation_id),
                 "has_variables": bool(payload.variables),
                 "has_files": bool(payload.files)
@@ -676,6 +688,7 @@ async def draft_run(
 
         from app.services.draft_run_service import AgentRunService
         draft_service = AgentRunService(db)
+        source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
         result = await draft_service.run(
             agent_config=agent_cfg,
             model_config=model_config,
@@ -686,7 +699,8 @@ async def draft_run(
             variables=payload.variables,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            files=payload.files  # 传递多模态文件
+            files=payload.files,  # 传递多模态文件
+            source=source
         )
 
         logger.debug(
@@ -733,7 +747,7 @@ async def draft_run(
                 "开始多智能体流式试运行",
                 extra={
                     "app_id": str(app_id),
-                    "message_length": len(payload.message),
+                    "message_length": len(payload.message or ""),
                     "has_conversation_id": bool(payload.conversation_id)
                 }
             )
@@ -767,7 +781,7 @@ async def draft_run(
             "开始多智能体非流式试运行",
             extra={
                 "app_id": str(app_id),
-                "message_length": len(payload.message),
+                "message_length": len(payload.message or ""),
                 "has_conversation_id": bool(payload.conversation_id)
             }
         )
@@ -787,7 +801,7 @@ async def draft_run(
             data=result,
             msg="多 Agent 任务执行成功"
         )
-    elif app.type == AppType.WORKFLOW:  # 工作流
+    elif app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):  # 工作流 / 对话流
         # 共享应用：从最新发布版本读配置快照，而非草稿
         is_shared = app.workspace_id != workspace_id
         if is_shared:
@@ -805,11 +819,12 @@ async def draft_run(
                 "开始工作流流式试运行",
                 extra={
                     "app_id": str(app_id),
-                    "message_length": len(payload.message),
+                    "message_length": len(payload.message or ""),
                     "has_conversation_id": bool(payload.conversation_id)
                 }
             )
 
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
             async def event_generator():
                 """工作流事件生成器
                 
@@ -824,7 +839,9 @@ async def draft_run(
                         app_id=app_id,
                         payload=payload,
                         config=config,
-                        workspace_id=current_user.current_workspace_id
+                        workspace_id=current_user.current_workspace_id,
+                        source=source,
+                        trigger_payload=payload.trigger_payload
                 ):
                     # 提取事件类型和数据
                     event_type = event.get("event", "message")
@@ -849,12 +866,13 @@ async def draft_run(
             "开始非流式试运行",
             extra={
                 "app_id": str(app_id),
-                "message_length": len(payload.message),
+                "message_length": len(payload.message or ""),
                 "has_conversation_id": bool(payload.conversation_id)
             }
         )
 
-        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id)
+        source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id, source=source, trigger_payload=payload.trigger_payload)
 
         logger.debug(
             "工作流试运行返回结果",
@@ -936,8 +954,6 @@ async def draft_run_compare(
     # 1. 验证应用和权限
     app = service._get_app_or_404(app_id)
     if app.type != "agent":
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
 
@@ -957,8 +973,6 @@ async def draft_run_compare(
     stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
     agent_cfg = db.scalars(stmt).first()
     if not agent_cfg:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
     # 3. 验证所有模型配置
@@ -1005,6 +1019,7 @@ async def draft_run_compare(
 
     # 流式返回
     if payload.stream:
+        source = HitLogSource.CONSOLE
         async def event_generator():
             from app.services.draft_run_service import AgentRunService
             draft_service = AgentRunService(db)
@@ -1022,7 +1037,8 @@ async def draft_run_compare(
                     memory=True,
                     parallel=payload.parallel,
                     timeout=payload.timeout or 60,
-                    files=payload.files
+                    files=payload.files,
+                    source=source
             ):
                 yield event
 
@@ -1039,6 +1055,7 @@ async def draft_run_compare(
     # 非流式返回
     from app.services.draft_run_service import AgentRunService
     draft_service = AgentRunService(db)
+    source = HitLogSource.CONSOLE
     result = await draft_service.run_compare(
         agent_config=agent_cfg,
         models=model_configs,
@@ -1053,7 +1070,8 @@ async def draft_run_compare(
         memory=True,
         parallel=payload.parallel,
         timeout=payload.timeout or 60,
-        files=payload.files
+        files=payload.files,
+        source=source
     )
 
     logger.info(
@@ -1066,6 +1084,65 @@ async def draft_run_compare(
     )
 
     return success(data=app_schema.DraftRunCompareResponse(**result))
+
+
+@router.post("/{app_id}/workflow/nodes/{node_id}/run", summary="单节点试运行")
+@cur_workspace_access_guard()
+async def run_single_workflow_node(
+        app_id: uuid.UUID,
+        node_id: str,
+        payload: app_schema.NodeRunRequest,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    """单独执行工作流中的某个节点
+
+    inputs 支持以下 key 格式:
+    - 节点变量: "node_id.var_name"
+    - 系统变量: "sys.message"、"sys.files"
+    """
+    workspace_id = current_user.current_workspace_id
+    config = workflow_service.get_workflow_config(app_id)
+    if not config:
+        raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
+
+    raw_inputs = payload.inputs or {}
+    input_data = {
+        "message": raw_inputs.pop("sys.message", ""),
+        "files": raw_inputs.pop("sys.files", []),
+        "user_id": raw_inputs.pop("sys.user_id", str(current_user.id)),
+        "trigger_payload": raw_inputs.pop("trigger_payload", None),
+        "inputs": raw_inputs,
+        "conversation_id": "",
+        "conv_messages": [],
+    }
+
+    if payload.stream:
+        async def event_generator():
+            async for event in workflow_service.run_single_node_stream(
+                    app_id=app_id,
+                    node_id=node_id,
+                    config=config,
+                    workspace_id=workspace_id,
+                    input_data=input_data,
+            ):
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+        )
+
+    result = await workflow_service.run_single_node(
+        app_id=app_id,
+        node_id=node_id,
+        config=config,
+        workspace_id=workspace_id,
+        input_data=input_data,
+    )
+    return success(data=result)
 
 
 @router.get("/{app_id}/workflow")
@@ -1084,6 +1161,28 @@ async def get_workflow_config(
     cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
     # 配置总是存在（不存在时返回默认模板）
     return success(data=WorkflowConfigSchema.model_validate(cfg))
+
+
+@router.get("/{app_id}/workflow/executions/{execution_id}")
+@cur_workspace_access_guard()
+async def get_workflow_execution_detail(
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        execution_id: Annotated[str, Path(description="执行 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    """获取工作流执行详情与变量快照。"""
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+
+    execution_detail = workflow_service.get_execution_detail(execution_id)
+    if not execution_detail or execution_detail.get("app_id") != str(app_id):
+        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+
+    return success(data=execution_detail)
 
 
 @router.put("/{app_id}/workflow", summary="更新 Workflow 配置")
@@ -1257,7 +1356,7 @@ async def export_app(
     return StreamingResponse(
         file_stream,
         media_type="application/octet-stream; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={encoded}",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
                  "Content-Length": str(len(yaml_bytes))}
     )
 
@@ -1300,20 +1399,64 @@ async def import_app(
     )
 
 
+@router.post("/{app_id}/publish_tool", summary="发布工作流为工具")
+@cur_workspace_access_guard()
+async def publish_workflow_as_tool(
+        app_id: uuid.UUID,
+        payload: tool_schema.WorkflowToolCreateRequest,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    from app.services.workflow_tool_publish_service import WorkflowToolPublishService
+    from app.services.tool_service import ToolService
+
+    service = WorkflowToolPublishService(db)
+    tool_config = service.publish_workflow_as_tool(
+        workflow_app_id=app_id,
+        tool_name=payload.name,
+        tool_description=payload.description or "",
+        tenant_id=current_user.tenant_id,
+        workspace_id=current_user.current_workspace_id,
+        icon=payload.icon,
+        timeout=payload.timeout,
+        tags=payload.tags,
+        release_id=uuid.UUID(payload.release_id) if payload.release_id else None,
+    )
+
+    detail = ToolService(db).get_tool_detail(str(tool_config.id), current_user.tenant_id)
+    return success(data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config))
+
+
+@router.get("/{app_id}/publish_tool/preview", summary="预览工作流发布为工具的入参和出参")
+@cur_workspace_access_guard()
+async def preview_workflow_tool_publish(
+        app_id: uuid.UUID,
+        release_id: uuid.UUID | None = Query(None, description="指定工作流发布版本ID，不传则使用当前发布版本"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    from app.services.workflow_tool_publish_service import WorkflowToolPublishService
+
+    preview = WorkflowToolPublishService(db).get_publish_preview(
+        workflow_app_id=app_id,
+        workspace_id=current_user.current_workspace_id,
+        release_id=release_id,
+    )
+    return success(data=preview)
+
+
 @router.get("/citations/{document_id}/download", summary="下载引用文档原始文件")
 async def download_citation_file(
         document_id: uuid.UUID = Path(..., description="引用文档ID"),
         db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
     下载引用文档的原始文件。
     仅当应用功能特性 citation.allow_download=true 时，前端才会展示此下载链接。
     路由本身不做权限校验，由业务层通过 allow_download 开关控制入口。
     """
-    import os
     from fastapi import HTTPException, status as http_status
-    from fastapi.responses import FileResponse
-    from app.core.config import settings
     from app.models.document_model import Document
     from app.models.file_model import File as FileModel
 
@@ -1325,19 +1468,15 @@ async def download_citation_file(
     if not file_record:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="原始文件不存在")
 
-    file_path = os.path.join(
-        settings.FILE_PATH,
-        str(file_record.kb_id),
-        str(file_record.parent_id),
-        f"{file_record.id}{file_record.file_ext}"
-    )
-    if not os.path.exists(file_path):
+    try:
+        content = await storage_service.download_file(file_record.file_key)
+    except Exception as e:
+        logger.error(f"Storage download failed: {e}")
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="文件未找到")
 
     encoded_name = quote(doc.file_name)
-    return FileResponse(
-        path=file_path,
-        filename=doc.file_name,
+    return Response(
+        content=content,
         media_type="application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"}
     )

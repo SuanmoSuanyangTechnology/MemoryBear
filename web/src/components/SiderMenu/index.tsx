@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 17:56:09
+ * @Last Modified time: 2026-05-08 16:21:25
  */
 /**
  * SiderMenu Component
@@ -34,6 +34,7 @@ import { useUser } from '@/store/user';
 import styles from './index.module.css';
 import SubscriptionDetailModal, { type SubscriptionDetailModalRef } from './SubscriptionDetailModal';
 import SwitchSpaceModal, { type SwitchSpaceModalRef } from './SwitchSpaceModal';
+import { formatDateTime } from '@/utils/format'
 
 // Import SVG files
 // space
@@ -281,7 +282,7 @@ const Menu: FC<{
   /** Load menus on component mount */
   useEffect(() => {
     loadMenus(source);
-  }, [])
+  }, [loadMenus, source])
 
   /** Handle current path matching and update selected keys */
   useEffect(() => {
@@ -333,20 +334,36 @@ const Menu: FC<{
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   useEffect(() => {
     if (source === 'manage') {
-      getTenantSubscription()
-        .then(res => {
-          setSubscription(res as Subscription)
-        })
+      getSubscription()
     } else {
       setSubscription(null)
     }
   }, [source])
 
+  const getSubscription = () => {
+    return new Promise((resolve, reject) => {
+      getTenantSubscription()
+        .then(res => {
+          setSubscription(res as Subscription)
+          resolve(res)
+        })
+        .catch((error) => {
+          reject(error)
+        })
+    })
+  }
+
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
   }
   const handleViewDetail = () => {
-    subscriptionDetailRef.current?.handleOpen(subscription)
+    getSubscription()
+      .then(res => {
+        subscriptionDetailRef.current?.handleOpen(res as Subscription)
+      })
+      .catch(() => {
+        subscriptionDetailRef.current?.handleOpen(subscription)
+      })
   }
   const handleSwitchSpace = () => {
     switchSpaceModalRef.current?.handleOpen()
@@ -399,7 +416,7 @@ const Menu: FC<{
         className="rb:overflow-y-auto rb:flex-1!"
       />
       {/* Return to space button for superusers */}
-      {user?.is_superuser && source === 'space' &&
+      {source === 'space' &&
         <Flex gap={4} vertical className="rb:my-3! rb:mx-3!">
           <Divider className="rb:mb-2.5! rb:mt-0! rb:border-[#DFE4ED]! rb:mx-2! rb:min-w-[calc(100%-20px)]! rb:w-[calc(100%-20px)]!" />
           <Flex
@@ -412,21 +429,34 @@ const Menu: FC<{
             <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/switch.svg')]"></div>
             {collapsed ? null : t('common.switchSpace')}
           </Flex>
-          <Flex
-            gap={8}
-            align="center"
-            justify="start"
-            onClick={goToSpace}
-            className="rb:p-2.5! rb:text-[13px] rb:hover:bg-[rgba(223,228,237,0.5)] rb:rounded-lg rb:leading-3.5 rb:font-regular rb:text-center rb:cursor-pointer"
-          >
-            <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/return.svg')]"></div>
-            {collapsed ? null : t('common.returnToSpace')}
-          </Flex>
+          {user?.is_superuser &&
+            <Flex
+              gap={8}
+              align="center"
+              justify="start"
+              onClick={goToSpace}
+              className="rb:p-2.5! rb:text-[13px] rb:hover:bg-[rgba(223,228,237,0.5)] rb:rounded-lg rb:leading-3.5 rb:font-regular rb:text-center rb:cursor-pointer"
+            >
+              <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/return.svg')]"></div>
+              {collapsed ? null : t('common.returnToSpace')}
+            </Flex>
+          }
         </Flex>
       }
       {source === 'manage' && subscription && !collapsed &&
         <div className="rb:mb-3 rb:ml-3 rb:mr-3 rb:py-3 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/package_bg.png')] rb:overflow-hidden rb:rounded-xl">
-          <div className="rb:h-4.5 rb:flex-1 rb:truncate rb:px-3 rb:text-[13px] rb:font-medium rb:leading-4.5">{subscription.package_plan?.[getKeyWithLanguage('name')]}</div>
+          <Flex align="center" justify="space-between" className="rb:px-3!">
+            <div className="rb:h-4.5 rb:flex-1 rb:truncate rb:text-[13px] rb:font-medium rb:leading-4.5">
+              {subscription.package_plan?.[getKeyWithLanguage('name')]}
+            </div>
+
+            {subscription.expired_at &&
+              <div className="rb:text-[10px] rb:text-[#5B6167]">
+                {formatDateTime(subscription.expired_at, 'YYYY-MM-DD')}
+                {t('package.expired')}
+              </div>
+            }
+          </Flex>
 
           <div className="rb:grid rb:grid-cols-4 rb:mt-4">
             {['workspace_quota', 'skill_quota', 'app_quota', 'model_quota'].map(key => (
@@ -447,6 +477,7 @@ const Menu: FC<{
 
       <SubscriptionDetailModal
         ref={subscriptionDetailRef}
+        currentPackage={subscription}
       />
       <SwitchSpaceModal
         ref={switchSpaceModalRef}

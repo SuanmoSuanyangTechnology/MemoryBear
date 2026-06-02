@@ -8,6 +8,7 @@
       { "path": "/space", "element": "SpaceManagement" },
       { "path": "/tool", "element": "ToolManagement" },
       { "path": "/pricing", "element": "Package" },
+      { "path": "/upgrade", "element": "Package" },
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
       { "path": "/skills", "element": "Skills" },
@@ -63,6 +64,8 @@
     "element": "NoAuthLayout",
     "children": [
       { "path": "/conversation/:token", "element": "Conversation" },
+      { "path": "/chat-box/:token", "element": "Conversation" },
+      { "path": "/share-chat/:shareUuid", "element": "Conversation" },
       { "path": "/jump", "element": "Jump" }
     ]
   },

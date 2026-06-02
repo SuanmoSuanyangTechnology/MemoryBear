@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 18:29:48
+ * @Last Modified time: 2026-04-21 10:22:41
  */
 /**
  * File Upload Component
@@ -56,7 +56,7 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   /** Custom file removal callback */
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
 
-  featureConfig: FeaturesConfigForm['file_upload'];
+  featureConfig?: FeaturesConfigForm['file_upload'];
   textType?: 'button' | 'text';
   block?: boolean;
 }
@@ -184,7 +184,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       audio: 'audio_max_size_mb',
     }
     const maxSizeKey = categoryMap[mimePrefix] ?? 'document_max_size_mb'
-    const maxSize = (featureConfig[maxSizeKey] as number) ?? fileSize
+    const maxSize = (featureConfig?.[maxSizeKey] as number) ?? fileSize
 
     const fileSizeMB = file.size / 1024 / 1024
     const isLtMaxSize = fileSizeMB < maxSize;

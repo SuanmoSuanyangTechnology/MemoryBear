@@ -2,11 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:57:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:23:44
+ * @Last Modified time: 2026-05-21 14:12:07
  */
 /**
  * Type definitions for Conversation
  */
+import type { ChatItem } from '@/components/Chat/types'
 
 /**
  * Conversation history item
@@ -57,4 +58,18 @@ export interface QueryParams {
 
 export interface UploadFileListModalRef {
   handleOpen: (fileList?: any[]) => void;
+}
+export interface ShareModalRef {
+  handleOpen: () => void;
+}
+
+export interface ReportModalRef {
+  handleOpen: (item: ChatItem) => void
+}
+export interface ReportMessageData {
+  report_type: string;
+  report_reason: string;
+  text_start_offset?: number;
+  text_end_offset?: number;
+  selected_text: string;
 }

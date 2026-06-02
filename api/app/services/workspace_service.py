@@ -20,6 +20,7 @@ from app.models.workspace_model import (
 )
 from app.repositories import workspace_repository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
+from app.services.session_service import SessionService
 from app.schemas.workspace_schema import (
     InviteAcceptRequest,
     InviteValidateResponse,
@@ -58,7 +59,7 @@ def switch_workspace(
         raise BusinessException(f"切换工作空间失败: {str(e)}", BizCode.INTERNAL_ERROR)
 
 
-def delete_workspace_member(
+async def delete_workspace_member(
         db: Session,
         workspace_id: uuid.UUID,
         member_id: uuid.UUID,
@@ -76,10 +77,29 @@ def delete_workspace_member(
                                 BizCode.WORKSPACE_NOT_FOUND)
 
     try:
+        deleted_user = workspace_member.user
         workspace_member.is_active = False
-        workspace_member.user.current_workspace_id = None
+        deleted_user.current_workspace_id = None
+
+        # 若被删除成员不是超级管理员且没有其他可用工作空间，则禁用该用户
+        if not deleted_user.is_superuser:
+            remaining = (
+                db.query(WorkspaceMember)
+                .filter(
+                    WorkspaceMember.user_id == deleted_user.id,
+                    WorkspaceMember.workspace_id != workspace_id,
+                    WorkspaceMember.is_active.is_(True),
+                )
+                .count()
+            )
+            if remaining == 0:
+                deleted_user.is_active = False
+
         db.commit()
         business_logger.info(f"用户 {user.username} 成功删除工作空间 {workspace_id} 的成员 {member_id}")
+
+        # 使被删除成员的所有 token 立即失效
+        await SessionService.invalidate_all_user_tokens(str(workspace_member.user_id))
     except Exception as e:
         db.rollback()
         business_logger.error(f"删除工作空间成员失败 - 工作空间: {workspace_id}, 成员: {member_id}, 错误: {str(e)}")

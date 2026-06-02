@@ -18,7 +18,7 @@ from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
 )
-from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from app.models.app_model import AppType
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
@@ -418,6 +418,9 @@ class MemoryConfigService:
                 pruning_scene=memory_config.pruning_scene or "education",
                 pruning_threshold=float(
                     memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
+                # Pipeline config: Emotion extraction
+                emotion_enabled=bool(
+                    memory_config.emotion_enabled) if memory_config.emotion_enabled is not None else False,
                 # Ontology scene association
                 scene_id=memory_config.scene_id,
                 ontology_class_infos=_load_ontology_class_infos(self.db, memory_config.scene_id),
@@ -573,6 +576,7 @@ class MemoryConfigService:
             statement_extraction=stmt_config,
             deduplication=dedup_config,
             forgetting_engine=forget_config,
+            emotion_enabled=getattr(memory_config, "emotion_enabled", False),
         )
 
     @staticmethod
@@ -851,11 +855,11 @@ class MemoryConfigService:
                 - memory_config_id: 提取的配置ID，如果不存在或为旧格式则返回 None
                 - is_legacy_int: 是否检测到旧格式 int 数据，需要回退到工作空间默认配置
         """
-        if app_type == "agent":
+        if app_type == AppType.AGENT:
             return self._extract_memory_config_id_from_agent(config)
-        elif app_type == "workflow":
+        elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             return self._extract_memory_config_id_from_workflow(config)
-        elif app_type == "multi_agent":
+        elif app_type == AppType.MULTI_AGENT:
             # Multi-agent 暂不支持记忆配置提取
             logger.debug(f"多智能体应用暂不支持记忆配置提取: app_type={app_type}")
             return None, False

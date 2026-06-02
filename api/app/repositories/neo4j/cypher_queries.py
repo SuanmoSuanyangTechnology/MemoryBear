@@ -1,3 +1,4 @@
+from app.core.memory.constants.graph_data_constants import SUPPORTED_NODE_TYPES
 from app.core.memory.enums import Neo4jNodeType
 
 DIALOGUE_NODE_SAVE = """
@@ -8,7 +9,6 @@ DIALOGUE_NODE_SAVE = """
         n.run_id = dialogue.run_id,
         n.ref_id = dialogue.ref_id,
         n.created_at = dialogue.created_at,
-        n.expired_at = dialogue.expired_at,
         n.content = dialogue.content,
         n.dialog_embedding = dialogue.dialog_embedding
     RETURN n.id AS uuid
@@ -32,17 +32,26 @@ SET s += {
     emotion_keywords: statement.emotion_keywords,
     temporal_info: statement.temporal_info,
     created_at: statement.created_at,
-    expired_at: statement.expired_at,
-    valid_at: statement.valid_at,
-    invalid_at: statement.invalid_at,
+    valid_at: coalesce(statement.valid_at, ""),
+    invalid_at: coalesce(statement.invalid_at, ""),
     statement_embedding: statement.statement_embedding,
     relevence_info: statement.relevence_info,
     importance_score: statement.importance_score,
     activation_value: statement.activation_value,
     access_history: statement.access_history,
     last_access_time: statement.last_access_time,
-    access_count: statement.access_count
+    access_count: statement.access_count,
+    dialog_at: statement.dialog_at
 }
+RETURN s.id AS uuid
+"""
+
+STATEMENT_EMOTION_UPDATE = """
+UNWIND $items AS item
+MATCH (s:Statement {id: item.statement_id})
+SET s.emotion_type = item.emotion_type,
+    s.emotion_intensity = item.emotion_intensity,
+    s.emotion_keywords = item.emotion_keywords
 RETURN s.id AS uuid
 """
 
@@ -55,7 +64,6 @@ SET c += {
     end_user_id: chunk.end_user_id,
     run_id: chunk.run_id,
     created_at: chunk.created_at,
-    expired_at: chunk.expired_at,
     dialog_id: chunk.dialog_id,
     content: chunk.content,
     speaker: chunk.speaker,
@@ -78,11 +86,10 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.created_at = CASE
         WHEN entity.created_at IS NOT NULL AND (e.created_at IS NULL OR entity.created_at < e.created_at)
         THEN entity.created_at ELSE e.created_at END,
-    e.expired_at = CASE
-        WHEN entity.expired_at IS NOT NULL AND (e.expired_at IS NULL OR entity.expired_at > e.expired_at)
-        THEN entity.expired_at ELSE e.expired_at END,
     e.entity_idx = CASE WHEN e.entity_idx IS NULL OR e.entity_idx = 0 THEN entity.entity_idx ELSE e.entity_idx END,
     e.entity_type = CASE WHEN entity.entity_type IS NOT NULL AND entity.entity_type <> '' THEN entity.entity_type ELSE e.entity_type END,
+    e.type_id = entity.type_id,
+    e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
     e.description = CASE
         WHEN entity.description IS NOT NULL AND entity.description <> ''
          AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
@@ -94,8 +101,6 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     END,
     e.statement_id = CASE WHEN entity.statement_id IS NOT NULL AND entity.statement_id <> '' THEN entity.statement_id ELSE e.statement_id END,
     e.aliases = CASE
-        // 用户实体的 aliases 由 PgSQL end_user_info 作为唯一权威源，知识抽取完全不写入
-        WHEN entity.name IN ['用户', '我', 'User', 'I'] THEN e.aliases
         WHEN entity.aliases IS NOT NULL AND size(entity.aliases) > 0
         THEN CASE 
             WHEN e.aliases IS NULL THEN entity.aliases 
@@ -129,6 +134,65 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
 RETURN e.id AS uuid
 """
 
+# ── 元数据增量回写：将 LLM 提取的元数据追加到用户实体节点 ──
+ENTITY_METADATA_UPDATE = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.core_facts = CASE
+        WHEN $core_facts IS NOT NULL AND size($core_facts) > 0
+        THEN reduce(acc = coalesce(e.core_facts, []), item IN $core_facts |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.core_facts, []) END,
+    e.traits = CASE
+        WHEN $traits IS NOT NULL AND size($traits) > 0
+        THEN reduce(acc = coalesce(e.traits, []), item IN $traits |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.traits, []) END,
+    e.relations = CASE
+        WHEN $relations IS NOT NULL AND size($relations) > 0
+        THEN reduce(acc = coalesce(e.relations, []), item IN $relations |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.relations, []) END,
+    e.goals = CASE
+        WHEN $goals IS NOT NULL AND size($goals) > 0
+        THEN reduce(acc = coalesce(e.goals, []), item IN $goals |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.goals, []) END,
+    e.interests = CASE
+        WHEN $interests IS NOT NULL AND size($interests) > 0
+        THEN reduce(acc = coalesce(e.interests, []), item IN $interests |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.interests, []) END,
+    e.beliefs_or_stances = CASE
+        WHEN $beliefs_or_stances IS NOT NULL AND size($beliefs_or_stances) > 0
+        THEN reduce(acc = coalesce(e.beliefs_or_stances, []), item IN $beliefs_or_stances |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.beliefs_or_stances, []) END,
+    e.anchors = CASE
+        WHEN $anchors IS NOT NULL AND size($anchors) > 0
+        THEN reduce(acc = coalesce(e.anchors, []), item IN $anchors |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.anchors, []) END,
+    e.events = CASE
+        WHEN $events IS NOT NULL AND size($events) > 0
+        THEN reduce(acc = coalesce(e.events, []), item IN $events |
+            CASE WHEN item IN acc THEN acc ELSE acc + item END)
+        ELSE coalesce(e.events, []) END
+RETURN e.id AS uuid
+"""
+
+# ── 查询用户实体已有的元数据（供增量提取时去重） ──
+ENTITY_METADATA_QUERY = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+RETURN e.core_facts AS core_facts,
+       e.traits AS traits,
+       e.relations AS relations,
+       e.goals AS goals,
+       e.interests AS interests,
+       e.beliefs_or_stances AS beliefs_or_stances,
+       e.anchors AS anchors,
+       e.events AS events
+"""
+
 # Add back ENTITY_RELATIONSHIP_SAVE to be used by graph_saver.save_entities_and_relationships
 ENTITY_RELATIONSHIP_SAVE = """
 UNWIND $relationships AS rel
@@ -138,17 +202,69 @@ MATCH (object:ExtractedEntity {id: rel.target_id, end_user_id: rel.end_user_id})
 // Avoid duplicate edges across runs for the same endpoints
 MERGE (subject)-[r:EXTRACTED_RELATIONSHIP]->(object)
 SET r.predicate = rel.predicate,
+    r.predicate_id = rel.predicate_id,
+    r.predicate_surface = rel.predicate_surface,
+    r.predicate_description = rel.predicate_description,
     r.statement_id = rel.statement_id,
     r.value = rel.value,
     r.statement = rel.statement,
-    r.valid_at = rel.valid_at,
-    r.invalid_at = rel.invalid_at,
+    r.valid_at = coalesce(rel.valid_at, ""),
+    r.invalid_at = coalesce(rel.invalid_at, ""),
     r.created_at = rel.created_at,
-    r.expired_at = rel.expired_at,
     r.run_id = rel.run_id,
     r.end_user_id = rel.end_user_id
 RETURN elementId(r) AS uuid
 """
+
+# 在 Neo4j 5及后续版本中，id() 函数已被标记为弃用，用elementId() 函数替代
+
+# 保存弱关系实体，设置 e.is_weak = true；不维护 e.relations 聚合字段
+WEAK_ENTITY_NODE_SAVE = """
+UNWIND $weak_entities AS entity
+MERGE (e:ExtractedEntity {id: entity.id, run_id: entity.run_id})
+SET e += {
+    name: entity.name,
+    end_user_id: entity.end_user_id,
+    run_id: entity.run_id,
+    description: entity.description,
+    chunk_id: entity.chunk_id,
+    dialog_id: entity.dialog_id
+}
+// Independent weak flag，仅标记弱关系，不再维护 relations 聚合字段
+SET e.is_weak = true
+RETURN e.id AS id
+"""
+
+# 为强关系三元组中的主语和宾语创建/更新实体节点，仅设置 e.is_strong = true，不维护 e.relations 字段
+SAVE_STRONG_TRIPLE_ENTITIES = """
+UNWIND $items AS item
+MERGE (s:ExtractedEntity {id: item.source_id, run_id: item.run_id})
+SET s += {name: item.subject, end_user_id: item.end_user_id, run_id: item.run_id}
+// Independent strong flag
+SET s.is_strong = true
+MERGE (o:ExtractedEntity {id: item.target_id, run_id: item.run_id})
+SET o += {name: item.object, end_user_id: item.end_user_id, run_id: item.run_id}
+// Independent strong flag
+SET o.is_strong = true
+"""
+
+
+DIALOGUE_STATEMENT_EDGE_SAVE = """
+    UNWIND $dialogue_statement_edges AS edge
+    // 支持按 uuid 或 ref_id 连接到 Dialogue，避免因来源 ID 不一致而断链
+    MATCH (dialogue:Dialogue)
+    WHERE dialogue.uuid = edge.source OR dialogue.ref_id = edge.source
+    MATCH (statement:Statement {id: edge.target})
+    // 仅按端点去重，关系属性可更新
+    MERGE (dialogue)-[e:MENTIONS]->(statement)
+    SET e.uuid = edge.id,
+        e.end_user_id = edge.end_user_id,
+        e.created_at = edge.created_at
+    RETURN e.uuid AS uuid
+"""
+
+# 在 Neo4j 5及后续版本中，id() 函数已被标记为弃用，用elementId() 函数替代
+
 
 CHUNK_STATEMENT_EDGE_SAVE = """
     UNWIND $chunk_statement_edges AS edge
@@ -157,8 +273,7 @@ CHUNK_STATEMENT_EDGE_SAVE = """
     MERGE (chunk)-[e:CONTAINS {id: edge.id}]->(statement)
     SET e.end_user_id = edge.end_user_id,
         e.run_id = edge.run_id,
-        e.created_at = edge.created_at,
-        e.expired_at = edge.expired_at
+        e.created_at = edge.created_at
     RETURN e.id AS uuid
 """
 
@@ -173,9 +288,134 @@ MERGE (statement)-[r:REFERENCES_ENTITY]->(entity)
 SET r.end_user_id = rel.end_user_id,
     r.run_id = rel.run_id,
     r.created_at = rel.created_at,
-    r.expired_at = rel.expired_at,
     r.connect_strength = rel.connect_strength
 RETURN elementId(r) AS uuid
+"""
+
+ENTITY_EMBEDDING_SEARCH = """
+CALL db.index.vector.queryNodes('entity_embedding_index', $limit * 100, $embedding)
+YIELD node AS e, score
+WHERE e.name_embedding IS NOT NULL
+  AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+# Embedding-based search: cosine similarity on Statement.statement_embedding
+STATEMENT_EMBEDDING_SEARCH = """
+CALL db.index.vector.queryNodes('statement_embedding_index', $limit * 100, $embedding)
+YIELD node AS s, score
+WHERE s.statement_embedding IS NOT NULL
+  AND ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+RETURN s.id AS id,
+       s.statement AS statement,
+       s.end_user_id AS end_user_id,
+       s.chunk_id AS chunk_id,
+       s.created_at AS created_at,
+       s.valid_at AS valid_at,
+       s.invalid_at AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# Embedding-based search: cosine similarity on Chunk.chunk_embedding
+CHUNK_EMBEDDING_SEARCH = """
+CALL db.index.vector.queryNodes('chunk_embedding_index', $limit * 100, $embedding)
+YIELD node AS c, score
+WHERE c.chunk_embedding IS NOT NULL
+  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+RETURN c.id AS chunk_id,
+       c.end_user_id AS end_user_id,
+       c.content AS content,
+       c.dialog_id AS dialog_id,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+SEARCH_STATEMENTS_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
+WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+RETURN s.id AS id,
+       s.statement AS statement,
+       s.end_user_id AS end_user_id,
+       s.chunk_id AS chunk_id,
+       s.created_at AS created_at,
+       s.valid_at AS valid_at,
+       s.invalid_at AS invalid_at,
+       c.id AS chunk_id_from_rel,
+       collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+# 第二层去重：批量精确匹配（按 name 或 alias，不依赖全文索引，立即一致）
+# 输入 $rows: [{incoming_id, name}]，返回与 SEARCH_ENTITIES_BY_NAME 字段对齐
+BATCH_EXACT_MATCH_ENTITIES_BY_NAME = """
+UNWIND $rows AS r
+WITH r, toLower(r.name) AS lname
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND (toLower(e.name) = lname
+       OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = lname))
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN r.incoming_id AS incoming_id,
+       e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       1.0 AS score
+"""
+
+# 第二层去重：用 APOC 批量合并被淘汰节点到规范节点（重定向边 + 删除冗余节点）
+# 输入 $redirects: [{old_id, new_id}]，返回被删除的节点数
+MERGE_DEDUPED_ENTITIES = """
+UNWIND $redirects AS r
+MATCH (canonical:ExtractedEntity {id: r.new_id})
+MATCH (old:ExtractedEntity {id: r.old_id})
+WHERE canonical <> old
+CALL apoc.refactor.mergeNodes([canonical, old], {
+    properties: 'discard',
+    mergeRels: true,
+    produceSelfRel: false
+}) YIELD node
+RETURN count(node) AS deleted_count
 """
 
 # 查询实体名称包含指定字符串的实体
@@ -189,7 +429,6 @@ RETURN e.id AS id,
        e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
        e.created_at AS created_at,
-       e.expired_at AS expired_at,
        e.entity_idx AS entity_idx,
        e.statement_id AS statement_id,
        e.description AS description,
@@ -204,6 +443,72 @@ RETURN e.id AS id,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
        COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
+CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
+WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+WITH e, score
+With collect({entity: e, score: score}) AS fulltextResults
+
+OPTIONAL MATCH (ae:ExtractedEntity)
+WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
+  AND ae.aliases IS NOT NULL
+  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($query))
+WITH fulltextResults, collect(ae) AS aliasEntities
+
+UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
+     CASE 
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($query)) THEN 1.0
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($query)) THEN 0.9
+       ELSE 0.8
+     END
+}]) AS row
+WITH row.entity AS e, row.score AS score
+WITH DISTINCT e, MAX(score) AS score
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+
+SEARCH_CHUNKS_BY_CONTENT = """
+CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+RETURN c.id AS chunk_id,
+       c.end_user_id AS end_user_id,
+       c.content AS content,
+       c.dialog_id AS dialog_id,
+       c.sequence_number AS sequence_number,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -262,8 +567,7 @@ WHERE ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
 RETURN d.id AS dialog_id,
        d.end_user_id AS end_user_id,
        d.content AS content,
-       d.created_at AS created_at,
-       d.expired_at AS expired_at
+       d.created_at AS created_at
 ORDER BY d.created_at DESC
 LIMIT $limit
 """
@@ -277,7 +581,6 @@ RETURN c.id AS chunk_id,
        c.content AS content,
        c.dialog_id AS dialog_id,
        c.created_at AS created_at,
-       c.expired_at AS expired_at,
        c.sequence_number AS sequence_number
 ORDER BY c.created_at DESC
 LIMIT $limit
@@ -490,7 +793,6 @@ SET m += {
     end_user_id: summary.end_user_id,
     run_id: summary.run_id,
     created_at: summary.created_at,
-    expired_at: summary.expired_at,
     dialog_id: summary.dialog_id,
     chunk_ids: summary.chunk_ids,
     content: summary.content,
@@ -514,8 +816,7 @@ MATCH (c)-[:CONTAINS]->(s:Statement {run_id: e.run_id})
 MERGE (ms)-[r:DERIVED_FROM_STATEMENT]->(s)
 SET r.end_user_id = e.end_user_id,
     r.run_id = e.run_id,
-    r.created_at = e.created_at,
-    r.expired_at = e.expired_at
+    r.created_at = e.created_at
 RETURN elementId(r) AS uuid
 """
 
@@ -544,8 +845,7 @@ FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
         user_id: rel.user_id,
         apply_id: rel.apply_id,
         run_id: rel.run_id,
-        created_at: rel.created_at,
-        expired_at: rel.expired_at
+        created_at: rel.created_at
     }]->(target)
 )
 
@@ -566,8 +866,7 @@ FOREACH (rel IN CASE WHEN r IS NOT NULL THEN [r] ELSE [] END |
         user_id: rel.user_id,
         apply_id: rel.apply_id,
         run_id: rel.run_id,
-        created_at: rel.created_at,
-        expired_at: rel.expired_at
+        created_at: rel.created_at
     }]->(canonical)
 )
 
@@ -608,7 +907,6 @@ neo4j_query_part = """
             m.description as description,
             m.statement_id as statement_id,
             m.created_at as created_at,
-            m.expired_at as expired_at,
             CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
               elementId(rel) as rel_id,
             rel.predicate as predicate,
@@ -628,7 +926,6 @@ neo4j_query_all = """
                 m.description as description,
                 m.statement_id as statement_id,
                 m.created_at as created_at,
-                m.expired_at as expired_at,
                 CASE WHEN rel IS NULL THEN "NO_RELATIONSHIP" ELSE type(rel) END as relationship_type,
                   elementId(rel) as rel_id,
                 rel.predicate as predicate,
@@ -810,6 +1107,104 @@ RETURN DISTINCT
  x.statement as statement,x.created_at as created_at
 """
 
+# ============================================================
+# graph_data 接口的参数化 Cypher 查询（spec: graph-data-per-type-limit）
+# ============================================================
+# 以下查询用于支撑 GET /api/memory-storage/analytics/graph_data 的
+# 「按类型独立 LIMIT + 批量关联计数 + 全量计数」流水线（参见
+# .kiro/specs/graph-data-per-type-limit/design.md）。
+#
+# 索引命中的关键约束（Neo4j 5.x）：
+#   `end_user_id` 范围索引是 label-property 索引（``FOR (n:Label) ON (n.end_user_id)``），
+#   规划器只有在 **label 出现在 MATCH 模式里**（``MATCH (n:Label)``）时才会用
+#   NodeIndexSeek。若把 label 放进 WHERE 用 ``labels(n)[0] = $node_type``，
+#   规划器无法绑定具体 label 索引，只能 AllNodesScan 全表扫描。动态 label
+#   (``MATCH (n:$($node_type))``, Neo4j 5.26+) 同样无法稳定命中索引。
+#   因此 Q1/Q4 改为「把白名单内的 label 字面量内联进 MATCH 模式」的 builder 形式。
+#   label 取自 :data:`SUPPORTED_NODE_TYPES`（已 ``isidentifier`` 校验 + 白名单过滤），
+#   字面量内联不存在注入风险。
+
+
+def build_graph_nodes_by_type_query(node_type: str) -> str:
+    """构建「按单个 Node_Type 检索节点」的 Cypher（Q1），label 字面量内联以命中索引。
+
+    Neo4j 不允许 ``LIMIT`` 引用运行期变量，故 ``$limit`` 仍以静态参数下发；
+    service 层 helper 对每个非零 ``Per_Type_Limit`` 类型循环调用一次本 builder，
+    整体调用次数与节点总数 N 无关（最多 = 类型数，常数级），符合 Requirement 6.4。
+
+    Args:
+        node_type: 节点 label，必须属于 :data:`SUPPORTED_NODE_TYPES`。
+
+    Returns:
+        把 ``node_type`` 内联进 ``MATCH (n:<label>)`` 后的 Cypher 字符串；
+        运行期参数为 ``$end_user_id`` (STRING) 与 ``$limit`` (INTEGER)。
+
+    Raises:
+        ValueError: 当 ``node_type`` 不在 :data:`SUPPORTED_NODE_TYPES` 中时
+            （防止任何未经白名单校验的字符串被内联进 Cypher）。
+    """
+    if node_type not in SUPPORTED_NODE_TYPES:
+        raise ValueError(f"不支持的 Node_Type，拒绝内联进 Cypher: {node_type!r}")
+    return f"""
+// GRAPH_NODES_BY_TYPE_LIMITS({node_type})
+MATCH (n:{node_type})
+WHERE n.end_user_id = $end_user_id
+RETURN
+    elementId(n)        AS id,
+    labels(n)           AS labels,
+    properties(n)       AS properties
+LIMIT $limit
+"""
+
+
+def build_graph_total_count_by_type_query(node_type: str) -> str:
+    """构建「单个 Node_Type 全量计数」的 Cypher（Q4），label 字面量内联以命中索引。
+
+    取代旧版「``MATCH (n) WHERE labels(n)[0] IN $supported_types``」单查询——
+    后者无 label 在模式里，会对全库做 AllNodesScan。改为按类型 NodeIndexSeek，
+    service 层循环调用并合并为 ``{label: total}``（调用次数 = 类型数，常数级）。
+
+    Args:
+        node_type: 节点 label，必须属于 :data:`SUPPORTED_NODE_TYPES`。
+
+    Returns:
+        把 ``node_type`` 内联进 ``MATCH (n:<label>)`` 后的计数 Cypher；
+        运行期参数为 ``$end_user_id`` (STRING)。
+
+    Raises:
+        ValueError: 当 ``node_type`` 不在 :data:`SUPPORTED_NODE_TYPES` 中时。
+    """
+    if node_type not in SUPPORTED_NODE_TYPES:
+        raise ValueError(f"不支持的 Node_Type，拒绝内联进 Cypher: {node_type!r}")
+    return f"""
+// GRAPH_NODES_TOTAL_COUNT_BY_TYPE({node_type})
+MATCH (n:{node_type})
+WHERE n.end_user_id = $end_user_id
+RETURN count(n) AS total
+"""
+
+
+# Q2：批量查询若干节点的关联边总数，取代旧实现里每节点一次的 N+1 子查询。
+# Q2 按 ``elementId(n)`` 直接定位节点，无需 label，不涉及上面的索引命中问题。
+#
+# 注意：Neo4j 5 已移除 ``size((n)--())`` 这种「pattern expression in size()」用法，
+# 必须改用 ``COUNT { (n)--() }`` 子查询表达式（见
+# ``Neo.ClientError.Statement.SyntaxError 50N42 — A pattern expression should
+# only be used in order to test the existence of a pattern. It can no longer be
+# used inside the function size(), an alternative is to replace size() with
+# COUNT {}.``）。
+#
+# 参数：$node_ids (LIST<STRING>)
+GRAPH_NODES_REL_COUNT_BATCH = """
+// GRAPH_NODES_REL_COUNT_BATCH
+UNWIND $node_ids AS nid
+MATCH (n) WHERE elementId(n) = nid
+RETURN nid AS id, COUNT { (n)--() } AS rel_count
+"""
+
+# DEPRECATED: Graph_Node_query 已被 build_graph_nodes_by_type_query() 取代，
+# 后者按 SUPPORTED_NODE_TYPES 内联 label 字面量，可命中 end_user_id 索引并支持
+# 独立 Per_Type_Limit。此常量仅保留以避免破坏式改动；新代码不应再使用。
 Graph_Node_query = """
 MATCH (n:MemorySummary)
 WHERE n.end_user_id = $end_user_id
@@ -1096,6 +1491,101 @@ RETURN (
 ) AS is_complete
 """
 
+# 别名归并：将 predicate="别名属于" 的 EXTRACTED_RELATIONSHIP 边的 source.name
+# 合并进 target.aliases（去重），并将 source.description 追加到 target.description（分号分隔）
+MERGE_ALIAS_BELONGS_TO = """
+// 先按 target 分组，将所有 source.name 和 source.description 聚合，
+// 再一次性 SET，避免多条 别名属于 边对同一 target 反复覆盖。
+MATCH (source:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(target:ExtractedEntity {end_user_id: $end_user_id})
+WHERE r.predicate = '别名属于'
+WITH target,
+     coalesce(target.aliases, []) AS existing_aliases,
+     coalesce(target.description, '') AS tgt_desc,
+     collect(DISTINCT source.name) AS source_names,
+     collect(DISTINCT coalesce(source.description, '')) AS source_descs
+
+// 1. 合并 aliases：将所有 source.name 追加到 target.aliases（去重，忽略空值）
+WITH target, tgt_desc, source_names, source_descs, existing_aliases,
+     existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT n IN existing_aliases] AS new_aliases
+
+// 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
+WITH target, new_aliases, existing_aliases, source_descs,
+     reduce(desc = tgt_desc, src IN source_descs |
+         CASE
+             WHEN src <> '' AND NOT desc CONTAINS src
+             THEN CASE WHEN desc = '' THEN src ELSE desc + '；' + src END
+             ELSE desc
+         END
+     ) AS new_description
+
+SET target.aliases = new_aliases,
+    target.description = new_description
+
+RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_aliases) - size(existing_aliases) AS added_count
+"""
+
+# 边重定向：将指向别名节点（"别名属于"关系的 source）的所有其他边，重定向到用户节点（target）。
+# 处理两类边：
+#   1. EXTRACTED_RELATIONSHIP：其他实体 → 别名节点 或 别名节点 → 其他实体
+#   2. STATEMENT_ENTITY：陈述句 → 别名节点
+# 对于每条需要重定向的边，创建一条指向用户节点的新边（复制所有属性），然后删除旧边。
+REDIRECT_ALIAS_EDGES = """
+// 找到所有 别名→用户 的映射
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
+WHERE ar.predicate = '别名属于'
+WITH collect({alias_id: elementId(alias), user_id: elementId(user), alias_eid: alias.id, user_eid: user.id}) AS mappings
+
+// 1. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 target 的情况
+UNWIND mappings AS m
+MATCH (other)-[r:EXTRACTED_RELATIONSHIP]->(alias:ExtractedEntity {end_user_id: $end_user_id})
+WHERE alias.id = m.alias_eid
+  AND r.predicate <> '别名属于'
+  AND other.id <> m.user_eid
+WITH m, other, r, alias
+MATCH (user:ExtractedEntity {id: m.user_eid, end_user_id: $end_user_id})
+CREATE (other)-[nr:EXTRACTED_RELATIONSHIP]->(user)
+SET nr = properties(r)
+DELETE r
+WITH count(*) AS redirected_incoming
+
+// 2. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 source 的情况
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar2:EXTRACTED_RELATIONSHIP]->(user2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE ar2.predicate = '别名属于'
+WITH alias, user2, redirected_incoming
+MATCH (alias)-[r:EXTRACTED_RELATIONSHIP]->(other)
+WHERE r.predicate <> '别名属于'
+  AND other.id <> user2.id
+WITH user2, other, r, redirected_incoming
+CREATE (user2)-[nr:EXTRACTED_RELATIONSHIP]->(other)
+SET nr = properties(r)
+DELETE r
+WITH redirected_incoming, count(*) AS redirected_outgoing
+
+// 3. 重定向 STATEMENT_ENTITY 边：陈述句 → 别名节点
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar3:EXTRACTED_RELATIONSHIP]->(user3:ExtractedEntity {end_user_id: $end_user_id})
+WHERE ar3.predicate = '别名属于'
+WITH alias, user3, redirected_incoming, redirected_outgoing
+MATCH (stmt)-[r:STATEMENT_ENTITY]->(alias)
+WITH user3, stmt, r, redirected_incoming, redirected_outgoing
+CREATE (stmt)-[nr:STATEMENT_ENTITY]->(user3)
+SET nr = properties(r)
+DELETE r
+
+RETURN redirected_incoming, redirected_outgoing, count(*) AS redirected_stmt
+"""
+
+# 删除别名节点：在别名归并和边重定向完成后，删除所有 predicate="别名属于" 关系的 source 节点。
+# 此时这些节点的其他边已被 REDIRECT_ALIAS_EDGES 重定向完毕，
+# 唯一剩余的边就是 (alias)-[:EXTRACTED_RELATIONSHIP {predicate:'别名属于'}]->(user)，
+# 使用 DETACH DELETE 一并删除节点和该关系。
+DELETE_ALIAS_NODES = """
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
+WHERE r.predicate = '别名属于'
+WITH alias, count(r) AS rel_count
+DETACH DELETE alias
+RETURN count(alias) AS deleted_count
+"""
+
 CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING = """
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
 RETURN (
@@ -1296,6 +1786,7 @@ RETURN e.id AS id,
        e.name AS name,
        e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
+       e.description AS description,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
@@ -1479,6 +1970,175 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
+SEARCH_ENITITES_BY_RELATIONSHIP = """
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE (n.end_user_id = $end_user_id AND n.id = $source_id AND r.predicate_id IN $predicates)
+RETURN m.id AS id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.name AS target_name
+"""
+
+SEARCH_RELATION_BETWEEN_ENTITIES = """
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id AND n.id = $source_id AND m.id = $target_id
+RETURN n.id AS source_id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.id AS target_id,
+       m.name AS target_name
+"""
+
+SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS = """
+UNWIND $pairs AS pair
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id AND n.id = pair.source_id AND m.id = pair.target_id
+RETURN n.id AS source_id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.id AS target_id,
+       m.name AS target_name
+"""
+
+SEARCH_USER_METADATA = """
+MATCH (n:ExtractedEntity)
+WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
+RETURN n.description AS description,
+       n.aliases AS aliases,
+       n.anchors AS anchors,
+       n.beliefs_or_stances AS beliefs_or_stances,
+       n.core_facts AS core_facts,
+       n.events AS events,
+       n.goals AS goals,
+       n.interests AS interests,
+       n.relations AS relations,
+       n.traits AS traits,
+       n.id AS id
+"""
+
+# -------------------
+# cosine similarity search (vector.similarity.cosine in Cypher)
+# -------------------
+COSINE_STATEMENT_SEARCH = """
+MATCH (s:Statement)
+WHERE s.end_user_id = $end_user_id AND s.statement_embedding IS NOT NULL
+WITH s, vector.similarity.cosine(s.statement_embedding, $embedding) AS score
+WHERE score > 0
+RETURN s.id AS id,
+       s.statement AS statement,
+       s.end_user_id AS end_user_id,
+       s.chunk_id AS chunk_id,
+       s.created_at AS created_at,
+       s.valid_at AS valid_at,
+       properties(s)['invalid_at'] AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_ENTITY_SEARCH = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id AND e.name_embedding IS NOT NULL
+WITH e, vector.similarity.cosine(e.name_embedding, $embedding) AS score
+WHERE score > 0
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.description AS description,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_CHUNK_SEARCH = """
+MATCH (c:Chunk)
+WHERE c.end_user_id = $end_user_id AND c.chunk_embedding IS NOT NULL
+WITH c, vector.similarity.cosine(c.chunk_embedding, $embedding) AS score
+WHERE score > 0
+RETURN c.id AS id,
+       c.end_user_id AS end_user_id,
+       c.content AS content,
+       c.dialog_id AS dialog_id,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_MEMORY_SUMMARY_SEARCH = """
+MATCH (m:MemorySummary)
+WHERE m.end_user_id = $end_user_id AND m.summary_embedding IS NOT NULL
+WITH m, vector.similarity.cosine(m.summary_embedding, $embedding) AS score
+WHERE score > 0
+RETURN m.id AS id,
+       m.name AS name,
+       m.end_user_id AS end_user_id,
+       m.dialog_id AS dialog_id,
+       m.chunk_ids AS chunk_ids,
+       m.content AS content,
+       m.created_at AS created_at,
+       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
+       COALESCE(m.importance_score, 0.5) AS importance_score,
+       m.last_access_time AS last_access_time,
+       COALESCE(m.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_COMMUNITY_SEARCH = """
+MATCH (c:Community)
+WHERE c.end_user_id = $end_user_id AND c.summary_embedding IS NOT NULL
+WITH c, vector.similarity.cosine(c.summary_embedding, $embedding) AS score
+WHERE score > 0
+RETURN c.community_id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_PERCEPTUAL_SEARCH = """
+MATCH (p:Perceptual)
+WHERE p.end_user_id = $end_user_id AND p.summary_embedding IS NOT NULL
+WITH p, vector.similarity.cosine(p.summary_embedding, $embedding) AS score
+WHERE score > 0
+RETURN p.id AS id,
+       p.end_user_id AS end_user_id,
+       p.perceptual_type AS perceptual_type,
+       p.file_path AS file_path,
+       p.file_name AS file_name,
+       p.file_ext AS file_ext,
+       p.summary AS summary,
+       p.keywords AS keywords,
+       p.topic AS topic,
+       p.domain AS domain,
+       p.created_at AS created_at,
+       p.file_type AS file_type,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_SEARCH_CYPHER_MAPPING = {
+    Neo4jNodeType.STATEMENT: COSINE_STATEMENT_SEARCH,
+    Neo4jNodeType.EXTRACTEDENTITY: COSINE_ENTITY_SEARCH,
+    Neo4jNodeType.CHUNK: COSINE_CHUNK_SEARCH,
+    Neo4jNodeType.MEMORYSUMMARY: COSINE_MEMORY_SUMMARY_SEARCH,
+    Neo4jNodeType.COMMUNITY: COSINE_COMMUNITY_SEARCH,
+    Neo4jNodeType.PERCEPTUAL: COSINE_PERCEPTUAL_SEARCH,
+}
+
 FULLTEXT_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_KEYWORD,
     Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
@@ -1503,3 +2163,342 @@ NODE_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_IDS,
     Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_IDS
 }
+
+# -------------------
+# Assistant Original / Pruned nodes and edges
+# -------------------
+
+ASSISTANT_ORIGINAL_NODE_SAVE = """
+UNWIND $originals AS o
+MERGE (n:AssistantOriginal {id: o.id})
+SET n += {
+    id: o.id,
+    name: o.name,
+    end_user_id: o.end_user_id,
+    run_id: o.run_id,
+    created_at: o.created_at,
+    pair_id: o.pair_id,
+    dialog_id: o.dialog_id,
+    text: o.text
+}
+RETURN n.id AS uuid
+"""
+
+ASSISTANT_PRUNED_NODE_SAVE = """
+UNWIND $pruneds AS p
+MERGE (n:AssistantPruned {id: p.id})
+SET n += {
+    id: p.id,
+    name: p.name,
+    end_user_id: p.end_user_id,
+    run_id: p.run_id,
+    created_at: p.created_at,
+    pair_id: p.pair_id,
+    dialog_id: p.dialog_id,
+    text: p.text,
+    memory_type: p.memory_type,
+    text_embedding: p.text_embedding
+}
+RETURN n.id AS uuid
+"""
+
+ASSISTANT_PRUNED_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (orig:AssistantOriginal {id: edge.source, end_user_id: edge.end_user_id})
+MATCH (pruned:AssistantPruned {id: edge.target, end_user_id: edge.end_user_id})
+MERGE (orig)-[r:PRUNED_TO {pair_id: edge.pair_id}]->(pruned)
+ON CREATE SET r.id = edge.id,
+    r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
+"""
+
+ASSISTANT_DIALOG_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (orig:AssistantOriginal {id: edge.source, end_user_id: edge.end_user_id})
+MATCH (dialog:Dialogue {id: edge.target, end_user_id: edge.end_user_id})
+MERGE (orig)-[r:BELONGS_TO_DIALOG]->(dialog)
+ON CREATE SET r.id = edge.id,
+    r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
+"""
+# --- Reflection Engine Layer 2: Description Merge ---
+
+# Find entities whose description has accumulated >= min_fragments
+REFLECTION_DESC_MERGE_CANDIDATES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.description IS NOT NULL
+  AND e.description <> ""
+  AND size(split(e.description, '；')) >= $min_fragments
+RETURN e.id AS entity_id,
+       e.name AS name,
+       e.entity_type AS entity_type,
+       e.description AS description,
+       e.description_summary AS description_summary,
+       e.description_timeline AS description_timeline,
+       e.event_timeline AS event_timeline,
+       e.aliases AS aliases
+ORDER BY size(split(e.description, '；')) DESC
+LIMIT $batch_size
+"""
+
+# Clear description, write summary, timeline and event_timeline
+REFLECTION_DESC_UPDATE = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.description = "",
+    e.description_summary = $summary,
+    e.description_timeline = $timeline,
+    e.event_timeline = $event_timeline
+RETURN e.id
+"""
+
+# --- Reflection Engine Layer 2: Entity Rename ---
+REFLECTION_RENAME_CHECK_CONFLICT = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $suggested_name})
+WHERE e.id <> $current_entity_id
+RETURN count(e) AS conflict_count
+"""
+
+REFLECTION_RENAME_ENTITY = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.name = $new_name
+RETURN e.id
+"""
+
+REFLECTION_UPDATE_NAME_EMBEDDING = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.name_embedding = $name_embedding
+RETURN e.id
+"""
+# --- Reflection Engine Layer 2: Entity Dedup ---
+#来源一：名称相似度
+DEDUP_CANDIDATES_BY_NAME = """
+MATCH (e1:ExtractedEntity)
+WHERE e1.end_user_id = $end_user_id
+  AND NOT toLower(e1.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+WITH e1
+MATCH (e2:ExtractedEntity)
+WHERE e2.end_user_id = $end_user_id
+  AND e2.entity_type = e1.entity_type
+  AND elementId(e1) < elementId(e2)
+  AND NOT toLower(e2.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+  AND (
+    toLower(e1.name) CONTAINS toLower(e2.name)
+    OR toLower(e2.name) CONTAINS toLower(e1.name)
+    OR any(a IN coalesce(e1.aliases, []) WHERE a IN coalesce(e2.aliases, []))
+    OR e1.name IN coalesce(e2.aliases, [])
+    OR e2.name IN coalesce(e1.aliases, [])
+  )
+RETURN e1.id AS a_id, e2.id AS b_id,
+       e1.name AS a_name, e2.name AS b_name,
+       e1.entity_type AS entity_type,
+       e1.description AS a_desc, e2.description AS b_desc,
+       e1.aliases AS a_aliases, e2.aliases AS b_aliases,
+       e1.name_embedding AS a_embed, e2.name_embedding AS b_embed
+LIMIT $candidate_cap
+"""
+
+#路径B 通过name_embedding 相似度检索
+DEDUP_CANDIDATES_BY_EMBED = """
+MATCH (e1:ExtractedEntity)
+WHERE e1.end_user_id = $end_user_id
+  AND e1.name_embedding IS NOT NULL
+  AND NOT toLower(e1.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+CALL db.index.vector.queryNodes('entity_embedding_index', $top_k, e1.name_embedding)
+YIELD node AS e2, score
+WHERE e2.end_user_id = $end_user_id
+  AND e2.entity_type = e1.entity_type
+  AND elementId(e1) < elementId(e2)
+  AND score >= $theta_embed_floor
+  AND NOT toLower(e2.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN e1.id AS a_id, e2.id AS b_id,
+       e1.name AS a_name, e2.name AS b_name,
+       e1.entity_type AS entity_type,
+       e1.description AS a_desc, e2.description AS b_desc,
+       e1.aliases AS a_aliases, e2.aliases AS b_aliases,
+       score AS sim_embed
+LIMIT $candidate_cap
+"""
+
+
+#去重两个实体合并
+DEDUP_MERGE_ENTITIES = """
+MATCH (keeper:ExtractedEntity {id: $keeper_id, end_user_id: $end_user_id})
+MATCH (loser:ExtractedEntity {id: $loser_id, end_user_id: $end_user_id})
+SET keeper.name = $merged_name,
+    keeper.aliases = $merged_aliases,
+    keeper.description = CASE
+      WHEN coalesce(keeper.description, '') = '' THEN coalesce(loser.description, '')
+      WHEN coalesce(loser.description, '') = '' THEN coalesce(keeper.description, '')
+      ELSE keeper.description + '；' + loser.description
+    END,
+    keeper.connect_strength = CASE
+      WHEN keeper.connect_strength = 'both' OR loser.connect_strength = 'both' THEN 'both'
+      WHEN keeper.connect_strength <> loser.connect_strength THEN 'both'
+      ELSE coalesce(keeper.connect_strength, loser.connect_strength, 'weak')
+    END,
+    keeper.importance_score = CASE
+      WHEN coalesce(loser.importance_score, 0) > coalesce(keeper.importance_score, 0)
+      THEN loser.importance_score ELSE keeper.importance_score END,
+    keeper.access_count = coalesce(keeper.access_count, 0) + coalesce(loser.access_count, 0),
+    keeper.created_at = CASE
+      WHEN keeper.created_at IS NULL THEN loser.created_at
+      WHEN loser.created_at IS NULL THEN keeper.created_at
+      WHEN loser.created_at < keeper.created_at THEN loser.created_at
+      ELSE keeper.created_at END,
+    keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
+    keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
+    keeper.relations = apoc.coll.toSet(coalesce(keeper.relations,[]) + coalesce(loser.relations,[])),
+    keeper.goals = apoc.coll.toSet(coalesce(keeper.goals,[]) + coalesce(loser.goals,[])),
+    keeper.interests = apoc.coll.toSet(coalesce(keeper.interests,[]) + coalesce(loser.interests,[])),
+    keeper.beliefs_or_stances = apoc.coll.toSet(coalesce(keeper.beliefs_or_stances,[]) + coalesce(loser.beliefs_or_stances,[])),
+    keeper.anchors = apoc.coll.toSet(coalesce(keeper.anchors,[]) + coalesce(loser.anchors,[])),
+    keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
+WITH keeper, loser
+OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
+WHERE NOT (s)-[:REFERENCES_ENTITY]->(keeper)
+FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
+  CREATE (s)-[:REFERENCES_ENTITY]->(keeper)
+)
+WITH keeper, loser
+OPTIONAL MATCH (loser)-[r:EXTRACTED_RELATIONSHIP]->(target)
+WHERE target <> keeper AND NOT (keeper)-[:EXTRACTED_RELATIONSHIP]->(target)
+FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
+  CREATE (keeper)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(target)
+)
+WITH keeper, loser
+OPTIONAL MATCH (source)-[r:EXTRACTED_RELATIONSHIP]->(loser)
+WHERE source <> keeper AND NOT (source)-[:EXTRACTED_RELATIONSHIP]->(keeper)
+FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
+  CREATE (source)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(keeper)
+)
+WITH keeper, loser
+DETACH DELETE loser
+RETURN keeper.id AS merged_id
+"""
+
+# 方案B：查出指定类型下所有实体（全量送 LLM 分组判定）
+DEDUP_FULL_SCAN_ENTITIES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.entity_type = $entity_type
+  AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN e.id AS entity_id, e.name AS name, e.entity_type AS entity_type,
+       e.description AS description, e.aliases AS aliases, e.created_at AS created_at
+ORDER BY e.created_at
+"""
+
+# 方案B：查上次扫描后新增的实体数（增量判断，new_count=0 则跳过该类型）
+DEDUP_FULL_SCAN_NEW_COUNT = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.entity_type = $entity_type
+  AND e.created_at > $last_scan_time
+  AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN count(e) AS new_count
+"""
+
+# 方案B：查该用户所有 entity_type 及数量（决定遍历哪些类型）
+DEDUP_FULL_SCAN_ENTITY_TYPES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN DISTINCT e.entity_type AS entity_type, count(e) AS count
+"""
+
+
+# --- Reflection Engine Layer 2: Unresolved Entity (子问题5) ---
+
+UNRESOLVED_STATEMENT_CANDIDATES = """
+MATCH (s:Statement)
+WHERE s.end_user_id = $end_user_id
+  AND s.has_unsolved_reference = true
+RETURN s.id AS statement_id,
+       s.statement AS statement_text,
+       s.dialog_at AS dialog_at,
+       s.chunk_id AS chunk_id,
+       s.stmt_type AS stmt_type,
+       s.temporal_info AS temporal_info,
+       s.speaker AS speaker,
+       s.valid_at AS valid_at,
+       s.invalid_at AS invalid_at
+ORDER BY s.created_at ASC
+LIMIT $batch_size
+"""
+
+UNRESOLVED_CONTEXT_CHUNKS = """
+MATCH (c:Chunk {id: $chunk_id})
+MATCH (nearby:Chunk {end_user_id: $end_user_id})
+WHERE nearby.id <> c.id
+WITH c, nearby,
+     abs(duration.between(datetime(nearby.created_at), datetime(c.created_at)).days * 86400
+       + duration.between(datetime(nearby.created_at), datetime(c.created_at)).seconds) AS diff_sec
+ORDER BY diff_sec ASC
+LIMIT $limit
+WITH collect(nearby) AS chunks
+UNWIND chunks AS chunk
+RETURN chunk.content AS content, chunk.created_at AS created_at
+ORDER BY chunk.created_at ASC
+"""
+
+UNRESOLVED_CREATE_ENTITY = """
+MERGE (e:ExtractedEntity {
+  end_user_id: $end_user_id,
+  name: $name,
+  entity_type: $entity_type
+})
+ON CREATE SET
+  e.id = randomUUID(),
+  e.description = $description,
+  e.aliases = [],
+  e.connect_strength = "weak",
+  e.source = "reflection_unresolved",
+  e.created_at = localdatetime()
+ON MATCH SET
+  e.description = CASE
+    WHEN e.description IS NULL OR e.description = "" THEN $description
+    ELSE e.description + '；' + $description
+  END
+RETURN e.id AS entity_id, e.name AS name
+"""
+
+UNRESOLVED_UPDATE_NAME_EMBEDDING = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.name_embedding = $name_embedding
+RETURN e.id
+"""
+
+UNRESOLVED_CREATE_RELATIONSHIP = """
+MATCH (subj:ExtractedEntity {end_user_id: $end_user_id, name: $subject_name})
+MATCH (obj:ExtractedEntity {end_user_id: $end_user_id, name: $object_name})
+CREATE (subj)-[r:EXTRACTED_RELATIONSHIP {
+  predicate: $predicate,
+  predicate_id: $predicate_id,
+  predicate_surface: $predicate_surface,
+  statement_id: $statement_id,
+  valid_at: $valid_at,
+  invalid_at: $invalid_at,
+  end_user_id: $end_user_id,
+  connect_strength: "weak",
+  source: "reflection_unresolved",
+  created_at: datetime()
+}]->(obj)
+RETURN r.predicate AS predicate
+"""
+
+UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE = """
+MATCH (s:Statement {id: $statement_id})
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $entity_name})
+MERGE (s)-[:REFERENCES_ENTITY]->(e)
+RETURN s.id AS statement_id
+"""
+
+UNRESOLVED_UPDATE_STATEMENT_FLAG = """
+MATCH (s:Statement {id: $statement_id})
+SET s.has_unsolved_reference = false
+RETURN s.id AS statement_id
+"""

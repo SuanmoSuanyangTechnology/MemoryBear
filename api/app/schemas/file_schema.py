@@ -1,6 +1,28 @@
+from typing import List, Optional
+
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 import datetime
 import uuid
+
+
+class BatchDownloadRequest(BaseModel):
+    file_ids: List[uuid.UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="要下载的文件ID列表，最多500个",
+    )
+    zip_filename: Optional[str] = Field(
+        None,
+        description="ZIP文件名，默认为 download.zip",
+    )
+
+
+class KBBatchDownloadRequest(BaseModel):
+    zip_filename: Optional[str] = Field(
+        None,
+        description="ZIP文件名，不传则自动生成",
+    )
 
 
 class FileBase(BaseModel):

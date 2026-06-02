@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 18:04:31
+ * @Last Modified time: 2026-05-14 14:29:25
  */
 /*
  * Runtime Component
@@ -27,13 +27,15 @@ import type { ChatItem } from '@/components/Chat/types'
 import Markdown from '@/components/Markdown'
 import CodeBlock from '@/components/Markdown/CodeBlock'
 import RbAlert from '@/components/RbAlert'
+import { hasProcessNodes } from '../../constant'
 
 /**
  * Runtime component props
  * @param item - Chat item containing workflow execution data
  * @param index - Index of the chat item in the list
  */
-const Runtime: FC<{ item: ChatItem; index: number;}> = ({
+const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
+  source,
   item,
   index
 }) => {
@@ -144,7 +146,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                 key: vo.node_id,
                 label: <div className={clsx("rb:flex rb:justify-between rb:items-center")}>
                   <Flex gap={6} align="center" className="rb:flex-1!">
-                    {vo.icon && <div className={`rb:size-6 rb:bg-cover ${vo.icon}`} />}
+                    {vo.icon && source !== 'agent' && <div className={`rb:size-6 rb:bg-cover ${vo.icon}`} />}
                     <div className="rb:wrap-break-word rb:line-clamp-1 rb:font-medium">{vo.node_name}</div>
                   </Flex>
                   <Flex align="center" gap={8} className="rb:text-[12px]">
@@ -185,7 +187,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                     )}
                     {/* Display input and output data as JSON code blocks */}
                     {['input', 'process', 'output'].map(key => {
-                      if (vo.node_type !== 'http-request' && key === 'process') return null
+                      if ((source === 'agent' || !hasProcessNodes.includes(vo.node_type)) && key === 'process') return null
                       return (
                         <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
                           <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
@@ -242,7 +244,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
             ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
             : <LoadingOutlined className={`rb:mr-1 ${getStatus(item.status)}`} />
           }
-          {t('application.workflow')}
+          {t(`application.${source}`)}
         </span>
         <Flex
           align="center"

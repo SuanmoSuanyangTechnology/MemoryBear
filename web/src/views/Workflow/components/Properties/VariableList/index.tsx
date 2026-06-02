@@ -1,15 +1,13 @@
 import { type FC, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Node } from '@antv/x6';
-import { Space, Button, Divider, App, Flex } from 'antd'
+import { Space, Button, App, Flex } from 'antd'
 
 import type { Variable, VariableEditModalRef } from './types'
-import type { NodeConfig } from '../../../types'
 import VariableEditModal from './VariableEditModal'
 
 interface VariableListProps {
   selectedNode?: Node | null; 
-  config: NodeConfig;
   value?: Variable[];
   parentName: string;
   onChange?: (value: Variable[]) => void;
@@ -17,8 +15,7 @@ interface VariableListProps {
 const VariableList: FC<VariableListProps> = ({
   value = [], 
   onChange, 
-  selectedNode, 
-  config, 
+  selectedNode,
   parentName 
 }) => {
   const { t } = useTranslation()
@@ -78,7 +75,7 @@ const VariableList: FC<VariableListProps> = ({
             className="rb:cursor-pointer rb:group rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb-border rb:rounded-lg"
             onClick={() => handleEditVariable(index, vo)}
           >
-            <span className="rb:font-medium rb:flex-1">{vo.name}·{vo.description}</span>
+            <span className="rb:font-medium rb:flex-1 rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-1">{vo.name}·{vo.description}</span>
 
             <Space size={8}>
               {vo.required && <span className="rb:py-px rb:px-2 rb:bg-white rb-border rb:rounded-sm">{t('workflow.config.start.required')}</span>}
@@ -91,15 +88,6 @@ const VariableList: FC<VariableListProps> = ({
           </Flex>
         )}
 
-      </Flex>
-      <Divider size="small" />
-      <Flex gap={10} vertical>
-        {config.sys?.map((vo, index) =>
-          <Flex align="center" justify="space-between" key={index} className="rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb:border rb:border-[#EBEBEB] rb:rounded-md">
-            <span className="rb:font-medium">sys.{vo.name}</span>
-            <span className="rb:py-px rb:px-2 rb:bg-[#FBFDFF] rb-border rb:rounded-sm">{vo.type}</span>
-          </Flex>
-        )}
       </Flex>
       <VariableEditModal
         ref={variableModalRef}

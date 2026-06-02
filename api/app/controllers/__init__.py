@@ -9,6 +9,7 @@ from . import (
     api_key_controller,
     app_controller,
     app_log_controller,
+    annotation_controller,
     auth_controller,
     chunk_controller,
     document_controller,
@@ -33,6 +34,7 @@ from . import (
     memory_short_term_controller,
     memory_storage_controller,
     memory_working_controller,
+    message_interaction_controller,
     model_controller,
     multi_agent_controller,
     prompt_optimizer_controller,
@@ -45,6 +47,7 @@ from . import (
     upload_controller,
     user_controller,
     user_memory_controllers,
+    workflow_trigger_controller,
     workspace_controller,
     ontology_controller,
     skill_controller,
@@ -72,6 +75,7 @@ manager_router.include_router(test_controller.router)
 manager_router.include_router(knowledgeshare_controller.router)
 manager_router.include_router(app_controller.router)
 manager_router.include_router(app_log_controller.router)
+manager_router.include_router(annotation_controller.router)
 manager_router.include_router(upload_controller.router)
 manager_router.include_router(memory_agent_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)
@@ -101,5 +105,7 @@ manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
 manager_router.include_router(tenant_subscription_controller.router)
 manager_router.include_router(tenant_subscription_controller.public_router)
+manager_router.include_router(message_interaction_controller.router)  # 消息交互功能
+manager_router.include_router(workflow_trigger_controller.router)
 
 __all__ = ["manager_router"]

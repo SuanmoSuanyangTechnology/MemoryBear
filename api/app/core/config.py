@@ -98,6 +98,7 @@ class Settings:
     # File Upload
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))
     MAX_FILE_COUNT: int = int(os.getenv("MAX_FILE_COUNT", "20"))
+    MAX_CHUNK_BATCH_SIZE: int = int(os.getenv("MAX_CHUNK_BATCH_SIZE", "8"))
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
     FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
 
@@ -241,6 +242,8 @@ class Settings:
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
     SMTP_USER: str = os.getenv("SMTP_USER", "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    
+    SANDBOX_URL: str = os.getenv("SANDBOX_URL", "")
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
@@ -266,6 +269,12 @@ class Settings:
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）
     IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  
+    LAYER2_REFLECTION_INTERVAL_MINUTES: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="Layer 2 reflection interval in minutes, must be >= 1")]
+    ).validate_python(int(os.getenv("LAYER2_REFLECTION_INTERVAL_MINUTES", "10")))
+    LAYER2_DEDUP_FULL_SCAN_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="Layer 2 dedup full scan hour, must be 0-23")]
+    ).validate_python(int(os.getenv("LAYER2_DEDUP_FULL_SCAN_HOUR", "3")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
@@ -299,11 +308,11 @@ class Settings:
     # Prompt 中最大类型数量
     MAX_ONTOLOGY_TYPES_IN_PROMPT: int = int(os.getenv("MAX_ONTOLOGY_TYPES_IN_PROMPT", "50"))
 
-    # 核心通用类型列表（逗号分隔）
+    # 核心通用类型列表（逗号分隔）—— 与 ontology.md Entity Ontology 保持一致的 13 类
     CORE_GENERAL_TYPES: str = os.getenv(
         "CORE_GENERAL_TYPES",
-        "Person,Organization,Company,GovernmentAgency,Place,Location,City,Country,Building,"
-        "Event,SportsEvent,SocialEvent,Work,Book,Film,Software,Concept,TopicalConcept,AcademicSubject"
+        "生命体,组织,群体,角色职业,地点设施,物品设备,软件平台,识别联系信息,"
+        "文档媒体,知识能力,偏好习惯,具体目标,称呼别名"
     )
 
     # 实验模式开关（允许通过 API 动态切换本体配置）

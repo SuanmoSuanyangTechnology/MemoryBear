@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch import Elasticsearch, helpers, NotFoundError
 from elasticsearch.helpers import BulkIndexError
 from packaging.version import parse as parse_version
 # langchain-community
@@ -30,7 +30,7 @@ class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
                  embedding_config: ModelApiKey, reranker_config: ModelApiKey):
         super().__init__(index_name.lower())
-        
+
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
         self.embeddings = RedBearEmbeddings(RedBearModelConfig(
             model_name=embedding_config.model_name,
@@ -39,7 +39,7 @@ class ElasticSearchVector(BaseVector):
             base_url=embedding_config.api_base
         ))
         self.is_multimodal_embedding = self.embeddings.is_multimodal_supported()
-        
+
         self.reranker = RedBearRerank(RedBearModelConfig(
             model_name=reranker_config.model_name,
             provider=reranker_config.provider,
@@ -53,13 +53,33 @@ class ElasticSearchVector(BaseVector):
         return "elasticsearch"
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
-        # 实现 Elasticsearch 保存向量
-        texts = [chunk.page_content for chunk in chunks]
+        # 仅在写入时检查并补充字段映射，避免每次检索都做冗余检查
+        ElasticSearchVectorFactory._ensure_parent_id_mapping(self._client, self._collection_name)
+
+        # QA chunks: embedding 只对 question 字段做；source/parent chunks: 不做 embedding
+        texts_for_embedding = []
+        for chunk in chunks:
+            chunk_type = (chunk.metadata or {}).get("chunk_type", "chunk")
+            if chunk_type in ("source", "parent"):
+                # source 和 parent chunk 不需要向量索引
+                texts_for_embedding.append("")
+            elif chunk_type == "qa":
+                # QA chunk: 用 question 字段做 embedding
+                texts_for_embedding.append((chunk.metadata or {}).get("question", chunk.page_content))
+            else:
+                # 普通 chunk / child chunk: 用 page_content 做 embedding
+                texts_for_embedding.append(chunk.page_content)
+
         if self.is_multimodal_embedding:
-            # 火山引擎多模态 Embedding
-            embeddings = self.embeddings.embed_batch(texts)
+            embeddings = self.embeddings.embed_batch(texts_for_embedding)
         else:
-            embeddings = self.embeddings.embed_documents(list(texts))
+            embeddings = self.embeddings.embed_documents(texts_for_embedding)
+
+        # source/parent chunk 的向量置空
+        for i, chunk in enumerate(chunks):
+            if (chunk.metadata or {}).get("chunk_type") in ("source", "parent"):
+                embeddings[i] = None
+
         self.create(chunks, embeddings, **kwargs)
 
     def create(self, chunks: list[DocumentChunk], embeddings: list[list[float]], **kwargs):
@@ -72,18 +92,37 @@ class ElasticSearchVector(BaseVector):
         uuids = self._get_uuids(chunks)
         actions = []
         for i, chunk in enumerate(chunks):
+            source = {
+                Field.CONTENT_KEY.value: chunk.page_content,
+                Field.METADATA_KEY.value: chunk.metadata or {},
+                Field.VECTOR.value: embeddings[i] or None
+            }
+            # 写入 QA 相关字段
+            meta = chunk.metadata or {}
+            if meta.get("chunk_type"):
+                source[Field.CHUNK_TYPE.value] = meta["chunk_type"]
+            if meta.get("question"):
+                source[Field.QUESTION.value] = meta["question"]
+            if meta.get("answer"):
+                source[Field.ANSWER.value] = meta["answer"]
+            if meta.get("source_chunk_id"):
+                source[Field.SOURCE_CHUNK_ID.value] = meta["source_chunk_id"]
+            if meta.get("parent_id"):
+                source[Field.PARENT_ID.value] = meta["parent_id"]
+
             action = {
                 "_index": self._collection_name,
-                "_source": {
-                    Field.CONTENT_KEY.value: chunk.page_content,
-                    Field.METADATA_KEY.value: chunk.metadata or {},
-                    Field.VECTOR.value: embeddings[i] or None
-                }
+                "_source": source
             }
             actions.append(action)
         # using bulk mode
-        result = helpers.bulk(self._client, actions)
-        logger.info(f"add_texts result:{result}")
+        try:
+            result = helpers.bulk(self._client, actions)
+            logger.info(f"add_texts result:{result}")
+        except BulkIndexError as e:
+            for error in e.errors[:3]:
+                logger.error(f"ES bulk index error detail: {error}")
+            raise
         return uuids
 
     def text_exists(self, id: str) -> bool:
@@ -113,7 +152,7 @@ class ElasticSearchVector(BaseVector):
 
         return True
 
-    def delete_by_ids(self, ids: list[str]):
+    def delete_by_ids(self, ids: list[str], *, refresh: bool = False):
         if not ids:
             return
         if not self._client.indices.exists(index=self._collection_name):
@@ -134,6 +173,8 @@ class ElasticSearchVector(BaseVector):
             actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
             try:
                 helpers.bulk(self._client, actions)
+                if refresh:
+                    self._client.indices.refresh(index=self._collection_name)
             except BulkIndexError as e:
                 for error in e.errors:
                     delete_error = error.get('delete', {})
@@ -153,7 +194,7 @@ class ElasticSearchVector(BaseVector):
         else:
             return None
 
-    def delete_by_metadata_field(self, key: str, value: str):
+    def delete_by_metadata_field(self, key: str, value: str, *, refresh: bool = False):
         if not self._client.indices.exists(index=self._collection_name):
             return False
         actual_ids = self.get_ids_by_metadata_field(key, value)
@@ -162,6 +203,8 @@ class ElasticSearchVector(BaseVector):
             actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
             try:
                 helpers.bulk(self._client, actions)
+                if refresh:
+                    self._client.indices.refresh(index=self._collection_name)
             except BulkIndexError as e:
                 for error in e.errors:
                     delete_error = error.get('delete', {})
@@ -172,12 +215,15 @@ class ElasticSearchVector(BaseVector):
                         logger.warning(f"Document not found for deletion: {doc_id}")
                     else:
                         logger.error(f"Error deleting document: {error}")
+                        raise
+
+        return True
 
     def delete(self):
         if self._client.indices.exists(index=self._collection_name):
             self._client.indices.delete(index=self._collection_name, ignore=[400, 404])
 
-    def search_by_segment(self, document_id: str | None = None, query: str | None = None, pagesize: int = 10, page: int = 1, asc: bool = True, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
+    def search_by_segment(self, document_id: str | None = None, query: str | None = None, pagesize: int = 10, page: int = 1, asc: bool = True, chunk_types: list[str] | str | None = None, parent_ids: list[str] | str | None = None, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
         """
         Search documents by segment (pagination) with optional keyword query.
 
@@ -186,12 +232,16 @@ class ElasticSearchVector(BaseVector):
             query: Optional keywords used to match chunk content.
             pagesize: Number of documents per page.
             page: 1-based page number.
+            chunk_types: If provided, filter by chunk_type (e.g., "parent", "child", or ["parent", "child"]).
+            parent_ids: If provided, filter by metadata.parent_id (for child chunks under specific parents).
             **kwargs: Additional search parameters (e.g., indices).
 
         Returns:
             List of DocumentChunk objects that match the query.
         """
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multiple indexes are also supported, such as "index1, index2, index3"
+        if not self._client.indices.exists(index=indices):
+            return 0, []
 
         # Calculate the start position for the current page
         from_ = pagesize * (page-1)
@@ -225,13 +275,32 @@ class ElasticSearchVector(BaseVector):
                 }
             })
 
+        if chunk_types:
+            types = chunk_types if isinstance(chunk_types, list) else [chunk_types]
+            query_str["query"]["bool"]["must"].append({
+                "terms": {
+                    Field.CHUNK_TYPE.value: types
+                }
+            })
+
+        if parent_ids:
+            pids = parent_ids if isinstance(parent_ids, list) else [parent_ids]
+            query_str["query"]["bool"]["must"].append({
+                "terms": {
+                    f"metadata.{Field.PARENT_ID.value}": pids
+                }
+            })
+
         # For simplicity, we use from/size here which has a limit (usually up to 10,000).
-        result = self._client.search(
-            index=indices,
-            from_=from_,  # Only use from_ for the first page (simplified)
-            size=pagesize,
-            body=query_str,
-        )
+        try:
+            result = self._client.search(
+                index=indices,
+                from_=from_,  # Only use from_ for the first page (simplified)
+                size=pagesize,
+                body=query_str,
+            )
+        except NotFoundError:
+            return 0, []
 
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
@@ -241,10 +310,19 @@ class ElasticSearchVector(BaseVector):
         for res in result["hits"]["hits"]:
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
-            # vector = source.get(Field.VECTOR.value)
             vector = None
             metadata = source.get(Field.METADATA_KEY.value, {})
+            chunk_type = source.get(Field.CHUNK_TYPE.value)
             score = res["_score"]
+
+            # 将 QA 字段注入 metadata 供前端展示
+            if chunk_type:
+                metadata["chunk_type"] = chunk_type
+            if chunk_type == "qa":
+                metadata["question"] = source.get(Field.QUESTION.value, "")
+                metadata["answer"] = source.get(Field.ANSWER.value, "")
+                page_content = f"question: {metadata['question']}\nanswer: {metadata['answer']}"
+
             docs_and_scores.append((DocumentChunk(page_content=page_content, vector=vector, metadata=metadata), score))
 
         docs = []
@@ -267,13 +345,18 @@ class ElasticSearchVector(BaseVector):
             List of DocumentChunk objects that match the query.
         """
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
+        if not self._client.indices.exists(index=indices):
+            return 0, []
         query_str = {"query": {"term": {f"{Field.DOC_ID.value}": doc_id}}}
-        result = self._client.search(
-            index=indices,
-            from_=0,  # Only use from_ for the first page (simplified)
-            size=1,
-            body=query_str,
-        )
+        try:
+            result = self._client.search(
+                index=indices,
+                from_=0,  # Only use from_ for the first page (simplified)
+                size=1,
+                body=query_str,
+            )
+        except NotFoundError:
+            return 0, []
         # print(result)
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
@@ -308,27 +391,43 @@ class ElasticSearchVector(BaseVector):
         Returns:
             updated count.
         """
-        indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
-        if self.is_multimodal_embedding:
-            # 火山引擎多模态 Embedding
-            chunk.vector = self.embeddings.embed_text(chunk.page_content)
+        indices = kwargs.get("indices", self._collection_name)
+        chunk_type = (chunk.metadata or {}).get("chunk_type")
+
+        # QA chunk: embedding 基于 question；source chunk: 不更新向量
+        if chunk_type == "source":
+            embed_text = ""
+        elif chunk_type == "qa":
+            embed_text = (chunk.metadata or {}).get("question", chunk.page_content)
         else:
-            chunk.vector = self.embeddings.embed_query(chunk.page_content)
+            embed_text = chunk.page_content
+
+        if chunk_type != "source":
+            if self.is_multimodal_embedding:
+                chunk.vector = self.embeddings.embed_text(embed_text)
+            else:
+                chunk.vector = self.embeddings.embed_query(embed_text)
+
+        script_source = "ctx._source.page_content = params.new_content; ctx._source.vector = params.new_vector;"
+        params = {
+            "new_content": chunk.page_content,
+            "new_vector": chunk.vector if chunk_type != "source" else None
+        }
+
+        # QA chunk: 同时更新 question/answer 字段
+        if chunk_type == "qa":
+            script_source += " ctx._source.question = params.new_question; ctx._source.answer = params.new_answer;"
+            params["new_question"] = (chunk.metadata or {}).get("question", "")
+            params["new_answer"] = (chunk.metadata or {}).get("answer", "")
 
         body = {
             "script": {
-                "source": """
-                        ctx._source.page_content = params.new_content;
-                        ctx._source.vector = params.new_vector;
-                    """,
-                "params": {
-                    "new_content": chunk.page_content,
-                    "new_vector": chunk.vector
-                }
+                "source": script_source,
+                "params": params
             },
             "query": {
                 "term": {
-                    Field.DOC_ID.value: chunk.metadata["doc_id"]  # exact match doc_id
+                    Field.DOC_ID.value: chunk.metadata["doc_id"]
                 }
             }
         }
@@ -336,9 +435,6 @@ class ElasticSearchVector(BaseVector):
             index=indices,
             body=body,
         )
-        # Remove debug printing and use logging instead
-        # print(result)
-        # print(f"Update successful, number of affected documents: {result['updated']}")
         return result['updated']
 
     def change_status_by_document_id(self, document_id: str, status: int, **kwargs) -> str:
@@ -371,7 +467,7 @@ class ElasticSearchVector(BaseVector):
         # print(f"Update successful, number of affected documents: {result['updated']}")
         return result['updated']
 
-    def search_by_vector(self, query: str, **kwargs: Any) -> list[DocumentChunk]:
+    def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Search the nearest neighbors to a vector."""
         if self.is_multimodal_embedding:
             # 火山引擎多模态 Embedding
@@ -397,11 +493,11 @@ class ElasticSearchVector(BaseVector):
                             }
                         }
                     },
-                    "filter": {  # Add the filter condition of status=1
-                        "term": {
-                            "metadata.status": 1
-                        }
-                    }
+                    "filter": [
+                        {"term": {"metadata.status": 1}},
+                        # 排除 source chunk（仅供 GraphRAG 使用，不参与检索）
+                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
+                    ]
                 }
             }
         # If file_names_filter is passed in, merge the filtering conditions
@@ -415,22 +511,14 @@ class ElasticSearchVector(BaseVector):
                             },
                             "script": {
                                 "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
-                                # The script_score query calculates the cosine similarity between the embedding field of each document and the query vector. The addition of +1.0 is to ensure that the scores returned by the script are non-negative, as the range of cosine similarity is [-1, 1]
                                 "params": {"query_vector": query_vector}
                             }
                         }
                     },
                     "filter": [
-                        {
-                            "term": {
-                                "metadata.status": 1
-                            }
-                        },
-                        {
-                            "terms": {
-                                "metadata.file_name": file_names_filter  # Additional file_name filtering
-                            }
-                        }
+                        {"term": {"metadata.status": 1}},
+                        {"terms": {"metadata.file_name": file_names_filter}},
+                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                     ],
                 }
             }
@@ -451,10 +539,22 @@ class ElasticSearchVector(BaseVector):
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
             metadata = source.get(Field.METADATA_KEY.value, {})
+            chunk_type = source.get(Field.CHUNK_TYPE.value)
             score = res["_score"]
             score = score / 2  # Normalized [0-1]
+
+            # QA chunk: 返回 Q+A 拼接作为上下文
+            if chunk_type == "qa":
+                question = source.get(Field.QUESTION.value, "")
+                answer = source.get(Field.ANSWER.value, "")
+                page_content = f"question: {question}\nanswer: {answer}"
+                metadata["chunk_type"] = "qa"
+                metadata["question"] = question
+                metadata["answer"] = answer
+
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), score))
 
+        # docs = [doc for doc, score in docs_and_scores]
         docs = []
         for doc, score in docs_and_scores:
             # check score threshold
@@ -463,9 +563,9 @@ class ElasticSearchVector(BaseVector):
                     doc.metadata["score"] = score
                     docs.append(doc)
 
-        return docs
+        return self.resolve_parent_chunks(docs) if resolve_parents else docs
 
-    def search_by_full_text(self, query: str, **kwargs: Any) -> list[DocumentChunk]:
+    def search_by_full_text(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Return docs using BM25F.
 
         Args:
@@ -491,11 +591,10 @@ class ElasticSearchVector(BaseVector):
                         }
                     }
                 },
-                "filter": {  # Add the filter condition of status=1
-                    "term": {
-                        "metadata.status": 1
-                    }
-                }
+                "filter": [
+                    {"term": {"metadata.status": 1}},
+                    {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
+                ]
             }
         }
 
@@ -512,16 +611,9 @@ class ElasticSearchVector(BaseVector):
                         }
                     },
                     "filter": [
-                        {
-                            "term": {
-                                "metadata.status": 1
-                            }
-                        },
-                        {
-                            "terms": {
-                                "metadata.file_name": file_names_filter  # Additional file_name filtering
-                            }
-                        }
+                        {"term": {"metadata.status": 1}},
+                        {"terms": {"metadata.file_name": file_names_filter}},
+                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                     ],
                 }
             }
@@ -533,7 +625,7 @@ class ElasticSearchVector(BaseVector):
             query=query_str,
         )
         # logger.info(result)
-        
+
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
 
@@ -543,10 +635,22 @@ class ElasticSearchVector(BaseVector):
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
             metadata = source.get(Field.METADATA_KEY.value, {})
+            chunk_type = source.get(Field.CHUNK_TYPE.value)
+
+            # QA chunk: 返回 Q+A 拼接作为上下文
+            if chunk_type == "qa":
+                question = source.get(Field.QUESTION.value, "")
+                answer = source.get(Field.ANSWER.value, "")
+                page_content = f"question: {question}\nanswer: {answer}"
+                metadata["chunk_type"] = "qa"
+                metadata["question"] = question
+                metadata["answer"] = answer
+
             # Normalize the score to the [0,1] interval
             normalized_score = res["_score"] / max_score
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), normalized_score))
-        
+
+        # docs = [doc for doc, score in docs_and_scores]
         docs = []
         for doc, score in docs_and_scores:
             # check score threshold
@@ -555,47 +659,112 @@ class ElasticSearchVector(BaseVector):
                     doc.metadata["score"] = score
                     docs.append(doc)
 
-        return docs
+        return self.resolve_parent_chunks(docs) if resolve_parents else docs
+
+    def resolve_parent_chunks(self, chunks: list[DocumentChunk]) -> list[DocumentChunk]:
+        """
+        For child chunks (chunk_type == "child"), replace page_content with the
+        parent chunk's page_content. Deduplicate when multiple children share
+        the same parent.
+
+        Non-child chunks (regular "chunk", "qa") pass through unchanged.
+        """
+        child_results = []
+        other_results = []
+        for doc in chunks:
+            if (doc.metadata or {}).get("chunk_type") == "child":
+                child_results.append(doc)
+            else:
+                other_results.append(doc)
+
+        if not child_results:
+            return chunks
+
+        # Collect unique parent IDs
+        parent_ids = list({doc.metadata.get("parent_id", "") for doc in child_results if doc.metadata.get("parent_id")})
+        if not parent_ids:
+            return chunks
+
+        # Batch-fetch parent chunks from ES by doc_id
+        parent_map = {}
+        try:
+            result = self._client.search(
+                index=self._collection_name,
+                body={
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"terms": {"metadata.doc_id": parent_ids}}
+                            ]
+                        }
+                    }
+                },
+                size=len(parent_ids),
+            )
+            for hit in result.get("hits", {}).get("hits", []):
+                source = hit["_source"]
+                parent_doc_id = source.get("metadata", {}).get("doc_id", "")
+                parent_map[parent_doc_id] = DocumentChunk(
+                    page_content=source.get(Field.CONTENT_KEY.value, ""),
+                    metadata=source.get(Field.METADATA_KEY.value, {}),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to resolve parent chunks: {e}")
+            return chunks
+
+        # Replace child content with parent content, dedup by parent_id
+        seen_parents: dict[str, DocumentChunk] = {}
+        for doc in child_results:
+            parent_id = doc.metadata.get("parent_id", "")
+            if parent_id in seen_parents:
+                existing = seen_parents[parent_id]
+                if doc.metadata.get("score", 0) > existing.metadata.get("score", 0):
+                    seen_parents[parent_id] = DocumentChunk(
+                        page_content=existing.page_content,
+                        metadata={**existing.metadata, "score": doc.metadata.get("score", 0)},
+                    )
+                continue
+
+            parent = parent_map.get(parent_id)
+            if parent:
+                # Replace page_content with parent's, preserve child's score
+                score = doc.metadata.get("score", 0)
+                merged_metadata = {**parent.metadata, "score": score, "chunk_type": "parent"}
+                seen_parents[parent_id] = DocumentChunk(
+                    page_content=parent.page_content,
+                    metadata=merged_metadata,
+                )
+            else:
+                # Parent not found, keep child as-is
+                seen_parents[parent_id] = doc
+
+        return list(seen_parents.values()) + other_results
 
     def rerank(self, query: str, docs: list[DocumentChunk], top_k: int) -> list[DocumentChunk]:
         """
-        Reorder the list of document blocks and return the top_k results most relevant to the query
-        Args:
-            query: query string
-            docs: List of document chunk to be rearranged
-            top_k: The number of top-level documents returned
-
-        Returns:
-            Rearranged document chunk list (sorted in descending order of relevance)
-
-        Raises:
-            ValueError: If the input document list is empty or top_k is invalid
+        Reorder the list of document blocks and return the top_k results most relevant to the query.
+        Falls back to the original docs (truncated to top_k) if reranking fails.
         """
-        # parameter validation
         if not docs:
             raise ValueError("retrieval chunks be empty")
         if top_k <= 0:
             raise ValueError("top_k must be a positive integer")
         try:
-            # Convert to LangChain Document object
             documents = [
                 Document(
-                    page_content=doc.page_content,  # Ensure that DocumentChunk possesses this attribute
-                    metadata=doc.metadata or {}  # Deal with possible None metadata
+                    page_content=doc.page_content,
+                    metadata=doc.metadata or {}
                 )
                 for doc in docs
             ]
 
-            # Perform reordering (compress_documents will automatically handle relevance scores and indexing)
             reranked_docs = list(self.reranker.compress_documents(documents, query))
             print(reranked_docs)
 
-            # Sort in descending order based on relevance score
             reranked_docs.sort(
                 key=lambda x: x.metadata.get("relevance_score", 0),
                 reverse=True
             )
-            # Convert back to a list of DocumentChunk, and save the relevance_score to metadata["score"]
             result = []
             for item in reranked_docs[:top_k]:
                 for doc in docs:
@@ -604,7 +773,11 @@ class ElasticSearchVector(BaseVector):
                         result.append(doc)
             return result
         except Exception as e:
-            raise RuntimeError(f"Failed to rerank documents: {str(e)}") from e
+            logger.warning(f"Rerank failed, falling back to original results: {str(e)}")
+            for doc in docs[:top_k]:
+                if doc.metadata is not None and "score" not in doc.metadata:
+                    doc.metadata["score"] = 0.5
+            return docs[:top_k]
 
     def create_collection(
         self,
@@ -647,14 +820,34 @@ class ElasticSearchVector(BaseVector):
                                 },
                                 "status": {
                                     "type": "integer"
+                                },
+                                "parent_id": {
+                                    "type": "keyword"
                                 }
                             }
                         },
                         Field.VECTOR.value: {
                             "type": "dense_vector",
-                            "dims": len(embeddings[0]),  # Make sure the dimension is correct here,The dimension size of the vector. When index is true, it cannot exceed 1024; when index is false or not specified, it cannot exceed 2048, which can improve retrieval efficiency
+                            "dims": len(next((e for e in embeddings if e is not None), [0]*768)),  # 跳过 None 获取向量维度，fallback 768
                             "index": True,
                             "similarity": "cosine"
+                        },
+                        Field.CHUNK_TYPE.value: {
+                            "type": "keyword"
+                        },
+                        Field.QUESTION.value: {
+                            "type": "text",
+                            "analyzer": "ik_max_word"
+                        },
+                        Field.ANSWER.value: {
+                            "type": "text",
+                            "analyzer": "ik_max_word"
+                        },
+                        Field.SOURCE_CHUNK_ID.value: {
+                            "type": "keyword"
+                        },
+                        Field.PARENT_ID.value: {
+                            "type": "keyword"
                         }
                     }
                 }
@@ -741,13 +934,55 @@ class ElasticSearchVectorFactory:
             raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        embedding_config = knowledge.embedding.api_keys[0] if knowledge.embedding.api_keys else None
+        if not knowledge.embedding.api_keys:
+            logger.warning(f"No embedding api key found for knowledge {knowledge.id}")
+        reranker_config = knowledge.reranker.api_keys[0] if knowledge.reranker.api_keys else None
+        if not knowledge.reranker.api_keys:
+            logger.warning(f"No reranker api key found for knowledge {knowledge.id}")
 
         return ElasticSearchVector(
             index_name=collection_name,
             client=client,
-            embedding_config=knowledge.embedding.api_keys[0],
-            reranker_config=knowledge.reranker.api_keys[0],
+            embedding_config=embedding_config,
+            reranker_config=reranker_config,
         )
+
+    @classmethod
+    def _ensure_parent_id_mapping(cls, client: Elasticsearch, index_name: str):
+        """为已有索引补充缺失的字段映射（仅追加，非破坏性）"""
+        if not client.indices.exists(index=index_name):
+            return
+        try:
+            mapping = client.indices.get_mapping(index=index_name)
+            props = mapping[index_name]["mappings"].get("properties", {})
+            metadata_props = props.get("metadata", {}).get("properties", {})
+
+            update_body: dict[str, Any] = {"properties": {}}
+
+            # metadata.parent_id
+            if metadata_props.get("parent_id", {}).get("type") != "keyword":
+                update_body["properties"]["metadata"] = {
+                    "properties": {"parent_id": {"type": "keyword"}}
+                }
+
+            # top-level parent_id
+            if props.get(Field.PARENT_ID.value, {}).get("type") != "keyword":
+                update_body["properties"][Field.PARENT_ID.value] = {"type": "keyword"}
+
+            # top-level chunk_type
+            if Field.CHUNK_TYPE.value not in props:
+                update_body["properties"][Field.CHUNK_TYPE.value] = {"type": "keyword"}
+
+            # source_chunk_id
+            if Field.SOURCE_CHUNK_ID.value not in props:
+                update_body["properties"][Field.SOURCE_CHUNK_ID.value] = {"type": "keyword"}
+
+            if len(update_body["properties"]) > 0:
+                client.indices.put_mapping(index=index_name, body=update_body)
+                logger.info(f"Updated mapping for {index_name}: added {list(update_body['properties'].keys())}")
+        except Exception as e:
+            logger.warning(f"Failed to update mapping for {index_name}: {e}")
 
 
 

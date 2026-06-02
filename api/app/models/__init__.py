@@ -6,7 +6,8 @@ from .document_model import Document
 from .file_model import File
 from .file_metadata_model import FileMetadata
 from .generic_file_model import GenericFile
-from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy
+from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy, \
+    ModelCapability
 from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
 from .mcp_market_model import McpMarket
@@ -24,6 +25,7 @@ from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from .memory_config_model import MemoryConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
 from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from .agent_execution_model import AgentExecution
 from .retrieval_info import RetrievalInfo
 from .prompt_optimizer_model import PromptOptimizerSession, PromptOptimizerSessionHistory
 from .tool_model import (
@@ -37,6 +39,12 @@ from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
+from .annotation_model import AppAnnotation, AppAnnotationSetting
+from .reflection_log_model import MemoryReflectionLog
+from .message_feedback_model import MessageFeedback
+from .message_report_model import MessageReport
+from .conversation_share_model import ConversationShare
+from .memory_message_model import MemoryMessage
 
 __all__ = [
     "Tenants",
@@ -66,6 +74,9 @@ __all__ = [
     "ReleaseShare",
     "Conversation",
     "Message",
+    "MessageFeedback",
+    "MessageReport",
+    "ConversationShare",
     "ApiKey",
     "ApiKeyLog",
     "ApiKeyType",
@@ -75,6 +86,7 @@ __all__ = [
     "WorkflowConfig",
     "WorkflowExecution",
     "WorkflowNodeExecution",
+    "AgentExecution",
     "RetrievalInfo",
     "PromptOptimizerSession",
     "PromptOptimizerSessionHistory",
@@ -94,5 +106,10 @@ __all__ = [
     "ModelBase",
     "LoadBalanceStrategy",
     "Skill",
-    "ImplicitEmotionsStorage"
+    "ImplicitEmotionsStorage",
+    "AppAnnotation",
+    "AppAnnotationSetting",
+    "ModelCapability",
+    "MemoryMessage",
+    "MemoryReflectionLog"
 ]

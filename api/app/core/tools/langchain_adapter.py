@@ -161,8 +161,11 @@ class LangchainAdapter:
     @staticmethod
     def _create_mcp_tool_with_name(mcp_tool: BaseTool, tool_name: str) -> BaseTool:
         """为MCP工具创建指定工具名称的实例"""
-        mcp_tool.set_current_tool(tool_name)
-        return mcp_tool
+        # 为每个工具创建新实例，避免共享同一个实例导致 _current_tool_name 被覆盖
+        import copy
+        new_tool = copy.deepcopy(mcp_tool)
+        new_tool.set_current_tool(tool_name)
+        return new_tool
 
     @staticmethod
     def convert_tools(tools: List[BaseTool]) -> List[LangchainToolWrapper]:

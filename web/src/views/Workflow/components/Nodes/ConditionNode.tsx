@@ -28,7 +28,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   const data = node?.getData() || {};
   const { t } = useTranslation()
   const graphRef = useRef(node?.model?.graph)
-  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [])
+  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [], data.appType ?? '')
 
   const getLocaleField = (field: string, filedType: string) => {
     const key = filedType === 'boolean'
@@ -99,7 +99,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
       {data.type === 'if-else' &&
         <Flex vertical gap={4} className="rb:mt-3!">
           {data.config?.cases?.defaultValue.map((item: any, index: number) => (
-            <div key={index} className={item.expressions.length > 0 ? '' : 'rb:mb-1'}>
+            <div key={index}>
               <Flex justify={item.expressions.length > 0 ? "space-between" : 'end'} className="rb:mb-1! rb:leading-4">
                 {item.expressions.length > 0 && <span className="rb:text-[#5B6167] rb:text-[10px] rb:pl-1">CASE{index + 1}</span>}
                 <span className="rb:text-[#212332] rb:font-medium rb:text-[12px]">{index === 0 ? 'IF' : `ELIF`}</span>
@@ -120,7 +120,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                       {calculateIsSet(expression, 'cases')
                         ? <>
                           {labelRender(expression.left)}
-                          <span className="rb:mx-1">{getLocaleField(expression.operator, typeof expression.right)}</span>
+                          <span className="rb:mx-1 rb:shrink-0">{getLocaleField(expression.operator, typeof expression.right)}</span>
                           <span className="rb:break-all rb:line-clamp-1">{!['not_empty', 'empty'].includes(expression.operator) && <span>{typeof expression.right === 'boolean' ? String(expression.right).charAt(0).toUpperCase() + String(expression.right).slice(1) : expression.right}</span>}</span>
                         </>
                         : t(`workflow.config.${data.type}.unset`)
@@ -138,7 +138,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                                 })}
                               >
                                 <span className="rb:text-[#155EEF]">{sub.key}</span>
-                                <span className="rb:mx-1">{getSubLocaleField(sub.operator, sub.key)}</span>
+                                <span className="rb:mx-1 rb:shrink-0">{getSubLocaleField(sub.operator, sub.key)}</span>
                                 <span className="rb:break-all rb:line-clamp-1">
                                   {sub.key === 'type'
                                     ? t(`application.${sub.value}`)

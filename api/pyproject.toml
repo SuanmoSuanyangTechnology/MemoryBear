@@ -144,11 +144,12 @@ dependencies = [
     "rdflib>=7.0.0",
     "lxml>=4.9.0",
     "httpx>=0.28.0",
-    "modelscope>=1.34.0",
+    "modelscope==1.36.1",
     "python-magic>=0.4.14; sys_platform == 'linux' or sys_platform == 'darwin'",
     "python-magic-bin>=0.4.14; sys_platform=='win32'",
     "volcengine-python-sdk[ark]==5.0.19",
     "pymupdf>=1.27.2.2",
+    "langid>=1.1.6",
 ]
 
 [tool.pytest.ini_options]
@@ -156,5 +157,5 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-# 使用 anyio 作为异步测试后端
-anyio_backends = ["asyncio"]
+# 使用 asyncio 作为异步测试后端
+asyncio_mode = "auto"

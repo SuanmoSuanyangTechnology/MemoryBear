@@ -6,6 +6,15 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
+class LogFileInfo(BaseModel):
+    """日志中用户上传的文件信息"""
+    type: str = Field(description="文件类型: image / document / audio / video")
+    url: str = Field(description="文件访问 URL")
+    name: Optional[str] = Field(default=None, description="文件名")
+    size: Optional[int] = Field(default=None, description="文件大小（字节）")
+    file_type: Optional[str] = Field(default=None, description="MIME 类型，如 image/jpeg")
+
+
 class AppLogMessage(BaseModel):
     """单条消息记录"""
     model_config = ConfigDict(from_attributes=True)
@@ -14,8 +23,9 @@ class AppLogMessage(BaseModel):
     conversation_id: uuid.UUID
     role: str = Field(description="角色: user / assistant / system")
     content: str
-    status: Optional[str] = Field(default=None, description="执行状态（工作流专用）: completed / failed")
+    status: Optional[str] = Field(default=None, description="消息状态: completed / failed")
     meta_data: Optional[Dict[str, Any]] = None
+    files: List[LogFileInfo] = Field(default_factory=list, description="用户上传的文件列表")
     created_at: datetime.datetime
 
     @field_serializer("created_at", when_used="json")
@@ -62,6 +72,7 @@ class AppLogNodeExecution(BaseModel):
     cycle_items: Optional[List[Any]] = None
     elapsed_time: Optional[float] = None
     token_usage: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None
 
 
 class AppLogConversationDetail(AppLogConversation):

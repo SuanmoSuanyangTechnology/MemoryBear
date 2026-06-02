@@ -46,6 +46,10 @@ def validate_language(language: Optional[str]) -> str:
     if language is None:
         return DEFAULT_LANGUAGE
     
+    # 处理枚举类型：优先取 .value，避免 str(Language.ZH) → "Language.ZH"
+    if hasattr(language, "value"):
+        language = language.value
+    
     # 标准化：转小写并去除空白
     lang = str(language).lower().strip()
     

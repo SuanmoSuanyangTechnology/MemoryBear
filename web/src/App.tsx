@@ -3,13 +3,15 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-24 19:00:14
- * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-25 18:48:26
+ * @LastEditors: zhaoying zhaoyingyz@126.com
+ * @LastEditTime: 2026-05-13 16:50:52
  */
 import { RouterProvider } from 'react-router-dom';
 import { 
   Suspense, 
-  useEffect
+  useEffect,
+  type FC,
+  type ReactNode,
 } from 'react';
 import { 
   Spin, 
@@ -17,7 +19,6 @@ import {
   App as AntdApp
 } from 'antd';
 import i18n from 'i18next';
-
 import { lightTheme } from './styles/antdThemeConfig.ts'
 import router from './routes';
 import { useI18n } from '@/store/locale'
@@ -28,8 +29,13 @@ import 'dayjs/plugin/timezone'
 import 'dayjs/plugin/utc'
 import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
+import { Provider as PrivateProvider } from '@redbear/memory-brick'
 
 import menuJson from '@/store/menu.json';
+
+console.log('PrivateProvider', PrivateProvider)
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
+
 
 type MenuEntry = { path: string; i18nKey: string };
 
@@ -70,6 +76,24 @@ const SKIP_TITLE_PATTERNS = [
 
 
 
+// 根据环境选择 Provider：saas 用私有组件库的 Provider，其他用 antd ConfigProvider
+const AppProvider: FC<{ locale: any; theme: any; children: ReactNode }> = ({ locale, theme, children }) => {
+  if (isSaas && PrivateProvider) {
+    return (
+      <Suspense fallback={<Spin fullscreen />}>
+        <PrivateProvider locale={locale} theme={theme}>
+          {children}
+        </PrivateProvider>
+      </Suspense>
+    )
+  }
+  return (
+    <ConfigProvider locale={locale} theme={theme}>
+      {children}
+    </ConfigProvider>
+  )
+}
+
 function App() {
   const { locale, language, timeZone } = useI18n()
   const { checkJump } = useUser();
@@ -83,7 +107,14 @@ function App() {
 
   useEffect(() => {
     const authToken = cookieUtils.get('authToken')
-    if (!authToken && !window.location.hash.includes('#/login') && !window.location.hash.includes('#/conversation/') && !window.location.hash.includes('#/jump') && !window.location.hash.includes('#/invite-register')) {
+    if (
+      !authToken && !window.location.hash.includes('#/login')
+      && !window.location.hash.includes('#/conversation/')
+      && !window.location.hash.includes('#/chat-box/')
+      && !window.location.hash.includes('#/share-chat/')
+      && !window.location.hash.includes('#/jump')
+      && !window.location.hash.includes('#/invite-register')
+    ) {
       window.location.href = `/#/login`;
     } else {
       checkJump()
@@ -104,10 +135,7 @@ function App() {
   }, [timeZone])
 
   return (
-    <ConfigProvider
-      locale={locale}
-      theme={lightTheme}
-    >
+    <AppProvider locale={locale} theme={lightTheme}>
       <AntdApp>
         <Suspense fallback={<Spin fullscreen></Spin>}>
           <RouterProvider 
@@ -118,7 +146,7 @@ function App() {
           />
         </Suspense>
       </AntdApp>
-    </ConfigProvider>
+    </AppProvider>
   );
 }
 

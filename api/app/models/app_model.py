@@ -19,11 +19,12 @@ class AppVisibility(StrEnum):
     WORKSPACE = "workspace"
     PUBLIC = "public"
 
-# 应用类型：agent | workflow | multi_agent
+# 应用类型：agent | workflow | pure_workflow | multi_agent
 class AppType(StrEnum):
     """应用类型枚举"""
     AGENT = "agent"
     WORKFLOW = "workflow"
+    PURE_WORKFLOW = "pure_workflow"
     MULTI_AGENT = "multi_agent"
 
 

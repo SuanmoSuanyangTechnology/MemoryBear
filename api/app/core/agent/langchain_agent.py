@@ -8,7 +8,9 @@ LangChain Agent 封装
 - 使用 RedBearLLM 支持多提供商
 """
 
+import json
 import time
+import uuid as _uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from langchain.agents import create_agent
@@ -66,6 +68,14 @@ class LangChainAgent:
         self.is_omni = is_omni
         self.max_tool_consecutive_calls = max_tool_consecutive_calls
 
+        # 构建工具名 → 元数据映射（用于执行记录中补充具体资源信息）
+        self._tool_meta_map: Dict[str, Dict[str, Any]] = {}
+        for t in self.tools:
+            tool_name = getattr(t, "name", None)
+            tool_meta = getattr(t, "_tool_meta", None)
+            if tool_name and tool_meta:
+                self._tool_meta_map[tool_name] = tool_meta
+
         # 工具调用计数器：记录每个工具的连续调用次数
         self.tool_call_counter: Dict[str, int] = {}
         self.last_tool_called: Optional[str] = None
@@ -80,15 +90,8 @@ class LangChainAgent:
 
         self.system_prompt = system_prompt or "你是一个专业的AI助手"
 
-        # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format
-        # 在 system prompt 中注入 JSON 要求
-        from app.models.models_model import ModelProvider
-        if json_output and (
-            (provider.lower() == ModelProvider.DASHSCOPE and not is_omni)
-            or provider.lower() == ModelProvider.VOLCANO
-            # 有工具时 response_format 会被移除，所有 provider 都需要 system prompt 注入保证 JSON 输出
-            or bool(tools)
-        ):
+        # 所有 provider 统一注入 JSON prompt 兜底，确保即使 API 层 response_format 未生效也能引导 JSON 输出
+        if json_output:
             self.system_prompt += "\n请以JSON格式输出。"
 
         logger.debug(
@@ -342,6 +345,31 @@ class LangChainAgent:
         additional = getattr(msg, "additional_kwargs", None) or {}
         return additional.get("reasoning_content") or additional.get("reasoning", "")
 
+    @staticmethod
+    def _truncate_data(data, max_length: int = 2000) -> Any:
+        if data is None:
+            return None
+        if isinstance(data, str):
+            return data[:max_length] + "..." if len(data) > max_length else data
+        try:
+            text = json.dumps(data, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(data)
+        return text[:max_length] + "...[truncated]" if len(text) > max_length else text
+
+    def _extract_tool_sources(self, tool_name: str, node: Dict[str, Any]) -> None:
+        """从工具实例中提取来源信息，合并到 node["meta"] 中"""
+        for t in self.tools:
+            t_name = getattr(t, "name", None)
+            if t_name == tool_name:
+                sources = getattr(t, "_last_sources", None)
+                if sources:
+                    if not node.get("meta"):
+                        node["meta"] = {}
+                    node["meta"]["sources"] = sources
+                    t._last_sources = []
+                break
+
     async def chat(
             self,
             message: str,
@@ -358,9 +386,14 @@ class LangChainAgent:
             files: 多模态文件
 
         Returns:
-            Dict: 包含 content 和元数据的字典
+            Dict: 包含 content、node_executions 和元数据的字典
         """
         start_time = time.time()
+        # 收集节点执行记录
+        node_executions: List[Dict[str, Any]] = []
+        # 用于匹配 tool_start/tool_end 的临时栈
+        _tool_stack: List[Dict[str, Any]] = []
+
         try:
             # 准备消息列表（支持多模态）
             messages = self._prepare_messages(message, history, context, files)
@@ -377,19 +410,143 @@ class LangChainAgent:
                 }
             )
 
-            # 统一使用 agent.invoke 调用
-            # 通过 recursion_limit 限制最大迭代次数，防止工具调用死循环
+            # 使用 astream_events 捕获中间步骤
+            content = ""
+            total_tokens = 0
+            reasoning_content = ""
+            last_event = {}
+
             try:
-                result = await self.agent.ainvoke(
+                async for event in self.agent.astream_events(
                     {"messages": messages},
+                    version="v2",
                     config={"recursion_limit": self.max_iterations}
-                )
+                ):
+                    last_event = event
+                    kind = event.get("event")
+
+                    if kind == "on_tool_start":
+                        tool_name = event.get("name", "unknown")
+                        tool_input = event.get("data", {}).get("input")
+                        step_id = str(_uuid.uuid4())
+                        tool_meta = self._tool_meta_map.get(tool_name, {})
+                        node = {
+                            "step_id": step_id,
+                            "node_type": "tool",
+                            "node_name": tool_name,
+                            "status": "running",
+                            "input": self._truncate_data(tool_input),
+                            "output": None,
+                            "elapsed_time": 0,
+                            "started_at": time.time(),
+                            "error": None,
+                            "meta": tool_meta if tool_meta else None,
+                        }
+                        _tool_stack.append(node)
+                        node_executions.append(node)
+
+                    elif kind == "on_tool_end":
+                        tool_output = event.get("data", {}).get("output")
+                        tool_name = event.get("name", "unknown")
+                        matched_node = None
+                        if _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        if matched_node:
+                            matched_node["status"] = "completed"
+                            matched_node["output"] = self._truncate_data(tool_output)
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+                            # 提取工具的额外来源信息（如知识库检索来源）
+                            self._extract_tool_sources(tool_name, matched_node)
+
+                    elif kind == "on_tool_error":
+                        error_msg = str(event.get("data", {}).get("error", ""))
+                        tool_name = event.get("name", "unknown")
+                        matched_node = None
+                        if _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        if matched_node:
+                            matched_node["status"] = "failed"
+                            matched_node["error"] = error_msg[:500]
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+
+                    elif kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content"):
+                            if self.deep_thinking:
+                                rc = self._extract_reasoning_content(chunk)
+                                if rc:
+                                    reasoning_content += rc
+                            chunk_content = chunk.content
+                            if isinstance(chunk_content, str):
+                                content += chunk_content
+                            elif isinstance(chunk_content, list):
+                                for item in chunk_content:
+                                    if isinstance(item, dict):
+                                        if "text" in item:
+                                            content += item.get("text", "")
+                                        elif item.get("type") == "text":
+                                            content += item.get("text", "")
+                                    elif isinstance(item, str):
+                                        content += item
+
+                # 从最后一个事件中提取 token 统计
+                output_messages = last_event.get("data", {}).get("output", {}).get("messages", [])
+                for msg in reversed(output_messages):
+                    if isinstance(msg, AIMessage):
+                        total_tokens = self._extract_tokens_from_message(msg)
+                        if not content:
+                            # 如果流式没有拼出内容，从最终消息中提取
+                            if isinstance(msg.content, str):
+                                content = msg.content
+                            elif isinstance(msg.content, list):
+                                text_parts = []
+                                for item in msg.content:
+                                    if isinstance(item, dict):
+                                        if "text" in item:
+                                            text_parts.append(item.get("text", ""))
+                                        elif item.get("type") == "text":
+                                            text_parts.append(item.get("text", ""))
+                                    elif isinstance(item, str):
+                                        text_parts.append(item)
+                                content = "".join(text_parts)
+                            else:
+                                content = str(msg.content)
+                        if self.deep_thinking and not reasoning_content:
+                            reasoning_content = self._extract_reasoning_content(msg)
+                        break
+
             except (RecursionError, GraphRecursionError) as e:
                 logger.warning(
                     f"Agent 达到最大迭代次数限制 ({self.max_iterations})，可能存在工具调用循环",
                     extra={"error": str(e)}
                 )
-                # 返回一个友好的错误提示
+                # 标记未完成的工具为失败
+                for node in _tool_stack:
+                    node["status"] = "failed"
+                    node["error"] = "达到最大迭代次数限制"
+                    node["elapsed_time"] = round(
+                        (time.time() - node.get("started_at", time.time())) * 1000, 2
+                    )
+                _tool_stack.clear()
+
+                # 清理 started_at（不需要持久化）
+                for node in node_executions:
+                    node.pop("started_at", None)
+
                 return {
                     "content": f"抱歉，我在处理您的请求时遇到了问题。已达到最大处理步骤限制（{self.max_iterations}次）。请尝试简化您的问题或稍后再试。",
                     "model": self.model_name,
@@ -398,55 +555,18 @@ class LangChainAgent:
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
                         "total_tokens": 0
-                    }
+                    },
+                    "node_executions": node_executions,
                 }
 
-            # 获取最后的 AI 消息
-            output_messages = result.get("messages", [])
-            content = ""
-
-            logger.debug(f"输出消息数量: {len(output_messages)}")
-            total_tokens = 0
-            reasoning_content = ""
-            for msg in reversed(output_messages):
-                if isinstance(msg, AIMessage):
-                    logger.debug(f"找到 AI 消息，content 类型: {type(msg.content)}")
-                    logger.debug(f"AI 消息内容: {msg.content}")
-
-                    # 处理多模态响应：content 可能是字符串或列表
-                    if isinstance(msg.content, str):
-                        content = msg.content
-                        logger.debug(f"提取字符串内容，长度: {len(content)}")
-                    elif isinstance(msg.content, list):
-                        # 多模态响应：提取文本部分
-                        logger.debug(f"多模态响应，列表长度: {len(msg.content)}")
-                        text_parts = []
-                        for item in msg.content:
-                            logger.debug(f"处理项: {item}")
-                            if isinstance(item, dict):
-                                # 通义千问格式: {"text": "..."}
-                                if "text" in item:
-                                    text = item.get("text", "")
-                                    text_parts.append(text)
-                                    logger.debug(f"提取文本: {text[:100]}...")
-                                # OpenAI 格式: {"type": "text", "text": "..."}
-                                elif item.get("type") == "text":
-                                    text = item.get("text", "")
-                                    text_parts.append(text)
-                                    logger.debug(f"提取文本: {text[:100]}...")
-                            elif isinstance(item, str):
-                                text_parts.append(item)
-                                logger.debug(f"提取字符串: {item[:100]}...")
-                        content = "".join(text_parts)
-                        logger.debug(f"合并后内容长度: {len(content)}")
-                    else:
-                        content = str(msg.content)
-                        logger.debug(f"转换为字符串: {content[:100]}...")
-                    total_tokens = self._extract_tokens_from_message(msg)
-                    reasoning_content = self._extract_reasoning_content(msg) if self.deep_thinking else ""
-                    break
-
             logger.info(f"最终提取的内容长度: {len(content)}")
+
+            # 清理 started_at 并确保所有节点都有最终状态
+            for node in node_executions:
+                node.pop("started_at", None)
+                # 如果执行到这里还是 running，说明 on_tool_end 事件丢失，标记为 completed
+                if node.get("status") == "running":
+                    node["status"] = "completed"
 
             elapsed_time = time.time() - start_time
             response = {
@@ -457,7 +577,8 @@ class LangChainAgent:
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": total_tokens
-                }
+                },
+                "node_executions": node_executions,
             }
             if reasoning_content:
                 response["reasoning_content"] = reasoning_content
@@ -466,7 +587,8 @@ class LangChainAgent:
                 "Agent 调用完成",
                 extra={
                     "elapsed_time": elapsed_time,
-                    "content_length": len(response["content"])
+                    "content_length": len(response["content"]),
+                    "node_execution_count": len(node_executions)
                 }
             )
 
@@ -482,7 +604,7 @@ class LangChainAgent:
             history: Optional[List[Dict[str, str]]] = None,
             context: Optional[str] = None,
             files: Optional[List[Dict[str, Any]]] = None
-    ) -> AsyncGenerator[str | int | dict[str, str], None]:
+    ) -> AsyncGenerator[str | int | dict[str, str] | list, None]:
         """执行流式对话
 
         Args:
@@ -495,6 +617,7 @@ class LangChainAgent:
             str: 消息内容块
             int: token 统计
             Dict: 深度思考内容 {"type": "reasoning", "content": "..."}
+            list: 节点执行记录 [{"node_type": ..., ...}]（最后 yield）
         """
         logger.info("=" * 80)
         logger.info(" chat_stream 方法开始执行")
@@ -502,6 +625,11 @@ class LangChainAgent:
         logger.info(f"  Has tools: {bool(self.tools)}")
         logger.info(f"  Tool count: {len(self.tools) if self.tools else 0}")
         logger.info("=" * 80)
+
+        # 收集节点执行记录
+        node_executions: List[Dict[str, Any]] = []
+        _tool_stack: List[Dict[str, Any]] = []
+
         try:
             # 准备消息列表（支持多模态）
             messages = self._prepare_messages(message, history, context, files)
@@ -603,11 +731,72 @@ class LangChainAgent:
                                 full_content += chunk
                                 yield chunk
 
-                    # 记录工具调用（可选）
+                    # 记录工具调用
                     elif kind == "on_tool_start":
-                        logger.debug(f"工具调用开始: {event.get('name')}")
+                        tool_name = event.get("name", "unknown")
+                        tool_input = event.get("data", {}).get("input")
+                        step_id = str(_uuid.uuid4())
+                        tool_meta = self._tool_meta_map.get(tool_name, {})
+                        node = {
+                            "step_id": step_id,
+                            "node_type": "tool",
+                            "node_name": tool_name,
+                            "status": "running",
+                            "input": self._truncate_data(tool_input),
+                            "output": None,
+                            "elapsed_time": 0,
+                            "started_at": time.time(),
+                            "error": None,
+                            "meta": tool_meta if tool_meta else None,
+                        }
+                        _tool_stack.append(node)
+                        node_executions.append(node)
+                        logger.debug(f"工具调用开始: {tool_name}")
+                        # 实时推送工具调用开始事件
+                        yield {"type": "tool_start", "step_id": step_id, "name": tool_name, "input": self._truncate_data(tool_input), "meta": tool_meta if tool_meta else None}
                     elif kind == "on_tool_end":
-                        logger.debug(f"工具调用结束: {event.get('name')}")
+                        tool_output = event.get("data", {}).get("output")
+                        tool_name = event.get("name", "unknown")
+                        matched_node = None
+                        if _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        matched_step_id = matched_node.get("step_id") if matched_node else None
+                        if matched_node:
+                            matched_node["status"] = "completed"
+                            matched_node["output"] = self._truncate_data(tool_output)
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+                            # 提取工具的额外来源信息
+                            self._extract_tool_sources(tool_name, matched_node)
+                        logger.debug(f"工具调用结束: {tool_name}")
+                        # 实时推送工具调用结束事件（含更新后的 meta）
+                        yield {"type": "tool_end", "step_id": matched_step_id, "name": tool_name, "output": self._truncate_data(tool_output), "meta": matched_node.get("meta") if matched_node else None}
+                    elif kind == "on_tool_error":
+                        error_msg = str(event.get("data", {}).get("error", ""))
+                        tool_name = event.get("name", "unknown")
+                        matched_node = None
+                        if _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        matched_step_id = matched_node.get("step_id") if matched_node else None
+                        if matched_node:
+                            matched_node["status"] = "failed"
+                            matched_node["error"] = error_msg[:500]
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+                        # 实时推送工具调用失败事件
+                        yield {"type": "tool_error", "step_id": matched_step_id, "name": tool_name, "error": error_msg[:500]}
 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
                 # 统计token消耗
@@ -619,12 +808,32 @@ class LangChainAgent:
                         yield stream_total_tokens
                         break
 
+                # yield 节点执行记录（清理 started_at 并确保状态）
+                for node in node_executions:
+                    node.pop("started_at", None)
+                    if node.get("status") == "running":
+                        node["status"] = "completed"
+                if node_executions:
+                    yield {"type": "node_executions", "data": node_executions}
+
             except GraphRecursionError:
                 logger.warning(
                     f"Agent 达到最大迭代次数限制 ({self.max_iterations})，模型可能不支持正确的工具调用停止判断"
                 )
                 if not full_content:
                     yield "抱歉，我在处理您的请求时遇到了问题（已达最大处理步骤限制）。请尝试简化问题或更换模型后重试。"
+                # 标记未完成的工具为失败
+                for node in _tool_stack:
+                    node["status"] = "failed"
+                    node["error"] = "达到最大迭代次数限制"
+                    node["elapsed_time"] = round(
+                        (time.time() - node.get("started_at", time.time())) * 1000, 2
+                    )
+                _tool_stack.clear()
+                for node in node_executions:
+                    node.pop("started_at", None)
+                if node_executions:
+                    yield {"type": "node_executions", "data": node_executions}
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
                 raise

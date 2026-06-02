@@ -17,6 +17,7 @@ from app.core.logging_config import get_logger
 from app.models.app_model import App
 from app.models.end_user_model import EndUser
 from app.schemas.memory_config_schema import ConfigurationError
+from app.schemas.memory_agent_schema import WriteMemoryRequest
 from app.services.memory_agent_service import MemoryAgentService
 
 logger = get_logger(__name__)
@@ -183,7 +184,8 @@ class MemoryAPIService:
                 "message": messages,
                 "config_id": config_id,
                 "storage_type": storage_type,
-                "user_rag_memory_id": user_rag_memory_id or ""
+                "user_rag_memory_id": user_rag_memory_id or "",
+                "workspace_id": str(workspace_id),
             }
         )
 
@@ -291,12 +293,14 @@ class MemoryAPIService:
         try:
             messages = message if isinstance(message, list) else [{"role": "user", "content": message}]
             result = await MemoryAgentService().write_memory(
-                end_user_id=end_user_id,
-                messages=messages,
-                config_id=config_id,
-                db=self.db,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id or "",
+                WriteMemoryRequest(
+                    end_user_id=end_user_id,
+                    messages=messages,
+                    config_id=config_id,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id or "",
+                ),
+                self.db,
             )
 
             logger.info(f"Memory write (sync) successful for end_user: {end_user_id}")

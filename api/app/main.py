@@ -1,5 +1,9 @@
 import os
 import subprocess
+
+# 必须在导入任何使用 DashScope SDK 的模块之前应用补丁
+import app.utils.dashscope_patch  # noqa: F401
+
 from app.repositories.neo4j.create_indexes import create_all_indexes
 from contextlib import asynccontextmanager
 
@@ -12,6 +16,9 @@ from fastapi.responses import JSONResponse
 from app.controllers import manager_router
 # 服务端 API (API Key 认证)
 from app.controllers.service import service_router
+# MCP
+from app.controllers.service.mcp_memory import mcp_app
+from app.controllers.service.mcp_auth_middleware import MCPAuthMiddleware
 from app.core.config import settings
 from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
@@ -65,8 +72,8 @@ async def lifespan(app: FastAPI):
     logger.info("All neo4j indexes and constraints created successfully!")
     logger.info("应用程序启动完成")
 
-
-    yield
+    async with mcp_app.lifespan(app):
+        yield
     # 应用关闭事件
     logger.info("应用程序正在关闭")
 
@@ -100,6 +107,9 @@ app.add_middleware(
 from app.i18n.middleware import LanguageMiddleware
 app.add_middleware(LanguageMiddleware)
 
+# MCP API Key 鉴权中间件（仅拦截 /mcp/* 路径）
+app.add_middleware(MCPAuthMiddleware)
+
 logger.info("FastAPI应用程序启动")
 
 
@@ -121,6 +131,9 @@ app.include_router(manager_router, prefix="/api")
 
 # 服务端 API (API Key 认证)
 app.include_router(service_router, prefix="/v1")
+
+# MCP
+app.mount("/v1/mcp", mcp_app)
 
 logger.info("所有路由已注册完成")
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 18:13:22
+ * @Last Modified time: 2026-05-29 19:51:55
  */
 /**
  * Workflow Chat Component
@@ -23,7 +23,8 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App, Flex } from 'antd'
+import { App, Flex, Button } from 'antd'
+import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
@@ -42,14 +43,16 @@ import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { replaceVariables } from '@/views/ApplicationConfig/Agent';
 import { useWorkflowStore } from '@/store/workflow';
+import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfigModal'
+import type { VariableConfigModalRef } from '@/views/Workflow/types'
+import type { Application } from '@/views/ApplicationManagement/types'
 
-const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({ // eslint-disable-line
-  appId, graphRef, features
+const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type']; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm; }>(({ // eslint-disable-line
+  appId, graphRef, features, appType
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const { setChatHistory } = useWorkflowStore()
-  const conversationIdRef = useRef<string>('draft')
   const toolbarRef = useRef<ChatToolbarRef>(null)
   const abortRef = useRef<(() => void) | null>(null)
   const [toolbarReady, setToolbarReady] = useState(false)
@@ -65,8 +68,9 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
-
-  console.log('abortRef', abortRef, chatList)
+  const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
+  const [executionId, setExecutionId] = useState<string | null>(null)
+  const executionIdRef = useRef<string>('draft')
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -87,10 +91,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }
 
   useEffect(() => {
-    if (open && toolbarReady) {
+    if (open && (toolbarReady || appType === 'pure_workflow')) {
       getVariables()
     }
-  }, [open, toolbarReady])
+  }, [open, toolbarReady, appType])
   /**
    * Extracts variables from the workflow's start node and merges with previous values
    */
@@ -119,14 +123,21 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    * Closes the drawer and resets all state
    */
   const handleClose = () => {
+    setChatHistory(executionIdRef.current, chatList.map((item: ChatItem) => ({
+      ...item,
+      subContent: item.subContent?.map(sub => ({
+        ...sub,
+        status: sub.status === 'running' ? undefined : sub.status
+      }))
+    })))
     abortRef.current?.()
     abortRef.current = null;
     setOpen(false)
     setToolbarReady(false)
     setChatList([])
     setVariables([])
-    setConversationId(null)
-    conversationIdRef.current = 'draft'
+    setExecutionId(null)
+    executionIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     toolbarRef.current?.setVariables([])
@@ -185,8 +196,9 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
+        const { content, execution_id, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
           content: string;
+          execution_id: string | null;
           conversation_id: string | null;
           cycle_id: string;
           cycle_idx: number;
@@ -237,6 +249,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                 if (filterIndex > -1) {
                   newSubContent[filterIndex] = {
                     ...newSubContent[filterIndex],
+                    execution_id,
                     node_id: node_id,
                     node_name: name,
                     node_type: type,
@@ -246,6 +259,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                   }
                 } else {
                   newSubContent.push({
+                    execution_id,
                     id: node_id,
                     node_id: node_id,
                     node_name: name,
@@ -358,8 +372,11 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         }
 
         if (conversation_id && conversationId !== conversation_id) {
-          conversationIdRef.current = conversation_id
           setConversationId(conversation_id)
+        }
+        if (execution_id && executionId !== execution_id) {
+          executionIdRef.current = execution_id
+          setExecutionId(execution_id)
         }
       })
     }
@@ -384,23 +401,34 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         }
       })
     }
-    setChatList(prev => [
-      ...prev,
-      {
-        role: 'user',
-        content: message,
-        created_at: Date.now(),
-        meta_data: {
-          files
+    if (appType === 'pure_workflow') {
+      setChatList([
+        {
+          role: 'assistant',
+          content: '',
+          created_at: Date.now(),
+          subContent: [],
+        }
+      ])
+    } else {
+      setChatList(prev => [
+        ...prev,
+        {
+          role: 'user',
+          content: message,
+          created_at: Date.now(),
+          meta_data: {
+            files
+          },
         },
-      },
-      {
-        role: 'assistant',
-        content: '',
-        created_at: Date.now(),
-        subContent: [],
-      }
-    ])
+        {
+          role: 'assistant',
+          content: '',
+          created_at: Date.now(),
+          subContent: [],
+        }
+      ])
+    }
     setLoading(true)
     setStreamLoading(true)
     draftRun(appId, data, handleStreamMessage, abort => { abortRef.current = abort })
@@ -456,8 +484,14 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }, [chatList.length, features?.opening_statement, variables])
 
   useEffect(() => {
-    setChatHistory(conversationIdRef.current, chatList)
+    if (chatList.length < 1) return
+    setChatHistory(executionIdRef.current, chatList)
   }, [chatList])
+
+  // True when any required variable is missing a value, used to highlight the config button
+  const isNeedVariableConfig = variables?.some(
+    vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === '')
+  )
 
   return (
     <RbDrawer
@@ -478,30 +512,60 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         streamLoading={streamLoading}
         labelPosition="bottom"
         labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-        errorDesc={t('application.ReplyException')}
+        // errorDesc={t('application.ReplyException')}
         renderRuntime={(item, index) => {
-          return <Runtime item={item} index={index} />
+          return <Runtime item={item} index={index} source={appType as string} />
         }}
         onSend={handleSend}
       />
-      <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
-        <ChatInput
-          message={message}
-          className="rb:relative!"
-          loading={loading}
-          fileChange={updateFileList}
-          fileList={fileList}
-          onSend={handleSend}
-          onChange={(msg) => setMessage(msg)}
-        >
-          <ChatToolbar
-            ref={toolbarCallbackRef}
-            features={features as FeaturesConfigForm}
-            onFilesChange={setFileList}
-            onVariablesChange={setVariables}
-          />
-        </ChatInput>
-      </Flex>
+
+      {appType === 'workflow' &&
+        <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
+          <ChatInput
+            message={message}
+            className="rb:relative!"
+            loading={loading}
+            fileChange={updateFileList}
+            fileList={fileList}
+            onSend={handleSend}
+            onChange={(msg) => setMessage(msg)}
+          >
+            <ChatToolbar
+              ref={toolbarCallbackRef}
+              features={features as FeaturesConfigForm}
+              onFilesChange={setFileList}
+              onVariablesChange={setVariables}
+            />
+          </ChatInput>
+        </Flex>
+      }
+      {appType === 'pure_workflow' &&
+        <Flex align="center" justify="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
+          {variables.length > 0 &&
+            <Button
+              danger={isNeedVariableConfig}
+              icon={<div className={clsx("rb:size-4 rb:bg-cover", {
+                "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
+                "rb:bg-[url('@/assets/images/conversation/variables.svg')]": !isNeedVariableConfig
+              })} />}
+              onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
+            >
+              {t('memoryConversation.variableConfig')}
+            </Button>
+          }
+          <Button
+            type="primary"
+            onClick={() => handleSend()}
+            loading={loading}
+          >
+            {t('workflow.startRun')}
+          </Button>
+        </Flex>
+      }
+      <VariableConfigModal
+        ref={variableConfigModalRef}
+        refresh={setVariables}
+      />
     </RbDrawer>
   )
 })

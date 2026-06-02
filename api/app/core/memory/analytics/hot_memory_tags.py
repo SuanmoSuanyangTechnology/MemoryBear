@@ -186,7 +186,7 @@ async def get_raw_tags_from_db(
     if by_user:
         query = (
             "MATCH (e:ExtractedEntity) "
-            "WHERE e.user_id = $id AND e.entity_type <> '人物' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
+            "WHERE e.user_id = $id AND e.entity_type <> '生命体' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
             "RETURN e.name AS name, count(e) AS frequency "
             "ORDER BY frequency DESC "
             "LIMIT $limit"
@@ -194,7 +194,7 @@ async def get_raw_tags_from_db(
     else:
         query = (
             "MATCH (e:ExtractedEntity) "
-            "WHERE e.end_user_id = $id AND e.entity_type <> '人物' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
+            "WHERE e.end_user_id = $id AND e.entity_type <> '生命体' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
             "RETURN e.name AS name, count(e) AS frequency "
             "ORDER BY frequency DESC "
             "LIMIT $limit"
@@ -208,6 +208,46 @@ async def get_raw_tags_from_db(
         names_to_exclude=names_to_exclude
     )
     
+    return [(record["name"], record["frequency"]) for record in results]
+
+async def get_raw_tags_batch(
+    connector: Neo4jConnector,
+    end_user_ids: List[str],
+    limit: int
+) -> List[Tuple[str, int]]:
+    """
+    批量查询多个用户的实体标签频率（单次 Cypher 查询替代 N 次循环）。
+    
+    在数据库侧完成聚合和排序，减少网络往返和应用层计算。
+
+    Args:
+        connector: Neo4j连接器实例
+        end_user_ids: end_user_id 列表
+        limit: 返回的标签数量限制
+        
+    Returns:
+        List[Tuple[str, int]]: 标签名称和频率的元组列表，按频率降序
+    """
+    names_to_exclude = ['AI', 'Caroline', 'Melanie', 'Jon', 'Gina', '用户', 'AI助手', 'John', 'Maria']
+
+    query = (
+        "MATCH (e:ExtractedEntity) "
+        "WHERE e.end_user_id IN $ids "
+        "AND e.entity_type <> '生命体' "
+        "AND e.name IS NOT NULL "
+        "AND NOT e.name IN $names_to_exclude "
+        "RETURN e.name AS name, count(e) AS frequency "
+        "ORDER BY frequency DESC "
+        "LIMIT $limit"
+    )
+
+    results = await connector.execute_query(
+        query,
+        ids=end_user_ids,
+        limit=limit,
+        names_to_exclude=names_to_exclude
+    )
+
     return [(record["name"], record["frequency"]) for record in results]
 
 async def get_hot_memory_tags(end_user_id: str, limit: int = 10, by_user: bool = False) -> List[Tuple[str, int]]:

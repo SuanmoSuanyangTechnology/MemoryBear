@@ -174,7 +174,7 @@ const ArrayFileSubConditions: FC<ArrayFileSubConditionsProps> = ({ conditionFiel
   }, [subValues])
 
   return (
-    <div className="rb:bg-white rb:rounded-lg rb:p-1 rb:w-62">
+    <div className="rb:bg-white rb:rounded-lg rb:p-1 rb:w-60">
       <Form.List name={[conditionFieldName, 'sub_variable_condition', 'conditions']}>
         {(subFields, { add: addSub, remove: removeSub }) => {
           const subLogicalOperator = form.getFieldValue([name, caseIndex, 'expressions', conditionIndex, 'sub_variable_condition', 'logical_operator']) || 'and';
@@ -208,7 +208,7 @@ const ArrayFileSubConditions: FC<ArrayFileSubConditionsProps> = ({ conditionFiel
                         'rb:w-43.5': subFields.length > 1,
                         'rb:w-54.5': subFields.length === 1
                       })}>
-                        <Row className={clsx('rb:p-1!', { 'rb-border-b': !hideSubRight })}>
+                        <Row wrap={false} className={clsx('rb:p-1!', { 'rb-border-b': !hideSubRight })}>
                           <Col flex="100px">
                             <Form.Item name={[subField.name, 'key']} noStyle>
                               <Select
@@ -355,14 +355,13 @@ const CaseList: FC<CaseListProps> = ({
   // Update node ports based on case count changes (add/remove cases)
   const updateNodePorts = (caseCount: number, removedCaseIndex?: number) => {
     if (!selectedNode || !graphRef?.current) return;
-    
-    // Get current port count to determine if it's an add or remove operation
-    const currentPorts = selectedNode.getPorts().filter((port: any) => port.group === 'right');
-    const currentCaseCount = currentPorts.length - 1; // Exclude ELSE port
+    const graph = graphRef.current;
+
+    const currentRightPorts = selectedNode.getPorts().filter((port: any) => port.group === 'right');
+    const currentCaseCount = currentRightPorts.length - 1;
     const isAddingCase = removedCaseIndex === undefined && caseCount > currentCaseCount;
-    
-    // Save existing edge connections (including left-side port connections)
-    const existingEdges = graphRef.current.getEdges().filter((edge: any) => 
+
+    const existingEdges = graph.getEdges().filter((edge: any) =>
       edge.getSourceCellId() === selectedNode.id || edge.getTargetCellId() === selectedNode.id
     );
     const edgeConnections = existingEdges.map((edge: any) => ({
@@ -371,113 +370,70 @@ const CaseList: FC<CaseListProps> = ({
       targetCellId: edge.getTargetCellId(),
       targetPortId: edge.getTargetPortId(),
       sourceCellId: edge.getSourceCellId(),
-      isIncoming: edge.getTargetCellId() === selectedNode.id
+      isIncoming: edge.getTargetCellId() === selectedNode.id,
     }));
-    
-    // Remove all existing right-side ports
-    const existingPorts = selectedNode.getPorts();
-    existingPorts.forEach((port: any) => {
-      if (port.group === 'right') {
-        selectedNode.removePort(port.id);
+
+    const cases = form.getFieldValue(name) || [];
+    const leftPorts = selectedNode.getPorts().filter((p: any) => p.group !== 'right');
+    const newRightPorts = Array.from({ length: caseCount + 1 }, (_, i) => ({
+      id: `CASE${i + 1}`,
+      group: 'right',
+      args: { x: nodeWidth, y: getConditionNodeCasePortY(cases, i) },
+    }));
+
+    graph.startBatch('update-ports');
+
+    existingEdges.forEach((edge: any) => graph.removeCell(edge));
+    // Replace all ports in one prop call — produces a single cell:change:ports command
+    selectedNode.prop('ports/items', [...leftPorts, ...newRightPorts], { rewrite: true });
+    selectedNode.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(cases) });
+
+    edgeConnections.forEach(({sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
+      if (isIncoming) {
+        const sourceCell = graph.getCellById(sourceCellId);
+        if (sourceCell) {
+          graph.addEdge({
+            source: { cell: sourceCellId, port: sourcePortId },
+            target: { cell: selectedNode.id, port: targetPortId },
+            ...edgeAttrs
+          });
+          sourceCell.toFront();
+          bringLoopChildrenToFront(sourceCell);
+          selectedNode.toFront();
+          bringLoopChildrenToFront(selectedNode);
+        }
+        return;
+      }
+      const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
+      if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) return;
+      let newPortId = sourcePortId;
+
+      if (removedCaseIndex !== undefined) {
+        if (originalCaseNumber > removedCaseIndex + 1) {
+          newPortId = `CASE${originalCaseNumber - 1}`;
+        } else if (originalCaseNumber === currentCaseCount + 1) {
+          newPortId = `CASE${caseCount + 1}`;
+        }
+      } else if (isAddingCase && originalCaseNumber === currentCaseCount + 1) {
+        newPortId = `CASE${caseCount + 1}`;
+      }
+      if (newRightPorts.find((p) => p.id === newPortId)) {
+        const targetCell = graph.getCellById(targetCellId);
+        if (targetCell) {
+          graph.addEdge({
+            source: { cell: selectedNode.id, port: newPortId },
+            target: { cell: targetCellId, port: targetPortId },
+            ...edgeAttrs
+          });
+          selectedNode.toFront();
+          bringLoopChildrenToFront(selectedNode);
+          targetCell.toFront();
+          bringLoopChildrenToFront(targetCell);
+        }
       }
     });
 
-    const cases = form.getFieldValue(name) || [];
-    selectedNode.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(cases) });
-
-    // Add ELIF ports
-    for (let i = 0; i < caseCount; i++) {
-      selectedNode.addPort({
-        id: `CASE${i + 1}`,
-        group: 'right',
-        args: {
-          x: nodeWidth,
-          y: getConditionNodeCasePortY(cases, i),
-        },
-      });
-    }
-    
-    // Add ELSE port
-    selectedNode.addPort({
-      id: `CASE${caseCount + 1}`,
-      group: 'right',
-      args: {
-        x: nodeWidth,
-        y: getConditionNodeCasePortY(cases, caseCount),
-      },
-    });
-    
-    // Restore edge connections
-    setTimeout(() => {
-      edgeConnections.forEach(({ edge, sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
-        // If it's an incoming connection (left-side port), restore directly
-        if (isIncoming) {
-          const sourceCell = graphRef.current?.getCellById(sourceCellId);
-          if (sourceCell) {
-            graphRef.current?.addEdge({
-              source: { cell: sourceCellId, port: sourcePortId },
-              target: { cell: selectedNode.id, port: targetPortId },
-              ...edgeAttrs,
-            });
-          }
-          sourceCell.toFront()
-          selectedNode.toFront()
-          bringLoopChildrenToFront(sourceCell)
-          bringLoopChildrenToFront(selectedNode)
-          graphRef.current?.removeCell(edge);
-          return;
-        }
-        
-        // Handle right-side port connections
-        const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
-        
-        // If it's a remove operation and the port is being removed, delete the connection
-        if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) {
-          graphRef.current?.removeCell(edge);
-          return;
-        }
-        
-        let newPortId = sourcePortId;
-        
-        // If it's a remove operation, remap port IDs
-        if (removedCaseIndex !== undefined) {
-          if (originalCaseNumber > removedCaseIndex + 1) {
-            // Ports after the removed port, shift numbering forward
-            newPortId = `CASE${originalCaseNumber - 1}`;
-          }
-          // ELSE port always maps to the new ELSE port position
-          else if (originalCaseNumber === currentCaseCount + 1) {
-            newPortId = `CASE${caseCount + 1}`;
-          }
-        } else if (isAddingCase) {
-          // If it's an add operation, ELSE port needs to be remapped
-          if (originalCaseNumber === currentCaseCount + 1) {
-            newPortId = `CASE${caseCount + 1}`; // New ELSE port
-          }
-          // Newly added ports don't restore any connections
-        }
-        
-        const newPorts = selectedNode.getPorts();
-        const matchingPort = newPorts.find((port: any) => port.id === newPortId);
-        
-        if (matchingPort) {
-          const targetCell = graphRef.current?.getCellById(targetCellId);
-          if (targetCell) {
-            graphRef.current?.addEdge({
-              source: { cell: selectedNode.id, port: newPortId },
-              target: { cell: targetCellId, port: targetPortId },
-              ...edgeAttrs
-            });
-            selectedNode.toFront()
-            bringLoopChildrenToFront(selectedNode)
-            targetCell.toFront()
-            bringLoopChildrenToFront(targetCell)
-          }
-        }
-        
-        graphRef.current?.removeCell(edge);
-      });
-    }, 50);
+    graph.stopBatch('update-ports');
   };
 
   const handleChangeLogicalOperator = (index: number) => {
@@ -552,7 +508,7 @@ const CaseList: FC<CaseListProps> = ({
                   {(conditionFields, { add: addCondition, remove: removeCondition }) => {
                     const logicalOperator = form.getFieldValue(name)?.[caseIndex]?.logical_operator || 'and'
                     return (
-                      <Row className="rb:text-[12px] rb:mb-4!">
+                      <Row wrap={false} className="rb:text-[12px] rb:mb-4!">
                         <Col flex="44px">
                           <div className="rb:font-medium rb:leading-4.5">{caseIndex === 0 ? 'IF' : 'ELIF'}</div>
                           {caseFields.length > 1 && <div className="rb:text-[10px] rb:text-[#5B6167] rb:leading-2.5"> {`CASE ${caseIndex + 1}`}</div>}
@@ -593,7 +549,7 @@ const CaseList: FC<CaseListProps> = ({
                               return (
                                 <Flex key={conditionField.key} gap={4} align="start" className="rb:mb-2!">
                                   <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
-                                    <Row className={clsx("rb:px-1!", {
+                                    <Row wrap={false} className={clsx("rb:px-1!", {
                                       'rb-border-b': !hideRightField
                                     })}>
                                       <Col flex="144px">
@@ -702,7 +658,7 @@ const CaseList: FC<CaseListProps> = ({
                               )
                             })}
                           </div>
-                          <Row>
+                          <Row wrap={false}>
                             <Col flex="1">
                               <Button
                                 onClick={() => {

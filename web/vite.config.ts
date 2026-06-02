@@ -1,9 +1,45 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { existsSync } from 'fs'
 import AutoImport from 'unplugin-auto-import/vite'
 import tailwindcss from '@tailwindcss/vite'
 import svgr from 'vite-plugin-svgr';
+
+// 处理私有包的虚拟模块插件
+const virtualModulePlugin = () => ({
+  name: 'virtual-module-plugin',
+  enforce: 'pre',
+  resolveId(id: string) {
+    if (id === '@redbear/memory-brick') {
+      const packagePath = resolve(__dirname, 'node_modules/@redbear/memory-brick')
+
+      if (existsSync(packagePath)) {
+        // 存在时，使用实际的模块
+        const entryFile = resolve(__dirname, 'node_modules/@redbear/memory-brick/dist/index.js')
+        console.log('[virtual-module] resolveId:', id, '-> actual package')
+        return entryFile
+      } else {
+        // 不存在时，使用虚拟模块
+        console.log('[virtual-module] resolveId:', id, '-> virtual module')
+        return '\0@redbear/memory-brick'
+      }
+    }
+    return null
+  },
+  load(id: string) {
+    if (id === '\0@redbear/memory-brick') {
+      // 提供虚拟模块的默认导出
+      return `
+        const FallbackComponent = () => null;
+        export const BrainView = FallbackComponent;
+        export const Provider = FallbackComponent;
+        export default { BrainView, Provider };
+      `
+    }
+    return null
+  }
+})
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -27,6 +63,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    virtualModulePlugin(),
     tailwindcss(),
     react(),
     AutoImport({
@@ -44,6 +81,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      'x6-html-shape': resolve(__dirname, 'src/vendor/x6-html-shape/index.js'),
+      'x6-html-shape/dist/react': resolve(__dirname, 'src/vendor/x6-html-shape/react.js'),
+      'x6-html-shape/dist/utils.js': resolve(__dirname, 'src/vendor/x6-html-shape/utils.js'),
     },
   },
   base: './', // 使用相对路径，确保资源能正确加载

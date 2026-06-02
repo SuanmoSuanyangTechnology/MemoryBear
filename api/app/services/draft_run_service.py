@@ -26,9 +26,12 @@ from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
-from app.models import AgentConfig, ModelConfig
+from app.models import AgentConfig, ModelConfig, Message
+from app.models.models_model import ModelCapability, ModelType
+from app.models.agent_execution_model import AgentExecution
+from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
-from app.schemas.app_schema import FileInput, Citation, FileType
+from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.conversation_service import ConversationService
@@ -37,6 +40,8 @@ from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_service import ToolService
+from app.services.tool_orchestrator import ToolOrchestrator
+from app.services.annotation_service import AnnotationService
 
 logger = get_business_logger()
 
@@ -55,13 +60,19 @@ class LongTermMemoryInput(BaseModel):
     """长期记忆工具输入参数"""
     question: str = Field(
         description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
+    search_mode: str = Field(
+        description="'0':深度检索适用于涉及到复杂问题的检索,关系检索 "
+                    "'1':普通问题检索链路 "
+                    "'2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断"
+    )
 
 
 def create_long_term_memory_tool(
         memory_config: Dict[str, Any],
         end_user_id: str,
         storage_type: Optional[str] = None,
-        user_rag_memory_id: Optional[str] = None
+        user_rag_memory_id: Optional[str] = None,
+        memory_name: Optional[str] = None
 ):
     """创建记忆工具,
 
@@ -81,7 +92,7 @@ def create_long_term_memory_tool(
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
 
     @tool(args_schema=LongTermMemoryInput)
-    def long_term_memory(question: str) -> str:
+    def long_term_memory(question: str, search_mode: str) -> str:
         """
         从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
 
@@ -89,6 +100,7 @@ def create_long_term_memory_tool(
         - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
         - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
         - 需要基于历史上下文提供个性化建议
+        - 需要用户信息进行一些问题的推断
 
         **何时不使用此工具：**
         - 简单问候（如"你好"、"谢谢"、"再见"）
@@ -96,10 +108,11 @@ def create_long_term_memory_tool(
         - 用户已提供完整信息（如提供了文本、图片、文档等内容）
         - 创作性任务（如"写诗"、"编故事"、"创作谜语"）
 
-        **重要：如果用户的问题可以直接回答，不要调用此工具。只在确实需要历史信息时才使用。**
-
         Args:
             question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词，第三人称描述的偏好、行为通常指用户本人，比如（我，本人，在下，自己，咱，鄙人，吴，余）通指用户）
+            search_mode: '0':深度检索适用于涉及到复杂问题的检索,关系检索
+                        '1':普通问题检索链路
+                        '2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断
 
         Returns:
             检索到的历史记忆内容
@@ -108,7 +121,8 @@ def create_long_term_memory_tool(
         try:
             with get_db_context() as db:
                 memory_service = MemoryService(db, config_id, end_user_id)
-                search_result = asyncio.run(memory_service.read(question, SearchStrategy.QUICK))
+                # TODO: Historical Messages -> Used to refer to coreference resolution
+                search_result = asyncio.run(memory_service.read(question, search_mode))
 
             #     memory_content = asyncio.run(
             #         MemoryAgentService().read_memory(
@@ -146,6 +160,11 @@ def create_long_term_memory_tool(
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"记忆检索失败: {str(e)}"
 
+    # 挂载工具元数据，供 Agent 执行记录使用
+    long_term_memory._tool_meta = {
+        "tool_type": "long_term_memory",
+        "sources": [{"id": config_id, "name": memory_name or config_id}],
+    }
     return long_term_memory
 
 
@@ -192,7 +211,7 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
-def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None):
+def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None, kb_names: Optional[List[Dict]] = None):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
     Args:
@@ -200,11 +219,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
         kb_ids: 知识库ID列表
         user_id: 用户ID
         citations_collector: 用于收集引用信息的列表（由外部传入，tool 执行时填充）
-            列表元素类型为 Citation，包含字段：
-            - document_id: 文档唯一标识
-            - file_name: 文件名
-            - knowledge_id: 知识库 ID
-            - score: 检索相关性得分
+        kb_names: 知识库名称列表 [{"id": "...", "name": "..."}]
 
     Returns:
         检索到的相关知识内容
@@ -242,24 +257,47 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
                     seen_doc_ids = {c.get("document_id") for c in citations_collector}
                     for chunk in retrieve_chunks_result:
                         meta = chunk.metadata or {}
-                        doc_id = meta.get("document_id") or meta.get("doc_id")
-                        if doc_id and doc_id not in seen_doc_ids:
-                            seen_doc_ids.add(doc_id)
+                        document_id = meta.get("document_id")
+                        if document_id and document_id not in seen_doc_ids:
+                            seen_doc_ids.add(document_id)
                             citations_collector.append(Citation(
-                                document_id=doc_id,
+                                document_id=str(document_id),
+                                doc_id=meta.get("doc_id", ""),
                                 file_name=meta.get("file_name", ""),
                                 knowledge_id=str(meta.get("knowledge_id", "")),
                                 score=meta.get("score", 0)
                             ))
 
+                # 收集每条结果的来源知识库信息（用于 agent_executions 记录）
+                # 构建知识库 ID → 名称映射
+                kb_name_map = {item["id"]: item["name"] for item in (kb_names or [])}
+                sources = []
+                for chunk in retrieve_chunks_result:
+                    meta = chunk.metadata or {}
+                    kid = str(meta.get("knowledge_id", ""))
+                    sources.append({
+                        "knowledge_id": kid,
+                        "knowledge_name": kb_name_map.get(kid, kid),
+                        "file_name": meta.get("file_name", ""),
+                        "content": chunk.page_content[:500] if chunk.page_content else "",
+                    })
+                # 把来源信息挂到函数属性上，供外部读取
+                knowledge_retrieval_tool._last_sources = sources
+
                 return f"检索到以下相关信息：\n\n{context}"
             else:
+                knowledge_retrieval_tool._last_sources = []
                 logger.warning("知识库检索未找到结果")
                 return "未找到相关信息"
         except Exception as e:
             logger.error("知识库检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"检索失败: {str(e)}"
 
+    # 挂载工具元数据，供 Agent 执行记录使用
+    knowledge_retrieval_tool._tool_meta = {
+        "tool_type": "knowledge_retrieval",
+        "sources": [{"id": item["id"], "name": item["name"], "knowledge_name": item["name"]} for item in (kb_names or [])],
+    }
     return knowledge_retrieval_tool
 
 
@@ -274,6 +312,66 @@ class AgentRunService:
         """
         self.db = db
 
+    def _check_annotation_match(self, app_id: uuid.UUID, message: str,
+                              source: str = "") -> Optional[dict]:
+        """检查是否命中标注
+
+        Args:
+            app_id: 应用ID
+            message: 用户消息
+            source: 来源（用于记录命中来源）
+
+        Returns:
+            命中返回标注结果字典，未命中返回None
+        """
+        try:
+            service = AnnotationService(self.db)
+            setting = service.get_setting(app_id)
+            if not setting or not setting.enabled:
+                return None
+            if not setting.model_config_id:
+                return None
+
+            annotations = service.repo.get_all_active_by_app(app_id)
+            if not annotations:
+                return None
+
+            from app.models.models_model import ModelConfig
+            from app.services.model_service import ModelApiKeyService
+            model_cfg = self.db.query(ModelConfig).filter(
+                ModelConfig.id == setting.model_config_id
+            ).first()
+            if not model_cfg:
+                return None
+
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            if not api_key_obj:
+                return None
+
+            from app.core.models.base import RedBearModelConfig
+            config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            result = service.find_best_match(
+                query=message,
+                annotations=annotations,
+                threshold=setting.similarity_threshold,
+                model_config=config,
+                app_id=app_id,
+                source=source,
+            )
+
+            return result
+        except Exception as e:
+            logger.warning(f"标注匹配检查失败: {e}")
+            return None
+
     @staticmethod
     def prepare_variables(
             input_vars: dict | None,
@@ -285,7 +383,7 @@ class AgentRunService:
                 raise ValueError(f"The required parameter '{variable.get('name')}' was not provided")
         return input_vars
 
-    def load_tools_config(self, tools_config, web_search, tenant_id) -> list:
+    def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """加载工具配置"""
         tools = []
         if web_search:
@@ -301,6 +399,7 @@ class AgentRunService:
                     # 根据工具名称查找工具实例
                     tool_instance = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                     if tool_instance:
+                        tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
                         # 转换为LangChain工具
                         langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                         tools.append(langchain_tool)
@@ -315,7 +414,10 @@ class AgentRunService:
     def load_skill_config(
             self,
             skills_config: dict | None,
-            message: str, tenant_id
+            message: str,
+            tenant_id,
+            user_id=None,
+            workspace_id=None,
     ) -> tuple[list, str]:
         if not skills_config:
             return [], ""
@@ -325,7 +427,24 @@ class AgentRunService:
         skill_enable = skills_config.get("enabled", False)
         if skill_enable:
             middleware = AgentMiddleware(skills=skills_config)
-            skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+            skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(
+                self.db,
+                tenant_id,
+                runtime_context={"user_id": user_id, "workspace_id": workspace_id},
+            )
+
+            # 给技能工具挂载元数据（技能名称）
+            for t in skill_tools:
+                t_name = getattr(t, "name", None)
+                if t_name and t_name in tool_to_skill_map:
+                    skill_id = tool_to_skill_map[t_name]
+                    skill_cfg = skill_configs.get(skill_id, {})
+                    skill_name = skill_cfg.get("name", t_name)
+                    t._tool_meta = {
+                        "tool_type": "skill",
+                        "sources": [{"id": skill_id, "name": skill_name}],
+                    }
+
             tools.extend(skill_tools)
             logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
 
@@ -353,9 +472,37 @@ class AgentRunService:
         knowledge_bases = knowledge_retrieval_config.get("knowledge_bases", [])
         kb_ids = [kb["kb_id"] for kb in knowledge_bases if kb.get("kb_id")]
         if kb_ids:
+            # 查询知识库名称
+            kb_names = []
+            try:
+                from app.models import Knowledge
+                rows = self.db.query(Knowledge.id, Knowledge.name).filter(
+                    Knowledge.id.in_(kb_ids)
+                ).all()
+                kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
+
+                # 对于共享知识库，chunk元数据中的knowledge_id是source_kb_id，
+                # 需要将source_kb_id也映射到名称，否则会显示为ID
+                from app.models.knowledgeshare_model import KnowledgeShare
+                target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
+                share_rows = self.db.query(
+                    KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id
+                ).filter(
+                    KnowledgeShare.target_kb_id.in_(target_kb_ids)
+                ).all()
+                if share_rows:
+                    id_to_name = {str(r.id): r.name for r in rows}
+                    for sr in share_rows:
+                        source_name = id_to_name.get(str(sr.target_kb_id))
+                        if source_name:
+                            kb_names.append({"id": str(sr.source_kb_id), "name": source_name})
+            except Exception:
+                kb_names = [{"id": kid, "name": kid} for kid in kb_ids]
+
             kb_tool = create_knowledge_retrieval_tool(
                 knowledge_retrieval_config, kb_ids, user_id,
-                citations_collector=citations_collector
+                citations_collector=citations_collector,
+                kb_names=kb_names
             )
             tools.append(kb_tool)
             logger.debug(
@@ -378,9 +525,24 @@ class AgentRunService:
         tools = []
         if memory_config.get("enabled"):
             if user_id:
+                # 查询记忆配置名称
+                config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
+                memory_name = None
+                if config_id:
+                    try:
+                        from app.models import MemoryConfig
+                        mc = self.db.query(MemoryConfig.config_name).filter(
+                            MemoryConfig.config_id == config_id
+                        ).first()
+                        memory_name = mc.config_name if mc else None
+                    except Exception:
+                        pass
+
                 # 创建长期记忆工具
-                memory_tool = create_long_term_memory_tool(memory_config, user_id, storage_type,
-                                                           user_rag_memory_id)
+                memory_tool = create_long_term_memory_tool(
+                    memory_config, user_id, storage_type, user_rag_memory_id,
+                    memory_name=memory_name
+                )
                 tools.append(memory_tool)
 
                 logger.debug(
@@ -504,7 +666,10 @@ class AgentRunService:
             web_search: bool = True,
             memory: bool = True,
             sub_agent: bool = False,
-            files: Optional[List[FileInput]] = None  # 新增：多模态文件
+            files: Optional[List[FileInput]] = None,
+            source: str = "",
+            history: Optional[List[Dict[str, str]]] = None,
+            skip_save: bool = False,
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -522,6 +687,8 @@ class AgentRunService:
             memory: 是否启用长期记忆（默认True）
             sub_agent: 是否为子代理调用（默认False）
             files: 多模态文件列表（可选）
+            history: 外部传入的历史消息（可选，用于重新生成场景）
+            skip_save: 是否跳过保存消息（用于重新生成场景）
 
         Returns:
             Dict: 包含 AI 回复和元数据的字典
@@ -580,8 +747,8 @@ class AgentRunService:
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             # 从配置中获取启用的工具
-            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id))
-            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id)
+            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
+            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
@@ -609,6 +776,44 @@ class AgentRunService:
                 suggested_questions=suggested_questions
             )
 
+            # 检查标注命中
+            if not sub_agent:
+                annotation_match = self._check_annotation_match(agent_config.app_id, message,
+                                                                source=source)
+                if annotation_match:
+                    elapsed_time = time.time() - start_time
+                    conv_uuid = uuid.UUID(conversation_id)
+                    from app.services.conversation_service import ConversationService
+                    conv_service = ConversationService(self.db)
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="user",
+                        content=message,
+                        meta_data={"files": []}
+                    )
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content=annotation_match["answer"],
+                        meta_data={"usage": {}}
+                    )
+                    return {
+                        "message": annotation_match["answer"],
+                        "reasoning_content": None,
+                        "conversation_id": conversation_id,
+                        "usage": None,
+                        "elapsed_time": elapsed_time,
+                        "suggested_questions": [],
+                        "citations": [],
+                        "audio_url": None,
+                        "audio_status": None,
+                        "annotation_hit": {
+                            "annotation_id": str(annotation_match["annotation_id"]),
+                            "similarity": annotation_match["similarity"],
+                            "question": annotation_match["question"],
+                        }
+                    }
+
             model_info = ModelInfo(
                 model_name=api_key_config["model_name"],
                 provider=api_key_config["provider"],
@@ -620,12 +825,15 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息（包含开场白）
-            history = await self._load_conversation_history(
-                conversation_id=conversation_id,
-                max_history=10,
-                current_provider=api_key_config.get("provider"),
-                current_is_omni=api_key_config.get("is_omni", False)
-            )
+            if history is None:
+                # 没有外部传入的历史，从数据库加载
+                history = await self._load_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=10,
+                    current_provider=api_key_config.get("provider"),
+                    current_is_omni=api_key_config.get("is_omni", False)
+                )
+            # 否则使用外部传入的历史（用于重新生成场景）
 
             # 6. 处理多模态文件
             processed_files = None
@@ -645,13 +853,34 @@ class AgentRunService:
                 capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
-                    and "vision" in capability
+                    and ModelCapability.VISION in capability
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
+                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
+                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+            # 7. 根据模型能力选择执行路径
+            capability = api_key_config.get("capability", [])
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            orchestrator_node_executions = []
+            if not use_agent_mode and tools:
+                # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
+                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    message=message,
+                    history=history,
+                    api_key_config=api_key_config,
+                    model_config=model_config,
+                    effective_params=effective_params,
+                    processed_files=processed_files,
+                )
+                tools = []
 
             agent = LangChainAgent(
                 model_name=api_key_config["model_name"],
@@ -666,10 +895,9 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=api_key_config.get("capability", []),
+                capability=capability,
             )
 
-            # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
                     t.tool_instance.set_runtime_context(
@@ -677,29 +905,48 @@ class AgentRunService:
                         conversation_id=str(conversation_id) if conversation_id else None,
                         uploaded_files=processed_files or []
                     )
-            # 7. 知识库检索
             context = None
 
             logger.debug(
                 "准备调用 LangChain Agent",
                 extra={
                     "model": api_key_config["model_name"],
+                    "use_agent_mode": use_agent_mode,
                     "has_history": bool(history),
-                    "has_context": bool(context),
                     "has_files": bool(processed_files)
                 }
             )
 
             memory_config_ = agent_config.memory
-            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
             config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
+
+            # 创建 Agent 执行记录（running 状态）
+            if not sub_agent and not skip_save:
+                agent_exec_repo = AgentExecutionRepository(self.db)
+                agent_execution = AgentExecution(
+                    app_id=agent_config.app_id,
+                    conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
+                    message_id=None,
+                    agent_config_id=agent_config.id,
+                    release_id=None,
+                    triggered_by=None,
+                    steps=[],
+                    status="running",
+                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    meta_data={
+                        "model": api_key_config["model_name"],
+                        "provider": api_key_config.get("provider"),
+                    },
+                )
+                agent_exec_repo.create(agent_execution)
+                self.db.commit()
 
             # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
                 message=message,
                 history=history,
                 context=context,
-                files=processed_files  # 传递处理后的文件
+                files=processed_files
             )
 
             elapsed_time = time.time() - start_time
@@ -715,9 +962,15 @@ class AgentRunService:
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
+            # 生成建议问题（在保存消息前生成，以便存入 meta_data）
+            suggested_questions = (await self._generate_suggested_questions(
+                features_config, result["content"], api_key_config, effective_params
+            )) if not sub_agent else []
+
             # 10. 保存会话消息
+            message_id = None
             if not sub_agent:
-                await self._save_conversation_message(
+                message_id = await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=result["content"],
@@ -729,7 +982,8 @@ class AgentRunService:
                             "completion_tokens": 0,
                             "total_tokens": 0
                         }),
-                        "reasoning_content": result.get("reasoning_content")
+                        "reasoning_content": result.get("reasoning_content"),
+                        "suggested_questions": suggested_questions
                     },
                     files=files,
                     processed_files=processed_files,
@@ -739,8 +993,20 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
 
+            # 11. 更新 Agent 执行记录为 completed
+            node_executions = result.get("node_executions", [])
+            if not sub_agent:
+                agent_exec_repo.update_completed(
+                    execution_id=agent_execution.id,
+                    steps=orchestrator_node_executions + node_executions,
+                    status="completed",
+                    elapsed_time=elapsed_time,
+                    token_usage=result.get("usage"),
+                )
+
             response = {
                 "message": result["content"],
+                "message_id": message_id,
                 "reasoning_content": result.get("reasoning_content"),
                 "conversation_id": conversation_id,
                 "usage": result.get("usage", {
@@ -749,9 +1015,7 @@ class AgentRunService:
                     "total_tokens": 0
                 }),
                 "elapsed_time": elapsed_time,
-                "suggested_questions": await self._generate_suggested_questions(
-                    features_config, result["content"], api_key_config, effective_params
-                ) if not sub_agent else [],
+                "suggested_questions": suggested_questions,
                 "citations": filtered_citations,
                 "audio_url": audio_url,
                 "audio_status": "pending" if audio_url else None
@@ -771,6 +1035,19 @@ class AgentRunService:
 
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
+            # 更新 Agent 执行记录为 failed
+            if not sub_agent:
+                try:
+                    elapsed_time = time.time() - start_time
+                    agent_exec_repo.update_completed(
+                        execution_id=agent_execution.id,
+                        steps=[],
+                        status="failed",
+                        elapsed_time=elapsed_time,
+                        error_message=str(e)[:2000],
+                    )
+                except Exception:
+                    pass
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
     async def run_stream(
@@ -785,10 +1062,13 @@ class AgentRunService:
             variables: Optional[Dict[str, Any]] = None,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            web_search: bool = True,  # 布尔类型默认值
-            memory: bool = True,  # 布尔类型默认值
-            sub_agent: bool = False,  # 是否是作为子Agent运行
-            files: Optional[List[FileInput]] = None  # 新增：多模态文件
+            web_search: bool = True,
+            memory: bool = True,
+            sub_agent: bool = False,
+            files: Optional[List[FileInput]] = None,
+            source: str = "",
+            history: Optional[List[Dict[str, str]]] = None,
+            skip_save: bool = False,
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -801,6 +1081,8 @@ class AgentRunService:
             conversation_id: 会话ID（用于多轮对话）
             user_id: 用户ID
             variables: 自定义变量参数值
+            history: 外部传入的历史消息（可选，用于重新生成场景）
+            skip_save: 是否跳过保存消息
 
         Yields:
             str: SSE 格式的事件数据
@@ -853,8 +1135,8 @@ class AgentRunService:
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             # 从配置中获取启用的工具
-            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id))
-            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id)
+            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
+            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
@@ -883,6 +1165,51 @@ class AgentRunService:
                 suggested_questions=suggested_questions
             )
 
+            # 检查标注命中
+            if not sub_agent:
+                annotation_match = self._check_annotation_match(agent_config.app_id, message,
+                                                                source=source)
+                if annotation_match:
+                    elapsed_time = time.time() - start_time
+                    conv_uuid = uuid.UUID(conversation_id)
+                    from app.services.conversation_service import ConversationService
+                    conv_service = ConversationService(self.db)
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="user",
+                        content=message,
+                        meta_data={"files": []}
+                    )
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content=annotation_match["answer"],
+                        meta_data={"usage": {}}
+                    )
+                    yield self._format_sse_event("start", {
+                        "conversation_id": conversation_id,
+                        "timestamp": time.time()
+                    })
+                    yield self._format_sse_event("message", {
+                        "content": annotation_match["answer"],
+                        "conversation_id": conversation_id,
+                    })
+                    end_data = {
+                        "conversation_id": conversation_id,
+                        "message": annotation_match["answer"],
+                        "answer": annotation_match["answer"],
+                        "usage": {},
+                        "elapsed_time": elapsed_time,
+                        "message_length": len(annotation_match["answer"]),
+                        "annotation_hit": {
+                            "annotation_id": str(annotation_match["annotation_id"]),
+                            "similarity": annotation_match["similarity"],
+                            "question": annotation_match["question"],
+                        }
+                    }
+                    yield self._format_sse_event("end", end_data)
+                    return
+
             model_info = ModelInfo(
                 model_name=api_key_config["model_name"],
                 provider=api_key_config["provider"],
@@ -894,12 +1221,16 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息
-            history = await self._load_conversation_history(
-                conversation_id=conversation_id,
-                max_history=memory_config.get("max_history", 10),
-                current_provider=api_key_config.get("provider"),
-                current_is_omni=api_key_config.get("is_omni", False)
-            )
+            if history is None:
+                max_history = 10
+                if isinstance(memory_config, dict):
+                    max_history = memory_config.get("max_history", 10)
+                history = await self._load_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=max_history,
+                    current_provider=api_key_config.get("provider"),
+                    current_is_omni=api_key_config.get("is_omni", False)
+                )
 
             # 6. 处理多模态文件
             processed_files = None
@@ -919,13 +1250,34 @@ class AgentRunService:
                 capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
-                    and "vision" in capability
+                    and ModelCapability.VISION in capability
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
+                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
+                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+            # 7. 根据模型能力选择执行路径
+            capability = api_key_config.get("capability", [])
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            orchestrator_node_executions = []
+            if not use_agent_mode and tools:
+                # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
+                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    message=message,
+                    history=history,
+                    api_key_config=api_key_config,
+                    model_config=model_config,
+                    effective_params=effective_params,
+                    processed_files=processed_files,
+                )
+                tools = []
 
             # 创建 LangChain Agent
             agent = LangChainAgent(
@@ -942,10 +1294,9 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=api_key_config.get("capability", []),
+                capability=capability,
             )
 
-            # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
                     t.tool_instance.set_runtime_context(
@@ -953,7 +1304,6 @@ class AgentRunService:
                         conversation_id=str(conversation_id) if conversation_id else None,
                         uploaded_files=processed_files or []
                     )
-            # 7. 知识库检索
             context = None
 
             # 8. 发送开始事件
@@ -962,14 +1312,53 @@ class AgentRunService:
                 "timestamp": time.time()
             })
 
+            # 把弱模型的工具调用步骤补发给前端
+            for step in orchestrator_node_executions:
+                event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
+                yield self._format_sse_event("tool_start", {
+                    "step_id": step.get("step_id"),
+                    "name": step.get("node_name"),
+                    "input": step.get("input"),
+                    "meta": step.get("meta"),
+                })
+                yield self._format_sse_event(event_type, {
+                    "step_id": step.get("step_id"),
+                    "name": step.get("node_name"),
+                    "output": step.get("output"),
+                    "error": step.get("error"),
+                    "meta": step.get("meta"),
+                })
+
             memory_config_ = agent_config.memory
             # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
             config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
+
+            # 创建 Agent 执行记录（running 状态）
+            if not sub_agent and not skip_save:
+                agent_exec_repo = AgentExecutionRepository(self.db)
+                agent_execution = AgentExecution(
+                    app_id=agent_config.app_id,
+                    conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
+                    message_id=None,
+                    agent_config_id=agent_config.id,
+                    release_id=None,
+                    triggered_by=None,
+                    steps=[],
+                    status="running",
+                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    meta_data={
+                        "model": api_key_config["model_name"],
+                        "provider": api_key_config.get("provider"),
+                    },
+                )
+                agent_exec_repo.create(agent_execution)
+                self.db.commit()
 
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
             total_tokens = 0
+            node_executions = []
 
             # 启动流式 TTS（文本边输出边合成）
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -990,6 +1379,14 @@ class AgentRunService:
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
                     full_reasoning += chunk["content"]
                     yield self._format_sse_event("reasoning", {"content": chunk["content"]})
+                elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
+                    node_executions = chunk.get("data", [])
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
+                    yield self._format_sse_event("tool_start", {"step_id": chunk.get("step_id"), "name": chunk["name"], "input": chunk.get("input"), "meta": chunk.get("meta")})
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
+                    yield self._format_sse_event("tool_end", {"step_id": chunk.get("step_id"), "name": chunk["name"], "output": chunk.get("output"), "meta": chunk.get("meta")})
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
+                    yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
                 else:
                     full_content += chunk
                     yield self._format_sse_event("message", {"content": chunk})
@@ -1009,9 +1406,14 @@ class AgentRunService:
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
+            suggested_questions = (await self._generate_suggested_questions(
+                features_config, full_content, api_key_config, effective_params
+            )) if not sub_agent else []
+
             # 11. 保存会话消息
+            message_id = None
             if not sub_agent:
-                await self._save_conversation_message(
+                message_id = await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=full_content,
@@ -1019,7 +1421,8 @@ class AgentRunService:
                     user_id=user_id,
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                        "reasoning_content": full_reasoning or None
+                        "reasoning_content": full_reasoning or None,
+                        "suggested_questions": suggested_questions
                     },
                     files=files,
                     processed_files=processed_files,
@@ -1029,16 +1432,25 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
 
+            # 11.5 更新 Agent 执行记录为 completed
+            if not sub_agent:
+                agent_exec_repo.update_completed(
+                    execution_id=agent_execution.id,
+                    steps=orchestrator_node_executions + node_executions,
+                    status="completed",
+                    elapsed_time=elapsed_time,
+                    token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                )
+
             # 12. 发送结束事件（包含 suggested_questions、audio_url 和 audio_status）
             end_data: Dict[str, Any] = {
                 "conversation_id": conversation_id,
+                "message_id": message_id,
                 "elapsed_time": elapsed_time,
                 "message_length": len(full_content)
             }
             if not sub_agent:
-                end_data["suggested_questions"] = await self._generate_suggested_questions(
-                    features_config, full_content, api_key_config, effective_params
-                )
+                end_data["suggested_questions"] = suggested_questions
                 end_data["audio_url"] = stream_audio_url
                 # 检查TTS是否已完成（非阻塞，不取消任务）
                 audio_status = "pending"
@@ -1065,6 +1477,45 @@ class AgentRunService:
 
         except Exception as e:
             logger.error("流式 Agent 调用失败", extra={"error": str(e)}, exc_info=True)
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            # 保存失败的消息，使前端可以展示失败状态
+            if not sub_agent:
+                try:
+                    from app.services.conversation_service import ConversationService
+
+                    conv_svc = ConversationService(self.db)
+                    conv_uuid = uuid.UUID(conversation_id)
+                    conv_svc.add_message(
+                        conversation_id=conv_uuid,
+                        role="user",
+                        content=message,
+                        meta_data={"files": [], "history_files": {}},
+                    )
+                    conv_svc.add_message(
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content="",
+                        meta_data={"error": str(e)[:2000]},
+                        status="failed",
+                    )
+                except Exception:
+                    pass
+            # 更新 Agent 执行记录为 failed
+            if not sub_agent:
+                try:
+                    elapsed_time = time.time() - start_time
+                    agent_exec_repo.update_completed(
+                        execution_id=agent_execution.id,
+                        steps=node_executions if 'node_executions' in dir() else [],
+                        status="failed",
+                        elapsed_time=elapsed_time,
+                        error_message=str(e)[:2000],
+                    )
+                except Exception:
+                    pass
             # 发送错误事件
             yield self._format_sse_event("error", {
                 "error": str(e),
@@ -1212,9 +1663,8 @@ class AgentRunService:
             if not sub_agent and conversation.workspace_id != workspace_id:
                 # 检查是否是共享应用的会话（被共享者 workspace 访问源应用）
                 from app.models import AppShare
-                from sqlalchemy import select as sa_select
                 share = self.db.scalars(
-                    sa_select(AppShare).where(
+                    select(AppShare).where(
                         AppShare.source_app_id == app_id,
                         AppShare.target_workspace_id == workspace_id
                     )
@@ -1300,9 +1750,62 @@ class AgentRunService:
             return history
 
         except Exception as e:
-            # 新会话没有历史记录是正常的
-            logger.debug("加载会话历史失败（可能是新会话）", extra={"error": str(e)})
+            logger.warning("加载会话历史失败", extra={"conversation_id": conversation_id, "error": str(e)})
             return []
+
+    async def _load_history_before_message(
+            self,
+            conversation_id: uuid.UUID,
+            before_time: datetime.datetime,
+            max_history: int = 10
+    ) -> List[Dict[str, Any]]:
+        """加载指定时间之前的历史消息（用于重新生成场景）
+
+        Args:
+            conversation_id: 会话ID
+            before_time: 截止时间（不包含该时间的消息）
+            max_history: 最大历史消息数量
+
+        Returns:
+            List[Dict]: 历史消息列表，格式为 [{"role": "user/assistant", "content": [...]}]
+        """
+        # 查询指定时间之前的消息
+        history_msgs = self.db.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.created_at < before_time,  # 只取截止时间之前的消息
+                Message.is_deleted.is_not(True),
+            )
+            .order_by(Message.created_at.asc())  # 正序排列
+            .limit(max_history)
+        ).all()
+
+        # 转换为 history 格式
+        filtered_history = []
+        for msg in history_msgs:
+            msg_dict = {
+                "role": msg.role,
+                "content": [{"type": "text", "text": msg.content}]
+            }
+            # 处理用户消息中的多模态文件
+            if msg.role == "user" and msg.meta_data:
+                history_files = msg.meta_data.get("history_files", {})
+                if history_files and history_files.get("content"):
+                    msg_dict["content"].extend(history_files.get("content"))
+            filtered_history.append(msg_dict)
+
+        logger.debug(
+            "加载指定时间前的历史消息",
+            extra={
+                "conversation_id": str(conversation_id),
+                "before_time": before_time.isoformat(),
+                "max_history": max_history,
+                "loaded_count": len(filtered_history)
+            }
+        )
+
+        return filtered_history
 
     async def _save_conversation_message(
             self,
@@ -1318,7 +1821,7 @@ class AgentRunService:
             citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
             is_omni: Optional[bool] = None
-    ) -> None:
+    ) -> Optional[str]:
         """保存会话消息（会话已通过 _ensure_conversation 确保存在）
 
         Args:
@@ -1334,6 +1837,9 @@ class AgentRunService:
             citations: 引用来源列表
             provider: 模型供应商
             is_omni: 是否为全模态模型
+
+        Returns:
+            Optional[str]: 助手消息ID
         """
         try:
             from app.services.conversation_service import ConversationService
@@ -1382,7 +1888,7 @@ class AgentRunService:
                 }
 
             # 保存用户消息
-            conversation_service.add_message(
+            user_msg = conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="user",
                 content=user_message,
@@ -1393,24 +1899,33 @@ class AgentRunService:
                 meta_data["audio_url"] = audio_url
             if citations:
                 meta_data["citations"] = citations
-            conversation_service.add_message(
+            assistant_msg = conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",
                 content=assistant_message,
                 meta_data=meta_data
             )
 
+            # 设置 parent_message_id（助手消息关联到用户消息）
+            assistant_msg.parent_message_id = user_msg.id
+            self.db.commit()
+
             logger.debug(
                 "保存会话消息",
                 extra={
                     "conversation_id": conversation_id,
                     "user_message_length": len(user_message),
-                    "assistant_message_length": len(assistant_message)
+                    "assistant_message_length": len(assistant_message),
+                    "user_msg_id": str(user_msg.id),
+                    "assistant_msg_id": str(assistant_msg.id),
                 }
             )
 
+            return str(assistant_msg.id)
+
         except Exception as e:
             logger.warning("保存会话消息失败", extra={"error": str(e)})
+            return None
 
     async def _get_config_snapshot(self, app_id: uuid.UUID) -> Dict[str, Any]:
         """获取当前配置快照
@@ -1488,20 +2003,29 @@ class AgentRunService:
         if not isinstance(sq_config, dict) or not sq_config.get("enabled"):
             return []
         try:
-            from langchain_openai import ChatOpenAI
-            from langchain_core.messages import HumanMessage, SystemMessage
-            llm = ChatOpenAI(
-                model=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
-                base_url=api_key_config.get("api_base"),
-                temperature=0.5,
-                max_tokens=200,
+            from langchain_core.messages import HumanMessage
+            from app.core.models import RedBearLLM, RedBearModelConfig
+            llm = RedBearLLM(
+                RedBearModelConfig(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config.get("provider", "openai"),
+                    api_key=api_key_config["api_key"],
+                    base_url=api_key_config.get("api_base"),
+                    capability=api_key_config.get("capability", []),
+                    is_omni=api_key_config.get("is_omni", False),
+                    extra_params={"temperature": 0.5, "max_tokens": 200}
+                ),
+                type=ModelType.CHAT
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"
             )
             resp = await llm.ainvoke([HumanMessage(content=prompt)])
-            lines = [l.strip() for l in resp.content.strip().split("\n") if l.strip()]
+            content = resp.content
+            # 兼容 content 为 list 的情况（部分模型返回结构化内容）
+            if isinstance(content, list):
+                content = "".join(str(c) if isinstance(c, str) else c.get("text", "") for c in content)
+            lines = [l.strip() for l in content.strip().split("\n") if l.strip()]
             return lines[:3]
         except Exception as e:
             logger.warning(f"生成建议问题失败: {e}")
@@ -1914,7 +2438,8 @@ class AgentRunService:
             user_rag_memory_id: Optional[str] = None,
             web_search: bool = True,
             memory: bool = True,
-            files: list[FileInput] | None = None
+            files: list[FileInput] | None = None,
+            source: str = ""
     ) -> Dict[str, Any]:
         """多模型对比试运行
 
@@ -1971,7 +2496,8 @@ class AgentRunService:
                             user_rag_memory_id=user_rag_memory_id,
                             web_search=web_search,
                             memory=memory,
-                            files=files
+                            files=files,
+                            source=source
                         ),
                         timeout=timeout
                     )
@@ -2140,7 +2666,8 @@ class AgentRunService:
             memory: bool = True,
             parallel: bool = True,
             timeout: int = 60,
-            files: list[FileInput] | None = None
+            files: list[FileInput] | None = None,
+            source: str = ""
     ) -> AsyncGenerator[str, None]:
         """多模型对比试运行（流式返回）
 
@@ -2231,7 +2758,8 @@ class AgentRunService:
                             user_rag_memory_id=user_rag_memory_id,
                             web_search=web_search,
                             memory=memory,
-                            files=files
+                            files=files,
+                            source=source
                     ):
                         # 解析原始事件
                         try:
@@ -2275,6 +2803,35 @@ class AgentRunService:
                                     "label": model_label,
                                     "conversation_id": returned_conversation_id,
                                     "content": event_data.get("content", "")
+                                }))
+
+                            # 转发工具调用事件（带模型标识）
+                            if event_type == "tool_start" and event_data:
+                                await event_queue.put(self._format_sse_event("model_tool_start", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "step_id": event_data.get("step_id"),
+                                    "name": event_data.get("name", ""),
+                                    "input": event_data.get("input"),
+                                }))
+
+                            if event_type == "tool_end" and event_data:
+                                await event_queue.put(self._format_sse_event("model_tool_end", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "step_id": event_data.get("step_id"),
+                                    "name": event_data.get("name", ""),
+                                    "output": event_data.get("output"),
+                                    "meta": event_data.get("meta"),
+                                }))
+
+                            if event_type == "tool_error" and event_data:
+                                await event_queue.put(self._format_sse_event("model_tool_error", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "step_id": event_data.get("step_id"),
+                                    "name": event_data.get("name", ""),
+                                    "error": event_data.get("error"),
                                 }))
 
                             # 从 end 事件中提取 features 输出字段
@@ -2490,3 +3047,369 @@ class AgentRunService:
                 "total_time": sum(r.get("elapsed_time", 0) for r in results)
             }
         )
+
+    # ==================== 重新生成功能 ====================
+
+    async def regenerate(
+            self,
+            *,
+            message_id: uuid.UUID,
+            agent_config: AgentConfig,
+            model_config: ModelConfig,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """重新生成回复（多版本支持）
+
+        核心逻辑：
+        1. 获取原 assistant 消息及其父 user 消息
+        2. 将原 assistant 消息标记为非当前版本 (is_current=False)
+        3. 复用相同的上下文重新调用 LLM
+        4. 保存新版本 assistant 消息（version+1, is_current=True）
+
+        Args:
+            message_id: 原 AI 回复的消息ID
+            agent_config: Agent 配置
+            model_config: 模型配置
+            workspace_id: 工作空间ID
+            user_id: 用户ID
+            storage_type: 存储类型
+            user_rag_memory_id: RAG 记忆ID
+
+        Returns:
+            Dict: 包含新消息ID、内容、版本号等
+        """
+        from app.models import Message
+
+        # 1. 获取原消息
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        # 2. 将原版本标记为非当前
+        original_msg.is_current = False
+        self.db.commit()
+
+        # 3. 获取父用户消息（用于提取原始问题）
+        parent_msg_id = original_msg.parent_message_id
+        if not parent_msg_id:
+            # 如果没有 parent_message_id，则查找上一条 user 消息
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at < original_msg.created_at,
+                    Message.is_deleted.is_not(True),
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+            if not parent_msg:
+                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+            parent_msg_id = parent_msg.id
+        else:
+            parent_msg = self.db.get(Message, parent_msg_id)
+
+        user_message_content = parent_msg.content if parent_msg else ""
+
+        # 3.5 提取父消息中的文件信息（如果有）
+        files = None
+        if parent_msg and parent_msg.meta_data:
+            meta_files = parent_msg.meta_data.get("files", [])
+            if meta_files:
+                # 将存储的文件信息转换回 FileInput 格式
+                files = []
+                for f in meta_files:
+                    try:
+                        file_input = FileInput(
+                            type=FileType(f.get("type", "document")),
+                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
+                            url=f.get("url"),
+                            file_type=f.get("file_type"),
+                            name=f.get("name"),
+                            size=f.get("size"),
+                        )
+                        files.append(file_input)
+                    except Exception as e:
+                        logger.warning(f"转换文件信息失败: {e}")
+                        continue
+
+        # 4. 加载上下文（到父消息为止，不包含当前要重新生成的消息）
+        conversation_id = str(original_msg.conversation_id)
+        max_history = agent_config.memory.get("max_history", 10) if agent_config.memory else 10
+
+        # 使用封装的方法加载父消息之前的历史
+        filtered_history = await self._load_history_before_message(
+            conversation_id=original_msg.conversation_id,
+            before_time=parent_msg.created_at,
+            max_history=max_history
+        )
+
+        # 5. 调用 LLM（复用现有 run 方法，传入过滤后的历史和文件）
+        result = await self.run(
+            agent_config=agent_config,
+            model_config=model_config,
+            message=user_message_content,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            skip_save=True,  # 跳过保存，由 regenerate 自己保存
+            history=filtered_history,  # 传入过滤后的历史
+            files=files,  # 传入父消息的文件
+        )
+
+        # 6. 保存新版本消息
+        new_version = original_msg.version + 1
+        new_msg = Message(
+            conversation_id=original_msg.conversation_id,
+            role="assistant",
+            content=result["message"],
+            version=new_version,
+            is_current=True,
+            parent_message_id=parent_msg_id,
+            meta_data={
+                "usage": result.get("usage"),
+                "reasoning_content": result.get("reasoning_content"),
+                "regenerated_from": str(message_id),
+                "suggested_questions": result.get("suggested_questions", []),
+                "citations": result.get("citations", []),
+            },
+        )
+        self.db.add(new_msg)
+
+        # 更新会话消息计数
+        from app.models import Conversation
+        conv = self.db.get(Conversation, original_msg.conversation_id)
+        if conv:
+            conv.message_count += 1
+
+        self.db.commit()
+        self.db.refresh(new_msg)
+
+        logger.info(
+            "重新生成回复成功",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": str(new_msg.id),
+                "version": new_version,
+                "conversation_id": conversation_id,
+            }
+        )
+
+        return {
+            "message_id": str(new_msg.id),
+            "message": result["message"],
+            "reasoning_content": result.get("reasoning_content"),
+            "version": new_version,
+            "conversation_id": conversation_id,
+            "suggested_questions": result.get("suggested_questions", []),
+            "citations": result.get("citations", []),
+        }
+
+    async def regenerate_stream(
+            self,
+            *,
+            message_id: uuid.UUID,
+            agent_config: AgentConfig,
+            model_config: ModelConfig,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """重新生成回复（流式输出，多版本支持）
+
+        核心逻辑与 regenerate 相同，但支持流式输出
+
+        Args:
+            message_id: 原 AI 回复的消息ID
+            agent_config: Agent 配置
+            model_config: 模型配置
+            workspace_id: 工作空间ID
+            user_id: 用户ID
+            storage_type: 存储类型
+            user_rag_memory_id: RAG 记忆ID
+
+        Yields:
+            str: SSE 格式的事件数据
+        """
+        from app.models import Message, Conversation
+
+        # 1. 获取原消息
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        # 2. 将原版本标记为非当前
+        original_msg.is_current = False
+        self.db.commit()
+
+        # 3. 获取父用户消息（用于提取原始问题）
+        parent_msg_id = original_msg.parent_message_id
+        if not parent_msg_id:
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at < original_msg.created_at,
+                    Message.is_deleted.is_not(True),
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+            if not parent_msg:
+                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+            parent_msg_id = parent_msg.id
+        else:
+            parent_msg = self.db.get(Message, parent_msg_id)
+
+        user_message_content = parent_msg.content if parent_msg else ""
+
+        # 3.5 提取父消息中的文件信息
+        files = None
+        if parent_msg and parent_msg.meta_data:
+            meta_files = parent_msg.meta_data.get("files", [])
+            if meta_files:
+                from app.schemas.app_schema import FileInput, FileType, TransferMethod
+                files = []
+                for f in meta_files:
+                    try:
+                        file_input = FileInput(
+                            type=FileType(f.get("type", "document")),
+                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
+                            url=f.get("url"),
+                            file_type=f.get("file_type"),
+                            name=f.get("name"),
+                            size=f.get("size"),
+                        )
+                        files.append(file_input)
+                    except Exception as e:
+                        logger.warning(f"转换文件信息失败: {e}")
+                        continue
+
+        # 4. 加载上下文
+        conversation_id = str(original_msg.conversation_id)
+        max_history = agent_config.memory.get("max_history", 10) if agent_config.memory else 10
+
+        filtered_history = await self._load_history_before_message(
+            conversation_id=original_msg.conversation_id,
+            before_time=parent_msg.created_at,
+            max_history=max_history
+        )
+
+        # 5. 流式调用 LLM
+        full_content = ""
+        full_reasoning = ""
+        suggested_questions = []
+        citations = []
+        audio_url = None
+        audio_status = None
+
+        # 发送开始事件
+        yield self._format_sse_event("start", {
+            "conversation_id": conversation_id,
+            "version": original_msg.version + 1,
+            "timestamp": time.time()
+        })
+
+        # 流式调用 run_stream
+        async for event_str in self.run_stream(
+                agent_config=agent_config,
+                model_config=model_config,
+                message=user_message_content,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                skip_save=True,
+                history=filtered_history,
+                files=files,
+        ):
+            # 解析事件
+            lines = event_str.strip().split('\n')
+            event_type = None
+            event_data = None
+
+            for line in lines:
+                if line.startswith('event: '):
+                    event_type = line[7:].strip()
+                elif line.startswith('data: '):
+                    event_data = json.loads(line[6:])
+
+            # 累积内容并转发事件
+            if event_type == "message" and event_data:
+                full_content += event_data.get("content", "")
+                yield event_str
+            elif event_type == "reasoning" and event_data:
+                full_reasoning += event_data.get("content", "")
+                yield event_str
+            elif event_type == "tool_start" or event_type == "tool_end" or event_type == "tool_error":
+                yield event_str
+            elif event_type == "end" and event_data:
+                # 从 end 事件中提取 features 输出
+                suggested_questions = event_data.get("suggested_questions", [])
+                audio_url = event_data.get("audio_url")
+                audio_status = event_data.get("audio_status")
+                citations = event_data.get("citations", [])
+
+        # 6. 保存新版本消息
+        new_version = original_msg.version + 1
+        new_msg = Message(
+            conversation_id=original_msg.conversation_id,
+            role="assistant",
+            content=full_content,
+            version=new_version,
+            is_current=True,
+            parent_message_id=parent_msg_id,
+            meta_data={
+                "reasoning_content": full_reasoning or None,
+                "regenerated_from": str(message_id),
+                "suggested_questions": suggested_questions,
+                "citations": citations,
+                "audio_url": audio_url,
+            },
+        )
+        self.db.add(new_msg)
+
+        # 更新会话消息计数
+        conv = self.db.get(Conversation, original_msg.conversation_id)
+        if conv:
+            conv.message_count += 1
+
+        self.db.commit()
+        self.db.refresh(new_msg)
+
+        logger.info(
+            "重新生成回复成功（流式）",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": str(new_msg.id),
+                "version": new_version,
+                "conversation_id": conversation_id,
+            }
+        )
+
+        # 发送结束事件
+        yield self._format_sse_event("end", {
+            "message_id": str(new_msg.id),
+            "conversation_id": conversation_id,
+            "version": new_version,
+            "suggested_questions": suggested_questions,
+            "audio_url": audio_url,
+            "audio_status": audio_status,
+            "citations": citations,
+            "timestamp": time.time()
+        })

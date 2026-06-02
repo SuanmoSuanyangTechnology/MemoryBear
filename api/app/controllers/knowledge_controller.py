@@ -5,11 +5,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_api_logger
 from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
@@ -22,10 +24,16 @@ from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import knowledge_model
+from app.models import file_model
+from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import knowledge_schema
+from app.schemas import file_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
+from app.services import file_service
+from app.services.file_service import _is_qa_doc, _build_qa_export
+from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelConfigService
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -113,7 +121,7 @@ async def get_knowledges(
     - Return paging metadata + file list
     """
     api_logger.info(f"Query knowledge base list: workspace_id={current_user.current_workspace_id}, page={page}, pagesize={pagesize}, keywords={keywords}, kb_ids={kb_ids}, username: {current_user.username}")
-    
+
     # 1. parameter validation
     if page < 1 or pagesize < 1:
         api_logger.warning(f"Error in paging parameters: page={page}, pagesize={pagesize}")
@@ -190,7 +198,7 @@ async def create_knowledge(
     create knowledge
     """
     api_logger.info(f"Request to create a knowledge base: name={create_data.name}, workspace_id={current_user.current_workspace_id}, username: {current_user.username}")
-    
+
     try:
         api_logger.debug(f"Start creating the knowledge base: {create_data.name}")
         # 1. Check if the knowledge base name already exists
@@ -219,7 +227,7 @@ async def get_knowledge(
     Retrieve knowledge base information based on knowledge_id
     """
     api_logger.info(f"Obtain details of the knowledge base: knowledge_id={knowledge_id}, username: {current_user.username}")
-    
+
     try:
         # 1. Query knowledge base information from the database
         api_logger.debug(f"Query knowledge base: {knowledge_id}")
@@ -230,7 +238,7 @@ async def get_knowledge(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The knowledge base does not exist or access is denied"
             )
-        
+
         api_logger.info(f"Knowledge base query successful: {db_knowledge.name} (ID: {db_knowledge.id})")
         return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="Successfully obtained knowledge base information")
     except HTTPException:
@@ -238,6 +246,41 @@ async def get_knowledge(
     except Exception as e:
         api_logger.error(f"Knowledge base query failed: knowledge_id={knowledge_id} - {str(e)}")
         raise
+
+
+@router.get("/{knowledge_id}/chunk-policy", response_model=ApiResponse)
+async def get_knowledge_chunk_policy(
+        knowledge_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    查询知识库的分块策略锁定状态
+    - 知识库为空（无文档）→ parent_child_mode: null，未锁定，可自由选择
+    - 知识库有文档且使用普通分块 → parent_child_mode: false，锁定为普通模式
+    - 知识库有文档且使用父子分块 → parent_child_mode: true，锁定为父子模式
+    """
+    api_logger.info(f"Query knowledge base chunk policy: knowledge_id={knowledge_id}, username: {current_user.username}")
+
+    # 1. 验证知识库存在
+    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied"
+        )
+
+    # 2. 查询该知识库下第一个文档的 parser_config（同 KB 下文档分块策略一致，取第一个即可）
+    try:
+        result_map = {0: None,    1: False,    2: True}
+        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={result_map[db_knowledge.chunk_mode]}")
+        return success(data={"parent_child_mode": result_map[db_knowledge.chunk_mode]}, msg="Successfully obtained knowledge base chunk policy")
+    except Exception as e:
+        api_logger.error(f"Failed to query knowledge base chunk policy: knowledge_id={knowledge_id} - {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query chunk policy: {str(e)}"
+        )
 
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
@@ -250,6 +293,55 @@ async def update_knowledge(
     api_logger.info(f"Update knowledge base request: knowledge_id={knowledge_id}, username: {current_user.username}")
     db_knowledge = await _update_knowledge(knowledge_id=knowledge_id, update_data=update_data, db=db, current_user=current_user)
     return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base information has been successfully updated")
+
+
+@router.post("/{kb_id}/batch-download")
+async def kb_batch_download(
+        kb_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+        request_body: file_schema.KBBatchDownloadRequest = file_schema.KBBatchDownloadRequest(),
+):
+    """知识库文件一键下载 — 将该知识库下所有文件打包为 ZIP 流式下载"""
+    api_logger.info(f"KB batch download: kb_id={kb_id}, username={current_user.username}")
+
+    db_knowledge = knowledge_service.get_knowledge_by_id(
+        db, knowledge_id=kb_id, current_user=current_user
+    )
+    if not db_knowledge:
+        raise BusinessException("知识库不存在或无权访问", BizCode.NOT_FOUND)
+
+    files = db.query(file_model.File).filter(
+        file_model.File.kb_id == kb_id,
+        file_model.File.file_key.isnot(None),
+        file_model.File.file_key != "",
+    ).all()
+
+    if not files:
+        raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
+
+    # 预取 QA 文档内容
+    pre_fetched: dict[str, bytes] = {}
+    for f in files:
+        if _is_qa_doc(db, f.id):
+            result = _build_qa_export(db, f.id, f.kb_id)
+            if result:
+                content, _, _ = result
+                pre_fetched[f.file_key] = content
+
+    entries = file_service.build_zip_arcnames(files)
+    zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
+
+    from urllib.parse import quote
+    return StreamingResponse(
+        file_service.stream_zip_files(entries, storage_service, api_logger, pre_fetched),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
+            "X-Total-Files": str(len(files)),
+        },
+    )
 
 
 async def _update_knowledge(
@@ -304,10 +396,10 @@ async def _update_knowledge(
                     # update value
                     setattr(db_knowledge, field, value)
                     updated_fields.append(f"{field}: {old_value} -> {value}")
-        
+
         if updated_fields:
             api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
-        
+
         db_knowledge.updated_at = datetime.datetime.now()
 
         # 3. Save to database
@@ -338,7 +430,7 @@ async def delete_knowledge(
     Soft-delete knowledge base
     """
     api_logger.info(f"Request to delete knowledge base: knowledge_id={knowledge_id}, username: {current_user.username}")
-    
+
     try:
         # 1. Check whether the knowledge base exists
         api_logger.debug(f"Check whether the knowledge base exists: {knowledge_id}")

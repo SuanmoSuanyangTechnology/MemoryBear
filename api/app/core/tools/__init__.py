@@ -14,6 +14,11 @@ try:
 except ImportError:
     MCPTool = None
 
+try:
+    from .workflow.base import WorkflowAsTool
+except ImportError:
+    WorkflowAsTool = None
+
 __all__ = [
     "BaseTool",
     "ToolResult", 
@@ -27,3 +32,6 @@ if CustomTool:
 
 if MCPTool:
     __all__.append("MCPTool")
+
+if WorkflowAsTool:
+    __all__.append("WorkflowAsTool")

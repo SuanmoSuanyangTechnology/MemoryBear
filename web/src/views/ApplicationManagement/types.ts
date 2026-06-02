@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 10:50:27
+ * @Last Modified time: 2026-05-27 19:01:40
  */
 /**
  * Type definitions for Application Management
@@ -13,7 +13,8 @@ import type { WorkflowConfig } from '@/views/Workflow/types';
  */
 export interface Query {
   /** Search keyword */
-  search: string;
+  search_type?: string;
+  search?: string;
   type?: string;
   shared_only?: boolean;
   include_shared?: boolean;
@@ -38,7 +39,7 @@ export interface Application {
   /** Icon type */
   icon_type?: string;
   /** Application type: agent, multi_agent, or workflow */
-  type: 'agent' | 'multi_agent' | 'workflow';
+  type: 'agent' | 'multi_agent' | 'workflow' | 'pure_workflow';
   /** Visibility setting */
   visibility: string;
   /** Application status */
@@ -77,6 +78,8 @@ export interface ApplicationModalData {
     url: string;
     uid: string | number;
   }[];
+  /** Application tags */
+  tags?: string[];
 }
 
 /**

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 16:35:30
+ * @Last Modified time: 2026-05-27 19:03:29
  */
 /**
  * Application Modal
@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input } from 'antd';
+import { Form, Input, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import RadioGroupCard from '@/components/RadioGroupCard'
@@ -39,7 +39,8 @@ interface ApplicationModalProps {
 export const types = [
   'agent',
   'multi_agent',
-  'workflow'
+  'workflow',
+  'pure_workflow'
 ]
 /**
  * Application type icon mapping
@@ -47,7 +48,8 @@ export const types = [
 const typeIcons: Record<string, string> = {
   agent: AgentIcon,
   multi_agent: ClusterIcon,
-  workflow: WorkflowIcon
+  workflow: WorkflowIcon,
+  pure_workflow: WorkflowIcon,
 }
 
 /**
@@ -80,6 +82,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
         name: application.name,
         type: application.type,
         description: application.description,
+        tags: application.tags || [],
       })
     } else {
       form.resetFields();
@@ -147,6 +150,12 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
         >
           <Input.TextArea placeholder={t('common.enter')} />
         </FormItem>
+        <FormItem
+          name="tags"
+          label={t('application.tags')}
+        >
+          <Select mode="tags" placeholder={t('common.pleaseEnter')} />
+        </FormItem>
         
         <FormItem
           name="type"
@@ -160,6 +169,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
               labelDesc: t(`application.${type}Desc`),
               icon: typeIcons[type],
             }))}
+            disabled={!!editVo?.id}
           />
         </FormItem>
       </Form>

@@ -106,7 +106,6 @@ class Edge(BaseModel):
         end_user_id: End user ID for multi-tenancy
         run_id: Unique identifier for the pipeline run that created this edge
         created_at: Timestamp when the edge was created (system perspective)
-        expired_at: Optional timestamp when the edge expires (system perspective)
     """
     id: str = Field(default_factory=lambda: uuid4().hex, description="A unique identifier for the edge.")
     source: str = Field(..., description="The ID of the source node.")
@@ -114,7 +113,6 @@ class Edge(BaseModel):
     end_user_id: str = Field(..., description="The end user ID of the edge.")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
     created_at: datetime = Field(..., description="The valid time of the edge from system perspective.")
-    expired_at: Optional[datetime] = Field(default=None, description="The expired time of the edge from system perspective.")
 
 
 class ChunkEdge(Edge):
@@ -162,6 +160,9 @@ class EntityEntityEdge(Edge):
         invalid_at: Optional end date of temporal validity
     """
     relation_type: str = Field(..., description="Relation type as defined in ontology")
+    relation_type_id: Optional[int] = Field(default=None, description="Ontology ID for predicate (1-13). None indicates unknown/unmapped predicate.")
+    relation_type_surface: str = Field(..., description="Source-text relation phrase expressing this predicate")
+    relation_type_description: str = Field(default="", description="Chinese definition of the relation type from ontology")
     relation_value: Optional[str] = Field(None, description="Value of the relation")
     statement: str = Field(..., description='The statement of the edge.')
     source_statement_id: str = Field(..., description="Statement where this relationship was extracted")
@@ -190,14 +191,12 @@ class Node(BaseModel):
         end_user_id: End user ID for multi-tenancy
         run_id: Unique identifier for the pipeline run that created this node
         created_at: Timestamp when the node was created (system perspective)
-        expired_at: Optional timestamp when the node expires (system perspective)
     """
     id: str = Field(..., description="The unique identifier for the node.")
     name: str = Field(..., description="The name of the node.")
     end_user_id: str = Field(..., description="The end user ID of the node.")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
     created_at: datetime = Field(..., description="The valid time of the node from system perspective.")
-    expired_at: Optional[datetime] = Field(None, description="The expired time of the node from system perspective.")
 
 
 class DialogueNode(Node):
@@ -283,6 +282,7 @@ class StatementNode(Node):
     temporal_info: TemporalInfo = Field(..., description="Temporal information")
     valid_at: Optional[datetime] = Field(None, description="Temporal validity start")
     invalid_at: Optional[datetime] = Field(None, description="Temporal validity end")
+    dialog_at: Optional[datetime] = Field(None, description="Absolute timestamp of the conversation this statement belongs to")
 
     # Embedding and other fields
     statement_embedding: Optional[List[float]] = Field(None, description="Statement embedding vector")
@@ -318,7 +318,7 @@ class StatementNode(Node):
         description="Total number of times this node has been accessed"
     )
 
-    @field_validator('valid_at', 'invalid_at', mode='before')
+    @field_validator('valid_at', 'invalid_at', 'dialog_at', mode='before')
     @classmethod
     def validate_datetime(cls, v):
         """使用通用的历史日期解析函数"""
@@ -413,6 +413,8 @@ class ExtractedEntityNode(Node):
     entity_idx: int = Field(..., description="Unique identifier for the entity")
     statement_id: str = Field(..., description="Statement this entity was extracted from")
     entity_type: str = Field(..., description="Type of the entity")
+    type_id: Optional[int] = Field(default=None, description="Ontology ID for entity type (1-13). None indicates unknown/unmapped type.")
+    type_description: str = Field(default="", description="Chinese definition of the entity type from ontology")
     description: str = Field(..., description="Entity description")
     example: str = Field(
         default="",
@@ -461,6 +463,16 @@ class ExtractedEntityNode(Node):
         default=False,
         description="Whether this entity represents explicit/semantic memory (knowledge, concepts, definitions, theories, principles)"
     )
+
+    # User Metadata Fields (populated by async metadata extraction after dedup)
+    core_facts: List[str] = Field(default_factory=list, description="Stable basic facts about the user")
+    traits: List[str] = Field(default_factory=list, description="Stable personality traits or behavioral tendencies")
+    relations: List[str] = Field(default_factory=list, description="Durable relationships with people/groups/entities")
+    goals: List[str] = Field(default_factory=list, description="Long-term goals or ongoing pursuits")
+    interests: List[str] = Field(default_factory=list, description="Stable interests, preferences, or hobbies")
+    beliefs_or_stances: List[str] = Field(default_factory=list, description="Stable beliefs, values, or stances")
+    anchors: List[str] = Field(default_factory=list, description="Personally meaningful objects or symbols")
+    events: List[str] = Field(default_factory=list, description="Durable personal experiences or milestones")
 
     @field_validator('aliases', mode='before')
     @classmethod
@@ -576,3 +588,47 @@ class PerceptualNode(Node):
     domain: str
     file_type: str
     summary_embedding: list[float] | None
+
+
+class AssistantOriginalNode(Node):
+    """Node storing the original text of an Assistant message before pruning.
+
+    Attributes:
+        pair_id: Shared ID with the corresponding AssistantPrunedNode for pairing
+        dialog_id: ID of the parent dialogue this message belongs to
+        text: The full original Assistant response text
+    """
+    pair_id: str = Field(..., description="Shared pairing ID with the corresponding pruned node")
+    dialog_id: str = Field(..., description="ID of the parent dialogue")
+    text: str = Field(..., description="Original Assistant message text")
+
+
+class AssistantPrunedNode(Node):
+    """Node storing the pruned (compressed) text of an Assistant message.
+
+    Attributes:
+        pair_id: Shared ID with the corresponding AssistantOriginalNode for pairing
+        dialog_id: ID of the parent dialogue this message belongs to
+        text: The pruned memory hint text (or "NULL" if no memory value)
+        memory_type: Type of the memory hint (comfort|suggestion|recommendation|warning|instruction|NULL)
+        text_embedding: Optional embedding vector for semantic search on pruned text
+    """
+    pair_id: str = Field(..., description="Shared pairing ID with the corresponding original node")
+    dialog_id: str = Field(..., description="ID of the parent dialogue")
+    text: str = Field(..., description="Pruned assistant memory hint text")
+    memory_type: str = Field(..., description="Memory type: comfort|suggestion|recommendation|warning|instruction|NULL")
+    text_embedding: Optional[List[float]] = Field(None, description="Embedding vector for semantic search")
+
+
+class AssistantPrunedEdge(Edge):
+    """Edge connecting an AssistantOriginal node to its AssistantPruned node (PRUNED_TO).
+
+    Attributes:
+        pair_id: Shared pairing ID for traceability
+    """
+    pair_id: str = Field(..., description="Shared pairing ID for traceability")
+
+
+class AssistantDialogEdge(Edge):
+    """Edge connecting an AssistantOriginal node to its parent Dialogue node (BELONGS_TO_DIALOG)."""
+    pass

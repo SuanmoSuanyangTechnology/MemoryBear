@@ -1,0 +1,812 @@
+{% macro render_input() -%}
+{{ input_json }}
+{%- endmacro %}
+
+=== Tasks ===
+
+{% if language == "zh" %}
+你的任务是从提供的目标文本中识别并提取陈述句，并为每条陈述句标注以下信息：
+
+- statement_id
+- statement_text
+- statement_type
+- temporal_type
+- speaker
+- has_emotional_state
+- has_unsolved_reference
+- dialog_at
+- valid_at
+- invalid_at
+
+每条输出都应是一个结构化的候选记忆陈述句。
+{% else %}
+Your task is to identify and extract declarative statements from the provided target text, and annotate each extracted statement with:
+
+- statement_id
+- statement_text
+- statement_type
+- temporal_type
+- speaker
+- has_emotional_state
+- has_unsolved_reference
+- dialog_at
+- valid_at
+- invalid_at
+
+Each output item should be a structured candidate memory statement.
+{% endif %}
+
+=== Inputs ===
+{% if language == "zh" %}
+
+- chunk_id: chunk 唯一 ID
+- end_user_id: 终端用户 ID
+- dialog_at: 会话时间，必须是 ISO 8601 时间点
+- target_content: 当前要处理的对话片段文本，也是唯一允许被抽取的目标文本
+- target_message_date: 目标文本对应的时间，可作为辅助时间背景；当与 dialog_at 同时存在时，优先使用 dialog_at 解析相对时间表达
+- supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
+- supporting_context.msgs: 按顺序提供的上下文消息，可包含 User 和 Assistant
+  {% else %}
+- chunk_id: unique chunk identifier
+- end_user_id: end-user identifier
+- dialog_at: session time, which must be an ISO 8601 timestamp
+- target_content: the current dialogue fragment to process, and the only text span that may be extracted from
+- target_message_date: the time associated with the target content and may serve as supporting temporal context; when both exist, prefer `dialog_at` for resolving relative expressions
+- supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
+- supporting_context.msgs: ordered contextual messages, which may include User and Assistant messages
+  {% endif %}
+
+=== Scope ===
+{% if language == "zh" %}
+
+- 只从 `target_content` 中提取陈述句。
+- `supporting_context.msgs` 只用于解释 `target_content` 中的代词、省略、主体、时间和语义背景。
+- 不要从 `supporting_context.msgs` 中单独提取任何陈述句。
+- 如果某条信息没有出现在 `target_content` 中，即使它出现在 `supporting_context.msgs` 中，也不能把它作为独立 statement 输出。
+- 如果 Assistant 在 `supporting_context.msgs` 中提供了总结、猜测、解释或改写，这些内容只能作为理解辅助，不能被当作事实直接提取。
+- 每条输出的 statement 都必须能够在 `target_content` 中找到直接对应的表达依据。
+  {% else %}
+- Extract statements only from `target_content`.
+- `supporting_context.msgs` is used only to interpret references, ellipsis, subjects, temporal expressions, and semantic background in `target_content`.
+- Do not extract any standalone statement from `supporting_context.msgs`.
+- If a piece of information does not appear in `target_content`, it must not be output as an independent statement even if it appears in `supporting_context.msgs`.
+- If the Assistant in `supporting_context.msgs` provides a summary, guess, interpretation, or rephrasing, treat it only as interpretive support and never as a direct factual source for extraction.
+- Every output statement must be directly grounded in wording from `target_content`.
+  {% endif %}
+
+=== Extraction Rules ===
+{% if language == "zh" %}
+拆分规则：
+
+- 以“一个完整意思”为单位提取陈述句，通常对应一个完整句子或一个自然语义片段。
+- 默认保留句子级结构；只有当一个句子内部包含两个及以上彼此独立、拆开后明显更清晰的重要信息时，才拆成多条。
+- 宁可多提取，也不要漏掉 `target_content` 中能独立成立、且语义稳定的 statement。
+- 但不要为了提高覆盖率而引入原文没有的信息，或输出语义不成立的 statement。
+
+用户主语归一化：
+
+- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与输出语言一致的用户锚点，不要使用用户的具体名字或别名。
+- 中文输出使用“用户”作为主语。
+- 英文输出使用 `the user` 作为主语。
+- 这是硬规则；如果用户主语没有按输出语言统一成对应锚点，则该 statement 视为不合格。
+
+共指消解：
+
+- 先完成最终的 `statement_text` 改写，再判断 `has_unsolved_reference`。
+- `has_unsolved_reference` 必须基于最终输出的 `statement_text` 判断，而不是基于原始 `target_content` 里是否出现过代词来判断。
+- 如果最终 `statement_text` 已经把引用改写成具体实体名，例如“助理恭喜用户”“小李点了一杯美式咖啡”，则 `has_unsolved_reference` 必须是 `false`。
+- 如果可以解析到具体实体名，优先输出具体实体名，并将 `has_unsolved_reference` 设为 `false`。
+- 如果不能解析到具体实体名，但可以解析到最小必要描述，则输出该最小必要描述，并将 `has_unsolved_reference` 设为 `true`。
+- 如果既不能解析到具体实体名，也不能稳定解析到最小必要描述，则保留最小必要原始表达，并将 `has_unsolved_reference` 设为 `true`。
+- 但对任何命名表达（如“X 叫 Z / X 的名字是 Z / 大家叫 X 为 Z”），只允许为了解析 `X` 做必要改写；`Z` 是新出现的名字、称呼或别名，必须保留原文表面形式，不得被共指消解、翻译、转写或归一化成 `X`。
+- 对涉及用户与其他人的共同活动，优先写成“用户和谁……”的形式，而不是保留“我们”“他们”这类未展开表达。
+
+清晰指代与模糊指代：
+
+- 只有当当前 `supporting_context` 足以将引用稳定映射到具体实体名时，才算 fully resolved。
+- `张三`、`老张`（且上下文中明确就是张三）、`李教授`、`王老师` 属于清晰指代。
+- `用户的朋友`、`用户的同事`、`某位老师`、`一位面试官` 这类最小必要描述允许输出，但仍然算 unresolved。
+- `朋友`、`前天那个人`、`那个`、`这个`、`那些`、`那两个`、`对方`、`他/她`（且无唯一可解对象）属于模糊指代。
+
+过滤：
+
+- 仅提取陈述句。
+- 不要提取问题、命令、问候语或对话填充词。
+
+感知记忆文件摘要处理：
+
+- 如果 `target_content` 中包含 `<input-file-summary>...</input-file-summary>` 标签，标签内的内容是用户上传文件（图片、视频、文档等）的系统预处理摘要。
+- 对于这类内容，必须以"用户"为主语改写成陈述句，表达用户上传/分享了什么内容。
+- 例如：`<input-file-summary>这张图片展示了一朵盛开的粉色莲花</input-file-summary>` 应提取为 `"用户分享了一张盛开的粉色莲花的图片，背景是蓝色的墙壁。"`
+- 不要原样保留 `<input-file-summary>` 标签在 statement_text 中。
+- 不要把文件摘要当作独立的客观描述输出（如"一张图片展示了..."），必须关联到用户行为。
+
+speaker：
+
+- `speaker` 表示该 statement 在 `target_content` 中的直接说话来源。
+- 如果 statement 来自用户消息，填 `"user"`。
+- 如果 statement 来自助理消息，填 `"assistant"`。
+- 不要省略 `speaker`；每条 statement 都必须输出该字段。
+
+statement_type：
+
+- `FACT`：用户陈述的事实、状态、关系、经历、行为、事件或计划等现实描述。
+- `OPINION`：主观评价、态度、判断、感受、看法，例如“我觉得”“我担心”。
+- `OTHER`：不应归入 `FACT` 或 `OPINION` 的其他陈述；“我希望……”默认标为 `OTHER`。
+- 不要因为句子带有主观色彩就自动判为 `OPINION`；只有在其核心是个人判断、态度、感受或评价时才标为 `OPINION`。
+
+时间规则：
+
+- 仅使用目标文本中明确陈述或可由 `dialog_at` / `target_message_date` 直接解析的时间信息；不要使用外部知识补时间。
+- 优先使用 `dialog_at` 作为“现在”来解释相对时间，例如“昨天”“上周五”“下个月”；只有在 `dialog_at` 缺失时才退回 `target_message_date`。
+- 如果相对时间可以稳定落到更具体的中文时间表达，就应直接改写进 `statement_text`，而不要保留原始模糊表达。
+- 可稳定具体化的示例包括：
+  - “昨天” -> “2026年4月29日”
+  - “前天晚上” -> “2026年4月28日晚上”
+  - “上周三” -> “2026年4月22日”
+  - “上周” -> “2026年4月20日至2026年4月26日”
+  - “上周末” -> “2026年4月25日至2026年4月26日”
+  - “上个月” -> “2026年3月”
+  - “下周” -> “2026年5月4日至2026年5月10日”
+- 对开放区间时间表达，也要做相对时间消解并改写进 `statement_text`。
+- 常见开放过去区间表达包括：`最近`、`近来`、`这段时间`、`这些天`、`截至现在`、`更早之前`。
+- 常见开放未来区间表达包括：`即将`、`接下来`、`不久后`、`很快`、`未来一段时间`。
+- 这类表达无法稳定落到封闭日期区间时，可以改写为开放区间表达，例如：
+  - “最近” -> “截至2026年4月1日之前的最近一段时间”
+  - “近来” -> “截至2026年4月1日之前的近来一段时间”
+  - “这段时间” -> “截至2026年4月1日之前的这段时间”
+  - “即将” -> “在2026年4月1日之后即将发生”
+  - “接下来” -> “在2026年4月1日之后接下来的一段时间”
+  - “很快” -> “在2026年4月1日之后不久”
+- 如果相对时间不能稳定落到具体日期或日期区间，就保留其最小可信粗粒度，但仍尽量做相对时间消解；例如“去年冬天”可改写为“2025年冬天”，而不是保留“去年冬天”。
+- 对节假日类表达，能稳定映射到具体日期或日期区间时应具体化；例如“五一”通常可改写为具体日期，“清明节”通常也可改写为具体日期或短区间；“春节前后”这类边界不稳的表达仍保留较粗粒度。
+- `valid_at` 表示陈述开始成立或生效的时间。
+- `invalid_at` 表示陈述结束或不再成立的时间；如果仍在持续，填 `"NULL"`。
+- `dialog_at` 表示当前会话时间，每条 statement 都必须原样复制输入中的 `dialog_at`。
+- 如果输入中缺少 `dialog_at`，则把 `target_message_date` 作为当前会话时间使用，并在每条 statement 的 `dialog_at` 字段中填入 `target_message_date` 的原值。
+- 时间格式优先使用 ISO 8601。
+- 对于只有日期没有时分秒的时间，默认使用整天边界，便于后续检索。
+- 如果没有明确时间，不要编造时间。
+- 对于点状事件（例如某天发生的一次考试、一次见面、一次提交），`valid_at` 和 `invalid_at` 都应填写为该事件的起止边界；不要只填 `valid_at`。
+
+情感状态判断：
+
+- `has_emotional_state` 只用于判断当前 statement 是否反映了用户的情感状态。
+- 如果根据当前 statement 和 supporting_context，可以判断用户当前存在某种情感状态，则输出 `true`。
+- 该字段不是情绪分类字段，不要求输出具体情绪类型。
+- 明确情绪表达例如“开心”“难过”“紧张”“有压力”通常应标为 `true`。
+- 即使没有明确情绪词，只要语义足以表明用户当前具有情感状态，也可以标为 `true`，例如“我很好”。
+- 如果只是客观事实、动作描述或安排，且无法从当前上下文稳定判断用户情感状态，则输出 `false`。
+
+temporal_type：
+
+- `STATIC`：相对稳定、持续性的状态、身份、属性、长期偏好、长期关系、长期职业或长期居住状态；若带起始时间，可填 `valid_at`，`invalid_at` 必须为 `"NULL"`。
+- `DYNAMIC`：有明确时间范围、阶段性持续、可结束或已结束的事件、活动、计划、任务或临时状态。
+- `ATEMPORAL`：普遍事实、定义、常识、百科知识、数学事实或无具体时间边界的泛化陈述；`valid_at` 和 `invalid_at` 都必须为 `"NULL"`。
+- 不要因为句子里出现时间词就机械地标为 `DYNAMIC`。
+
+改写边界：
+
+- 允许为解决代词、省略和时间歧义做最小必要改写。
+- 不要引入原文未明确表达的新事实、额外推断或风格化概括。
+  {% else %}
+  Splitting rules:
+- Extract statements at the level of one complete thought, usually one full sentence or one natural semantic unit.
+- Preserve sentence-level structure by default; split only when a sentence contains two or more independent and important pieces of information that become clearly easier to understand when separated.
+- Prefer higher recall: do not miss independently valid and semantically stable statements in `target_content`.
+- But do not increase recall by inventing unsupported facts or emitting semantically unstable statements.
+
+User-subject normalization:
+
+- If the subject of a statement is the user, always use “the user” as the subject in the extracted statement, regardless of whether the context provides the user’s real name, nickname, alias, or other identifier.
+- This is a hard rule. If a user-subject statement does not use “the user,” treat it as invalid.
+- Keep “the user” as the main retrieval anchor in English rewrites, including object position when possible.
+- For English reflexive self-expressions, preserve retrieval consistency without creating unnatural strings. Use these preferred rewrites:
+  - “myself” in ordinary object position -> “the user”
+  - “be myself” -> “be who the user is”
+  - “embrace myself” -> “embrace who the user is”
+  - “accept myself” -> “accept who the user is”
+  - “express myself” -> “express the user’s thoughts” only if needed for grammaticality; otherwise keep the smallest rewrite anchored on “the user”
+- Do not rewrite fixed self-expressions into forms such as “embrace the user” or “be the user” when a more natural anchored template is available.
+
+Coreference resolution:
+
+- If you can resolve to a concrete named entity, output that name and set `has_unsolved_reference` to `false`.
+- If you cannot resolve to a concrete named entity but can resolve to a minimal grounded description, output that description and set `has_unsolved_reference` to `true`.
+- If you cannot even resolve to a stable minimal grounded description, keep the minimal original expression and set `has_unsolved_reference` to `true`.
+- However, for any naming expression such as "X is called Z", "X's name is Z", or "people call X Z", only `X` may be minimally rewritten for reference resolution; `Z` is a newly introduced name, form of address, or alias and must keep its original surface form. Do not coreference-resolve, translate, transcribe, or normalize `Z` into `X`.
+- For shared activities involving the user and others, prefer forms like “the user and X...” rather than unresolved expressions like “we” or “they”.
+
+Clear vs unresolved reference:
+
+- First produce the final rewritten `statement_text`, then decide `has_unsolved_reference`.
+- `has_unsolved_reference` must be judged from the final `statement_text`, not from whether the original `target_content` once contained a pronoun.
+- If the final `statement_text` already resolves the reference to a concrete named entity, such as “The assistant congratulates the user” or “Xiao Li ordered an Americano,” then `has_unsolved_reference` must be `false`.
+- A reference is fully resolved only if the current `supporting_context` can map it to a concrete named entity.
+- `Zhang San`, `Old Zhang` when clearly resolved to Zhang San, `Professor Li`, and `Teacher Wang` are clear references.
+- `the user's friend`, `the user's coworker`, `a teacher`, and `an interviewer` are allowed outputs but still count as unresolved.
+- `friend`, `that person from the other day`, `that one`, `this one`, `those`, `the two of them`, `the other party`, and `he/she` without a unique referent are unresolved.
+
+Filtering:
+
+- Extract only declarative statements.
+- Do not extract questions, commands, greetings, or conversational filler.
+
+Perceptual memory file summary handling:
+
+- If `target_content` contains `<input-file-summary>...</input-file-summary>` tags, the content inside is a system-preprocessed summary of a file uploaded by the user (image, video, document, etc.).
+- For such content, you must rewrite it as a declarative statement with "the user" as the subject, expressing what the user uploaded or shared.
+- Example: `<input-file-summary>This image shows a blooming pink lotus</input-file-summary>` should be extracted as `"The user shared an image of a blooming pink lotus with a blue wall in the background."`
+- Do not keep `<input-file-summary>` tags in statement_text.
+- Do not output file summaries as standalone objective descriptions (e.g., "An image shows..."). They must be linked to the user's action.
+
+speaker:
+
+- `speaker` is the direct speaking source of the statement in `target_content`.
+- If the statement comes from a user message, output `"user"`.
+- If the statement comes from an assistant message, output `"assistant"`.
+- Never omit `speaker`; every statement must include this field.
+
+statement_type:
+
+- `FACT`: user-stated facts, states, relationships, experiences, behaviors, events, or plans.
+- `OPINION`: subjective judgments, attitudes, feelings, evaluations, or viewpoints, such as “I think...” or “I worry...”.
+- `OTHER`: statements that should not be categorized as `FACT` or `OPINION`; statements like “I hope...” default to `OTHER`.
+- Do not classify a statement as `OPINION` merely because it sounds subjective; use `OPINION` only when its core content is a personal judgment, attitude, feeling, or evaluation.
+
+Temporal rules:
+
+- Use only temporal information explicitly stated in the target text or directly resolvable from `dialog_at` / `target_message_date`; do not add dates from external knowledge.
+- Prefer `dialog_at` as “now” when interpreting relative expressions such as “yesterday,” “last Friday,” or “next month”; only fall back to `target_message_date` when `dialog_at` is unavailable.
+- If a relative time can be stably grounded to a more concrete time expression in the output language, rewrite it directly into `statement_text` rather than keeping the vague source phrase.
+- Examples of stable concretization:
+  - “yesterday” -> “April 29, 2026”
+  - “the night before last” -> “the evening of April 28, 2026”
+  - “last Wednesday” -> “April 22, 2026”
+  - “last week” -> “April 20 to April 26, 2026”
+  - “last weekend” -> “April 25 to April 26, 2026”
+  - “last month” -> “March 2026”
+  - “next week” -> “May 4 to May 10, 2026”
+- Open-interval temporal expressions should also be resolved and rewritten inside `statement_text`.
+- Common open past-interval expressions include: `recently`, `lately`, `these days`, `over this period`, `as of now`, and `earlier`.
+- Common open future-interval expressions include: `upcoming`, `coming up`, `soon`, `before long`, and `in the near future`.
+- When they cannot be stably converted into a closed date range, rewrite them as open intervals, for example:
+  - `recently` -> `recently before April 1, 2026`
+  - `lately` -> `lately before April 1, 2026`
+  - `these days` -> `during the period leading up to April 1, 2026`
+  - `upcoming` -> `upcoming after April 1, 2026`
+  - `coming up` -> `coming up after April 1, 2026`
+  - `soon` -> `soon after April 1, 2026`
+- If the relative time cannot be stably grounded to an exact date or date range, keep the smallest trustworthy coarse granularity but still resolve the relative reference as much as possible; for example, “last winter” may become “winter 2025” rather than remaining “last winter”.
+- For holiday expressions, concretize them when they can be stably mapped to specific dates or short date ranges; for example, Labor Day or Qingming Festival usually can be grounded, while expressions such as “around Spring Festival” should stay at a coarser granularity.
+- `valid_at` means when the statement became valid or started to hold.
+- `invalid_at` means when the statement ended or stopped being valid; use `"NULL"` if it is still ongoing.
+- `dialog_at` is the session timestamp, and every statement must copy the input `dialog_at` verbatim.
+- If `dialog_at` is missing from the input, use `target_message_date` as the session timestamp and copy the original `target_message_date` value into each statement's `dialog_at` field.
+- Prefer ISO 8601 for time values.
+- When only a date can be resolved, default to full-day boundaries for retrieval use.
+- If no explicit time is available, do not invent one.
+- For point-in-time events such as a single exam, a meeting, or a submission on one day, populate both `valid_at` and `invalid_at`; do not fill only `valid_at`.
+
+Emotional-state detection:
+
+- `has_emotional_state` is used only to judge whether the current statement reflects the user's emotional state.
+- If the current statement plus supporting context is sufficient to infer that the user currently has some emotional state, output `true`.
+- This field is not an emotion category field. Do not infer or output a specific emotion label here.
+- Explicit emotion wording such as “happy”, “sad”, “nervous”, or “under pressure” should usually be marked `true`.
+- Statements without explicit emotion words may still be `true` if the user's emotional state is reasonably inferable, such as “I am fine.”
+- If the statement is only an objective fact or action description and the user's emotional state cannot be stably inferred from the current context, output `false`.
+
+temporal_type:
+
+- `STATIC`: relatively stable, ongoing states, identities, attributes, long-term preferences, long-term relationships, occupations, or residence states.
+- `DYNAMIC`: events, activities, plans, tasks, or temporary states with a bounded or potentially bounded time span.
+- `ATEMPORAL`: general facts, definitions, common knowledge, encyclopedic knowledge, mathematical facts, or generalized statements without meaningful temporal boundaries; both `valid_at` and `invalid_at` must be `"NULL"`.
+- Do not classify a statement as `DYNAMIC` merely because it contains a time word.
+
+Rewrite boundary:
+
+- Minimal rewriting is allowed only to resolve reference, ellipsis, and temporal ambiguity.
+- For resolvable relative time expressions, rewrite them into grounded time expressions directly inside `statement_text`, using the output language.
+- Do not keep both the vague source phrase and the grounded phrase together; output only the rewritten concrete form.
+- Do not fake precision for time expressions that cannot be grounded reliably from `dialog_at`.
+- In English, you may use a slightly more natural anchored paraphrase for reflexive user-self expressions when a literal replacement would be awkward, as long as the rewritten form still keeps “the user” as the retrieval anchor and does not change the meaning.
+- Do not introduce unsupported facts, extra inference, or stylistic summarization.
+  {% endif %}
+
+=== Examples ===
+{% if language == "zh" %}
+示例 1:
+示例输入: {
+  "chunk_id": "chunk_a1b2c3d4",
+  "end_user_id": "eu_12345678",
+  "dialog_at": "2023-09-04T18:00:00Z",
+  "target_content": "老李这学期要求还是一如既往地严，不过他讲课确实清晰透彻，而且每节课的结构都特别清楚。就是气场实在太吓人了，我每次被他点名都有点发怵。",
+  "target_message_date": "2023-09-04T18:00:00",
+  "supporting_context": {
+    "msgs": [
+      {
+        "role": "User",
+        "msg": "今天是九月第一周的星期一，上了本学期第一节数据库课。作为班长，我帮李教授发了教学大纲。老李宣布的期末项目考核标准特别严，看了一眼大纲上的作业量，我感觉这学期恐怕要脱层皮。不过老李讲课确实清晰透彻，就是气场实在太吓人了。"
+      },
+      {
+        "role": "Assistant",
+        "msg": "听起来你对这门课既佩服又有点压力，李教授应该是很有气场的老师。"
+      }
+    ]
+  }
+}
+
+示例输出: {
+  "statements": [
+    {
+      "statement_id": "stmt_e5f6g7h8",
+      "statement_text": "李教授这学期要求很严。",
+      "statement_type": "OPINION",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
+      "valid_at": "2023-09-04T18:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_i9j0k1l2",
+      "statement_text": "李教授讲课清晰透彻。",
+      "statement_type": "OPINION",
+      "temporal_type": "ATEMPORAL",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
+      "valid_at": "NULL",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_m1n2o3p4",
+      "statement_text": "用户每次被李教授点名都有点发怵。",
+      "statement_type": "OPINION",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": true,
+      "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
+      "valid_at": "2023-09-04T18:00:00",
+      "invalid_at": "NULL"
+    }
+  ]
+}
+
+示例 2:
+示例输入: {
+  "chunk_id": "chunk_b2c3d4e5",
+  "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
+  "target_content": "我最近在学Python，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
+  "target_message_date": "2026-04-01T00:00:00",
+  "supporting_context": {
+    "msgs": [
+      {
+        "role": "User",
+        "msg": "我最近在学Python。"
+      },
+      {
+        "role": "Assistant",
+        "msg": "Python 是一个很实用的语言。"
+      }
+    ]
+  }
+}
+
+示例输出: {
+  "statements": [
+    {
+      "statement_id": "stmt_m3n4o5p6",
+      "statement_text": "用户截至2026年4月1日之前的最近一段时间在学Python。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_q7r8s9t0",
+      "statement_text": "用户截至2026年4月1日之前的最近一段时间每晚都会练一个小时Python。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_u1v2w3x4",
+      "statement_text": "用户计划在2026年3月30日至2026年4月5日先复习Python的基础语法和函数部分。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    }
+  ]
+}
+
+示例 3:
+示例输入: {
+  "chunk_id": "chunk_c3d4e5f6",
+  "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
+  "target_content": "去年冬天老师布置的那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。",
+  "target_message_date": "2026-04-01T00:00:00",
+  "supporting_context": {
+    "msgs": [
+      {
+        "role": "User",
+        "msg": "去年冬天老师布置的那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。"
+      },
+      {
+        "role": "Assistant",
+        "msg": "听起来你卡在老师去年冬天布置的那两个项目上了，如果这周末还没进展，再去问助教也可以。"
+      }
+    ]
+  }
+}
+
+示例输出: {
+  "statements": [
+    {
+      "statement_id": "stmt_y5z6a7b8",
+      "statement_text": "用户觉得2025年冬天老师布置的那两个项目有点难。",
+      "statement_type": "OPINION",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": true,
+      "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_c9d0e1f2",
+      "statement_text": "用户2026年3月31日晚上看了半天那两个项目还是没太搞明白。",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-03-31T00:00:00",
+      "invalid_at": "2026-03-31T23:59:59"
+    },
+    {
+      "statement_id": "stmt_g3h4i5j6",
+      "statement_text": "如果到2026年4月4日至2026年4月5日还弄不出来，用户可能会去问助教。",
+      "statement_type": "OTHER",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    }
+  ]
+}
+{% else %}
+Example 1:
+Example Input: {
+  "chunk_id": "chunk_a1b2c3d4",
+  "end_user_id": "eu_12345678",
+  "dialog_at": "2023-09-04T18:00:00Z",
+  "target_content": "Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating, and I get nervous every time he calls on me.",
+  "target_message_date": "2023-09-04T18:00:00",
+  "supporting_context": {
+    "msgs": [
+      {
+        "role": "User",
+        "msg": "Today was the Monday of the first week of September, and I had the first database class of the semester. As class monitor, I helped Professor Li distribute the syllabus. Professor Li said the grading criteria for the final project would be very strict. Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating."
+      },
+      {
+        "role": "Assistant",
+        "msg": "It sounds like you admire the teaching but also feel pressured by Professor Li."
+      }
+    ]
+  }
+}
+
+Example Output: {
+  "statements": [
+    {
+      "statement_id": "stmt_e5f6g7h8",
+      "statement_text": "Professor Li is very strict this semester.",
+      "statement_type": "OPINION",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
+      "valid_at": "2023-09-04T18:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_i9j0k1l2",
+      "statement_text": "Professor Li explains things clearly.",
+      "statement_type": "OPINION",
+      "temporal_type": "ATEMPORAL",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
+      "valid_at": "NULL",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_m1n2o3p4",
+      "statement_text": "The user gets nervous every time Professor Li calls on the user.",
+      "statement_type": "OPINION",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": true,
+      "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
+      "valid_at": "2023-09-04T18:00:00",
+      "invalid_at": "NULL"
+    }
+  ]
+}
+
+Example 2:
+Example Input: {
+  "chunk_id": "chunk_b2c3d4e5",
+  "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
+  "target_content": "I've been learning Python recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
+  "target_message_date": "2026-04-01T00:00:00",
+  "supporting_context": {
+    "msgs": [
+      {
+        "role": "User",
+        "msg": "I've been learning Python recently."
+      },
+      {
+        "role": "Assistant",
+        "msg": "Python is a very practical language."
+      }
+    ]
+  }
+}
+
+Example Output: {
+  "statements": [
+    {
+      "statement_id": "stmt_m3n4o5p6",
+      "statement_text": "The user has been learning Python recently before April 1, 2026.",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_q7r8s9t0",
+      "statement_text": "The user has been practicing Python for an hour every night recently before April 1, 2026.",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_u1v2w3x4",
+      "statement_text": "The user plans to review Python basic syntax and functions first during 2026-03-30 to 2026-04-05.",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    }
+  ]
+}
+
+Example 3:
+Example Input: {
+  "chunk_id": "chunk_c3d4e5f6",
+  "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
+  "target_content": "The two projects the teacher assigned last winter seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA.",
+  "target_message_date": "2026-04-01T00:00:00",
+  "supporting_context": {
+    "msgs": [
+      {
+        "role": "User",
+        "msg": "The two projects the teacher assigned last winter seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA."
+      },
+      {
+        "role": "Assistant",
+        "msg": "It sounds like you're stuck on the two projects assigned last winter, and asking the TA would make sense if there is still no progress by this weekend."
+      }
+    ]
+  }
+}
+
+Example Output: {
+  "statements": [
+    {
+      "statement_id": "stmt_y5z6a7b8",
+      "statement_text": "The user thinks the two projects assigned in winter 2025 are difficult.",
+      "statement_type": "OPINION",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": true,
+      "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    },
+    {
+      "statement_id": "stmt_c9d0e1f2",
+      "statement_text": "The user spent a long time on the evening of 2026-03-31 looking at those two projects but still did not really understand them.",
+      "statement_type": "FACT",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-03-31T00:00:00",
+      "invalid_at": "2026-03-31T23:59:59"
+    },
+    {
+      "statement_id": "stmt_g3h4i5j6",
+      "statement_text": "If the user still cannot finish them by 2026-04-04 to 2026-04-05, the user may ask the TA.",
+      "statement_type": "OTHER",
+      "temporal_type": "DYNAMIC",
+      "speaker": "user",
+      "has_emotional_state": false,
+      "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
+      "valid_at": "2026-04-01T00:00:00",
+      "invalid_at": "NULL"
+    }
+  ]
+}
+
+{% endif %}
+=== End of Examples ===
+
+{% if language == "zh" %}
+最终输出前检查：
+
+- 是否只保留 `target_content` 中可直接支持的陈述句
+- 如果主语是用户，是否统一写“用户”
+- 非用户主体是否尽量写成具体名称；若无法做到，是否已正确标记 `has_unsolved_reference = true`
+- 如果最终 `statement_text` 已经落到具体实体名，`has_unsolved_reference` 是否已经改为 `false`
+- 如果 `statement_text` 中出现可由 `dialog_at` 稳定解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
+- 如果 `statement_text` 中出现“最近”“近来”“即将”“接下来”“很快”这类开放区间时间词，是否已经改写为带 `dialog_at` 锚点的开放区间表达
+- statement_type 是否合法，且没有把一般事实机械标成 `OPINION`
+- `has_emotional_state` 是否仅用于判断是否存在情感状态，而没有被当作情绪分类字段
+- temporal_type 是否与 valid_at / invalid_at 一致
+- 输出是否严格符合 JSON schema
+  {% else %}
+  Final checks before output:
+- Keep only statements directly supported by `target_content`
+- If the subject is the user, render it as “the user”
+- Render non-user subjects as concrete names when possible; otherwise mark `has_unsolved_reference = true`
+- If the final `statement_text` already resolves the reference to a concrete named entity, ensure `has_unsolved_reference = false`
+- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, rewrite them into more concrete date, month, or date-range expressions
+- If `statement_text` contains open-interval temporal words such as `recently`, `lately`, `upcoming`, `coming up`, or `soon`, rewrite them into open interval expressions anchored on `dialog_at`
+- Ensure statement_type is valid and do not mechanically label ordinary facts as `OPINION`
+- Ensure `has_emotional_state` is used only for emotional-state presence detection, not emotion classification
+- Ensure temporal_type is consistent with valid_at and invalid_at
+- Ensure the output strictly matches the JSON schema
+  {% endif %}
+
+**Output format**
+**CRITICAL JSON FORMATTING REQUIREMENTS:**
+
+1. Use only standard ASCII double quotes (") for JSON structure.
+2. Escape internal quotation marks inside string values using backslashes (\").
+3. Ensure all JSON strings are properly closed and comma-separated.
+4. Do not include line breaks within JSON string values.
+5. Return only the JSON object. Do not add explanations before or after it.
+
+**STATEMENT_TEXT TEMPORAL NORMALIZATION HARD CONSTRAINT:**
+{% if language == "zh" %}
+
+- `statement_text` 是最终记忆文本，必须在文本本身包含已解析后的时间表达，不能只依赖 `valid_at` / `invalid_at` 表示时间。
+- 如果相对时间或开放区间时间可以根据 `dialog_at` 或 `target_message_date` 解析，必须直接改写进 `statement_text`。
+- 不要在 `statement_text` 中保留可解析的原始模糊时间表达。
+- 不要同时保留原始模糊时间表达和解析后的时间表达。
+- `statement_text` 中禁止残留未锚定、未解析的相对时间词，例如：`今天`、`昨天`、`前天`、`明天`、`后天`、`本周`、`这周`、`上周`、`下周`、`本月`、`这个月`、`上个月`、`下个月`、`去年`、`明年`、`最近`、`近来`、`这段时间`、`这些天`、`即将`、`接下来`、`很快`。
+- 如果开放区间词已经被明确锚定到参考时间，则允许保留在锚定表达中，例如 `截至2026年4月1日之前的最近一段时间`。
+- 正确示例：`用户2026年3月28日和小李一起去了咖啡馆。`
+- 错误示例：`用户上周六和小李一起去了咖啡馆。`
+- 正确示例：`用户截至2026年4月1日之前的最近一段时间拿到了腾讯公司的offer。`
+- 错误示例：`用户最近拿到了腾讯公司的offer。`
+  {% else %}
+- `statement_text` is the final memory text, so it must contain the resolved temporal expression itself, not only rely on `valid_at` / `invalid_at`.
+- If a relative or open-interval temporal expression can be resolved from `dialog_at` or `target_message_date`, rewrite it inside `statement_text`.
+- Do not leave a resolvable source temporal phrase in `statement_text`.
+- Do not keep both the vague phrase and the resolved phrase together.
+- `statement_text` must not contain unanchored, unresolved relative temporal words such as: `today`, `yesterday`, `the day before yesterday`, `tomorrow`, `the day after tomorrow`, `this week`, `last week`, `next week`, `this month`, `last month`, `next month`, `last year`, `next year`, `recently`, `lately`, `these days`, `upcoming`, `coming up`, or `soon`.
+- Open-interval words are allowed only when explicitly anchored to the reference time, such as `recently before April 1, 2026`.
+- Correct example: `The user went to the cafe with Xiao Li on March 28, 2026.`
+- Wrong example: `The user went to the cafe with Xiao Li last Saturday.`
+- Correct example: `The user received Tencent's offer recently before April 1, 2026.`
+- Wrong example: `The user recently received Tencent's offer.`
+  {% endif %}
+  {% if language == "zh" %}
+- 例外：如果时间表达确实无法可靠落地，保留最小可信粗粒度表达，但仍应尽量锚定到参考时间，例如写成 `2025年冬天`，而不是保留 `去年冬天`。
+  {% else %}
+- Exception: if the temporal phrase truly cannot be grounded reliably, keep the smallest trustworthy coarse-grained expression, but still anchor it when possible, for example `winter 2025` instead of `last winter`.
+  {% endif %}
+
+**ISO 8601 HARD CONSTRAINT:**
+
+- `dialog_at` must be ISO 8601.
+- `target_message_date` must be ISO 8601.
+- `valid_at` and `invalid_at` must be ISO 8601, or `"NULL"` when no time is available.
+- Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
+- When only a date is known, still output an ISO 8601 datetime boundary.
+
+**SCHEMA HARD CONSTRAINT:**
+
+- Every statement object must include exactly these fields: `statement_id`, `statement_text`, `statement_type`, `temporal_type`, `speaker`, `has_emotional_state`, `has_unsolved_reference`, `dialog_at`, `valid_at`, `invalid_at`.
+- Do not omit `speaker`, `dialog_at`, `valid_at`, or `invalid_at`.
+- Do not output extra fields.
+- `statement_type` must be one of `"FACT"`, `"OPINION"`, `"OTHER"`.
+- `temporal_type` must be one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`.
+- `speaker` must be one of `"user"`, `"assistant"`.
+- `has_emotional_state` and `has_unsolved_reference` must be JSON booleans, not strings.
+- Missing time must be the string `"NULL"`, not JSON null.
+
+**LANGUAGE REQUIREMENT:**
+{% if language == "zh" %}
+
+- 输出语言应始终与输入语言匹配。
+- 如果输入是中文，则用中文提取陈述句。
+- 如果输入是英文，则用英文提取陈述句。
+- 保留原始语言，不要翻译。
+  {% else %}
+- The output language must always match the input language.
+- If the input is in Chinese, extract statements in Chinese.
+- If the input is in English, extract statements in English.
+- Preserve the original language and do not translate.
+  {% endif %}
+
+现在处理下面这个输入：{{ render_input() }}
+
+Return only a JSON object with this top-level shape:
+{
+  "statements": []
+}
+
+Each item in `statements` must be a JSON object with exactly these fields and value types:
+
+- `statement_id`: string
+- `statement_text`: string
+- `statement_type`: one of `"FACT"`, `"OPINION"`, `"OTHER"`
+- `temporal_type`: one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`
+- `speaker`: one of `"user"`, `"assistant"`
+- `has_emotional_state`: boolean, choose `true` or `false` according to the rules above
+- `has_unsolved_reference`: boolean, choose `true` or `false` according to the rules above
+- `dialog_at`: ISO 8601 datetime string
+- `valid_at`: ISO 8601 datetime string or `"NULL"`
+- `invalid_at`: ISO 8601 datetime string or `"NULL"`

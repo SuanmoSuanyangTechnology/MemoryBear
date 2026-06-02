@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-04-20 10:39:17 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-29 19:46:06
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -43,6 +43,7 @@ const nodeConfigMap: Record<string, Record<string, any>> = Object.fromEntries(
 
 // Special validators for fields that need deeper checks beyond simple empty check
 const specialValidators: Record<string, (val: any) => boolean> = {
+  'output.outputs': (val: any[]) => !Array.isArray(val) || !val.every(m => m?.name && String(m.name).trim() && m?.value && String(m.value).trim()),
   // llm.messages: at least one message with non-empty content
   'llm.messages': (val: any[]) => !Array.isArray(val) || !val.some(m => m?.content && String(m.content).trim()),
   // knowledge-retrieval.knowledge_retrieval: knowledge_bases array must be non-empty
@@ -59,8 +60,14 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     }
     return val.some(c => !c?.expressions?.length || c.expressions.some((expr: any) => !isExprSet(expr)))
   },
+  // vision.vision_input: if vision is true, vision_input must be non-empty array
+  'question-classifier.vision_input': (val: any) => {
+    console.log('vision_input',val)
+    
+    return false
+  },
   // question-classifier.categories: every category must have a value
-  'question-classifier.categories': (val: any[]) => !Array.isArray(val) || !val.some(c => c?.class_name && String(c.class_name).trim()),
+  'question-classifier.categories': (val: any[]) => !Array.isArray(val) || !val.every(c => c?.class_name && String(c.class_name).trim()),
   // var-aggregator.group_variables: must be non-empty array
   'var-aggregator.group_variables': (val: any[]) => !Array.isArray(val) || !val.length,
   // assigner.assignments: every item needs variable_selector + operation; value required unless operation is 'clear'
@@ -68,7 +75,7 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     if (!Array.isArray(val) || !val.length) return false
     return val.some(a => {
       if (!a?.variable_selector || !a?.operation) return true
-      if (a.operation === 'clear') return false
+      if (a.operation === 'clear' || a.operation === 'remove_first' || a.operation === 'remove_last') return false
       return a.value === undefined || a.value === null || a.value === ''
     })
   },
@@ -107,13 +114,13 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
   })
 
   // llm: vision_input required when vision is enabled
-  if (type === 'llm') {
+  if (type === 'llm' || type === 'question-classifier') {
     const vision = get('vision')
     if (vision === true || vision === 'true') {
       const visionInput = get('vision_input')
       console.log('vision', vision, isEmpty(visionInput))
       if (isEmpty(visionInput)) {
-        errors.push({ key: 'llm.vision_input', message: '' })
+        errors.push({ key: `${type}.vision_input`, message: '' })
       }
     }
   }
@@ -168,7 +175,7 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
 
       // Check connectivity
       const isChildNode = !!data.cycle
-      const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start'].includes(data.type) ? targetIds.has(node.id) : true
+      const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start', 'trigger'].includes(data.type) ? targetIds.has(node.id) : true
       if (!hasIncoming) {
         errors.push({ key: 'notConnected', message: t('workflow.notConnected') })
       }

@@ -1,13 +1,15 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Form, Select, Flex, Tooltip } from 'antd'
-import { Node } from '@antv/x6'
+import { Graph, Node } from '@antv/x6';
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import MappingList from '../MappingList'
 import OutputList from './OutputList'
 import CodeMirrorEditor from '@/components/CodeMirrorEditor';
 import styles from './index.module.css'
+import Retry from '../Retry'
+import ErrorHandle from '../ErrorHandle'  
 
 interface MappingItem {
   name?: string
@@ -16,7 +18,10 @@ interface MappingItem {
 
 interface CodeExecutionProps {
   options: Suggestion[]
-  selectedNode: Node
+  /** Currently selected node */
+  selectedNode: Node;
+  /** Reference to graph instance */
+  graphRef: React.MutableRefObject<Graph | undefined>;
 }
 
 const codeTemplate = {
@@ -31,7 +36,7 @@ const codeTemplate = {
 }`
 }
 
-const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
+const CodeExecution: FC<CodeExecutionProps> = ({ options, selectedNode, graphRef }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
 
@@ -115,6 +120,13 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
         <OutputList
           label={t('workflow.config.code.output_variables')} 
           name="output_variables" 
+        />
+      </Form.Item>
+      <Retry />
+      <Form.Item name="error_handle">
+        <ErrorHandle
+          selectedNode={selectedNode}
+          graphRef={graphRef}
         />
       </Form.Item>
     </>
