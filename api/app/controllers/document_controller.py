@@ -448,3 +448,44 @@ async def batch_update_document_metadata(
     )
 
     return success(data=result, msg="批量更新完成")
+
+
+@router.put("/{document_id}/metadata", response_model=ApiResponse)
+async def update_document_metadata(
+    document_id: uuid.UUID,
+    data: metadata_schema.DocumentMetadataUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    更新单个文档的元数据
+    - 字段必须在知识库中已定义
+    - 值类型必须与字段定义一致
+    """
+    api_logger.info(
+        f"Update document metadata: document_id={document_id}, user={current_user.username}"
+    )
+
+    # 1. 校验文档存在且有权访问
+    db_document = document_service.get_document_by_id(
+        db, document_id=document_id, current_user=current_user
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    # 2. 调用 Service 更新
+    updated_doc = KnowledgeMetadataService.update_document_metadata(
+        db=db,
+        document_id=document_id,
+        metadata=data.metadata,
+        tenant_id=current_user.tenant_id,
+        created_by=current_user.id,
+    )
+
+    return success(
+        data=jsonable_encoder(document_schema.Document.model_validate(updated_doc)),
+        msg="文档元数据更新成功",
+    )

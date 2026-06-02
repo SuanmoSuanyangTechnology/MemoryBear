@@ -269,6 +269,72 @@ class KnowledgeMetadataService:
         return {"success_count": success_count, "failed_items": failed_items}
 
     @staticmethod
+    def update_document_metadata(
+        db: Session,
+        document_id: uuid.UUID,
+        metadata: dict[str, Any],
+        tenant_id: uuid.UUID,
+        created_by: uuid.UUID,
+    ) -> Document:
+        """
+        更新单个文档的元数据
+        Args:
+            document_id: 文档ID
+            metadata: {field_name: value}
+        Returns:
+            更新后的 Document
+        """
+        # 1. 查询文档
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            raise ResourceNotFoundException("文档", str(document_id))
+
+        knowledge_id = doc.kb_id
+
+        # 2. 获取该知识库的元数据字段定义
+        custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
+        field_defs = {f.name: f for f in custom_fields}
+
+        # 3. 校验每个字段
+        for field_name, value in metadata.items():
+            field_def = field_defs.get(field_name)
+            if not field_def:
+                raise ValidationException(
+                    f"字段 '{field_name}' 未在知识库中定义",
+                    field=field_name,
+                )
+
+            if not KnowledgeMetadataService._validate_value_type(field_def.type, value):
+                raise ValidationException(
+                    f"字段 '{field_name}' 的值类型不匹配，期望 {field_def.type}",
+                    field=field_name,
+                )
+
+        # 4. 更新 metadata JSON
+        doc.doc_metadata.update(metadata)
+        flag_modified(doc, "doc_metadata")
+        doc.updated_at = datetime.datetime.now()
+
+        # 5. 创建/更新绑定记录
+        for field_name in metadata.keys():
+            field_def = field_defs[field_name]
+            if not KnowledgeMetadataRepository.binding_exists(
+                db, knowledge_id, field_def.id, document_id
+            ):
+                binding = KnowledgeMetadataBinding(
+                    tenant_id=tenant_id,
+                    knowledge_id=knowledge_id,
+                    metadata_id=field_def.id,
+                    document_id=document_id,
+                    created_by=created_by,
+                )
+                db.add(binding)
+
+        db.commit()
+        db.refresh(doc)
+        return doc
+
+    @staticmethod
     def _validate_value_type(field_type: str, value: Any) -> bool:
         """校验值类型是否与字段定义一致"""
         if value is None:

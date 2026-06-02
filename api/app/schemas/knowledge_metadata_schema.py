@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, field_serializer, ConfigDict
 from enum import StrEnum
 
 
+FIELD_NAME_PATTERN = r"^[a-z][a-z0-9_]*$"
+
 class MetadataFieldType(StrEnum):
     STRING = "string"
     NUMBER = "number"
@@ -30,12 +32,14 @@ class MetadataFilterMode(StrEnum):
 # === KnowledgeMetadata CRUD Schemas ===
 
 class KnowledgeMetadataCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255, description="字段名")
+    name: str = Field(..., min_length=1, max_length=255, pattern=FIELD_NAME_PATTERN,
+                      description="字段名（小写字母开头，仅含小写字母、数字、下划线）")
     type: MetadataFieldType = Field(..., description="字段类型")
 
 
 class KnowledgeMetadataUpdate(BaseModel):
-    name: str | None = Field(None, min_length=1, max_length=255, description="字段名")
+    name: str | None = Field(None, min_length=1, max_length=255, pattern=FIELD_NAME_PATTERN,
+                             description="字段名（小写字母开头，仅含小写字母、数字、下划线）")
 
 
 class KnowledgeMetadataResponse(BaseModel):
@@ -81,3 +85,7 @@ class DocumentMetadataItem(BaseModel):
 
 class BatchUpdateMetadataRequest(BaseModel):
     items: list[DocumentMetadataItem] = Field(..., min_length=1, description="文档元数据列表")
+
+
+class DocumentMetadataUpdateRequest(BaseModel):
+    metadata: dict[str, Any] = Field(..., description="元数据 {field_name: value}")
