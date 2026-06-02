@@ -335,7 +335,7 @@ class LangchainAdapter:
             "parameters": [
                 {
                     "name": param.name,
-                    "type": param.type.value,
+                    "type": getattr(param.type, "value", param.type),
                     "description": param.description,
                     "required": param.required,
                     "default": param.default,

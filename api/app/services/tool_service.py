@@ -432,6 +432,22 @@ class ToolService:
             logger.error(f"获取工具方法失败: {tool_id}, {e}")
             return []
 
+    @staticmethod
+    def _serialize_tool_parameter(param: Any) -> Dict[str, Any]:
+        """兼容 ToolParameter.type 为枚举或字符串两种情况。"""
+        param_type = getattr(param.type, "value", param.type)
+        return {
+            "name": param.name,
+            "type": param_type,
+            "description": param.description,
+            "required": param.required,
+            "default": param.default,
+            "enum": param.enum,
+            "minimum": param.minimum,
+            "maximum": param.maximum,
+            "pattern": param.pattern
+        }
+
     async def _get_builtin_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
         """获取内置工具的方法"""
         builtin_config = self.builtin_repo.find_by_tool_id(self.db, config.id)
@@ -485,17 +501,11 @@ class ToolService:
             return self._get_openclaw_tool_params(operation)
         
         # 其他工具的默认处理：返回除operation外的所有参数
-        return [{
-            "name": param.name,
-            "type": param.type.value,
-            "description": param.description,
-            "required": param.required,
-            "default": param.default,
-            "enum": param.enum,
-            "minimum": param.minimum,
-            "maximum": param.maximum,
-            "pattern": param.pattern
-        } for param in tool_instance.parameters if param.name != "operation"]
+        return [
+            self._serialize_tool_parameter(param)
+            for param in tool_instance.parameters
+            if param.name != "operation"
+        ]
     
     def _get_datetime_tool_params(self, operation: str) -> List[Dict[str, Any]]:
         """获取datetime_tool特定操作的参数"""
@@ -1240,17 +1250,7 @@ class ToolService:
             "method_id": config.name,
             "name": config.name,
             "description": config.description,
-            "parameters": [{
-                "name": param.name,
-                "type": param.type.value,
-                "description": param.description,
-                "required": param.required,
-                "default": param.default,
-                "enum": param.enum,
-                "minimum": param.minimum,
-                "maximum": param.maximum,
-                "pattern": param.pattern
-            } for param in tool_instance.parameters]
+            "parameters": [self._serialize_tool_parameter(param) for param in tool_instance.parameters]
         }]
 
     def _create_type_config(self, tool_config: ToolConfig, config: Dict[str, Any]):
