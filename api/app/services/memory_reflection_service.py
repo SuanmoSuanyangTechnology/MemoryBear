@@ -160,8 +160,8 @@ class WorkspaceAppService:
                 "app_id": str(end_user.app_id)
             }
             app_info["end_users"].append(end_user_info)
-        print(100*'-')
-        print(app_info)
+        # print(100*'-')
+        # print(app_info)
 
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """
