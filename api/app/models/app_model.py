@@ -6,6 +6,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 class IconType(StrEnum):
     """图标类型枚举"""
@@ -69,8 +70,8 @@ class App(Base):
     )
 
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     # 一对一：Agent 配置（仅当 type=agent 时有效）
     agent_config = relationship(

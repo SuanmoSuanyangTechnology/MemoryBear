@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models import ReleaseShare, AppRelease, App, AgentConfig
 from app.repositories.release_share_repository import ReleaseShareRepository
 from app.core.share_utils import (
@@ -295,7 +296,7 @@ class ReleaseShareService:
                     app_type=release.type,
                     version=release.version,
                     release_notes=release.release_notes,
-                    published_at=int(release.published_at.timestamp() * 1000),
+                    published_at=to_timestamp_ms(release.published_at),
                     config={},
                     require_password=True,
                     is_password_verified=False,
@@ -327,7 +328,7 @@ class ReleaseShareService:
             app_type=release.type,
             version=release.version,
             release_notes=release.release_notes,
-            published_at=int(release.published_at.timestamp() * 1000),
+            published_at=to_timestamp_ms(release.published_at),
             config=release.config or {},
             require_password=share.require_password,
             is_password_verified=is_password_verified,

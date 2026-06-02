@@ -12,6 +12,7 @@ from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class FileMetadata(Base):
@@ -42,4 +43,4 @@ class FileMetadata(Base):
     file_size = Column(Integer, nullable=False, default=0, comment="File size in bytes")
     content_type = Column(String(128), nullable=True, comment="MIME content type")
     status = Column(String(16), nullable=False, default="pending", comment="Upload status: pending, completed, failed")
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)

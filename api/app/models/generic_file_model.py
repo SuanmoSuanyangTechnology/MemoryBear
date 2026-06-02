@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Index, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class GenericFile(Base):
@@ -40,8 +41,8 @@ class GenericFile(Base):
     reference_count = Column(Integer, default=0, comment="引用计数")
 
     # 时间戳
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
     deleted_at = Column(DateTime, nullable=True, comment="删除时间（软删除）")
 
     # 复合索引

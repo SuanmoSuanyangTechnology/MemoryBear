@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from uuid import uuid4
 from datetime import datetime
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.utils.data.ontology import StatementType, TemporalInfo, RelevenceInfo
 from app.core.memory.models.triplet_models import TripletExtractionResponse, Triplet
 
@@ -186,7 +187,7 @@ class DialogData(BaseModel):
     ref_id: str = Field(..., description="Refer to external dialog id. This is used to link to the original dialog.")
     end_user_id: str = Field(default=..., description="End user ID of dialogue data")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
-    created_at: datetime = Field(default_factory=datetime.now, description="The timestamp when the dialog was created.")
+    created_at: datetime = Field(default_factory=utcnow_naive, description="The timestamp when the dialog was created.")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the dialog.")
     chunks: List[Chunk] = Field(default_factory=list, description="A list of chunks from the conversation context.")
     config_id: Optional[int | str] = Field(None, description="Configuration ID used to process this dialog (integer or string)")

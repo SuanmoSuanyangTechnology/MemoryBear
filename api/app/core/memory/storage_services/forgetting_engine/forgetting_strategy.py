@@ -16,6 +16,7 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 
@@ -122,8 +123,8 @@ class ForgettingStrategy:
                 - avg_activation: 平均激活值（用于排序）
         """
         # 计算时间阈值
-        cutoff_time = datetime.now() - timedelta(days=min_days_since_access)
-        cutoff_time_iso = cutoff_time.isoformat()
+        cutoff_time = utcnow_naive() - timedelta(days=min_days_since_access)
+        cutoff_time_iso = to_iso_z(cutoff_time)
         
         # 构建查询
         query = """
@@ -293,8 +294,8 @@ class ForgettingStrategy:
         inherited_importance = max(statement_importance, entity_importance)
         
         # 创建 MemorySummary 节点
-        current_time = datetime.now()
-        current_time_iso = current_time.isoformat()
+        current_time = utcnow_naive()
+        current_time_iso = to_iso_z(current_time)
         
         # 生成新的 MemorySummary ID
         import uuid
@@ -641,4 +642,3 @@ class ForgettingStrategy:
             summary = f"{summary[:197]}..."
         
         return summary
-

@@ -6,6 +6,7 @@ from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, and_
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.api_key_model import ApiKey, ApiKeyLog
 from app.schemas import api_key_schema
 
@@ -92,7 +93,7 @@ class ApiKeyRepository:
         if api_key:
             api_key.usage_count += 1
             api_key.quota_used += 1
-            api_key.last_used_at = datetime.datetime.now()
+            api_key.last_used_at = utcnow_naive()
             db.flush()
             return True
         return False
@@ -105,7 +106,7 @@ class ApiKeyRepository:
             return {}
 
         # 今日请求数
-        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = utcnow_naive().replace(hour=0, minute=0, second=0, microsecond=0)
         today_count_stmt = select(func.count()).select_from(ApiKeyLog).where(
             and_(
                 ApiKeyLog.api_key_id == api_key_id,

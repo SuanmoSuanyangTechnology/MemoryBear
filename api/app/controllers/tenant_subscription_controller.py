@@ -1,7 +1,6 @@
 """
 租户套餐查询接口（普通用户可访问）
 """
-import datetime
 from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends
@@ -15,6 +14,7 @@ from app.dependencies import get_current_user
 from app.i18n.dependencies import get_translator
 from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 
 logger = get_api_logger()
 
@@ -47,6 +47,7 @@ async def get_my_tenant_subscription(
             free_plan = svc.plan_repo.get_free_plan()
             if not free_plan:
                 return success(data=None, msg="暂无有效套餐")
+            current_time_ms = to_timestamp_ms(utcnow_naive())
             return success(data={
                 "subscription_id": None,
                 "tenant_id": str(tenant_id),
@@ -75,8 +76,8 @@ async def get_my_tenant_subscription(
                 "expired_at": None,
                 "status": "active",
                 "quotas": free_plan.quotas or {},
-                "created_at": int(datetime.datetime.utcnow().timestamp() * 1000),
-                "updated_at": int(datetime.datetime.utcnow().timestamp() * 1000),
+                "created_at": current_time_ms,
+                "updated_at": current_time_ms,
             }, msg="免费套餐")
 
         return success(data=svc.build_response(sub))
@@ -89,6 +90,7 @@ async def get_my_tenant_subscription(
         from app.config.default_free_plan import DEFAULT_FREE_PLAN
 
         plan = DEFAULT_FREE_PLAN
+        current_time_ms = to_timestamp_ms(utcnow_naive())
         response_data = {
             "subscription_id": None,
             "tenant_id": str(current_user.tenant.id),
@@ -117,8 +119,8 @@ async def get_my_tenant_subscription(
             "expired_at": None,
             "status": "active",
             "quotas": plan["quotas"],
-            "created_at": int(datetime.datetime.utcnow().timestamp() * 1000),
-            "updated_at": int(datetime.datetime.utcnow().timestamp() * 1000),
+            "created_at": current_time_ms,
+            "updated_at": current_time_ms,
         }
         return success(data=response_data, msg="社区版免费套餐")
 

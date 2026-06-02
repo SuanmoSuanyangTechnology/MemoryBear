@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Tuple
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.models.graph_models import (
     EntityEntityEdge,
     ExtractedEntityNode,
@@ -48,7 +49,7 @@ def _parse_dt(val: Any) -> datetime: # 定义内部辅助函数_parse_dt，用�
         except Exception:
             pass
     # Fallback: now; upstream should provide real times
-    return datetime.now()
+    return utcnow_naive()
 
 
 def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:

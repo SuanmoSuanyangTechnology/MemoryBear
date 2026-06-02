@@ -4,6 +4,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, U
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ReleaseShare(Base):
@@ -35,8 +36,8 @@ class ReleaseShare(Base):
     
     # 元数据
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="创建者")
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     # 关系
     release = relationship("AppRelease", backref="share")

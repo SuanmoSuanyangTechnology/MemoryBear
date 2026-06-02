@@ -16,9 +16,9 @@ import os
 
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
-from datetime import datetime
 
 from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
+from app.core.utils.datetime_utils import to_iso_z
 
 
 class DataPreprocessor:
@@ -724,7 +724,7 @@ class DataPreprocessor:
             serializable_data.append({
                 'id': dialog.id,
                 'ref_id': dialog.ref_id,
-                'created_at': dialog.created_at.isoformat(),
+                'created_at': to_iso_z(dialog.created_at),
                 'context': {
                     'msgs': [{'role': msg.role, 'msg': msg.msg} for msg in dialog.context.msgs]
                 },

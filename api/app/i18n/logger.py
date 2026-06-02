@@ -10,12 +10,12 @@ This module provides:
 
 import logging
 from typing import Dict, List, Optional, Set
-from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
 import json
 
 from app.core.logging_config import get_logger
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 
 logger = get_logger(__name__)
 
@@ -88,7 +88,7 @@ class TranslationLogger:
         
         # Create context entry
         entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": to_iso_z(utcnow_naive()),
             "key": key,
             "locale": locale,
             "context": context or {}
@@ -130,7 +130,7 @@ class TranslationLogger:
             "key": key,
             "locale": locale,
             "context": context or {},
-            "timestamp": datetime.now().isoformat()
+            "timestamp": to_iso_z(utcnow_naive())
         }
         
         self._logger.error(
@@ -223,7 +223,7 @@ class TranslationLogger:
         missing = self.get_missing_translations(locale)
         
         report = {
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": to_iso_z(utcnow_naive()),
             "total_missing": sum(len(keys) for keys in missing.values()),
             "missing_by_locale": {
                 loc: {
@@ -301,7 +301,7 @@ class TranslationLogger:
             output_file: Output file path
         """
         data = {
-            "exported_at": datetime.now().isoformat(),
+            "exported_at": to_iso_z(utcnow_naive()),
             "missing_translations": self.get_missing_translations(),
             "statistics": self.get_statistics(),
             "recent_context": self.get_missing_with_context(limit=1000)

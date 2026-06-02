@@ -98,7 +98,7 @@ def get_model_list(
             pagesize=pagesize
         )
 
-        api_logger.debug(f"开始获取模型配置列表: {query.dict()}")
+        api_logger.debug(f"开始获取模型配置列表: {query.model_dump()}")
         result_orm = ModelConfigService.get_model_list(db=db, query=query, tenant_id=current_user.tenant_id)
         result = PageData.model_validate(result_orm)
         api_logger.info(f"模型配置列表获取成功: 总数={result.page.total}, 当前页={len(result.items)}")

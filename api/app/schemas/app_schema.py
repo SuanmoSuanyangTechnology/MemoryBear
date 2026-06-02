@@ -5,6 +5,7 @@ from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.schemas.workflow_schema import WorkflowConfigCreate
 
 
@@ -417,15 +418,15 @@ class App(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("shared_at", when_used="json")
     def _serialize_shared_at(self, dt: Optional[datetime.datetime]):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class AgentConfig(BaseModel):
@@ -504,11 +505,11 @@ class AgentConfig(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class PublishRequest(BaseModel):
@@ -554,15 +555,15 @@ class AppRelease(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("published_at", when_used="json")
     def _serialize_published_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # ---------- App Copy Schema ----------
@@ -622,11 +623,11 @@ class AppShare(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # ---------- Draft Run Schemas ----------

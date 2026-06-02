@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 from enum import Enum
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 
 class OptimizationStrategy(str, Enum):
@@ -49,7 +50,7 @@ class ReflectionLogListItem(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 class ReflectionLogDetail(BaseModel):
     """详情页完整日志（含 JSONB 字段）"""
@@ -73,7 +74,7 @@ class ReflectionLogDetail(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class Memory_Reflection(BaseModel):

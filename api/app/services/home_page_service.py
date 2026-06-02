@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Dict, Any
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.repositories.home_page_repository import HomePageRepository
 from app.schemas.home_page_schema import HomeStatistics, WorkspaceInfo
 
@@ -32,7 +33,7 @@ class HomePageService:
     def get_home_statistics(db: Session, tenant_id: UUID) -> HomeStatistics:
         """获取首页统计数据"""
         # 计算时间范围
-        now = datetime.now()
+        now = utcnow_naive()
         week_start = now - timedelta(days=now.weekday())
         week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
         

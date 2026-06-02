@@ -7,9 +7,9 @@ Interest Distribution Cache
 import json
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 from app.aioRedis import get_thread_safe_redis
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class InterestMemoryCache:
             key = cls._get_key(end_user_id, language)
             payload = {
                 "data": data,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": to_iso_z(utcnow_naive()),
                 "cached": True,
             }
             value = json.dumps(payload, ensure_ascii=False)

@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field, field_serializer
 import uuid
 from datetime import datetime
 
+from app.core.utils.datetime_utils import to_timestamp_ms
+
 
 class SkillBase(BaseModel):
     """Skill 基础 Schema"""
@@ -49,7 +51,7 @@ class Skill(BaseModel):
     @field_serializer('created_at', 'updated_at')
     def serialize_datetime_to_timestamp(self, value: datetime) -> int:
         """（毫秒级）时间戳"""
-        return int(value.timestamp() * 1000)
+        return to_timestamp_ms(value)
 
     class Config:
         from_attributes = True

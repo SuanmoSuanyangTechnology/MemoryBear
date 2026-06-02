@@ -23,6 +23,7 @@ from app.services.conversation_share_service import ConversationShareService
 from app.services.draft_run_service import AgentRunService
 from app.services.app_service import AppService
 from app.models import ModelConfig
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 router = APIRouter(prefix="/apps", tags=["Message Interaction"])
 
@@ -355,7 +356,7 @@ async def get_reports_for_review(
             "selected_text": r.selected_text,
             "text_start_offset": r.text_start_offset,
             "text_end_offset": r.text_end_offset,
-            "created_at": int(r.created_at.timestamp() * 1000) if r.created_at else None,
+            "created_at": to_timestamp_ms(r.created_at),
         }
         for r in reports
     ]

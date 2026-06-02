@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class EndUser(Base):
@@ -19,8 +20,8 @@ class EndUser(Base):
     other_name = Column(String, default="", nullable=False)
     other_address = Column(String, default="", nullable=False)
     reflection_time = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
     
     # 用户档案字段 - User Profile Fields
     position = Column(String, nullable=True, comment="职位")

@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, DateTime, Index
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ForgettingCycleHistory(Base):
@@ -18,7 +19,7 @@ class ForgettingCycleHistory(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True, comment="主键ID")
     end_user_id = Column(String(255), nullable=False, comment="终端用户ID")
-    execution_time = Column(DateTime, nullable=False, default=datetime.now, comment="执行时间")
+    execution_time = Column(DateTime, nullable=False, default=utcnow_naive, comment="执行时间")
     merged_count = Column(Integer, default=0, comment="本次成功融合的节点对数")
     failed_count = Column(Integer, default=0, comment="本次融合失败的节点对数")
     average_activation_value = Column(Float, nullable=True, comment="平均激活值")

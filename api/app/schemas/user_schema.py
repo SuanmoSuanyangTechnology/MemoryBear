@@ -4,6 +4,7 @@ from typing import Optional, List
 import datetime
 import uuid
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models import Workspace
 from app.models.workspace_model import WorkspaceRole
 
@@ -94,7 +95,7 @@ class User(UserBase):
     @classmethod
     def _created_at_to_ms(cls, v):
         if isinstance(v, datetime.datetime):
-            return int(v.timestamp() * 1000)
+            return to_timestamp_ms(v)
         if isinstance(v, (int, float)):
             return int(v)
         return v
@@ -108,7 +109,7 @@ class User(UserBase):
         if v is None:
             return None
         if isinstance(v, datetime.datetime):
-            return int(v.timestamp() * 1000)
+            return to_timestamp_ms(v)
         if isinstance(v, (int, float)):
             return int(v)
         return v

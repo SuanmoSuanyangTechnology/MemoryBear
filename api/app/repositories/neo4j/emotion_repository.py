@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import json
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -209,7 +210,7 @@ class EmotionRepository:
         days = days_map.get(time_range, 30)
         
         # 计算起始日期（使用字符串比较，避免时区问题）
-        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        start_date = to_iso_z(utcnow_naive() - timedelta(days=days))
         
         # 使用 datetime() 函数进行时间比较，与其他查询保持一致
         query = """
@@ -236,7 +237,7 @@ class EmotionRepository:
                     "statement_id": record["statement_id"],
                     "emotion_type": record["emotion_type"],
                     "emotion_intensity": record["emotion_intensity"],
-                    "created_at": record["created_at"].isoformat() if hasattr(record["created_at"], "isoformat") else str(record["created_at"])
+                    "created_at": to_iso_z(record["created_at"]) if hasattr(record["created_at"], "isoformat") else str(record["created_at"])
                 }
                 for record in results
             ]

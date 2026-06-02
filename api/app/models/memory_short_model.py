@@ -7,6 +7,7 @@ from sqlalchemy import Column, String, DateTime, Text, JSON
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ShortTermMemory(Base):
@@ -32,7 +33,7 @@ class ShortTermMemory(Base):
     retrieved_content = Column(JSON, nullable=True, default=list, comment="检索到的相关内容，格式为[{}, {}]")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False, index=True, comment="创建时间")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, index=True, comment="创建时间")
     
     def __repr__(self):
         return f"<ShortTermMemory(id={self.id}, end_user_id={self.end_user_id}, created_at={self.created_at})>"
@@ -54,7 +55,7 @@ class LongTermMemory(Base):
     retrieved_content = Column(JSON, nullable=True, default=list, comment="检索到的相关内容，格式为[{}, {}]")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False, index=True, comment="创建时间")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, index=True, comment="创建时间")
     
     def __repr__(self):
         return f"<LongTermMemory(id={self.id}, end_user_id={self.end_user_id}, created_at={self.created_at})>"

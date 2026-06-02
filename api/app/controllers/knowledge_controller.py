@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -400,7 +401,7 @@ async def _update_knowledge(
         if updated_fields:
             api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
-        db_knowledge.updated_at = datetime.datetime.now()
+        db_knowledge.updated_at = utcnow_naive()
 
         # 3. Save to database
         db.commit()
@@ -446,7 +447,7 @@ async def delete_knowledge(
         # 2. Soft-delete knowledge base
         api_logger.debug(f"Perform a soft delete: {db_knowledge.name} (ID: {knowledge_id})")
         db_knowledge.status = 2
-        db_knowledge.updated_at = datetime.datetime.now()
+        db_knowledge.updated_at = utcnow_naive()
         db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
         return success(msg="The knowledge base has been successfully deleted")

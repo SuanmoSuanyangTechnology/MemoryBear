@@ -31,8 +31,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
 from typing import Any, Dict, Optional
+
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ class PipelineSnapshot:
         self._oss_prefix: Optional[str] = None
 
         if self.enabled:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
             if conversation_id:
                 # 滑动窗口路径：按 user / conversation / seq_xxx_时间戳 三级组织
                 seq_part = (
@@ -194,7 +195,7 @@ class PipelineSnapshot:
             "end_user_id": self.end_user_id,
             "conversation_id": self.conversation_id,
             "message_seq": self.message_seq,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": to_iso_z(utcnow_naive()),
             "stats": stats,
         }
         if self.extra_metadata:

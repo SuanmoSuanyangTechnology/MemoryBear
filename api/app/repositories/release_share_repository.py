@@ -2,6 +2,7 @@ import uuid
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models import ReleaseShare
 
 
@@ -50,10 +51,9 @@ class ReleaseShareRepository:
     
     def increment_view_count(self, share_id: uuid.UUID) -> None:
         """增加访问次数（异步更新，不阻塞）"""
-        from datetime import datetime
         stmt = select(ReleaseShare).where(ReleaseShare.id == share_id)
         share = self.db.scalars(stmt).first()
         if share:
             share.view_count += 1
-            share.last_accessed_at = datetime.now()
+            share.last_accessed_at = utcnow_naive()
             self.db.commit()

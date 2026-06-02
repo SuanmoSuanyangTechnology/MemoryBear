@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.analytics.implicit_memory.analyzers.habit_analyzer import (
     HabitAnalyzer,
 )
@@ -119,7 +120,7 @@ class HabitDetector:
             confidence_score = habit.confidence_level / 100.0
             
             # Recency score (0.0-1.0)
-            current_time = datetime.now()
+            current_time = utcnow_naive()
             days_since_last = (current_time - habit.last_observed).days
             
             # Exponential decay for recency (habits lose relevance over time)
@@ -183,7 +184,7 @@ class HabitDetector:
         if not habits:
             return []
         
-        current_time = datetime.now()
+        current_time = utcnow_naive()
         cutoff_date = current_time - timedelta(days=current_threshold_days)
         
         current_habits = []

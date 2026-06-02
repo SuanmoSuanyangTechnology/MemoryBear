@@ -2,7 +2,6 @@
 # Author: Eternity
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/9 13:51
-import datetime
 import time
 import logging
 from typing import Any
@@ -17,6 +16,7 @@ from app.core.workflow.engine.state_manager import WorkflowStateManager
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
 from app.core.workflow.nodes.base_node import NodeExecutionError
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class WorkflowExecutor:
                   - token_usage: aggregated token usage if available
                   - error: error message if any
         """
-        start = datetime.datetime.now()
+        start = utcnow_naive()
         async for event in self.execute_stream(input_data):
             if event.get("event") == "workflow_end":
                 return event.get("data")
@@ -141,7 +141,7 @@ class WorkflowExecutor:
             {"error": "Workflow execution did not end as expected"},
             self.execution_context,
             self.variable_pool,
-            (datetime.datetime.now() - start).total_seconds(),
+            (utcnow_naive() - start).total_seconds(),
             "",
             success=False
         )
@@ -171,7 +171,7 @@ class WorkflowExecutor:
         """
         logger.info(f"Starting workflow execution (streaming): execution_id={self.execution_context.execution_id}")
 
-        start_time = datetime.datetime.now()
+        start_time = utcnow_naive()
 
         yield {
             "event": "workflow_start",
@@ -179,7 +179,7 @@ class WorkflowExecutor:
                 "execution_id": self.execution_context.execution_id,
                 "workspace_id": self.execution_context.workspace_id,
                 "conversation_id": self.execution_context.conversation_id,
-                "timestamp": int(start_time.timestamp() * 1000)
+                "timestamp": to_timestamp_ms(start_time)
             }
         }
         result = None
@@ -256,7 +256,7 @@ class WorkflowExecutor:
                 yield msg_event
 
             result = graph.get_state(self.execution_context.checkpoint_config).values
-            end_time = datetime.datetime.now()
+            end_time = utcnow_naive()
             elapsed_time = (end_time - start_time).total_seconds()
 
             # For output nodes, collect structured results from variable_pool and serialize to JSON
@@ -322,7 +322,7 @@ class WorkflowExecutor:
             }
 
         except Exception as e:
-            end_time = datetime.datetime.now()
+            end_time = utcnow_naive()
             elapsed_time = (end_time - start_time).total_seconds()
 
             logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",

@@ -6,6 +6,7 @@ from sqlalchemy import Column, ForeignKey, Text, DateTime, String, Index, Boolea
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class RoleType(StrEnum):
@@ -65,7 +66,7 @@ class PromptOptimizerSession(Base):
     # app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, comment="Application ID")
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="User ID")
 
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time", index=True)
+    created_at = Column(DateTime, default=utcnow_naive, comment="Creation Time", index=True)
 
 
 class PromptOptimizerSessionHistory(Base):
@@ -132,7 +133,7 @@ class PromptOptimizerSessionHistory(Base):
     content = Column(Text, nullable=False, comment="Message Content")
     # prompt = Column(Text, nullable=False, comment="Prompt")
 
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time", index=True)
+    created_at = Column(DateTime, default=utcnow_naive, comment="Creation Time", index=True)
 
 
 class PromptHistory(Base):
@@ -149,5 +150,5 @@ class PromptHistory(Base):
     )
     title = Column(String, nullable=False, comment="Title")
     prompt = Column(Text, nullable=False, comment="Prompt")
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="Creation Time", index=True)
+    created_at = Column(DateTime, default=utcnow_naive, comment="Creation Time", index=True)
     is_delete = Column(Boolean, default=False, comment="Delete")

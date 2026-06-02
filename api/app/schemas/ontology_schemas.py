@@ -24,6 +24,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.memory.models.ontology_scenario_models import OntologyClass
 
 
@@ -158,7 +159,7 @@ class OntologyResultResponse(BaseModel):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         """将创建时间序列化为毫秒时间戳"""
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
     
     class Config:
         from_attributes = True
@@ -246,12 +247,12 @@ class SceneResponse(BaseModel):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         """将创建时间序列化为毫秒时间戳"""
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
     
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         """将更新时间序列化为毫秒时间戳"""
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -400,12 +401,12 @@ class ClassResponse(BaseModel):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         """将创建时间序列化为毫秒时间戳"""
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
     
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         """将更新时间序列化为毫秒时间戳"""
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
     
     model_config = ConfigDict(from_attributes=True)
 

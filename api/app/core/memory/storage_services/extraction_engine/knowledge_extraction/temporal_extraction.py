@@ -1,6 +1,5 @@
 import os
 import asyncio
-from datetime import datetime
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 from app.core.memory.llm_tools.openai_client import OpenAIClient
@@ -8,6 +7,7 @@ from app.core.memory.models.message_models import DialogData, Statement, Tempora
 from app.core.memory.utils.prompt.prompt_utils import render_temporal_extraction_prompt
 from app.core.memory.utils.data.ontology import LABEL_DEFINITIONS, TemporalInfo
 from app.core.memory.utils.log.logging_utils import prompt_logger
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class RawTemporalRange(BaseModel):
@@ -49,7 +49,7 @@ class TemporalExtractor:
             TemporalValidityRange: The extracted temporal validity range.
         """
         if not ref_dates:
-            ref_dates = {"today": datetime.now().strftime("%Y-%m-%d")}
+            ref_dates = {"today": utcnow_naive().strftime("%Y-%m-%d")}
 
         if statement.temporal_info == TemporalInfo.ATEMPORAL:
             return TemporalValidityRange(valid_at=None, invalid_at=None)

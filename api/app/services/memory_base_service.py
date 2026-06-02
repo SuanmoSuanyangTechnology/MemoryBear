@@ -8,6 +8,7 @@ import re
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.logging_config import get_logger
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.emotion_analytics_service import EmotionAnalyticsService
@@ -332,20 +333,20 @@ class MemoryBaseService:
             # 处理 Neo4j DateTime 对象
             if hasattr(timestamp_value, 'to_native'):
                 dt_object = timestamp_value.to_native()
-                return int(dt_object.timestamp() * 1000)
+                return to_timestamp_ms(dt_object)
             
             # 处理 Python datetime 对象
             if isinstance(timestamp_value, datetime):
-                return int(timestamp_value.timestamp() * 1000)
+                return to_timestamp_ms(timestamp_value)
             
             # 处理字符串格式
             if isinstance(timestamp_value, str):
                 dt_object = datetime.fromisoformat(timestamp_value.replace("Z", "+00:00"))
-                return int(dt_object.timestamp() * 1000)
+                return to_timestamp_ms(dt_object)
             
             # 其他情况尝试转换为字符串再解析
             dt_object = datetime.fromisoformat(str(timestamp_value).replace("Z", "+00:00"))
-            return int(dt_object.timestamp() * 1000)
+            return to_timestamp_ms(dt_object)
             
         except (ValueError, TypeError, AttributeError) as e:
             logger.warning(f"无法解析时间戳: {timestamp_value}, error={str(e)}")

@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
@@ -391,7 +392,7 @@ class MemoryConfigService:
                 reflexion_iteration_period=int(memory_config.iteration_period or "3"),
                 reflexion_range=memory_config.reflexion_range or "partial",
                 reflexion_baseline=memory_config.baseline or "Time",
-                loaded_at=datetime.now(),
+                loaded_at=utcnow_naive(),
                 # Pipeline config: Deduplication
                 enable_llm_dedup_blockwise=bool(
                     memory_config.enable_llm_dedup_blockwise) if memory_config.enable_llm_dedup_blockwise is not None else False,

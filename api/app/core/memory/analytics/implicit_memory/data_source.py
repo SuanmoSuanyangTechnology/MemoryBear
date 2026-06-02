@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.repositories.neo4j.memory_summary_repository import MemorySummaryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.implicit_memory_schema import TimeRange, UserMemorySummary
@@ -33,7 +34,7 @@ class MemoryDataSource:
         if isinstance(timestamp, str):
             return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
         elif timestamp is None:
-            return datetime.now()
+            return utcnow_naive()
         return timestamp
     
     def _dict_to_user_summary(self, summary_dict: Dict, user_id: str) -> Optional[UserMemorySummary]:

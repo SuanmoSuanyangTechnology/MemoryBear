@@ -4,6 +4,7 @@ import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer, computed_field, model_validator
 from typing import Optional, List
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.api_key_model import ApiKeyType
 from app.core.api_key_utils import timestamp_to_datetime, datetime_to_timestamp
 
@@ -26,7 +27,7 @@ class ApiKeyCreate(BaseModel):
         """检查API Key是否已过期"""
         if not self.expires_at:
             return False
-        return datetime.datetime.now() > self.expires_at
+        return utcnow_naive() > self.expires_at
 
     @field_validator('expires_at', mode='before')
     @classmethod
@@ -78,7 +79,7 @@ class ApiKeyUpdate(BaseModel):
         """检查API Key是否已过期"""
         if not self.expires_at:
             return False
-        return datetime.datetime.now() > self.expires_at
+        return utcnow_naive() > self.expires_at
 
     @field_validator('expires_at', mode='before')
     @classmethod
@@ -125,7 +126,7 @@ class ApiKeyResponse(BaseModel):
         """检查API Key是否已过期"""
         if not self.expires_at:
             return False
-        return datetime.datetime.now() > self.expires_at
+        return utcnow_naive() > self.expires_at
 
     @field_serializer('expires_at', 'created_at')
     @classmethod
@@ -164,7 +165,7 @@ class ApiKey(BaseModel):
         """检查API Key是否已过期"""
         if not self.expires_at:
             return False
-        return datetime.datetime.now() > self.expires_at
+        return utcnow_naive() > self.expires_at
 
     @field_serializer('expires_at', 'last_used_at', 'created_at', 'updated_at')
     def serialize_datetime(self, v: Optional[datetime.datetime]) -> Optional[int]:

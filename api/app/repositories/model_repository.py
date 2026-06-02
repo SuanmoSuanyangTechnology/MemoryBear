@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy import and_, or_, func, desc
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase, model_config_api_key_association
 from app.schemas.model_schema import (
@@ -111,7 +112,7 @@ class ModelConfigRepository:
     @staticmethod
     def get_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> Tuple[List[ModelConfig], int]:
         """获取模型配置列表"""
-        db_logger.debug(f"查询模型配置列表: {query.dict()}, tenant_id={tenant_id}")
+        db_logger.debug(f"查询模型配置列表: {query.model_dump()}, tenant_id={tenant_id}")
 
         try:
             # 构建查询条件
@@ -587,7 +588,7 @@ class ModelApiKeyRepository:
             # 更新使用次数和最后使用时间
             current_count = int(db_api_key.usage_count or "0")
             db_api_key.usage_count = str(current_count + 1)
-            db_api_key.last_used_at = func.now()
+            db_api_key.last_used_at = utcnow_naive()
             
             db.flush()
             db_logger.debug(f"API Key使用统计更新成功: api_key_id={api_key_id}")
