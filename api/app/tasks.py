@@ -2349,6 +2349,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                 logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
                 processed_users = 0
+                processed_user_ids = []
                 skipped_configs = 0
                 skipped_inactive = 0
                 total_dedup_merged = 0
@@ -2406,6 +2407,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             baseline=baseline,
                                         )
                                         processed_users += 1
+                                        processed_user_ids.append(str(user['id']))
                                         # 增量统计
                                         dedup_info = r.get("entity_dedup", {})
                                         merge_info = r.get("description_merge", {})
@@ -2438,6 +2440,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                 return {
                     "status": "SUCCESS",
                     "processed_users": processed_users,
+                    "processed_user_ids": processed_user_ids,
                     "skipped_configs": skipped_configs,
                     "skipped_inactive": skipped_inactive,
                     "total_dedup_merged": total_dedup_merged,
@@ -2499,6 +2502,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
                 return {"status": "SUCCESS", "message": "无工作空间"}
 
             processed_users = 0
+            processed_user_ids = []
             skipped_configs = 0
             skipped_inactive = 0
             total_merged = 0
@@ -2535,6 +2539,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
                                 )
                                 r = await memory_service.run_dedup_full_scan()
                                 processed_users += 1
+                                processed_user_ids.append(str(user['id']))
                                 merged = r.get("merged_count", 0)
                                 total_merged += merged
                                 if merged > 0:
@@ -2555,6 +2560,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
             return {
                 "status": "SUCCESS",
                 "processed_users": processed_users,
+                "processed_user_ids": processed_user_ids,
                 "skipped_configs": skipped_configs,
                 "skipped_inactive": skipped_inactive,
                 "total_merged": total_merged,
