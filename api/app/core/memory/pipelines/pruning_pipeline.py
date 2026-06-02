@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
+from app.core.utils.datetime_utils import to_iso_z
+
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
 
@@ -351,7 +353,7 @@ class PruningPipeline:
                 "pair_id": pruned_edge.pair_id,
                 "end_user_id": pruned_edge.end_user_id,
                 "run_id": pruned_edge.run_id,
-                "created_at": pruned_edge.created_at.isoformat(),
+                "created_at": to_iso_z(pruned_edge.created_at),
             }]
             result = await tx.run(ASSISTANT_PRUNED_EDGE_SAVE, edges=edge_data)
             await result.consume()

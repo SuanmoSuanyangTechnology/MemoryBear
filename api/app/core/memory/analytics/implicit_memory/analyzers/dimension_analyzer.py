@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
@@ -87,7 +88,7 @@ class DimensionAnalyzer:
             
             # Create dimension scores
             dimension_scores = {}
-            current_time = datetime.now()
+            current_time = utcnow_naive()
             
             for dimension_name in self.DIMENSIONS:
                 # Handle response as dictionary
@@ -224,7 +225,7 @@ class DimensionAnalyzer:
         Returns:
             Empty DimensionPortrait
         """
-        current_time = datetime.now()
+        current_time = utcnow_naive()
         
         return DimensionPortrait(
             creativity=self._create_default_dimension_score("creativity"),
@@ -253,7 +254,7 @@ class DimensionAnalyzer:
         
         # Create trend entry from existing portrait
         trend_entry = {
-            "timestamp": existing_portrait.analysis_timestamp.isoformat(),
+            "timestamp": to_iso_z(existing_portrait.analysis_timestamp),
             "creativity": existing_portrait.creativity.percentage,
             "aesthetic": existing_portrait.aesthetic.percentage,
             "technology": existing_portrait.technology.percentage,

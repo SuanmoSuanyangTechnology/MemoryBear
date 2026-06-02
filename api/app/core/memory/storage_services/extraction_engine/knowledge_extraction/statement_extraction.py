@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.models.message_models import DialogData, Statement
 from app.core.memory.models.variate_config import StatementExtractionConfig
 from app.core.memory.utils.data.ontology import (
@@ -123,7 +124,7 @@ class StatementExtractor:
                 "chunk_id": getattr(chunk, "id", ""),
                 "end_user_id": end_user_id or "",
                 "target_content": chunk_content,
-                "target_message_date": datetime.now().isoformat(),
+                "target_message_date": to_iso_z(utcnow_naive()),
                 "supporting_context": {
                     "msgs": [
                         {"role": "context", "msg": dialogue_content}
@@ -252,7 +253,7 @@ class StatementExtractor:
                 f.write(f"Content: {statement.statement}\n")
                 f.write(f"Type: {statement.stmt_type.value}\n")
                 f.write(f"Temporal Info: {statement.temporal_info.value}\n")
-                f.write(f"Created At: {datetime.now()}\n")
+                f.write(f"Created At: {to_iso_z(utcnow_naive())}\n")
                 f.write(f"Expired At: {None}\n")
                 f.write(f"Valid At: {statement.temporal_validity.valid_at if statement.temporal_validity else None}\n")
                 f.write(f"Invalid At: {statement.temporal_validity.invalid_at if statement.temporal_validity else None}\n")

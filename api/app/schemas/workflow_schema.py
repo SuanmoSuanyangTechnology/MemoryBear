@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 # ==================== 节点和边定义 ====================
 
@@ -128,11 +129,11 @@ class WorkflowConfig(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("features", when_used="json")
     def _serialize_features(self, features: dict | None):
@@ -194,15 +195,15 @@ class WorkflowExecution(BaseModel):
 
     @field_serializer("started_at", when_used="json")
     def _serialize_started_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("completed_at", when_used="json")
     def _serialize_completed_at(self, dt: datetime.datetime | None):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class WorkflowNodeExecution(BaseModel):
@@ -231,15 +232,15 @@ class WorkflowNodeExecution(BaseModel):
 
     @field_serializer("started_at", when_used="json")
     def _serialize_started_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("completed_at", when_used="json")
     def _serialize_completed_at(self, dt: datetime.datetime | None):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # ==================== 验证响应 ====================

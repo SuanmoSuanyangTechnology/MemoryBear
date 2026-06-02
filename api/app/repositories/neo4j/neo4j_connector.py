@@ -14,12 +14,13 @@ from neo4j import AsyncGraphDatabase, basic_auth
 from neo4j.time import DateTime as Neo4jDateTime, Date as Neo4jDate, Time as Neo4jTime, Duration as Neo4jDuration
 
 from app.core.config import settings
+from app.core.utils.datetime_utils import to_iso_z
 
 
 def _convert_neo4j_types(value: Any) -> Any:
     """递归将 neo4j 原生时间类型转为 Python 原生类型 / ISO 字符串，确保可被 json.dumps 序列化。"""
     if isinstance(value, Neo4jDateTime):
-        return value.to_native().isoformat() if value.tzinfo else value.iso_format()
+        return to_iso_z(value.to_native()) if value.tzinfo else value.iso_format()
     if isinstance(value, Neo4jDate):
         return value.iso_format()
     if isinstance(value, Neo4jTime):

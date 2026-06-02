@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class MemoryMessage(Base):
@@ -76,7 +77,7 @@ class MemoryMessage(Base):
     )
 
     # 时间戳
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 
     # 关联关系
     conversation = relationship(

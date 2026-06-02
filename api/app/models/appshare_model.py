@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 from sqlalchemy.orm import relationship
 
 
@@ -20,8 +21,8 @@ class AppShare(Base):
     shared_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, comment="分享者用户ID")
     permission = Column(String, default="readonly", nullable=False, comment="权限模式: readonly | editable")
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, comment="是否有效，False 表示逻辑删除")
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive)
 
     # Relationships
     source_app = relationship("App", foreign_keys=[source_app_id], backref="shares")

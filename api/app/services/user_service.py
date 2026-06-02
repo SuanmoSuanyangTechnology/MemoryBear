@@ -7,6 +7,7 @@ from pydantic import EmailStr
 from sqlalchemy.orm import Session
 import uuid
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.aioRedis import aio_redis_set, aio_redis_get, aio_redis_delete
 from app.models import Workspace
 from app.models.user_model import User
@@ -395,7 +396,7 @@ def update_last_login_time(db: Session, user_id: uuid.UUID) -> User:
             raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)
         
         # 更新最后登录时间
-        db_user.last_login_at = datetime.datetime.now()
+        db_user.last_login_at = utcnow_naive()
         db.commit()
         db.refresh(db_user)
         

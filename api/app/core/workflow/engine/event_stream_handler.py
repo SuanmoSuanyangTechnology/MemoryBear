@@ -8,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from app.core.logging_config import get_logger
+from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool
 
@@ -282,9 +283,7 @@ class EventStreamHandler:
                     "node_id": node_name,
                     "conversation_id": conversation_id,
                     "execution_id": self.execution_id,
-                    "timestamp": int(datetime.datetime.fromisoformat(
-                        data.get("timestamp")
-                    ).timestamp() * 1000),
+                    "timestamp": to_timestamp_ms(parse_iso_to_utc_naive(data.get("timestamp"))),
                 }
             }
         elif event_type == "task_result":
@@ -302,9 +301,7 @@ class EventStreamHandler:
                     "node_id": node_name,
                     "conversation_id": conversation_id,
                     "execution_id": self.execution_id,
-                    "timestamp": int(datetime.datetime.fromisoformat(
-                        data.get("timestamp")
-                    ).timestamp() * 1000),
+                    "timestamp": to_timestamp_ms(parse_iso_to_utc_naive(data.get("timestamp"))),
                     "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
                     "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
                     "process": result.get("node_outputs", {}).get(node_name, {}).get("process"),
@@ -319,5 +316,4 @@ class EventStreamHandler:
             "event": "cycle_item",
             "data": data.get("data")
         }
-
 

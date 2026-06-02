@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
@@ -1799,7 +1800,7 @@ class AgentRunService:
             "加载指定时间前的历史消息",
             extra={
                 "conversation_id": str(conversation_id),
-                "before_time": before_time.isoformat(),
+                "before_time": to_iso_z(before_time),
                 "max_history": max_history,
                 "loaded_count": len(filtered_history)
             }
@@ -1981,7 +1982,7 @@ class AgentRunService:
                     "provider": model_config.provider if model_config else None,
                     "type": model_config.type if model_config else None
                 } if model_config else None,
-                "snapshot_time": datetime.datetime.now().isoformat()
+                "snapshot_time": to_iso_z(utcnow_naive())
             }
 
             return snapshot

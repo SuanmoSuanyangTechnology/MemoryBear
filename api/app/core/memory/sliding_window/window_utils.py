@@ -15,12 +15,13 @@ from __future__ import annotations
 import logging
 import uuid
 from bisect import bisect_right
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List
 
 from sqlalchemy import func, select, update
 
 from app.db import get_db_context
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
 
@@ -195,11 +196,7 @@ def message_to_dict(message: MemoryMessage) -> dict:
         "content": message.content,
         "message_seq": message.message_seq,
         "should_memorize": message.should_memorize,
-        "created_at": (
-            message.created_at.isoformat()
-            if message.created_at is not None
-            else None
-        ),
+        "created_at": to_iso_z(message.created_at),
         "dialog_at": message.dialog_at,
         "files": message.files,
     }
@@ -453,7 +450,7 @@ async def write_batch_to_memory_messages(
                 content=content,
                 message_seq=next_seq,
                 should_memorize=True,
-                created_at=datetime.now(timezone.utc),
+                created_at=utcnow_naive(),
                 dialog_at=(msg.get("dialog_at") or None),
                 files=msg.get("files"),
             )

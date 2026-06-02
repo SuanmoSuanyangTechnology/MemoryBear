@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 from sqlalchemy.orm import relationship
 
 
@@ -15,8 +16,8 @@ class KnowledgeShare(Base):
     target_kb_id = Column(UUID(as_uuid=True), ForeignKey('knowledges.id'), nullable=False, comment="target knowledges.id")
     target_workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False, comment="target workspaces.id")
     shared_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, comment="shared users.id")
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive)
 
     # Relationships
     target_kb = relationship("Knowledge", backref="target_kb")

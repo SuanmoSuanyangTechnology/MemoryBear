@@ -12,6 +12,7 @@ from app.services.collaborative_orchestrator import CollaborativeOrchestrator
 from app.schemas.multi_agent_schema import MultiAgentRunRequest
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
+from app.core.utils.datetime_utils import to_iso_z
 from app.core.error_codes import BizCode
 from app.services.multi_agent_service import MultiAgentService
 
@@ -184,14 +185,14 @@ class MultiAgentHandoffsService:
                     "from_agent": h.from_agent_id,
                     "to_agent": h.to_agent_id,
                     "reason": h.reason,
-                    "timestamp": h.timestamp.isoformat(),
+                    "timestamp": to_iso_z(h.timestamp),
                     "user_message": h.user_message,
                     "context_summary": h.context_summary
                 }
                 for h in state.handoff_history
             ],
-            "created_at": state.created_at.isoformat(),
-            "updated_at": state.updated_at.isoformat()
+            "created_at": to_iso_z(state.created_at),
+            "updated_at": to_iso_z(state.updated_at)
         }
 
     def clear_handoff_state(self, conversation_id: str):

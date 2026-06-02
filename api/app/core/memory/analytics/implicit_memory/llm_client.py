@@ -8,6 +8,7 @@ extraction, personality dimension analysis, interest categorization, and habit d
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.core.utils.datetime_utils import to_iso_z
 from app.core.memory.analytics.implicit_memory.prompts import (
     get_dimension_analysis_prompt,
     get_habit_analysis_prompt,
@@ -105,7 +106,7 @@ class ImplicitMemoryLLMClient:
             formatted_summary = {
                 'summary_id': summary.summary_id,
                 'user_content': summary.user_content,
-                'timestamp': summary.timestamp.isoformat(),
+                'timestamp': to_iso_z(summary.timestamp),
                 'summary_type': summary.summary_type,
                 'confidence_score': summary.confidence_score
             }

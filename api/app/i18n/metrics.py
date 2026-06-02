@@ -14,7 +14,8 @@ import time
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
 from collections import defaultdict
-from datetime import datetime
+
+from app.core.utils.datetime_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class TranslationMetrics:
         self._error_counts: Dict[str, int] = defaultdict(int)
         
         # Start time
-        self._start_time = datetime.now()
+        self._start_time = utcnow_naive()
         
         logger.info("TranslationMetrics initialized")
     
@@ -125,7 +126,7 @@ class TranslationMetrics:
         timing_stats = self._calculate_timing_stats()
         
         # Calculate uptime
-        uptime_seconds = (datetime.now() - self._start_time).total_seconds()
+        uptime_seconds = (utcnow_naive() - self._start_time).total_seconds()
         
         return {
             "uptime_seconds": round(uptime_seconds, 2),
@@ -207,7 +208,7 @@ class TranslationMetrics:
         self._locale_usage.clear()
         self._namespace_usage.clear()
         self._error_counts.clear()
-        self._start_time = datetime.now()
+        self._start_time = utcnow_naive()
         logger.info("Metrics reset")
     
     def export_prometheus(self) -> str:

@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -55,7 +56,7 @@ class ConversationShareService:
 
         expire_at = None
         if expire_hours:
-            expire_at = datetime.now() + timedelta(hours=expire_hours)
+            expire_at = utcnow_naive() + timedelta(hours=expire_hours)
 
         share = ConversationShare(
             conversation_id=conversation_id,
@@ -85,7 +86,7 @@ class ConversationShareService:
             "share_id": str(share.id),
             "share_uuid": share_uuid,
             "share_url": share_url,
-            "expire_at": int(expire_at.timestamp() * 1000) if expire_at else None,
+            "expire_at": to_timestamp_ms(expire_at),
             "has_password": bool(password),
         }
 
@@ -112,7 +113,7 @@ class ConversationShareService:
             raise BusinessException("分享链接不存在或已失效", BizCode.NOT_FOUND)
 
         # 检查过期
-        if share.expire_at and share.expire_at < datetime.now():
+        if share.expire_at and share.expire_at < utcnow_naive():
             raise BusinessException("分享链接已过期", BizCode.FORBIDDEN)
 
         # 检查密码
@@ -145,7 +146,7 @@ class ConversationShareService:
                     "id": str(msg.id),
                     "role": msg.role,
                     "content": msg.content,
-                    "created_at": int(msg.created_at.timestamp() * 1000),
+                    "created_at": to_timestamp_ms(msg.created_at),
                     "meta_data": msg.meta_data,
                     "feedback_type": msg.feedbacks[0].feedback_type if msg.feedbacks else None,
                     "feedback_content": msg.feedbacks[0].feedback_content if msg.feedbacks else None
@@ -212,10 +213,10 @@ class ConversationShareService:
                 "share_uuid": s.share_uuid,
                 "share_url": f"{settings.FILE_LOCAL_SERVER_URL}/share/{s.share_uuid}",
                 "view_count": s.view_count,
-                "expire_at": int(s.expire_at.timestamp() * 1000) if s.expire_at else None,
+                "expire_at": to_timestamp_ms(s.expire_at),
                 "has_password": bool(s.password),
                 "allow_copy": s.allow_copy,
-                "created_at": int(s.created_at.timestamp() * 1000),
+                "created_at": to_timestamp_ms(s.created_at),
             }
             for s in shares
         ]

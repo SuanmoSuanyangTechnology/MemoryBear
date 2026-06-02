@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
@@ -86,7 +87,7 @@ class InterestAnalyzer:
             
             # Create interest categories
             interest_categories = {}
-            current_time = datetime.now()
+            current_time = utcnow_naive()
             
             # Extract interest_distribution from response dict
             interest_distribution = response.get("interest_distribution", {})
@@ -255,7 +256,7 @@ class InterestAnalyzer:
         Returns:
             Empty InterestAreaDistribution with equal percentages
         """
-        current_time = datetime.now()
+        current_time = utcnow_naive()
         equal_percentage = 25.0  # 100% / 4 categories
         
         def default_category(name: str) -> InterestCategory:

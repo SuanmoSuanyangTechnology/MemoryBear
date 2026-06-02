@@ -3,6 +3,7 @@ from typing import Callable
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.response_utils import success
 from app.db import get_db
 from app.schemas.response_schema import ApiResponse
@@ -149,8 +150,8 @@ async def refresh_token(
     new_refresh_token, new_refresh_token_id = security.create_refresh_token(subject=user.id)
     
     # 计算过期时间
-    access_expires_at = datetime.now() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    refresh_expires_at = datetime.now() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    access_expires_at = utcnow_naive() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_expires_at = utcnow_naive() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     
     # 单点登录会话管理
     if settings.ENABLE_SINGLE_SESSION:

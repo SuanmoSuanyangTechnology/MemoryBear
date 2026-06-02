@@ -4,6 +4,7 @@ from sqlalchemy import Column, String, DateTime, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class Tenants(Base):
@@ -12,8 +13,8 @@ class Tenants(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, index=True, nullable=False)
     description = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
     is_active = Column(Boolean, default=True)
     
     # SSO 外部关联字段

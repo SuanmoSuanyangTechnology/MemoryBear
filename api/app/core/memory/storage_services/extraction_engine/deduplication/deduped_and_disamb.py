@@ -7,9 +7,9 @@ import importlib
 import logging
 import os
 import re
-from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.models.graph_models import (
     EntityEntityEdge,
     ExtractedEntityNode,
@@ -1048,7 +1048,7 @@ def _write_dedup_fusion_report(
         out_path = settings.get_memory_output_path("dedup_entity_output.txt")
         report_lines: List[str] = []
         if not append:
-            report_lines.append(f"去重融合报告 - {datetime.now().isoformat()}")
+            report_lines.append(f"去重融合报告 - {to_iso_z(utcnow_naive())}")
             report_lines.append("")
         if stage_label:
             # 追加写入时，在阶段标题前增加一个空行以增强分隔

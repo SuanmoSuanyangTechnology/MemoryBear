@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
@@ -75,7 +76,7 @@ class PreferenceAnalyzer:
             
             # Convert to PreferenceTag objects
             preference_tags = []
-            current_time = datetime.now()
+            current_time = utcnow_naive()
             
             for pref_data in response.get("preferences", []):
                 try:
@@ -168,7 +169,7 @@ class PreferenceAnalyzer:
             Consolidated list of preferences
         """
         consolidated = existing_preferences.copy()
-        current_time = datetime.now()
+        current_time = utcnow_naive()
         
         for new_pref in new_preferences:
             # Find similar existing preference

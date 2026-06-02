@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.celery_task_scheduler import scheduler
+from app.core.utils.datetime_utils import to_iso_z
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_logger
@@ -474,8 +475,8 @@ class MemoryAPIService:
                     "config_desc": config.config_desc,
                     "is_default": config.is_default or False,
                     "scene_name": scene_name,
-                    "created_at": config.created_at.isoformat() if config.created_at else None,
-                    "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+                    "created_at": to_iso_z(config.created_at),
+                    "updated_at": to_iso_z(config.updated_at),
                 })
 
             logger.info(f"Found {len(configs)} memory configs for workspace {workspace_id}")

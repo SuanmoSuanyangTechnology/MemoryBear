@@ -4,6 +4,7 @@ import uuid
 from .knowledge_schema import Knowledge
 from .workspace_schema import Workspace
 from .user_schema import User
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 
 class KnowledgeShareBase(BaseModel):
@@ -28,10 +29,10 @@ class KnowledgeShare(KnowledgeShareBase):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     model_config = ConfigDict(from_attributes=True)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)

@@ -10,6 +10,7 @@ from jinja2 import Template
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
@@ -673,7 +674,7 @@ class ConversationService:
                 "version": v.version,
                 "is_current": v.is_current,
                 "content": v.content,
-                "created_at": int(v.created_at.timestamp() * 1000),
+                "created_at": to_timestamp_ms(v.created_at),
             }
             for v in versions
         ]
@@ -783,7 +784,7 @@ class ConversationService:
             raise BusinessException("Conversation not found", BizCode.INVALID_CONVERSATION)
         is_stable = (
                 conversation.updated_at
-                and datetime.now() - conversation.updated_at > timedelta(days=1)
+                and utcnow_naive() - conversation.updated_at > timedelta(days=1)
         )
         if conversation_detail and is_stable:
             logger.info(f"Conversation detail found in repository for conversation_id={conversation_id}")

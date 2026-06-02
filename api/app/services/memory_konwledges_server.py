@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
+from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
@@ -257,7 +258,7 @@ def find_documents_by_kb_id(
                 "file_name": doc.file_name,
                 "file_ext": doc.file_ext,
                 "file_size": doc.file_size,
-                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "created_at": to_iso_z(doc.created_at),
                 "status": getattr(doc, 'status', None)
             })
         return result
@@ -417,7 +418,7 @@ async def create_document_chunk(
         "doc_id": doc_id,
         "file_id": str(db_document.file_id),
         "file_name": db_document.file_name,
-        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+        "file_created_at": to_timestamp_ms(db_document.created_at),
         "document_id": str(document_id),
         "knowledge_id": str(kb_id),
         "sort_id": sort_id,

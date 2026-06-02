@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ImplicitEmotionsStorage(Base):
@@ -29,8 +30,8 @@ class ImplicitEmotionsStorage(Base):
     emotion_suggestions = Column(JSONB, nullable=True, comment="情绪个性化建议数据")
     
     # 时间戳
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, comment="创建时间")
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
     
     # 数据生成时间（用于业务逻辑）
     implicit_generated_at = Column(DateTime, nullable=True, comment="隐性记忆画像生成时间")

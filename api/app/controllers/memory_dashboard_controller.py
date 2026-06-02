@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -570,10 +571,10 @@ async def dashboard_data(
     # 如果没有提供时间范围，默认使用最近30天
     if start_date is None or end_date is None:
         from datetime import datetime, timedelta
-        end_dt = datetime.now()
+        end_dt = utcnow_naive()
         start_dt = end_dt - timedelta(days=30)
-        end_date = int(end_dt.timestamp() * 1000)
-        start_date = int(start_dt.timestamp() * 1000)
+        end_date = to_timestamp_ms(end_dt)
+        start_date = to_timestamp_ms(start_dt)
         api_logger.info(f"使用默认时间范围: {start_dt} 到 {end_dt}")
     
     # 获取 storage_type，如果为 None 则使用默认值

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from app.core.utils.datetime_utils import to_iso_z
 from app.core.memory.models.graph_models import (
     ChunkNode,
     DialogueNode,
@@ -187,7 +188,7 @@ async def build_graph_nodes_and_edges(
                     keywords=content_meta.get("keywords", []),
                     topic=content_meta.get("topic", ""),
                     domain=content_meta.get("domain", ""),
-                    created_at=p.created_time.isoformat() if p.created_time else None,
+                    created_at=to_iso_z(p.created_time),
                     file_type=file_type,
                     summary_embedding=summary_embedding,
                 )

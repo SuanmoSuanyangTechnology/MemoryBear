@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class AgentExecution(Base):
@@ -88,14 +89,14 @@ class AgentExecution(Base):
     error_message = Column(Text, nullable=True)
 
     # 性能指标
-    started_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     completed_at = Column(DateTime, nullable=True)
     elapsed_time = Column(Float, nullable=True, comment="总耗时（秒）")
 
     # Token 使用
     token_usage = Column(JSONB, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     # 扩展元数据（模型名称、provider 等运行时信息）
     meta_data = Column(JSONB, nullable=True, default=dict, comment="扩展元数据")

@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 class McpMarket(Base):
     __tablename__ = "mcp_markets"
@@ -15,4 +16,4 @@ class McpMarket(Base):
     url = Column(String, index=True, nullable=False, comment="mcp market url")
     category = Column(String, index=True, nullable=False, comment="category")
     created_by = Column(UUID(as_uuid=True), nullable=False, comment="users.id")
-    created_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)

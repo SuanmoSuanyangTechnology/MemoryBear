@@ -6,6 +6,7 @@ from typing import Optional
 import yaml
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
@@ -41,7 +42,7 @@ class AppDslService:
         meta = {
             "version": settings.SYSTEM_VERSION,
             "platform": "MemoryBear",
-            "exported_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "exported_at": to_iso_z(utcnow_naive()),
         }
         app_meta = {
             "name": app.name,
@@ -264,7 +265,7 @@ class AppDslService:
             raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.BAD_REQUEST)
 
         warnings: list[str] = []
-        now = datetime.datetime.now()
+        now = utcnow_naive()
 
         if app_id is not None:
             return self._overwrite_dsl(dsl, app_id, app_type, workspace_id, tenant_id, warnings, now)

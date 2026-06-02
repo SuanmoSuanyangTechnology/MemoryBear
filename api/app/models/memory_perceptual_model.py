@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 from app.schemas.app_schema import FileType
 
 
@@ -48,4 +49,4 @@ class MemoryPerceptualModel(Base):
     summary = Column(String, comment="摘要")
     meta_data = Column(JSONB, comment="元信息")
 
-    created_time = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
+    created_time = Column(DateTime, default=utcnow_naive, comment="创建时间")

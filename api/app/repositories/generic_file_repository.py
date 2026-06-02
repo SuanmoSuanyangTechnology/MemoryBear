@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.generic_file_model import GenericFile
 from app.core.upload_enums import UploadContext
 from app.core.logging_config import get_db_logger
@@ -102,7 +103,7 @@ class GenericFileRepository:
                     setattr(file, field, value)
             
             # Update timestamp
-            file.updated_at = datetime.now()
+            file.updated_at = utcnow_naive()
             
             self.db.flush()
             db_logger.info(f"File updated successfully: {file.file_name} (ID: {file_id})")
@@ -130,9 +131,9 @@ class GenericFileRepository:
                 return False
             
             # Soft delete by setting deleted_at
-            file.deleted_at = datetime.now()
+            file.deleted_at = utcnow_naive()
             file.status = "deleted"
-            file.updated_at = datetime.now()
+            file.updated_at = utcnow_naive()
             
             self.db.flush()
             db_logger.info(f"File soft deleted successfully: {file.file_name} (ID: {file_id})")

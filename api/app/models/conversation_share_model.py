@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ConversationShare(Base):
@@ -33,7 +34,7 @@ class ConversationShare(Base):
     view_count = Column(Integer, default=0, comment="访问次数")
 
     is_active = Column(Boolean, default=True, nullable=False, comment="是否有效")
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 
     # 关联关系
     conversation = relationship("Conversation", back_populates="shares")

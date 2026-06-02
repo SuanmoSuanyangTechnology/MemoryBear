@@ -7,6 +7,8 @@ import time
 import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+
 
 # ============================================================================
 # 从 json_schema.py 迁移的 Schema
@@ -35,8 +37,7 @@ class BaseDataSchema(BaseModel):
     def _set_default_created_at(cls, v):
         """Set default created_at if missing"""
         if isinstance(v, dict) and v.get("created_at") is None:
-            from datetime import datetime
-            v["created_at"] = datetime.now().isoformat()
+            v["created_at"] = to_iso_z(utcnow_naive())
         return v
 
 

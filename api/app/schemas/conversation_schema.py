@@ -4,6 +4,7 @@ import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, model_serializer
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 # 导入 FileInput（用于体验运行）
 from app.schemas.app_schema import FileInput
 
@@ -58,7 +59,7 @@ class Message(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("meta_data", when_used="json")
     def _serialize_meta_data(self, data: Optional[Dict[str, Any]]):
@@ -83,11 +84,11 @@ class Conversation(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class ConversationWithMessages(Conversation):

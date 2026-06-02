@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from langchain.tools import tool
 from pydantic import BaseModel, Field
@@ -9,6 +9,7 @@ from app.core.memory.src.search import (
     search_by_temporal,
     search_by_keyword_temporal,
 )
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 
 
 def extract_tool_message_content(response):
@@ -151,8 +152,9 @@ def create_time_retrieval_tool(end_user_id: str):
         async def _async_search():
             # Use passed parameters or default values
             actual_end_user_id = end_user_id_param or end_user_id
-            actual_end_date = end_date or datetime.now().strftime("%Y-%m-%d")
-            actual_start_date = start_date or (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            current_date = utcnow_naive()
+            actual_end_date = end_date or current_date.strftime("%Y-%m-%d")
+            actual_start_date = start_date or (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
             
             # Basic time search
             results = await search_by_temporal(
@@ -195,8 +197,9 @@ def create_time_retrieval_tool(end_user_id: str):
         """
 
         async def _async_search():
-            actual_end_date = end_date or datetime.now().strftime("%Y-%m-%d")
-            actual_start_date = start_date or (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            current_date = utcnow_naive()
+            actual_end_date = end_date or current_date.strftime("%Y-%m-%d")
+            actual_start_date = start_date or (current_date - timedelta(days=days_back)).strftime("%Y-%m-%d")
 
             # Keyword time search
             results = await search_by_keyword_temporal(
@@ -342,7 +345,7 @@ def create_hybrid_retrieval_tool_async(memory_config, **search_params):
                 "error": f"混合检索失败: {str(e)}",
                 "search_query": context,
                 "search_type": search_type,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": to_iso_z(utcnow_naive())
             }
             return json.dumps(error_result, ensure_ascii=False, indent=2)
 
