@@ -56,6 +56,7 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
                   parameters: mcpFilterItem?.parameters
                 }
               case 'builtin':
+              case 'workflow':
                 if ((methods as any[]).length > 1) {
                   const builtinFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                   return {

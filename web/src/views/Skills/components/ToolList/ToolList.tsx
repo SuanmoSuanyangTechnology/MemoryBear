@@ -71,6 +71,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
                 }
                 break
               case 'builtin':
+              case 'workflow':
                 // Builtin tools: Handle single or multiple methods
                 if ((methods as any[]).length > 1) {
                   const builtinFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
