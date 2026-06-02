@@ -1639,6 +1639,14 @@ def write_message_task(
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
+
+        # 同步 end_user 记忆计数（Neo4j → PostgreSQL）
+        try:
+            from app.core.memory.utils.memory_count_utils import sync_memory_count_neo4j
+            sync_memory_count_neo4j(end_user_id)
+        except Exception as _count_e:
+            logger.warning(f"[CELERY WRITE] 同步记忆计数失败（不影响主流程）: {_count_e}")
+
         # 将 result 转为 JSON 安全结构，避免 Celery JSON 序列化 pydantic BaseModel / UUID 失败
         try:
             safe_result = jsonable_encoder(result)
