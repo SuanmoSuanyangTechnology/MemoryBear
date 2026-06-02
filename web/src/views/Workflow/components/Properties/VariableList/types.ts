@@ -1,6 +1,6 @@
 export interface Variable {
   name: string;
-  description: string;
+  description?: string;
   ui_type: string;
   type: string;
   required: boolean;
@@ -11,6 +11,7 @@ export interface Variable {
   readonly?: boolean;
   defaultValue?: any;
   value?: any;
+  nodeType?: string;
 }
 export interface VariableEditModalRef {
   handleOpen: (values?: Variable) => void;
