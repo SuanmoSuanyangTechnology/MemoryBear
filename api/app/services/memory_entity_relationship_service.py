@@ -15,9 +15,10 @@ import logging
 import re
 from neo4j.time import DateTime as Neo4jDateTime
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.schemas.memory_episodic_schema import EmotionType
+from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 
 logger = logging.getLogger(__name__)
 
@@ -117,23 +118,16 @@ class MemoryEntityService:
     def _to_epoch_ms(value: str):
         """把事件日期转为 Unix 毫秒时间戳（UTC）。
 
-        底层 event_timeline 只存日期（YYYY-MM-DD），按 UTC 当天 0 点换算为
-        毫秒时间戳，如 `2026-06-15` → `1781481600000`；兼容已带时分秒的历史值；
-        无法解析则返回 None。
+        底层 event_timeline 只存日期（YYYY-MM-DD），统一走 datetime_utils 解析为
+        naive UTC 再序列化为毫秒时间戳；无法解析则返回 None（调用方据此过滤）。
         """
         if not value:
             return None
-        value = value.strip()
-        # 依次尝试：纯日期 / 带时分秒（含 T 或空格分隔，允许末尾 Z）
-        fmts = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
-        v = value[:-1] if value.endswith("Z") else value
-        for fmt in fmts:
-            try:
-                d = datetime.strptime(v, fmt).replace(tzinfo=timezone.utc)
-                return int(d.timestamp() * 1000)
-            except ValueError:
-                continue
-        return None
+        try:
+            dt = parse_iso_to_utc_naive(value.strip())
+        except ValueError:
+            return None
+        return to_timestamp_ms(dt)
 
     @staticmethod
     def _parse_event_timeline(event_timeline: str) -> list:
