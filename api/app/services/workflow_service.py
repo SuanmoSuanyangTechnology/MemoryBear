@@ -985,7 +985,9 @@ class WorkflowService:
 
     @staticmethod
     def _get_node_name_from_config(config: WorkflowConfig | None, node_id: str) -> str | None:
-        for node in config.nodes or [] if config else []:
+        if not config:
+            return None
+        for node in config.nodes or []:
             if node.get("id") == node_id:
                 return node.get("name")
         return None
