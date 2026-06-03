@@ -72,7 +72,7 @@ services:
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=subscription_tasks --max-tasks-per-child=50 -n subscription_worker@%h
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=subscription_tasks --time-limit=600 --soft-time-limit=540 --max-tasks-per-child=200 --prefetch-multiplier=1 -n subscription_worker@%h
     restart: unless-stopped
     networks:
       - celery

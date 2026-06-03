@@ -237,10 +237,10 @@ celery_app.conf.beat_schedule = beat_schedule_config
 # 企业版订阅任务调度配置（_HAS_SUBSCRIPTION_TASKS 在上方路由注册处探测完成）
 if _HAS_SUBSCRIPTION_TASKS:
     celery_app.conf.beat_schedule.update({
-        # 主处理：每分钟扫一次过期订阅（任务开销很小，保持准实时切换）
+        # 主处理：每10分钟扫一次过期订阅（支持10万租户，concurrency=4可并行处理）
         "process-expired-subscriptions": {
             "task": "subscription.process_expired_subscriptions",
-            "schedule": crontab(minute="*"),
+            "schedule": crontab(minute="*/10"),
         },
         # 兜底修复：每天北京凌晨 2:00（= UTC 18:00）再全量扫一次，
         # 处理主循环因异常/重启/时钟漂移遗漏的租户
