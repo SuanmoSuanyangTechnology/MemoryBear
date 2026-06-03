@@ -1780,7 +1780,7 @@ export const zh = {
       expired_detection: '过期检测',
       factual_contradiction: '事实矛盾',
       ontology_verification: '本体校验',
-      unrecognized_entity: '未识别实体',
+      unresolved_entity: '未识别实体',
       to_be_implemented: '待实现',
       allStatus: '全部状态',
       resolved: '已处理',
