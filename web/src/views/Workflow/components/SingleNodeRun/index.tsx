@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 11:39:38
+ * @Last Modified time: 2026-06-02 11:55:54
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -19,6 +19,7 @@ import RunResultDisplay from './RunResultDisplay'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import type { Variable } from '../Properties/VariableList/types'
 import CodeMirrorEditor from '@/components/CodeMirrorEditor';
+import { triggerParams } from '../Properties/hooks/useVariableList'
 
 interface RunResult {
   status: 'completed' | 'failed' | 'running';
@@ -79,7 +80,18 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
   const varRefs = extractVarRefs(nodeData)
   const visionInputRef = isLlm ? nodeData.config.vision_input?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
   const contextInputRef = isLlm ? nodeData.config.context?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
-  const inputVars: Suggestion[] = nodeData?.type === 'start'
+  const inputVars: Suggestion[] = nodeData?.type === 'trigger' && nodeData.config?.trigger_type?.defaultValue === 'webhook'
+    ? Object.keys(triggerParams).map(key => {
+      const params = nodeData.config?.[key]?.defaultValue || []
+      return params.map((item: Variable) => ({
+        label: item.name,
+        value: `trigger_payload.${triggerParams[key]}.${item.name}`,
+        dataType: item.type || 'string',
+        nodeData,
+        required: item.required,
+      }))
+    }).flat()
+    : nodeData?.type === 'start'
     ? (nodeData.config?.variables?.defaultValue || []).map((item: Variable) => ({
       label: item.description,
       value: item.name,
@@ -96,12 +108,11 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
     form.validateFields()
       .then((values) => {
         const { inputs = {} } = values
-        console.log('values', values)
         const params: Record<string, any> = {};
         Object.keys(inputs).forEach(key => {
           const value = inputs[key]
 
-          if (typeof value === 'object') {
+          if (Array.isArray(value)) {
             params[key] = value.map((file: any) => {
               if (file.url) {
                 return file
@@ -184,80 +195,83 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
               {nodeData?.type !== 'iteration' && inputVars.length > 0 && (
                 <Flex vertical gap={8}>
                   <div className="rb:text-[12px] rb:font-medium rb:text-[#5B6167]">{t('workflow.variables')}</div>
-                  {inputVars.map((v: Suggestion) => (
-                    <Form.Item
-                      key={v.value}
-                      name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
-                      label={v.dataType.includes('boolean')
-                        ? null
-                        : <Flex gap={4} align="center" className="rb:text-[12px]">
-                          {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
-                          <span className="rb:font-medium">{v.nodeData?.name}</span>
-                          <span className="rb:text-[#5B6167]">/</span>
-                          <span className="rb:text-[#1677ff]">{v.label}</span>
-                        </Flex>
-                      }
-                      rules={['start'].includes(nodeData.type) && v.ui_type !== 'checkbox' ? [{
-                        required: v.required,
-                        message: v.ui_type === 'select' && Array.isArray(v.options) && v.options.length > 0
-                          ? t('common.selectPlaceholder', { title: v.label })
-                          : t('common.inputPlaceholder', { title: v.label })
-                      }] : undefined}
-                      valuePropName={v.dataType.includes('boolean') ? 'checked' : 'value'}
-                      initialValue={v.dataType.includes('boolean') ? v.default || false : undefined}
-                      className="rb:mb-0!"
-                    >
-                      {v.dataType === 'object'
-                        ? <CodeMirrorEditor
-                            language="json"
-                            variant="outlined"
-                          />
-                        : v.ui_type && ['select'].includes(v.ui_type) && Array.isArray(v.options) && v.options.length > 0
-                          ? <Select
-                            placeholder={t('common.pleaseSelect')}
-                            options={v.options.map((item: string) => ({ label: item, value: item }))}
-                          />
-                        : ['array[string]', 'array[number]'].includes(v.dataType) && Array.isArray(v.default) && v.default.length > 0
-                          ? <Select
-                            placeholder={t('common.pleaseSelect')}
-                            options={v.default.map((item: string) => ({ label: item, value: item }))}
-                          />
-                        : v.dataType.includes('string') && nodeData.type === 'knowledge-retrieval'
-                          ? <Input.TextArea
-                            placeholder={t('common.pleaseEnter')}
-                            size="small"
-                          />
-                        : v.dataType.includes('string')
-                          ? <Input
-                            placeholder={t('common.pleaseEnter')}
-                            size="small"
-                          />
-                        : v.dataType.includes('number')
-                          ? <InputNumber
-                            size="small"
-                            placeholder={t('common.pleaseEnter')}
-                            className="rb:w-full!"
-                            onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
-                          />
-                        : v.dataType.includes('file')
-                          ? <FileVarInput
-                            name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
-                            dataType={v.dataType}
-                            form={form}
-                          />
-                        : v.dataType.includes('boolean')
-                          ? <Checkbox>
-                            <Flex gap={4} align="center" className="rb:text-[12px]">
+                  {inputVars.map((v: Suggestion) => {
+                    const names = v.nodeData.type === 'trigger' ? [...v.value.split('.')] : [v.value.replace('{{', '').replace('}}', '')]
+                    return (
+                      <Form.Item
+                        key={v.value}
+                        name={['inputs', ...names]}
+                        label={v.dataType.includes('boolean')
+                          ? null
+                          : <Flex gap={4} align="center" className="rb:text-[12px]">
                             {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
                             <span className="rb:font-medium">{v.nodeData?.name}</span>
                             <span className="rb:text-[#5B6167]">/</span>
                             <span className="rb:text-[#1677ff]">{v.label}</span>
                           </Flex>
-                          </Checkbox>
-                          : null
-                      }
-                    </Form.Item>
-                  ))}
+                        }
+                        rules={['start', 'trigger'].includes(nodeData.type) && v.ui_type !== 'checkbox' ? [{
+                          required: v.required,
+                          message: v.ui_type === 'select' && Array.isArray(v.options) && v.options.length > 0
+                            ? t('common.selectPlaceholder', { title: v.label })
+                            : t('common.inputPlaceholder', { title: v.label })
+                        }] : undefined}
+                        valuePropName={v.dataType.includes('boolean') ? 'checked' : 'value'}
+                        initialValue={v.dataType.includes('boolean') ? v.default || false : undefined}
+                        className="rb:mb-0!"
+                      >
+                        {v.dataType === 'object'
+                          ? <CodeMirrorEditor
+                              language="json"
+                              variant="outlined"
+                            />
+                          : v.ui_type && ['select'].includes(v.ui_type) && Array.isArray(v.options) && v.options.length > 0
+                            ? <Select
+                              placeholder={t('common.pleaseSelect')}
+                              options={v.options.map((item: string) => ({ label: item, value: item }))}
+                            />
+                          : ['array[string]', 'array[number]'].includes(v.dataType) && Array.isArray(v.default) && v.default.length > 0
+                            ? <Select
+                              placeholder={t('common.pleaseSelect')}
+                              options={v.default.map((item: string) => ({ label: item, value: item }))}
+                            />
+                          : v.dataType.includes('string') && nodeData.type === 'knowledge-retrieval'
+                            ? <Input.TextArea
+                              placeholder={t('common.pleaseEnter')}
+                              size="small"
+                            />
+                          : v.dataType.includes('string')
+                            ? <Input
+                              placeholder={t('common.pleaseEnter')}
+                              size="small"
+                            />
+                          : v.dataType.includes('number')
+                            ? <InputNumber
+                              size="small"
+                              placeholder={t('common.pleaseEnter')}
+                              className="rb:w-full!"
+                              onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
+                            />
+                          : v.dataType.includes('file')
+                            ? <FileVarInput
+                              name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
+                              dataType={v.dataType}
+                              form={form}
+                            />
+                          : v.dataType.includes('boolean')
+                            ? <Checkbox>
+                              <Flex gap={4} align="center" className="rb:text-[12px]">
+                              {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
+                              <span className="rb:font-medium">{v.nodeData?.name}</span>
+                              <span className="rb:text-[#5B6167]">/</span>
+                              <span className="rb:text-[#1677ff]">{v.label}</span>
+                            </Flex>
+                            </Checkbox>
+                            : null
+                        }
+                      </Form.Item>
+                    )
+                  })}
                 </Flex>
               )}
               {/* Context */}

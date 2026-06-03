@@ -12,6 +12,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.core.workflow.utils.secret_masker import mask_secrets
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
     get_trigger_type,
@@ -73,6 +74,7 @@ class WorkflowService:
             nodes=normalized_nodes,
             edges=cfg.get("edges", []),
             variables=cfg.get("variables", []),
+            environment_variables=cfg.get("environment_variables", []),
             execution_config=cfg.get("execution_config", {}),
             triggers=cfg.get("triggers", []),
             features=cfg.get("features", {}),
@@ -107,6 +109,7 @@ class WorkflowService:
         nodes: list[dict[str, Any]] | None,
         edges: list[dict[str, Any]] | None,
         variables: list[dict[str, Any]] | None,
+        environment_variables: list[dict[str, Any]] | None,
         execution_config: dict[str, Any] | None,
         features: dict[str, Any] | None,
         triggers: list[dict[str, Any]] | None,
@@ -118,6 +121,7 @@ class WorkflowService:
             "nodes": normalized_nodes,
             "edges": edges or [],
             "variables": variables or [],
+            "environment_variables": environment_variables or [],
             "execution_config": execution_config or {},
             "features": features or {},
             "triggers": normalized_triggers,
@@ -574,6 +578,7 @@ class WorkflowService:
             nodes: list[dict[str, Any]],
             edges: list[dict[str, Any]],
             variables: list[dict[str, Any]] | None = None,
+            environment_variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
             features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
@@ -603,6 +608,7 @@ class WorkflowService:
             nodes=nodes,
             edges=edges,
             variables=variables,
+            environment_variables=environment_variables,
             execution_config=execution_config,
             features=features,
             triggers=triggers,
@@ -627,6 +633,7 @@ class WorkflowService:
             nodes=normalized_nodes,
             edges=edges,
             variables=variables,
+            environment_variables=environment_variables,
             execution_config=execution_config,
             features=features,
             triggers=normalized_triggers,
@@ -653,6 +660,7 @@ class WorkflowService:
             nodes: list[dict[str, Any]] | None = None,
             edges: list[dict[str, Any]] | None = None,
             variables: list[dict[str, Any]] | None = None,
+            environment_variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
             features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
@@ -691,6 +699,7 @@ class WorkflowService:
             nodes=nodes if nodes is not None else config.nodes,
             edges=edges if edges is not None else config.edges,
             variables=variables if variables is not None else config.variables,
+            environment_variables=environment_variables if environment_variables is not None else config.environment_variables,
             execution_config=execution_config if execution_config is not None else config.execution_config,
             features=features if features is not None else config.features,
             triggers=triggers if triggers is not None else config.triggers,
@@ -699,6 +708,7 @@ class WorkflowService:
         updated_nodes = config_dict["nodes"]
         updated_edges = config_dict["edges"]
         updated_variables = config_dict["variables"]
+        updated_environment_variables = config_dict["environment_variables"]
         updated_execution_config = config_dict["execution_config"]
         updated_features = config_dict["features"]
         updated_triggers = config_dict["triggers"]
@@ -720,6 +730,7 @@ class WorkflowService:
             nodes=updated_nodes,
             edges=updated_edges,
             variables=updated_variables,
+            environment_variables=updated_environment_variables,
             execution_config=updated_execution_config,
             features=updated_features,
             triggers=updated_triggers,
@@ -792,6 +803,7 @@ class WorkflowService:
             nodes=config.nodes,
             edges=config.edges,
             variables=config.variables,
+            environment_variables=config.environment_variables,
             execution_config=config.execution_config,
             features=config.features,
             triggers=config.triggers,
@@ -834,6 +846,7 @@ class WorkflowService:
             nodes=config.nodes,
             edges=config.edges,
             variables=config.variables,
+            environment_variables=config.environment_variables,
             execution_config=config.execution_config,
             features=config.features,
             triggers=config.triggers,
@@ -912,6 +925,12 @@ class WorkflowService:
         if isinstance(value, list):
             return [WorkflowService._serialize_execution_value(item) for item in value]
         return value
+
+    @staticmethod
+    def _mask_runtime_secrets(payload: dict[str, Any], variable_pool) -> dict[str, Any]:
+        if not variable_pool:
+            return payload
+        return mask_secrets(payload, variable_pool.get_secret_values())
 
     def get_execution_detail(self, execution_id: str) -> dict[str, Any] | None:
         execution = self.get_execution(execution_id)
@@ -1657,6 +1676,7 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
+            "environment_variables": config.environment_variables,
             "execution_config": config.execution_config,
             "features": feature_configs
         }
@@ -2118,6 +2138,7 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
+            "environment_variables": config.environment_variables,
             "execution_config": config.execution_config,
             "features": feature_configs
         }
@@ -2375,6 +2396,7 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables or [],
+            "environment_variables": config.environment_variables or [],
             "execution_config": config.execution_config or {},
             "features": config.features or {},
         }
@@ -2450,7 +2472,7 @@ class WorkflowService:
         try:
             result = await node.execute(state, variable_pool)
             elapsed = (time.time() - start_time) * 1000
-            return {
+            payload = {
                 "status": "completed",
                 "node_id": node_id,
                 "node_type": node_config.get("type"),
@@ -2461,10 +2483,11 @@ class WorkflowService:
                 "elapsed_time": elapsed,
                 "error": None,
             }
+            return self._mask_runtime_secrets(payload, variable_pool)
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
             logger.error(f"单节点执行失败: node_id={node_id}, error={e}", exc_info=True)
-            return {
+            payload = {
                 "status": "failed",
                 "node_id": node_id,
                 "node_type": node_config.get("type"),
@@ -2474,6 +2497,7 @@ class WorkflowService:
                 "elapsed_time": elapsed,
                 "error": str(e),
             }
+            return self._mask_runtime_secrets(payload, variable_pool)
 
     async def run_single_node_stream(
             self,
@@ -2505,10 +2529,13 @@ class WorkflowService:
                 else:
                     chunk = item.get("chunk", "")
                     if chunk:
-                        yield {"event": "node_chunk", "data": {"node_id": node_id, "chunk": chunk}}
+                        yield self._mask_runtime_secrets(
+                            {"event": "node_chunk", "data": {"node_id": node_id, "chunk": chunk}},
+                            variable_pool
+                        )
 
             elapsed = (time.time() - start_time) * 1000
-            yield {
+            yield self._mask_runtime_secrets({
                 "event": "node_end",
                 "data": {
                     "node_id": node_id,
@@ -2521,11 +2548,11 @@ class WorkflowService:
                     "elapsed_time": elapsed,
                     "error": None,
                 }
-            }
+            }, variable_pool)
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
             logger.error(f"单节点流式执行失败: node_id={node_id}, error={e}", exc_info=True)
-            yield {
+            yield self._mask_runtime_secrets({
                 "event": "node_error",
                 "data": {
                     "node_id": node_id,
@@ -2534,7 +2561,7 @@ class WorkflowService:
                     "elapsed_time": elapsed,
                     "error": str(e),
                 }
-            }
+            }, variable_pool)
 
     @staticmethod
     def get_start_node_variables(config: dict) -> list:

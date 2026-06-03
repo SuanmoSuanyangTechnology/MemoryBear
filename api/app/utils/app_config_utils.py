@@ -153,6 +153,7 @@ def workflow_config_4_app_release(release: AppRelease) -> WorkflowConfig:
         nodes=config_dict.get("nodes", []),
         edges=config_dict.get("edges", []),
         variables=config_dict.get("variables", []),
+        environment_variables=config_dict.get("environment_variables", []),
         execution_config=config_dict.get("execution_config", {}),
         triggers=config_dict.get("triggers", []),
         features=config_dict.get("features", {})
@@ -280,6 +281,7 @@ def dict_to_workflow_config(config_dict: Dict[str, Any], app_id: Optional[uuid.U
         nodes=config_dict.get("nodes", []),
         edges=config_dict.get("edges", []),
         variables=config_dict.get("variables", []),
+        environment_variables=config_dict.get("environment_variables", []),
         execution_config=config_dict.get("execution_config", {}),
         triggers=config_dict.get("triggers", []),
         is_active=config_dict.get("is_active", True),

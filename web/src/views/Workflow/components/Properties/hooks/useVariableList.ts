@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 14:57:30
+ * @Last Modified time: 2026-06-02 11:39:51
  */
 /**
  * useVariableList Hook
@@ -68,7 +68,8 @@ export const fileSubVariable = [
 const NODE_VARIABLES = {
   llm: [
     { label: 'output', dataType: 'string', field: 'output' },
-    { label: 'reasoning_content', dataType: 'string', field: 'reasoning_content' }
+    { label: 'reasoning_content', dataType: 'string', field: 'reasoning_content' },
+    { label: 'history', dataType: 'array[object]', field: 'history' },
   ],
   'jinja-render': [{ label: 'output', dataType: 'string', field: 'output' }],
   tool: [{ label: 'data', dataType: 'string', field: 'data' }],
@@ -98,6 +99,12 @@ const NODE_VARIABLES = {
     { label: 'last_record', dataType: 'string', field: 'last_record' },
   ] // dataType will be overridden dynamically
 } as const;
+
+export const triggerParams: Record<string, string> = {
+  query_params: 'query',
+  header_params: 'headers',
+  req_body_params: 'body',
+}
 
 /**
  * Add variable to list if not already present
@@ -260,6 +267,23 @@ const processNodeVariables = (
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
+    case 'trigger':
+      // Add webhook trigger variables
+      const triggerType = config.trigger_type?.defaultValue ?? config.trigger_type;
+      if (triggerType === 'webhook') {
+        Object.keys(triggerParams).forEach((key: any) => {
+          const configParams = Array.isArray(config[key]?.defaultValue)
+            ? config[key]?.defaultValue
+            : Array.isArray(config[key])
+              ? config[key]
+              : [];
+          configParams.forEach((param: any) => {
+            if (param?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${param.name}`, `${key}.${param.name}`, param.type || 'string', `${dataNodeId}.${key}.${param.name}`, nodeData, undefined);
+          });
+        });
+        addVariable(variableList, addedKeys, `${dataNodeId}_webhook_raw`, 'webhook_raw', 'object', `${dataNodeId}.webhook_raw`, nodeData, undefined);
+      }
+      break;
   }
 };
 
@@ -276,7 +300,8 @@ const hasOutputNodeTypes = [
   'tool',
   'jinja-render',
   'document-extractor',
-  'list-operator'
+  'list-operator',
+  'trigger'
 ];
 
 /**

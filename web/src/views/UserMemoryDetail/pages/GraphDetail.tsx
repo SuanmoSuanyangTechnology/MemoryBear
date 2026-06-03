@@ -13,6 +13,7 @@ import InteractionBar from '../components/InteractionBar'
 import Empty from '@/components/Empty'
 import PageHeader from '@/components/Layout/PageHeader'
 import BtnTabs from '@/components/BtnTabs'
+import ExtractedEntityGraphDetail from './ExtractedEntityGraphDetail'
 
 export interface Emotion {
   emotion_intensity: number;
@@ -45,7 +46,14 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   const [interactionData, setInteractionData] = useState<Interaction[]>([])
   const [activeTab, setActiveTab] = useState('timelines_memory')
   const [timelineLoading, setTimelineLoading] = useState(false)
-  const [timelineMemories, setTimelineMemories] = useState<Timeline>({ timelines_memory: [], MemorySummary: [], Statement: [], ExtractedEntity: []})
+  const [timelineMemories, setTimelineMemories] = useState<Timeline>({
+    MemorySummary: [],
+    Statement: [],
+    ExtractedEntity: [],
+    timelines_memory: [],
+  })
+
+
   useEffect(() => {
     const nodeId = searchParams.get('nodeId')
     const nodeLabel = searchParams.get('nodeLabel')
@@ -79,7 +87,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
       .finally(() => setLoading(false))
   }
   const getTimelineMemoriesData = (vo: Node) => {
-    if (!vo.id || !vo.label) return
+    if (!vo.id || !vo.label || vo.label === 'ExtractedEntity') return
     setTimelineLoading(true)
     getTimelineMemories({ id: vo.id as string, label: vo.label })
       .then(res => {
@@ -99,7 +107,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   return (
     <>
       <PageHeader
-        title={vo?.name}
+        title={vo?.label === 'ExtractedEntity' ? undefined : vo?.name}
         extra={
           <Space size={12}>
             <Button
@@ -112,62 +120,65 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
           </Space>
         }
       />
-      <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
-        <Col flex="480px" className="rb:h-full!">
-          <RbCard
-            title={t('userMemory.relationshipEvolution')}
-            headerType="borderless"
-            headerClassName="rb:min-h-[56px]! rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-56px)] rb:overflow-y-auto!"
-            className="rb:h-full!"
-          >
-            <Flex vertical gap={16}>
-              <EmotionLine chartData={emotionData} loading={loading} />
-              <InteractionBar chartData={interactionData} loading={loading} />
-            </Flex>
-          </RbCard>
-        </Col>
-        <Col flex="1" className="rb:h-full!">
-          <RbCard
-            title={t('userMemory.timelineMemories')}
-            headerType="borderless"
-            headerClassName="rb:min-h-[53px]! rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-53px)]!"
-            className="rb:w-full! rb:h-full!"
-          >
-            <BtnTabs
-              className="rb:mb-4!"
-              activeKey={activeTab}
-              items={['timelines_memory', 'Statement', 'MemorySummary'].map(key => ({
-                label: t(`userMemory.${key}`),
-                key
-              }))}
-              onChange={(key: string) => setActiveTab(key)}
-            />
-            <div className="rb:h-[calc(100%-42px)] rb:overflow-y-auto">
-              {timelineLoading
-                ? <Skeleton active />
-                : !activeContent || activeContent.length === 0
-                  ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
-                  : <Flex gap={12} vertical>
-                    {activeContent.map((vo, index) => (
-                      <div
-                        key={index}
-                        className="rb-border rb:rounded-xl rb:p-3"
-                      >
-                        <Flex align="center" justify="space-between">
-                          <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{formatDateTime(vo.created_at)}</div>
-                          <Tag>{vo.type}</Tag>
-                        </Flex>
-                        <div className="rb:mt-3 rb:leading-5 rb:break-all">{vo.text}</div>
-                      </div>
-                    ))}
-                  </Flex>
-              }
-            </div>
-          </RbCard>
-        </Col>
-      </Row>
+      {vo?.label === 'ExtractedEntity'
+        ? <ExtractedEntityGraphDetail />
+        : <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
+          <Col flex="480px" className="rb:h-full!">
+            <RbCard
+              title={t('userMemory.relationshipEvolution')}
+              headerType="borderless"
+              headerClassName="rb:min-h-[56px]! rb:font-[MiSans-Bold] rb:font-bold"
+              bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-56px)] rb:overflow-y-auto!"
+              className="rb:h-full!"
+            >
+              <Flex vertical gap={16}>
+                <EmotionLine chartData={emotionData} loading={loading} />
+                <InteractionBar chartData={interactionData} loading={loading} />
+              </Flex>
+            </RbCard>
+          </Col>
+          <Col flex="1" className="rb:h-full!">
+            <RbCard
+              title={t('userMemory.timelineMemories')}
+              headerType="borderless"
+              headerClassName="rb:min-h-[53px]! rb:font-[MiSans-Bold] rb:font-bold"
+              bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-53px)]!"
+              className="rb:w-full! rb:h-full!"
+            >
+              <BtnTabs
+                className="rb:mb-4!"
+                activeKey={activeTab}
+                items={['timelines_memory', 'Statement', 'MemorySummary'].map(key => ({
+                  label: t(`userMemory.${key}`),
+                  key
+                }))}
+                onChange={(key: string) => setActiveTab(key)}
+              />
+              <div className="rb:h-[calc(100%-42px)] rb:overflow-y-auto">
+                {timelineLoading
+                  ? <Skeleton active />
+                  : !activeContent || activeContent.length === 0
+                    ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+                    : <Flex gap={12} vertical>
+                      {activeContent.map((vo, index) => (
+                        <div
+                          key={index}
+                          className="rb-border rb:rounded-xl rb:p-3"
+                        >
+                          <Flex align="center" justify="space-between">
+                            <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{formatDateTime(vo.created_at)}</div>
+                            <Tag>{vo.type}</Tag>
+                          </Flex>
+                          <div className="rb:mt-3 rb:leading-5 rb:break-all">{vo.text}</div>
+                        </div>
+                      ))}
+                    </Flex>
+                }
+              </div>
+            </RbCard>
+          </Col>
+        </Row>
+      }
     </>
   )
 })

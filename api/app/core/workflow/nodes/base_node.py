@@ -593,6 +593,7 @@ class BaseNode(ABC):
           - sys.xxx: System variables (e.g., message, execution_id, workspace_id,
             user_id, conversation_id)
           - conv.xxx: Conversation variables (persist across multiple turns)
+          - env.xxx: Environment variables (workflow-level, read-only)
           - node_id.xxx: Node outputs
 
         Args:
@@ -612,6 +613,7 @@ class BaseNode(ABC):
             conv_vars=variable_pool.lazy_namespace("conv", literal=True),
             node_outputs=variable_pool.lazy_all_node_outputs(literal=True),
             system_vars=variable_pool.lazy_namespace("sys", literal=True),
+            env_vars=variable_pool.lazy_namespace("env", literal=True),
             strict=strict
         )
 
@@ -622,6 +624,7 @@ class BaseNode(ABC):
         Supported variable namespaces:
           - sys.xxx: System variables
           - conv.xxx: Conversation variables
+          - env.xxx: Environment variables
           - node_id.xxx: Node outputs
 
         Args:
@@ -638,7 +641,8 @@ class BaseNode(ABC):
             expression=expression,
             conv_var=variable_pool.lazy_namespace("conv"),
             node_outputs=variable_pool.lazy_all_node_outputs(),
-            system_vars=variable_pool.lazy_namespace("sys")
+            system_vars=variable_pool.lazy_namespace("sys"),
+            env_vars=variable_pool.lazy_namespace("env"),
         )
 
     @staticmethod

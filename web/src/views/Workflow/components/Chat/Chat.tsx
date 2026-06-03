@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 19:51:55
+ * @Last Modified time: 2026-06-02 12:20:24
  */
 /**
  * Workflow Chat Component
@@ -46,6 +46,7 @@ import { useWorkflowStore } from '@/store/workflow';
 import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfigModal'
 import type { VariableConfigModalRef } from '@/views/Workflow/types'
 import type { Application } from '@/views/ApplicationManagement/types'
+import { triggerParams } from '../Properties/hooks/useVariableList'
 
 const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type']; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm; }>(({ // eslint-disable-line
   appId, graphRef, features, appType
@@ -102,6 +103,8 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     const nodes = graphRef.current?.getNodes()
     const list = nodes?.map(node => node.getData()) || []
     const startNodes = list.filter(vo => vo.type === 'start')
+    const webhookTriggerNodes = list.filter(vo => vo.type === 'trigger' && (vo.config?.trigger_type === 'webhook' || vo.config?.trigger_type?.defaultValue === 'webhook'))
+    const allVariables: Variable[] = []
     if (startNodes.length) {
       const curVariables = startNodes[0].config.variables?.defaultValue
 
@@ -114,10 +117,44 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
           vo.value = lastVo.value
         }
       })
-      console.log('curVariables', curVariables)
-      setVariables([...curVariables])
-      toolbarRef.current?.setVariables([...curVariables])
+      allVariables.push(...curVariables)
     }
+    if (webhookTriggerNodes.length) {
+      webhookTriggerNodes.forEach(webhookTrigger => {
+        const webhookVariables: Variable[] = []
+        Object.keys(triggerParams).forEach(key => {
+          const params = Array.isArray(webhookTrigger.config?.[key])
+              ? webhookTrigger.config?.[key]
+              : Array.isArray(webhookTrigger.config?.[key].defaultValue)
+              ? webhookTrigger.config?.[key].defaultValue
+              : []
+          params.forEach((param: any) => {
+            if (param?.name) {
+              webhookVariables.push({
+                name: [triggerParams[key], param.name].join('.'),
+                // description: param.name,
+                ui_type: 'paragraph',
+                type: param.type || 'string',
+                required: param.required || false,
+                nodeType: 'webhook',
+              })
+            }
+          })
+        })
+        if (webhookVariables.length) {
+          webhookVariables.forEach((vo: Variable) => {
+            const lastVo = variables.find(item => item.name === vo.name)
+            if (lastVo?.value) {
+              vo.value = lastVo.value
+            }
+          })
+          allVariables.push(...webhookVariables)
+        }
+      })
+    }
+    console.log('allVariables', allVariables)
+    setVariables([...allVariables])
+    toolbarRef.current?.setVariables([...allVariables])
   }
   /**
    * Closes the drawer and resets all state
@@ -162,15 +199,26 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     // Validate required variables before sending
     let isCanSend = true
     const params: Record<string, any> = {}
+    const trigger_payload: Record<string, any> = {}
     if (variables.length > 0) {
       const needRequired: string[] = []
-      variables.forEach(vo => {
+      const normalVariables = variables.filter(item => !item.nodeType)
+      const webhookTriggerVariables = variables.filter(item => item.nodeType === 'webhook')
+      normalVariables.forEach(vo => {
         params[vo.name] = vo.value ?? vo.defaultValue
 
         if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
           isCanSend = false
           needRequired.push(vo.name)
         }
+      })
+      webhookTriggerVariables.forEach(vo => {
+        console.log('webhookTriggerVariables vo', vo)
+        const nameList = vo.name.split('.')
+        if (!trigger_payload[nameList[0]]) {
+          trigger_payload[nameList[0]] = {}
+        }
+        trigger_payload[nameList[0]][nameList[1]] = vo.value
       })
 
       if (needRequired.length) {
@@ -386,6 +434,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     setFileList([])
     const data = {
       message: message,
+      trigger_payload,
       variables: params,
       stream: true,
       conversation_id: conversationId,

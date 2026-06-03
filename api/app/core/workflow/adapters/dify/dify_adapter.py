@@ -18,6 +18,7 @@ from app.schemas.workflow_schema import (
     NodeDefinition,
     EdgeDefinition,
     VariableDefinition,
+    EnvironmentVariableDefinition,
     TriggerConfig,
     ExecutionConfig
 )
@@ -120,6 +121,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             target_workflow_type = mode
         
         conv_variables = self.config.get("workflow").get("conversation_variables") or []
+        environment_variables = self.config.get("workflow").get("environment_variables") or []
         # 纯工作流没有会话变量
         if target_workflow_type == "pure_workflow":
             conv_variables = []
@@ -130,6 +132,17 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
 
         # 开始节点的文件变量合并到会话变量
         self.conv_variables.extend(self._file_vars_to_conv)
+
+        for variable in environment_variables:
+            try:
+                env_var: EnvironmentVariableDefinition = self.convert_environment_variable(variable)
+                self.env_variables.append(env_var)
+            except Exception as e:
+                self.warnings.append(ExceptionDefinition(
+                    type=ExceptionType.VARIABLE,
+                    name=variable.get("name") or variable.get("variable"),
+                    detail=f"convert environment variable error - {e}"
+                ))
 
         features = self.convert_features(
             self.config.get("workflow", {}).get("features", {})
@@ -148,6 +161,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             edges=self.edges,
             nodes=self.nodes,
             variables=self.conv_variables,
+            environment_variables=self.env_variables,
             features=features,
             warnings=self.warnings,
             errors=self.errors

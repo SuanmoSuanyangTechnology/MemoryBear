@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 19:46:16
+ * @Last Modified time: 2026-06-02 16:05:27
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -37,6 +37,64 @@ export const cannotRunNodes = [
   'end',
   'output',
 ]
+export const scheduleNodeConfig = {
+  cron: {
+    type: 'define',
+    // required: true,
+  },
+  // frequency: {
+  //   type: 'define',
+  //   defaultValue: 'daily'
+  // },
+  // minute: {
+  //   type: 'define',
+  //   defaultValue: 0,
+  // },
+  // time: {
+  //   type: 'define',
+  //   defaultValue: '12:00 AM',
+  // },
+  // week_days: {
+  //   type: 'define',
+  //   defaultValue: []
+  // },
+  // month_days: {
+  //   type: 'define',
+  //   defaultValue: []
+  // },
+}
+export const webhookNodeInitConfig = {
+  method: {
+    type: 'define',
+    defaultValue: 'POST'
+  },
+  route_key: {
+    type: 'define',
+  },
+  content_type: {
+    type: 'define',
+    defaultValue: 'application/json',
+  },
+  query_params: {
+    type: 'define',
+    defaultValue: []
+  },
+  header_params: {
+    type: 'define',
+    defaultValue: []
+  },
+  req_body_params: {
+    type: 'define',
+    defaultValue: []
+  },
+  response: {
+    type: 'define',
+    defaultValue: {
+      status_code: 200,
+      body: undefined
+    }
+  }
+}
 /**
  * Workflow node library configuration
  * Defines all available node types, their icons, and configuration schemas
@@ -57,15 +115,14 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           trigger_type: {
             type: 'define',
-            required: true,
-          },
-          cron: {
-            type: 'define',
-            required: true,
           },
           enabled: {
             type: 'define',
             defaultValue: true
+          },
+          cron: {
+            type: 'define',
+            // required: true,
           },
           // frequency: {
           //   type: 'define',
@@ -87,6 +144,36 @@ export const nodeLibrary: NodeLibrary[] = [
           //   type: 'define',
           //   defaultValue: []
           // },
+          method: {
+            type: 'define',
+            defaultValue: 'POST'
+          },
+          route_key: {
+            type: 'define',
+          },
+          content_type: {
+            type: 'define',
+            defaultValue: 'application/json',
+          },
+          query_params: {
+            type: 'define',
+            defaultValue: []
+          },
+          header_params: {
+            type: 'define',
+            defaultValue: []
+          },
+          req_body_params: {
+            type: 'define',
+            defaultValue: []
+          },
+          response: {
+            type: 'define',
+            defaultValue: {
+              status_code: 200,
+              body: undefined
+            }
+          }
         }
       },
       { type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
@@ -128,7 +215,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           max_tokens: { 
             type: 'define',
-            defaultValue: 2000 
+            defaultValue: 8000 
           },
           json_output: {
             type: 'define',
@@ -459,14 +546,14 @@ export const nodeLibrary: NodeLibrary[] = [
             dependsOn: 'parallel',
             dependsOnValue: true
           },
-          error_response: {
+          error_handle_mode: {
             type: 'select',
-            defaultValue: 'stop',
+            defaultValue: 'terminated',
             needTranslation: true,
             options: [
-              { label: 'workflow.config.iteration.stop', value: 'stop' },
-              { label: 'workflow.config.iteration.ignore_error', value: 'ignore_error' },
-              { label: 'workflow.config.iteration.remove_error', value: 'remove_error' },
+              { label: 'workflow.config.iteration.terminated', value: 'terminated' },
+              { label: 'workflow.config.iteration.continue-on-error', value: 'continue-on-error' },
+              { label: 'workflow.config.iteration.remove-abnormal-output', value: 'remove-abnormal-output' },
             ],
           },
           flatten: { // Flatten output

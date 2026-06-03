@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 14:06:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 14:12:04
+ * @Last Modified time: 2026-06-01 11:52:56
  */
 /**
  * GraphNetworkChart Component
@@ -63,6 +63,7 @@ interface GraphNetworkChartProps {
   onNodeClick: Dispatch<SetStateAction<Node | EdgeClickData | null>>;
   selectedNodeId?: string | null;
   selectedCategory?: string | null;
+  regionId?: string | null;
 }
 
 interface D3Node extends d3.SimulationNodeDatum {
@@ -83,6 +84,16 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   label?: string;
 }
 
+const regionMapping: Record<string, string[]> = {
+  prefrontal: ['Statement'],
+  frontal: ['ExtractedEntity'],
+  parietal: ['Perceptual'],
+  occipital: ['Chunk'],
+  cerebellum: ['AssistantPruned', 'AssistantOriginal'],
+  brainstem: ['Dialogue', 'Conversation'],
+  hippocampus: ['MemorySummary'],
+  amygdala: ['Statement'],
+}
 const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   nodes,
   links,
@@ -91,6 +102,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   onNodeClick,
   selectedNodeId,
   selectedCategory,
+  regionId,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
@@ -99,6 +111,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   const linkLabelSelRef = useRef<d3.Selection<SVGTextElement, D3Link, SVGGElement, unknown> | null>(null)
   const graphStateRef = useRef<{ nodes: D3Node[]; links: D3Link[] } | null>(null)
   const zoomScaleRef = useRef<number>(1)
+  const transformRef = useRef<d3.ZoomTransform | null>(null)
 
   const graphState = useMemo(() => {
     if (!nodes || nodes.length === 0) return null
@@ -150,6 +163,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.2, 4])
       .on('zoom', e => {
+        transformRef.current = e.transform
         g.attr('transform', e.transform)
         zoomScaleRef.current = e.transform.k
         const currentZoom = e.transform.k
@@ -162,12 +176,16 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
     svg.call(zoom)
 
-    const defaultZoom = graphState.nodes.length < 50 ? 3 : graphState.nodes.length < 100 ? 2 : 1
-    if (defaultZoom !== 1) {
+    const defaultZoom = graphState.nodes.length < 30 ? 1.2 : graphState.nodes.length < 80 ? 0.9 : 0.6
+    if (transformRef.current) {
+      svg.call(zoom.transform, transformRef.current)
+      zoomScaleRef.current = transformRef.current.k
+    } else {
       svg.call(zoom.transform, d3.zoomIdentity
         .translate(width / 2 * (1 - defaultZoom), height / 2 * (1 - defaultZoom))
         .scale(defaultZoom)
       )
+      zoomScaleRef.current = defaultZoom
     }
 
     const defs = svg.append('defs')
@@ -196,6 +214,8 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       .force('charge', d3.forceManyBody().strength(-100))
       .force('center', d3.forceCenter(width / 2, height / 2).strength(0.1))
       .force('collision', d3.forceCollide<D3Node>(d => d.symbolSize + 15))
+      .force('x', d3.forceX<D3Node>(width / 2).strength(0.05))
+      .force('y', d3.forceY<D3Node>(height / 2).strength(0.05))
 
     const linkSel = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(graphState.links)
@@ -518,14 +538,214 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   useEffect(() => {
     if (!selectedCategory || !nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
 
+    const { nodes: graphNodes } = graphStateRef.current
+
+    const highlightedNodeIds = new Set<string>()
+
+    graphNodes.forEach(node => {
+      if (node.caption === selectedCategory) {
+        highlightedNodeIds.add(node.id)
+      }
+    })
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8)
+      .attr('fill-opacity', d => highlightedNodeIds.has(d.id) ? 0.85 : 0.15)
+      .attr('stroke', d => highlightedNodeIds.has(d.id) ? '#fff' : '#ccc')
+      .attr('stroke-width', d => highlightedNodeIds.has(d.id) ? 1.5 : 0.5)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8)
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.6 : 0.1)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.4 : 0.1)
+
+    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+      .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
+      .attr('font-weight', 'normal')
+      .style('display', d => {
+        if (!d.name) return 'none'
+        const textWidth = d.name.length * 6
+        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
+        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
+        return 'none'
+      })
+
+    linkSelRef.current
+      .attr('stroke', '#A8ABB2')
+      .attr('stroke-opacity', 0.4)
+      .attr('stroke-width', 0.8)
+      .attr('marker-end', 'url(#arrow)')
+      .attr('stroke-dasharray', 'none')
+
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current.style('display', 'none')
+    }
+
+  }, [selectedCategory])
+
+  useEffect(() => {
+    if (!nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
+
+    const { links: graphLinks } = graphStateRef.current
+    
+    const highlightedNodeIds = new Set<string>()
+    const highlightedLinkIds = new Set<string>()
+    
+    if (selectedNodeId) {
+      const isLink = graphLinks.some(link => link.id === selectedNodeId)
+      
+      if (isLink) {
+        highlightedLinkIds.add(selectedNodeId)
+      } else {
+        highlightedNodeIds.add(selectedNodeId)
+        graphLinks.forEach(link => {
+          const sourceId = typeof link.source === 'string' ? link.source : link.source.id
+          const targetId = typeof link.target === 'string' ? link.target : link.target.id
+          if (sourceId === selectedNodeId) {
+            highlightedNodeIds.add(targetId)
+            highlightedLinkIds.add(link.id)
+          }
+          if (targetId === selectedNodeId) {
+            highlightedNodeIds.add(sourceId)
+            highlightedLinkIds.add(link.id)
+          }
+        })
+      }
+    }
+
+    if (!selectedNodeId && !selectedCategory) {
+      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+        .transition()
+        .duration(200)
+        .attr('r', d => d.symbolSize)
+        .attr('fill-opacity', 0.85)
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 1.5)
+      
+      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+        .transition()
+        .duration(200)
+        .attr('r', d => d.symbolSize * 1.35)
+        .attr('stroke-opacity', 0.3)
+      
+      nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+        .attr('fill', '#171719')
+        .attr('font-weight', 'normal')
+        .style('display', d => {
+          if (!d.name) return 'none'
+          const textWidth = d.name.length * 6
+          return d.symbolSize * zoomScaleRef.current >= textWidth / 2 ? 'block' : 'none'
+        })
+      
+      linkSelRef.current
+        .attr('stroke', '#A8ABB2')
+        .attr('stroke-opacity', 0.4)
+        .attr('stroke-width', 0.8)
+        .attr('marker-end', 'url(#arrow)')
+        .attr('stroke-dasharray', 'none')
+
+      if (linkLabelSelRef.current) {
+        linkLabelSelRef.current.style('display', 'none')
+      }
+
+      return
+    }
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8)
+      .attr('fill-opacity', d => highlightedNodeIds.has(d.id) ? 0.85 : 0.15)
+      .attr('stroke', d => highlightedNodeIds.has(d.id) ? '#fff' : '#ccc')
+      .attr('stroke-width', d => highlightedNodeIds.has(d.id) ? 1.5 : 0.5)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8)
+    
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.6 : 0.1)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.4 : 0.1)
+    
+    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+      .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
+      .attr('font-weight', d => selectedNodeId && d.id === selectedNodeId ? 'bold' : 'normal')
+      .style('display', d => {
+        if (!d.name) return 'none'
+        const textWidth = d.name.length * 6
+        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
+        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
+        return 'none'
+      })
+
+    linkSelRef.current
+      .attr('stroke', '#A8ABB2')
+      .attr('stroke-opacity', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 0.6 : 0.15
+      })
+      .attr('stroke-width', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 1.5 : 0.5
+      })
+      .attr('marker-end', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 'url(#arrow-highlight)' : 'url(#arrow)'
+      })
+      .attr('stroke-dasharray', 'none')
+
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current
+        .style('display', d => {
+          const linkId = d.id as string
+          return highlightedLinkIds.has(linkId) ? 'block' : 'none'
+        })
+    }
+
+  }, [selectedNodeId])
+
+  useEffect(() => {
+    if (!regionId || !nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
+
     const { nodes: graphNodes, links: graphLinks } = graphStateRef.current
+
+    const targetTypes = regionMapping[regionId] || []
     
     const highlightedNodeIds = new Set<string>()
     const highlightedLinkIds = new Set<string>()
 
     graphNodes.forEach(node => {
-      if (node.caption === selectedCategory) {
-        highlightedNodeIds.add(node.id)
+      const originalNode = nodes.find(n => n.id === node.id)
+      if (!originalNode) return
+
+      const nodeType = originalNode.caption
+
+      if (regionId === 'amygdala') {
+        if (nodeType === 'Statement' && 
+            originalNode.properties && 
+            (originalNode.properties.emotion_type !== undefined || 
+             originalNode.properties.emotion_intensity !== undefined)) {
+          highlightedNodeIds.add(node.id)
+        }
+      } else {
+        if (targetTypes.includes(nodeType)) {
+          highlightedNodeIds.add(node.id)
+        }
       }
     })
 
@@ -585,127 +805,15 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
       .attr('stroke-dasharray', 'none')
 
-  }, [selectedCategory])
-
-  useEffect(() => {
-    if (!nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
-
-    const { links: graphLinks } = graphStateRef.current
-    
-    const highlightedNodeIds = new Set<string>()
-    const highlightedLinkIds = new Set<string>()
-    
-    if (selectedNodeId) {
-      const isLink = graphLinks.some(link => link.id === selectedNodeId)
-      
-      if (isLink) {
-        highlightedLinkIds.add(selectedNodeId)
-      } else {
-        highlightedNodeIds.add(selectedNodeId)
-        graphLinks.forEach(link => {
-          const sourceId = typeof link.source === 'string' ? link.source : link.source.id
-          const targetId = typeof link.target === 'string' ? link.target : link.target.id
-          if (sourceId === selectedNodeId) highlightedNodeIds.add(targetId)
-          if (targetId === selectedNodeId) highlightedNodeIds.add(sourceId)
-        })
-      }
-    }
-
-    if (!selectedNodeId && !selectedCategory) {
-      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
-        .transition()
-        .duration(200)
-        .attr('r', d => d.symbolSize)
-        .attr('fill-opacity', 0.85)
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 1.5)
-      
-      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
-        .transition()
-        .duration(200)
-        .attr('r', d => d.symbolSize * 1.35)
-        .attr('stroke-opacity', 0.3)
-      
-      nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
-        .attr('fill', '#171719')
-        .attr('font-weight', 'normal')
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current
         .style('display', d => {
-          if (!d.name) return 'none'
-          const textWidth = d.name.length * 6
-          return d.symbolSize * zoomScaleRef.current >= textWidth / 2 ? 'block' : 'none'
+          const linkId = d.id as string
+          return highlightedLinkIds.has(linkId) ? 'block' : 'none'
         })
-      
-      linkSelRef.current
-        .attr('stroke', '#A8ABB2')
-        .attr('stroke-opacity', 0.4)
-        .attr('stroke-width', 0.8)
-        .attr('marker-end', 'url(#arrow)')
-        .attr('stroke-dasharray', 'none')
-      
-      return
     }
 
-    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize : (highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8))
-      .attr('fill-opacity', d => highlightedLinkIds.size ? 0.85 : (highlightedNodeIds.has(d.id) ? 0.85 : 0.15))
-      .attr('stroke', d => highlightedLinkIds.size ? '#fff' : (highlightedNodeIds.has(d.id) ? '#fff' : '#ccc'))
-      .attr('stroke-width', d => highlightedLinkIds.size ? 1.5 : (highlightedNodeIds.has(d.id) ? 1.5 : 0.5))
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize : (highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8))
-    
-    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize * 1.35 : (highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8))
-      .attr('stroke-opacity', d => highlightedLinkIds.size ? 0.3 : (highlightedNodeIds.has(d.id) ? 0.6 : 0.1))
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize * 1.35 : (highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8))
-      .attr('stroke-opacity', d => highlightedLinkIds.size ? 0.3 : (highlightedNodeIds.has(d.id) ? 0.4 : 0.1))
-    
-    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
-      .attr('fill', d => highlightedLinkIds.size ? '#171719' : (highlightedNodeIds.has(d.id) ? '#171719' : '#bbb'))
-      .attr('font-weight', d => selectedNodeId && !highlightedLinkIds.size && d.id === selectedNodeId ? 'bold' : 'normal')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-        if (highlightedLinkIds.size) {
-          return shouldShow ? 'block' : 'none'
-        }
-        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-        return 'none'
-      })
-
-    linkSelRef.current
-      .attr('stroke', '#A8ABB2')
-      .attr('stroke-opacity', d => {
-        const linkId = d.id as string
-        if (highlightedLinkIds.has(linkId)) return 0.6
-        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
-        const targetId = typeof d.target === 'string' ? d.target : d.target.id
-        return highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId) ? 0.6 : 0.15
-      })
-      .attr('stroke-width', d => {
-        const linkId = d.id as string
-        if (highlightedLinkIds.has(linkId)) return 1.5
-        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
-        const targetId = typeof d.target === 'string' ? d.target : d.target.id
-        return highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId) ? 1.5 : 0.5
-      })
-      .attr('marker-end', d => {
-        const linkId = d.id as string
-        if (highlightedLinkIds.has(linkId)) return 'url(#arrow-highlight)'
-        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
-        const targetId = typeof d.target === 'string' ? d.target : d.target.id
-        return highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId) ? 'url(#arrow-highlight)' : 'url(#arrow)'
-      })
-      .attr('stroke-dasharray', 'none')
-
-  }, [selectedNodeId])
+  }, [regionId, nodes])
 
   if (!nodes || nodes.length === 0) {
     return <PageEmpty />

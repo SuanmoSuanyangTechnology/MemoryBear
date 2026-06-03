@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 16:21:49
+ * @Last Modified time: 2026-06-02 17:08:35
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -49,7 +49,7 @@ import Retry from './Retry'
 import NextStep from './NextStep'
 import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisplay'
 import type { Application } from '@/views/ApplicationManagement/types'
-import CronTriggerConfig from './CronTriggerConfig'
+import Trigger from './Trigger'
 
 /**
  * Props for Properties component
@@ -411,7 +411,7 @@ const Properties: FC<PropertiesProps> = ({
 
     if ((nodeType === 'iteration' && key === 'output')) {
       if (!selectedNode) return [];
-      let filteredList = variableList.filter(variable => variable.value.includes('sys.'))
+      let filteredList = variableList.filter(variable => variable.value.includes('sys.') || variable.nodeData?.type === 'var-aggregator')
       const childVariables = getChildNodeVariables(selectedNode, graphRef);
       const existingKeys = new Set(filteredList.map(v => v.key));
       childVariables.forEach(v => {
@@ -701,7 +701,9 @@ const Properties: FC<PropertiesProps> = ({
                       <Button type="primary" size="small" className="rb:text-[12px]!" onClick={handleSureReplace}>{t('workflow.sureReplace')}</Button>
                     </>
                     : selectedNode?.data?.type === 'trigger'
-                      ? <CronTriggerConfig />
+                      ? <Trigger
+                        key={data.id || 'trigger'}
+                      />
                       : selectedNode?.data?.type === 'http-request'
                       ? <HttpRequest
                         options={variableList}

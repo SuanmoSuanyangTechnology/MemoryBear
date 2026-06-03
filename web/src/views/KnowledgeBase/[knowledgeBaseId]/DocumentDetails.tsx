@@ -375,7 +375,7 @@ const DocumentDetails: FC = () => {
   }
   const handleDownload = () => {
     if (!document) return;
-    downloadFile(document.file_id || '', document.file_name)
+    downloadFile(document.file_id || '', document.file_name, document.parser_id === 'qa')
   };
   const onChange = (checked: boolean) => {
       updateDocument(documentId, {

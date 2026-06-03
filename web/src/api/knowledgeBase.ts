@@ -169,9 +169,9 @@ export const uploadQaFile = async (data: FormData, options?: UploadFileOptions) 
 };
 
 // 下载文件
-export const downloadFile = async (fileId: string, fileName?: string) => {
+export const downloadFile = async (fileId: string, fileName?: string, original?: boolean) => {
   const token = cookieUtils.get('authToken');
-  const url = `/api/files/${fileId}`;
+  const url = `/api/files/${fileId}${original ? '?original=true' : ''}`;
   
   try {
     const response = await fetch(url, {
