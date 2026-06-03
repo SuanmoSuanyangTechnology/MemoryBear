@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 10:51:22
+ * @Last Modified time: 2026-06-03 23:04:12
  */
 /**
  * Tool List Component
@@ -58,12 +58,13 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
             // Process based on tool type
             switch ((toolDetail as any).tool_type) {
               case 'mcp':
+              case 'workflow':
                 // MCP tools: Find method by operation name
                 const mcpFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                 return {
                   ...item,
                   is_active: (toolDetail as any).is_active,
-                  label: mcpFilterItem?.description,
+                  label: (toolDetail as any).tool_type === 'workflow' ? mcpFilterItem?.name ||mcpFilterItem?.description : mcpFilterItem?.description,
                   method_id: mcpFilterItem?.method_id,
                   value: mcpFilterItem?.name,
                   description: mcpFilterItem?.description,
@@ -71,7 +72,6 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
                 }
                 break
               case 'builtin':
-              case 'workflow':
                 // Builtin tools: Handle single or multiple methods
                 if ((methods as any[]).length > 1) {
                   const builtinFilterItem = (methods as any[]).find(vo => vo.name === item.operation)

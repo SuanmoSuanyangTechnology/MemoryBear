@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 18:21:05
+ * @Last Modified time: 2026-06-03 23:03:09
  */
 /**
  * Tool Selection Modal
@@ -87,10 +87,12 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
       let operation: any = undefined
 
       // Determine operation based on tool type
-      if (selectdTools[0].value === 'mcp' || 
-          (selectdTools[0].value === 'builtin' && 
-           selectdTools[1]?.children && 
-           selectdTools[1].children.length > 1)) {
+      if (selectdTools[0].value === 'mcp'
+        || selectdTools[0].value === 'workflow'
+        || (selectdTools[0].value === 'builtin' && 
+          selectdTools[1]?.children && 
+          selectdTools[1].children.length > 1)
+        ) {
         // MCP or builtin with multiple methods: use method name
         operation = selectdTools[2].value
       } else if (selectdTools[0].value === 'custom') {
@@ -102,7 +104,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
       const tool = {
         ...selectdTools[2],
         // Custom tools use label, others use description
-        label: selectdTools[0].value === 'custom' ? selectdTools[2].label : selectdTools[2].description,
+        label: ['custom', 'workflow'].includes(selectdTools[0].value as string) ? selectdTools[2].label : selectdTools[2].description,
         tool_id: selectdTools[1].value as string,
         enabled: true
       }
