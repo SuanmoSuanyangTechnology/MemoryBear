@@ -30,7 +30,7 @@ from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
 from app.models import App, AppRelease
-from app.models.workflow_model import WorkflowConfig, WorkflowExecution
+from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -932,6 +932,233 @@ class WorkflowService:
             return payload
         return mask_secrets(payload, variable_pool.get_secret_values())
 
+    @staticmethod
+    def _extract_secret_values_from_environment_variables(
+            environment_variables: list[dict[str, Any]] | None
+    ) -> list[str]:
+        secret_values: list[str] = []
+        for item in environment_variables or []:
+            if item.get("value_type") != "secret":
+                continue
+            value = item.get("value")
+            if value not in (None, "", "__SECRET__"):
+                secret_values.append(str(value))
+        return sorted(set(secret_values), key=len, reverse=True)
+
+    @staticmethod
+    def _mask_payload_with_secret_values(payload: dict[str, Any], secret_values: list[str]) -> dict[str, Any]:
+        if not secret_values:
+            return payload
+        return mask_secrets(payload, secret_values)
+
+    @staticmethod
+    def _build_debug_execution_output(node_id: str, status: str) -> dict[str, Any]:
+        return {
+            "debug": True,
+            "source": "single_node_debug",
+            "node_id": node_id,
+            "status": status,
+        }
+
+    @staticmethod
+    def _normalize_single_node_payload(node_type: str, node_name: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "node_type": node_type,
+            "node_name": node_name,
+            "status": payload.get("status", "completed"),
+            "input": payload.get("inputs", payload.get("input")),
+            "output": payload.get("outputs", payload.get("output")),
+            "process": payload.get("process"),
+            "token_usage": payload.get("token_usage"),
+            "elapsed_time": payload.get("elapsed_time"),
+            "error": payload.get("error"),
+            "execution_order": 1,
+            "retry_count": 0,
+        }
+
+    @staticmethod
+    def _node_output_sort_key(item: tuple[str, Any]) -> int:
+        node_data = item[1]
+        if not isinstance(node_data, dict):
+            return 0
+        return int(node_data.get("execution_order", 0) or 0)
+
+    @staticmethod
+    def _get_node_name_from_config(config: WorkflowConfig | None, node_id: str) -> str | None:
+        if not config:
+            return None
+        for node in config.nodes or []:
+            if node.get("id") == node_id:
+                return node.get("name")
+        return None
+
+    def _build_node_execution_record(
+            self,
+            *,
+            execution: WorkflowExecution,
+            node_id: str,
+            node_data: dict[str, Any],
+            source: str,
+            fallback_execution_order: int,
+            fallback_node_name: str | None = None,
+    ) -> dict[str, Any]:
+        normalized = dict(node_data or {})
+        now = utcnow_naive()
+        completed_at = execution.completed_at or now
+        elapsed_time = normalized.pop("elapsed_time", None)
+        started_at = execution.started_at or now
+        if isinstance(elapsed_time, (int, float)) and elapsed_time and execution.completed_at:
+            # Workflow node elapsed_time is typically in seconds; single-node debug uses milliseconds.
+            if source == "single_node_debug":
+                started_at = completed_at - datetime.timedelta(milliseconds=elapsed_time)
+            else:
+                started_at = completed_at - datetime.timedelta(seconds=elapsed_time)
+
+        process_data = normalized.pop("process", None)
+        return {
+            "execution_id": execution.id,
+            "node_id": node_id,
+            "node_type": normalized.pop("node_type", "unknown"),
+            "node_name": normalized.pop("node_name", fallback_node_name),
+            "execution_order": int(normalized.pop("execution_order", fallback_execution_order) or fallback_execution_order),
+            "retry_count": int(normalized.pop("retry_count", 0) or 0),
+            "input_data": normalized.pop("input", None),
+            "output_data": normalized.pop("output", normalized or None),
+            "status": normalized.pop("status", "completed"),
+            "error_message": normalized.pop("error", None),
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "elapsed_time": elapsed_time,
+            "token_usage": normalized.pop("token_usage", None),
+            "cache_hit": bool(normalized.pop("cache_hit", False)),
+            "cache_key": normalized.pop("cache_key", None),
+            "meta_data": {
+                "source": source,
+                "process_data": process_data,
+                "workflow_config_id": str(execution.workflow_config_id),
+                "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
+                "debug": source == "single_node_debug",
+            }
+        }
+
+    def _persist_workflow_node_executions(
+            self,
+            execution: WorkflowExecution,
+            workflow_config: WorkflowConfig,
+            result: dict[str, Any],
+    ) -> None:
+        node_outputs = result.get("node_outputs") or {}
+        if not isinstance(node_outputs, dict) or not node_outputs:
+            return
+
+        self.node_execution_repo.delete_by_execution_id(execution.id)
+        items: list[dict[str, Any]] = []
+        ordered_node_outputs = sorted(node_outputs.items(), key=self._node_output_sort_key)
+        for index, (node_id, node_data) in enumerate(ordered_node_outputs, start=1):
+            if not isinstance(node_data, dict):
+                continue
+            items.append(
+                self._build_node_execution_record(
+                    execution=execution,
+                    node_id=node_id,
+                    node_data=node_data,
+                    source="workflow_execution",
+                    fallback_execution_order=index,
+                    fallback_node_name=self._get_node_name_from_config(workflow_config, node_id),
+                )
+            )
+        self.node_execution_repo.bulk_create(items)
+
+    def _create_single_node_debug_execution(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig,
+            node_id: str,
+            input_data: dict[str, Any],
+    ) -> WorkflowExecution:
+        conversation_id = input_data.get("conversation_id")
+        conversation_id_uuid = uuid.UUID(conversation_id) if conversation_id else None
+        execution = self.create_execution(
+            workflow_config_id=workflow_config.id,
+            app_id=app_id,
+            trigger_type="debug",
+            triggered_by=None,
+            conversation_id=conversation_id_uuid,
+            input_data=input_data,
+        )
+        execution.meta_data = {
+            **(execution.meta_data or {}),
+            "debug": True,
+            "source": "single_node_debug",
+            "node_id": node_id,
+        }
+        self.db.commit()
+        self.db.refresh(execution)
+        return execution
+
+    def _persist_single_node_execution(
+            self,
+            *,
+            execution: WorkflowExecution,
+            node_id: str,
+            node_type: str,
+            node_name: str | None,
+            payload: dict[str, Any],
+    ) -> None:
+        normalized_payload = self._normalize_single_node_payload(node_type, node_name, payload)
+        self.node_execution_repo.delete_by_execution_id(execution.id)
+        self.node_execution_repo.create(
+            **self._build_node_execution_record(
+                execution=execution,
+                node_id=node_id,
+                node_data=normalized_payload,
+                source="single_node_debug",
+                fallback_execution_order=1,
+                fallback_node_name=node_name,
+            )
+        )
+
+    def _serialize_last_node_execution(self, node_execution: WorkflowNodeExecution) -> dict[str, Any]:
+        execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
+        meta_data = node_execution.meta_data or {}
+        return {
+            "node_id": node_execution.node_id,
+            "node_type": node_execution.node_type,
+            "node_name": node_execution.node_name,
+            "status": node_execution.status,
+            "source": meta_data.get("source", "workflow_execution"),
+            "execution_id": execution.execution_id if execution else "",
+            "workflow_execution_id": node_execution.execution_id,
+            "input_data": node_execution.input_data,
+            "output_data": node_execution.output_data,
+            "process_data": meta_data.get("process_data"),
+            "error_message": node_execution.error_message,
+            "elapsed_time": node_execution.elapsed_time,
+            "token_usage": node_execution.token_usage,
+            "retry_count": node_execution.retry_count,
+            "cache_hit": node_execution.cache_hit,
+            "started_at": node_execution.started_at,
+            "completed_at": node_execution.completed_at,
+        }
+
+    def get_node_last_run(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            source: str | None = None,
+    ) -> dict[str, Any] | None:
+        node_execution = self.node_execution_repo.get_latest_by_app_node(app_id, node_id, source=source)
+        if not node_execution:
+            return None
+
+        config = self.get_workflow_config(app_id)
+        secret_values = self._extract_secret_values_from_environment_variables(
+            config.environment_variables if config else []
+        )
+        payload = self._serialize_last_node_execution(node_execution)
+        return self._mask_payload_with_secret_values(payload, secret_values)
+
     def get_execution_detail(self, execution_id: str) -> dict[str, Any] | None:
         execution = self.get_execution(execution_id)
         if not execution:
@@ -1817,6 +2044,8 @@ class WorkflowService:
                     output_data=result,
                     token_usage=token_usage.get("total_tokens", None)
                 )
+                execution = self.get_execution(execution.execution_id)
+                self._persist_workflow_node_executions(execution, config, result)
 
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
@@ -1826,6 +2055,8 @@ class WorkflowService:
                     "failed",
                     error_message=result.get("error")
                 )
+                execution = self.get_execution(execution.execution_id)
+                self._persist_workflow_node_executions(execution, config, result)
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
                 final_messages = result.get("messages", [])[init_message_length:]
@@ -2319,6 +2550,8 @@ class WorkflowService:
                                 node_outputs[cycle_node_id] = {"cycle_items": items}
                         execution.output_data = new_output_data
                         self.db.commit()
+                    if status in {"completed", "failed"} and execution.output_data:
+                        self._persist_workflow_node_executions(execution, config, execution.output_data)
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                 event = self._emit(public, event)
@@ -2468,6 +2701,12 @@ class WorkflowService:
         node_config, node, state, variable_pool = await self._build_node_context(
             app_id, node_id, config, workspace_id, input_data
         )
+        debug_execution = self._create_single_node_debug_execution(
+            app_id=app_id,
+            workflow_config=config,
+            node_id=node_id,
+            input_data=input_data,
+        )
         start_time = time.time()
         try:
             result = await node.execute(state, variable_pool)
@@ -2483,6 +2722,20 @@ class WorkflowService:
                 "elapsed_time": elapsed,
                 "error": None,
             }
+            self.update_execution_status(
+                debug_execution.execution_id,
+                "completed",
+                token_usage=(payload.get("token_usage") or {}).get("total_tokens"),
+                output_data=self._build_debug_execution_output(node_id, "completed"),
+            )
+            debug_execution = self.get_execution(debug_execution.execution_id)
+            self._persist_single_node_execution(
+                execution=debug_execution,
+                node_id=node_id,
+                node_type=node_config.get("type"),
+                node_name=node_config.get("name"),
+                payload=payload,
+            )
             return self._mask_runtime_secrets(payload, variable_pool)
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
@@ -2497,6 +2750,21 @@ class WorkflowService:
                 "elapsed_time": elapsed,
                 "error": str(e),
             }
+            self.update_execution_status(
+                debug_execution.execution_id,
+                "failed",
+                output_data=self._build_debug_execution_output(node_id, "failed"),
+                error_message=str(e),
+                error_node_id=node_id,
+            )
+            debug_execution = self.get_execution(debug_execution.execution_id)
+            self._persist_single_node_execution(
+                execution=debug_execution,
+                node_id=node_id,
+                node_type=node_config.get("type"),
+                node_name=node_config.get("name"),
+                payload=payload,
+            )
             return self._mask_runtime_secrets(payload, variable_pool)
 
     async def run_single_node_stream(
@@ -2517,6 +2785,12 @@ class WorkflowService:
             app_id, node_id, config, workspace_id, input_data
         )
         node_type = node_config.get("type")
+        debug_execution = self._create_single_node_debug_execution(
+            app_id=app_id,
+            workflow_config=config,
+            node_id=node_id,
+            input_data=input_data,
+        )
         start_time = time.time()
 
         yield {"event": "node_start", "data": {"node_id": node_id, "node_type": node_type}}
@@ -2535,7 +2809,7 @@ class WorkflowService:
                         )
 
             elapsed = (time.time() - start_time) * 1000
-            yield self._mask_runtime_secrets({
+            event_payload = {
                 "event": "node_end",
                 "data": {
                     "node_id": node_id,
@@ -2548,11 +2822,26 @@ class WorkflowService:
                     "elapsed_time": elapsed,
                     "error": None,
                 }
-            }, variable_pool)
+            }
+            self.update_execution_status(
+                debug_execution.execution_id,
+                "completed",
+                token_usage=(event_payload["data"].get("token_usage") or {}).get("total_tokens"),
+                output_data=self._build_debug_execution_output(node_id, "completed"),
+            )
+            debug_execution = self.get_execution(debug_execution.execution_id)
+            self._persist_single_node_execution(
+                execution=debug_execution,
+                node_id=node_id,
+                node_type=node_type,
+                node_name=node_config.get("name"),
+                payload=event_payload["data"],
+            )
+            yield self._mask_runtime_secrets(event_payload, variable_pool)
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
             logger.error(f"单节点流式执行失败: node_id={node_id}, error={e}", exc_info=True)
-            yield self._mask_runtime_secrets({
+            event_payload = {
                 "event": "node_error",
                 "data": {
                     "node_id": node_id,
@@ -2561,7 +2850,29 @@ class WorkflowService:
                     "elapsed_time": elapsed,
                     "error": str(e),
                 }
-            }, variable_pool)
+            }
+            self.update_execution_status(
+                debug_execution.execution_id,
+                "failed",
+                output_data=self._build_debug_execution_output(node_id, "failed"),
+                error_message=str(e),
+                error_node_id=node_id,
+            )
+            debug_execution = self.get_execution(debug_execution.execution_id)
+            self._persist_single_node_execution(
+                execution=debug_execution,
+                node_id=node_id,
+                node_type=node_type,
+                node_name=node_config.get("name"),
+                payload={
+                    **event_payload["data"],
+                    "status": "failed",
+                    "outputs": None,
+                    "process": None,
+                    "token_usage": None,
+                },
+            )
+            yield self._mask_runtime_secrets(event_payload, variable_pool)
 
     @staticmethod
     def get_start_node_variables(config: dict) -> list:
