@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class WorkflowValidator:
     """工作流配置验证器"""
 
-    ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+    ENV_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
     ENV_ALLOWED_TYPES = {"string", "number", "secret"}
 
     @classmethod
