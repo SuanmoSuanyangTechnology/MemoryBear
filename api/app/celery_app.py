@@ -204,9 +204,10 @@ beat_schedule_config = {
     },
     "scan-idle-conversations": {
         "task": "app.tasks.scan_idle_conversations",
-        "schedule": 60.0,
+        "schedule": 3600.0,
         "options": {"queue": "periodic_tasks"},
     },
+    # FIXME: Infinite task accumulation
 }
 
 celery_app.conf.beat_schedule = beat_schedule_config
