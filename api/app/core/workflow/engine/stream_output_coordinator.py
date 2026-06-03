@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from app.core.logging_config import get_logger
 from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.utils.secret_masker import mask_secrets
 
 logger = get_logger(__name__)
 
@@ -378,6 +379,7 @@ class StreamOutputCoordinator:
                     logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}, error: {e}")
 
             if final_chunk:
+                final_chunk = mask_secrets(final_chunk, variable_pool.get_secret_values())
                 logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk_length:{len(final_chunk)}")
                 yield {
                     "event": "message",

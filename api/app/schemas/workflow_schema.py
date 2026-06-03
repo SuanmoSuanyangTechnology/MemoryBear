@@ -4,7 +4,7 @@
 
 import datetime
 import uuid
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 from app.core.utils.datetime_utils import to_timestamp_ms
@@ -57,6 +57,19 @@ class VariableDefinition(BaseModel):
     max_file_size_mb: float | None = Field(default=None, description="单文件最大大小(MB)，仅 file/file-list-upload 时有效")
 
 
+class EnvironmentVariableDefinition(BaseModel):
+    """环境变量定义"""
+
+    name: str = Field(..., description="环境变量名称，运行时通过 env.NAME 访问")
+    value_type: Literal["string", "number", "secret"] = Field(
+        ...,
+        description="环境变量类型: string, number, secret"
+    )
+    required: bool = Field(default=False, description="是否必填")
+    value: str | int | float | None = Field(default=None, description="变量值")
+    description: str | None = Field(default=None, description="变量描述")
+
+
 class ExecutionConfig(BaseModel):
     """执行配置"""
     max_iterations: int = Field(default=100, ge=1, le=1000, description="最大迭代次数")
@@ -93,6 +106,7 @@ class WorkflowConfigCreate(BaseModel):
     nodes: list[NodeDefinition] = Field(default_factory=list, description="节点列表")
     edges: list[EdgeDefinition] = Field(default_factory=list, description="边列表")
     variables: list[VariableDefinition] = Field(default_factory=list, description="变量列表")
+    environment_variables: list[EnvironmentVariableDefinition] = Field(default_factory=list, description="环境变量列表")
     execution_config: ExecutionConfig = Field(default_factory=ExecutionConfig, description="执行配置")
     triggers: list[TriggerConfig] = Field(default_factory=list, description="触发器列表")
     features: dict = Field(default_factory=dict, description="功能特性配置")
@@ -104,6 +118,7 @@ class WorkflowConfigUpdate(BaseModel):
     nodes: list[NodeDefinition] | None = None
     edges: list[EdgeDefinition] | None = None
     variables: list[VariableDefinition] | None = None
+    environment_variables: list[EnvironmentVariableDefinition] | None = None
     features: dict | None = None
     execution_config: ExecutionConfig | None = None
     triggers: list[TriggerConfig] | None = None
@@ -119,6 +134,7 @@ class WorkflowConfig(BaseModel):
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
     variables: list[dict[str, Any]]
+    environment_variables: list[dict[str, Any]]
     execution_config: dict[str, Any]
     triggers: list[dict[str, Any]]
     features: dict | None

@@ -468,9 +468,10 @@ class GraphBuilder:
                     for label, branch in unique_branch.items():
                         if node_output and evaluate_condition(
                                 branch["condition"],
-                                {},
-                                {src: node_output},
-                                {}
+                                variable_pool.lazy_namespace("conv"),
+                                {**variable_pool.lazy_all_node_outputs(), src: node_output},
+                                variable_pool.lazy_namespace("sys"),
+                                variable_pool.lazy_namespace("env"),
                         ):
                             logger.debug(f"Conditional routing {src}: selected branch {label}")
                             new_state["activate"][branch["node"]["name"]] = True

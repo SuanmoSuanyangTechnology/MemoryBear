@@ -13,7 +13,7 @@ import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, column, delete, exists, func, or_, select, update as sa_update
+from sqlalchemy import and_, column, exists, func, or_, select, update as sa_update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -419,6 +419,7 @@ class AppService:
             nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
             edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
             variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            environment_variables=[var.model_dump() for var in data.environment_variables] if getattr(data, "environment_variables", None) else [],
             execution_config=data.execution_config.model_dump() if data.execution_config else {},
             features=data.features if data.features else {},
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
@@ -430,6 +431,7 @@ class AppService:
             nodes=config_dict["nodes"],
             edges=config_dict["edges"],
             variables=config_dict["variables"],
+            environment_variables=config_dict["environment_variables"],
             execution_config=config_dict["execution_config"],
             features=config_dict["features"],
             triggers=config_dict["triggers"],
@@ -957,6 +959,8 @@ class AppService:
                         nodes=copy.deepcopy(source_config.nodes) if source_config.nodes else [],
                         edges=copy.deepcopy(source_config.edges) if source_config.edges else [],
                         variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
+                        environment_variables=copy.deepcopy(source_config.environment_variables)
+                        if source_config.environment_variables else [],
                         execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
                         features=copy.deepcopy(source_config.features) if source_config.features else {},
                         triggers=copy.deepcopy(source_config.triggers) if source_config.triggers else [],
@@ -1657,6 +1661,7 @@ class AppService:
             nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
             edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
             variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            environment_variables=[var.model_dump() for var in data.environment_variables] if data.environment_variables else [],
             execution_config=data.execution_config.model_dump() if data.execution_config else {},
             features=features,
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
@@ -1677,6 +1682,7 @@ class AppService:
                 nodes=config_dict["nodes"],
                 edges=config_dict["edges"],
                 variables=config_dict["variables"],
+                environment_variables=config_dict["environment_variables"],
                 execution_config=config_dict["execution_config"],
                 triggers=config_dict["triggers"],
                 features=config_dict["features"],
@@ -1692,6 +1698,7 @@ class AppService:
             workflow_cfg.nodes = config_dict["nodes"]
             workflow_cfg.edges = config_dict["edges"]
             workflow_cfg.variables = config_dict["variables"]
+            workflow_cfg.environment_variables = config_dict["environment_variables"]
             workflow_cfg.execution_config = config_dict["execution_config"]
             workflow_cfg.triggers = config_dict["triggers"]
             workflow_cfg.features = config_dict["features"]
@@ -1741,6 +1748,7 @@ class AppService:
                         {"source": "start", "target": "output_node"}
                     ],
                     "variables": [],
+                    "environment_variables": [],
                     "execution_config": {
                         "max_execution_time": 300,
                         "max_iterations": 10,
@@ -1757,6 +1765,7 @@ class AppService:
                         {'source': 'start', 'target': 'end'}
                     ],
                     'variables': [],
+                    'environment_variables': [],
                     'execution_config': {
                         'max_execution_time': 300,
                         'max_iterations': 10
@@ -1771,6 +1780,7 @@ class AppService:
             nodes=template_data.get('nodes', []),
             edges=template_data.get('edges', []),
             variables=template_data.get('variables', []),
+            environment_variables=template_data.get('environment_variables', []),
             execution_config=template_data.get('execution_config', {}),
             triggers=template_data.get('triggers', []),
             workflow_type=normalized_workflow_type,
