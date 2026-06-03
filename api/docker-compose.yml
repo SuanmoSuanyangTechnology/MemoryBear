@@ -63,6 +63,20 @@ services:
     networks:
       - celery
 
+  # Subscription worker - 订阅过期处理 & 到期提醒（独立 worker，轻量任务）
+  worker-subscription:
+    image: redbear-mem-open:latest
+    container_name: worker-subscription
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=subscription_tasks --max-tasks-per-child=50 -n subscription_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
   # Workflow trigger worker - For triggering workflows (prefork, low concurrency)
   worker-workflow-trigger:
     image: redbear-mem-open:latest

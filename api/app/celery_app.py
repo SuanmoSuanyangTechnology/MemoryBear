@@ -162,10 +162,10 @@ try:
     import premium.platform_admin.subscription_tasks  # noqa: F401
     _HAS_SUBSCRIPTION_TASKS = True
     celery_app.conf.task_routes['subscription.process_expired_subscriptions'] = {
-        'queue': 'periodic_tasks'
+        'queue': 'subscription_tasks'
     }
     celery_app.conf.task_routes['subscription.expiration_reminder'] = {
-        'queue': 'periodic_tasks'
+        'queue': 'subscription_tasks'
     }
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
