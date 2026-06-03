@@ -2394,6 +2394,9 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             logger.warning(
                                                 f"反思引擎Layer2 获取锁超时，跳过用户 {user['id']}"
                                             )
+                                            # 锁超时的用户仍计入处理列表，保证与低频任务的用户口径一致
+                                            processed_users += 1
+                                            processed_user_ids.append(str(user['id']))
                                             continue
 
                                     try:
@@ -2430,6 +2433,14 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             await asyncio.to_thread(write_lock.release)
                                 except Exception as e:
                                     logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
+                                    # 回滚失败事务，避免污染后续用户的查询
+                                    try:
+                                        db.rollback()
+                                    except Exception:
+                                        pass
+                                    # 失败用户仍计入处理列表，保证与低频任务的用户口径一致
+                                    processed_users += 1
+                                    processed_user_ids.append(str(user['id']))
 
                 logger.info(
                     f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
@@ -2506,6 +2517,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
             skipped_configs = 0
             skipped_inactive = 0
             total_merged = 0
+            redis_client = get_sync_redis_client()
 
             for workspace in workspaces:
                 service = WorkspaceAppService(db)
@@ -2531,25 +2543,56 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
                                     skipped_inactive += 1
                                     continue
 
-                                memory_service = MemoryService(
-                                    db=db,
-                                    config_id=config_id,
-                                    end_user_id=str(user['id']),
-                                    workspace_id=str(workspace.id),
-                                )
-                                r = await memory_service.run_dedup_full_scan()
-                                processed_users += 1
-                                processed_user_ids.append(str(user['id']))
-                                merged = r.get("merged_count", 0)
-                                total_merged += merged
-                                if merged > 0:
-                                    logger.info(
-                                        f"方案B全量扫描 用户 {user['id']} "
-                                        f"扫描类型 {r.get('scanned_types', 0)}, "
-                                        f"合并 {merged} 对"
+                                # 获取 Redis 锁，和写入 pipeline 互斥
+                                write_lock = None
+                                if redis_client is not None:
+                                    write_lock = RedisFairLock(
+                                        key=f"memory_write:{user['id']}",
+                                        redis_client=redis_client,
+                                        expire=600,
+                                        timeout=30,
+                                        auto_renewal=True,
                                     )
+                                    if not await asyncio.to_thread(write_lock.acquire):
+                                        logger.warning(
+                                            f"方案B全量扫描 获取锁超时，跳过用户 {user['id']}"
+                                        )
+                                        # 锁超时的用户仍计入处理列表，保证与高频任务的用户口径一致
+                                        processed_users += 1
+                                        processed_user_ids.append(str(user['id']))
+                                        continue
+
+                                try:
+                                    memory_service = MemoryService(
+                                        db=db,
+                                        config_id=config_id,
+                                        end_user_id=str(user['id']),
+                                        workspace_id=str(workspace.id),
+                                    )
+                                    r = await memory_service.run_dedup_full_scan()
+                                    processed_users += 1
+                                    processed_user_ids.append(str(user['id']))
+                                    merged = r.get("merged_count", 0)
+                                    total_merged += merged
+                                    if merged > 0:
+                                        logger.info(
+                                            f"方案B全量扫描 用户 {user['id']} "
+                                            f"扫描类型 {r.get('scanned_types', 0)}, "
+                                            f"合并 {merged} 对"
+                                        )
+                                finally:
+                                    if write_lock is not None:
+                                        await asyncio.to_thread(write_lock.release)
                             except Exception as e:
                                 logger.error(f"方案B全量扫描失败 user={user['id']}: {e}")
+                                # 回滚失败事务，避免污染后续用户的查询
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                # 失败用户仍计入处理列表，保证与高频任务的用户口径一致
+                                processed_users += 1
+                                processed_user_ids.append(str(user['id']))
 
             logger.info(
                 f"方案B全量扫描完成: 处理 {processed_users} 用户, "
