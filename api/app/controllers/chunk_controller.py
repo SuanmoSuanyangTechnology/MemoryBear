@@ -1006,44 +1006,81 @@ async def retrieve_chunks(
 
     # === 元数据过滤 ===
     document_ids_filter = None
-    if retrieve_data.metadata_filters and retrieve_data.metadata_filter_mode.value == "manual":
-        all_document_ids = set()
-        for pk_kb_id in private_kb_ids:
-            metadata_defs = KnowledgeMetadataService.get_metadata_defs_for_filtering(db, pk_kb_id)
-
-            # 校验所有过滤字段是否已定义
-            for group in retrieve_data.metadata_filters:
-                for cond in group.conditions:
-                    if cond.field not in metadata_defs:
-                        raise BusinessException(
-                            f"过滤字段 '{cond.field}' 未在知识库中定义",
-                            code=BizCode.METADATA_FIELD_NOT_FOUND,
-                        )
-
-            # 执行过滤
-            engine = MetadataFilterEngine(db)
-            filter_groups = [
-                FilterGroup(
-                    conditions=[
-                        FilterCondition(field=c.field, operator=c.operator, value=c.value)
-                        for c in group.conditions
-                    ],
-                    logic=group.logic,
-                )
-                for group in retrieve_data.metadata_filters
-            ]
-
-            document_ids = engine.execute(
-                knowledge_id=pk_kb_id,
-                filter_groups=filter_groups,
-                metadata_defs=metadata_defs,
+    if retrieve_data.metadata_filters:
+        # 1) auto 模式拒绝
+        if retrieve_data.metadata_filter_mode.value != "manual":
+            raise BusinessException(
+                "metadata_filter_mode 暂仅支持 'manual'",
+                code=BizCode.INVALID_PARAMETER,
             )
-            all_document_ids.update(document_ids)
 
-        if not all_document_ids:
-            return success(data=[], msg="retrieval successful")
+        # 2) 收集所有库的字段定义
+        all_metadata_defs: dict[uuid.UUID, dict[str, dict]] = {}
+        for pk_kb_id in private_kb_ids:
+            all_metadata_defs[pk_kb_id] = KnowledgeMetadataService.get_metadata_defs_for_filtering(db, pk_kb_id)
 
-        document_ids_filter = [str(d) for d in all_document_ids]
+        # 3) 找出公共字段（所有库都有 + 类型一致）
+        # 先取所有字段名的交集
+        all_field_names = set()
+        for defs in all_metadata_defs.values():
+            all_field_names.update(defs.keys())
+
+        common_fields = set()
+        for field_name in all_field_names:
+            field_types = set()
+            all_have = True
+            for defs in all_metadata_defs.values():
+                if field_name not in defs:
+                    all_have = False
+                    break
+                field_types.add(defs[field_name]["type"])
+            if all_have and len(field_types) == 1:
+                common_fields.add(field_name)
+
+        # 4) 过滤条件中只保留公共字段，非公共字段忽略+打日志
+        filtered_groups = []
+        for group in retrieve_data.metadata_filters:
+            filtered_conditions = []
+            for cond in group.conditions:
+                if cond.field in common_fields:
+                    filtered_conditions.append(cond)
+                else:
+                    api_logger.warning(
+                        f"[MetadataFilter] 字段 '{cond.field}' 不是公共字段（不是所有知识库都有或类型不一致），已忽略"
+                    )
+            if filtered_conditions:
+                filtered_groups.append((group.logic, filtered_conditions))
+
+        if not filtered_groups:
+            api_logger.warning("[MetadataFilter] 过滤条件中无公共字段，跳过元数据过滤")
+        else:
+            all_document_ids = set()
+            for pk_kb_id in private_kb_ids:
+                metadata_defs = all_metadata_defs[pk_kb_id]
+
+                engine = MetadataFilterEngine(db)
+                filter_groups = [
+                    FilterGroup(
+                        conditions=[
+                            FilterCondition(field=c.field, operator=c.operator, value=c.value)
+                            for c in conditions
+                        ],
+                        logic=logic,
+                    )
+                    for logic, conditions in filtered_groups
+                ]
+
+                document_ids = engine.execute(
+                    knowledge_id=pk_kb_id,
+                    filter_groups=filter_groups,
+                    metadata_defs=metadata_defs,
+                )
+                all_document_ids.update(document_ids)
+
+            if not all_document_ids:
+                return success(data=[], msg="retrieval successful")
+
+            document_ids_filter = [str(d) for d in all_document_ids]
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 

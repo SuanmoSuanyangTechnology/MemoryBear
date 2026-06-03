@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.models.document_model import Document
-from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy
+from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy, _escape_like
 from .builtin_resolver import BuiltinFieldResolver
 
 
@@ -120,13 +120,13 @@ class MetadataFilterEngine:
             case "ne":
                 return col != str(value)
             case "contains":
-                return col.like(f"%{value}%")
+                return col.like(f"%{_escape_like(value)}%", escape="\\")
             case "not_contains":
-                return ~col.like(f"%{value}%")
+                return ~col.like(f"%{_escape_like(value)}%", escape="\\")
             case "starts_with":
-                return col.like(f"{value}%")
+                return col.like(f"{_escape_like(value)}%", escape="\\")
             case "ends_with":
-                return col.like(f"%{value}")
+                return col.like(f"%{_escape_like(value)}", escape="\\")
             case "is_empty":
                 return or_(col.is_(None), col == "")
             case "not_empty":
@@ -140,14 +140,16 @@ class MetadataFilterEngine:
         raise ValueError(f"unsupported operator '{operator}' for string column")
 
     def _build_time_column_filter(self, column_name: str, operator: str, value: Any):
+        from sqlalchemy import func, text as sa_text
         col = getattr(Document, column_name)
         match operator:
             case "eq":
-                return col == value
+                # 分钟级比较：将列值截断到分钟后比较
+                return func.date_trunc('minute', col) == sa_text(":val::timestamp").bindparams(val=str(value))
             case "before":
-                return col < value
+                return func.date_trunc('minute', col) < sa_text(":val::timestamp").bindparams(val=str(value))
             case "after":
-                return col > value
+                return func.date_trunc('minute', col) > sa_text(":val::timestamp").bindparams(val=str(value))
             case "is_empty":
                 return col.is_(None)
             case "not_empty":

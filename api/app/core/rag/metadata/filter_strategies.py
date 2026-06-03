@@ -3,6 +3,11 @@ from typing import Any
 from sqlalchemy import text, or_, and_
 
 
+def _escape_like(value: str) -> str:
+    """转义 LIKE 通配符：% _ \\"""
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class FilterStrategy(ABC):
     """元数据过滤策略接口"""
 
@@ -38,13 +43,13 @@ class StringFilterStrategy(FilterStrategy):
             case "ne":
                 return text(f"{json_path} != :val").bindparams(val=str(value))
             case "contains":
-                return text(f"{json_path} LIKE :val").bindparams(val=f"%{value}%")
+                return text(f"{json_path} LIKE :val ESCAPE '\\'").bindparams(val=f"%{_escape_like(value)}%")
             case "not_contains":
-                return text(f"{json_path} NOT LIKE :val").bindparams(val=f"%{value}%")
+                return text(f"{json_path} NOT LIKE :val ESCAPE '\\'").bindparams(val=f"%{_escape_like(value)}%")
             case "starts_with":
-                return text(f"{json_path} LIKE :val").bindparams(val=f"{value}%")
+                return text(f"{json_path} LIKE :val ESCAPE '\\'").bindparams(val=f"{_escape_like(value)}%")
             case "ends_with":
-                return text(f"{json_path} LIKE :val").bindparams(val=f"%{value}")
+                return text(f"{json_path} LIKE :val ESCAPE '\\'").bindparams(val=f"%{_escape_like(value)}")
             case "is_empty":
                 return or_(
                     text(f"{json_path} IS NULL"),
