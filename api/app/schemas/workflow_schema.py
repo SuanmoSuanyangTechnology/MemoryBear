@@ -259,6 +259,35 @@ class WorkflowNodeExecution(BaseModel):
         return to_timestamp_ms(dt)
 
 
+class NodeLastRunResponse(BaseModel):
+    """节点最近一次运行结果"""
+    node_id: str
+    node_type: str
+    node_name: str | None = None
+    status: str
+    source: str
+    execution_id: str
+    workflow_execution_id: uuid.UUID
+    input_data: dict[str, Any] | None = None
+    output_data: dict[str, Any] | None = None
+    process_data: dict[str, Any] | None = None
+    error_message: str | None = None
+    elapsed_time: float | None = None
+    token_usage: dict[str, Any] | None = None
+    retry_count: int = 0
+    cache_hit: bool = False
+    started_at: datetime.datetime
+    completed_at: datetime.datetime | None = None
+
+    @field_serializer("started_at", when_used="json")
+    def _serialize_started_at(self, dt: datetime.datetime):
+        return to_timestamp_ms(dt)
+
+    @field_serializer("completed_at", when_used="json")
+    def _serialize_completed_at(self, dt: datetime.datetime | None):
+        return to_timestamp_ms(dt)
+
+
 # ==================== 验证响应 ====================
 
 class WorkflowValidationResponse(BaseModel):

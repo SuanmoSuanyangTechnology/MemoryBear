@@ -5,7 +5,7 @@
 import uuid
 from typing import Any, Annotated, Literal
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, delete
 from fastapi import Depends
 
 from app.core.workflow.nodes.enums import NodeType
@@ -237,6 +237,34 @@ class WorkflowNodeExecutionRepository:
     
     def __init__(self, db: Session):
         self.db = db
+
+    def create(self, **kwargs) -> WorkflowNodeExecution:
+        node_execution = WorkflowNodeExecution(**kwargs)
+        self.db.add(node_execution)
+        self.db.commit()
+        self.db.refresh(node_execution)
+        return node_execution
+
+    def bulk_create(
+        self,
+        items: list[dict[str, Any]]
+    ) -> list[WorkflowNodeExecution]:
+        if not items:
+            return []
+
+        node_executions = [WorkflowNodeExecution(**item) for item in items]
+        self.db.add_all(node_executions)
+        self.db.commit()
+        for item in node_executions:
+            self.db.refresh(item)
+        return node_executions
+
+    def delete_by_execution_id(self, execution_id: uuid.UUID) -> None:
+        stmt = delete(WorkflowNodeExecution).where(
+            WorkflowNodeExecution.execution_id == execution_id
+        )
+        self.db.execute(stmt)
+        self.db.commit()
     
     def get_by_execution_id(
         self,
@@ -278,6 +306,33 @@ class WorkflowNodeExecutionRepository:
             WorkflowNodeExecution.retry_count
         )
         return list(self.db.execute(stmt).scalars())
+
+    def get_latest_by_app_node(
+        self,
+        app_id: uuid.UUID,
+        node_id: str,
+        source: str | None = None,
+    ) -> WorkflowNodeExecution | None:
+        stmt = (
+            select(WorkflowNodeExecution)
+            .join(WorkflowExecution, WorkflowNodeExecution.execution_id == WorkflowExecution.id)
+            .where(
+                WorkflowExecution.app_id == app_id,
+                WorkflowNodeExecution.node_id == node_id,
+            )
+            .order_by(
+                desc(WorkflowNodeExecution.started_at),
+                desc(WorkflowNodeExecution.created_at),
+            )
+        )
+        results = list(self.db.execute(stmt).scalars())
+        if source is None:
+            return results[0] if results else None
+
+        for item in results:
+            if (item.meta_data or {}).get("source") == source:
+                return item
+        return None
 
 
 # ==================== 依赖注入函数 ====================
