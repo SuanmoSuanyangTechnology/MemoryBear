@@ -202,11 +202,11 @@ beat_schedule_config = {
         "schedule": layer2_dedup_full_scan_schedule,
         "args": (),
     },
-    "scan-idle-conversations": {
-        "task": "app.tasks.scan_idle_conversations",
-        "schedule": 3600.0,
-        "options": {"queue": "periodic_tasks"},
-    },
+    # "scan-idle-conversations": {
+    #     "task": "app.tasks.scan_idle_conversations",
+    #     "schedule": 3600.0,
+    #     "options": {"queue": "periodic_tasks"},
+    # },
     # FIXME: Infinite task accumulation
 }
 
