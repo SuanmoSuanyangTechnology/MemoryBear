@@ -52,8 +52,8 @@ class KnowledgeMetadataResponse(BaseModel):
     type: str = Field(..., description="字段类型")
     name: str = Field(..., description="字段名")
     is_builtin: bool = Field(False, description="是否内置字段")
-    created_at: int | None = Field(None, description="创建时间戳(ms)")
-    updated_at: int | None = Field(None, description="更新时间戳(ms)")
+    created_at: datetime.datetime | int | None = Field(None, description="创建时间戳(ms)")
+    updated_at: datetime.datetime | int | None = Field(None, description="更新时间戳(ms)")
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime | int | None):

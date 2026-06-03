@@ -3,7 +3,7 @@ import os
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -428,7 +428,7 @@ async def batch_update_document_metadata(
 
     # 1. 校验所有文档的权限和归属
     document_ids = [item.document_id for item in data.items]
-    documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
+    documents = db.query(document_model.Document).filter(document_model.Document.id.in_(document_ids)).all()
     found_ids = {doc.id for doc in documents}
 
     if len(documents) != len(document_ids):

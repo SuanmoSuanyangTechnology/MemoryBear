@@ -240,7 +240,7 @@ class KnowledgeMetadataService:
                 doc_id = item["document_id"]
                 metadata = item["metadata"]
                 doc = doc_map[doc_id]
-
+                doc.meta_data = doc.meta_data or {}
                 doc.meta_data.update(metadata)
                 flag_modified(doc, "meta_data")
                 doc.updated_at = datetime.datetime.now()
@@ -311,6 +311,7 @@ class KnowledgeMetadataService:
                 )
 
         # 4. 更新 metadata JSON
+        doc.meta_data = doc.meta_data or {}
         doc.meta_data.update(metadata)
         flag_modified(doc, "meta_data")
         doc.updated_at = datetime.datetime.now()

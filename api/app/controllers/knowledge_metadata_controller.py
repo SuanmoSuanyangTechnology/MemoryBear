@@ -89,7 +89,7 @@ async def create_metadata_field(
     )
 
 
-@router.patch("/{kb_id}/metadata/{metadata_id}", response_model=ApiResponse)
+@router.put("/{kb_id}/metadata/{metadata_id}", response_model=ApiResponse)
 async def update_metadata_field(
     kb_id: uuid.UUID,
     metadata_id: uuid.UUID,
