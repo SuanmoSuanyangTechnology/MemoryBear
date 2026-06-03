@@ -48,6 +48,7 @@ class WorkflowConfigRepository:
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
         variables: list[dict[str, Any]] | None = None,
+        environment_variables: list[dict[str, Any]] | None = None,
         execution_config: dict[str, Any] | None = None,
         features: dict[str, Any] | None = None,
         triggers: list[dict[str, Any]] | None = None,
@@ -59,7 +60,8 @@ class WorkflowConfigRepository:
             app_id: 应用 ID
             nodes: 节点列表
             edges: 边列表
-            variables: 变量列表
+            variables: 会话变量列表
+            environment_variables: 环境变量列表
             execution_config: 执行配置
             features: 功能特性
             triggers: 触发器列表
@@ -78,6 +80,8 @@ class WorkflowConfigRepository:
             existing.workflow_type = workflow_type
             if variables is not None:
                 existing.variables = variables
+            if environment_variables is not None:
+                existing.environment_variables = environment_variables
             if execution_config is not None:
                 existing.execution_config = execution_config
             if triggers is not None:
@@ -94,6 +98,7 @@ class WorkflowConfigRepository:
                 nodes=nodes,
                 edges=edges,
                 variables=variables or [],
+                environment_variables=environment_variables or [],
                 execution_config=execution_config or {},
                 features=features or {},
                 triggers=triggers or [],

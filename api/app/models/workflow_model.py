@@ -2,9 +2,8 @@
 工作流相关数据模型
 """
 
-import datetime
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -36,6 +35,7 @@ class WorkflowConfig(Base):
     
     # 全局变量定义
     variables = Column(JSONB, default=list)
+    environment_variables = Column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     
     # 执行配置
     execution_config = Column(JSONB, nullable=False, default=dict)
