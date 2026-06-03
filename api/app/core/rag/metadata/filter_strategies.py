@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 from sqlalchemy import text, or_, and_
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 
 
 def _escape_like(value: str) -> str:
@@ -67,7 +69,10 @@ class StringFilterStrategy(FilterStrategy):
                 values = list(value) if hasattr(value, '__iter__') and not isinstance(value, str) else [value]
                 return text(f"{json_path} != ALL(:vals)").bindparams(vals=[str(v) for v in values])
 
-        raise ValueError(f"StringFilterStrategy: unsupported operator '{operator}'")
+        raise BusinessException(
+            f"StringFilterStrategy: unsupported operator '{operator}'",
+            code=BizCode.METADATA_INVALID_OPERATOR,
+        )
 
 
 class NumberFilterStrategy(FilterStrategy):
@@ -100,7 +105,10 @@ class NumberFilterStrategy(FilterStrategy):
             case "not_empty":
                 return text(f"(meta_data->>'{field_name}') IS NOT NULL")
 
-        raise ValueError(f"NumberFilterStrategy: unsupported operator '{operator}'")
+        raise BusinessException(
+            f"NumberFilterStrategy: unsupported operator '{operator}'",
+            code=BizCode.METADATA_INVALID_OPERATOR,
+        )
 
 
 class TimeFilterStrategy(FilterStrategy):
@@ -123,4 +131,7 @@ class TimeFilterStrategy(FilterStrategy):
             case "not_empty":
                 return text(f"(meta_data->>'{field_name}') IS NOT NULL")
 
-        raise ValueError(f"TimeFilterStrategy: unsupported operator '{operator}'")
+        raise BusinessException(
+            f"TimeFilterStrategy: unsupported operator '{operator}'",
+            code=BizCode.METADATA_INVALID_OPERATOR,
+        )

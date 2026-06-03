@@ -19,9 +19,14 @@ class FilterCondition(BaseModel):
     value: Any | None = Field(None, description="值")
 
 
+class GroupLogic(StrEnum):
+    AND = "AND"
+    OR = "OR"
+
+
 class FilterGroup(BaseModel):
     conditions: list[FilterCondition] = Field(..., description="条件列表")
-    logic: str = Field("AND", description="组内逻辑: AND | OR")
+    logic: GroupLogic = Field(GroupLogic.AND, description="组内逻辑: AND | OR")
 
 
 class MetadataFilterMode(StrEnum):
@@ -84,7 +89,7 @@ class DocumentMetadataItem(BaseModel):
 
 
 class BatchUpdateMetadataRequest(BaseModel):
-    items: list[DocumentMetadataItem] = Field(..., min_length=1, description="文档元数据列表")
+    items: list[DocumentMetadataItem] = Field(..., min_length=1, max_length=100, description="文档元数据列表，最多100条")
 
 
 class DocumentMetadataUpdateRequest(BaseModel):

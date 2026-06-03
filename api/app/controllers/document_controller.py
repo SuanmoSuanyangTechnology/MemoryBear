@@ -419,18 +419,36 @@ async def batch_update_document_metadata(
 ):
     """
     批量更新文档元数据
-    - 所有文档必须属于同一知识库
+    - 所有文档必须属于同一知识库且当前用户有权限访问
     - 事务性：全成功或全回滚
     """
     api_logger.info(
         f"Batch update document metadata: count={len(data.items)}, user={current_user.username}"
     )
 
-    if len(data.items) > 100:
-        raise BusinessException(
-            "单次批量更新最多 100 条文档",
-            code=BizCode.VALIDATION_FAILED,
+    # 1. 校验所有文档的权限和归属
+    document_ids = [item.document_id for item in data.items]
+    documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
+    found_ids = {doc.id for doc in documents}
+
+    if len(documents) != len(document_ids):
+        missing = set(document_ids) - found_ids
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"文档不存在或无权访问: {sorted(str(d) for d in missing)}"
         )
+
+    # 校验知识库权限
+    kb_ids = {doc.kb_id for doc in documents}
+    for kb_id in kb_ids:
+        db_knowledge = knowledge_service.get_knowledge_by_id(
+            db, knowledge_id=kb_id, current_user=current_user
+        )
+        if not db_knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"知识库不存在或无权访问: {kb_id}"
+            )
 
     items = [
         {

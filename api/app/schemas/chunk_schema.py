@@ -2,7 +2,8 @@ from pydantic import BaseModel, Field
 import uuid
 from enum import StrEnum
 from app.core.rag.models.chunk import QAChunk
-from typing import Union, Any
+from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
+from typing import Union
 
 
 class RetrieveType(StrEnum):
@@ -85,22 +86,6 @@ class ChunkUpdate(BaseModel):
                 "answer": self.content.answer,
             }
         return {}
-
-
-class FilterCondition(BaseModel):
-    field: str = Field(..., description="元数据字段名")
-    operator: str = Field(..., description="操作符")
-    value: Any | None = Field(None, description="值")
-
-
-class FilterGroup(BaseModel):
-    conditions: list[FilterCondition] = Field(..., description="条件列表")
-    logic: str = Field("AND", description="组内逻辑: AND | OR")
-
-
-class MetadataFilterMode(StrEnum):
-    MANUAL = "manual"
-    AUTO = "auto"
 
 
 class ChunkRetrieve(BaseModel):

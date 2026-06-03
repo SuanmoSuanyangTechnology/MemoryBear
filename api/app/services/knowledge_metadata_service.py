@@ -391,6 +391,7 @@ class KnowledgeMetadataService:
         if not doc:
             raise ResourceNotFoundException("文档", str(document_id))
 
+        doc.meta_data = doc.meta_data or {}
         knowledge_id = doc.kb_id
         deleted_fields = []
 

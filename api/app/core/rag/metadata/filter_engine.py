@@ -2,6 +2,8 @@ import uuid
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.models.document_model import Document
 from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy, _escape_like
 from .builtin_resolver import BuiltinFieldResolver
@@ -19,7 +21,13 @@ class FilterGroup:
     """条件组"""
     def __init__(self, conditions: list[FilterCondition], logic: str = "AND"):
         self.conditions = conditions
-        self.logic = logic.upper()
+        logic_upper = logic.upper()
+        if logic_upper not in ("AND", "OR"):
+            raise BusinessException(
+                f"无效的组内逻辑: {logic}（仅支持 AND/OR）",
+                code=BizCode.INVALID_PARAMETER,
+            )
+        self.logic = logic_upper
 
 
 class MetadataFilterEngine:
@@ -56,7 +64,10 @@ class MetadataFilterEngine:
             for cond in group.conditions:
                 field_def = metadata_defs.get(cond.field)
                 if not field_def:
-                    raise ValueError(f"未知元数据字段: {cond.field}")
+                    raise BusinessException(
+                        f"未知元数据字段: {cond.field}",
+                        code=BizCode.METADATA_FIELD_NOT_FOUND,
+                    )
 
                 is_builtin = field_def.get("is_builtin", False)
 
@@ -65,9 +76,10 @@ class MetadataFilterEngine:
                 else:
                     strategy = self._strategies[field_def["type"]]
                     if not strategy.supports(cond.operator):
-                        raise ValueError(
+                        raise BusinessException(
                             f"字段 '{cond.field}' (类型 {field_def['type']}) "
-                            f"不支持操作符 '{cond.operator}'"
+                            f"不支持操作符 '{cond.operator}'",
+                            code=BizCode.METADATA_INVALID_OPERATOR,
                         )
                     filter_expr = strategy.apply(cond.field, cond.operator, cond.value)
 
@@ -95,7 +107,10 @@ class MetadataFilterEngine:
         """构建内置字段的过滤表达式（查真实列）"""
         builtin_field = BuiltinFieldResolver.resolve(cond.field)
         if not builtin_field:
-            raise ValueError(f"未知内置字段: {cond.field}")
+            raise BusinessException(
+                f"未知内置字段: {cond.field}",
+                code=BizCode.METADATA_FIELD_NOT_FOUND,
+            )
 
         column_name = builtin_field.mapping
         field_type = builtin_field.type
@@ -110,7 +125,10 @@ class MetadataFilterEngine:
             case "time":
                 return self._build_time_column_filter(column_name, operator, value)
             case _:
-                raise ValueError(f"不支持的内置字段类型: {field_type}")
+                raise BusinessException(
+                    f"不支持的内置字段类型: {field_type}",
+                    code=BizCode.METADATA_INVALID_VALUE_TYPE,
+                )
 
     def _build_string_column_filter(self, column_name: str, operator: str, value: Any):
         col = getattr(Document, column_name)
@@ -137,7 +155,10 @@ class MetadataFilterEngine:
             case "not_in":
                 values = list(value) if hasattr(value, '__iter__') and not isinstance(value, str) else [value]
                 return ~col.in_([str(v) for v in values])
-        raise ValueError(f"unsupported operator '{operator}' for string column")
+        raise BusinessException(
+            f"unsupported operator '{operator}' for string column",
+            code=BizCode.METADATA_INVALID_OPERATOR,
+        )
 
     def _build_time_column_filter(self, column_name: str, operator: str, value: Any):
         from sqlalchemy import func, text as sa_text
@@ -154,4 +175,7 @@ class MetadataFilterEngine:
                 return col.is_(None)
             case "not_empty":
                 return col.is_not(None)
-        raise ValueError(f"unsupported operator '{operator}' for time column")
+        raise BusinessException(
+            f"unsupported operator '{operator}' for time column",
+            code=BizCode.METADATA_INVALID_OPERATOR,
+        )
