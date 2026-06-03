@@ -5,7 +5,7 @@
 from typing import Optional
 import datetime
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Query
 
 from app.db import get_db
 from app.core.language_utils import get_language_from_header
@@ -495,6 +495,34 @@ async def memory_space_timeline_of_shared_memories(
     timeline_memories_result = await MemoryEntity.get_timeline_memories_server(model_id, language)
 
     return success(data=timeline_memories_result, msg="共同记忆时间线")
+
+
+@router.get("/memory_space/entity_event_timeline", response_model=ApiResponse)
+async def memory_space_entity_event_timeline(
+        id: str,
+        label: str,
+        page: int = Query(1, ge=1, description="页码，从1开始"),
+        pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+        current_user: User = Depends(get_current_user),
+):
+    """ExtractedEntity 实体事件时间线（分页）
+
+    Query 参数:
+        id: 实体节点的 Neo4j elementId
+        label: 节点类型，仅支持 ExtractedEntity
+        page: 页码（从 1 开始）
+        pagesize: 每页条数（1~100）
+
+    实体基本信息（entity_name / description_summary 等）与 category_stats
+    始终基于全量事件计算，分页只影响返回的 items 列表。
+    """
+    # 仅支持 ExtractedEntity 节点
+    if label != 'ExtractedEntity':
+        return fail(BizCode.INVALID_PARAMETER, "该接口仅支持 ExtractedEntity 节点", f"label={label}")
+
+    memory_entity = MemoryEntityService(id, label)
+    result = await memory_entity.get_entity_event_timeline(page=page, pagesize=pagesize)
+    return success(data=result, msg="实体事件时间线")
 
 
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)

@@ -6,24 +6,219 @@ Memory_Timeline_Statement,
 Memory_Space_Emotion_Statement,
 Memory_Space_Emotion_MemorySummary,
 Memory_Space_Emotion_ExtractedEntity,
-Memory_Space_Associative,Memory_Space_User,Memory_Space_Entity
+Memory_Space_Associative,Memory_Space_User,Memory_Space_Entity,
+Memory_Timeline_Entity_Events,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from typing import Dict, List, Any, Optional
 import logging
+import re
 from neo4j.time import DateTime as Neo4jDateTime
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.schemas.memory_episodic_schema import EmotionType
 
 logger = logging.getLogger(__name__)
+
+# event_timeline category 固定顺序（13 类，与 prompt category_id→category 映射顺序一致）
+# 用于 category_stats 补全：有数据的按 count 降序在前，无数据的按此顺序补在后（count=0）
+_CATEGORY_ORDER = [
+    "教育学习", "职业工作", "项目里程碑", "居住迁移", "关系家庭",
+    "宠物照护", "健康医疗", "旅行到访", "购买资产", "创作发布",
+    "成就荣誉", "财务法务行政", "其他生活事件",
+]
+
 
 class MemoryEntityService:
     def __init__(self, id: str, table: str):
         self.id = id
         self.table = table
         self.connector = Neo4jConnector()
+
+    async def get_entity_event_timeline(self, page: int = 1, pagesize: int = 10) -> dict:
+        """获取 ExtractedEntity 的结构化事件时间线（分页）
+
+        从 Neo4j 读取实体的 event_timeline 属性，解析为结构化事件数组，
+        按 valid_at 降序排列，并统计各 category 的事件数量。
+
+        Args:
+            page: 页码（从 1 开始）
+            pagesize: 每页条数
+
+        Returns:
+            包含 entity_name, entity_type, description_summary, category_stats,
+            items（当前页事件）, page（分页信息）的字典。category_stats 始终基于
+            全量事件计算，分页只影响 items 列表。
+        """
+        results = await self.connector.execute_query(
+            Memory_Timeline_Entity_Events,
+            id=self.id,
+        )
+        if not results:
+            logger.warning(f"事件时间线查询无结果: elementId={self.id}")
+            return {
+                "entity_name": None,
+                "entity_type": None,
+                "description_summary": None,
+                "category_stats": [{"category": cat, "count": 0} for cat in _CATEGORY_ORDER],
+                "items": [],
+                "page": {"page": page, "pagesize": pagesize, "total": 0, "hasnext": False},
+            }
+
+        record = results[0]
+        entity_name = record.get("entity_name")
+        entity_type = record.get("entity_type")
+        description_summary = record.get("description_summary")
+        event_timeline_raw = record.get("event_timeline") or ""
+
+        # 解析 event_timeline 字符串（全量）
+        events = self._parse_event_timeline(event_timeline_raw)
+        total = len(events)
+
+        # 统计各 category 的事件数量；基于全量
+        # 13 类全部返回：有数据的按 count 降序在前，无数据的（count=0）按固定顺序补在后
+        category_counts = {}
+        for event in events:
+            cat = event.get("category")
+            if cat:
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+        with_count = sorted(
+            [(cat, cnt) for cat, cnt in category_counts.items()],
+            key=lambda kv: kv[1], reverse=True
+        )
+        zero_count = [(cat, 0) for cat in _CATEGORY_ORDER if cat not in category_counts]
+        category_stats = [
+            {"category": cat, "count": cnt}
+            for cat, cnt in (with_count + zero_count)
+        ]
+
+        # 分页切片
+        start = (page - 1) * pagesize
+        items = events[start:start + pagesize]
+        hasnext = page * pagesize < total
+
+        logger.info(
+            f"事件时间线解析完成: entity={entity_name}, total={total}, "
+            f"returned={len(items)}, categories={len(category_stats)}, "
+            f"page={page}, pagesize={pagesize}"
+        )
+
+        return {
+            "entity_name": entity_name,
+            "entity_type": entity_type,
+            "description_summary": description_summary,
+            "category_stats": category_stats,
+            "items": items,
+            "page": {"page": page, "pagesize": pagesize, "total": total, "hasnext": hasnext},
+        }
+
+    @staticmethod
+    def _to_epoch_ms(value: str):
+        """把事件日期转为 Unix 毫秒时间戳（UTC）。
+
+        底层 event_timeline 只存日期（YYYY-MM-DD），按 UTC 当天 0 点换算为
+        毫秒时间戳，如 `2026-06-15` → `1781481600000`；兼容已带时分秒的历史值；
+        无法解析则返回 None。
+        """
+        if not value:
+            return None
+        value = value.strip()
+        # 依次尝试：纯日期 / 带时分秒（含 T 或空格分隔，允许末尾 Z）
+        fmts = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
+        v = value[:-1] if value.endswith("Z") else value
+        for fmt in fmts:
+            try:
+                d = datetime.strptime(v, fmt).replace(tzinfo=timezone.utc)
+                return int(d.timestamp() * 1000)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _parse_event_timeline(event_timeline: str) -> list:
+        """解析 event_timeline 字符串为结构化事件列表，按 valid_at 降序排列
+
+        只展示新格式（4 段正文：fact|title|category|category_id）；旧格式（1 段，仅 fact）
+        字段残缺，直接跳过不返回。数据库中的 "NULL" 字符串统一转为 None；时间为空的事件不返回。
+
+        Args:
+            event_timeline: 原始 event_timeline 字符串
+
+        Returns:
+            结构化事件列表，按 valid_at 降序
+        """
+        if not event_timeline or not event_timeline.strip():
+            return []
+
+        events = []
+        for item in event_timeline.split('；'):
+            item = item.strip()
+            if not item:
+                continue
+
+            # 抠出 [valid_at|invalid_at]
+            m = re.match(r'^\[([^|]*)\|([^\]]*)\]\s*(.*)', item)
+            if m:
+                valid_at = m.group(1).strip() or None
+                invalid_at = m.group(2).strip() or None
+                body = m.group(3)
+            else:
+                valid_at = None
+                invalid_at = None
+                body = item
+
+            # "NULL" → None
+            if valid_at == "NULL":
+                valid_at = None
+            if invalid_at == "NULL":
+                invalid_at = None
+
+            # 按 | 切正文段（新格式为 4 段：fact|title|category|category_id）
+            parts = body.split('|')
+
+            # 旧格式（仅 fact，1 段）字段残缺，不展示给前端
+            if len(parts) < 4:
+                continue
+
+            fact = parts[0].strip()
+            title = parts[1].strip()
+            category = parts[2].strip()
+            category_id = parts[3].strip()
+
+            # "NULL" → None
+            if title == "NULL":
+                title = None
+            if category == "NULL":
+                category = None
+            if category_id == "NULL":
+                category_id = None
+
+            # fact 为空则跳过
+            if not fact:
+                continue
+
+            # 时间为空的事件不返回给前端
+            if not valid_at:
+                continue
+
+            # valid_at 转为 Unix 毫秒时间戳（UTC）；无法解析则跳过
+            valid_at_ms = MemoryEntityService._to_epoch_ms(valid_at)
+            if valid_at_ms is None:
+                continue
+
+            # 不返回 invalid_at / category_id（前端不需要）
+            events.append({
+                "title": title,
+                "fact": fact,
+                "category": category,
+                "valid_at": valid_at_ms,
+            })
+
+        # 排序：valid_at 降序（最新在前）
+        events.sort(key=lambda e: e["valid_at"], reverse=True)
+        return events
+
     async def get_timeline_memories_server(self,model_id, language_type):
         """
         获取时间线记忆数据
