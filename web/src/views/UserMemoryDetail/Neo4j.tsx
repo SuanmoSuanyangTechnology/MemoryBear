@@ -95,7 +95,6 @@ const Neo4j: FC = () => {
     e.stopPropagation();
     setSelectedKey(type)
     if (type !== 'Brain') {
-      setSelectedKey(null);
       setBrainMemories([]);
       setRegionId(null);
     }
