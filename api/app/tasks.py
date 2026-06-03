@@ -1784,6 +1784,14 @@ def write_message_task(
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
+
+        # 同步 end_user 记忆计数（Neo4j → PostgreSQL）
+        try:
+            from app.core.memory.utils.memory_count_utils import sync_memory_count_neo4j
+            sync_memory_count_neo4j(end_user_id)
+        except Exception as _count_e:
+            logger.warning(f"[CELERY WRITE] 同步记忆计数失败（不影响主流程）: {_count_e}")
+
         # 将 result 转为 JSON 安全结构，避免 Celery JSON 序列化 pydantic BaseModel / UUID 失败
         try:
             safe_result = jsonable_encoder(result)
@@ -2015,245 +2023,6 @@ def extract_emotion_batch_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
-
-@celery_app.task(
-    bind=True,
-    name="app.tasks.post_store_dedup_and_alias_merge",
-    max_retries=1,
-    default_retry_delay=30,
-)
-def post_store_dedup_and_alias_merge_task(
-    self,
-    end_user_id: str,
-    entity_ids: List[str],
-    llm_model_id: Optional[str] = None,
-    snapshot_dir: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Celery task: 写入后异步执行 Neo4j 别名归并 + 第二层去重。
-
-    在主写入流水线将第一层去重结果写入 Neo4j 之后执行：
-    1. Neo4j 别名归并：将 "别名属于" 边的 source.name 合并到 target.aliases
-    2. Neo4j 边重定向：将指向别名节点的边重定向到目标节点
-    3. 第二层去重：与 Neo4j 中已有的同组实体做联合去重
-
-    Args:
-        end_user_id: 终端用户 ID
-        entity_ids: 本轮写入的实体 ID 列表（用于第二层去重的候选检索）
-        llm_model_id: LLM 模型 UUID（用于第二层去重的 LLM 兜底判定）
-    """
-    task_id = self.request.id
-    logger.info(
-        f"[PostStore] 开始异步别名归并+第二层去重: "
-        f"end_user_id={end_user_id}, entity_count={len(entity_ids)}, "
-        f"task_id={task_id}"
-    )
-    start_time = time.time()
-
-    async def _run() -> Dict[str, Any]:
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.repositories.neo4j.cypher_queries import (
-            MERGE_ALIAS_BELONGS_TO,
-            REDIRECT_ALIAS_EDGES,
-            DELETE_ALIAS_NODES,
-        )
-
-        connector = Neo4jConnector()
-        result_info: Dict[str, Any] = {}
-
-        try:
-            # ── 1. Neo4j 别名归并（追加新别名） ──
-            try:
-                records = await connector.execute_query(
-                    MERGE_ALIAS_BELONGS_TO,
-                    end_user_id=end_user_id,
-                )
-                merged_count = len(records) if records else 0
-                result_info["alias_merged"] = merged_count
-                logger.info(f"[PostStore] Neo4j 别名归并完成，影响 {merged_count} 条记录")
-            except Exception as e:
-                logger.warning(f"[PostStore] Neo4j 别名归并失败: {e}")
-                result_info["alias_merge_error"] = str(e)
-
-            # ── 2. Neo4j 边重定向 ──
-            try:
-                redirect_records = await connector.execute_query(
-                    REDIRECT_ALIAS_EDGES,
-                    end_user_id=end_user_id,
-                )
-                redirect_count = len(redirect_records) if redirect_records else 0
-                result_info["edges_redirected"] = redirect_count
-                logger.info(f"[PostStore] Neo4j 边重定向完成，影响 {redirect_count} 条记录")
-            except Exception as e:
-                logger.warning(f"[PostStore] Neo4j 边重定向失败: {e}")
-                result_info["redirect_error"] = str(e)
-
-            # ── 3. 删除别名节点及"别名属于"关系 ──
-            try:
-                delete_records = await connector.execute_query(
-                    DELETE_ALIAS_NODES,
-                    end_user_id=end_user_id,
-                )
-                deleted_count = delete_records[0].get("deleted_count", 0) if delete_records else 0
-                result_info["alias_nodes_deleted"] = deleted_count
-                logger.info(f"[PostStore] 别名节点删除完成，删除 {deleted_count} 个节点")
-            except Exception as e:
-                logger.warning(f"[PostStore] 别名节点删除失败: {e}")
-                result_info["alias_delete_error"] = str(e)
-
-            # ── 3.5 Snapshot: 别名归并+删除后的实体状态 ──
-            if snapshot_dir:
-                try:
-                    snapshot_query = """
-                    UNWIND $entity_ids AS eid
-                    MATCH (e:ExtractedEntity {id: eid})
-                    RETURN e.id AS id, e.name AS name,
-                           e.entity_type AS entity_type,
-                           e.description AS description,
-                           coalesce(e.aliases, []) AS aliases
-                    """
-                    snap_records = await connector.execute_query(
-                        snapshot_query, entity_ids=entity_ids
-                    )
-                    entity_rows = [dict(r) for r in snap_records] if snap_records else []
-                    from app.core.memory.utils.debug.write_snapshot_recorder import WriteSnapshotRecorder
-                    WriteSnapshotRecorder.save_alias_merge_result(snapshot_dir, entity_rows)
-                    logger.info(f"[PostStore] Snapshot 8_after_alias_merge 已写入，实体数={len(entity_rows)}")
-                except Exception as e:
-                    logger.warning(f"[PostStore] Snapshot 写入失败（不影响主流程）: {e}")
-
-            # ── 4. 第二层去重（与 Neo4j 已有实体联合去重） ──
-            try:
-                from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
-                    second_layer_dedup_and_merge_with_neo4j,
-                )
-                from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
-                    clean_cross_role_aliases,
-                )
-                from app.repositories.neo4j.cypher_queries import EXTRACTED_ENTITY_NODE_SAVE
-
-                # 从 Neo4j 加载本轮写入的实体（第一层去重后的结果）
-                load_query = """
-                UNWIND $entity_ids AS eid
-                MATCH (e:ExtractedEntity {id: eid})
-                RETURN e {.*} AS entity
-                """
-                entity_records = await connector.execute_query(
-                    load_query, entity_ids=entity_ids
-                )
-
-                if entity_records:
-                    from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
-                        _row_to_entity,
-                    )
-
-                    current_entities = []
-                    for rec in entity_records:
-                        try:
-                            entity_data = rec.get("entity") or rec
-                            current_entities.append(_row_to_entity(entity_data))
-                        except Exception:
-                            pass
-
-                    if current_entities:
-                        # 构建 LLM client（如果有 llm_model_id）
-                        llm_client = None
-                        if llm_model_id:
-                            try:
-                                from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-                                from app.db import get_db_context
-                                with get_db_context() as db:
-                                    factory = MemoryClientFactory(db)
-                                    llm_client = factory.get_llm_client(llm_model_id)
-                            except Exception as e:
-                                logger.warning(f"[PostStore] 构建 LLM client 失败，跳过 LLM 兜底: {e}")
-
-                        fused_entities, _, _, id_redirect = await second_layer_dedup_and_merge_with_neo4j(
-                            connector=connector,
-                            end_user_id=end_user_id,
-                            entity_nodes=current_entities,
-                            statement_entity_edges=[],
-                            entity_entity_edges=[],
-                            llm_client=llm_client,
-                        )
-
-                        # 清洗跨角色别名污染
-                        clean_cross_role_aliases(fused_entities)
-
-                        # 将融合后的实体回写 Neo4j
-                        if fused_entities:
-                            entity_data = [e.model_dump() for e in fused_entities]
-                            await connector.execute_query(
-                                EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data
-                            )
-
-                        # 删除被合并的冗余节点并重定向边（APOC 合并）
-                        from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
-                            cleanup_merged_entities,
-                        )
-                        cleanup_info = await cleanup_merged_entities(connector, id_redirect)
-                        result_info["layer2_merged_count"] = len(cleanup_info["redirects"])
-                        if cleanup_info["redirects"]:
-                            result_info["layer2_nodes_deleted"] = cleanup_info["deleted_count"]
-                        if "error" in cleanup_info:
-                            result_info["layer2_delete_error"] = cleanup_info["error"]
-
-                        result_info["layer2_input"] = len(current_entities)
-                        result_info["layer2_output"] = len(fused_entities)
-                        logger.info(
-                            f"[PostStore] 第二层去重完成: "
-                            f"{len(current_entities)} → {len(fused_entities)} 个实体"
-                        )
-                    else:
-                        result_info["layer2_skipped"] = "no entities loaded"
-                else:
-                    result_info["layer2_skipped"] = "no entity records found"
-
-            except Exception as e:
-                logger.warning(f"[PostStore] 第二层去重失败（不影响主流程）: {e}", exc_info=True)
-                result_info["layer2_error"] = str(e)
-
-        finally:
-            await connector.close()
-
-        # ── 第二层去重可能合并/删除节点，重新同步 memory_count ──
-        _count_connector = Neo4jConnector()
-        try:
-            await sync_end_user_memory_count_from_neo4j(end_user_id, _count_connector)
-        except Exception as _sync_e:
-            logger.warning(
-                f"[MEMORY_COUNT_SYNC] 同步失败（不影响主流程）: end_user_id={end_user_id}, error={_sync_e}"
-            )
-        finally:
-            await _count_connector.close()
-
-        return result_info
-
-    loop = None
-    try:
-        loop = set_asyncio_event_loop()
-        result = loop.run_until_complete(_run())
-        elapsed = time.time() - start_time
-        logger.info(
-            f"[PostStore] 任务完成: {result}, 耗时={elapsed:.2f}s, task_id={task_id}"
-        )
-
-        return {
-            "status": "SUCCESS",
-            **result,
-            "elapsed_time": elapsed,
-            "task_id": task_id,
-        }
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(
-            f"[PostStore] 任务失败: {e}, 耗时={elapsed:.2f}s",
-            exc_info=True,
-        )
-        raise self.retry(exc=e)
-    finally:
-        if loop:
-            _shutdown_loop_gracefully(loop)
-
 def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_days: int = 3) -> bool:
     """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_days 天则跳过。
 
@@ -2287,7 +2056,6 @@ def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_days: i
     if last_updated.tzinfo is not None:
         last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
     return (now_utc - last_updated) >= timedelta(days=inactive_days)
-
 
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",

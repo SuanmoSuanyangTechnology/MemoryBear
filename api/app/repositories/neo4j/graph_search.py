@@ -13,7 +13,6 @@ from app.repositories.neo4j.cypher_queries import (
     EXPAND_COMMUNITY_STATEMENTS,
     SEARCH_CHUNK_BY_CHUNK_ID,
     SEARCH_DIALOGUE_BY_DIALOG_ID,
-    SEARCH_ENTITIES_BY_NAME,
     BATCH_EXACT_MATCH_ENTITIES_BY_NAME,
     SEARCH_STATEMENTS_BY_CREATED_AT,
     SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
@@ -631,114 +630,6 @@ async def search_user_metadata(
         end_user_id=end_user_id
     )
     return user_info[0] if user_info else {}
-
-
-async def get_dedup_candidates_for_entities(
-        connector: Neo4jConnector,
-        end_user_id: str,
-        entities: List[Dict[str, Any]],
-        use_contains_fallback: bool = True,
-        batch_size: int = 500,
-        max_concurrency: int = 5,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    为第二层去重消歧批量检索候选实体：
-    - 第 1 步：批量精确匹配（name + aliases，单次 RTT，不受全文索引延迟影响）；
-    - 第 2 步：对每个实体并发跑全文索引召回，补充模糊候选（别名、CONTAINS 语义）；
-    - `use_contains_fallback`：仅对 1+2 步均无结果的实体做小写名兜底全文召回；
-    - 若 `entity_type` 提供，则在本地按类型过滤。
-
-    返回：incoming_id -> [db_entity_props...]
-    """
-    if not entities:
-        return {}
-
-    # ───── 1. 批量精确匹配（单次往返，覆盖大多数场景） ─────
-    rows_for_unwind = [
-        {"incoming_id": e.get("id") or "__unknown__", "name": (e.get("name") or "").strip()}
-        for e in entities
-        if (e.get("name") or "").strip()
-    ]
-    exact_by_inc: Dict[str, List[Dict[str, Any]]] = {}
-    if rows_for_unwind:
-        try:
-            exact_rows = await connector.execute_query(
-                BATCH_EXACT_MATCH_ENTITIES_BY_NAME,
-                rows=rows_for_unwind,
-                end_user_id=end_user_id,
-            )
-            for r in exact_rows or []:
-                exact_by_inc.setdefault(r.get("incoming_id"), []).append(r)
-        except Exception as e:
-            logger.warning(f"[Dedup] 批量精确匹配失败，回退到全文索引: {e}", exc_info=True)
-
-    # ───── 2. 全文索引补充召回 + 类型过滤 + fallback（按实体并发） ─────
-    sem = asyncio.Semaphore(max_concurrency)
-
-    def _filter_and_tag(rows: List[Dict[str, Any]], typ: Optional[str], inc_id: str) -> List[Dict[str, Any]]:
-        if typ:
-            rows = [r for r in rows if r.get("entity_type") == typ]
-        for r in rows:
-            r["incoming_id"] = inc_id
-        return rows
-
-    async def _supplement(incoming: Dict[str, Any]) -> tuple[str, List[Dict[str, Any]]]:
-        async with sem:
-            inc_id = incoming.get("id") or "__unknown__"
-            name = (incoming.get("name") or "").strip()
-            typ = incoming.get("entity_type")
-            if not name:
-                return inc_id, []
-
-            # 起步候选 = 精确匹配命中（已带 incoming_id）
-            rows = list(exact_by_inc.get(inc_id, []))
-            seen_ids = {r.get("id") for r in rows}
-
-            # 全文索引补召回模糊候选
-            try:
-                fulltext_rows = await connector.execute_query(
-                    SEARCH_ENTITIES_BY_NAME,
-                    query=escape_lucene_query(name),
-                    end_user_id=end_user_id,
-                    limit=100,
-                )
-                for r in fulltext_rows or []:
-                    if r.get("id") not in seen_ids:
-                        rows.append(r)
-                        seen_ids.add(r.get("id"))
-            except Exception as e:
-                logger.warning(f"[Dedup] 全文索引召回失败 (inc_id={inc_id}): {e}")
-
-            rows = _filter_and_tag(rows, typ, inc_id)
-
-            # 兜底：如果什么都没召回到，按小写名再试一次全文索引
-            if use_contains_fallback and not rows:
-                try:
-                    fb_rows = await connector.execute_query(
-                        SEARCH_ENTITIES_BY_NAME,
-                        query=escape_lucene_query(name.lower()),
-                        end_user_id=end_user_id,
-                        limit=100,
-                    )
-                    rows = _filter_and_tag(list(fb_rows or []), typ, inc_id)
-                except Exception as e:
-                    logger.warning(f"[Dedup] fallback 全文索引召回失败 (inc_id={inc_id}): {e}")
-
-            return inc_id, rows
-
-    results = await asyncio.gather(
-        *(_supplement(e) for e in entities),
-        return_exceptions=True,
-    )
-
-    merged: Dict[str, List[Dict[str, Any]]] = {}
-    for res in results:
-        if isinstance(res, Exception):
-            logger.warning(f"[Dedup] 单条候选检索异常: {res}")
-            continue
-        inc_id, rows = res
-        merged[inc_id] = rows
-    return merged
 
 
 async def search_graph_by_keyword_temporal(

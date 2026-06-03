@@ -222,13 +222,13 @@ class WritePipeline:
                     chunked_dialogs = await self._preprocess(messages, ref_id)
                     s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
-                # Step 2: 萃取 - 知识提取 + 第一层去重 + 别名归并（内存侧）
+                # Step 2: 萃取 - 知识提取 + 第一层去重（仅精确匹配）
                 async with bear.step(2, 5, "萃取", "知识提取") as s:
                     extraction_result = await self._extract(
                         chunked_dialogs, is_pilot_run
                     )
-                    # 别名归并（内存侧）：在写入前完成，确保写入的数据已归并
-                    self._merge_alias_in_memory(extraction_result)
+                    # 别名归并已移除：写入阶段不再处理 "别名属于" 关系，
+                    # 别名合并与节点去重统一延迟到反思阶段执行
                     stats = extraction_result.stats
                     s.metadata(
                         entities=stats["entity_count"],
@@ -379,7 +379,7 @@ class WritePipeline:
         recorder.record_graph_before_dedup(graph)
 
         # step3: 第一层去重消歧（同一轮对话内的实体碎片合并）
-        # 第二层（Neo4j 联合去重）后移到 _store 之后异步执行
+        # 仅按 (name, entity_type) 精确匹配，更精细的去重留给反思阶段
         dedup_result = await run_dedup(
             entity_nodes=graph.entity_nodes,
             statement_entity_edges=graph.stmt_entity_edges,
@@ -475,105 +475,14 @@ class WritePipeline:
                     raise
 
     # ──────────────────────────────────────────────
-    # Step 3.2: 别名归并（内存侧）
-    # ──────────────────────────────────────────────
-
-    def _merge_alias_in_memory(self, result: ExtractionResult) -> None:
-        """别名归并（内存侧）：处理 predicate="别名属于" 的边。
-
-        在写入 Neo4j 之前执行，确保写入的数据已经完成别名归并：
-        - 别名属于：将别名实体的 name 追加到目标实体的 aliases
-        - 别名属于：将别名实体的 description 拼接到目标实体的 description
-        - 重定向指向别名节点的边到目标节点
-
-        纯内存操作，不涉及 Neo4j。
-        """
-        ALIAS_PREDICATE = "别名属于"
-
-        alias_edges = [
-            e
-            for e in result.entity_entity_edges
-            if getattr(e, "relation_type", "") == ALIAS_PREDICATE
-            or getattr(e, "predicate", "") == ALIAS_PREDICATE
-        ]
-
-        if not alias_edges:
-            logger.debug("[AliasMerge] 无 '别名属于' 关系，跳过")
-            return
-
-        try:
-            entity_map = {e.id: e for e in result.entity_nodes}
-            alias_to_target: dict[str, str] = {}
-
-            # ── 处理 别名属于：追加 aliases ──
-            for edge in alias_edges:
-                source_node = entity_map.get(edge.source)
-                target_node = entity_map.get(edge.target)
-                if not source_node or not target_node:
-                    continue
-
-                alias_to_target[edge.source] = edge.target
-
-                # 将 source.name 追加到 target.aliases（去重，忽略大小写）
-                source_name = (source_node.name or "").strip()
-                if source_name:
-                    existing_lower = {a.lower() for a in (target_node.aliases or [])}
-                    if source_name.lower() not in existing_lower:
-                        target_node.aliases = list(target_node.aliases or []) + [
-                            source_name
-                        ]
-
-                # 将 source.description 拼接到 target.description（分号分隔，去重）
-                src_desc = (source_node.description or "").strip()
-                if src_desc:
-                    tgt_desc = (target_node.description or "").strip()
-                    if src_desc not in tgt_desc:
-                        target_node.description = (
-                            f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
-                        )
-
-            # 重定向指向别名节点的边到目标节点
-            alias_ids = set(alias_to_target.keys())
-            redirected_ee_count = 0
-            redirected_se_count = 0
-
-            for edge in result.entity_entity_edges:
-                rel_type = getattr(edge, "relation_type", "")
-                if rel_type == ALIAS_PREDICATE:
-                    continue
-                if edge.source in alias_ids:
-                    edge.source = alias_to_target[edge.source]
-                    redirected_ee_count += 1
-                if edge.target in alias_ids:
-                    edge.target = alias_to_target[edge.target]
-                    redirected_ee_count += 1
-
-            for edge in result.stmt_entity_edges:
-                if edge.target in alias_ids:
-                    edge.target = alias_to_target[edge.target]
-                    redirected_se_count += 1
-
-            logger.info(
-                f"[AliasMerge] 内存归并完成，处理 {len(alias_edges)} 条 '别名属于' 边，"
-                f"重定向 entity_entity 边 {redirected_ee_count} 次，"
-                f"重定向 stmt_entity 边 {redirected_se_count} 次"
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"[AliasMerge] 内存归并失败（不影响主流程）: {e}", exc_info=True
-            )
-
-    # ──────────────────────────────────────────────
-    # Step 3.5: 异步后处理（Neo4j 别名归并 + 第二层去重）
+    # Step 3.5: 异步后处理（情绪提取 + 元数据提取）
     # ──────────────────────────────────────────────
 
     async def _post_store_async_tasks(self, result: ExtractionResult) -> None:
         """提交写入后的异步 Celery 任务（全部 fire-and-forget，失败不影响主流程）：
 
-        1. Neo4j 别名归并 + 第二层去重
-        2. 异步情绪提取
-        3. 异步元数据提取
+        1. 异步情绪提取
+        2. 异步元数据提取
         """
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import (
             collect_user_entities_for_metadata,
@@ -591,19 +500,7 @@ class WritePipeline:
             else None
         )
 
-        # ── 1. Neo4j 别名归并 + 第二层去重 ──
-        self._submit_celery_task(
-            "PostStore",
-            "app.tasks.post_store_dedup_and_alias_merge",
-            {
-                "end_user_id": self.end_user_id,
-                "entity_ids": [e.id for e in result.entity_nodes],
-                "llm_model_id": llm_model_id,
-                "snapshot_dir": snapshot_dir,
-            },
-        )
-
-        # ── 2. 异步情绪提取 ──
+        # ── 1. 异步情绪提取 ──
         emotion_statements = getattr(self, "_emotion_statements", [])
         if emotion_statements and llm_model_id:
             self._submit_celery_task(
@@ -617,7 +514,7 @@ class WritePipeline:
                 },
             )
 
-        # ── 3. 异步元数据提取 ──
+        # ── 2. 异步元数据提取 ──
         user_entities = collect_user_entities_for_metadata(result.entity_nodes)
         if user_entities and llm_model_id:
             self._submit_celery_task(
@@ -1215,7 +1112,6 @@ class WritePipeline:
 
                 async with bear.step(3, 6, "萃取", "知识提取") as s:
                     extraction_result = await self._extract(chunked_dialogs, is_pilot_run=False)
-                    self._merge_alias_in_memory(extraction_result)
                     stats = extraction_result.stats
                     s.metadata(
                         entities=stats["entity_count"],
