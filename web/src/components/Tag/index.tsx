@@ -25,6 +25,7 @@ export interface TagProps {
   className?: string;
   variant?: 'outline' | 'borderless'
   onClick?: () => void;
+  circle?: boolean;
 }
 
 /** Color theme mappings with text, border, and background colors */
@@ -39,9 +40,10 @@ const colors = {
 }
 
 /** Custom tag component with color themes */
-const Tag: FC<TagProps> = ({ color = 'processing', children, className, variant = 'outline', onClick }) => {
+const Tag: FC<TagProps> = ({ color = 'processing', children, className, variant = 'outline', circle, onClick }) => {
   return (
-    <span onClick={onClick} className={`rb:inline-block rb:px-1 rb:py-0.5 rb:rounded-sm rb:text-[12px] rb:font-regular! rb:leading-4 rb:border ${colors[color]} ${className || ''} ${variant === 'borderless' ? 'rb:border-none!' : ''}`}>
+    <span onClick={onClick}
+      className={`rb:inline-block rb:px-1 rb:py-0.5 ${circle ? 'rb:rounded-full': 'rb:rounded-sm'} rb:text-[12px] rb:font-regular! rb:leading-4 rb:border ${colors[color]} ${className || ''} ${variant === 'borderless' ? 'rb:border-none!' : ''}`}>
       {children}
     </span>
   )

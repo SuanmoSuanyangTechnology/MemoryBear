@@ -1794,6 +1794,9 @@ export const zh = {
       relationshipType: '关系类型',
       sourceNode: '源节点',
       targetNode: '目标节点',
+      totalCategoryStats: '总事件数',
+      more: '更多',
+      extractedEntityTip: '记录用户的生活轨迹与成长变化',
     },
     space: {
       createSpace: '创建空间',
