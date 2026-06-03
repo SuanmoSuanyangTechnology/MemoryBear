@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 18:50:18
+ * @Last Modified time: 2026-06-03 18:10:34
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -21,7 +21,7 @@ import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode } from '../constant';
-import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
+import type { ChatVariable, EnvVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
 import type { Application } from '@/views/ApplicationManagement/types'
@@ -89,6 +89,9 @@ export interface UseWorkflowGraphReturn {
   /** Function to update chat variables */
   setChatVariables: Dispatch<SetStateAction<ChatVariable[]>>;
 
+  envVariables: EnvVariable[];
+  setEnvVariables: Dispatch<SetStateAction<EnvVariable[]>>;
+
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
   features?: FeaturesConfigForm;
@@ -134,6 +137,7 @@ export const useWorkflowGraph = ({
   const isHandModeRef = useRef(true)
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
+  const [envVariables, setEnvVariables] = useState<EnvVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
@@ -146,10 +150,10 @@ export const useWorkflowGraph = ({
     graphRef.current.getNodes().forEach(node => {
       const data = node.getData()
       if (data?.type === 'if-else' || data?.type === 'question-classifier') {
-        node.setData({ ...data, chatVariables })
+        node.setData({ ...data, chatVariables, envVariables })
       }
     })
-  }, [chatVariables, graphRef.current])
+  }, [chatVariables, envVariables, graphRef.current])
 
   useEffect(() => {
     if (!appType || !graphRef.current) return
@@ -169,7 +173,7 @@ export const useWorkflowGraph = ({
     if (!id) return
     getWorkflowConfig(id)
       .then(res => {
-        const { variables, ...rest } = res as WorkflowConfig
+        const { variables, environment_variables, ...rest } = res as WorkflowConfig
         const initChatVariables = variables.map(v => {
           const { default: _, ...cleanV } = v
           return {
@@ -178,7 +182,8 @@ export const useWorkflowGraph = ({
           }
         })
         setChatVariables(initChatVariables)
-        setConfig({ ...rest, variables: initChatVariables })
+        setEnvVariables(environment_variables ?? [])
+        setConfig({ ...rest, variables: initChatVariables, environment_variables: environment_variables ?? [] })
         featuresRef.current = rest.features
         onFeaturesLoad?.(rest.features)
       })
@@ -281,7 +286,7 @@ export const useWorkflowGraph = ({
           id,
           type,
           name,
-          data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables } : {}) },
+          data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables, envVariables } : {}) },
           ...position,
         }
 
@@ -1668,6 +1673,7 @@ export const useWorkflowGraph = ({
             default: defaultValue ?? ''
           }
         }),
+        environment_variables: envVariables,
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();
@@ -2022,6 +2028,8 @@ export const useWorkflowGraph = ({
     handleSave,
     chatVariables,
     setChatVariables,
+    envVariables,
+    setEnvVariables,
     handleAddNotes,
     handleSaveFeaturesConfig,
     features: featuresRef.current,

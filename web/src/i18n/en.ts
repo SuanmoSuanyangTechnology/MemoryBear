@@ -2878,6 +2878,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       jumpToNode: 'Jump to Node',
       errorBranch: 'Error Branch',
       systemVariable: 'System Variables',
+      addEnvVariable: 'Environment Variable',
+      editEnvVariable: 'Edit Environment Variable',
+      'env-variable': {
+        value: 'Value',
+        secret: 'Secret',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',
