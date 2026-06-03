@@ -213,7 +213,7 @@ class WriteSnapshotRecorder:
         - dialog_id / chunk_id：定位信息
         - input：本次 extract_statement 注入给 LLM 的上下文
             （target_content / target_message_date / dialog_at /
-             supporting_context.msgs）
+             supporting_context.before_msgs / supporting_context.after_msgs）
         - outputs：LLM 抽取出来的 statement 列表
         便于人工核对每个 chunk 的输入是否正确、输出是否合理。
         """

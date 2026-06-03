@@ -125,9 +125,10 @@ class StatementExtractor:
                 "target_content": chunk_content,
                 "target_message_date": datetime.now().isoformat(),
                 "supporting_context": {
-                    "msgs": [
+                    "before_msgs": [
                         {"role": "context", "msg": dialogue_content}
-                    ] if dialogue_content else []
+                    ] if dialogue_content else [],
+                    "after_msgs": [],
                 },
             },
         )

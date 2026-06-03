@@ -31,8 +31,10 @@ async def get_chunked_dialogs(
 
     Returns:
         List of DialogData objects with generated chunks. When context_before or context_after is provided,
-        dialog_data.metadata["supporting_context"] will contain a List[MessageItem] in
-        [upstream messages..., downstream messages...] order.
+        dialog_data.metadata["supporting_context"] will contain a dict with two keys
+        ``{"before_msgs": List[MessageItem], "after_msgs": List[MessageItem]}``,
+        directly mirroring the SupportingContext schema. The target message itself is
+        NEVER placed in either list — its position is implied by the field names.
     """
     from app.core.logging_config import get_agent_logger
     logger = get_agent_logger(__name__)
@@ -157,13 +159,23 @@ async def get_chunked_dialogs(
 # step4: 注入结构化上下文（滑动窗口写入场景）
     if context_before or context_after:
         from app.core.memory.storage_services.extraction_engine.steps.schema.extraction_step_schema import MessageItem
-        supporting_msgs = []
-        for msg in (context_before or []):
-            supporting_msgs.append(MessageItem(role=msg["role"], msg=msg["content"]))
-        for msg in (context_after or []):
-            supporting_msgs.append(MessageItem(role=msg["role"], msg=msg["content"]))
-        dialog_data.metadata["supporting_context"] = supporting_msgs
-        logger.info(f"[SupportingContext] 注入 {len(supporting_msgs)} 条上下文消息 "
-                    f"(before={len(context_before or [])}, after={len(context_after or [])})")
+        before_msgs = [
+            MessageItem(role=msg["role"], msg=msg["content"])
+            for msg in (context_before or [])
+        ]
+        after_msgs = [
+            MessageItem(role=msg["role"], msg=msg["content"])
+            for msg in (context_after or [])
+        ]
+        # 直接用方向化字段，让 target_content 在结构上夹在 before_msgs 与 after_msgs 之间，
+        # LLM 通过字段名而非额外提示理解位置关系。
+        dialog_data.metadata["supporting_context"] = {
+            "before_msgs": before_msgs,
+            "after_msgs": after_msgs,
+        }
+        logger.info(
+            f"[SupportingContext] 注入上下文消息: "
+            f"before={len(before_msgs)}, after={len(after_msgs)}"
+        )
 
     return [dialog_data]
