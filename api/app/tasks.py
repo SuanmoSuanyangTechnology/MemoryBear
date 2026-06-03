@@ -2295,8 +2295,6 @@ def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_days: i
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=1860,
-    soft_time_limit=1800,
 )
 def layer2_reflection_task(self) -> Dict[str, Any]:
     """Layer 2 离线巡检（描述合并等）
@@ -2307,19 +2305,20 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     单例锁：单轮巡检耗时可能超过 10 分钟调度间隔，若不加锁，新一轮会与上一轮
     重叠执行（并发数 > 1），两个实例同时加载实体 + embedding + 调 LLM 导致内存
     叠加，超出容器内存上限被 OOMKill (SIGKILL)。这里用 Redis NX 锁保证任意时刻
-    只有一个实例在跑，重叠触发时直接跳过本轮。
+    只有一个实例在跑，重叠触发时直接跳过本轮。锁以主动释放为主、7200s TTL 兜底。
     """
     start_time = time.time()
 
     # 单例锁：防止上一轮未结束时本轮重叠执行造成内存叠加。
-    # TTL 略大于 time_limit(1860s)，确保任务被硬超时杀掉前锁一定仍有效，避免临界窗口重叠。
+    # 以"主动释放为主、TTL 兜底"：finally 正常时秒级释放；若进程被 OOMKill/SIGKILL
+    # 导致 finally 跑不到，锁靠 7200s TTL 自动过期，避免永久泄漏卡死后续轮次。
     _lock_redis = get_sync_redis_client()
     _lock_key = "lock:layer2_reflection_task"
     _lock_acquired = False
     if _lock_redis is not None:
         try:
             _lock_acquired = bool(
-                _lock_redis.set(_lock_key, self.request.id or "1", ex=1920, nx=True)
+                _lock_redis.set(_lock_key, self.request.id or "1", ex=7200, nx=True)
             )
         except Exception as e:
             # Redis 异常时降级为不加锁，避免任务永久无法执行
@@ -2491,16 +2490,44 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=1800,
-    soft_time_limit=1740,
 )
 def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
     """方案B：低频全量扫描去重（每天一次）
 
     复用 layer2_reflection_task 的调度模式：
     遍历所有 workspace → app → end_user，检查 enable_self_reflexion 配置。
+
+    单例锁：与高频 layer2_reflection_task 共用同一把锁 "lock:layer2_reflection_task"，
+    保证高频/低频两个 Layer2 任务任意时刻只有一个在跑，避免同时加载实体 + embedding +
+    调 LLM 造成内存叠加被 OOMKill。锁以主动释放为主、7200s TTL 兜底。
     """
     start_time = time.time()
+
+    # 单例锁：与 layer2_reflection_task 共用同一 key，实现高频/低频互斥。
+    # 以"主动释放为主、TTL 兜底"：finally 正常时秒级释放；若进程被 OOMKill/SIGKILL
+    # 导致 finally 跑不到，锁靠 7200s TTL 自动过期，避免永久泄漏卡死后续轮次。
+    _lock_redis = get_sync_redis_client()
+    _lock_key = "lock:layer2_reflection_task"
+    _lock_acquired = False
+    if _lock_redis is not None:
+        try:
+            _lock_acquired = bool(
+                _lock_redis.set(_lock_key, self.request.id or "1", ex=7200, nx=True)
+            )
+        except Exception as e:
+            # Redis 异常时降级为不加锁，避免任务永久无法执行
+            logger.warning(f"方案B全量扫描 获取单例锁异常，降级为不加锁执行: {e}")
+            _lock_acquired = False
+            _lock_redis = None
+        else:
+            if not _lock_acquired:
+                logger.warning("方案B全量扫描 Layer2 任务（高频或低频）仍在执行，本轮跳过")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "another layer2 task still in progress",
+                    "task_id": self.request.id,
+                    "elapsed_time": time.time() - start_time,
+                }
 
     async def _run() -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
@@ -2616,6 +2643,16 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
         result = {"status": "FAILED", "error": str(e)}
     finally:
         _shutdown_loop_gracefully(loop)
+        # 释放单例锁：仅当锁值仍是本次 task_id 时才删除，避免误删其他实例的锁
+        if _lock_redis is not None and _lock_acquired:
+            try:
+                _release_lua = (
+                    "if redis.call('get', KEYS[1]) == ARGV[1] "
+                    "then return redis.call('del', KEYS[1]) else return 0 end"
+                )
+                _lock_redis.eval(_release_lua, 1, _lock_key, self.request.id or "1")
+            except Exception as e:
+                logger.warning(f"方案B全量扫描 释放单例锁失败: {e}")
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
