@@ -43,7 +43,7 @@ const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
 
   return (
     <Flex vertical gap={16} className="rb-border rb:rounded-xl rb:p-4! rb:h-78">
-      <div className="rb:text-[#212332] rb:font-medium rb:leading-5">{t('userMemory.emotionLine')}</div>
+      <div className="rb:text-[#212332] rb:font-medium rb:leading-5">{t('userMemory.interaction')}</div>
       {loading
         ? <Loading size={249} />
         : !chartData || chartData.length === 0

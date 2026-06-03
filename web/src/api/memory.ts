@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 15:38:04
+ * @Last Modified time: 2026-06-03 17:21:07
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -214,6 +214,11 @@ export const getRelationshipEvolution = (data: { id: string; label: string; } ) 
 // Shared memory timeline
 export const getTimelineMemories = (data: { id: string; label: string; }) => {
   return request.get(`/memory-storage/memory_space/timeline_memories`, data)
+}
+
+// ExtractedEntity memory timeline
+export const getEntityEventTimeline = (data: { id: string; label: string; }) => {
+  return request.get('/memory-storage/memory_space/entity_event_timeline', data)
 }
 export const getExplicitMemory = (end_user_id: string) => {
   return request.post(`/memory/explicit-memory/overview`, { end_user_id })
