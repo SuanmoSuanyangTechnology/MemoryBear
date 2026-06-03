@@ -241,8 +241,6 @@ class WorkflowNodeExecutionRepository:
     def create(self, **kwargs) -> WorkflowNodeExecution:
         node_execution = WorkflowNodeExecution(**kwargs)
         self.db.add(node_execution)
-        self.db.commit()
-        self.db.refresh(node_execution)
         return node_execution
 
     def bulk_create(
@@ -254,9 +252,6 @@ class WorkflowNodeExecutionRepository:
 
         node_executions = [WorkflowNodeExecution(**item) for item in items]
         self.db.add_all(node_executions)
-        self.db.commit()
-        for item in node_executions:
-            self.db.refresh(item)
         return node_executions
 
     def delete_by_execution_id(self, execution_id: uuid.UUID) -> None:
@@ -264,7 +259,6 @@ class WorkflowNodeExecutionRepository:
             WorkflowNodeExecution.execution_id == execution_id
         )
         self.db.execute(stmt)
-        self.db.commit()
     
     def get_by_execution_id(
         self,
@@ -325,14 +319,14 @@ class WorkflowNodeExecutionRepository:
                 desc(WorkflowNodeExecution.created_at),
             )
         )
-        results = list(self.db.execute(stmt).scalars())
         if source is None:
-            return results[0] if results else None
+            row = self.db.execute(stmt.limit(1)).scalars().first()
+            return row
 
-        for item in results:
-            if (item.meta_data or {}).get("source") == source:
-                return item
-        return None
+        stmt = stmt.where(
+            WorkflowNodeExecution.meta_data["source"].as_string() == source
+        ).limit(1)
+        return self.db.execute(stmt).scalars().first()
 
 
 # ==================== 依赖注入函数 ====================

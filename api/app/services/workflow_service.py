@@ -1068,6 +1068,7 @@ class WorkflowService:
                 )
             )
         self.node_execution_repo.bulk_create(items)
+        self.db.commit()
 
     def _create_single_node_debug_execution(
             self,
@@ -1118,6 +1119,7 @@ class WorkflowService:
                 fallback_node_name=node_name,
             )
         )
+        self.db.commit()
 
     def _serialize_last_node_execution(self, node_execution: WorkflowNodeExecution) -> dict[str, Any]:
         execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
@@ -1130,9 +1132,9 @@ class WorkflowService:
             "source": meta_data.get("source", "workflow_execution"),
             "execution_id": execution.execution_id if execution else "",
             "workflow_execution_id": node_execution.execution_id,
-            "input_data": node_execution.input_data,
-            "output_data": node_execution.output_data,
-            "process_data": meta_data.get("process_data"),
+            "inputs": node_execution.input_data,
+            "outputs": node_execution.output_data,
+            "process": meta_data.get("process_data"),
             "error_message": node_execution.error_message,
             "elapsed_time": node_execution.elapsed_time,
             "token_usage": node_execution.token_usage,
