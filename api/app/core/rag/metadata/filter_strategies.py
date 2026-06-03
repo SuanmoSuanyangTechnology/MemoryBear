@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Any
-from sqlalchemy import text, or_, and_
+from sqlalchemy import or_, and_, cast, func, DateTime, Numeric, String
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.models.document_model import Document
 
 
 def _escape_like(value: str) -> str:
@@ -37,37 +38,31 @@ class StringFilterStrategy(FilterStrategy):
     ]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        json_path = f"meta_data->>'{field_name}'"
+        col = Document.meta_data[field_name].astext
 
         match operator:
             case "eq":
-                return text(f"{json_path} = :val").bindparams(val=str(value))
+                return col == str(value)
             case "ne":
-                return text(f"{json_path} != :val").bindparams(val=str(value))
+                return col != str(value)
             case "contains":
-                return text(f"{json_path} LIKE :val ESCAPE '\\'").bindparams(val=f"%{_escape_like(value)}%")
+                return col.like(f"%{_escape_like(value)}%", escape="\\")
             case "not_contains":
-                return text(f"{json_path} NOT LIKE :val ESCAPE '\\'").bindparams(val=f"%{_escape_like(value)}%")
+                return ~col.like(f"%{_escape_like(value)}%", escape="\\")
             case "starts_with":
-                return text(f"{json_path} LIKE :val ESCAPE '\\'").bindparams(val=f"{_escape_like(value)}%")
+                return col.like(f"{_escape_like(value)}%", escape="\\")
             case "ends_with":
-                return text(f"{json_path} LIKE :val ESCAPE '\\'").bindparams(val=f"%{_escape_like(value)}")
+                return col.like(f"%{_escape_like(value)}", escape="\\")
             case "is_empty":
-                return or_(
-                    text(f"{json_path} IS NULL"),
-                    text(f"{json_path} = ''"),
-                )
+                return or_(col.is_(None), col == "")
             case "not_empty":
-                return and_(
-                    text(f"{json_path} IS NOT NULL"),
-                    text(f"{json_path} != ''"),
-                )
+                return and_(col.is_not(None), col != "")
             case "in":
                 values = list(value) if hasattr(value, '__iter__') and not isinstance(value, str) else [value]
-                return text(f"{json_path} = ANY(:vals)").bindparams(vals=[str(v) for v in values])
+                return col.in_([str(v) for v in values])
             case "not_in":
                 values = list(value) if hasattr(value, '__iter__') and not isinstance(value, str) else [value]
-                return text(f"{json_path} != ALL(:vals)").bindparams(vals=[str(v) for v in values])
+                return ~col.in_([str(v) for v in values])
 
         raise BusinessException(
             f"StringFilterStrategy: unsupported operator '{operator}'",
@@ -81,7 +76,7 @@ class NumberFilterStrategy(FilterStrategy):
     supported_operators = ["eq", "ne", "gt", "lt", "gte", "lte", "is_empty", "not_empty"]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        json_path = f"(meta_data->>'{field_name}')::numeric"
+        col = cast(Document.meta_data[field_name].astext, Numeric)
 
         def _num(v):
             f = float(v)
@@ -89,21 +84,21 @@ class NumberFilterStrategy(FilterStrategy):
 
         match operator:
             case "eq":
-                return text(f"{json_path} = :val").bindparams(val=_num(value))
+                return col == _num(value)
             case "ne":
-                return text(f"{json_path} != :val").bindparams(val=_num(value))
+                return col != _num(value)
             case "gt":
-                return text(f"{json_path} > :val").bindparams(val=_num(value))
+                return col > _num(value)
             case "lt":
-                return text(f"{json_path} < :val").bindparams(val=_num(value))
+                return col < _num(value)
             case "gte":
-                return text(f"{json_path} >= :val").bindparams(val=_num(value))
+                return col >= _num(value)
             case "lte":
-                return text(f"{json_path} <= :val").bindparams(val=_num(value))
+                return col <= _num(value)
             case "is_empty":
-                return text(f"(meta_data->>'{field_name}') IS NULL")
+                return Document.meta_data[field_name].astext.is_(None)
             case "not_empty":
-                return text(f"(meta_data->>'{field_name}') IS NOT NULL")
+                return Document.meta_data[field_name].astext.is_not(None)
 
         raise BusinessException(
             f"NumberFilterStrategy: unsupported operator '{operator}'",
@@ -117,19 +112,21 @@ class TimeFilterStrategy(FilterStrategy):
     supported_operators = ["eq", "before", "after", "is_empty", "not_empty"]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        json_path = f"(meta_data->>'{field_name}')::timestamp"
+        from datetime import datetime
+        col = cast(Document.meta_data[field_name].astext, DateTime)
+        dt = datetime.fromisoformat(str(value))
 
         match operator:
             case "eq":
-                return text(f"{json_path} = :val").bindparams(val=str(value))
+                return func.date_trunc('minute', col) == func.date_trunc('minute', dt)
             case "before":
-                return text(f"{json_path} < :val").bindparams(val=str(value))
+                return func.date_trunc('minute', col) < func.date_trunc('minute', dt)
             case "after":
-                return text(f"{json_path} > :val").bindparams(val=str(value))
+                return func.date_trunc('minute', col) > func.date_trunc('minute', dt)
             case "is_empty":
-                return text(f"(meta_data->>'{field_name}') IS NULL")
+                return Document.meta_data[field_name].astext.is_(None)
             case "not_empty":
-                return text(f"(meta_data->>'{field_name}') IS NOT NULL")
+                return Document.meta_data[field_name].astext.is_not(None)
 
         raise BusinessException(
             f"TimeFilterStrategy: unsupported operator '{operator}'",

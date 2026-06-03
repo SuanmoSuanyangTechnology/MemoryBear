@@ -317,7 +317,11 @@ async def delete_document(
         # 4. Delete file (storage errors are swallowed internally)
         await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)
 
-        # 5. Delete document from DB (last — if DB fails, external resources are already cleaned)
+        # 5. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
+        api_logger.debug(f"Delete metadata bindings for document: {document_id}")
+        KnowledgeMetadataService.delete_document_metadata(db, document_id)
+
+        # 6. Delete document from DB (last — if DB fails, external resources are already cleaned)
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
         db.delete(db_document)
         db.commit()

@@ -1,4 +1,5 @@
 import uuid
+import logging
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
@@ -7,6 +8,8 @@ from app.core.error_codes import BizCode
 from app.models.document_model import Document
 from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy, _escape_like
 from .builtin_resolver import BuiltinFieldResolver
+
+logger = logging.getLogger(__name__)
 
 
 class FilterCondition:
@@ -96,6 +99,10 @@ class MetadataFilterEngine:
         if group_conditions:
             query = query.filter(and_(*group_conditions))
 
+        logger.debug(
+            "[MetadataFilterEngine] built query: %s",
+            str(query.statement.compile(compile_kwargs={"literal_binds": True}))
+        )
         return query
 
     def execute(self, *args, **kwargs) -> list[uuid.UUID]:
@@ -161,16 +168,18 @@ class MetadataFilterEngine:
         )
 
     def _build_time_column_filter(self, column_name: str, operator: str, value: Any):
-        from sqlalchemy import func, text as sa_text
+        from sqlalchemy import func
+        from datetime import datetime
         col = getattr(Document, column_name)
+        dt = datetime.fromisoformat(str(value))
         match operator:
             case "eq":
                 # 分钟级比较：将列值截断到分钟后比较
-                return func.date_trunc('minute', col) == sa_text(":val::timestamp").bindparams(val=str(value))
+                return func.date_trunc('minute', col) == dt
             case "before":
-                return func.date_trunc('minute', col) < sa_text(":val::timestamp").bindparams(val=str(value))
+                return func.date_trunc('minute', col) < dt
             case "after":
-                return func.date_trunc('minute', col) > sa_text(":val::timestamp").bindparams(val=str(value))
+                return func.date_trunc('minute', col) > dt
             case "is_empty":
                 return col.is_(None)
             case "not_empty":
