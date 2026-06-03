@@ -11,7 +11,6 @@ from app.repositories.neo4j.cypher_queries import (
     EXPAND_COMMUNITY_STATEMENTS,
     SEARCH_CHUNK_BY_CHUNK_ID,
     SEARCH_DIALOGUE_BY_DIALOG_ID,
-    SEARCH_ENTITIES_BY_NAME,
     SEARCH_STATEMENTS_BY_CREATED_AT,
     SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
     SEARCH_STATEMENTS_BY_TEMPORAL,
@@ -560,92 +559,6 @@ async def search_user_metadata(
         end_user_id=end_user_id
     )
     return user_info[0] if user_info else {}
-
-
-async def get_dedup_candidates_for_entities(  # 适配新版查询：使用全文索引按名称检索候选实体
-        connector: Neo4jConnector,
-        end_user_id: str,
-        entities: List[Dict[str, Any]],
-        use_contains_fallback: bool = True,
-        batch_size: int = 500,
-        max_concurrency: int = 5,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    为第二层去重消歧批量检索候选实体（适配新版 cypher_queries）：
-    - 使用全文索引查询 `SEARCH_ENTITIES_BY_NAME` 按 (end_user_id, name) 检索候选；
-    - 保留并发控制与返回结构（incoming_id -> [db_entity_props...]）；
-    - 若提供 `entity_type`，在本地对返回结果做类型过滤；
-    - `use_contains_fallback` 保留形参以兼容，必要时可扩展二次查询策略。
-
-    返回：incoming_id -> [db_entity_props...]
-    """
-
-    if not entities:
-        return {}
-
-    sem = asyncio.Semaphore(max_concurrency)
-
-    async def _query_by_name(incoming: Dict[str, Any]) -> tuple[str, List[Dict[str, Any]]]:
-        async with sem:
-            inc_id = incoming.get("id") or "__unknown__"
-            name = (incoming.get("name") or "").strip()
-            if not name:
-                return inc_id, []
-            try:
-                # 全文索引按名称检索（包含 CONTAINS 语义）
-                rows = await connector.execute_query(
-                    SEARCH_ENTITIES_BY_NAME,
-                    query=escape_lucene_query(name),
-                    end_user_id=end_user_id,
-                    limit=100,
-                )
-            except Exception:
-                rows = []
-
-            # 可选本地类型过滤（若输入实体提供类型）
-            typ = incoming.get("entity_type")
-            if typ:
-                try:
-                    rows = [r for r in rows if (r.get("entity_type") == typ)]
-                except Exception:
-                    pass
-
-            # 注入 incoming_id 以保持兼容下游合并逻辑
-            for r in rows:
-                r["incoming_id"] = inc_id
-
-            # 简单的降级：若为空且允许 fallback，可按小写名再次查询
-            if use_contains_fallback and not rows and name:
-                try:
-                    rows = await connector.execute_query(
-                        SEARCH_ENTITIES_BY_NAME,
-                        query=escape_lucene_query(name.lower()),
-                        end_user_id=end_user_id,
-                        limit=100,
-                    )
-                    for r in rows:
-                        r["incoming_id"] = inc_id
-                except Exception:
-                    pass
-
-            return inc_id, rows
-
-    tasks = [_query_by_name(e) for e in entities]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    merged: Dict[str, List[Dict[str, Any]]] = {}
-    for res in results:
-        if isinstance(res, Exception):
-            # 静默跳过单条失败
-            continue
-        inc_id, rows = res
-        inc_id = inc_id or "__unknown__"
-        merged.setdefault(inc_id, [])
-        existing_ids = {x.get("id") for x in merged[inc_id]}
-        for rec in rows:
-            if rec.get("id") not in existing_ids:
-                merged[inc_id].append(rec)
-    return merged
 
 
 async def search_graph_by_keyword_temporal(
