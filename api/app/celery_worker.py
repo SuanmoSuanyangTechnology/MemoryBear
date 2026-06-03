@@ -20,6 +20,7 @@ import app.tasks
 try:
     from premium.platform_admin.subscription_tasks import (  # noqa: F401
         process_expired_subscriptions_task,
+        subscription_expiration_reminder_task,
     )
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过

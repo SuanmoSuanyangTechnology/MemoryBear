@@ -164,6 +164,9 @@ try:
     celery_app.conf.task_routes['subscription.process_expired_subscriptions'] = {
         'queue': 'periodic_tasks'
     }
+    celery_app.conf.task_routes['subscription.expiration_reminder'] = {
+        'queue': 'periodic_tasks'
+    }
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
@@ -244,5 +247,10 @@ if _HAS_SUBSCRIPTION_TASKS:
         "process-expired-subscriptions-daily": {
             "task": "subscription.process_expired_subscriptions",
             "schedule": crontab(hour=18, minute=0),  # UTC 18:00 = CST 02:00
+        },
+        # 到期提醒：每天北京时间 10:00（= UTC 02:00）发送到期前3天/1天邮件提醒
+        "subscription-expiration-reminder": {
+            "task": "subscription.expiration_reminder",
+            "schedule": crontab(hour=2, minute=0),  # UTC 02:00 = CST 10:00
         },
     })
