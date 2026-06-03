@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 13:48:02
+ * @Last Modified time: 2026-06-03 18:40:41
  */
 import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -74,6 +74,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
               const contextMatch = part.match(/^\{\{context\}\}$/);
               const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
+              const envMatch = part.match(/^\{\{env\.([^}]+)\}\}$/);
               const systemMatch = part.match(/^\{\{sys\.([^}]+)\}\}$/);
 
               if (contextMatch) {
@@ -127,6 +128,29 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
                 }
                 if (systemSuggestion) {
                   paragraph.append($createVariableNode(systemSuggestion));
+                } else {
+                  paragraph.append($createTextNode(part));
+                }
+                return
+              }
+              if (envMatch) {
+                const [_, variableName] = envMatch;
+                const fullValue = `env.${variableName}`;
+                // First try direct match on top-level label
+                let envSuggestion = optionsRef.current.find(s =>
+                  s.group === 'ENV' && s.label === fullValue
+                );
+                // Then search children by value (e.g. env.api_key.url)
+                if (!envSuggestion) {
+                  for (const s of optionsRef.current) {
+                    if (s.group === 'ENV' && s.children) {
+                      const child = s.children.find(c => c.value === fullValue);
+                      if (child) { envSuggestion = child; break; }
+                    }
+                  }
+                }
+                if (envSuggestion) {
+                  paragraph.append($createVariableNode(envSuggestion));
                 } else {
                   paragraph.append($createTextNode(part));
                 }
