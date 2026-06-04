@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 17:54:08
+ * @Last Modified time: 2026-06-03 20:01:14
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -301,4 +301,8 @@ export const workflowPublishAsTool = (app_id: string, data: WorkflowToolForm) =>
 // Get workflow execution details and variable snapshot
 export const getWorkflowExecutionDetail = (app_id: string, execution_id: string) => {
   return request.get(`/apps/${app_id}/workflow/executions/${execution_id}`)
+}
+// Get workflow node last run details
+export const getWorkflowNodeLastRunDetail = (app_id: string, node_id: string) => {
+  return request.get(`/apps/${app_id}/workflow/nodes/${node_id}/last_run`)
 }

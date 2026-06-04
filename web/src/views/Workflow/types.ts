@@ -84,6 +84,7 @@ export interface WorkflowConfig {
     default?: string;
     defaultValue: string;
   }>,
+  environment_variables: EnvVariable[],
   execution_config: {
     max_execution_time: number;
     max_iterations: number;
@@ -114,6 +115,17 @@ export interface ChatVariable {
 }
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;
+}
+
+export interface EnvVariable {
+  name: string;
+  value_type: 'secret' | 'string' | 'number';
+  required: boolean;
+  value: string;
+  description: string;
+}
+export interface AddEnvVariableRef {
+  handleOpen: (value?: EnvVariable) => void;
 }
 
 export type HistoryActionType = 'add' | 'remove' | 'change' | 'undo' | 'redo' | 'batch'

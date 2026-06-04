@@ -1145,6 +1145,28 @@ async def run_single_workflow_node(
     return success(data=result)
 
 
+@router.get("/{app_id}/workflow/nodes/{node_id}/last_run", summary="获取节点上次运行")
+@cur_workspace_access_guard()
+async def get_workflow_node_last_run(
+        app_id: uuid.UUID,
+        node_id: str,
+        source: str | None = Query(None, description="workflow_execution 或 single_node_debug"),
+        db: Annotated[Session, Depends(get_db)] = None,
+        current_user: Annotated[User, Depends(get_current_user)] = None,
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+
+    if source not in (None, "workflow_execution", "single_node_debug"):
+        raise BusinessException("source 参数无效", BizCode.INVALID_PARAMETER)
+
+    result = workflow_service.get_node_last_run(app_id=app_id, node_id=node_id, source=source)
+    return success(data=result)
+
+
 @router.get("/{app_id}/workflow")
 @cur_workspace_access_guard()
 async def get_workflow_config(

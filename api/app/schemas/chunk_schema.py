@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 import uuid
 from enum import StrEnum
 from app.core.rag.models.chunk import QAChunk
+from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from typing import Union
 
 
@@ -97,6 +98,10 @@ class ChunkRetrieve(BaseModel):
     top_k: int | None = Field(100, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
+
+    # === 新增：元数据过滤 ===
+    metadata_filters: list[FilterGroup] | None = Field(None, description="元数据过滤条件")
+    metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="过滤模式")
 
 
 class ChunkBatchCreate(BaseModel):

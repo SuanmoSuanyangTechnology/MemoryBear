@@ -28,7 +28,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   const data = node?.getData() || {};
   const { t } = useTranslation()
   const graphRef = useRef(node?.model?.graph)
-  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [], data.appType ?? '')
+  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [], data.envVariables ?? [], data.appType ?? '')
 
   const getLocaleField = (field: string, filedType: string) => {
     const key = filedType === 'boolean'

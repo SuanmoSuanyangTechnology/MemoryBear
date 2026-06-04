@@ -2844,6 +2844,12 @@ export const zh = {
       jumpToNode: '跳转到节点',
       errorBranch: '异常时',
       systemVariable: '系统变量',
+      addEnvVariable: '环境变量',
+      editEnvVariable: '编辑环境变量',
+      'env-variable': {
+        value: '值',
+        secret: 'Secret',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

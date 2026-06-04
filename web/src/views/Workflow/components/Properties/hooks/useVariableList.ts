@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 11:39:51
+ * @Last Modified time: 2026-06-03 18:53:06
  */
 /**
  * useVariableList Hook
@@ -17,7 +17,7 @@
 import { useMemo, useEffect, useState } from 'react';
 import { Graph, Node } from '@antv/x6';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
-import type { ChatVariable } from '../../../types';
+import type { ChatVariable, EnvVariable } from '../../../types';
 
 export const sysVariable = [
   { name: "message", type: "string",
@@ -411,12 +411,14 @@ export const getChildNodeVariables = (
  * @param {Node | null | undefined} selectedNode - Currently selected node
  * @param {React.MutableRefObject<Graph | undefined>} graphRef - Graph reference
  * @param {ChatVariable[]} chatVariables - List of chat variables
+ * @param {EnvVariable[]} envVariables - List of environment variables
  * @returns {Suggestion[]} List of available variables
  */
 export const useVariableList = (
   selectedNode: Node | null | undefined,
   graphRef: React.MutableRefObject<Graph | undefined>,
   chatVariables: ChatVariable[],
+  envVariables: EnvVariable[],
   appType?: string
 ) => {
   const [trigger, setTrigger] = useState(0);
@@ -466,11 +468,12 @@ export const useVariableList = (
     // Add system variables
     sysVariable.forEach((v: any) => {
         if (v?.name && !(appType === 'pure_workflow' && v.name === 'message')) {
-          addVariable(list, keys, `sys_${v.name}`, `sys.${v.name}`, v.type, `sys.${v.name}`, { type: 'SYSTEM', name: 'SYSTEM', icon: '' }, { group: 'SYSTEM' });
+          addVariable(list, keys, `sys_${v.name}`, `sys.${v.name}`, v.type, `sys.${v.name}`, { type: 'SYSTEM', name: 'SYSTEM', icon: '', id: 'SYSTEM' }, { group: 'SYSTEM' });
         }
       });
     // Add chat variables
-    chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }, v.defaultValue ?? v.default));
+    chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '', id: 'ENV' }, { group: 'CONVERSATION' }, v.defaultValue ?? v.default));
+    envVariables?.forEach(v => addVariable(list, keys, `ENV_${v.name}`, v.name, v.value_type, `env.${v.name}`, { type: 'ENV', name: 'ENV', icon: '', id: 'ENV' }, { group: 'ENV' }));
 
     // Process each relevant node: deferred types last (they depend on prior variables)
     const deferredIds: string[] = [];
@@ -508,7 +511,7 @@ export const useVariableList = (
     }
 
     return list;
-  }, [selectedNode, graphRef, trigger, chatVariables, appType]);
+  }, [selectedNode, graphRef, trigger, chatVariables, envVariables, appType]);
 
   // Refresh variable list when graph changes
   useEffect(() => {
