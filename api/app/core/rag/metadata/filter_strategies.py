@@ -113,16 +113,18 @@ class TimeFilterStrategy(FilterStrategy):
 
     def apply(self, field_name: str, operator: str, value: Any):
         from datetime import datetime
+        from sqlalchemy import literal
         col = cast(Document.meta_data[field_name].astext, DateTime)
         dt = datetime.fromisoformat(str(value))
+        dt_lit = literal(dt, DateTime)
 
         match operator:
             case "eq":
-                return func.date_trunc('minute', col) == func.date_trunc('minute', dt)
+                return func.date_trunc('minute', col) == func.date_trunc('minute', dt_lit)
             case "before":
-                return func.date_trunc('minute', col) < func.date_trunc('minute', dt)
+                return func.date_trunc('minute', col) < func.date_trunc('minute', dt_lit)
             case "after":
-                return func.date_trunc('minute', col) > func.date_trunc('minute', dt)
+                return func.date_trunc('minute', col) > func.date_trunc('minute', dt_lit)
             case "is_empty":
                 return Document.meta_data[field_name].astext.is_(None)
             case "not_empty":

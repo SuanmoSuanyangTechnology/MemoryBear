@@ -97,6 +97,7 @@ class MetadataFilterEngine:
                 group_conditions.append(and_(*conditions))
 
         if group_conditions:
+            # 用户传的条件是"要排除的文档特征"，返回符合这些特征的文档（待过滤）
             query = query.filter(and_(*group_conditions))
 
         logger.debug(

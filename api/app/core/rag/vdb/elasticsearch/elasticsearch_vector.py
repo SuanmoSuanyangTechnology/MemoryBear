@@ -523,12 +523,17 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        # If document_ids_filter is passed in, append to filter
+        # If document_ids_filter is passed in, append to filter (blacklist: exclude these IDs)
         document_ids_filter = kwargs.get("document_ids_filter")
         if document_ids_filter:
             query_str["bool"]["filter"].append({
-                "terms": {"metadata.document_id": document_ids_filter}
+                "bool": {"must_not": {"terms": {"metadata.document_id": document_ids_filter}}}
             })
+            logger.info(f"[ES search_by_vector] excluding document_ids: {document_ids_filter}")
+        else:
+            logger.info("[ES search_by_vector] no document_ids_filter")
+
+        logger.debug(f"[ES search_by_vector] query DSL: {query_str}")
 
         result = self._client.search(
             index=indices,
@@ -625,12 +630,17 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        # If document_ids_filter is passed in, append to filter
+        # If document_ids_filter is passed in, append to filter (blacklist: exclude these IDs)
         document_ids_filter = kwargs.get("document_ids_filter")
         if document_ids_filter:
             query_str["bool"]["filter"].append({
-                "terms": {"metadata.document_id": document_ids_filter}
+                "bool": {"must_not": {"terms": {"metadata.document_id": document_ids_filter}}}
             })
+            logger.info(f"[ES search_by_full_text] excluding document_ids: {document_ids_filter}")
+        else:
+            logger.info("[ES search_by_full_text] no document_ids_filter")
+
+        logger.debug(f"[ES search_by_full_text] query DSL: {query_str}")
 
         result = self._client.search(
             index=indices,
@@ -773,7 +783,7 @@ class ElasticSearchVector(BaseVector):
             ]
 
             reranked_docs = list(self.reranker.compress_documents(documents, query))
-            print(reranked_docs)
+            logger.debug(f"[rerank] returned {len(reranked_docs)} docs")
 
             reranked_docs.sort(
                 key=lambda x: x.metadata.get("relevance_score", 0),

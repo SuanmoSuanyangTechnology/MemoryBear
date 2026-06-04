@@ -1070,30 +1070,48 @@ async def retrieve_chunks(
                     for logic, conditions in filtered_groups
                 ]
 
+                api_logger.info(
+                    f"[MetadataFilter] executing filter for kb_id={pk_kb_id}, "
+                    f"conditions={[{'field': c.field, 'op': c.operator, 'val': c.value} for g in filter_groups for c in g.conditions]}"
+                )
                 document_ids = engine.execute(
                     knowledge_id=pk_kb_id,
                     filter_groups=filter_groups,
                     metadata_defs=metadata_defs,
                 )
+                api_logger.info(
+                    f"[MetadataFilter] kb_id={pk_kb_id}, "
+                    f"filtered_count={len(document_ids)}, "
+                    f"filtered_document_ids={sorted(str(d) for d in document_ids)}"
+                )
                 all_document_ids.update(document_ids)
 
-            if not all_document_ids:
-                return success(data=[], msg="retrieval successful")
-
             document_ids_filter = [str(d) for d in all_document_ids]
+            api_logger.info(f"[MetadataFilter] final filter list: {document_ids_filter}")
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
     # default value is topk
     topn = retrieve_data.top_k
 
+    # Helper: exclude documents in document_ids_filter (blacklist)
+    exclude_ids = set(document_ids_filter) if document_ids_filter else set()
+    def _exclude_filtered(docs):
+        if not exclude_ids:
+            return docs
+        filtered = [d for d in docs if d.metadata.get("document_id") not in exclude_ids]
+        api_logger.info(f"[MetadataFilter] post-filter: total={len(docs)}, excluded={len(docs) - len(filtered)}, remaining={len(filtered)}")
+        return filtered
+
     # 1 participle search, 2 semantic search, 3 hybrid search
     match retrieve_data.retrieve_type:
         case chunk_schema.RetrieveType.PARTICIPLE:
             rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case chunk_schema.RetrieveType.SEMANTIC:
             rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
             rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
@@ -1125,6 +1143,7 @@ async def retrieve_chunks(
                     base_url=emb_key.api_base
                 )
                 doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
-                if doc:
+                if doc and doc['page_content'].strip() != '':
                     rs.insert(0, doc)
+            rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
