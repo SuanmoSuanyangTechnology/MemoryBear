@@ -24,7 +24,7 @@ from .conversation_model import Conversation, Message
 from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from .memory_config_model import MemoryConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
-from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution, WorkflowNodeCache
 from .agent_execution_model import AgentExecution
 from .retrieval_info import RetrievalInfo
 from .prompt_optimizer_model import PromptOptimizerSession, PromptOptimizerSessionHistory
@@ -87,6 +87,7 @@ __all__ = [
     "WorkflowConfig",
     "WorkflowExecution",
     "WorkflowNodeExecution",
+    "WorkflowNodeCache",
     "AgentExecution",
     "RetrievalInfo",
     "PromptOptimizerSession",

@@ -3,7 +3,7 @@ import uuid
 from typing import Optional, Any, List, Dict, Union
 from enum import Enum, StrEnum
 
-from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer, model_validator
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.schemas.workflow_schema import WorkflowConfigCreate
@@ -735,6 +735,72 @@ class NodeRunRequest(BaseModel):
         }]
     )
     stream: bool = Field(default=False, description="是否流式返回")
+    base_execution_id: Optional[str] = Field(
+        default=None,
+        description="基准执行 ID，用于基于某次整图执行快照恢复上下文后再单节点运行",
+    )
+
+
+class NodeCacheUpdateRequest(BaseModel):
+    """更新节点缓存内容"""
+    result_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="兼容旧模式：直接提交完整的缓存结果数据",
+    )
+    patches: List["NodeCacheVariablePatch"] = Field(
+        default_factory=list,
+        description="新模式：按变量 patch 缓存内容，只修改指定字段",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if self.result_data is None and not self.patches:
+            raise ValueError("result_data 和 patches 至少需要传一个")
+        if self.result_data is not None and self.patches:
+            raise ValueError("result_data 和 patches 不能同时传")
+        return self
+
+
+class NodeCacheVariablePatch(BaseModel):
+    """按变量 patch 节点缓存内容"""
+    scope: str = Field(
+        default="output",
+        description="修改范围，只支持 output/input/process",
+    )
+    path: Optional[str] = Field(
+        default=None,
+        description="变量路径，支持 dot notation，例如 output 或 metadata.answer",
+    )
+    name: Optional[str] = Field(
+        default=None,
+        description="变量名，等价于 path 的简写",
+    )
+    value: Any = Field(
+        ...,
+        description="变量新值",
+    )
+    type: Optional[str] = Field(
+        default=None,
+        description="变量类型，仅作为前端透传和调试信息，后端以 value 为准",
+    )
+
+    @model_validator(mode="after")
+    def validate_patch(self):
+        if self.scope not in {"output", "input", "process"}:
+            raise ValueError("scope 只支持 output、input、process")
+        if bool(self.path) == bool(self.name):
+            raise ValueError("path 和 name 必须二选一")
+        return self
+
+
+class NodeRerunRequest(BaseModel):
+    """基于最近一次单节点调试输入重跑"""
+    invalidate_cache: bool = Field(default=False, description="重跑前是否先失效当前缓存")
+    bypass_cache: bool = Field(default=False, description="重跑时是否跳过缓存直接真实执行")
+    base_execution_id: Optional[str] = Field(
+        default=None,
+        description="可选，覆盖最近一次单节点调试绑定的基准执行 ID",
+    )
 
 
 class DraftRunCompareRequest(BaseModel):

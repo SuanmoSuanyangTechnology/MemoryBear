@@ -3,7 +3,7 @@
 """
 
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey, Text, text
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, BigInteger, Float, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -172,7 +172,7 @@ class WorkflowNodeExecution(Base):
     node_name = Column(String(100))
     
     # 执行顺序
-    execution_order = Column(Integer, nullable=False)
+    execution_order = Column(BigInteger, nullable=False)
     retry_count = Column(Integer, nullable=False, default=0)
     
     # 输入输出
@@ -207,3 +207,53 @@ class WorkflowNodeExecution(Base):
     
     def __repr__(self):
         return f"<WorkflowNodeExecution(id={self.id}, node_id={self.node_id}, status={self.status})>"
+
+
+class WorkflowNodeCache(Base):
+    """工作流节点缓存表"""
+
+    __tablename__ = "workflow_node_caches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_configs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    node_id = Column(String(100), nullable=False, index=True)
+    node_type = Column(String(50), nullable=False)
+    node_name = Column(String(100))
+    cache_key = Column(String(64), nullable=False, index=True)
+    source = Column(String(32), nullable=False, default="workflow_execution")
+
+    status = Column(String(20), nullable=False, default="active", index=True)
+    input_data = Column(JSONB)
+    result_data = Column(JSONB)
+    hit_count = Column(Integer, nullable=False, default=0)
+    last_hit_at = Column(DateTime)
+    expires_at = Column(DateTime)
+    invalidated_at = Column(DateTime)
+    meta_data = Column(JSONB, default=dict)
+
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utcnow_naive,
+        onupdate=utcnow_naive
+    )
+
+    app = relationship("App")
+    workflow_config = relationship("WorkflowConfig")
+
+    def __repr__(self):
+        return f"<WorkflowNodeCache(id={self.id}, node_id={self.node_id}, status={self.status})>"
