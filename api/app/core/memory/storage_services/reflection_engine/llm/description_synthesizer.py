@@ -6,6 +6,8 @@ from typing import List, Optional
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
+from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAME_SET
+
 logger = logging.getLogger(__name__)
 
 _prompt_dir = os.path.join(
@@ -94,14 +96,6 @@ class EventItem(BaseModel):
     category_id: str = "NULL"   # 稳定分类ID，按需求直接存、不做枚举校验
 
 
-# event_timeline category 固定枚举（13 类，单值）；仅校验 category，category_id 不校验
-_CATEGORY_ENUM = {
-    "教育学习", "职业工作", "项目里程碑", "居住迁移", "关系家庭",
-    "宠物照护", "健康医疗", "旅行到访", "购买资产", "创作发布",
-    "成就荣誉", "财务法务行政", "其他生活事件",
-}
-
-
 def _sanitize_field(value: str) -> str:
     """清洗字段内的分隔符，防止破坏 [valid_at|invalid_at] fact|title|category|category_id 结构。
 
@@ -174,7 +168,7 @@ def filter_events(
         # 写入前兜底：清洗分隔符 + category 枚举校验，保证拼接结构稳定
         event.fact = _sanitize_field(event.fact)
         event.title = _sanitize_field(event.title) if (event.title and event.title != "NULL") else "NULL"
-        event.category = event.category if event.category in _CATEGORY_ENUM else "NULL"
+        event.category = event.category if event.category in EVENT_CATEGORY_NAME_SET else "NULL"
         # category_id 不做枚举校验，仅清洗分隔符后原样透传（后续检索/聚合使用）
         event.category_id = _sanitize_field(event.category_id) if (event.category_id and event.category_id != "NULL") else "NULL"
 

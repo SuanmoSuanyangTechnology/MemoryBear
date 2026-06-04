@@ -19,16 +19,9 @@ from datetime import datetime
 
 from app.schemas.memory_episodic_schema import EmotionType
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
+from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAMES
 
 logger = logging.getLogger(__name__)
-
-# event_timeline category 固定顺序（13 类，与 prompt category_id→category 映射顺序一致）
-# 用于 category_stats 补全：有数据的按 count 降序在前，无数据的按此顺序补在后（count=0）
-_CATEGORY_ORDER = [
-    "教育学习", "职业工作", "项目里程碑", "居住迁移", "关系家庭",
-    "宠物照护", "健康医疗", "旅行到访", "购买资产", "创作发布",
-    "成就荣誉", "财务法务行政", "其他生活事件",
-]
 
 
 class MemoryEntityService:
@@ -62,7 +55,7 @@ class MemoryEntityService:
                 "entity_name": None,
                 "entity_type": None,
                 "description_summary": None,
-                "category_stats": [{"category": cat, "count": 0} for cat in _CATEGORY_ORDER],
+                "category_stats": [{"category": cat, "count": 0} for cat in EVENT_CATEGORY_NAMES],
                 "items": [],
                 "page": {"page": page, "pagesize": pagesize, "total": 0, "hasnext": False},
             }
@@ -88,7 +81,7 @@ class MemoryEntityService:
             [(cat, cnt) for cat, cnt in category_counts.items()],
             key=lambda kv: kv[1], reverse=True
         )
-        zero_count = [(cat, 0) for cat in _CATEGORY_ORDER if cat not in category_counts]
+        zero_count = [(cat, 0) for cat in EVENT_CATEGORY_NAMES if cat not in category_counts]
         category_stats = [
             {"category": cat, "count": cnt}
             for cat, cnt in (with_count + zero_count)
