@@ -226,12 +226,27 @@ class WriteSnapshotRecorder:
                 input_dump: Optional[Dict[str, Any]] = None
                 if step_input is not None and hasattr(step_input, "model_dump"):
                     full = step_input.model_dump()
-                    # 仅保留与 extract_statement 提示词相关的字段，避免冗余
+                    ctx = full.get("supporting_context") or {}
+                    before_msgs = ctx.get("before_msgs") or []
+                    after_msgs = ctx.get("after_msgs") or []
+                    # 与 StatementTemporalExtractionStep.render_prompt 中构建 input_json
+                    # 完全一致的结构，保证快照展示的就是实际传入 extract_statement 的内容。
                     input_dump = {
+                        "chunk_id": full.get("chunk_id"),
+                        "end_user_id": full.get("end_user_id"),
+                        "dialog_at": full.get("dialog_at") or "",
                         "target_content": full.get("target_content"),
                         "target_message_date": full.get("target_message_date"),
-                        "dialog_at": full.get("dialog_at"),
-                        "supporting_context": full.get("supporting_context"),
+                        "supporting_context": {
+                            "before_msgs": [
+                                {"role": m.get("role", ""), "msg": m.get("msg", "")}
+                                for m in before_msgs
+                            ],
+                            "after_msgs": [
+                                {"role": m.get("role", ""), "msg": m.get("msg", "")}
+                                for m in after_msgs
+                            ],
+                        },
                     }
                 snapshot_data.append(
                     {
