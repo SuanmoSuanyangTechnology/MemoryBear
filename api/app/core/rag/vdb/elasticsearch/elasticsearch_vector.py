@@ -54,7 +54,7 @@ class ElasticSearchVector(BaseVector):
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
         # 仅在写入时检查并补充字段映射，避免每次检索都做冗余检查
-        ElasticSearchVectorFactory._ensure_parent_id_mapping(self._client, self._collection_name)
+        # ElasticSearchVectorFactory._ensure_parent_id_mapping(self._client, self._collection_name)
 
         # QA chunks: embedding 只对 question 字段做；source/parent chunks: 不做 embedding
         texts_for_embedding = []
@@ -495,8 +495,7 @@ class ElasticSearchVector(BaseVector):
                     },
                     "filter": [
                         {"term": {"metadata.status": 1}},
-                        # 排除 source chunk（仅供 GraphRAG 使用，不参与检索）
-                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
+                        {"exists": {"field": Field.VECTOR.value}},
                     ]
                 }
             }
@@ -518,7 +517,7 @@ class ElasticSearchVector(BaseVector):
                     "filter": [
                         {"term": {"metadata.status": 1}},
                         {"terms": {"metadata.file_name": file_names_filter}},
-                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
+                        {"exists": {"field": Field.VECTOR.value}},
                     ],
                 }
             }
@@ -605,7 +604,6 @@ class ElasticSearchVector(BaseVector):
                 },
                 "filter": [
                     {"term": {"metadata.status": 1}},
-                    {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                 ]
             }
         }
@@ -625,7 +623,6 @@ class ElasticSearchVector(BaseVector):
                     "filter": [
                         {"term": {"metadata.status": 1}},
                         {"terms": {"metadata.file_name": file_names_filter}},
-                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                     ],
                 }
             }
@@ -1007,6 +1004,5 @@ class ElasticSearchVectorFactory:
                 logger.info(f"Updated mapping for {index_name}: added {list(update_body['properties'].keys())}")
         except Exception as e:
             logger.warning(f"Failed to update mapping for {index_name}: {e}")
-
 
 
