@@ -30,6 +30,7 @@ def generate_api_key(key_type: ApiKeyType) -> str:
         ApiKeyType.AGENT: "sk-agent-",
         ApiKeyType.CLUSTER: "sk-multi_agent-",
         ApiKeyType.WORKFLOW: "sk-workflow-",
+        ApiKeyType.PURE_WORKFLOW: "sk-workflow-",
         ApiKeyType.SERVICE: "sk-service-"
     }
 
