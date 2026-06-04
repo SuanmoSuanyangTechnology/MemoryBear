@@ -2023,14 +2023,14 @@ def extract_emotion_batch_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
-def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_days: int = 3) -> bool:
-    """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_days 天则跳过。
+def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int = 36) -> bool:
+    """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_hours 小时则跳过。
 
     通过 conversations.user_id（存的是 end_user_id 的 UUID 字符串）取该用户所有会话
     的最新 updated_at（最后写入时间），与当前 UTC 时间比较。
 
     Returns:
-        True  -> 跳过反思（无会话记录，或最近更新已超过 inactive_days 天）
+        True  -> 跳过反思（无会话记录，或最近更新已超过 inactive_hours 小时）
         False -> 正常执行反思
     """
     from sqlalchemy import func
@@ -2055,7 +2055,7 @@ def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_days: i
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     if last_updated.tzinfo is not None:
         last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
-    return (now_utc - last_updated) >= timedelta(days=inactive_days)
+    return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
 
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
@@ -2147,7 +2147,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                             for user in end_users:
                                 try:
-                                    # 前置过滤：最近一次会话更新距今 >= 3 天则跳过（仅对活跃用户反思）
+                                    # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过（仅对活跃用户反思）
                                     if _should_skip_reflection_by_inactivity(db, str(user['id'])):
                                         skipped_inactive += 1
                                         continue
@@ -2217,7 +2217,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                 logger.info(
                     f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
                     f"跳过 {skipped_configs} 个未启用反思的配置, "
-                    f"跳过 {skipped_inactive} 个 3 天内无会话更新的用户"
+                    f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户"
                 )
 
                 return {
@@ -2340,7 +2340,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
 
                         for user in end_users:
                             try:
-                                # 前置过滤：最近一次会话更新距今 >= 3 天则跳过
+                                # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过
                                 if _should_skip_reflection_by_inactivity(db, str(user['id'])):
                                     skipped_inactive += 1
                                     continue
@@ -2399,7 +2399,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
             logger.info(
                 f"方案B全量扫描完成: 处理 {processed_users} 用户, "
                 f"跳过 {skipped_configs} 个未启用配置, "
-                f"跳过 {skipped_inactive} 个 3 天内无会话更新的用户, "
+                f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户, "
                 f"总合并 {total_merged} 对"
             )
             return {
