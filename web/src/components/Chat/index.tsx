@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 17:20:31
+ * @Last Modified time: 2026-06-04 11:36:37
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -18,39 +18,24 @@ const Chat: FC<ChatProps> = ({
   data,
   onChange,
   onSend,
-  streamLoading = false,
-  loading,
   contentClassName = '',
+  loading,
   children,
-  labelFormat,
-  errorDesc,
   fileList,
   fileChange,
   className,
-  renderRuntime,
   conversationId,
-  userIcon,
-  assistantIcon,
-  isSupportTools = false,
-  handleFeedback,
+  ...restProps
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
       {/* Chat content display area */}
       <ChatContent
-        userIcon={userIcon}
-        assistantIcon={assistantIcon}
         key={conversationId ?? 'new'}
         classNames={contentClassName}
         data={data}
-        streamLoading={streamLoading}
-        empty={empty}
-        labelFormat={labelFormat}
-        errorDesc={errorDesc}
-        renderRuntime={renderRuntime}
         onSend={onSend}
-        isSupportTools={isSupportTools}
-        handleFeedback={handleFeedback}
+        {...restProps}
       />
 
       {/* Chat input area */}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:17:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:56:00
+ * @Last Modified time: 2026-06-04 11:03:43
  */
 /**
  * RbMarkdown Component
@@ -107,7 +107,6 @@ const buildComponents = () => ({
     const handleChange = useCallback((val: any) => {
       if (props.name) ctx?.setValue(props.name, val)
     }, [ctx, props.name])
-    console.log('props', props)
     switch (props.type) {
       case 'color':
         return <ColorPicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
@@ -150,9 +149,9 @@ const buildComponents = () => ({
     const ctx = useContext(FormContext)
     return <Select className="rb:mb-4! rb:w-full!" {...props} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }}>{children}</Select>
   },
-  textarea: ({ children, ...props }: any) => {
+  textarea: ({ children, default_value, ...props }: any) => {
     const ctx = useContext(FormContext)
-    return <Input.TextArea className="rb:mb-4!" {...props} onChange={(e) => { if (props.name) ctx?.setValue(props.name, e.target.value) }}>{children}</Input.TextArea>
+    return <Input.TextArea className="rb:mb-4!" defaultValue={default_value} {...props} onChange={(e) => { if (props.name) ctx?.setValue(props.name, e.target.value) }}>{children}</Input.TextArea>
   },
   form: RbForm,
   label: ({ children, ...props }: any) => {

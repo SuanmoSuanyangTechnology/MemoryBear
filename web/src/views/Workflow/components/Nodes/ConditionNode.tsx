@@ -168,6 +168,18 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
           </Flex>
         </Flex>
       }
+      {data.type === 'human-intervention' &&
+        <Flex vertical gap={4} className="rb:mt-3!">
+          {data.config?.actions?.defaultValue.map((_item: any, index: number) => (
+            <Flex key={index} justify="end" className="rb:py-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+              ACTION_{index + 1}
+            </Flex>
+          ))}
+          <Flex justify="end" className="rb:py-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+            TIMEOUT
+          </Flex>
+        </Flex>
+      }
     </div>
   );
 };

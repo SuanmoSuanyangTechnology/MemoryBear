@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:36:58
+ * @Last Modified time: 2026-06-04 15:34:44
  */
 /**
  * useVariableList Hook
@@ -43,6 +43,10 @@ const NODE_VARIABLES = {
   'parameter-extractor': [
     { label: '__is_success', dataType: 'number', field: '__is_success' },
     { label: '__reason', dataType: 'string', field: '__reason' }
+  ],
+  'human-intervention': [
+    { label: '__action_id', dataType: 'string', field: '__action_id' },
+    { label: '__rendered_content', dataType: 'string', field: '__rendered_content' },
   ],
   'http-request': [
     { label: 'body', dataType: 'string', field: 'body' },
@@ -216,6 +220,14 @@ const processNodeVariables = (
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
+    case 'human-intervention':
+      // Add human intervention form fields as variables
+      (config.form_fields?.defaultValue || []).forEach((field: any) => {
+        if (field.id?.trim()) {
+          addVariable(variableList, addedKeys, `${dataNodeId}_${field.id}`, field.id, 'string', `${dataNodeId}.${field.id}`, nodeData, undefined, field.default_value);
+        }
+      });
+      break;
   }
 };
 
@@ -232,7 +244,8 @@ const hasOutputNodeTypes = [
   'tool',
   'jinja-render',
   'document-extractor',
-  'list-operator'
+  'list-operator',
+  'human-intervention'
 ];
 
 /**
@@ -248,12 +261,20 @@ export const getCurrentNodeVariables = (nodeData: any, values: any, upstreamVari
   const keys = new Set<string>(upstreamVariables.map(v => v.key));
   const dataNodeId = nodeData.id;
 
+  // Merge config with values, handling defaultValue format correctly
+  const mergedConfig = { ...nodeData.config };
+  Object.keys(values || {}).forEach(key => {
+    // If the original config has defaultValue format, preserve it
+    if (mergedConfig[key]?.defaultValue !== undefined) {
+      mergedConfig[key] = { defaultValue: values[key] };
+    } else {
+      mergedConfig[key] = values[key];
+    }
+  });
+
   processNodeVariables({
     ...nodeData,
-    config: {
-      ...nodeData.config,
-      ...values
-    }
+    config: mergedConfig
   }, dataNodeId, list, keys);
   
   // Special case: var-aggregator without group enabled returns no variables

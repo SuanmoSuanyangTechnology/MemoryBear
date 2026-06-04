@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:44:14
+ * @Last Modified time: 2026-06-04 14:56:30
  */
 import { type ReactNode } from 'react'
 
@@ -38,44 +38,56 @@ export interface ChatItem {
     }[];
     reasoning_content?: string;
     error?: string;
+    waiting_human?: boolean;
+    execution_id?: string;
   },
-}
 
+  interventions?: Intervention[]
+}
+export interface Intervention {
+  execution_id?: string;
+  node_id?: string;
+  node_name?: string;
+  rendered_content?: string;
+  form_fields?: {
+    id: string;
+    variable_ref?: any;
+    default_value?: string;
+  }[];
+  actions?: {
+    id: string;
+    label: string;
+    variant: string;
+  }[];
+  timeout_at?: number;
+
+  resolved_action_id?: string;
+  resolved_form_data?: Record<string, string>;
+  
+  resolved_at?: string;
+  resolved_kind?: string;
+}
 /**
  * Chat component main props interface
  */
-export interface ChatProps {
+export interface ChatProps extends Omit<ChatContentProps, 'onSend'> {
   /** Empty state display content */
-  empty?: ReactNode;
-  /** Chat data list */
-  data: ChatItem[];
   /** Input content change callback */
   onChange: (message: string) => void;
   /** Send message callback */
   onSend: () => void;
-  /** Streaming loading state */
-  streamLoading?: boolean;
   /** Loading state */
   loading: boolean;
   /** Content area custom class name */
   contentClassName?: string;
   /** Child component content */
   children?: ReactNode;
-  /** Label format function */
-  labelFormat: (item: ChatItem) => any;
-  errorDesc?: string;
   /** Attachment list */
   fileList?: any[];
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
   className?: string;
-  renderRuntime?: (item: ChatItem, index: number) => ReactNode;
   conversationId?: string | null;
-
-  userIcon?: ReactNode;
-  assistantIcon?: ReactNode;
-  isSupportTools?: boolean;
-  handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
 }
 
 /**
@@ -124,4 +136,5 @@ export interface ChatContentProps {
   assistantIcon?: ReactNode;
   isSupportTools?: boolean;
   handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
+  handleInterventionActionClick?: (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => void;
 }

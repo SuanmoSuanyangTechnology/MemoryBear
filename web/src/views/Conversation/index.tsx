@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:52:30
+ * @Last Modified time: 2026-06-04 15:32:52
  */
 /**
  * Conversation Page
@@ -18,14 +18,16 @@ import { Flex, Skeleton, App, Tooltip, Space } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig, feedbackMessage } from '@/api/application'
+import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig, feedbackMessage,
+  interventionsSubmit, interventionsResumeSubmit,
+} from '@/api/application'
 import type { HistoryItem } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
 import ChatEmpty from '@/assets/images/empty/chatEmpty.png'
 import Chat from '@/components/Chat'
-import type { ChatItem } from '@/components/Chat/types'
+import type { ChatItem, Intervention } from '@/components/Chat/types'
 import { type SSEMessage } from '@/utils/stream'
 import { shareFileUploadUrlWithoutApiPrefix, getFileStatusById } from '@/api/fileStorage'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
@@ -179,7 +181,7 @@ const Conversation: FC = () => {
     if (conversation_id) {
       getConversationDetail(token as string, conversation_id)
         .then(res => {
-          const response = res as { messages: ChatItem[] }
+          const response = res as { messages: ChatItem[]; pending_intervention: Record<string, any> }
           const messages = response?.messages || []
           const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
           audioPollingRef.current.forEach((timer, key) => {
@@ -197,6 +199,11 @@ const Conversation: FC = () => {
             if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
               return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
             }
+            const pendingIntervention = msg.id ? response?.pending_intervention?.[msg.id] || {} : {}
+            msg.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
+              ...intervention,
+              execution_id: pendingIntervention.execution_id,
+            }))
             msg.status = msg.role === 'user' ? undefined : msg.status
             return msg
           }))
@@ -358,7 +365,16 @@ const Conversation: FC = () => {
     let currentConversationId: string | null = null
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach((item) => {
-        const { content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as {
+        const {
+          execution_id,
+          node_id,
+          node_name,
+          content, conversation_id: curId, audio_url, citations, suggested_questions, error,
+          rendered_content, form_fields, actions, timeout_at
+        } = item.data as {
+          execution_id: string;
+          node_id: string;
+          node_name: string;
           content: string; conversation_id: string; audio_url?: string;
           citations?: {
             document_id: string;
@@ -368,6 +384,17 @@ const Conversation: FC = () => {
           }[];
           error?: string;
           suggested_questions?: string[];
+          rendered_content?: string;
+          form_fields?: {
+            id: string;
+            default_value?: string;
+          }[]
+          actions?: {
+            id: string;
+            label: string;
+            variant: string;
+          }[];
+          timeout_at?: number;
         }
         switch (item.event) {
           case 'start':
@@ -397,6 +424,61 @@ const Conversation: FC = () => {
           case 'message':
             updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
             if (curId) currentConversationId = curId;
+            break
+          case 'intervention_required':
+            if (streamLoadingRef.current) streamLoadingRef.current = false
+            setChatList(prev => {
+              const lastList = [...prev]
+              const lastIndex = lastList.length - 1
+              const lastMsg = lastList[lastIndex]
+              if (lastMsg?.role === 'assistant') {
+                return [
+                  ...lastList.slice(0, lastIndex),
+                  {
+                    ...lastMsg,
+                    meta_data: {
+                      ...lastMsg.meta_data,
+                      waiting_human: true
+                    },
+                    interventions: [
+                      ...(lastMsg.interventions || []),
+                      {
+                        execution_id,
+                        node_id: node_id,
+                        node_name: node_name,
+                        rendered_content,
+                        form_fields: form_fields || [],
+                        actions: actions || [],
+                        timeout_at,
+                      }
+                    ]
+                  }
+                ]
+              }
+              return prev
+            })
+            break;
+          case 'intervention_timeout':
+            setChatList(prev => {
+              const lastMsg = prev[prev.length - 1]
+              if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+                return prev
+              }
+
+              const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+              lastMsg.interventions[filterIndex] = {
+                ...lastMsg.interventions[filterIndex],
+                resolved_action_id: '__timeout__',
+                resolved_kind: 'timeout'
+              }
+              
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...lastMsg,
+                }
+              ]
+            })
             break
           case 'end':
           case 'workflow_end':
@@ -458,6 +540,219 @@ const Conversation: FC = () => {
         setLoading(false)
         streamLoadingRef.current = false
       })
+  }
+
+  const handleInterventionActionClick = (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
+    if (!execution_id || !node_id || !shareToken) {
+      return
+    }
+    const data = {
+      node_id,
+      action_id: actionId,
+      form_data: fieldValues,
+    }
+    if (loading) {
+      interventionsSubmit(shareToken, execution_id, data)
+        .then(() => {
+          setChatList(prev => {
+            const lastMsg = prev[prev.length - 1]
+            if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+              return prev
+            }
+
+            const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+            lastMsg.interventions[filterIndex] = {
+              ...lastMsg.interventions[filterIndex],
+              resolved_action_id: actionId,
+            }
+            
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...lastMsg,
+              }
+            ]
+          })
+        })
+    } else {
+      let currentConversationId: string | null = null
+      const handleStreamMessage = (data: SSEMessage[]) => {
+        data.forEach((item) => {
+          const {
+            execution_id,
+            node_id: nodeId,
+            node_name,
+            content, conversation_id: curId, audio_url, citations, suggested_questions, error,
+            rendered_content, form_fields, actions, timeout_at
+          } = item.data as {
+            execution_id: string;
+            node_id: string;
+            node_name: string;
+            content: string; conversation_id: string; audio_url?: string;
+            citations?: {
+              document_id: string;
+              file_name: string;
+              knowledge_id: string;
+              score: string;
+            }[];
+            error?: string;
+            suggested_questions?: string[];
+            rendered_content?: string;
+            form_fields?: {
+              id: string;
+              default_value?: string;
+            }[]
+            actions?: {
+              id: string;
+              label: string;
+              variant: string;
+            }[];
+            timeout_at?: number;
+          }
+          switch (item.event) {
+            case 'start':
+              setChatList(prev => {
+                const lastMsg = prev[prev.length - 1]
+                if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+                  return prev
+                }
+
+                const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+                lastMsg.interventions[filterIndex] = {
+                  ...lastMsg.interventions[filterIndex],
+                  resolved_form_data: fieldValues,
+                  resolved_action_id: actionId,
+                }
+                
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...lastMsg,
+                  }
+                ]
+              })
+              break
+            case 'reasoning':
+              updateAssistantReasoningMessage(content)
+              if (curId) currentConversationId = curId;
+              break
+            case 'message':
+              setChatList(prev => {
+                const lastMsg = prev[prev.length - 1]
+                if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+                  return prev
+                }
+                
+                // 找到最后一条 intervention 并更新其 form_fields 的 default_value
+                const updatedInterventions = [
+                  ...lastMsg.interventions.slice(0, -1),
+                  {
+                    ...lastMsg.interventions[lastMsg.interventions.length - 1],
+                    resolved_form_data: fieldValues,
+                    resolved_action_id: actionId,
+                  }
+                ]
+
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...lastMsg,
+                    interventions: updatedInterventions,
+                    meta_data: {
+                      ...lastMsg.meta_data,
+                      waiting_human: false
+                    }
+                  }
+                ]
+              })
+              updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
+              if (curId) currentConversationId = curId;
+              break
+            case 'intervention_required':
+              if (streamLoadingRef.current) streamLoadingRef.current = false
+              setChatList(prev => {
+                const lastList = [...prev]
+                const lastIndex = lastList.length - 1
+                const lastMsg = lastList[lastIndex]
+                if (lastMsg?.role === 'assistant') {
+                  return [
+                    ...lastList.slice(0, lastIndex),
+                    {
+                      ...lastMsg,
+                      meta_data: {
+                        ...lastMsg.meta_data,
+                        waiting_human: true
+                      },
+                      interventions: [
+                        ...(lastMsg.interventions || []),
+                        {
+                          execution_id,
+                          node_id: nodeId,
+                          node_name: node_name,
+                          rendered_content,
+                          form_fields: form_fields || [],
+                          actions: actions || [],
+                          timeout_at,
+                        }
+                      ]
+                    }
+                  ]
+                }
+                return prev
+              })
+              break;
+            case 'intervention_timeout':
+              setChatList(prev => {
+                const lastMsg = prev[prev.length - 1]
+                if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+                  return prev
+                }
+
+                const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === nodeId)
+                lastMsg.interventions[filterIndex] = {
+                  ...lastMsg.interventions[filterIndex],
+                  resolved_action_id: '__timeout__',
+                  resolved_kind: 'timeout'
+                }
+                
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...lastMsg,
+                  }
+                ]
+              })
+              break
+            case 'end':
+            case 'workflow_end':
+              if (audio_url) {
+                updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error)
+                const { file_id } = item.data as { file_id?: string }
+                const idToPoll = file_id || audio_url || ''
+                const fileId = audio_url.split('/').pop()
+                if (fileId && idToPoll) {
+                  startAudioPolling(audio_url, idToPoll)
+                }
+              } else {
+                getHistory(true)
+                if (currentConversationId && currentConversationId !== conversation_id) {
+                  setConversationId(currentConversationId)
+                }
+              }
+              if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
+                updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)
+              }
+              setLoading(false)
+              getHistory(true)
+              if (currentConversationId && currentConversationId !== conversation_id) {
+                setConversationId(currentConversationId)
+              }
+              break
+          }
+        })
+      };
+      interventionsResumeSubmit(shareToken, execution_id, data, handleStreamMessage)
+    }
   }
 
   const handleChangeMemory = () => {
@@ -559,6 +854,7 @@ const Conversation: FC = () => {
                 setFileList(list || [])
                 toolbarRef.current?.setFiles(list || [])
               }}
+              handleInterventionActionClick={handleInterventionActionClick}
             >
               <ChatToolbar
                 ref={toolbarRef}
@@ -700,7 +996,7 @@ const Conversation: FC = () => {
       })
   }
 
-  console.log(chatList)
+  console.log('chatList', chatList, loading)
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
       <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
@@ -774,6 +1070,7 @@ const Conversation: FC = () => {
             }}
             isSupportTools={true}
             handleFeedback={handleFeedback}
+            handleInterventionActionClick={handleInterventionActionClick}
           >
           <ChatToolbar
             ref={toolbarRef}

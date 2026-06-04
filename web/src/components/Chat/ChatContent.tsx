@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:31:53
+ * @Last Modified time: 2026-06-04 15:28:45
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps, ChatItem } from './types'
 import MessageFiles from './MessageFiles'
+import InterventionList from './InterventionList'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -38,6 +39,7 @@ const ChatContent: FC<ChatContentProps> = ({
   assistantIcon,
   isSupportTools = false,
   handleFeedback,
+  handleInterventionActionClick,
 }) => {
   const { t } = useTranslation()
   // Scroll container reference for controlling auto-scroll to bottom
@@ -47,6 +49,8 @@ const ChatContent: FC<ChatContentProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [expandedReasoning, setExpandedReasoning] = useState<Set<number>>(new Set())
   const [manualToggledReasoning, setManualToggledReasoning] = useState<Set<number>>(new Set())
+  const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
+  const [manualToggledInterventions, setManualToggledInterventions] = useState<Set<string>>(new Set())
 
   const toggleReasoning = (index: number) => {
     setManualToggledReasoning(prev => new Set(prev).add(index))
@@ -55,6 +59,23 @@ const ChatContent: FC<ChatContentProps> = ({
       next.has(index) ? next.delete(index) : next.add(index)
       return next
     })
+  }
+
+  const toggleIntervention = (messageIndex: number, interventionIndex: number) => {
+    const key = `${messageIndex}-${interventionIndex}`
+    setManualToggledInterventions(prev => new Set(prev).add(key))
+    setExpandedInterventions(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  const isInterventionExpanded = (messageIndex: number, interventionIndex: number, resolved_action_id?: string) => {
+    const key = `${messageIndex}-${interventionIndex}`
+    if (manualToggledInterventions.has(key)) return expandedInterventions.has(key)
+    // 如果有 resolved_action_id，默认收起；否则默认展开
+    return !resolved_action_id
   }
 
   const isReasoningExpanded = (index: number) => {
@@ -143,6 +164,9 @@ const ChatContent: FC<ChatContentProps> = ({
       ? item.content
         : errorDesc ?? ''
   }
+  const onActionClick = (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
+    handleInterventionActionClick?.(actionId, fieldValues, execution_id, node_id)
+  }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
@@ -178,7 +202,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       {/* Message bubble */}
                       <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
                         // Error message style (content is null and not assistant message)
-                        'rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
+                        'rb:text-[#FF5D34]': (item.status && !['completed', 'paused', 'running'].includes(item.status as string)) || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
                         // Assistant message style
                         'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
                         'rb:max-w-full rb:w-full': item.role === 'assistant',
@@ -214,7 +238,9 @@ const ChatContent: FC<ChatContentProps> = ({
                                 ></div>
                             </Flex>
                             </Flex>
-                          {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
+                            {isReasoningExpanded(index) &&
+                              <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />
+                            }
                           </div>
                         }
                         {(item.status || typeof item.meta_data?.error === 'string') &&
@@ -224,6 +250,15 @@ const ChatContent: FC<ChatContentProps> = ({
                           })}></div>
                         }
                         {item.subContent && renderRuntime && renderRuntime(item, index)}
+                        {item.interventions && item.interventions.length > 0 && (
+                          <InterventionList
+                            interventions={item.interventions}
+                            messageIndex={index}
+                            isExpanded={isInterventionExpanded}
+                            toggle={toggleIntervention}
+                            onActionClick={onActionClick}
+                          />
+                        )}
                         {/* Render message content using Markdown component */}
                         <Markdown
                           content={formatContent(item)}

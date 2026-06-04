@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:17:40
+ * @Last Modified time: 2026-06-02 15:21:00
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -307,6 +307,36 @@ export const nodeLibrary: NodeLibrary[] = [
             isArray: false,
             titleVariant: 'borderless',
             placeholder: 'common.pleaseEnter'
+          }
+        }
+      },
+      // 人工介入
+      { type: "human-intervention", icon: 'rb:bg-[url("@/assets/images/workflow/human-intervention.svg")]',
+        config: {
+          delivery_method: {
+            type: 'define',
+            defaultValue: []
+          },
+          content: {
+            type: 'messageEditor',
+            isArray: false,
+            titleVariant: 'borderless',
+            placeholder: 'common.pleaseEnter'
+          },
+          actions: {
+            type: 'define',
+            defaultValue: []
+          },
+          timeout: {
+            type: 'timeout',
+            defaultValue: {
+              unit: 'days', // day, hour, minute, second
+              value: 3
+            }
+          },
+          form_fields: {
+            type: 'define',
+            defaultValue: []
           }
         }
       },
@@ -898,6 +928,25 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: [
         defaultPortItems[0],
         ...(['分类1', '分类2'].map((_text, index) => ({
+          group: 'right',
+          id: `CASE${index + 1}`,
+          args: {
+            ...portArgs,
+            y: portItemArgsY * index + conditionNodePortItemArgsY,
+          },
+        }))),
+      ],
+    },
+  },
+  'human-intervention': {
+    width: nodeWidth,
+    height: conditionNodeHeight,
+    shape: 'condition-node',
+    ports: {
+      groups: defaultAbsolutePortGroups,
+      items: [
+        defaultPortItems[0],
+        ...(['TIMEOUT'].map((_text, index) => ({
           group: 'right',
           id: `CASE${index + 1}`,
           args: {

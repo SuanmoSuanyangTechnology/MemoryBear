@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:36:31
+ * @Last Modified time: 2026-06-04 15:34:33
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -43,6 +43,7 @@ import MappingList from "./MappingList";
 import ErrorHandle from './ErrorHandle'
 import SingleNodeRun from '../SingleNodeRun'
 import { cannotRunNodes } from '../../constant'
+import HumanIntervention from './HumanIntervention'
 
 /**
  * Props for Properties component
@@ -368,6 +369,7 @@ const Properties: FC<PropertiesProps> = ({
 
     if ((nodeType === 'parameter-extractor' && key === 'prompt')
       || (nodeType === 'question-classifier' && key === 'user_supplement_prompt')
+      || nodeType === 'human-intervention'
     ) {
       const allList = addParentIterationVars(variableList);
       let filteredList: Suggestion[] = []
@@ -602,7 +604,13 @@ const Properties: FC<PropertiesProps> = ({
           <Form.Item name="id" label="ID">
             <Input disabled />
           </Form.Item>
-          {selectedNode?.data?.type === 'list-operator'
+          {selectedNode?.data?.type === 'human-intervention'
+            ? <HumanIntervention
+                options={getFilteredVariableList(selectedNode?.data?.type)}
+                selectedNode={selectedNode}
+                graphRef={graphRef}
+              />
+            : selectedNode?.data?.type === 'list-operator'
             ? <ListOperator
               options={variableList}
               selectedNode={selectedNode} 
@@ -951,7 +959,6 @@ const Properties: FC<PropertiesProps> = ({
                                                 baseVariableList.forEach((variable) => {
                                                   if (variable.children?.length) {
                                                     const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
-                                                    console.log('filteredChildren', filteredChildren)
                                                     if (filteredChildren.length > 0) {
                                                       list.push({ ...variable, children: filteredChildren });
                                                     } else if (types.includes(variable.dataType)) {

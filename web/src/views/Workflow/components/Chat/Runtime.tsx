@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 14:29:25
+ * @Last Modified time: 2026-06-04 15:33:22
  */
 /*
  * Runtime Component
@@ -19,7 +19,7 @@ import { type FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
 import { App, Button, Collapse, Flex } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, RightOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, RightOutlined, ArrowLeftOutlined, PauseCircleFilled } from '@ant-design/icons'
 import copy from 'copy-to-clipboard'
 
 import styles from './chat.module.css'
@@ -63,7 +63,13 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
    * @returns Tailwind CSS class for appropriate color
    */
   const getStatus = (status?: string) => {
-    return status === 'completed' ? 'rb:text-[#369F21]!' : status === 'failed' ? 'rb:text-[#FF5D34]!' : 'rb:text-[#5B6167]!'
+    return status === 'completed'
+      ? 'rb:text-[#369F21]!'
+      : status === 'failed'
+      ? 'rb:text-[#FF5D34]!'
+      : status === 'paused'
+      ? 'rb:text-[#FF5D34]!'
+      : 'rb:text-[#5B6167]!'
   }
 
   /**
@@ -155,6 +161,8 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
                       ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
                       : vo.status === 'failed'
                       ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
+                      : vo.status === 'paused'
+                      ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
                       : <LoadingOutlined className={`rb:mr-1 ${getStatus(vo.status)}`} />
                     }
                   </Flex>
@@ -242,6 +250,8 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
             ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
             : item.status === 'failed'
             ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
+            : item.status === 'paused'
+            ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
             : <LoadingOutlined className={`rb:mr-1 ${getStatus(item.status)}`} />
           }
           {t(`application.${source}`)}

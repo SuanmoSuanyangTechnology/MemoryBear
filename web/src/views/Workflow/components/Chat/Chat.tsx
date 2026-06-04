@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 13:35:55
+ * @Last Modified time: 2026-06-04 15:19:21
  */
 /**
  * Workflow Chat Component
@@ -27,7 +27,7 @@ import { App, Flex } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
-import { draftRun } from '@/api/application';
+import { draftRun, appInterventionsSubmit } from '@/api/application';
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
@@ -65,7 +65,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
-
+  console.log('chatList', chatList)
   /**
    * Opens the chat drawer and loads workflow variables from the start node
    */
@@ -183,7 +183,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
+        const {
+          execution_id,
+          content, conversation_id, node_id, node_name, cycle_id, cycle_idx,
+          input, output, process, error, elapsed_time, status, citations,
+          rendered_content, form_fields, actions, timeout_at,
+        } = item.data as {
+          execution_id?: string;
           content: string;
           conversation_id: string | null;
           cycle_id: string;
@@ -197,13 +203,24 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed' | 'running',
+          status?: 'completed' | 'failed' | 'running' | 'paused',
           citations?: {
             document_id: string;
             file_name: string;
             knowledge_id: string;
             score: string;
+          }[];
+          rendered_content?: string;
+          form_fields?: {
+            id: string;
+            default_value?: string;
           }[]
+          actions?: {
+            id: string;
+            label: string;
+            variant: string;
+          }[];
+          timeout_at?: number;
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
@@ -222,6 +239,84 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                 }
               }
               return newList
+            })
+            break
+          case 'intervention_required':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                const newSubContent = newList[lastIndex].subContent || []
+                const filterIndex = newSubContent.findIndex(vo => vo.id === node_id)
+                if (filterIndex > -1) {
+                  newSubContent[filterIndex] = {
+                    ...newSubContent[filterIndex],
+                    node_id: node_id,
+                    node_name: name,
+                    node_type: type,
+                    icon,
+                    status: 'paused',
+                    content: {},
+                  }
+                } else {
+                  newSubContent.push({
+                    id: node_id,
+                    node_id: node_id,
+                    node_name: name,
+                    node_type: type,
+                    icon,
+                    status: 'paused',
+                    content: {},
+                    meta_data: {
+                      waiting_human: true,
+                    },
+                  })
+                }
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  status: 'paused',
+                  subContent: newSubContent,
+                  meta_data: {
+                    ...newList[lastIndex].meta_data,
+                    waiting_human: true
+                  },
+                  interventions: [
+                    ...(newList[lastIndex].interventions || []),
+                    {
+                      execution_id,
+                      node_id: node_id,
+                      node_name: node_name || name,
+                      rendered_content,
+                      form_fields: form_fields || [],
+                      actions: actions || [],
+                      timeout_at,
+                    }
+                  ]
+                }
+              }
+              return newList
+            })
+            break;
+          case 'intervention_timeout':
+            setChatList(prev => {
+              const lastMsg = prev[prev.length - 1]
+              if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+                return prev
+              }
+
+              const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+              lastMsg.interventions[filterIndex] = {
+                ...lastMsg.interventions[filterIndex],
+                resolved_action_id: '__timeout__',
+                resolved_kind: 'timeout'
+              }
+              
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...lastMsg,
+                }
+              ]
             })
             break
           // Track node execution start
@@ -255,6 +350,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                 }
                 newList[lastIndex] = {
                   ...newList[lastIndex],
+                  status: 'running',
                   subContent: newSubContent
                 }
               }
@@ -428,6 +524,40 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     toolbarRef.current?.setFiles([...list || []])
   }
 
+  const handleInterventionActionClick = async (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
+    if (!execution_id || !node_id) {
+      return
+    }
+    const data = {
+      node_id,
+      action_id: actionId,
+      form_data: fieldValues,
+    }
+    appInterventionsSubmit(appId, execution_id, data)
+      .then(() => {
+        setChatList(prev => {
+          const lastMsg = prev[prev.length - 1]
+          if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+            return prev
+          }
+
+          const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+          lastMsg.interventions[filterIndex] = {
+            ...lastMsg.interventions[filterIndex],
+            resolved_form_data: fieldValues,
+            resolved_action_id: actionId,
+          }
+          
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...lastMsg,
+            }
+          ]
+        })
+      })
+  }
+
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -481,6 +611,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           return <Runtime item={item} index={index} source="workflow" />
         }}
         onSend={handleSend}
+        handleInterventionActionClick={handleInterventionActionClick}
       />
       <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
         <ChatInput
