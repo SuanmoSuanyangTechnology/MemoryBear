@@ -1,8 +1,8 @@
-import datetime
 import uuid
 from sqlalchemy import Column, Integer, String, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class KnowledgeMetadata(Base):
@@ -15,8 +15,8 @@ class KnowledgeMetadata(Base):
     name = Column(String(255), nullable=False, comment="字段名")
     created_by = Column(UUID(as_uuid=True), comment="创建人")
     updated_by = Column(UUID(as_uuid=True), comment="更新人")
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     __table_args__ = (
         UniqueConstraint('knowledge_id', 'name', name='uq_knowledge_metadata_name'),
@@ -32,7 +32,7 @@ class KnowledgeMetadataBinding(Base):
     metadata_id = Column(UUID(as_uuid=True), nullable=False, comment="元数据定义ID")
     document_id = Column(UUID(as_uuid=True), nullable=False, comment="文档ID")
     created_by = Column(UUID(as_uuid=True), comment="创建人")
-    created_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
 
     __table_args__ = (
         UniqueConstraint('knowledge_id', 'metadata_id', 'document_id', name='uq_knowledge_metadata_binding'),

@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 from enum import StrEnum
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 
 FIELD_NAME_PATTERN = r"^[a-z][a-z0-9_]*$"
@@ -59,13 +60,13 @@ class KnowledgeMetadataResponse(BaseModel):
     def _serialize_created_at(self, dt: datetime.datetime | int | None):
         if isinstance(dt, int):
             return dt
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime | int | None):
         if isinstance(dt, int):
             return dt
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     model_config = ConfigDict(from_attributes=True)
 

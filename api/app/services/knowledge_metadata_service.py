@@ -1,8 +1,8 @@
-import datetime
 import uuid
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
+from app.core.utils.datetime_utils import parse_iso_to_utc_naive, utcnow_naive
 from app.core.exceptions import (
     BusinessException,
     ResourceNotFoundException,
@@ -243,7 +243,7 @@ class KnowledgeMetadataService:
                 doc.meta_data = doc.meta_data or {}
                 doc.meta_data.update(metadata)
                 flag_modified(doc, "meta_data")
-                doc.updated_at = datetime.datetime.now()
+                doc.updated_at = utcnow_naive()
 
                 for field_name in metadata.keys():
                     field_def = field_defs[field_name]
@@ -314,7 +314,7 @@ class KnowledgeMetadataService:
         doc.meta_data = doc.meta_data or {}
         doc.meta_data.update(metadata)
         flag_modified(doc, "meta_data")
-        doc.updated_at = datetime.datetime.now()
+        doc.updated_at = utcnow_naive()
 
         # 5. 创建/更新绑定记录
         for field_name in metadata.keys():
@@ -446,8 +446,7 @@ class KnowledgeMetadataService:
                 if not isinstance(value, str):
                     return False
                 try:
-                    datetime.datetime.strptime(value, "%Y-%m-%d %H:%M")
-                    return True
+                    return parse_iso_to_utc_naive(value) is not None
                 except ValueError:
                     return False
             case _:

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.utils.datetime_utils import parse_iso_to_utc_naive
 from app.models.document_model import Document
 from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy, _escape_like
 from .builtin_resolver import BuiltinFieldResolver
@@ -170,12 +171,13 @@ class MetadataFilterEngine:
 
     def _build_time_column_filter(self, column_name: str, operator: str, value: Any):
         from sqlalchemy import DateTime, func, literal
-        from datetime import datetime
         col = getattr(Document, column_name)
         dt = None
         if operator in ("eq", "before", "after"):
             try:
-                dt = datetime.fromisoformat(str(value))
+                dt = parse_iso_to_utc_naive(str(value))
+                if dt is None:
+                    raise ValueError
             except ValueError as exc:
                 raise BusinessException(
                     "时间字段过滤参数必须为 ISO 时间格式，例如: 2024-12-31T23:59:59",

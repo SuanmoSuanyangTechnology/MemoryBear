@@ -3,6 +3,7 @@ from typing import Any
 from sqlalchemy import or_, and_, cast, func, DateTime, Numeric, String
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.utils.datetime_utils import parse_iso_to_utc_naive
 from app.models.document_model import Document
 
 
@@ -112,13 +113,14 @@ class TimeFilterStrategy(FilterStrategy):
     supported_operators = ["eq", "before", "after", "is_empty", "not_empty"]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        from datetime import datetime
         from sqlalchemy import literal
         col = cast(Document.meta_data[field_name].astext, DateTime)
         dt = None
         if operator in ("eq", "before", "after"):
             try:
-                dt = datetime.fromisoformat(str(value))
+                dt = parse_iso_to_utc_naive(str(value))
+                if dt is None:
+                    raise ValueError
             except ValueError as exc:
                 raise BusinessException(
                     "时间字段过滤参数必须为 ISO 时间格式，例如: 2024-12-31T23:59:59",
