@@ -12,6 +12,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.core.workflow.node_cache import normalize_cache_value, WorkflowNodeCacheManager
 from app.core.workflow.utils.secret_masker import mask_secrets
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
@@ -27,6 +28,7 @@ from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
 from app.models import App, AppRelease
@@ -35,7 +37,8 @@ from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
-    WorkflowNodeExecutionRepository
+    WorkflowNodeExecutionRepository,
+    WorkflowNodeCacheRepository,
 )
 from app.schemas import DraftRunRequest, FileInput, FileType
 from app.services.annotation_service import AnnotationService
@@ -54,6 +57,7 @@ class WorkflowService:
         self.config_repo = WorkflowConfigRepository(db)
         self.execution_repo = WorkflowExecutionRepository(db)
         self.node_execution_repo = WorkflowNodeExecutionRepository(db)
+        self.node_cache_repo = WorkflowNodeCacheRepository(db)
         self.conversation_service = ConversationService(db)
         self.multimodal_service = MultimodalService(db)
 
@@ -927,6 +931,516 @@ class WorkflowService:
         return value
 
     @staticmethod
+    def _normalize_variable_type_name(var_type: Any) -> str:
+        if isinstance(var_type, VariableType):
+            return var_type.value
+        if isinstance(var_type, str) and var_type:
+            if var_type == "secret":
+                return VariableType.STRING.value
+            return var_type
+        return VariableType.ANY.value
+
+    @staticmethod
+    def _infer_variable_type_name(value: Any) -> str:
+        try:
+            return VariableType.type_map(value).value
+        except Exception:
+            return VariableType.ANY.value
+
+    @classmethod
+    def _build_typed_variable(cls, value: Any, var_type: Any = None) -> dict[str, Any]:
+        serialized_value = cls._serialize_execution_value(value)
+        type_name = cls._normalize_variable_type_name(var_type)
+        if type_name == VariableType.ANY.value:
+            type_name = cls._infer_variable_type_name(serialized_value)
+        return {
+            "type": type_name,
+            "value": serialized_value,
+        }
+
+    @staticmethod
+    def _is_typed_variable_payload(value: Any) -> bool:
+        return (
+            isinstance(value, dict)
+            and "type" in value
+            and "value" in value
+            and isinstance(value.get("type"), str)
+            and value["type"] in {item.value for item in VariableType}
+        )
+
+    @classmethod
+    def _normalize_typed_group(
+            cls,
+            raw_group: Any,
+            *,
+            type_map: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(raw_group, dict):
+            return {}
+        normalized: dict[str, Any] = {}
+        for name, value in raw_group.items():
+            if cls._is_typed_variable_payload(value):
+                normalized[name] = cls._build_typed_variable(
+                    value=value.get("value"),
+                    var_type=value.get("type"),
+                )
+                continue
+            normalized[name] = cls._build_typed_variable(
+                value=value,
+                var_type=(type_map or {}).get(name),
+            )
+        return normalized
+
+    @classmethod
+    def _unwrap_typed_variable(cls, value: Any) -> Any:
+        if cls._is_typed_variable_payload(value):
+            return cls._serialize_execution_value(value.get("value"))
+        return cls._serialize_execution_value(value)
+
+    @classmethod
+    def _unwrap_typed_group(cls, raw_group: Any) -> dict[str, Any]:
+        if not isinstance(raw_group, dict):
+            return {}
+        return {
+            name: cls._unwrap_typed_variable(value)
+            for name, value in raw_group.items()
+        }
+
+    @classmethod
+    def _merge_typed_group(cls, base_group: Any, overlay_group: Any) -> dict[str, Any]:
+        merged = dict(base_group or {}) if isinstance(base_group, dict) else {}
+        if isinstance(overlay_group, dict):
+            for name, value in overlay_group.items():
+                merged[name] = value
+        return merged
+
+    @classmethod
+    def _merge_execution_snapshots(
+            cls,
+            base_snapshot: dict[str, Any],
+            overlay_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged_nodes = dict(base_snapshot.get("nodes") or {})
+        for node_id, node_group in (overlay_snapshot.get("nodes") or {}).items():
+            merged_nodes[node_id] = cls._merge_typed_group(merged_nodes.get(node_id), node_group)
+
+        return {
+            "system": cls._merge_typed_group(
+                base_snapshot.get("system"),
+                overlay_snapshot.get("system"),
+            ),
+            "conversation": cls._merge_typed_group(
+                base_snapshot.get("conversation"),
+                overlay_snapshot.get("conversation"),
+            ),
+            "environment": cls._merge_typed_group(
+                base_snapshot.get("environment"),
+                overlay_snapshot.get("environment"),
+            ),
+            "nodes": merged_nodes,
+        }
+
+    @staticmethod
+    def _get_execution_source(execution: WorkflowExecution | None) -> str:
+        if not execution:
+            return "workflow_execution"
+        meta_data = execution.meta_data or {}
+        return meta_data.get("source", "workflow_execution")
+
+    def _find_latest_base_execution(
+            self,
+            app_id: uuid.UUID,
+            *,
+            exclude_execution_id: str | None = None,
+    ) -> WorkflowExecution | None:
+        executions = self.execution_repo.get_by_app_id(app_id, limit=50, offset=0)
+        for execution in executions:
+            if exclude_execution_id and execution.execution_id == exclude_execution_id:
+                continue
+            if self._get_execution_source(execution) == "single_node_debug":
+                continue
+            if not isinstance(execution.output_data, dict):
+                continue
+            return execution
+        return None
+
+    def _resolve_base_execution(
+            self,
+            *,
+            app_id: uuid.UUID,
+            explicit_execution_id: str | None = None,
+            debug_execution: WorkflowExecution | None = None,
+    ) -> WorkflowExecution | None:
+        candidate: WorkflowExecution | None = None
+        if explicit_execution_id:
+            candidate = self.get_execution(explicit_execution_id)
+            if not candidate or candidate.app_id != app_id:
+                raise BusinessException("基准执行不存在", BizCode.NOT_FOUND)
+        elif debug_execution:
+            stored_execution_id = (debug_execution.meta_data or {}).get("base_execution_id")
+            if stored_execution_id:
+                candidate = self.get_execution(stored_execution_id)
+                if candidate and candidate.app_id != app_id:
+                    candidate = None
+
+        if candidate and self._get_execution_source(candidate) == "single_node_debug":
+            nested_execution_id = (candidate.meta_data or {}).get("base_execution_id")
+            if nested_execution_id and nested_execution_id != candidate.execution_id:
+                nested_execution = self.get_execution(nested_execution_id)
+                if nested_execution and nested_execution.app_id == app_id:
+                    candidate = nested_execution
+
+        if candidate:
+            return candidate
+
+        return self._find_latest_base_execution(
+            app_id,
+            exclude_execution_id=debug_execution.execution_id if debug_execution else None,
+        )
+
+    @staticmethod
+    def _coerce_variable_type(var_type: Any, value: Any = None) -> VariableType:
+        if isinstance(var_type, VariableType):
+            return var_type
+        if isinstance(var_type, str):
+            try:
+                return VariableType(var_type)
+            except ValueError:
+                pass
+        try:
+            return VariableType.type_map(value)
+        except Exception:
+            return VariableType.ANY
+
+    @staticmethod
+    def _build_conversation_variable_type_map(variables: list[dict[str, Any]] | None) -> dict[str, str]:
+        return {
+            item.get("name"): item.get("type", VariableType.STRING.value)
+            for item in (variables or [])
+            if item.get("name")
+        }
+
+    @staticmethod
+    def _build_system_variable_type_map() -> dict[str, str]:
+        return {
+            "conversation_index": VariableType.NUMBER.value,
+            "conversation_id": VariableType.STRING.value,
+            "execution_id": VariableType.STRING.value,
+            "workspace_id": VariableType.STRING.value,
+            "user_id": VariableType.STRING.value,
+            "input_variables": VariableType.OBJECT.value,
+            "files": VariableType.ARRAY_FILE.value,
+            "trigger": VariableType.OBJECT.value,
+            "trigger_payload": VariableType.OBJECT.value,
+            "message": VariableType.STRING.value,
+        }
+
+    @classmethod
+    def _build_missing_typed_variable(cls, var_type: Any) -> dict[str, Any]:
+        type_name = cls._normalize_variable_type_name(var_type)
+        if type_name == VariableType.FILE.value:
+            default_value = None
+        elif type_name == VariableType.ANY.value:
+            default_value = None
+        else:
+            default_value = cls._serialize_execution_value(DEFAULT_VALUE(VariableType(type_name)))
+        return {
+            "type": type_name,
+            "value": default_value,
+        }
+
+    @classmethod
+    def _build_node_variable_type_maps(
+            cls,
+            nodes: list[dict[str, Any]] | None,
+    ) -> dict[str, dict[str, str]]:
+        result: dict[str, dict[str, str]] = {}
+        for node in nodes or []:
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            if node.get("type") != NodeType.START.value:
+                continue
+            config = node.get("config") or {}
+            type_map = {
+                "message": VariableType.STRING.value,
+                "execution_id": VariableType.STRING.value,
+                "conversation_id": VariableType.STRING.value,
+                "workspace_id": VariableType.STRING.value,
+                "user_id": VariableType.STRING.value,
+            }
+            for item in config.get("variables") or []:
+                name = item.get("name")
+                if not name:
+                    continue
+                type_map[name] = cls._normalize_variable_type_name(item.get("type"))
+            result[node_id] = type_map
+        return result
+
+    @staticmethod
+    def _build_environment_variable_type_map(environment_variables: list[dict[str, Any]] | None) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for item in environment_variables or []:
+            name = item.get("name")
+            if not name:
+                continue
+            value_type = item.get("value_type", VariableType.STRING.value)
+            result[name] = VariableType.NUMBER.value if value_type == "number" else VariableType.STRING.value
+        return result
+
+    @staticmethod
+    def _build_environment_snapshot(environment_variables: list[dict[str, Any]] | None) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for item in environment_variables or []:
+            name = item.get("name")
+            if not name:
+                continue
+            result[name] = item.get("value")
+        return WorkflowService._serialize_execution_value(result)
+
+    def _build_execution_snapshot(
+            self,
+            *,
+            execution: WorkflowExecution,
+            node_executions: list[WorkflowNodeExecution],
+            output_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        conversation_type_map = self._build_conversation_variable_type_map(
+            workflow_config.variables if workflow_config else []
+        )
+        system_type_map = self._build_system_variable_type_map()
+        node_type_maps = self._build_node_variable_type_maps(
+            workflow_config.nodes if workflow_config else []
+        )
+        environment_type_map = self._build_environment_variable_type_map(
+            workflow_config.environment_variables if workflow_config else []
+        )
+        snapshot_data = output_data.get("snapshot") if isinstance(output_data, dict) else {}
+        variables_data = output_data.get("variables") if isinstance(output_data, dict) else {}
+
+        raw_system_vars = snapshot_data.get("system") if isinstance(snapshot_data, dict) else {}
+        raw_conversation_vars = snapshot_data.get("conversation") if isinstance(snapshot_data, dict) else {}
+        raw_environment_vars = snapshot_data.get("environment") if isinstance(snapshot_data, dict) else {}
+        raw_node_vars = snapshot_data.get("nodes") if isinstance(snapshot_data, dict) else {}
+
+        if not raw_system_vars and isinstance(variables_data, dict):
+            raw_system_vars = variables_data.get("sys") or {}
+        if not raw_conversation_vars and isinstance(variables_data, dict):
+            raw_conversation_vars = variables_data.get("conv") or {}
+        if not raw_environment_vars and isinstance(variables_data, dict):
+            raw_environment_vars = variables_data.get("env") or {}
+        if not raw_environment_vars:
+            raw_environment_vars = self._build_environment_snapshot(
+                workflow_config.environment_variables if workflow_config else []
+            )
+
+        ordered_node_vars: dict[str, Any] = {}
+        serialized_raw_node_vars = self._serialize_execution_value(raw_node_vars or {})
+        for node_execution in node_executions:
+            node_id = node_execution.node_id
+            node_type_map = node_type_maps.get(node_id)
+            if node_id in ordered_node_vars:
+                continue
+            if isinstance(serialized_raw_node_vars, dict) and node_id in serialized_raw_node_vars:
+                ordered_node_vars[node_id] = self._normalize_typed_group(
+                    serialized_raw_node_vars[node_id],
+                    type_map=node_type_map,
+                )
+                continue
+            serialized_output = self._serialize_execution_value(node_execution.output_data or {})
+            if isinstance(serialized_output, dict) and "output" in serialized_output:
+                node_value = serialized_output.get("output")
+                if isinstance(node_value, dict):
+                    ordered_node_vars[node_id] = self._normalize_typed_group(
+                        node_value,
+                        type_map=node_type_map,
+                    )
+                else:
+                    ordered_node_vars[node_id] = {
+                        "output": self._build_typed_variable(
+                            node_value,
+                            node_type_map.get("output") if node_type_map else None,
+                        )
+                    }
+            else:
+                if isinstance(serialized_output, dict):
+                    ordered_node_vars[node_id] = self._normalize_typed_group(
+                        serialized_output,
+                        type_map=node_type_map,
+                    )
+                else:
+                    ordered_node_vars[node_id] = {
+                        "output": self._build_typed_variable(
+                            serialized_output,
+                            node_type_map.get("output") if node_type_map else None,
+                        )
+                    }
+
+        if isinstance(serialized_raw_node_vars, dict):
+            for node_id, node_value in serialized_raw_node_vars.items():
+                if node_id not in ordered_node_vars:
+                    ordered_node_vars[node_id] = self._normalize_typed_group(
+                        node_value,
+                        type_map=node_type_maps.get(node_id),
+                    )
+
+        for node_id, type_map in node_type_maps.items():
+            node_vars = ordered_node_vars.setdefault(node_id, {})
+            for var_name, var_type in type_map.items():
+                if var_name not in node_vars:
+                    node_vars[var_name] = self._build_missing_typed_variable(var_type)
+
+        return {
+            "system": self._normalize_typed_group(
+                raw_system_vars or {},
+                type_map=system_type_map,
+            ),
+            "conversation": self._normalize_typed_group(
+                raw_conversation_vars or {},
+                type_map=conversation_type_map,
+            ),
+            "environment": self._normalize_typed_group(
+                raw_environment_vars or {},
+                type_map=environment_type_map,
+            ),
+            "nodes": ordered_node_vars,
+        }
+
+    def _build_execution_snapshot_from_record(self, execution: WorkflowExecution) -> dict[str, Any]:
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        return self._build_execution_snapshot(
+            execution=execution,
+            node_executions=node_executions,
+            output_data=output_data if isinstance(output_data, dict) else {},
+        )
+
+    def _extract_execution_messages(self, execution: WorkflowExecution | None) -> list[dict[str, Any]]:
+        if not execution or not isinstance(execution.output_data, dict):
+            return []
+        messages = self._serialize_execution_value(execution.output_data.get("messages") or [])
+        return messages if isinstance(messages, list) else []
+
+    def _extract_execution_node_outputs(self, execution: WorkflowExecution | None) -> dict[str, Any]:
+        if not execution or not isinstance(execution.output_data, dict):
+            return {}
+        node_outputs = self._serialize_execution_value(execution.output_data.get("node_outputs") or {})
+        return node_outputs if isinstance(node_outputs, dict) else {}
+
+    async def _restore_snapshot_group_to_variable_pool(
+            self,
+            *,
+            variable_pool,
+            namespace: str,
+            raw_group: Any,
+            mut: bool,
+            skip_keys: set[str] | None = None,
+    ) -> None:
+        if not isinstance(raw_group, dict):
+            return
+        for name, typed_value in raw_group.items():
+            if skip_keys and name in skip_keys:
+                continue
+            resolved_type = self._coerce_variable_type(
+                typed_value.get("type") if self._is_typed_variable_payload(typed_value) else None,
+                self._unwrap_typed_variable(typed_value),
+            )
+            resolved_value = self._unwrap_typed_variable(typed_value)
+            if resolved_value is None:
+                if resolved_type == VariableType.FILE:
+                    continue
+                if resolved_type != VariableType.ANY:
+                    resolved_value = DEFAULT_VALUE(resolved_type)
+            await variable_pool.new(
+                namespace=namespace,
+                key=name,
+                value=resolved_value,
+                var_type=resolved_type,
+                mut=mut,
+            )
+
+    async def _restore_variable_pool_from_snapshot(
+            self,
+            *,
+            variable_pool,
+            snapshot: dict[str, Any] | None,
+    ) -> None:
+        if not isinstance(snapshot, dict):
+            return
+        await self._restore_snapshot_group_to_variable_pool(
+            variable_pool=variable_pool,
+            namespace="sys",
+            raw_group=snapshot.get("system"),
+            mut=False,
+            skip_keys={"execution_id", "workspace_id", "user_id"},
+        )
+        await self._restore_snapshot_group_to_variable_pool(
+            variable_pool=variable_pool,
+            namespace="conv",
+            raw_group=snapshot.get("conversation"),
+            mut=True,
+        )
+        await self._restore_snapshot_group_to_variable_pool(
+            variable_pool=variable_pool,
+            namespace="env",
+            raw_group=snapshot.get("environment"),
+            mut=False,
+        )
+        for node_id, group in (snapshot.get("nodes") or {}).items():
+            await self._restore_snapshot_group_to_variable_pool(
+                variable_pool=variable_pool,
+                namespace=node_id,
+                raw_group=group,
+                mut=False,
+            )
+
+    async def _apply_input_data_overrides_to_variable_pool(
+            self,
+            *,
+            variable_pool,
+            input_data: dict[str, Any],
+    ) -> None:
+        if input_data.get("message") is not None:
+            await variable_pool.new("sys", "message", input_data.get("message"), VariableType.STRING, mut=False)
+        if input_data.get("files") is not None:
+            await variable_pool.new("sys", "files", input_data.get("files"), VariableType.ARRAY_FILE, mut=False)
+        if input_data.get("trigger") is not None:
+            await variable_pool.new("sys", "trigger", input_data.get("trigger"), VariableType.OBJECT, mut=False)
+        if input_data.get("trigger_payload") is not None:
+            await variable_pool.new(
+                "sys",
+                "trigger_payload",
+                input_data.get("trigger_payload"),
+                VariableType.OBJECT,
+                mut=False,
+            )
+        if input_data.get("conversation_id"):
+            await variable_pool.new(
+                "sys",
+                "conversation_id",
+                input_data.get("conversation_id"),
+                VariableType.STRING,
+                mut=False,
+            )
+        if input_data.get("variables") is not None:
+            await variable_pool.new(
+                "sys",
+                "input_variables",
+                input_data.get("variables") or {},
+                VariableType.OBJECT,
+                mut=False,
+            )
+        for key, value in (input_data.get("conv") or {}).items():
+            await variable_pool.new(
+                "conv",
+                key,
+                value,
+                self._coerce_variable_type(None, value),
+                mut=True,
+            )
+
+    @staticmethod
     def _mask_runtime_secrets(payload: dict[str, Any], variable_pool) -> dict[str, Any]:
         if not variable_pool:
             return payload
@@ -974,6 +1488,33 @@ class WorkflowService:
             "error": payload.get("error"),
             "execution_order": 1,
             "retry_count": 0,
+        }
+
+    @staticmethod
+    def _build_single_node_payload_from_node_output(
+            node_id: str,
+            node_type: str | None,
+            node_output: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "status": node_output.get("status", "completed"),
+            "node_id": node_id,
+            "node_type": node_type,
+            "inputs": node_output.get("input"),
+            "outputs": node_output.get("output"),
+            "process": node_output.get("process"),
+            "token_usage": node_output.get("token_usage"),
+            "elapsed_time": node_output.get("elapsed_time"),
+            "error": node_output.get("error"),
+            "cache_hit": bool(node_output.get("cache_hit", False)),
+            "cache_key": node_output.get("cache_key"),
+        }
+
+    @staticmethod
+    def _attach_debug_execution_id(payload: dict[str, Any], execution_id: str) -> dict[str, Any]:
+        return {
+            **(payload or {}),
+            "execution_id": execution_id,
         }
 
     @staticmethod
@@ -1077,6 +1618,7 @@ class WorkflowService:
             workflow_config: WorkflowConfig,
             node_id: str,
             input_data: dict[str, Any],
+            base_execution_id: str | None = None,
     ) -> WorkflowExecution:
         conversation_id = input_data.get("conversation_id")
         conversation_id_uuid = uuid.UUID(conversation_id) if conversation_id else None
@@ -1093,6 +1635,7 @@ class WorkflowService:
             "debug": True,
             "source": "single_node_debug",
             "node_id": node_id,
+            "base_execution_id": base_execution_id,
         }
         self.db.commit()
         self.db.refresh(execution)
@@ -1140,6 +1683,7 @@ class WorkflowService:
             "token_usage": node_execution.token_usage,
             "retry_count": node_execution.retry_count,
             "cache_hit": node_execution.cache_hit,
+            "cache_key": node_execution.cache_key,
             "started_at": node_execution.started_at,
             "completed_at": node_execution.completed_at,
         }
@@ -1159,62 +1703,257 @@ class WorkflowService:
             config.environment_variables if config else []
         )
         payload = self._serialize_last_node_execution(node_execution)
+        payload["cache"] = self.get_node_cache(app_id=app_id, node_id=node_id)
+        payload["can_rerun_from_last_debug"] = self._has_single_node_debug_input(app_id, node_id)
         return self._mask_payload_with_secret_values(payload, secret_values)
 
-    def get_execution_detail(self, execution_id: str) -> dict[str, Any] | None:
+    @staticmethod
+    def _build_node_cache_manager(
+            *,
+            app_id: uuid.UUID,
+            workflow_config_id: uuid.UUID | None,
+            node_id: str,
+            node_type: str | None,
+            node_name: str | None,
+    ) -> WorkflowNodeCacheManager:
+        return WorkflowNodeCacheManager(
+            app_id=app_id,
+            workflow_config_id=workflow_config_id,
+            node_id=node_id,
+            node_type=node_type or "unknown",
+            node_name=node_name,
+        )
+
+    @staticmethod
+    def _sanitize_cache_result_data(result_data: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(result_data or {})
+        for transient_key in (
+            "cache_hit",
+            "cache_key",
+            "cache_id",
+            "cache_status",
+            "cache_hit_count",
+            "cache_origin_elapsed_time",
+        ):
+            normalized.pop(transient_key, None)
+        normalized.pop("execution_order", None)
+        return normalize_cache_value(normalized)
+
+    @staticmethod
+    def _set_nested_patch_value(target: dict[str, Any], path: str, value: Any) -> None:
+        keys = [item for item in path.split(".") if item]
+        if not keys:
+            raise ValueError("patch path 不能为空")
+        current = target
+        for key in keys[:-1]:
+            nested = current.get(key)
+            if not isinstance(nested, dict):
+                nested = {}
+                current[key] = nested
+            current = nested
+        current[keys[-1]] = normalize_cache_value(value)
+
+    @classmethod
+    def _apply_cache_result_patches(
+            cls,
+            result_data: dict[str, Any],
+            patches: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        merged = cls._sanitize_cache_result_data(result_data)
+        for patch in patches or []:
+            scope = patch.get("scope", "output")
+            selector = patch.get("path") or patch.get("name")
+            if not selector:
+                continue
+            scope_value = merged.get(scope)
+            if selector == "output" and not isinstance(scope_value, dict):
+                merged[scope] = normalize_cache_value(patch.get("value"))
+                continue
+            if not isinstance(scope_value, dict):
+                scope_value = {}
+                merged[scope] = scope_value
+            cls._set_nested_patch_value(scope_value, selector, patch.get("value"))
+        return merged
+
+    @staticmethod
+    def _serialize_node_cache(cache: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not cache:
+            return None
+        return {
+            "id": str(cache["id"]) if cache.get("id") else None,
+            "node_id": cache.get("node_id"),
+            "node_type": cache.get("node_type"),
+            "node_name": cache.get("node_name"),
+            "cache_key": cache.get("cache_key"),
+            "source": cache.get("source"),
+            "status": cache.get("status"),
+            "input_data": cache.get("input_data"),
+            "result_data": cache.get("result_data"),
+            "hit_count": cache.get("hit_count", 0),
+            "last_hit_at": cache.get("last_hit_at"),
+            "expires_at": cache.get("expires_at"),
+            "invalidated_at": cache.get("invalidated_at"),
+            "created_at": cache.get("created_at"),
+            "updated_at": cache.get("updated_at"),
+            "meta_data": cache.get("meta_data") or {},
+        }
+
+    def get_node_cache(self, app_id: uuid.UUID, node_id: str) -> dict[str, Any] | None:
+        config = self.get_workflow_config(app_id)
+        node_name = self._get_node_name_from_config(config, node_id)
+        node_type = next((node.get("type") for node in (config.nodes if config else []) if node.get("id") == node_id), None)
+        manager = self._build_node_cache_manager(
+            app_id=app_id,
+            workflow_config_id=config.id if config else None,
+            node_id=node_id,
+            node_type=node_type,
+            node_name=node_name,
+        )
+        cache = manager.get_latest_cache(include_inactive=False)
+        secret_values = self._extract_secret_values_from_environment_variables(
+            config.environment_variables if config else []
+        )
+        serialized = self._serialize_node_cache(cache)
+        return self._mask_payload_with_secret_values(serialized, secret_values) if serialized else None
+
+    def update_node_cache(
+            self,
+            *,
+            app_id: uuid.UUID,
+            node_id: str,
+            result_data: dict[str, Any] | None = None,
+            patches: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        config = self.get_workflow_config(app_id)
+        if not config:
+            return None
+        node = next((item for item in config.nodes or [] if item.get("id") == node_id), None)
+        if not node:
+            return None
+        manager = self._build_node_cache_manager(
+            app_id=app_id,
+            workflow_config_id=config.id,
+            node_id=node_id,
+            node_type=node.get("type"),
+            node_name=node.get("name"),
+        )
+        latest_cache = manager.get_latest_cache(include_inactive=False)
+        if not latest_cache:
+            return None
+        next_result_data = self._sanitize_cache_result_data(result_data or {})
+        if patches:
+            next_result_data = self._apply_cache_result_patches(
+                latest_cache.get("result_data") or {},
+                patches,
+            )
+        updated = manager.update_latest_cache(
+            result_data=next_result_data,
+        )
+        if not updated:
+            return None
+        serialized = self._serialize_node_cache(updated)
+        secret_values = self._extract_secret_values_from_environment_variables(config.environment_variables)
+        return self._mask_payload_with_secret_values(serialized, secret_values)
+
+    def invalidate_node_cache(self, *, app_id: uuid.UUID, node_id: str) -> int:
+        config = self.get_workflow_config(app_id)
+        node = next((item for item in (config.nodes if config else []) or [] if item.get("id") == node_id), None)
+        manager = self._build_node_cache_manager(
+            app_id=app_id,
+            workflow_config_id=config.id if config else None,
+            node_id=node_id,
+            node_type=node.get("type") if node else None,
+            node_name=node.get("name") if node else None,
+        )
+        return manager.invalidate_latest_cache()
+
+    def _has_single_node_debug_input(self, app_id: uuid.UUID, node_id: str) -> bool:
+        node_execution = self.node_execution_repo.get_latest_by_app_node(
+            app_id=app_id,
+            node_id=node_id,
+            source="single_node_debug",
+        )
+        if not node_execution:
+            return False
+        execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
+        return bool(execution and isinstance(execution.input_data, dict))
+
+    async def rerun_node_from_last_debug(
+            self,
+            *,
+            app_id: uuid.UUID,
+            node_id: str,
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
+            invalidate_cache: bool = False,
+            bypass_cache: bool = False,
+            base_execution_id: str | None = None,
+    ) -> dict[str, Any]:
+        node_execution = self.node_execution_repo.get_latest_by_app_node(
+            app_id=app_id,
+            node_id=node_id,
+            source="single_node_debug",
+        )
+        if not node_execution:
+            raise BusinessException("没有可用于重跑的单节点调试输入", BizCode.NOT_FOUND)
+        execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
+        if not execution or not isinstance(execution.input_data, dict):
+            raise BusinessException("未找到可复用的单节点调试输入", BizCode.NOT_FOUND)
+        if invalidate_cache:
+            self.invalidate_node_cache(app_id=app_id, node_id=node_id)
+        rerun_input = dict(execution.input_data or {})
+        rerun_input["bypass_cache"] = bypass_cache
+        rerun_input["base_execution_id"] = (
+            base_execution_id
+            or rerun_input.get("base_execution_id")
+            or (execution.meta_data or {}).get("base_execution_id")
+        )
+        return await self.run_single_node(
+            app_id=app_id,
+            node_id=node_id,
+            config=config,
+            workspace_id=workspace_id,
+            input_data=rerun_input,
+        )
+
+    def get_execution_detail(
+            self,
+            execution_id: str,
+            app_id: uuid.UUID | None = None,
+    ) -> dict[str, Any] | None:
         execution = self.get_execution(execution_id)
         if not execution:
             return None
+        if app_id and execution.app_id != app_id:
+            return None
 
-        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
-        output_data = self._serialize_execution_value(execution.output_data or {})
-        input_data = self._serialize_execution_value(execution.input_data or {})
-        meta_data = self._serialize_execution_value(execution.meta_data or {})
-        snapshot = {}
-        if isinstance(output_data, dict):
-            snapshot = output_data.get("snapshot") or {}
-
-        return {
+        snapshot = self._build_execution_snapshot_from_record(execution)
+        if self._get_execution_source(execution) == "single_node_debug":
+            base_execution = self._resolve_base_execution(
+                app_id=execution.app_id,
+                debug_execution=execution,
+            )
+            if base_execution and base_execution.execution_id != execution.execution_id:
+                snapshot = self._merge_execution_snapshots(
+                    self._build_execution_snapshot_from_record(base_execution),
+                    snapshot,
+                )
+        payload = {
             "execution_id": execution.execution_id,
             "app_id": str(execution.app_id),
-            "workflow_config_id": str(execution.workflow_config_id),
-            "release_id": str(execution.release_id) if execution.release_id else None,
-            "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
-            "trigger_type": execution.trigger_type,
             "status": execution.status,
-            "input_data": input_data,
-            "output_data": output_data,
             "snapshot": snapshot,
-            "context": self._serialize_execution_value(execution.context or {}),
-            "meta_data": meta_data,
             "error_message": execution.error_message,
             "error_node_id": execution.error_node_id,
             "started_at": to_iso_z(execution.started_at),
             "completed_at": to_iso_z(execution.completed_at),
             "elapsed_time": execution.elapsed_time,
-            "token_usage": self._serialize_execution_value(execution.token_usage),
-            "node_executions": [
-                {
-                    "node_id": node_execution.node_id,
-                    "node_type": node_execution.node_type,
-                    "node_name": node_execution.node_name,
-                    "execution_order": node_execution.execution_order,
-                    "retry_count": node_execution.retry_count,
-                    "status": node_execution.status,
-                    "input_data": self._serialize_execution_value(node_execution.input_data or {}),
-                    "output_data": self._serialize_execution_value(node_execution.output_data or {}),
-                    "error_message": node_execution.error_message,
-                    "started_at": to_iso_z(node_execution.started_at),
-                    "completed_at": to_iso_z(node_execution.completed_at),
-                    "elapsed_time": node_execution.elapsed_time,
-                    "token_usage": self._serialize_execution_value(node_execution.token_usage),
-                    "cache_hit": node_execution.cache_hit,
-                    "cache_key": node_execution.cache_key,
-                    "meta_data": self._serialize_execution_value(node_execution.meta_data or {}),
-                }
-                for node_execution in node_executions
-            ],
         }
+        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        secret_values = self._extract_secret_values_from_environment_variables(
+            workflow_config.environment_variables if workflow_config else []
+        )
+        return self._mask_payload_with_secret_values(payload, secret_values)
 
     def get_executions_by_app(
             self,
@@ -1902,12 +2641,15 @@ class WorkflowService:
 
         # 3. 构建工作流配置字典
         workflow_config_dict = {
+            "app_id": str(app_id),
+            "workflow_config_id": str(config.id),
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
             "environment_variables": config.environment_variables,
             "execution_config": config.execution_config,
-            "features": feature_configs
+            "features": feature_configs,
+            "runtime_options": {},
         }
 
         try:
@@ -2255,6 +2997,7 @@ class WorkflowService:
             end_internal_event = {
                 "event": "workflow_end",
                 "data": {
+                    "execution_id": execution.execution_id,
                     "conversation_id": str(conversation_id_uuid),
                     "output": answer,
                     "usage": {},
@@ -2339,6 +3082,7 @@ class WorkflowService:
                 end_internal_event = {
                     "event": "workflow_end",
                     "data": {
+                        "execution_id": execution.execution_id,
                         "conversation_id": str(conversation_id_uuid),
                         "output": preset_response,
                         "usage": {},
@@ -2368,12 +3112,15 @@ class WorkflowService:
 
         # 3. 构建工作流配置字典
         workflow_config_dict = {
+            "app_id": str(app_id),
+            "workflow_config_id": str(config.id),
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
             "environment_variables": config.environment_variables,
             "execution_config": config.execution_config,
-            "features": feature_configs
+            "features": feature_configs,
+            "runtime_options": {},
         }
 
         try:
@@ -2592,7 +3339,6 @@ class WorkflowService:
         from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
         from app.core.workflow.engine.state_manager import WorkflowState
         from app.core.workflow.nodes.node_factory import NodeFactory
-        from app.core.workflow.variable.base_variable import VariableType
 
         if not config:
             config = self.get_workflow_config(app_id)
@@ -2608,6 +3354,13 @@ class WorkflowService:
         node_config = next((n for n in config.nodes if n.get("id") == node_id), None)
         if not node_config:
             raise BusinessException(code=BizCode.NOT_FOUND, message=f"节点不存在: node_id={node_id}")
+
+        base_execution = self._resolve_base_execution(
+            app_id=app_id,
+            explicit_execution_id=input_data.get("base_execution_id"),
+        )
+        if base_execution:
+            input_data["base_execution_id"] = base_execution.execution_id
 
         # 如果目标节点是开始节点，将 inputs 中的变量值注入到 variables（sys.input_variables）
         if node_config.get("type") == NodeType.START:
@@ -2628,12 +3381,18 @@ class WorkflowService:
             input_data["variables"] = variables
 
         workflow_config_dict = {
+            "app_id": str(app_id),
+            "workflow_config_id": str(config.id),
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables or [],
             "environment_variables": config.environment_variables or [],
             "execution_config": config.execution_config or {},
             "features": config.features or {},
+            "runtime_options": {
+                "bypass_node_cache": bool(input_data.get("bypass_cache")),
+                "cache_source": "single_node_debug",
+            },
         }
 
         storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
@@ -2660,6 +3419,15 @@ class WorkflowService:
 
         variable_pool = VariablePool()
         await VariablePoolInitializer(workflow_config_dict).initialize(variable_pool, input_data, execution_context)
+        if base_execution:
+            await self._restore_variable_pool_from_snapshot(
+                variable_pool=variable_pool,
+                snapshot=self._build_execution_snapshot_from_record(base_execution),
+            )
+        await self._apply_input_data_overrides_to_variable_pool(
+            variable_pool=variable_pool,
+            input_data=input_data,
+        )
 
         # 注入节点输入变量，支持扁平格式 {"node_id.var": value}
         for key, value in (input_data.get("inputs") or {}).items():
@@ -2672,9 +3440,11 @@ class WorkflowService:
             n.get("id") for n in workflow_config_dict.get("nodes", [])
             if n.get("type") in [NodeType.LOOP, NodeType.ITERATION]
         ]
+        base_messages = self._extract_execution_messages(base_execution)
+        base_node_outputs = self._extract_execution_node_outputs(base_execution)
         state = WorkflowState(
-            messages=input_data.get("conv_messages", []),
-            node_outputs={},
+            messages=input_data.get("conv_messages") or base_messages,
+            node_outputs=base_node_outputs,
             execution_id=execution_id,
             workspace_id=str(workspace_id),
             user_id=input_data.get("user_id", ""),
@@ -2708,22 +3478,17 @@ class WorkflowService:
             workflow_config=config,
             node_id=node_id,
             input_data=input_data,
+            base_execution_id=input_data.get("base_execution_id"),
         )
-        start_time = time.time()
         try:
-            result = await node.execute(state, variable_pool)
-            elapsed = (time.time() - start_time) * 1000
-            payload = {
-                "status": "completed",
-                "node_id": node_id,
-                "node_type": node_config.get("type"),
-                "inputs": node._extract_input(state, variable_pool),
-                "outputs": node._extract_output(result),
-                "process": node._extract_extra_fields(result).get("process"),
-                "token_usage": node._extract_token_usage(result),
-                "elapsed_time": elapsed,
-                "error": None,
-            }
+            state_update = await node.run(state, variable_pool)
+            node_output = (state_update.get("node_outputs") or {}).get(node_id) or {}
+            payload = self._build_single_node_payload_from_node_output(
+                node_id=node_id,
+                node_type=node_config.get("type"),
+                node_output=node_output,
+            )
+            payload = self._attach_debug_execution_id(payload, debug_execution.execution_id)
             self.update_execution_status(
                 debug_execution.execution_id,
                 "completed",
@@ -2740,16 +3505,16 @@ class WorkflowService:
             )
             return self._mask_runtime_secrets(payload, variable_pool)
         except Exception as e:
-            elapsed = (time.time() - start_time) * 1000
             logger.error(f"单节点执行失败: node_id={node_id}, error={e}", exc_info=True)
             payload = {
                 "status": "failed",
+                "execution_id": debug_execution.execution_id,
                 "node_id": node_id,
                 "node_type": node_config.get("type"),
                 "inputs": node._extract_input(state, variable_pool),
                 "outputs": None,
                 "token_usage": None,
-                "elapsed_time": elapsed,
+                "elapsed_time": None,
                 "error": str(e),
             }
             self.update_execution_status(
@@ -2792,13 +3557,52 @@ class WorkflowService:
             workflow_config=config,
             node_id=node_id,
             input_data=input_data,
+            base_execution_id=input_data.get("base_execution_id"),
         )
         start_time = time.time()
 
-        yield {"event": "node_start", "data": {"node_id": node_id, "node_type": node_type}}
+        yield {
+            "event": "node_start",
+            "data": {
+                "node_id": node_id,
+                "node_type": node_type,
+                "execution_id": debug_execution.execution_id,
+            }
+        }
 
         final_result = None
         try:
+            cached_state_update = await node._try_use_cache(state, variable_pool, start_time)
+            if cached_state_update:
+                node_output = (cached_state_update.get("node_outputs") or {}).get(node_id) or {}
+                event_payload = {
+                    "event": "node_end",
+                    "data": self._attach_debug_execution_id(
+                        self._build_single_node_payload_from_node_output(
+                            node_id=node_id,
+                            node_type=node_type,
+                            node_output=node_output,
+                        ),
+                        debug_execution.execution_id,
+                    )
+                }
+                self.update_execution_status(
+                    debug_execution.execution_id,
+                    "completed",
+                    token_usage=(event_payload["data"].get("token_usage") or {}).get("total_tokens"),
+                    output_data=self._build_debug_execution_output(node_id, "completed"),
+                )
+                debug_execution = self.get_execution(debug_execution.execution_id)
+                self._persist_single_node_execution(
+                    execution=debug_execution,
+                    node_id=node_id,
+                    node_type=node_type,
+                    node_name=node_config.get("name"),
+                    payload=event_payload["data"],
+                )
+                yield self._mask_runtime_secrets(event_payload, variable_pool)
+                return
+
             async for item in node.execute_stream(state, variable_pool):
                 if item.get("__final__"):
                     final_result = item["result"]
@@ -2806,25 +3610,41 @@ class WorkflowService:
                     chunk = item.get("chunk", "")
                     if chunk:
                         yield self._mask_runtime_secrets(
-                            {"event": "node_chunk", "data": {"node_id": node_id, "chunk": chunk}},
+                            {
+                                "event": "node_chunk",
+                                "data": {
+                                    "node_id": node_id,
+                                    "chunk": chunk,
+                                    "execution_id": debug_execution.execution_id,
+                                }
+                            },
                             variable_pool
                         )
 
             elapsed = (time.time() - start_time) * 1000
             event_payload = {
                 "event": "node_end",
-                "data": {
-                    "node_id": node_id,
-                    "node_type": node_type,
-                    "status": "succeeded",
-                    "inputs": node._extract_input(state, variable_pool),
-                    "outputs": node._extract_output(final_result),
-                    "process": node._extract_extra_fields(final_result).get("process"),
-                    "token_usage": node._extract_token_usage(final_result),
-                    "elapsed_time": elapsed,
-                    "error": None,
-                }
+                "data": self._attach_debug_execution_id(
+                    {
+                        "status": "completed",
+                        "node_id": node_id,
+                        "node_type": node_type,
+                        "inputs": node._extract_input(state, variable_pool),
+                        "outputs": node._extract_output(final_result),
+                        "process": node._extract_extra_fields(final_result).get("process"),
+                        "token_usage": node._extract_token_usage(final_result),
+                        "elapsed_time": elapsed,
+                        "error": None,
+                    },
+                    debug_execution.execution_id,
+                )
             }
+            node_output = self._normalize_single_node_payload(node_type, node_config.get("name"), event_payload["data"])
+            node._save_cache(
+                state=state,
+                variable_pool=variable_pool,
+                node_output=node_output,
+            )
             self.update_execution_status(
                 debug_execution.execution_id,
                 "completed",
@@ -2846,6 +3666,7 @@ class WorkflowService:
             event_payload = {
                 "event": "node_error",
                 "data": {
+                    "execution_id": debug_execution.execution_id,
                     "node_id": node_id,
                     "node_type": node_type,
                     "inputs": node._extract_input(state, variable_pool),

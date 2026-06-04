@@ -492,6 +492,7 @@ class VariablePool:
         return {
             "system": self.get_all_system_vars(),
             "conversation": self.get_all_conversation_vars(),
+            "environment": self.get_all_environment_vars(),
             "nodes": self.get_all_node_outputs()  # 从 runtime_vars 读取
         }
 
