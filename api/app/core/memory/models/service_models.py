@@ -99,7 +99,7 @@ class MemorySearchResult(BaseModel):
 
     def __add__(self, other: "MemorySearchResult") -> "MemorySearchResult":
         if not isinstance(other, MemorySearchResult):
-            raise TypeError("")
+            raise TypeError(f"unsupported operand type({type(other)}) for +")
 
         merged = MemorySearchResult(memories=list(self.memories))
 

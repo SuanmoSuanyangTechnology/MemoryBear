@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 CONVERSATION_WINDOW = 8
 
 
+def _safe_merge_results(results: list, label: str) -> MemorySearchResult:
+    """合并搜索结果列表，跳过异常项并记录警告。"""
+    merged = MemorySearchResult(memories=[])
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.warning(f"[DeepRead] {label} search error (question #{i}): {result}")
+        elif isinstance(result, MemorySearchResult):
+            merged = merged + result
+    return merged
+
+
 class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
     async def run(
             self,
@@ -23,7 +34,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             includes=None
     ) -> MemorySearchResult:
         memory_l0 = None
-        if self.ctx.storage_type == StorageType.NEO4J:  
+        if self.ctx.storage_type == StorageType.NEO4J:
             memory_l0 = await self._get_search_service(includes).memory_l0()
 
         query = QueryPreprocessor.process(query)
@@ -34,6 +45,9 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
                 res = await self._normal_read(query, history, limit, includes=includes, memory_l0=memory_l0)
             case SearchStrategy.QUICK:
                 res = await self._quick_read(query, limit, includes)
+                if memory_l0 is not None:
+                    res.content_str = memory_l0.content + '\n' + res.content
+                    res.memories.insert(0, memory_l0)
             case _:
                 raise RuntimeError("Unsupported search strategy")
 
@@ -54,32 +68,38 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
                 self.db
             )
 
-    async def _deep_read(self, query: str, history: list, limit: int, includes=None, memory_l0=None) -> MemorySearchResult:
+    async def _deep_read(
+            self,
+            query: str,
+            history: list,
+            limit: int,
+            includes=None,
+            memory_l0=None
+    ) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
         questions = await QueryPreprocessor.split(
             query,
             history,
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
-        query_results = []
+        # 所有搜索任务扁平化并行执行
+        all_tasks = []
         for question in questions:
-            hybrid_task = search_service.hybrid_search(question, limit)
-            relation_task = search_service.relation_search(question)
-            hybrid_search_results, relation_results = await asyncio.gather(
-                hybrid_task, relation_task, return_exceptions=True
-            )
+            all_tasks.append(search_service.hybrid_search(question, limit))
+            all_tasks.append(search_service.relation_search(question))
 
-            if isinstance(hybrid_search_results, Exception):
-                logger.warning(f"[DeepRead] hybrid search error: {hybrid_search_results}")
-                hybrid_search_results = MemorySearchResult(memories=[])
+        all_results = list(await asyncio.gather(*all_tasks, return_exceptions=True))
 
-            if isinstance(relation_results, Exception):
-                logger.warning(f"[DeepRead] relation search error: {relation_results}")
-                relation_results = MemorySearchResult(memories=[])
+        # 交错分区还原: [hybrid_0, relation_0, hybrid_1, relation_1, ...]
+        hybrid_results = all_results[::2]
+        relation_results = all_results[1::2]
 
-            merged = hybrid_search_results + relation_results
-            query_results.append(merged)
-        results = sum(query_results, start=MemorySearchResult(memories=[]))
+        hybrid_search_res = _safe_merge_results(hybrid_results, "hybrid")
+        relation_res = _safe_merge_results(relation_results, "relation")
+
+        results = hybrid_search_res + relation_res
+
+        # results = sum(query_results, start=MemorySearchResult(memories=[]))
         results.memories.sort(key=lambda x: x.score, reverse=True)
         results.content_str = await RetrievalSummaryProcessor.summary(
             query,
@@ -89,18 +109,23 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         )
         return results
 
-    async def _normal_read(self, query: str, history: list, limit: int, includes=None, memory_l0=None) -> MemorySearchResult:
+    async def _normal_read(
+            self, query: str,
+            history: list,
+            limit: int,
+            includes=None,
+            memory_l0=None
+    ) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
         questions = await QueryPreprocessor.split(
             query,
             history,
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
-        query_results = []
-        for question in questions:
-            search_results = await search_service.hybrid_search(question, limit)
-            query_results.append(search_results)
-        results = sum(query_results, start=MemorySearchResult(memories=[]))
+        all_results = list(await asyncio.gather(*(
+            search_service.hybrid_search(question, limit) for question in questions
+        ), return_exceptions=True))
+        results = _safe_merge_results(all_results, "normal")
         results.memories.sort(key=lambda x: x.score, reverse=True)
         results.content_str = await RetrievalSummaryProcessor.summary(
             query,
