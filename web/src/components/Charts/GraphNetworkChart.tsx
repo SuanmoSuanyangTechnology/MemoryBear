@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 14:06:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 18:45:57
+ * @Last Modified time: 2026-06-04 10:05:39
  */
 /**
  * GraphNetworkChart Component
@@ -13,6 +13,8 @@
  */
 import { type FC, useEffect, useRef, type SetStateAction, type Dispatch, useMemo } from 'react'
 import * as d3 from 'd3'
+import { useTranslation } from 'react-i18next'
+
 import PageEmpty from '@/components/Empty/PageEmpty'
 
 export const Colors = ['#155EEF', '#02AFD5', '#FF5D34', '#6473E9', '#369F21', '#4DA8FF', '#C86AFF', '#F7BA1E', '#5B6167']
@@ -104,6 +106,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   selectedCategory,
   regionId,
 }) => {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const nodeSelRef = useRef<d3.Selection<SVGGElement, D3Node, SVGGElement, unknown> | null>(null)
@@ -122,7 +125,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     
     const d3Nodes: D3Node[] = nodes.map(n => ({
       id: n.id,
-      name: n.name || `${n.caption}_${n.id.slice(0, 5)}`,
+      name: n.name || `${t(`userMemory.${n.caption}`)}_${n.id.slice(-5)}`,
       category: n.category,
       symbolSize: n.symbolSize || 35,
       color: n.itemStyle?.color || getColor(n.category),
