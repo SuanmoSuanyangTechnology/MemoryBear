@@ -1604,44 +1604,56 @@ RETURN elementId(r) AS uuid
 # -------------------
 SEARCH_PERCEPTUAL_BY_USER_ID = """
 MATCH (p:Perceptual)
-WHERE p.end_user_id = $end_user_id
+WHERE p.end_user_id = $end_user_id AND p.id > $last_id
 RETURN p.id AS id,
        p.summary_embedding AS embedding
+ORDER BY p.id
+LIMIT $batch_size
 """
 
 SEARCH_STATEMENTS_BY_USER_ID = """
 MATCH (s:Statement)
-WHERE s.end_user_id = $end_user_id
+WHERE s.end_user_id = $end_user_id AND s.id > $last_id
 RETURN s.id AS id,
        s.statement_embedding AS embedding
+ORDER BY s.id
+LIMIT $batch_size
 """
 
 SEARCH_ENTITIES_BY_USER_ID = """
 MATCH (e:ExtractedEntity)
-WHERE e.end_user_id = $end_user_id
+WHERE e.end_user_id = $end_user_id AND e.id > $last_id
 RETURN e.id AS id,
        e.name_embedding AS embedding
+ORDER BY e.id
+LIMIT $batch_size
 """
 
 SEARCH_CHUNKS_BY_USER_ID = """
 MATCH (c:Chunk)
-WHERE c.end_user_id = $end_user_id
+WHERE c.end_user_id = $end_user_id AND c.id > $last_id
 RETURN c.id AS id,
        c.chunk_embedding AS embedding
+ORDER BY c.id
+LIMIT $batch_size
 """
 
 SEARCH_MEMORY_SUMMARIES_BY_USER_ID = """
 MATCH (s:MemorySummary)
-WHERE s.end_user_id = $end_user_id
+WHERE s.end_user_id = $end_user_id AND s.id > $last_id
 RETURN s.id AS id,
        s.summary_embedding AS embedding
+ORDER BY s.id
+LIMIT $batch_size
 """
 
 SEARCH_COMMUNITIES_BY_USER_ID = """
 MATCH (c:Community)
-WHERE c.end_user_id = $end_user_id
+WHERE c.end_user_id = $end_user_id AND c.community_id > $last_id
 RETURN c.community_id AS id,
        c.summary_embedding AS embedding
+ORDER BY c.community_id
+LIMIT $batch_size
 """
 
 # -------------------

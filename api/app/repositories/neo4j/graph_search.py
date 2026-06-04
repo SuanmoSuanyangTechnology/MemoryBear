@@ -1,4 +1,5 @@
 import asyncio
+import heapq
 import logging
 import time
 from typing import Any, Dict, List, Optional, Coroutine
@@ -35,34 +36,6 @@ from app.repositories.neo4j.cypher_queries import (
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
-
-
-def cosine_similarity_search(
-        query: list[float],
-        vectors: list[list[float]],
-        limit: int
-) -> dict[int, float]:
-    if not vectors:
-        return {}
-    vectors: np.ndarray = np.array(vectors, dtype=np.float32)
-    vectors_norm = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
-    query: np.ndarray = np.array(query, dtype=np.float32)
-    norm = np.linalg.norm(query)
-    if norm == 0:
-        return {}
-    query_norm = query / norm
-
-    similarities = vectors_norm @ query_norm
-    similarities = np.clip(similarities, 0, 1)
-    top_k = min(limit, similarities.shape[0])
-    if top_k <= 0:
-        return {}
-    top_indices = np.argpartition(-similarities, top_k - 1)[:top_k]
-    top_indices = top_indices[np.argsort(-similarities[top_indices])]
-    result = {}
-    for idx in top_indices:
-        result[idx] = float(similarities[idx])
-    return result
 
 
 async def _update_activation_values_batch(
@@ -312,27 +285,74 @@ async def search_perceptual_by_embedding(
         logger.warning(f"search_perceptual_by_embedding: embedding generation failed for '{query_text[:50]}'")
         return {"perceptuals": []}
 
-    embedding = embeddings[0]
+    query_embedding = embeddings[0]
+    query_vec = np.array(query_embedding, dtype=np.float32)
+    query_norm = np.linalg.norm(query_vec)
+    if query_norm == 0:
+        return {"perceptuals": []}
+    query_vec = query_vec / query_norm
+
+    batch_query = SEARCH_PERCEPTUAL_BY_USER_ID
+
+    top_heap: list[tuple[float, str]] = []
+    batch_size = 1000
+    last_id = ""
+
+    while True:
+        try:
+            batch = await connector.execute_query(
+                batch_query,
+                end_user_id=end_user_id,
+                last_id=last_id,
+                batch_size=batch_size,
+            )
+        except Exception as e:
+            logger.warning(f"search_perceptual_by_embedding: batch fetch failed at last_id={last_id!r}: {e}")
+            break
+
+        if not batch:
+            break
+
+        batch_vectors = []
+        batch_ids = []
+        for record in batch:
+            emb = record.get("summary_embedding") if isinstance(record, dict) else None
+            if emb is not None:
+                batch_vectors.append(emb)
+                batch_ids.append(record["id"])
+
+        if batch_vectors:
+            vecs = np.array(batch_vectors, dtype=np.float32)
+            vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+            sims = np.clip(vecs @ query_vec, 0, 1)
+
+            for node_id, sim in zip(batch_ids, sims):
+                sim_f = float(sim)
+                if len(top_heap) < limit:
+                    heapq.heappush(top_heap, (sim_f, node_id))
+                elif sim_f > top_heap[0][0]:
+                    heapq.heapreplace(top_heap, (sim_f, node_id))
+
+        if len(batch) < batch_size:
+            break
+        last_id = batch[-1]["id"]
+
+    if not top_heap:
+        return {"perceptuals": []}
+
+    top_heap.sort(key=lambda x: x[0], reverse=True)
+    top_ids = [node_id for _, node_id in top_heap]
+
+    sim_map = {node_id: sim for sim, node_id in top_heap}
     try:
         perceptuals = await connector.execute_query(
-            SEARCH_PERCEPTUAL_BY_USER_ID,
-            end_user_id=end_user_id,
-        )
-        ids = [item['id'] for item in perceptuals]
-        vectors = [item['summary_embedding'] for item in perceptuals]
-        sim_res = cosine_similarity_search(embedding, vectors, limit=limit)
-        perceptual_res = {
-            ids[idx]: score
-            for idx, score in sim_res.items()
-        }
-        perceptuals = await connector.execute_query(
             SEARCH_PERCEPTUAL_BY_IDS,
-            ids=list(perceptual_res.keys())
+            ids=top_ids,
         )
         for perceptual in perceptuals:
-            perceptual["score"] = perceptual_res[perceptual["id"]]
+            perceptual["score"] = sim_map.get(perceptual.get("id"), 0)
     except Exception as e:
-        logger.warning(f"search_perceptual_by_embedding: vector search failed: {e}")
+        logger.warning(f"search_perceptual_by_embedding: fetch top-k nodes failed: {e}")
         perceptuals = []
 
     from app.core.memory.src.search import deduplicate_results
@@ -364,36 +384,93 @@ async def search_by_embedding(
         end_user_id: str,
         query_embedding: list[float],
         limit: int = 10,
+        batch_size: int = 1000,
 ) -> list[dict[str, Any]]:
-    """Cosine similarity search using gds.similarity.cosine in Cypher, single query."""
+    """分批游标式向量相似度搜索，避免一次性加载全部 embedding 到内存。
+
+    按 batch_size 游标分页拉取（WHERE id > $last_id），本地计算余弦相似度，
+    小顶堆保留 top-k，最后仅对 top-k 节点拉取完整数据。
+    """
+    query_vec = np.array(query_embedding, dtype=np.float32)
+    query_norm = np.linalg.norm(query_vec)
+    if query_norm == 0:
+        return []
+    query_vec = query_vec / query_norm
+
+    batch_query = USER_ID_QUERY_CYPHER_MAPPING[node_type]
+
+    top_heap: list[tuple[float, str]] = []
+
+    last_id = ""
+    while True:
+        try:
+            batch = await connector.execute_query(
+                batch_query,
+                end_user_id=end_user_id,
+                last_id=last_id,
+                batch_size=batch_size,
+            )
+        except Exception as e:
+            logger.warning(
+                f"search_by_embedding: batch fetch failed at last_id={last_id!r}: {e}, "
+                f"node_type={node_type.value}"
+            )
+            break
+
+        if not batch:
+            break
+
+        # 收集有效 embedding
+        batch_vectors = []
+        batch_ids = []
+        for record in batch:
+            emb = record.get("embedding") if isinstance(record, dict) else None
+            if emb is not None:
+                batch_vectors.append(emb)
+                batch_ids.append(record["id"])
+
+        if batch_vectors:
+            vecs = np.array(batch_vectors, dtype=np.float32)
+            vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+            sims = np.clip(vecs @ query_vec, 0, 1)
+
+            for node_id, sim in zip(batch_ids, sims):
+                sim_f = float(sim)
+                if len(top_heap) < limit:
+                    heapq.heappush(top_heap, (sim_f, node_id))
+                elif sim_f > top_heap[0][0]:
+                    heapq.heapreplace(top_heap, (sim_f, node_id))
+
+        if len(batch) < batch_size:
+            break
+        last_id = batch[-1]["id"]
+
+    if not top_heap:
+        return []
+
+    # 按相似度降序
+    top_heap.sort(key=lambda x: x[0], reverse=True)
+    top_ids = [node_id for _, node_id in top_heap]
+
+    # 仅拉取 top-k 完整节点数据
+    sim_map = {node_id: sim for sim, node_id in top_heap}
     try:
         records = await connector.execute_query(
-            USER_ID_QUERY_CYPHER_MAPPING[node_type],
-            end_user_id=end_user_id,
-        )
-        records = [record for record in records if record and record.get("embedding") is not None]
-        ids = [item['id'] for item in records]
-        vectors = [item['embedding'] for item in records]
-        sim_res = cosine_similarity_search(query_embedding, vectors, limit=limit)
-        records_score_map = {
-            ids[idx]: score
-            for idx, score in sim_res.items()
-        }
-        records = await connector.execute_query(
             NODE_ID_QUERY_CYPHER_MAPPING[node_type],
-            ids=list(records_score_map.keys()),
-            json_format=True
+            ids=top_ids,
+            json_format=True,
         )
         for record in records:
-            record["score"] = records_score_map[record["id"]]
+            record["score"] = sim_map.get(record.get("id"), 0)
     except Exception as e:
-        logger.warning(f"search_by_embedding: vector search failed: {e}, node_type:{node_type.value}",
-                       exc_info=True)
+        logger.warning(
+            f"search_by_embedding: fetch top-k nodes failed: {e}, "
+            f"node_type={node_type.value}"
+        )
         records = []
 
     from app.core.memory.src.search import deduplicate_results
-    records = deduplicate_results(records)
-    return records
+    return deduplicate_results(records)
 
 
 async def get_nodes_by_ids(

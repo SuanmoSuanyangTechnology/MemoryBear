@@ -244,6 +244,38 @@ async def create_unique_constraints():
             """
         )
 
+        # ExtractedEntity.id unique
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT entity_id_unique IF NOT EXISTS
+            FOR (e:ExtractedEntity) REQUIRE e.id IS UNIQUE
+            """
+        )
+
+        # MemorySummary.id unique
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT memory_summary_id_unique IF NOT EXISTS
+            FOR (m:MemorySummary) REQUIRE m.id IS UNIQUE
+            """
+        )
+
+        # Community.community_id unique（MERGE 以此字段为查找键，而非 id）
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT community_id_unique IF NOT EXISTS
+            FOR (c:Community) REQUIRE c.community_id IS UNIQUE
+            """
+        )
+
+        # Perceptual.id unique
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT perceptual_id_unique IF NOT EXISTS
+            FOR (p:Perceptual) REQUIRE p.id IS UNIQUE
+            """
+        )
+
     finally:
         await connector.close()
 
