@@ -99,20 +99,11 @@ celery_app.conf.update(
     # task routing
     task_routes={
         # Memory tasks → memory_tasks queue (threads worker)
-        'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
 
-        # Long-term storage tasks → memory_tasks queue (batched write strategies)
-        'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
-        'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
-        'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
-
         # Clustering tasks → memory_tasks queue (使用相同的 worker，避免 macOS fork 问题)
         'app.tasks.run_incremental_clustering': {'queue': 'memory_tasks'},
-
-        # Metadata extraction → memory_tasks queue
-        'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'},
 
         # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
         'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
@@ -140,8 +131,7 @@ celery_app.conf.update(
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
 
-        # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
-        'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
+        # Flush 兜底任务 → memory_tasks queue
         'app.tasks.flush_conversation': {'queue': 'memory_tasks'},
 
         # Sliding window idle scan → periodic_tasks queue (Beat scheduler)

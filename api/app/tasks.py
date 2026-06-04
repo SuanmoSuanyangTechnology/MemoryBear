@@ -4172,106 +4172,19 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
 # =============================================================================
 
 
-@celery_app.task(
-    bind=True,
-    name="app.tasks.sliding_window_write",
-    queue="memory_tasks",
-    max_retries=0,
-    acks_late=True,
-)
-def sliding_window_write_task(
-    self,
-    conversation_id: str,
-    message_seq: int,
-    context_before: List[dict],
-    context_after: List[dict],
-    target_message: dict,
-    config_id: str,
-    end_user_id: str,
-    workspace_id: str,
-    language: str,
-    dispatch_at: str,
-) -> None:
-    """滑动窗口写入任务。
-
-    1. 从数据库加载 memory_config
-    2. 初始化 WritePipeline
-    3. 调用 WritePipeline.run_with_window()
-    4. 任务完成后（无论成功或失败）删除幂等锁 write_task:{conversation_id}:{message_seq}
-
-    Fire-and-forget：异常时记录日志，不重试。
-    """
-    async def _run() -> None:
-        from app.core.memory.pipelines.write_pipeline import WritePipeline
-        from app.services.memory_config_service import MemoryConfigService
-        from app.models.conversation_model import Conversation
-        from sqlalchemy import select
-
-        with get_db_context() as db:
-            config_service = MemoryConfigService(db)
-
-            # config_id 为空时，通过 conversation_id 查出 workspace_id 作为 fallback
-            _config_id = config_id if config_id else None
-            _workspace_id = workspace_id if workspace_id else None
-
-            if not _workspace_id and conversation_id:
-                row = db.execute(
-                    select(Conversation.workspace_id).where(
-                        Conversation.id == conversation_id
-                    )
-                ).scalar_one_or_none()
-                if row:
-                    _workspace_id = str(row)
-
-            memory_config = config_service.load_memory_config(
-                config_id=_config_id,
-                workspace_id=_workspace_id,
-                service_name="SlidingWindowWriteTask",
-            )
-
-        pipeline = WritePipeline(
-            memory_config=memory_config,
-            end_user_id=end_user_id,
-            language=language,
-        )
-        await pipeline.run_with_window(
-            target_message=target_message,
-            context_before=context_before,
-            context_after=context_after,
-            conversation_id=conversation_id,
-            message_seq=message_seq,
-            dispatch_at=dispatch_at,
-        )
-
-    try:
-        asyncio.run(_run())
-    except Exception as e:
-        logger.error(
-            f"[SlidingWindowWrite] 失败: conv={conversation_id}, seq={message_seq}, err={e}",
-            exc_info=True,
-        )
-    finally:
-        redis_client = get_sync_redis_client()
-        if redis_client:
-            try:
-                redis_client.delete(f"write_task:{conversation_id}:{message_seq}")
-            except Exception as e:
-                logger.warning(
-                    f"[SlidingWindowWrite] 删除幂等锁失败: conv={conversation_id}, seq={message_seq}, err={e}"
-                )
-
-
 # ──────────────────────────────────────────────
 # 滑动窗口写入相关常量
 # ──────────────────────────────────────────────
 
 # Redis key 前缀
 CONV_ACTIVE_KEY_PREFIX = "conv_active:"
-FLUSH_LOCK_KEY_PREFIX = "flush_lock:"
 
-# Flush 任务幂等锁 TTL（秒）：派发 flush_conversation_task 时 SETNX 这把锁
-# 防止同一对话被并发兜底，FlushTask 完成（成功或失败）会主动 DELETE 释放
-FLUSH_LOCK_TTL_SECONDS = 600
+# Flush 任务幂等锁相关常量从 flush_dispatcher 模块统一定义
+# （避免循环 import：tasks.py 反过来 import flush_dispatcher 即可）
+from app.core.memory.sliding_window.flush_dispatcher import (  # noqa: E402
+    FLUSH_LOCK_KEY_PREFIX,
+    FLUSH_LOCK_TTL_SECONDS,
+)
 
 
 @celery_app.task(
@@ -4514,36 +4427,20 @@ def scan_idle_conversations_task() -> None:
                 skipped_active += 1
                 continue
 
-            # 原子写入 flush_lock（nx=True 保证只有一个 worker 能成功）
-            try:
-                flush_lock_key = f"{FLUSH_LOCK_KEY_PREFIX}{conv_id_str}"
-                acquired = redis_client.set(
-                    flush_lock_key, "1",
-                    ex=FLUSH_LOCK_TTL_SECONDS, nx=True,
-                )
-                if not acquired:
-                    # 锁已存在，说明已有 Flush_Task 在处理
-                    skipped_locked += 1
-                    continue
-            except Exception as e:
-                logger.warning(f"[ScanIdle] 写入 flush_lock 失败: conv={conv_id_str}, err={e}")
-                continue
+            # 通过统一派发入口派发 flush 任务（内部包含：SETNX flush_lock + apply_async + 失败兜底）
+            # 同 conversation_id 已有 flush 任务在跑时返回 False，自然跳过本次派发
+            from app.core.memory.sliding_window.flush_dispatcher import (
+                dispatch_flush_if_not_running,
+            )
 
-            # 派发 flush_conversation_task
-            try:
-                flush_conversation_task.apply_async(
-                    kwargs={"conversation_id": conv_id_str},
-                    queue="memory_tasks",
-                )
+            if dispatch_flush_if_not_running(
+                conversation_id=conv_id_str,
+                source="scan_idle",
+                flush_lock_ttl=FLUSH_LOCK_TTL_SECONDS,
+            ):
                 dispatched += 1
-                logger.info(f"[ScanIdle] 派发 FlushTask: conv={conv_id_str}")
-            except Exception as e:
-                # 派发失败时释放锁，避免死锁
-                logger.error(f"[ScanIdle] 派发 FlushTask 失败: conv={conv_id_str}, err={e}")
-                try:
-                    redis_client.delete(flush_lock_key)
-                except Exception:
-                    pass
+            else:
+                skipped_locked += 1
 
     except Exception as e:
         logger.error(f"[ScanIdle] 扫描任务失败: err={e}", exc_info=True)
