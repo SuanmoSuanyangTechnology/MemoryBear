@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
 from app.core.utils.datetime_utils import utcnow_naive
+from app.schemas.response_schema import PageMeta
 
 
 class EndUser(BaseModel):
@@ -28,6 +29,8 @@ class EndUser(BaseModel):
     memory_count: int = Field(description="记忆节点总数", default=0)
 
 
+
+
 class EndUserMappingItem(BaseModel):
     """终端用户 ID 映射项"""
     end_user_id: str = Field(description="终端用户ID（UUID）")
@@ -36,6 +39,6 @@ class EndUserMappingItem(BaseModel):
 
 
 class EndUserMappingResponse(BaseModel):
-    """终端用户 ID 映射响应"""
-    users: List[EndUserMappingItem] = Field(description="用户映射列表", default_factory=list)
-    total: int = Field(description="用户总数", default=0)
+    """终端用户 ID 映射响应（分页）"""
+    items: List[EndUserMappingItem] = Field(description="用户映射列表", default_factory=list)
+    page: PageMeta = Field(description="分页信息")

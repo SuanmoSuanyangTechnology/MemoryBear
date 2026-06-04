@@ -133,6 +133,8 @@ async def get_end_user_mapping(
     end_user_id: str = Query(None, description="Filter by end_user_id (UUID)"),
     other_id: str = Query(None, description="Filter by other_id (exact match)"),
     other_name: str = Query(None, description="Filter by other_name (fuzzy match)"),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数，最大 100"),
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
 ):
@@ -165,14 +167,17 @@ async def get_end_user_mapping(
             )
 
     end_user_repo = EndUserRepository(db)
-    end_users = end_user_repo.get_filtered_by_workspace(
+    end_users, total = end_user_repo.get_filtered_by_workspace(
         workspace_id=workspace_id,
         end_user_id=end_user_id_uuid,
         other_id=other_id,
         other_name=other_name,
+        limit=page_size,
+        offset=(page - 1) * page_size,
     )
 
     from app.schemas.end_user_schema import EndUserMappingItem, EndUserMappingResponse
+    from app.schemas.response_schema import PageMeta
 
     user_items = [
         EndUserMappingItem(
@@ -184,7 +189,15 @@ async def get_end_user_mapping(
     ]
 
     return success(
-        data=EndUserMappingResponse(users=user_items, total=len(user_items)).model_dump(),
+        data=EndUserMappingResponse(
+            items=user_items,
+            page=PageMeta(
+                page=page,
+                pagesize=page_size,
+                total=total,
+                hasnext=(page * page_size) < total,
+            ),
+        ).model_dump(),
         msg="End user mapping retrieved successfully",
     )
 

@@ -455,8 +455,10 @@ class EndUserRepository:
         end_user_id: Optional[uuid.UUID] = None,
         other_id: Optional[str] = None,
         other_name: Optional[str] = None,
-    ) -> List[EndUser]:
-        """获取工作空间下按条件过滤的终端用户
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> tuple[List[EndUser], int]:
+        """获取工作空间下按条件过滤的终端用户（分页）
 
         所有过滤条件均为可选，多个条件之间为 AND 关系。
 
@@ -465,25 +467,33 @@ class EndUserRepository:
             end_user_id: 终端用户ID（可选）
             other_id: 第三方ID（可选）
             other_name: 用户名称（可选，模糊匹配）
+            limit: 每页条数（None 表示不分页）
+            offset: 偏移量
 
         Returns:
-            List[EndUser]: 匹配的终端用户列表
+            tuple[List[EndUser], int]: (匹配的终端用户列表, 总数量)
         """
         try:
-            query = self.db.query(EndUser).filter(EndUser.workspace_id == workspace_id)
+            base_query = self.db.query(EndUser).filter(EndUser.workspace_id == workspace_id)
 
             if end_user_id is not None:
-                query = query.filter(EndUser.id == end_user_id)
+                base_query = base_query.filter(EndUser.id == end_user_id)
             if other_id is not None:
-                query = query.filter(EndUser.other_id == other_id)
+                base_query = base_query.filter(EndUser.other_id == other_id)
             if other_name is not None:
-                query = query.filter(EndUser.other_name.ilike(f"%{other_name}%"))
+                base_query = base_query.filter(EndUser.other_name.ilike(f"%{other_name}%"))
 
-            end_users = query.all()
+            total = base_query.count()
+
+            if limit is not None:
+                end_users = base_query.order_by(EndUser.created_at.desc()).offset(offset).limit(limit).all()
+            else:
+                end_users = base_query.all()
+
             db_logger.info(
-                f"成功按条件查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户"
+                f"成功按条件查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户（共 {total} 个）"
             )
-            return end_users
+            return end_users, total
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"按条件查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
