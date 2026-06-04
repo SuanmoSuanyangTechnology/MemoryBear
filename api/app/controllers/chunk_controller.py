@@ -19,6 +19,7 @@ from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.rag.metadata.filter_engine import MetadataFilterEngine, FilterCondition, FilterGroup
+from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.core.response_utils import success
 from app.db import get_db
@@ -37,11 +38,39 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
 
+# Redis keys for document processing task tracking.
+_PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
+_PARSE_TASK_TTL = 7200  # 2 hours
+_QA_IMPORT_TASK_NAME = "app.core.rag.tasks.import_qa_chunks"
+
 router = APIRouter(
     prefix="/chunks",
     tags=["chunks"],
     dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
 )
+
+
+def _dispatch_qa_import_task(kb_id: uuid.UUID, document_id: uuid.UUID, filename: str, contents: bytes) -> tuple[str, bool]:
+    task_key = _PARSE_TASK_KEY.format(doc_id=document_id)
+    claimed = REDIS_CONN.REDIS.set(task_key, "CLAIMED", ex=_PARSE_TASK_TTL, nx=True)
+    if not claimed:
+        existing_task_id = REDIS_CONN.get(task_key)
+        api_logger.info(f"Document is already being processed: document_id={document_id}, task_id={existing_task_id}")
+        return existing_task_id or "unknown", False
+
+    from app.celery_app import celery_app
+    try:
+        task = celery_app.send_task(
+            _QA_IMPORT_TASK_NAME,
+            args=[str(kb_id), str(document_id), filename, contents],
+            queue="qa_import"
+        )
+    except Exception:
+        REDIS_CONN.delete(task_key)
+        raise
+
+    REDIS_CONN.set(task_key, task.id, exp=_PARSE_TASK_TTL)
+    return task.id, True
 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
@@ -766,15 +795,16 @@ async def import_qa_new_doc(
     api_logger.info(f"Created doc for QA import: file_id={db_file.id}, document_id={db_document.id}, file_key={file_key}")
 
     # 7. 派发异步任务
-    from app.celery_app import celery_app
-    task = celery_app.send_task(
-        "app.core.rag.tasks.import_qa_chunks",
-        args=[str(kb_id), str(db_document.id), filename, contents],
-        queue="qa_import"
-    )
+    task_id, claimed = _dispatch_qa_import_task(kb_id=kb_id, document_id=db_document.id, filename=filename, contents=contents)
+    if not claimed:
+        return success(data={
+            "task_id": task_id,
+            "document_id": str(db_document.id),
+            "file_id": str(db_file.id),
+        }, msg="Document is already being processed.")
 
     return success(data={
-        "task_id": task.id,
+        "task_id": task_id,
         "document_id": str(db_document.id),
         "file_id": str(db_file.id),
     }, msg="QA 导入任务已提交，后台处理中")
@@ -810,14 +840,11 @@ async def import_qa_chunks(
     # 3. 读取文件内容，派发异步任务
     contents = await file.read()
 
-    from app.celery_app import celery_app
-    task = celery_app.send_task(
-        "app.core.rag.tasks.import_qa_chunks",
-        args=[str(kb_id), str(document_id), filename, contents],
-        queue="qa_import"
-    )
+    task_id, claimed = _dispatch_qa_import_task(kb_id=kb_id, document_id=document_id, filename=filename, contents=contents)
+    if not claimed:
+        return success(data={"task_id": task_id}, msg="Document is already being processed.")
 
-    return success(data={"task_id": task.id}, msg="QA 导入任务已提交，后台处理中")
+    return success(data={"task_id": task_id}, msg="QA 导入任务已提交，后台处理中")
 
 
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)

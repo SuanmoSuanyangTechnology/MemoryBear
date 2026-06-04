@@ -861,15 +861,57 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
     import csv as csv_module
     import io
 
-    db = None
+    document_uuid = None
+
+    def _clear_redis_state():
+        if document_uuid is None:
+            return
+        try:
+            REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_uuid))
+            REDIS_CONN.delete(_PARSE_CANCEL_KEY.format(doc_id=document_uuid))
+        except Exception:
+            logger.warning(f"[ImportQA] failed to clear Redis state for {document_uuid}", exc_info=True)
+
+    def _should_abort() -> bool:
+        if document_uuid is None:
+            return False
+        cancel = REDIS_CONN.get(_PARSE_CANCEL_KEY.format(doc_id=document_uuid))
+        if cancel:
+            logger.info(f"[ImportQA] document={document_uuid} cancelled via Redis -- aborting")
+            return True
+        return False
+
+    def _mark_failed(doc: Document, message: str):
+        doc.progress = -1.0
+        doc.run = 0
+        doc.progress_msg = f"QA 导入失败: {message[:200]}"
+
+    def _mark_aborted(doc: Document):
+        doc.run = 0
+        doc.progress_msg = "QA 导入已取消"
+
     try:
+        document_uuid = uuid.UUID(str(document_id))
         from app.db import get_db_context
         with get_db_context() as db:
-            db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+            db_document = db.query(Document).filter(Document.id == document_uuid).first()
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
             if not db_document or not db_knowledge:
                 logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
+                if db_document:
+                    _mark_failed(db_document, "Knowledge base not found")
+                    db.commit()
                 return {"error": "document or knowledge not found", "imported": 0}
+
+            if _should_abort():
+                _mark_aborted(db_document)
+                db.commit()
+                return {"error": "task cancelled", "imported": 0}
+
+            db_document.run = 1
+            db_document.progress = 0.0
+            db_document.progress_msg = "QA 导入处理中..."
+            db.commit()
 
             # 1. 解析文件
             qa_pairs = []
@@ -915,13 +957,22 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                     wb.close()
                 except Exception as e:
                     logger.error(f"[ImportQA] Excel parse failed: {e}")
+                    _mark_failed(db_document, f"Excel parse failed: {e}")
+                    db.commit()
                     return {"error": f"Excel parse failed: {e}", "imported": 0}
 
             if not qa_pairs:
                 logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
+                _mark_failed(db_document, "No valid QA pairs found")
+                db.commit()
                 return {"error": "No valid QA pairs found", "imported": 0}
 
             logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+
+            if _should_abort():
+                _mark_aborted(db_document)
+                db.commit()
+                return {"error": "task cancelled", "imported": 0}
 
             # 2. 写入 ES
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
@@ -951,13 +1002,27 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                 chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
 
             batch_size = 50
+            cancelled = False
             for i in range(0, len(chunks), batch_size):
+                if _should_abort():
+                    cancelled = True
+                    break
                 batch = chunks[i:i + batch_size]
                 vector_service.add_chunks(batch)
+                if _should_abort():
+                    cancelled = True
+                    break
+
+            if cancelled:
+                vector_service.delete_by_metadata_field(key="document_id", value=document_id)
+                _mark_aborted(db_document)
+                db.commit()
+                return {"error": "task cancelled", "imported": 0}
 
             # 3. 更新 chunk_num 和 progress
             db_document.chunk_num += len(chunks)
             db_document.progress = 1.0
+            db_document.run = 0
             db_document.progress_msg = f"QA 导入完成: {len(chunks)} 条"
             db.commit()
 
@@ -967,18 +1032,21 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
 
     except Exception as e:
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
-        # 尝试更新文档状态为失败
+        # Best effort: persist the failure state even if the main session failed.
         try:
             from app.db import get_db_context
             with get_db_context() as err_db:
                 doc = err_db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
                 if doc:
                     doc.progress = -1.0
+                    doc.run = 0
                     doc.progress_msg = f"QA 导入失败: {str(e)[:200]}"
                     err_db.commit()
         except Exception:
             pass
         return {"error": str(e), "imported": 0}
+    finally:
+        _clear_redis_state()
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
