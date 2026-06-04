@@ -115,8 +115,16 @@ class TimeFilterStrategy(FilterStrategy):
         from datetime import datetime
         from sqlalchemy import literal
         col = cast(Document.meta_data[field_name].astext, DateTime)
-        dt = datetime.fromisoformat(str(value))
-        dt_lit = literal(dt, DateTime)
+        dt = None
+        if operator in ("eq", "before", "after"):
+            try:
+                dt = datetime.fromisoformat(str(value))
+            except ValueError as exc:
+                raise BusinessException(
+                    "时间字段过滤参数必须为 ISO 时间格式，例如: 2024-12-31T23:59:59",
+                    code=BizCode.METADATA_INVALID_VALUE_TYPE,
+                ) from exc
+        dt_lit = literal(dt, DateTime) if dt else None
 
         match operator:
             case "eq":

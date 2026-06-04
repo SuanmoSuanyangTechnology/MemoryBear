@@ -3,15 +3,14 @@ from fastapi import APIRouter, Depends, Body
 from sqlalchemy.orm import Session
 from app.core.response_utils import success
 from app.core.logging_config import get_api_logger
-from app.core.exceptions import ResourceNotFoundException, BusinessException
-from app.core.error_codes import BizCode
+from app.core.exceptions import ResourceNotFoundException
 from app.db import get_db
 from app.dependencies import get_current_user
+from app.services.rag_access_service import require_current_workspace_knowledge
 from app.models.user_model import User
 from app.schemas import knowledge_metadata_schema as schemas
 from app.schemas.response_schema import ApiResponse
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
-from app.services import knowledge_service
 
 api_logger = get_api_logger()
 
@@ -32,7 +31,11 @@ async def list_metadata_fields(
     api_logger.info(f"List metadata fields: kb_id={kb_id}, user={current_user.username}")
 
     # 校验知识库权限
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = require_current_workspace_knowledge(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
     if not db_knowledge:
         raise ResourceNotFoundException("知识库", str(kb_id))
 
@@ -70,7 +73,11 @@ async def create_metadata_field(
     """创建自定义元数据字段"""
     api_logger.info(f"Create metadata field: kb_id={kb_id}, name={data.name}, type={data.type}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = require_current_workspace_knowledge(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
     if not db_knowledge:
         raise ResourceNotFoundException("知识库", str(kb_id))
 
@@ -100,7 +107,11 @@ async def update_metadata_field(
     """更新自定义元数据字段"""
     api_logger.info(f"Update metadata field: kb_id={kb_id}, metadata_id={metadata_id}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = require_current_workspace_knowledge(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
     if not db_knowledge:
         raise ResourceNotFoundException("知识库", str(kb_id))
 
@@ -128,7 +139,11 @@ async def delete_metadata_field(
     """删除自定义元数据字段"""
     api_logger.info(f"Delete metadata field: kb_id={kb_id}, metadata_id={metadata_id}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = require_current_workspace_knowledge(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
     if not db_knowledge:
         raise ResourceNotFoundException("知识库", str(kb_id))
 
@@ -146,7 +161,11 @@ async def get_builtin_metadata_fields(
     """获取内置元数据字段列表"""
     api_logger.info(f"Get builtin metadata fields: kb_id={kb_id}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = require_current_workspace_knowledge(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
     if not db_knowledge:
         raise ResourceNotFoundException("知识库", str(kb_id))
 
@@ -177,7 +196,11 @@ async def toggle_builtin_metadata(
     """更新内置元数据开关"""
     api_logger.info(f"Toggle builtin metadata: kb_id={kb_id}, enabled={data.enabled}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = require_current_workspace_knowledge(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
     if not db_knowledge:
         raise ResourceNotFoundException("知识库", str(kb_id))
 

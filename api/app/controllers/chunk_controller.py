@@ -957,6 +957,7 @@ async def retrieve_chunks(
 
     filters = [
         knowledge_model.Knowledge.id.in_(kb_ids),
+        knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -970,6 +971,7 @@ async def retrieve_chunks(
     private_workspace_ids = [item[1] for item in private_items]
     filters = [
         knowledge_model.Knowledge.id.in_(kb_ids),
+        knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -981,7 +983,8 @@ async def retrieve_chunks(
     )
     if items:
         filters = [
-            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids)
+            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids),
+            knowledgeshare_model.KnowledgeShare.target_workspace_id == current_user.current_workspace_id,
         ]
         share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
             db=db,

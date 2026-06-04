@@ -169,18 +169,27 @@ class MetadataFilterEngine:
         )
 
     def _build_time_column_filter(self, column_name: str, operator: str, value: Any):
-        from sqlalchemy import func
+        from sqlalchemy import DateTime, func, literal
         from datetime import datetime
         col = getattr(Document, column_name)
-        dt = datetime.fromisoformat(str(value))
+        dt = None
+        if operator in ("eq", "before", "after"):
+            try:
+                dt = datetime.fromisoformat(str(value))
+            except ValueError as exc:
+                raise BusinessException(
+                    "时间字段过滤参数必须为 ISO 时间格式，例如: 2024-12-31T23:59:59",
+                    code=BizCode.METADATA_INVALID_VALUE_TYPE,
+                ) from exc
+        dt_lit = literal(dt, DateTime) if dt else None
         match operator:
             case "eq":
                 # 分钟级比较：将列值截断到分钟后比较
-                return func.date_trunc('minute', col) == dt
+                return func.date_trunc('minute', col) == func.date_trunc('minute', dt_lit)
             case "before":
-                return func.date_trunc('minute', col) < dt
+                return func.date_trunc('minute', col) < func.date_trunc('minute', dt_lit)
             case "after":
-                return func.date_trunc('minute', col) > dt
+                return func.date_trunc('minute', col) > func.date_trunc('minute', dt_lit)
             case "is_empty":
                 return col.is_(None)
             case "not_empty":

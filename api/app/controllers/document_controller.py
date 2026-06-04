@@ -25,6 +25,7 @@ from app.models.user_model import User
 from app.schemas import document_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import document_service, file_service, knowledge_service
+from app.services.rag_access_service import require_current_workspace_document
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.schemas import knowledge_metadata_schema as metadata_schema
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
@@ -430,28 +431,17 @@ async def batch_update_document_metadata(
         f"Batch update document metadata: count={len(data.items)}, user={current_user.username}"
     )
 
-    # 1. 校验所有文档的权限和归属
-    document_ids = [item.document_id for item in data.items]
-    documents = db.query(document_model.Document).filter(document_model.Document.id.in_(document_ids)).all()
-    found_ids = {doc.id for doc in documents}
-
-    if len(documents) != len(document_ids):
-        missing = set(document_ids) - found_ids
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"文档不存在或无权访问: {sorted(str(d) for d in missing)}"
+    # 1. 校验所有文档的权限和归属（必须属于当前 workspace）
+    for item in data.items:
+        db_document = require_current_workspace_document(
+            db=db,
+            document_id=item.document_id,
+            current_user=current_user,
         )
-
-    # 校验知识库权限
-    kb_ids = {doc.kb_id for doc in documents}
-    for kb_id in kb_ids:
-        db_knowledge = knowledge_service.get_knowledge_by_id(
-            db, knowledge_id=kb_id, current_user=current_user
-        )
-        if not db_knowledge:
+        if not db_document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"知识库不存在或无权访问: {kb_id}"
+                detail=f"文档不存在或无权访问: {item.document_id}"
             )
 
     items = [
@@ -489,8 +479,10 @@ async def update_document_metadata(
     )
 
     # 1. 校验文档存在且有权访问
-    db_document = document_service.get_document_by_id(
-        db, document_id=document_id, current_user=current_user
+    db_document = require_current_workspace_document(
+        db=db,
+        document_id=document_id,
+        current_user=current_user
     )
     if not db_document:
         raise HTTPException(
@@ -525,8 +517,10 @@ async def get_document_metadata(
     )
 
     # 校验文档存在且有权访问
-    db_document = document_service.get_document_by_id(
-        db, document_id=document_id, current_user=current_user
+    db_document = require_current_workspace_document(
+        db=db,
+        document_id=document_id,
+        current_user=current_user
     )
     if not db_document:
         raise HTTPException(
@@ -562,8 +556,10 @@ async def delete_document_metadata(
     )
 
     # 校验文档存在且有权访问
-    db_document = document_service.get_document_by_id(
-        db, document_id=document_id, current_user=current_user
+    db_document = require_current_workspace_document(
+        db=db,
+        document_id=document_id,
+        current_user=current_user
     )
     if not db_document:
         raise HTTPException(
