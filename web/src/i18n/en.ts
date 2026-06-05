@@ -2058,6 +2058,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       memoryFunction: 'Memory Function',
       onlineSearch: 'Online Search',
       deepThinking: 'Deep Thinking',
+      conv: 'Recent Conversations',
+      metadata: 'User Metadata',
       MemoryFragmentsRecalled: 'Memory fragments recalled',
       MemoryRecallIndex: 'Memory recall index',
       comprehensiveEvaluation: 'Comprehensive evaluation',

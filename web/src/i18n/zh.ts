@@ -2021,6 +2021,8 @@ export const zh = {
       memoryFunction: '记忆功能',
       onlineSearch: '在线搜索',
       deepThinking: '深度思考',
+      conv: '近期会话',
+      metadata: '用户元数据',
       MemoryFragmentsRecalled: '召回的记忆片段',
       MemoryRecallIndex: '记忆召回指数',
       comprehensiveEvaluation: '综合评估',
