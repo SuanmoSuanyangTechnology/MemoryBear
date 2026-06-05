@@ -26,6 +26,16 @@ class VariableType(StrEnum):
 
     ANY = 'any'
 
+    @staticmethod
+    def _is_file_like_dict(var: Any) -> bool:
+        return isinstance(var, dict) and (
+            var.get("is_file") is True
+            or (
+                any(key in var for key in ("file_id", "upload_file_id", "url"))
+                and any(key in var for key in ("type", "origin_file_type", "transfer_method"))
+            )
+        )
+
     @classmethod
     def type_map(cls, var: Any) -> "VariableType":
         """Maps a Python value to a corresponding VariableType.
@@ -45,7 +55,7 @@ class VariableType(StrEnum):
             return cls.BOOLEAN
         elif isinstance(var, (int, float)):
             return cls.NUMBER
-        elif isinstance(var, FileObject) or (isinstance(var, dict) and var.get('is_file')):
+        elif isinstance(var, FileObject) or cls._is_file_like_dict(var):
             return cls.FILE
         elif isinstance(var, dict):
             return cls.OBJECT
@@ -53,7 +63,12 @@ class VariableType(StrEnum):
             if len(var) == 0:
                 return cls.ARRAY_STRING
             else:
-                child_type = type(var[0])
+                first_item = next((item for item in var if item is not None), None)
+                if first_item is None:
+                    return cls.ARRAY_STRING
+                if isinstance(first_item, FileObject) or cls._is_file_like_dict(first_item):
+                    return cls.ARRAY_FILE
+                child_type = type(first_item)
                 if child_type == str:
                     return cls.ARRAY_STRING
                 elif child_type == int or child_type == float:

@@ -299,7 +299,7 @@ async def delete_document(
         if task_id:
             api_logger.warning(f"[DELETE] Revoking running parse task: task_id={task_id}, document_id={document_id}")
             try:
-                celery_app.control.revoke(task_id, terminate=True)
+                celery_app.control.revoke(task_id)
                 api_logger.warning(f"[DELETE] Revoke signal sent for task_id={task_id}")
             except NotImplementedError:
                 # ThreadPool does not support force termination; rely on Redis cancel marker

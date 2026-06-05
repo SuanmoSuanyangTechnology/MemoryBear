@@ -117,9 +117,6 @@ celery_app.conf.update(
         # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
         'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
 
-        # Post-store dedup + alias merge → memory_tasks queue
-        'app.tasks.post_store_dedup_and_alias_merge': {'queue': 'memory_tasks'},
-
         # Async metadata extraction → memory_tasks queue
         'app.tasks.extract_metadata_batch': {'queue': 'memory_tasks'},
 
@@ -226,11 +223,13 @@ beat_schedule_config = {
         "schedule": layer2_dedup_full_scan_schedule,
         "args": (),
     },
-    "scan-idle-conversations": {
-        "task": "app.tasks.scan_idle_conversations",
-        "schedule": 60.0,
-        "options": {"queue": "periodic_tasks"},
-    },
+    # "scan-idle-conversations": {
+    #     "task": "app.tasks.scan_idle_conversations",
+    #     "schedule": 3600.0,
+    #     "options": {"queue": "periodic_tasks"},
+    # },
+    # FIXME: Infinite task accumulation
+
     "scan-workflow-schedule-triggers": {
         "task": "app.tasks.scan_workflow_schedule_triggers",
         "schedule": 60.0,

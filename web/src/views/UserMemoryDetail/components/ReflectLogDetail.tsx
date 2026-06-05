@@ -44,6 +44,10 @@ interface DescriptionMerge {
   fragment_count?: number;
   original_description?: string;
 }
+interface UnresolvedEntity {
+  statement_id: string;
+  statement_text: string;
+}
 interface SolutionDetailChange {
   field: string;
   old: string;
@@ -79,7 +83,7 @@ interface DetailData {
   entity_ids: string[];
   statement_ids: string[] | null;
 
-  trigger_detail: EntityData | DescriptionMerge;
+  trigger_detail: EntityData | DescriptionMerge | UnresolvedEntity;
   solution_detail: {
     title: string;
     changes: SolutionDetailChange[];
@@ -235,6 +239,17 @@ const ReflectLogDetail = forwardRef<ReflectLogDetailRef>((_, ref) => {
                         </div>
                         <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3 rb:text-[12px]">
                           {trigger_detail.original_description}
+                        </div>
+                      </>
+                    })()}
+                  </>}
+
+                  {data.sub_problem === 'unresolved_entity' && <>
+                    {(() => {
+                      const trigger_detail = data.trigger_detail as UnresolvedEntity
+                      return <>
+                        <div className="rb:text-[12px] rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3!">
+                          {trigger_detail.statement_text}
                         </div>
                       </>
                     })()}

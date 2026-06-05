@@ -10,7 +10,7 @@ import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
-import { Button, Spin, message, Switch, App } from 'antd';
+import { Button, Spin, message, Switch, App, Divider } from 'antd';
 import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
@@ -19,6 +19,7 @@ import RecallTestResult from '../components/RecallTestResult';
 import SearchInput from '@/components/SearchInput';
 import DocumentPreview from '@/components/DocumentPreview';
 import InsertModal, { type InsertModalRef } from '../components/InsertModal';
+import DocumentMetadata from '../components/DocumentMetadata';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import copy from 'copy-to-clipboard'
 const DocumentDetails: FC = () => {
@@ -50,6 +51,7 @@ const DocumentDetails: FC = () => {
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [total, setTotal] = useState(0);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
   const [fileUrl, setFileUrl] = useState('');
@@ -153,6 +155,7 @@ const DocumentDetails: FC = () => {
     ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
   };
 
+  const [isParentChildMode, setIsParentChildMode] = useState<string | boolean>('false');
   const fetchDocumentDetail = async () => {
     if (!documentId) return;
     setLoading(true);
@@ -162,7 +165,10 @@ const DocumentDetails: FC = () => {
       setInfoItems(formatDocumentInfo(response));
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
-      setParserMode(response?.parser_config?.auto_questions || 0)
+      const auto_questions = response?.parser_config?.auto_questions || 0
+      const parent_chunk_mode = response?.parser_config?.parent_chunk_mode || false
+      setParserMode(auto_questions)
+      setIsParentChildMode(auto_questions === 0 && parent_chunk_mode)
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
@@ -219,6 +225,7 @@ const DocumentDetails: FC = () => {
       }
       
       setHasMore(response.page?.has_next ?? false);
+      setTotal(response.page?.total ?? 0);
     } catch (error) {
       console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed') || '加载失败');
@@ -451,8 +458,13 @@ const DocumentDetails: FC = () => {
         {/* Left: Document info */}
         <div className='rb:w-80 rb:h-full rb:flex rb:flex-col rb:gap-4 rb:overflow-hidden'>
           <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4 rb:overflow-y-auto'>
+            <DocumentMetadata 
+              documentId={documentId} 
+              knowledgeBaseId={knowledgeBaseId || ''}
+            />
+            <Divider />
             <InfoPanel 
-              title={t('knowledgeBase.documentInfo') || '文档信息'} 
+              title={t('knowledgeBase.documentInfo')} 
               items={infoItems}
             />
             <Button type='primary' onClick={handleDownload} className="rb:mt-4 rb:w-full">
@@ -472,6 +484,7 @@ const DocumentDetails: FC = () => {
           <RecallTestResult 
             refresh={refreshChunks}
             data={chunkList} 
+            total={total}
             showEmpty={false}
             hasMore={hasMore}
             loadMore={loadMoreChunks}
@@ -489,6 +502,7 @@ const DocumentDetails: FC = () => {
       {/* Insert content modal */}
       <InsertModal 
         ref={insertModalRef}
+        isParentChildMode={isParentChildMode}
         onInsert={handleInsertContent}
         onSuccess={handleInsertSuccess}
       />

@@ -3,10 +3,11 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -168,27 +169,22 @@ def set_asyncio_event_loop():
 
 
 def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
-    """Gracefully shutdown pending async generators and tasks on the event loop.
+    """Cancel pending tasks and finalize async generators, but keep the loop open for reuse.
 
-    This prevents 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
-    by giving pending aclose() coroutines a chance to run before the loop is discarded.
-
-    Note: This only tears down the given loop. Callers that need a fresh event
-    loop afterwards should use ``set_asyncio_event_loop()`` explicitly.
+    Not closing the loop avoids 'Event loop is closed' from httpx AsyncClient.__del__ during GC.
     """
     try:
-        # Cancel and collect all remaining tasks
+        # Cancel remaining tasks to prevent leaks between Celery tasks
         all_tasks = asyncio.all_tasks(loop)
         if all_tasks:
             for task in all_tasks:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*all_tasks, return_exceptions=True))
-        # Shutdown async generators (triggers __aclose__ on httpx clients etc.)
+        # Finalize async generators so network/client resources are properly cleaned up.
+        # This does NOT close the loop.
         loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
-    finally:
-        loop.close()
 
 
 @celery_app.task(name="tasks.process_item")
@@ -318,6 +314,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             # Early-exit check after download
             if _should_abort(document_id):
                 _clear_redis_state(document_id)
+                logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
                 return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             file_binary = asyncio.run(_download())
         except RuntimeError:
@@ -359,6 +356,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         # Early-exit check before chunking
         if _should_abort(document_id):
             _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
             return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         parent_child_mode = db_document.is_parent_child_mode
@@ -393,6 +391,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         # Early-exit check before vectorization
         if _should_abort(document_id):
             _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
             return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         # 2. Document vectorization and storage
@@ -644,7 +643,16 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             db.refresh(db_document)
 
         # Vectorization and data entry completed
-        progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} Indexing done.")
+        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
+
+        # Early-exit check after data write: if doc deleted, remove written data
+        if _should_abort(document_id):
+            logger.info(f"[ParseDoc] document={document_id} deleted after data write -- rolling back vectors")
+            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+            _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped and es data deleted")
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+
         db_document.chunk_num = total_chunks
         db_document.progress = 1.0
         db_document.process_duration = time.time() - start_time
@@ -658,6 +666,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             # Early-exit check before dispatching GraphRAG
             if _should_abort(document_id):
                 _clear_redis_state(document_id)
+                logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
                 return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
@@ -892,8 +901,8 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                 for i, row in enumerate(reader):
                     if i == 0:
                         continue
-                    if len(row) >= 2 and row[0].strip() and row[1].strip():
-                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip()})
+                    if len(row) >= 2 and row[0].strip():
+                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip() if row[1].strip() else ""})
                     elif len(row) >= 1 and row[0].strip():
                         failed_rows.append(i + 1)
 
@@ -905,10 +914,10 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                         for i, row in enumerate(sheet.iter_rows(values_only=True)):
                             if i == 0:
                                 continue
-                            if len(row) >= 2 and row[0] and row[1]:
+                            if len(row) >= 2 and row[0]:
                                 q = str(row[0]).strip()
-                                a = str(row[1]).strip()
-                                if q and a:
+                                a = str(row[1]).strip() if row[1] else ""
+                                if q:
                                     qa_pairs.append({"question": q, "answer": a})
                             elif len(row) >= 1 and row[0]:
                                 failed_rows.append(i + 1)
@@ -1134,7 +1143,14 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             case "Third-party":  # Integration of knowledge bases from three parties
                 yuque_user_id = db_knowledge.parser_config.get("yuque_user_id", "")
                 feishu_app_id = db_knowledge.parser_config.get("feishu_app_id", "")
-                if yuque_user_id:  # Yuque Knowledge Base
+
+                # Determine source by existing files; skip unrelated source to avoid auth errors
+                existing_files = db.query(File).filter(File.kb_id == db_knowledge.id).all()
+                has_yuque = any(f.file_url and "yuque.com" in f.file_url for f in existing_files)
+                has_feishu = any(f.file_url and "feishu.cn" in f.file_url for f in existing_files)
+
+                if yuque_user_id and yuque_user_id not in ("User ID", "", None) \
+                        and (not existing_files or has_yuque):  # Yuque Knowledge Base
                     yuque_token = db_knowledge.parser_config.get("yuque_token", "")
                     # Create yuqueAPIClient
                     api_client = YuqueAPIClient(
@@ -1297,7 +1313,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                     except Exception as e:
                         logger.error(f"[SyncKB] Error during fetch yuque: {e}", exc_info=True)
-                if feishu_app_id:  # Feishu Knowledge Base
+                if feishu_app_id and feishu_app_id not in ("App ID", "", None) \
+                        and (not existing_files or has_feishu):  # Feishu Knowledge Base
                     feishu_app_secret = db_knowledge.parser_config.get("feishu_app_secret", "")
                     feishu_folder_token = db_knowledge.parser_config.get("feishu_folder_token", "")
                     # Create feishuAPIClient
@@ -1327,11 +1344,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     continue
                                 else:  # --update
                                     # 1. update file
-                                    # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                    save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.id))
-                                    Path(save_dir).mkdir(parents=True,
-                                                         exist_ok=True)  # Ensure that the directory exists
+                                    # Use temp dir for download, will upload to storage backend later
+                                    save_dir = tempfile.mkdtemp()
 
                                     # download document from Feishu FileInfo
                                     async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
@@ -1342,11 +1356,22 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                                     file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
 
-                                    save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                    # update file
-                                    if os.path.exists(save_path):
-                                        os.remove(save_path)  # Delete a single file
-                                    shutil.copyfile(file_path, save_path)
+                                    # Upload to storage backend
+                                    from app.services.file_storage_service import generate_kb_file_key, FileStorageService
+                                    _file_key = generate_kb_file_key(
+                                        kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
+                                    )
+                                    _storage_service = FileStorageService()
+                                    with open(file_path, "rb") as _f:
+                                        _content = _f.read()
+
+                                    async def _do_upload():
+                                        await _storage_service.storage.upload(
+                                            file_key=_file_key, content=_content, content_type="application/octet-stream"
+                                        )
+
+                                    asyncio.run(_do_upload())
+
                                     # update db_file
                                     file_name = os.path.basename(file_path)
                                     _, file_extension = os.path.splitext(file_name)
@@ -1355,8 +1380,17 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     db_file.file_ext = file_extension.lower()
                                     db_file.file_size = file_size
                                     db_file.created_at = doc.modified_time
+                                    db_file.file_key = _file_key
                                     db.commit()
                                     db.refresh(db_file)
+
+                                    # Clean up local temp file
+                                    try:
+                                        if os.path.exists(file_path):
+                                            os.remove(file_path)
+                                    except Exception:
+                                        pass
+
                                     # 2. update a document
                                     db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
                                                                             Document.file_id == db_file.id).first()
@@ -1369,13 +1403,11 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         db.commit()
                                         db.refresh(db_document)
                                         # 3. Document parsing, vectorization, and storage
-                                        parse_document(file_path=save_path, document_id=db_document.id)
+                                        parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                             else:  # --add
                                 # 1. update file
-                                # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                        str(db_knowledge.id))
-                                Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
+                                # Use temp dir for download, will upload to storage backend later
+                                save_dir = tempfile.mkdtemp()
 
                                 # download document from Feishu FileInfo
                                 async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
@@ -1402,12 +1434,34 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 db_file = File(**upload_file.model_dump())
                                 db.add(db_file)
                                 db.commit()
-                                # Save file
-                                save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                # update file
-                                if os.path.exists(save_path):
-                                    os.remove(save_path)  # Delete a single file
-                                shutil.copyfile(file_path, save_path)
+                                # Upload to storage backend
+                                from app.services.file_storage_service import generate_kb_file_key, FileStorageService
+                                _file_key = generate_kb_file_key(
+                                    kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
+                                )
+                                _storage_service = FileStorageService()
+                                with open(file_path, "rb") as _f:
+                                    _content = _f.read()
+
+                                async def _do_upload2():
+                                    await _storage_service.storage.upload(
+                                        file_key=_file_key, content=_content, content_type="application/octet-stream"
+                                    )
+
+                                asyncio.run(_do_upload2())
+
+                                # Save file_key
+                                db_file.file_key = _file_key
+                                db.commit()
+                                db.refresh(db_file)
+
+                                # Clean up local temp file
+                                try:
+                                    if os.path.exists(file_path):
+                                        os.remove(file_path)
+                                except Exception:
+                                    pass
+
                                 # 2. Create a document
                                 create_document_data = document_schema.DocumentCreate(
                                     kb_id=db_knowledge.id,
@@ -1431,7 +1485,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 db.add(db_document)
                                 db.commit()
                                 # 3. Document parsing, vectorization, and storage
-                                parse_document(file_path=save_path, document_id=db_document.id)
+                                parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                         db_files = db.query(File).filter(File.kb_id == db_knowledge.id,
                                                          File.file_url.notin_(file_urls)).all()
                         if db_files:  # --delete
@@ -1444,15 +1498,23 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                                                             value=str(db_document.id))
                                     # 2. Delete document
                                     db.delete(db_document)
-                                # 3. Delete file
-                                file_path = Path(
+                                # 3. Delete file from storage backend
+                                if db_file.file_key:
+                                    from app.services.file_storage_service import FileStorageService
+                                    storage_service = FileStorageService()
+                                    try:
+                                        asyncio.run(storage_service.delete_file(db_file.file_key))
+                                    except Exception:
+                                        pass
+                                # 3.5 Delete local temp file (legacy)
+                                _legacy_path = Path(
                                     settings.FILE_PATH,
                                     str(db_file.kb_id),
                                     str(db_file.parent_id),
                                     f"{db_file.id}{db_file.file_ext}"
                                 )
-                                if file_path.exists():
-                                    file_path.unlink()  # Delete a single file
+                                if _legacy_path.exists():
+                                    _legacy_path.unlink()
                                 db.delete(db_file)
                             # commit transaction
                             db.commit()
@@ -1724,6 +1786,14 @@ def write_message_task(
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
+
+        # 同步 end_user 记忆计数（Neo4j → PostgreSQL）
+        try:
+            from app.core.memory.utils.memory_count_utils import sync_memory_count_neo4j
+            sync_memory_count_neo4j(end_user_id)
+        except Exception as _count_e:
+            logger.warning(f"[CELERY WRITE] 同步记忆计数失败（不影响主流程）: {_count_e}")
+
         # 将 result 转为 JSON 安全结构，避免 Celery JSON 序列化 pydantic BaseModel / UUID 失败
         try:
             safe_result = jsonable_encoder(result)
@@ -1955,244 +2025,39 @@ def extract_emotion_batch_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
+def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int = 36) -> bool:
+    """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_hours 小时则跳过。
 
-@celery_app.task(
-    bind=True,
-    name="app.tasks.post_store_dedup_and_alias_merge",
-    max_retries=1,
-    default_retry_delay=30,
-)
-def post_store_dedup_and_alias_merge_task(
-    self,
-    end_user_id: str,
-    entity_ids: List[str],
-    llm_model_id: Optional[str] = None,
-    snapshot_dir: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Celery task: 写入后异步执行 Neo4j 别名归并 + 第二层去重。
+    通过 conversations.user_id（存的是 end_user_id 的 UUID 字符串）取该用户所有会话
+    的最新 updated_at（最后写入时间），与当前 UTC 时间比较。
 
-    在主写入流水线将第一层去重结果写入 Neo4j 之后执行：
-    1. Neo4j 别名归并：将 "别名属于" 边的 source.name 合并到 target.aliases
-    2. Neo4j 边重定向：将指向别名节点的边重定向到目标节点
-    3. 第二层去重：与 Neo4j 中已有的同组实体做联合去重
-
-    Args:
-        end_user_id: 终端用户 ID
-        entity_ids: 本轮写入的实体 ID 列表（用于第二层去重的候选检索）
-        llm_model_id: LLM 模型 UUID（用于第二层去重的 LLM 兜底判定）
+    Returns:
+        True  -> 跳过反思（无会话记录，或最近更新已超过 inactive_hours 小时）
+        False -> 正常执行反思
     """
-    task_id = self.request.id
-    logger.info(
-        f"[PostStore] 开始异步别名归并+第二层去重: "
-        f"end_user_id={end_user_id}, entity_count={len(entity_ids)}, "
-        f"task_id={task_id}"
-    )
-    start_time = time.time()
+    from sqlalchemy import func
+    from app.models.conversation_model import Conversation
 
-    async def _run() -> Dict[str, Any]:
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.repositories.neo4j.cypher_queries import (
-            MERGE_ALIAS_BELONGS_TO,
-            REDIRECT_ALIAS_EDGES,
-            DELETE_ALIAS_NODES,
-        )
-
-        connector = Neo4jConnector()
-        result_info: Dict[str, Any] = {}
-
-        try:
-            # ── 1. Neo4j 别名归并（追加新别名） ──
-            try:
-                records = await connector.execute_query(
-                    MERGE_ALIAS_BELONGS_TO,
-                    end_user_id=end_user_id,
-                )
-                merged_count = len(records) if records else 0
-                result_info["alias_merged"] = merged_count
-                logger.info(f"[PostStore] Neo4j 别名归并完成，影响 {merged_count} 条记录")
-            except Exception as e:
-                logger.warning(f"[PostStore] Neo4j 别名归并失败: {e}")
-                result_info["alias_merge_error"] = str(e)
-
-            # ── 2. Neo4j 边重定向 ──
-            try:
-                redirect_records = await connector.execute_query(
-                    REDIRECT_ALIAS_EDGES,
-                    end_user_id=end_user_id,
-                )
-                redirect_count = len(redirect_records) if redirect_records else 0
-                result_info["edges_redirected"] = redirect_count
-                logger.info(f"[PostStore] Neo4j 边重定向完成，影响 {redirect_count} 条记录")
-            except Exception as e:
-                logger.warning(f"[PostStore] Neo4j 边重定向失败: {e}")
-                result_info["redirect_error"] = str(e)
-
-            # ── 3. 删除别名节点及"别名属于"关系 ──
-            try:
-                delete_records = await connector.execute_query(
-                    DELETE_ALIAS_NODES,
-                    end_user_id=end_user_id,
-                )
-                deleted_count = delete_records[0].get("deleted_count", 0) if delete_records else 0
-                result_info["alias_nodes_deleted"] = deleted_count
-                logger.info(f"[PostStore] 别名节点删除完成，删除 {deleted_count} 个节点")
-            except Exception as e:
-                logger.warning(f"[PostStore] 别名节点删除失败: {e}")
-                result_info["alias_delete_error"] = str(e)
-
-            # ── 3.5 Snapshot: 别名归并+删除后的实体状态 ──
-            if snapshot_dir:
-                try:
-                    snapshot_query = """
-                    UNWIND $entity_ids AS eid
-                    MATCH (e:ExtractedEntity {id: eid})
-                    RETURN e.id AS id, e.name AS name,
-                           e.entity_type AS entity_type,
-                           e.description AS description,
-                           coalesce(e.aliases, []) AS aliases
-                    """
-                    snap_records = await connector.execute_query(
-                        snapshot_query, entity_ids=entity_ids
-                    )
-                    entity_rows = [dict(r) for r in snap_records] if snap_records else []
-                    from app.core.memory.utils.debug.write_snapshot_recorder import WriteSnapshotRecorder
-                    WriteSnapshotRecorder.save_alias_merge_result(snapshot_dir, entity_rows)
-                    logger.info(f"[PostStore] Snapshot 8_after_alias_merge 已写入，实体数={len(entity_rows)}")
-                except Exception as e:
-                    logger.warning(f"[PostStore] Snapshot 写入失败（不影响主流程）: {e}")
-
-            # ── 4. 第二层去重（与 Neo4j 已有实体联合去重） ──
-            try:
-                from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
-                    second_layer_dedup_and_merge_with_neo4j,
-                )
-                from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
-                    clean_cross_role_aliases,
-                )
-                from app.repositories.neo4j.cypher_queries import EXTRACTED_ENTITY_NODE_SAVE
-
-                # 从 Neo4j 加载本轮写入的实体（第一层去重后的结果）
-                load_query = """
-                UNWIND $entity_ids AS eid
-                MATCH (e:ExtractedEntity {id: eid})
-                RETURN e {.*} AS entity
-                """
-                entity_records = await connector.execute_query(
-                    load_query, entity_ids=entity_ids
-                )
-
-                if entity_records:
-                    from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
-                        _row_to_entity,
-                    )
-
-                    current_entities = []
-                    for rec in entity_records:
-                        try:
-                            entity_data = rec.get("entity") or rec
-                            current_entities.append(_row_to_entity(entity_data))
-                        except Exception:
-                            pass
-
-                    if current_entities:
-                        # 构建 LLM client（如果有 llm_model_id）
-                        llm_client = None
-                        if llm_model_id:
-                            try:
-                                from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-                                from app.db import get_db_context
-                                with get_db_context() as db:
-                                    factory = MemoryClientFactory(db)
-                                    llm_client = factory.get_llm_client(llm_model_id)
-                            except Exception as e:
-                                logger.warning(f"[PostStore] 构建 LLM client 失败，跳过 LLM 兜底: {e}")
-
-                        fused_entities, _, _, id_redirect = await second_layer_dedup_and_merge_with_neo4j(
-                            connector=connector,
-                            end_user_id=end_user_id,
-                            entity_nodes=current_entities,
-                            statement_entity_edges=[],
-                            entity_entity_edges=[],
-                            llm_client=llm_client,
-                        )
-
-                        # 清洗跨角色别名污染
-                        clean_cross_role_aliases(fused_entities)
-
-                        # 将融合后的实体回写 Neo4j
-                        if fused_entities:
-                            entity_data = [e.model_dump() for e in fused_entities]
-                            await connector.execute_query(
-                                EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data
-                            )
-
-                        # 删除被合并的冗余节点并重定向边（APOC 合并）
-                        from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
-                            cleanup_merged_entities,
-                        )
-                        cleanup_info = await cleanup_merged_entities(connector, id_redirect)
-                        result_info["layer2_merged_count"] = len(cleanup_info["redirects"])
-                        if cleanup_info["redirects"]:
-                            result_info["layer2_nodes_deleted"] = cleanup_info["deleted_count"]
-                        if "error" in cleanup_info:
-                            result_info["layer2_delete_error"] = cleanup_info["error"]
-
-                        result_info["layer2_input"] = len(current_entities)
-                        result_info["layer2_output"] = len(fused_entities)
-                        logger.info(
-                            f"[PostStore] 第二层去重完成: "
-                            f"{len(current_entities)} → {len(fused_entities)} 个实体"
-                        )
-                    else:
-                        result_info["layer2_skipped"] = "no entities loaded"
-                else:
-                    result_info["layer2_skipped"] = "no entity records found"
-
-            except Exception as e:
-                logger.warning(f"[PostStore] 第二层去重失败（不影响主流程）: {e}", exc_info=True)
-                result_info["layer2_error"] = str(e)
-
-        finally:
-            await connector.close()
-
-        # ── 第二层去重可能合并/删除节点，重新同步 memory_count ──
-        _count_connector = Neo4jConnector()
-        try:
-            await sync_end_user_memory_count_from_neo4j(end_user_id, _count_connector)
-        except Exception as _sync_e:
-            logger.warning(
-                f"[MEMORY_COUNT_SYNC] 同步失败（不影响主流程）: end_user_id={end_user_id}, error={_sync_e}"
-            )
-        finally:
-            await _count_connector.close()
-
-        return result_info
-
-    loop = None
     try:
-        loop = set_asyncio_event_loop()
-        result = loop.run_until_complete(_run())
-        elapsed = time.time() - start_time
-        logger.info(
-            f"[PostStore] 任务完成: {result}, 耗时={elapsed:.2f}s, task_id={task_id}"
+        last_updated = (
+            db.query(func.max(Conversation.updated_at))
+            .filter(Conversation.user_id == str(end_user_id))
+            .scalar()
         )
-
-        return {
-            "status": "SUCCESS",
-            **result,
-            "elapsed_time": elapsed,
-            "task_id": task_id,
-        }
     except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(
-            f"[PostStore] 任务失败: {e}, 耗时={elapsed:.2f}s",
-            exc_info=True,
-        )
-        raise self.retry(exc=e)
-    finally:
-        if loop:
-            _shutdown_loop_gracefully(loop)
+        # 查询异常时不跳过，保证反思仍能执行（保守策略）
+        logger.warning(f"反思活跃度前置查询失败 user={end_user_id}: {e}")
+        return False
+
+    if last_updated is None:
+        # 无任何会话记录 -> 没有可反思的新数据，跳过
+        return True
+
+    # updated_at 为 UTC naive，当前时间取 UTC naive 以对齐比较
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if last_updated.tzinfo is not None:
+        last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
+    return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
 
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
@@ -2200,16 +2065,50 @@ def post_store_dedup_and_alias_merge_task(
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=600,
-    soft_time_limit=540,
 )
 def layer2_reflection_task(self) -> Dict[str, Any]:
-    """Layer 2 离线巡检（描述合并等）— 每 10 分钟
+    """Layer 2 离线巡检（描述合并等）
 
     遍历所有 workspace → app → end_user，对每个启用了 enable_self_reflexion 的配置
     调用 MemoryService.run_reflection_layer2()。
+
+    单例锁：单轮巡检耗时可能超过 10 分钟调度间隔，若不加锁，新一轮会与上一轮
+    重叠执行（并发数 > 1），两个实例同时加载实体 + embedding + 调 LLM 导致内存
+    叠加，超出容器内存上限被 OOMKill (SIGKILL)。这里用 RedisFairLock 保证任意时刻
+    只有一个实例在跑，重叠触发时直接跳过本轮。锁以主动释放为主、后台线程自动续期
+    保活、较短 expire(180s) 兜底：进程被 SIGKILL 后续期线程消失，锁很快自动过期。
     """
     start_time = time.time()
+
+    # 单例锁：防止上一轮未结束时本轮重叠执行造成内存叠加。
+    # 用 RedisFairLock 自动续期：持有期间后台线程每 expire/3 秒续期一次，任务跑多久
+    # 锁就有效多久；进程被 OOMKill/SIGKILL 时续期线程随之终止，锁靠较短的 expire(180s)
+    # 自动过期释放，既不会永久泄漏，也不会像 7200s 长 TTL 那样卡死后续轮次。
+    _lock_redis = get_sync_redis_client()
+    _lock = None
+    if _lock_redis is not None:
+        _lock = RedisFairLock(
+            key="lock:layer2_reflection_task",
+            redis_client=_lock_redis,
+            expire=180,
+            timeout=0,  # 非阻塞：抢不到立即返回，本轮跳过
+            auto_renewal=True,
+        )
+        try:
+            _acquired = _lock.acquire()
+        except Exception as e:
+            # Redis 异常时降级为不加锁，避免任务永久无法执行
+            logger.warning(f"反思引擎Layer2 获取单例锁异常，降级为不加锁执行: {e}")
+            _lock = None
+        else:
+            if not _acquired:
+                logger.warning("反思引擎Layer2 上一轮任务仍在执行，本轮跳过")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "previous run still in progress",
+                    "task_id": self.request.id,
+                    "elapsed_time": time.time() - start_time,
+                }
 
     async def _run() -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
@@ -2224,7 +2123,9 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                 logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
                 processed_users = 0
+                processed_user_ids = []
                 skipped_configs = 0
+                skipped_inactive = 0
                 total_dedup_merged = 0
                 total_desc_merged = 0
                 redis_client = get_sync_redis_client()
@@ -2248,6 +2149,11 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                             for user in end_users:
                                 try:
+                                    # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过（仅对活跃用户反思）
+                                    if _should_skip_reflection_by_inactivity(db, str(user['id'])):
+                                        skipped_inactive += 1
+                                        continue
+
                                     # 获取 Redis 锁，和写入 pipeline 互斥
                                     write_lock = None
                                     if redis_client is not None:
@@ -2262,6 +2168,9 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             logger.warning(
                                                 f"反思引擎Layer2 获取锁超时，跳过用户 {user['id']}"
                                             )
+                                            # 锁超时的用户仍计入处理列表，保证与低频任务的用户口径一致
+                                            processed_users += 1
+                                            processed_user_ids.append(str(user['id']))
                                             continue
 
                                     try:
@@ -2275,6 +2184,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             baseline=baseline,
                                         )
                                         processed_users += 1
+                                        processed_user_ids.append(str(user['id']))
                                         # 增量统计
                                         dedup_info = r.get("entity_dedup", {})
                                         merge_info = r.get("description_merge", {})
@@ -2297,16 +2207,27 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             await asyncio.to_thread(write_lock.release)
                                 except Exception as e:
                                     logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
+                                    # 回滚失败事务，避免污染后续用户的查询
+                                    try:
+                                        db.rollback()
+                                    except Exception:
+                                        pass
+                                    # 失败用户仍计入处理列表，保证与低频任务的用户口径一致
+                                    processed_users += 1
+                                    processed_user_ids.append(str(user['id']))
 
                 logger.info(
                     f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
-                    f"跳过 {skipped_configs} 个未启用反思的配置"
+                    f"跳过 {skipped_configs} 个未启用反思的配置, "
+                    f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户"
                 )
 
                 return {
                     "status": "SUCCESS",
                     "processed_users": processed_users,
+                    "processed_user_ids": processed_user_ids,
                     "skipped_configs": skipped_configs,
+                    "skipped_inactive": skipped_inactive,
                     "total_dedup_merged": total_dedup_merged,
                     "total_desc_merged": total_desc_merged,
                 }
@@ -2322,6 +2243,13 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
         result = {"status": "FAILED", "error": str(e)}
     finally:
         _shutdown_loop_gracefully(loop)
+        # 释放单例锁：RedisFairLock 内部用 Lua 校验持有者后才删除，
+        # 并停止后台续期线程，避免误删后续实例的锁。
+        if _lock is not None:
+            try:
+                _lock.release()
+            except Exception as e:
+                logger.warning(f"反思引擎Layer2 释放单例锁失败（将靠 expire 自动过期）: {e}")
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
@@ -2334,16 +2262,49 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=1800,
-    soft_time_limit=1740,
 )
 def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
     """方案B：低频全量扫描去重（每天一次）
 
     复用 layer2_reflection_task 的调度模式：
     遍历所有 workspace → app → end_user，检查 enable_self_reflexion 配置。
+
+    单例锁：与高频 layer2_reflection_task 共用同一把锁 "lock:layer2_reflection_task"，
+    保证高频/低频两个 Layer2 任务任意时刻只有一个在跑，避免同时加载实体 + embedding +
+    调 LLM 造成内存叠加被 OOMKill。锁以主动释放为主、后台线程自动续期保活、较短
+    expire(180s) 兜底：进程被 SIGKILL 后续期线程消失，锁很快自动过期。
     """
     start_time = time.time()
+
+    # 单例锁：与 layer2_reflection_task 共用同一 key，实现高频/低频互斥。
+    # 用 RedisFairLock 自动续期：持有期间后台线程每 expire/3 秒续期一次，任务跑多久
+    # 锁就有效多久；进程被 OOMKill/SIGKILL 时续期线程随之终止，锁靠较短的 expire(180s)
+    # 自动过期释放，既不会永久泄漏，也不会像 7200s 长 TTL 那样卡死后续轮次。
+    _lock_redis = get_sync_redis_client()
+    _lock = None
+    if _lock_redis is not None:
+        _lock = RedisFairLock(
+            key="lock:layer2_reflection_task",
+            redis_client=_lock_redis,
+            expire=180,
+            timeout=0,  # 非阻塞：抢不到立即返回，本轮跳过
+            auto_renewal=True,
+        )
+        try:
+            _acquired = _lock.acquire()
+        except Exception as e:
+            # Redis 异常时降级为不加锁，避免任务永久无法执行
+            logger.warning(f"方案B全量扫描 获取单例锁异常，降级为不加锁执行: {e}")
+            _lock = None
+        else:
+            if not _acquired:
+                logger.warning("方案B全量扫描 Layer2 任务（高频或低频）仍在执行，本轮跳过")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "another layer2 task still in progress",
+                    "task_id": self.request.id,
+                    "elapsed_time": time.time() - start_time,
+                }
 
     async def _run() -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
@@ -2356,8 +2317,11 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
                 return {"status": "SUCCESS", "message": "无工作空间"}
 
             processed_users = 0
+            processed_user_ids = []
             skipped_configs = 0
+            skipped_inactive = 0
             total_merged = 0
+            redis_client = get_sync_redis_client()
 
             for workspace in workspaces:
                 service = WorkspaceAppService(db)
@@ -2378,34 +2342,74 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
 
                         for user in end_users:
                             try:
-                                memory_service = MemoryService(
-                                    db=db,
-                                    config_id=config_id,
-                                    end_user_id=str(user['id']),
-                                    workspace_id=str(workspace.id),
-                                )
-                                r = await memory_service.run_dedup_full_scan()
-                                processed_users += 1
-                                merged = r.get("merged_count", 0)
-                                total_merged += merged
-                                if merged > 0:
-                                    logger.info(
-                                        f"方案B全量扫描 用户 {user['id']} "
-                                        f"扫描类型 {r.get('scanned_types', 0)}, "
-                                        f"合并 {merged} 对"
+                                # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过
+                                if _should_skip_reflection_by_inactivity(db, str(user['id'])):
+                                    skipped_inactive += 1
+                                    continue
+
+                                # 获取 Redis 锁，和写入 pipeline 互斥
+                                write_lock = None
+                                if redis_client is not None:
+                                    write_lock = RedisFairLock(
+                                        key=f"memory_write:{user['id']}",
+                                        redis_client=redis_client,
+                                        expire=600,
+                                        timeout=30,
+                                        auto_renewal=True,
                                     )
+                                    if not await asyncio.to_thread(write_lock.acquire):
+                                        logger.warning(
+                                            f"方案B全量扫描 获取锁超时，跳过用户 {user['id']}"
+                                        )
+                                        # 锁超时的用户仍计入处理列表，保证与高频任务的用户口径一致
+                                        processed_users += 1
+                                        processed_user_ids.append(str(user['id']))
+                                        continue
+
+                                try:
+                                    memory_service = MemoryService(
+                                        db=db,
+                                        config_id=config_id,
+                                        end_user_id=str(user['id']),
+                                        workspace_id=str(workspace.id),
+                                    )
+                                    r = await memory_service.run_dedup_full_scan()
+                                    processed_users += 1
+                                    processed_user_ids.append(str(user['id']))
+                                    merged = r.get("merged_count", 0)
+                                    total_merged += merged
+                                    if merged > 0:
+                                        logger.info(
+                                            f"方案B全量扫描 用户 {user['id']} "
+                                            f"扫描类型 {r.get('scanned_types', 0)}, "
+                                            f"合并 {merged} 对"
+                                        )
+                                finally:
+                                    if write_lock is not None:
+                                        await asyncio.to_thread(write_lock.release)
                             except Exception as e:
                                 logger.error(f"方案B全量扫描失败 user={user['id']}: {e}")
+                                # 回滚失败事务，避免污染后续用户的查询
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                # 失败用户仍计入处理列表，保证与高频任务的用户口径一致
+                                processed_users += 1
+                                processed_user_ids.append(str(user['id']))
 
             logger.info(
                 f"方案B全量扫描完成: 处理 {processed_users} 用户, "
                 f"跳过 {skipped_configs} 个未启用配置, "
+                f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户, "
                 f"总合并 {total_merged} 对"
             )
             return {
                 "status": "SUCCESS",
                 "processed_users": processed_users,
+                "processed_user_ids": processed_user_ids,
                 "skipped_configs": skipped_configs,
+                "skipped_inactive": skipped_inactive,
                 "total_merged": total_merged,
             }
 
@@ -2416,6 +2420,13 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
         result = {"status": "FAILED", "error": str(e)}
     finally:
         _shutdown_loop_gracefully(loop)
+        # 释放单例锁：RedisFairLock 内部用 Lua 校验持有者后才删除，
+        # 并停止后台续期线程，避免误删其他实例的锁。
+        if _lock is not None:
+            try:
+                _lock.release()
+            except Exception as e:
+                logger.warning(f"方案B全量扫描 释放单例锁失败（将靠 expire 自动过期）: {e}")
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id

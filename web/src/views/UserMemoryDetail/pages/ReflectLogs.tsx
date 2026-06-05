@@ -22,10 +22,10 @@ import Tag from '@/components/Tag'
 const subTypeObj: Record<string, boolean> = {
   entity_dedup: true,
   description_merge: true,
+  unresolved_entity: true,
   expired_detection: false,
   factual_contradiction: false,
   ontology_verification: false,
-  unrecognized_entity: false,
 }
 
 const queryInitialValues = {

@@ -349,3 +349,39 @@ export const batchDownloadFilesByKb = async (kb_id: string, fileName: string, ca
 export const knowledgesChunkPolicy = async (kb_id: string) => {
   return request.get(`/knowledges/${kb_id}/chunk-policy`);
 }
+// 启用内置元数据
+export const enableBuiltInMetadata = (kb_id: string, data: { enabled: boolean }) => {
+  return request.post(`/knowledges/${kb_id}/metadata/builtin/enable`, data);
+}
+// 获取元数据字段列表
+export const getMetadataFields = (kb_id: string) => {
+  return request.get(`/knowledges/${kb_id}/metadata`);
+}
+// 创建元数据字段
+export const createMetadataField = (kb_id: string, data: any) => {
+  return request.post(`/knowledges/${kb_id}/metadata`, data);
+}
+// 修改元数据字段
+export const updateMetadataField = (kb_id: string, metadata_id: string, data: { name: string; }) => {
+  return request.put(`/knowledges/${kb_id}/metadata/${metadata_id}`, data);
+}
+// 删除元数据字段
+export const deleteMetadataField = (kb_id: string, metadata_id: string) => {
+  return request.delete(`/knowledges/${kb_id}/metadata/${metadata_id}`);
+}
+// 获取单个文档元数据
+export const getDocumentMetadata = (document_id: string) => {
+  return request.get(`/documents/${document_id}/metadata`);
+}
+// 批量更新文档元数据
+export const batchUpdateDocumentMetadata = (data: Array<{ document_id: string; metadata: Record<string, any>; }>) => {
+  return request.put(`/documents/metadata/batch`, data);
+}
+// 更新单个文档元数据
+export const updateDocumentMetadata = (document_id: string, data: {metadata: Record<string, any>}) => {
+  return request.put(`/documents/${document_id}/metadata`, data);
+}
+// 删除单个文档元数据
+export const deleteDocumentMetadata = (document_id: string, data: { field_names: string[] }) => {
+  return request.post(`/documents/${document_id}/metadata`, { params: data });
+}

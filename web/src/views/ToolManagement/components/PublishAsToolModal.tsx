@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-28 13:41:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 14:10:21
+ * @Last Modified time: 2026-06-02 18:05:15
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, App } from 'antd';
@@ -204,7 +204,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
         >
           <Select
             mode="tags"
-            placeholder={t('tool.selectTagsPlaceholder')}
+            placeholder={t('common.pleaseEnter')}
             className="rb:w-full"
           />
         </Form.Item>

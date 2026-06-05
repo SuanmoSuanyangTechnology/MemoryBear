@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 19:03:29
+ * @Last Modified time: 2026-06-04 12:26:51
  */
 /**
  * Application Modal
@@ -16,8 +16,9 @@ import { useTranslation } from 'react-i18next';
 
 import RadioGroupCard from '@/components/RadioGroupCard'
 import AgentIcon from '@/assets/images/application/agent.svg'
-import ClusterIcon from '@/assets/images/application/cluster.svg'
+import ClusterIcon from '@/assets/images/application/multi_agent.svg'
 import WorkflowIcon from '@/assets/images/application/workflow.svg'
+import PureWorkflowIcon from '@/assets/images/application/pure_workflow.svg'
 import type { ApplicationModalData, ApplicationModalRef, Application } from '../types'
 import RbModal from '@/components/RbModal'
 import { addApplication, updateApplication } from '@/api/application'
@@ -49,7 +50,7 @@ const typeIcons: Record<string, string> = {
   agent: AgentIcon,
   multi_agent: ClusterIcon,
   workflow: WorkflowIcon,
-  pure_workflow: WorkflowIcon,
+  pure_workflow: PureWorkflowIcon,
 }
 
 /**
@@ -170,6 +171,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
               icon: typeIcons[type],
             }))}
             disabled={!!editVo?.id}
+            block={true}
           />
         </FormItem>
       </Form>

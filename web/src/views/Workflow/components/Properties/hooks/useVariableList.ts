@@ -73,7 +73,7 @@ const NODE_VARIABLES = {
   ],
   'jinja-render': [{ label: 'output', dataType: 'string', field: 'output' }],
   tool: [{ label: 'data', dataType: 'string', field: 'data' }],
-  'knowledge-retrieval': [{ label: 'output', dataType: 'array[object]', field: 'output' }],
+  'knowledge-retrieval': [{ label: 'output', dataType: 'array[string]', field: 'output' }],
   'parameter-extractor': [
     { label: '__is_success', dataType: 'number', field: '__is_success' },
     { label: '__reason', dataType: 'string', field: '__reason' }
