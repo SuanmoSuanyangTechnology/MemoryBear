@@ -38,7 +38,7 @@ api_logger = get_api_logger()
 _PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 _PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 _PARSE_TASK_TTL = 7200  # 2 hours
-_PARSE_CANCEL_TTL = 60  # 1 minute
+_PARSE_CANCEL_TTL = 300  # 5 minutes
 
 router = APIRouter(
     prefix="/documents",
@@ -306,8 +306,11 @@ async def delete_document(
                 api_logger.info(f"[DELETE] ThreadPool does not support terminate, relying on Redis cancel marker for task_id={task_id}")
             except Exception as revoke_err:
                 api_logger.error(f"[DELETE] Failed to revoke task {task_id}: {revoke_err}")
-        # Set cancellation marker and clean up task key
-        REDIS_CONN.set(_PARSE_CANCEL_KEY.format(doc_id=document_id), "1", exp=_PARSE_CANCEL_TTL)
+        # Set cancellation marker only for tasks that have already entered execution.
+        if db_document.run == 1:
+            REDIS_CONN.set(_PARSE_CANCEL_KEY.format(doc_id=document_id), "1", exp=_PARSE_CANCEL_TTL)
+        else:
+            api_logger.info(f"[DELETE] Skip cancel marker for non-running document: document_id={document_id}, run={db_document.run}")
         REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
 
         # 3. Delete vector index (non-404 failures raise, caught by except below)
