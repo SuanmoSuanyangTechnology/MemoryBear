@@ -251,7 +251,7 @@ class WorkflowExecutor:
                                 yield agent_log_event
 
                         elif event_type in ("agent_tool_start", "agent_tool_end", "agent_tool_error"):
-                        # Agent 节点工具调用中间状态，直接透传给前端展示
+                            # Agent 节点工具调用中间状态，直接透传给前端展示
                             yield {
                                 "event": event_type,
                                 "data": {
