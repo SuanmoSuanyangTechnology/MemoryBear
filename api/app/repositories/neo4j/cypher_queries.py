@@ -861,6 +861,16 @@ neo4j_query_all = """
                 other as entity2
                           """
 
+'''按 elementId 查询 ExtractedEntity 的事件时间线字段'''
+Memory_Timeline_Entity_Events = """
+MATCH (e:ExtractedEntity)
+WHERE elementId(e) = $id
+RETURN e.name AS entity_name,
+       e.entity_type AS entity_type,
+       e.description_summary AS description_summary,
+       e.event_timeline AS event_timeline
+"""
+
 '''针对当前节点下扩长的句子，实体和总结'''
 Memory_Timeline_ExtractedEntity = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
