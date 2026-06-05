@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 14:13:39
+ * @Last Modified time: 2026-06-05 19:56:42
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -31,6 +31,12 @@ export const hasProcessNodes = [
   'tool',
   'code',
   'document-extractor',
+]
+export const hasErrorHandleNodes = [
+  'code',
+  'http-request',
+  'llm',
+  'agent'
 ]
 // support single run node
 export const cannotRunNodes = [
@@ -92,6 +98,116 @@ export const webhookNodeInitConfig = {
     defaultValue: {
       status_code: 200,
       body: undefined
+    }
+  }
+}
+const modelConfig: Record<string, any> = {
+  model_id: {
+    type: 'define',
+    required: true,
+    params: { type: 'llm,chat' }, // llm/chat
+    valueKey: 'id',
+    labelKey: 'name',
+  },
+  temperature: {
+    type: 'define',
+    defaultValue: 0.7
+  },
+  max_tokens: { 
+    type: 'define',
+    defaultValue: 8000 
+  },
+  json_output: {
+    type: 'define',
+    defaultValue: false
+  },
+  // Top P 采样参数
+  top_p: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: 0.8
+    }
+  },
+  // 取样数量
+  top_k: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: 50
+    }
+  },
+  // 随机种子
+  seed: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: 1234
+    }
+  },
+  // 重复惩罚
+  repetition_penalty: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: 1.0
+    }
+  },
+  // 联网搜索
+  // enable_search: {
+  //   type: 'define',
+  //   defaultValue: false
+  // },
+  // 思考模式
+  thinking: {
+    type: 'define',
+    defaultValue: {
+      budget: {
+          enable: false,
+          value: 256
+      },
+      enable: false
+    }
+  },
+  // 回复格式
+  response_format: {
+    type: 'define',
+    options: [
+      { label: 'text', value: 'text' },
+      { label: 'json_object', value: 'json_object' },
+    ],
+    defaultValue: 'text',
+  },
+  // 额外请求头，字符串格式
+  extra_headers: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: undefined
+    }
+  },
+  // 停止序列, 输入序列并按 Tab 键
+  stop: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: []
+    }
+  },
+  // 存在惩罚
+  presence_penalty: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: 0
+    }
+  },
+  // 频率惩罚
+  frequency_penalty: {
+    type: 'define',
+    defaultValue: {
+      enable: false,
+      value: 0
     }
   }
 }
@@ -201,115 +317,7 @@ export const nodeLibrary: NodeLibrary[] = [
     nodes: [
       { type: "llm", icon: 'rb:bg-[url("@/assets/images/workflow/llm.svg")]',
         config: {
-          model_id: {
-            type: 'define',
-            required: true,
-            params: { type: 'llm,chat' }, // llm/chat
-            valueKey: 'id',
-            labelKey: 'name',
-          },
-          // 温度参数
-          temperature: {
-            type: 'define',
-            defaultValue: 0.7
-          },
-          max_tokens: { 
-            type: 'define',
-            defaultValue: 8000 
-          },
-          json_output: {
-            type: 'define',
-            defaultValue: false
-          },
-          // Top P 采样参数
-          top_p: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: 0.8
-            }
-          },
-          // 取样数量
-          top_k: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: 50
-            }
-          },
-          // 随机种子
-          seed: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: 1234
-            }
-          },
-          // 重复惩罚
-          repetition_penalty: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: 1.0
-            }
-          },
-          // 联网搜索
-          // enable_search: {
-          //   type: 'define',
-          //   defaultValue: false
-          // },
-          // 思考模式
-          thinking: {
-            type: 'define',
-            defaultValue: {
-              budget: {
-                  enable: false,
-                  value: 256
-              },
-              enable: false
-            }
-          },
-          // 回复格式
-          response_format: {
-            type: 'define',
-            options: [
-              { label: 'text', value: 'text' },
-              { label: 'json_object', value: 'json_object' },
-            ],
-            defaultValue: 'text',
-          },
-          // 额外请求头，字符串格式
-          extra_headers: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: undefined
-            }
-          },
-          // 停止序列, 输入序列并按 Tab 键
-          stop: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: []
-            }
-          },
-          // 存在惩罚
-          presence_penalty: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: 0
-            }
-          },
-          // 频率惩罚
-          frequency_penalty: {
-            type: 'define',
-            defaultValue: {
-              enable: false,
-              value: 0
-            }
-          },
+          ...modelConfig,
 
           context: {
             type: 'variableList',
@@ -355,6 +363,67 @@ export const nodeLibrary: NodeLibrary[] = [
               enable: false,
               max_attempts: 3,
               retry_interval: 100,
+            }
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
+          }
+        }
+      },
+      { type: "agent", icon: 'rb:bg-[url("@/assets/images/workflow/agent.svg")]',
+        config: {
+          strategy: {
+            type: 'select',
+            options: [
+              { label: 'ReAct', value: 'react' },
+            ],
+            defaultValue: 'react',
+          },
+          model: {
+            type: 'define',
+            defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
+              acc[key] = value.defaultValue;
+              return acc;
+            }, {} as Record<string, any>),
+          },
+          tools: {
+            type: 'toolList',
+            defaultValue: [],
+          },
+          system_prompt: {
+            type: 'messageEditor',
+            isArray: false,
+            titleVariant: 'borderless',
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+          },
+
+          context: {
+            type: 'variableList',
+            placeholder: 'workflow.config.llm.contextPlaceholder'
+          },
+          message: {
+            type: 'messageEditor',
+            isArray: false,
+            titleVariant: 'borderless',
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+          },
+          max_iterations: {
+            type: 'slider',
+            min: 1,
+            max: 10,
+            step: 1,
+            defaultValue: 10,
+          },
+          memory: {
+            type: 'memoryConfig',
+            needMsg: false,
+            defaultValue: {
+              enable: false,
+              enable_window: false,
+              window_size: 20
             }
           },
           error_handle: {
@@ -516,6 +585,36 @@ export const nodeLibrary: NodeLibrary[] = [
             isArray: false,
             titleVariant: 'borderless',
             placeholder: 'common.pleaseEnter'
+          }
+        }
+      },
+      // 人工介入
+      { type: "human-intervention", icon: 'rb:bg-[url("@/assets/images/workflow/human-intervention.svg")]',
+        config: {
+          delivery_method: {
+            type: 'define',
+            defaultValue: []
+          },
+          content: {
+            type: 'messageEditor',
+            isArray: false,
+            titleVariant: 'borderless',
+            placeholder: 'common.pleaseEnter'
+          },
+          actions: {
+            type: 'define',
+            defaultValue: []
+          },
+          timeout: {
+            type: 'timeout',
+            defaultValue: {
+              unit: 'days', // day, hour, minute, second
+              value: 3
+            }
+          },
+          form_fields: {
+            type: 'define',
+            defaultValue: []
           }
         }
       },
@@ -1142,6 +1241,25 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: [
         defaultPortItems[0],
         ...(['分类1', '分类2'].map((_text, index) => ({
+          group: 'right',
+          id: `CASE${index + 1}`,
+          args: {
+            ...portArgs,
+            y: portItemArgsY * index + conditionNodePortItemArgsY,
+          },
+        }))),
+      ],
+    },
+  },
+  'human-intervention': {
+    width: nodeWidth,
+    height: conditionNodeHeight,
+    shape: 'condition-node',
+    ports: {
+      groups: defaultAbsolutePortGroups,
+      items: [
+        defaultPortItems[0],
+        ...(['TIMEOUT'].map((_text, index) => ({
           group: 'right',
           id: `CASE${index + 1}`,
           args: {

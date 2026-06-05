@@ -43,7 +43,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
   config,
   collapsed,
   runOpen,
-}) => {
+}, ref) => {
   const { t } = useTranslation()
   const [isVariableInspectorVisible, setIsVariableInspectorVisible] = useState(false)
 

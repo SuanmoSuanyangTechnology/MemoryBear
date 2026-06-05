@@ -383,5 +383,5 @@ export const updateDocumentMetadata = (document_id: string, data: {metadata: Rec
 }
 // 删除单个文档元数据
 export const deleteDocumentMetadata = (document_id: string, data: { field_names: string[] }) => {
-  return request.post(`/documents/${document_id}/metadata`, { params: data });
+  return request.post(`/documents/${document_id}/metadata`, data);
 }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 17:31:49
+ * @Last Modified time: 2026-06-05 18:11:51
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -117,6 +117,31 @@ export const feedbackMessage = (shareToken: string, message_id: string, data: { 
     }
   })
 }
+// Experience session - Human intervention trigger
+export const interventionsSubmit = (share_token: string, execution_id: string, data: { node_id: string; action_id: string; }) => {
+  return request.post(`/public/share/workflow/interventions/${execution_id}/submit`, data, {
+    headers: {
+      'Authorization': `Bearer ${share_token}`
+    }
+  })
+}
+// Restore SSE stream + Submit action
+export const interventionsResumeSubmit = (share_token: string, execution_id: string, data: { node_id: string; action_id: string; }, onMessage?: (data: SSEMessage[]) => void) => {
+  return handleSSE(`/public/share/workflow/interventions/${execution_id}/resume-submit`, data, onMessage, {
+    headers: {
+      'Authorization': `Bearer ${share_token}`
+    }
+  })
+}
+// Experience session - Human intervention trigger
+export const appInterventionsSubmit = (app_id: string, execution_id: string, data: {
+  node_id: string;
+  action_id: string;
+  form_data: Record<string, string>
+}) => {
+  return request.post(`/apps/${app_id}/workflow/interventions/${execution_id}/submit`, data)
+}
+
 // Get share token
 export const getShareToken = (share_token: string, user_id: string) => {
   return request.post(`/public/share/${share_token}/token`, { user_id })

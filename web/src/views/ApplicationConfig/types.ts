@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 17:51:18
+ * @Last Modified time: 2026-06-05 20:04:42
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -527,6 +527,7 @@ export interface LogItem {
   created_at: number;
   updated_at: number;
   node_executions_map?: Record<string, ChatItem['subContent']>
+  pending_intervention?: Record<string, { interventions: ChatItem['interventions'] }>
 }
 export interface LogDetailModalRef {
   handleOpen: (vo: LogItem) => void;

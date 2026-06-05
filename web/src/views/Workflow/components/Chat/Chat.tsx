@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 14:50:07
+ * @Last Modified time: 2026-06-05 19:57:15
  */
 /**
  * Workflow Chat Component
@@ -27,7 +27,7 @@ import { App, Flex, Button } from 'antd'
 import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
-import { draftRun } from '@/api/application';
+import { draftRun, appInterventionsSubmit } from '@/api/application';
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
@@ -163,7 +163,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
     }
-    console.log('allVariables', allVariables)
     setVariables([...allVariables])
     toolbarRef.current?.setVariables([...allVariables])
   }
@@ -235,7 +234,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
       webhookTriggerVariables.forEach(vo => {
-        console.log('webhookTriggerVariables vo', vo)
         const nameList = vo.name.split('.')
         if (!trigger_payload[nameList[0]]) {
           trigger_payload[nameList[0]] = {}
@@ -266,9 +264,14 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, execution_id, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
+        const {
+          execution_id, content, conversation_id, node_id, node_name, cycle_id, cycle_idx,
+          input, output, process, error, elapsed_time, status, citations,
+          rendered_content, form_fields, actions, timeout_at,
+          agent_log
+        } = item.data as {
           content: string;
-          execution_id: string | null;
+          execution_id?: string;
           conversation_id: string | null;
           cycle_id: string;
           cycle_idx: number;
@@ -281,13 +284,25 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed' | 'running',
+          status?: 'completed' | 'failed' | 'running' | 'waiting_human',
           citations?: {
             document_id: string;
             file_name: string;
             knowledge_id: string;
             score: string;
+          }[];
+          rendered_content?: string;
+          form_fields?: {
+            id: string;
+            default_value?: string;
           }[]
+          actions?: {
+            id: string;
+            label: string;
+            variant: string;
+          }[];
+          timeout_at?: number;
+          agent_log?: Record<string, any>;
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
@@ -321,6 +336,84 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
               return newList
             })
             break;
+          case 'intervention_required':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                const newSubContent = newList[lastIndex].subContent || []
+                const filterIndex = newSubContent.findIndex(vo => vo.id === node_id)
+                if (filterIndex > -1) {
+                  newSubContent[filterIndex] = {
+                    ...newSubContent[filterIndex],
+                    node_id: node_id,
+                    node_name: name,
+                    node_type: type,
+                    icon,
+                    status: 'waiting_human',
+                    content: {},
+                  }
+                } else {
+                  newSubContent.push({
+                    id: node_id,
+                    node_id: node_id,
+                    node_name: name,
+                    node_type: type,
+                    icon,
+                    status: 'waiting_human',
+                    content: {},
+                    meta_data: {
+                      waiting_human: true,
+                    },
+                  })
+                }
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  status: 'waiting_human',
+                  subContent: newSubContent,
+                  meta_data: {
+                    ...newList[lastIndex].meta_data,
+                    waiting_human: true
+                  },
+                  interventions: [
+                    ...(newList[lastIndex].interventions || []),
+                    {
+                      execution_id,
+                      node_id: node_id,
+                      node_name: node_name || name,
+                      rendered_content,
+                      form_fields: form_fields || [],
+                      actions: actions || [],
+                      timeout_at,
+                    }
+                  ]
+                }
+              }
+              return newList
+            })
+            break;
+          case 'intervention_timeout':
+            setChatList(prev => {
+              const lastMsg = prev[prev.length - 1]
+              if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+                return prev
+              }
+
+              const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+              lastMsg.interventions[filterIndex] = {
+                ...lastMsg.interventions[filterIndex],
+                resolved_action_id: '__timeout__',
+                resolved_kind: 'timeout'
+              }
+              
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...lastMsg,
+                }
+              ]
+            })
+            break
           // Track node execution start
           case 'node_start':
             setChatList(prev => {
@@ -354,6 +447,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                 }
                 newList[lastIndex] = {
                   ...newList[lastIndex],
+                  status: 'running',
                   subContent: newSubContent
                 }
               }
@@ -424,6 +518,28 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                   newList[lastIndex] = {
                     ...newList[lastIndex],
                     subContent: newSubContent
+                  }
+                }
+              }
+              return newList
+            })
+            break
+          case 'agent_log':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                const newSubContent = newList[lastIndex].subContent || []
+                const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
+                if (filterIndex > -1) {
+                  const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                  newSubContent[filterIndex].agent_log = {
+                    ...lastAgentLog,
+                    meta: agent_log?.meta || {},
+                    iterations: [
+                      ...(lastAgentLog?.iterations || []),
+                      ...agent_log?.iterations || []
+                    ],
                   }
                 }
               }
@@ -550,6 +666,39 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     // Chat panel is now always visible, just refresh variables
     getVariables()
   }
+  const handleInterventionActionClick = async (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
+    if (!execution_id || !node_id) {
+      return
+    }
+    const data = {
+      node_id,
+      action_id: actionId,
+      form_data: fieldValues,
+    }
+    appInterventionsSubmit(appId, execution_id, data)
+      .then(() => {
+        setChatList(prev => {
+          const lastMsg = prev[prev.length - 1]
+          if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+            return prev
+          }
+
+          const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+          lastMsg.interventions[filterIndex] = {
+            ...lastMsg.interventions[filterIndex],
+            resolved_form_data: fieldValues,
+            resolved_action_id: actionId,
+          }
+          
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...lastMsg,
+            }
+          ]
+        })
+      })
+  }
 
   useImperativeHandle(ref, () => ({
     handleOpen,
@@ -597,21 +746,22 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
         className="rb:h-full! rb:hover:shadow-none!"
         bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
-      >
-        <ChatContent
-          classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-134px)]"
-          contentClassNames="rb:max-w-[400px]!'"
-          empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
-          data={chatList}
-          streamLoading={streamLoading}
-          labelPosition="bottom"
-          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-          // errorDesc={t('application.ReplyException')}
-          renderRuntime={(item, index) => {
-            return <Runtime item={item} index={index} source={appType as string} />
-          }}
-          onSend={handleSend}
-        />
+    >
+      <ChatContent
+        classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-134px)]"
+        contentClassNames="rb:max-w-[400px]!'"
+        empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
+        data={chatList}
+        streamLoading={streamLoading}
+        labelPosition="bottom"
+        labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+        // errorDesc={t('application.ReplyException')}
+        renderRuntime={(item, index) => {
+          return <Runtime item={item} index={index} source="workflow" />
+        }}
+        onSend={handleSend}
+        handleInterventionActionClick={handleInterventionActionClick}
+      />
 
         {appType === 'workflow' &&
           <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">

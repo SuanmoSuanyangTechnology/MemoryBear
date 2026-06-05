@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 16:31:24 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 13:38:06
+ * @Last Modified time: 2026-06-05 20:04:46
  */
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Flex, Button, Empty, Skeleton } from 'antd';
@@ -60,12 +60,13 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ sour
     if (!vo) return
     setLoading(true)
     getAppLogDetail(vo.app_id, vo.id).then(res => {
-      const { node_executions_map, messages, ...rest } = res as Data;
+      const { node_executions_map, messages, pending_intervention, ...rest } = res as Data;
       let hasSubContentMessages = messages.map((item: any) => ({ ...item, status: item.role === 'user' ? null : item.status  }))
-      if (messages && messages.length > 0 && node_executions_map && Object.keys(node_executions_map).length > 0) {
+      if (messages && messages.length > 0 && (node_executions_map && Object.keys(node_executions_map).length > 0 || pending_intervention && Object.keys(pending_intervention).length > 0)) {
         hasSubContentMessages = messages.map((item: any) => {
-          if (item.id && node_executions_map[item.id]) {
-            const executions = node_executions_map[item.id] || []
+          if (item.id && (node_executions_map?.[item.id] || pending_intervention?.[item.id])) {
+            const executions = node_executions_map?.[item.id] || []
+            const interventions = pending_intervention?.[item.id]?.interventions || []
             const lastExecution = executions?.[executions.length - 1]
             const meta = lastExecution?.meta
             let sourceList: any[] = []
@@ -115,6 +116,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ sour
               })
             }
             item.subContent = sourceList
+            item.interventions = interventions
           }
           return { ...item }
         })

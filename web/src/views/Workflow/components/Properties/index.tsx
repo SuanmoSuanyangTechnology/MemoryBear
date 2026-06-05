@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 20:16:01
+ * @Last Modified time: 2026-06-05 19:57:34
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover, Tabs } from 'antd';
 
-import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
+import type { NodeConfig, NodeProperties, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
 import Knowledge from './Knowledge/Knowledge';
@@ -51,6 +51,8 @@ import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisp
 import type { Application } from '@/views/ApplicationManagement/types'
 import Trigger from './Trigger'
 import { getWorkflowNodeLastRunDetail } from '@/api/application'
+import HumanIntervention from './HumanIntervention'
+import ToolList from './ToolList'
 
 /**
  * Props for Properties component
@@ -181,6 +183,17 @@ const Properties: FC<PropertiesProps> = ({
     }
   }, [values, selectedNode, form])
 
+  /**
+   * Update node label in graph
+   * @param newLabel - New label text
+   */
+  const updateNodeLabel = (newLabel: string) => {
+    if (selectedNode && form) {
+      const nodeData = selectedNode.getData() as NodeProperties;
+      selectedNode.setAttrByPath('text/text', `${nodeData.icon} ${newLabel}`);
+      selectedNode.setData({ ...selectedNode.getData(), name: newLabel });
+    }
+  };
   /**
    * Get filtered variable list based on node type and config key
    * @param nodeType - Type of the node
@@ -375,6 +388,7 @@ const Properties: FC<PropertiesProps> = ({
 
     if ((nodeType === 'parameter-extractor' && key === 'prompt')
       || (nodeType === 'question-classifier' && key === 'user_supplement_prompt')
+      || nodeType === 'human-intervention'
     ) {
       const allList = addParentIterationVars(variableList);
       let filteredList: Suggestion[] = []
@@ -465,6 +479,9 @@ const Properties: FC<PropertiesProps> = ({
 
     if (nodeType === 'var-aggregator' || nodeType === 'assigner' || nodeType === 'jinja-render') {
       return variableList.filter(variable => variable.dataType !== 'secret');
+    }
+    if (nodeType === 'agent' && key === 'context') {
+      return variableList.filter(variable => variable.dataType === 'array[object]');
     }
 
     // For all other node types, add parent iteration variables if applicable
@@ -638,51 +655,62 @@ const Properties: FC<PropertiesProps> = ({
   return (
     <div className={clsx("rb:h-[calc(100vh-88px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical" className="rb:h-full!">
-        <RbCard
-          title={() => (
-            <Flex gap={4} align="center">
-              <div className={clsx("rb:size-6 rb:bg-cover rb:shrink-0", data.icon)}></div>
-              <Form.Item name="name" noStyle>
-                <Input
-                  placeholder={t('common.pleaseEnter')}
-                  variant="underlined"
-                  size="large"
-                  onFocus={() => setNameHover(true)}
-                  onBlur={() => setNameHover(false)}
-                  className={clsx('rb:px-1! rb:py-0!', {
-                    'rb:border-b-[#FFFFFF]!': !nameHover,
-                    'rb:border-b-[#EBEBEB]!': nameHover
-                  })}
-                />
-              </Form.Item>
-            </Flex>
-          )}
-          extra={<Space>
-            {!cannotRunNodes.includes(selectedNode?.data?.type) && <Popover content={t('workflow.singleRun')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/workflow/run.svg')]"
-                onClick={handleRun}
-              ></div>
-            </Popover>}
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex> },
-                  // { key: 'copy', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></div>, label: t('common.copy') }
-                ],
-                onClick: handleClick
+      <RbCard
+        title={() => (
+          <Flex gap={4} align="center">
+            <div className={clsx("rb:size-6 rb:bg-cover rb:shrink-0", data.icon)}></div>
+            <Form.Item name="name" noStyle>
+              <Input
+                placeholder={t('common.pleaseEnter')}
+                variant="underlined"
+                size="large"
+                onFocus={() => setNameHover(true)}
+                onBlur={() => setNameHover(false)}
+                className={clsx('rb:px-1! rb:py-0!', {
+                  'rb:border-b-[#FFFFFF]!': !nameHover,
+                  'rb:border-b-[#EBEBEB]!': nameHover
+                })}
+              />
+            </Form.Item>
+          </Flex>
+        )}
+        extra={<Space>
+          {!cannotRunNodes.includes(selectedNode?.data?.type) && <Popover content={t('workflow.singleRun')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+            <div
+              className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/workflow/run.svg')]"
+              onClick={handleRun}
+            ></div>
+          </Popover>}
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex> },
+                // { key: 'copy', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></div>, label: t('common.copy') }
+              ],
+              onClick: handleClick
+            }}
+          >
+            <div className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url(@/assets/images/common/dash.svg)]">
+            </div>
+          </Dropdown>
+          <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={blankClick}></div>
+        </Space>}
+        headerType="borderless"
+        headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
+        className="rb:h-full! rb:hover:shadow-none!"
+        bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:px-3! rb:pt-0! rb:pb-3!')}
+      >
+          <Form.Item name="name" label={t('workflow.nodeName')}>
+            <Input
+              placeholder={t('common.pleaseEnter')}
+              onChange={(e) => {
+                updateNodeLabel(e.target.value);
               }}
-            >
-              <div className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url(@/assets/images/common/dash.svg)]">
-              </div>
-            </Dropdown>
-            <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={blankClick}></div>
-          </Space>}
-          headerType="borderless"
-          headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
-          className="rb:h-full! rb:hover:shadow-none!"
-          bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
-        >
+            />
+          </Form.Item>
+          <Form.Item name="id" label="ID">
+            <Input disabled />
+          </Form.Item>
           <Tabs
             items={[
               { key: 'setting', label: t('workflow.config.setting') },
@@ -700,7 +728,13 @@ const Properties: FC<PropertiesProps> = ({
                   <Form.Item name="id" label="ID">
                     <Input disabled />
                   </Form.Item>
-                  {selectedNode?.data?.type === 'list-operator'
+                  {selectedNode?.data?.type === 'human-intervention'
+                    ? <HumanIntervention
+                        options={getFilteredVariableList(selectedNode?.data?.type)}
+                        selectedNode={selectedNode}
+                        graphRef={graphRef}
+                      />
+                    : selectedNode?.data?.type === 'list-operator'
                     ? <ListOperator
                       options={variableList}
                       selectedNode={selectedNode} 
@@ -767,8 +801,16 @@ const Properties: FC<PropertiesProps> = ({
                                 )
                               }
 
-                              if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                                return <ModelConfig key={key} variableOptions={getFilteredVariableList(selectedNode?.data?.type)} />
+                              if ((key === 'model_id' && selectedNode?.data?.type === 'llm')
+                                || (key === 'model' && selectedNode?.data?.type === 'agent')
+                              ) {
+                                return (
+                                  <ModelConfig
+                                    key={key}
+                                    parentName={selectedNode?.data?.type === 'agent' ? key : undefined}
+                                    variableOptions={getFilteredVariableList(selectedNode?.data?.type)}
+                                  />
+                                )
                               }
                               if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                                 // 为llm节点且isArray=true时添加context变量支持
@@ -953,6 +995,7 @@ const Properties: FC<PropertiesProps> = ({
                                   >
                                     <MemoryConfig
                                       parentName={key}
+                                      needMsg={config.needMsg as boolean}
                                       options={getFilteredVariableList('llm')}
                                     />
                                   </Form.Item>
@@ -1011,6 +1054,16 @@ const Properties: FC<PropertiesProps> = ({
                                 return null
                               }
 
+                              if (config.type === 'toolList') {
+                                return (
+                                  <Form.Item
+                                    key={key} name={key}
+                                  >
+                                    <ToolList />
+                                  </Form.Item>
+                                )
+                              }
+
                               return (
                                 <Form.Item
                                   key={key}
@@ -1037,117 +1090,116 @@ const Properties: FC<PropertiesProps> = ({
                                   {config.type === 'input'
                                     ? <Input placeholder={t('common.pleaseEnter')} />
                                     : config.type === 'textarea'
-                                      ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
-                                      : config.type === 'select'
-                                        ? <Select
-                                          options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
-                                          placeholder={t('common.pleaseSelect')}
-                                        />
-                                        : config.type === 'inputNumber'
-                                          ? <InputNumber
-                                            placeholder={t('common.pleaseEnter')}
-                                            className="rb:w-full!"
-                                            onChange={(value) => form.setFieldValue(key, value)}
-                                          />
-                                          : config.type === 'slider'
-                                            ? <RbSlider
-                                              min={config.min}
-                                              max={config.max}
-                                              step={config.step || 0.01}
-                                              isInput={true}
-                                              size="small"
-                                            />
-                                            : config.type === 'modelSelect'
-                                              ? <ModelSelect
-                                                placeholder={t('common.pleaseSelect')}
-                                                params={config.params}
-                                                size="small"
-                                                className="rb:w-full!"
-                                                updateOptions={setModelOptions}
-                                                onChange={handleChangeModel}
-                                              />
-                                              : config.type === 'customSelect'
-                                                ? <CustomSelect
-                                                  placeholder={t('common.pleaseSelect')}
-                                                  url={config.url as string}
-                                                  params={config.params}
-                                                  hasAll={false}
-                                                  valueKey={config.valueKey}
-                                                  labelKey={config.labelKey}
-                                                  size="small"
-                                                />
-                                                : config.type === 'variableList'
-                                                  ? <VariableSelect
-                                                    placeholder={t(config.placeholder || 'common.pleaseSelect')}
-                                                    options={(() => {
-                                                      const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
-                                                      // Apply filtering if specified in config
-                                                      if (config.filterNodeTypes) {
-                                                        return baseVariableList.filter(variable => {
-                                                          const nodeTypeMatch = !config.filterNodeTypes ||
-                                                            (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
-                                                          return nodeTypeMatch;
-                                                        });
-                                                      }
-                                                      if (config.onFilterVariableType) {
-                                                        const types = config.onFilterVariableType as string[];
-                                                        let list: Suggestion[] = []
-                                                        baseVariableList.forEach((variable) => {
-                                                          if (variable.children?.length) {
-                                                            const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
-                                                            console.log('filteredChildren', filteredChildren)
-                                                            if (filteredChildren.length > 0) {
-                                                              list.push({ ...variable, children: filteredChildren });
-                                                            } else if (types.includes(variable.dataType)) {
-                                                              list.push({ ...variable, children: [] });
-                                                            }
-                                                          } else if (types.includes(variable.dataType)) {
-                                                            list.push(variable);
-                                                          }
-                                                        });
+                                    ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
+                                    : config.type === 'select'
+                                    ? <Select
+                                      options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
+                                      placeholder={t('common.pleaseSelect')}
+                                    />
+                                    : config.type === 'inputNumber'
+                                      ? <InputNumber
+                                        placeholder={t('common.pleaseEnter')}
+                                        className="rb:w-full!"
+                                        onChange={(value) => form.setFieldValue(key, value)}
+                                      />
+                                      : config.type === 'slider'
+                                      ? <RbSlider
+                                        min={config.min}
+                                        max={config.max}
+                                        step={config.step || 0.01}
+                                        isInput={true}
+                                        size="small"
+                                      />
+                                      : config.type === 'modelSelect'
+                                      ? <ModelSelect
+                                        placeholder={t('common.pleaseSelect')}
+                                        params={config.params}
+                                        size="small"
+                                        className="rb:w-full!"
+                                        updateOptions={setModelOptions}
+                                        onChange={handleChangeModel}
+                                      />
+                                      : config.type === 'customSelect'
+                                      ? <CustomSelect
+                                        placeholder={t('common.pleaseSelect')}
+                                        url={config.url as string}
+                                        params={config.params}
+                                        hasAll={false}
+                                        valueKey={config.valueKey}
+                                        labelKey={config.labelKey}
+                                        size="small"
+                                      />
+                                      : config.type === 'variableList'
+                                    ? <VariableSelect
+                                      placeholder={t(config.placeholder || 'common.pleaseSelect')}
+                                      options={(() => {
+                                        const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
+                                        // Apply filtering if specified in config
+                                        if (config.filterNodeTypes) {
+                                          return baseVariableList.filter(variable => {
+                                            const nodeTypeMatch = !config.filterNodeTypes ||
+                                              (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
+                                            return nodeTypeMatch;
+                                          });
+                                        }
+                                        if (config.onFilterVariableType) {
+                                          const types = config.onFilterVariableType as string[];
+                                          let list: Suggestion[] = []
+                                          baseVariableList.forEach((variable) => {
+                                            if (variable.children?.length) {
+                                              const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
+                                              if (filteredChildren.length > 0) {
+                                                list.push({ ...variable, children: filteredChildren });
+                                              } else if (types.includes(variable.dataType)) {
+                                                list.push({ ...variable, children: [] });
+                                              }
+                                            } else if (types.includes(variable.dataType)) {
+                                              list.push(variable);
+                                            }
+                                          });
 
-                                                        return list
-                                                      }
-                                                      // Filter child nodes for iteration output
-                                                      if (config.filterChildNodes && selectedNode) {
-                                                        const graph = graphRef.current;
-                                                        if (!graph) return [];
+                                          return list
+                                        }
+                                        // Filter child nodes for iteration output
+                                        if (config.filterChildNodes && selectedNode) {
+                                          const graph = graphRef.current;
+                                          if (!graph) return [];
 
-                                                        const nodes = graph.getNodes();
+                                          const nodes = graph.getNodes();
 
-                                                        // Find child nodes whose cycle field equals parent node's ID
-                                                        const childNodes = nodes.filter(node => {
-                                                          const nodeData = node.getData();
-                                                          return nodeData?.cycle === selectedNode.id;
-                                                        });
+                                          // Find child nodes whose cycle field equals parent node's ID
+                                          const childNodes = nodes.filter(node => {
+                                            const nodeData = node.getData();
+                                            return nodeData?.cycle === selectedNode.id;
+                                          });
 
-                                                        return baseVariableList.filter(variable =>
-                                                          childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
-                                                        );
-                                                      }
-                                                      return baseVariableList;
-                                                    })()}
-                                                    onChange={(value, option) => handleChangeVariableList(value as string, option, key)}
-                                                    size="small"
-                                                  />
-                                                  : config.type === 'switch'
-                                                    ? <Switch onChange={
-                                                      key === 'group'
-                                                        ? () => { form.setFieldValue('group_variables', []) }
-                                                        : key === 'vision'
-                                                          ? () => { form.setFieldValue('vision_input', undefined) }
-                                                          : undefined
-                                                    } />
-                                                    : config.type === 'categoryList'
-                                                      ? <CategoryList
-                                                        parentName={key}
-                                                        selectedNode={selectedNode}
-                                                        graphRef={graphRef}
-                                                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
-                                                      />
-                                                      : config.type === 'editor'
-                                                        ? <Editor options={getFilteredVariableList(selectedNode?.data?.type, key)} variant="outlined" size="small" placeholder={config.placeholder || t('common.pleaseEnter')} />
-                                                        : null
+                                          return baseVariableList.filter(variable =>
+                                            childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
+                                          );
+                                        }
+                                        return baseVariableList;
+                                      })()}
+                                      onChange={(value, option) => handleChangeVariableList(value as string, option, key)}
+                                      size="small"
+                                    />
+                                    : config.type === 'switch'
+                                    ? <Switch onChange={
+                                      key === 'group'
+                                        ? () => { form.setFieldValue('group_variables', []) }
+                                        : key === 'vision'
+                                          ? () => { form.setFieldValue('vision_input', undefined) }
+                                          : undefined
+                                    } />
+                                    : config.type === 'categoryList'
+                                    ? <CategoryList
+                                      parentName={key}
+                                      selectedNode={selectedNode}
+                                      graphRef={graphRef}
+                                      options={getFilteredVariableList(selectedNode?.data?.type, key)}
+                                    />
+                                    : config.type === 'editor'
+                                    ? <Editor options={getFilteredVariableList(selectedNode?.data?.type, key)} variant="outlined" size="small" placeholder={config.placeholder || t('common.pleaseEnter')} />
+                                    : null
                                   }
                                 </Form.Item>
                               )
