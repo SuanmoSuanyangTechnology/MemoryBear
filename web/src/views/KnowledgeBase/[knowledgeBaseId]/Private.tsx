@@ -26,6 +26,7 @@ import {
   type FolderFormData, 
   type KnowledgeBaseDocumentData,
   type KnowledgeBaseFormData,
+  type MetadataDrawerRef,
 } from '@/views/KnowledgeBase/types';
 import RecallTestDrawer from '../components/RecallTestDrawer';
 import CreateFolderModal from '../components/CreateFolderModal';
@@ -34,6 +35,7 @@ import CreateModal from '../components/CreateModal';
 import ShareModal from '../components/ShareModal';
 import CreateDatasetModal from '../components/CreateDatasetModal';
 import CreateImageDataset from '../components/CreateImageDataset';
+import MetadataDrawer from '../components/MetadataDrawer';
 import FolderTree, { type TreeNodeData } from '../components/FolderTree';
 import { formatDateTime } from '@/utils/format';
 import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
@@ -54,6 +56,7 @@ const Private: FC = () => {
   const tableRef = useRef<TableRef>(null);
   const [tableApi, setTableApi] = useState<string | undefined>(undefined);
   const recallTestDrawerRef = useRef<RecallTestDrawerRef>(null);
+  const metadataDrawerRef = useRef<MetadataDrawerRef>(null);
   const createFolderModalRef = useRef<CreateFolderModalRef>(null);
   const createImageDataset = useRef<CreateSetModalRef>(null)
   const createContentModalRef = useRef<CreateSetModalRef>(null);
@@ -169,7 +172,7 @@ const Private: FC = () => {
       tableRef.current?.loadData();
     }
   }, [query._timestamp, tableApi]);
-
+  
   // Listen to location state changes
   useEffect(() => {
     const state = location.state as { 
@@ -453,6 +456,12 @@ const Private: FC = () => {
     recallTestDrawerRef?.current?.handleOpen(knowledgeBaseId);
   }
 
+  // Handle metadata
+  const handleMetadata = () => {
+    if (!knowledgeBaseId) return;
+    metadataDrawerRef?.current?.handleOpen(knowledgeBaseId);
+  }
+
   // new / import
   const handelCreateOrImport = () => {
 
@@ -574,14 +583,22 @@ const Private: FC = () => {
       dataIndex: 'progress',
       key: 'progress',
       width: 160,
-      render: (value: string | number) => {
+      render: (value: string | number, record: KnowledgeBaseDocumentData) => {
         return (
           <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
             <span
               className="rb:inline-block rb:w-1.25 rb:h-1.25 rb:mr-2 rb:rounded-full"
               style={{ backgroundColor: value === 1 ? '#369F21' : value === 0 ? '#FF0000' : '#FF8A4C' }}
             ></span>
-            <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
+            <span>
+              {record.run === 0 && typeof value === 'number' && value < 0
+                ? t('knowledgeBase.failed')
+                :value === 1
+                ? t('knowledgeBase.completed')
+                : value === 0
+                ? t('knowledgeBase.pending')
+                : t('knowledgeBase.processing')
+              }</span>
           </span>
         );
       }
@@ -597,7 +614,7 @@ const Private: FC = () => {
         const formattedText = value.replace(/\\n/g, '\n');
         
         return (
-          <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{formattedText}</pre>} placement="topLeft">
+          <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto' }}>{formattedText}</pre>} placement="topLeft">
             <div 
               style={{
                 maxWidth: '320px',
@@ -847,6 +864,7 @@ const Private: FC = () => {
             </Radio.Group>
             <Button onClick={handleShare}>{t('knowledgeBase.share')}</Button>
             <Button onClick={handleRecallTest}>{t('knowledgeBase.recallTest')}</Button>
+            <Button onClick={handleMetadata}>{t('knowledgeBase.metadata.label')}</Button>
             <Button onClick={handleSetting}>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</Button>
             <Button onClick={handleBatchDownload}>{t('knowledgeBase.batchDownload')}</Button>
             {(knowledgeBase?.type === 'Web' || knowledgeBase?.type === 'Third-party') && (
@@ -886,6 +904,9 @@ const Private: FC = () => {
       </div>
       <RecallTestDrawer 
         ref={recallTestDrawerRef}
+      />
+      <MetadataDrawer 
+        ref={metadataDrawerRef}
       />
       <CreateFolderModal
         ref={createFolderModalRef}
