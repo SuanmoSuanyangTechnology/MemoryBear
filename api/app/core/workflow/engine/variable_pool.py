@@ -423,7 +423,7 @@ class VariablePool:
         self.secret_values.add(str(value))
 
     def get_secret_values(self) -> list[str]:
-        return sorted(self.secret_values, key=len, reverse=True)
+        return list(self.secret_values)
 
     def get_all_node_outputs(self, literal=False) -> dict[str, Any]:
         """获取所有节点输出（运行时变量）
@@ -492,6 +492,7 @@ class VariablePool:
         return {
             "system": self.get_all_system_vars(),
             "conversation": self.get_all_conversation_vars(),
+            "environment": self.get_all_environment_vars(),
             "nodes": self.get_all_node_outputs()  # 从 runtime_vars 读取
         }
 

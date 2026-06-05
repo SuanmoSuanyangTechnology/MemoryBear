@@ -9,9 +9,10 @@ import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import Chat from './components/Chat/Chat';
-import type { ChatRef, AddChatVariableRef } from './types'
+import type { ChatRef, AddChatVariableRef, AddEnvVariableRef } from './types'
 import AddChatVariable from './components/AddChatVariable';
 import FeaturesConfigModal from '@/views/ApplicationConfig/components/FeaturesConfig/FeaturesConfigModal'
+import AddEnvVariable from './components/AddEnvVariable';
 
 interface WorkflowProps {
   appType?: Application['type'];
@@ -21,6 +22,8 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
   const containerRef = useRef<HTMLDivElement>(null);
   const miniMapRef = useRef<HTMLDivElement>(null);
   const addChatVariableRef = useRef<AddChatVariableRef>(null)
+  const addEnvVariableRef = useRef<AddEnvVariableRef>(null)
+
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
   // 使用自定义Hook初始化工作流图
@@ -40,6 +43,8 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     handleSave,
     chatVariables,
     setChatVariables,
+    envVariables,
+    setEnvVariables,
     handleAddNotes,
     handleSaveFeaturesConfig,
     features,
@@ -63,6 +68,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
   const addVariable = () => {
     addChatVariableRef.current?.handleOpen()
   }
+  const addEnvVariable = () => {
+    addEnvVariableRef.current?.handleOpen()
+  }
 
   // Ref used to imperatively open the config modal
   const funConfigModalRef = useRef<FeaturesConfigModalRef>(null)
@@ -79,6 +87,8 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     graphRef,
     addVariable,
     chatVariables,
+    addEnvVariable,
+    envVariables,
     config,
     features: features,
     handleFeaturesConfig,
@@ -131,6 +141,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
           parseEvent={parseEvent}
           config={config}
           chatVariables={chatVariables}
+          envVariables={envVariables}
           appId={config?.app_id}
           handleSave={handleSave}
           nodeClick={nodeClick}
@@ -155,6 +166,11 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         ref={addChatVariableRef}
         variables={chatVariables}
         onChange={setChatVariables}
+      />
+      <AddEnvVariable
+        ref={addEnvVariableRef}
+        variables={envVariables}
+        onChange={setEnvVariables}
       />
       {/* Modal for editing feature settings; calls refresh on save */}
       <FeaturesConfigModal

@@ -169,6 +169,10 @@ class StartNode(BaseNode):
                 processed[var_name] = var_def.default
                 logger.debug(f"变量 '{var_name}' 使用默认值: {var_def.default}")
             else:
+                # file 类型未传值时不生成空占位，避免后续被当成无效 FileObject 写入变量池
+                if var_type == VariableType.FILE:
+                    self.output_var_types[var_name] = var_type
+                    continue
                 processed[var_name] = DEFAULT_VALUE(var_type)
             self.output_var_types[var_name] = var_type
 

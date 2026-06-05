@@ -50,13 +50,16 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
       className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:mx-px rb:cursor-pointer"
       contentEditable={false}
     >
-      {!data.isContext && data.group !== 'CONVERSATION' && !data.value.includes('conv') && data.group !== 'SYSTEM' && !data.value.includes('sys')
+      {!data.isContext
+        && data.group !== 'CONVERSATION' && !data.value.includes('conv')
+        && data.group !== 'ENV' && !data.value.includes('env')
+        && data.group !== 'SYSTEM' && !data.value.includes('sys')
         ? <div className={`rb:size-3 rb:mr-1 rb:bg-cover ${data.nodeData?.icon}`} />
         : null
       }
       {!data.isContext && data.group !== 'CONVERSATION' && (
         <>
-          {!data.value.includes('conv') && !data.value.includes('sys') && <>
+          {!data.value.includes('conv') && !data.value.includes('env') && !data.value.includes('sys') && <>
             <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
             <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
           </>}

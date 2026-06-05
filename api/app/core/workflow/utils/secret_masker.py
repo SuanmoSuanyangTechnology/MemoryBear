@@ -16,18 +16,6 @@ def normalize_secret_values(secret_values: Iterable[str] | None) -> list[str]:
     return sorted(normalized, key=len, reverse=True)
 
 
-def mask_secret_text(text: str, secret_values: Iterable[str] | None) -> str:
-    """Replace secret substrings in text with a placeholder."""
-    if not text:
-        return text
-
-    masked = text
-    for secret in normalize_secret_values(secret_values):
-        if secret in masked:
-            masked = masked.replace(secret, MASKED_SECRET_VALUE)
-    return masked
-
-
 def mask_secrets(value: Any, secret_values: Iterable[str] | None) -> Any:
     """Recursively mask runtime secrets in common JSON-like structures."""
     secrets = normalize_secret_values(secret_values)
@@ -39,7 +27,11 @@ def mask_secrets(value: Any, secret_values: Iterable[str] | None) -> Any:
 
 def _mask_secrets(value: Any, secret_values: list[str]) -> Any:
     if isinstance(value, str):
-        return mask_secret_text(value, secret_values)
+        masked = value
+        for secret in secret_values:
+            if secret in masked:
+                masked = masked.replace(secret, MASKED_SECRET_VALUE)
+        return masked
     if isinstance(value, dict):
         return {key: _mask_secrets(item, secret_values) for key, item in value.items()}
     if isinstance(value, list):

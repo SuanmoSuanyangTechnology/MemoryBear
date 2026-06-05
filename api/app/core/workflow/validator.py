@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class WorkflowValidator:
     """工作流配置验证器"""
 
-    ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+    ENV_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
     ENV_ALLOWED_TYPES = {"string", "number", "secret"}
 
     @classmethod
@@ -265,7 +265,7 @@ class WorkflowValidator:
             names.add(name)
 
             if not cls.ENV_NAME_PATTERN.match(name):
-                errors.append(f"environment variable '{name}' 名称不合法，建议使用大写字母、数字和下划线")
+                errors.append(f"environment variable '{name}' 名称不合法，必须以字母开头，只能包含字母、数字和下划线")
 
             if value_type not in cls.ENV_ALLOWED_TYPES:
                 errors.append(
