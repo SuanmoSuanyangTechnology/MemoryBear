@@ -267,15 +267,17 @@ class NodeLastRunResponse(BaseModel):
     status: str
     source: str
     execution_id: str
-    workflow_execution_id: uuid.UUID
-    input_data: dict[str, Any] | None = None
-    output_data: dict[str, Any] | None = None
-    process_data: dict[str, Any] | None = None
+    run_id: str | None = None
+    workflow_execution_id: str | None = None
+    inputs: dict[str, Any] | None = None
+    outputs: dict[str, Any] | None = None
+    process: dict[str, Any] | None = None
     error_message: str | None = None
     elapsed_time: float | None = None
     token_usage: dict[str, Any] | None = None
     retry_count: int = 0
     cache_hit: bool = False
+    cache_key: str | None = None
     started_at: datetime.datetime
     completed_at: datetime.datetime | None = None
 

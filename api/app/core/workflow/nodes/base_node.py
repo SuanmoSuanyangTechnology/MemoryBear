@@ -249,9 +249,11 @@ class BaseNode(ABC):
             *,
             cache_entry: dict[str, Any],
             state: WorkflowState,
+            variable_pool: VariablePool,
             lookup_started_at: float,
     ) -> dict[str, Any]:
         cached_result = dict(cache_entry.get("result_data") or {})
+        cached_result["input"] = self._build_cache_input_snapshot(state, variable_pool)
         original_elapsed = cached_result.get("elapsed_time")
         cached_result["status"] = "completed"
         cached_result["error"] = None
@@ -291,6 +293,7 @@ class BaseNode(ABC):
         return self._build_state_update_from_cache(
             cache_entry=cache_entry,
             state=state,
+            variable_pool=variable_pool,
             lookup_started_at=lookup_started_at,
         )
 
