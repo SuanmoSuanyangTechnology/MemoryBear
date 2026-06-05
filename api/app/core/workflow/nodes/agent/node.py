@@ -405,6 +405,10 @@ class AgentNode(BaseNode):
                 # 1. 文本内容块（str）
                 if isinstance(event, str):
                     if event:
+                        if full_reasoning and not reasoning_done_sent:
+                            reasoning_done_sent = True
+                            yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
+
                         full_response += event
                         yield {"__final__": False, "chunk": event, "field": "output"}
                 # 2. token 统计（int）

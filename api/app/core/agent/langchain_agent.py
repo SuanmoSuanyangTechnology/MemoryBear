@@ -196,13 +196,14 @@ class AgentTraceRecorder:
         tool_call["time_cost"] = round(time.time() - tool_call.get("_started_at", time.time()), 3)
 
     def finalize(self, *, status: str = "success", total_tokens: int = 0, error: str | None = None) -> dict[str, Any]:
-        self.finish_llm(tokens=0)
+        final_error = error or (None if status == "success" else status)
+        self.finish_llm(tokens=0, error=final_error)
         self.log["meta"]["status"] = status
         self.log["meta"]["elapsed_time"] = round(time.time() - self._started_at, 3)
         if total_tokens:
             self.log["meta"]["total_tokens"] = total_tokens
-        if error:
-            self.log["meta"]["error"] = error
+        if final_error:
+            self.log["meta"]["error"] = final_error
         return self.to_dict()
 
     def to_dict(self) -> dict[str, Any]:
