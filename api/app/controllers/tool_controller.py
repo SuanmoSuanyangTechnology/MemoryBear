@@ -307,7 +307,8 @@ async def get_tool_types():
         data=[
             {"value": ToolType.BUILTIN.value, "label": "内置工具"},
             {"value": ToolType.CUSTOM.value, "label": "自定义工具"},
-            {"value": ToolType.MCP.value, "label": "MCP工具"}
+            {"value": ToolType.MCP.value, "label": "MCP工具"},
+            {"value": ToolType.WORKFLOW.value, "label": "工作流工具"},
         ],
         msg="获取工具类型成功"
     )

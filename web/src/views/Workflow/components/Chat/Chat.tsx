@@ -184,6 +184,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     setChatList([])
     setVariables([])
     setExecutionId(null)
+    setConversationId(null)
     executionIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
@@ -307,6 +308,19 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
               return newList
             })
             break
+          case 'message_replace':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  content: content
+                }
+              }
+              return newList
+            })
+            break;
           // Track node execution start
           case 'node_start':
             setChatList(prev => {

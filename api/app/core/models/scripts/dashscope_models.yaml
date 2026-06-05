@@ -1012,7 +1012,7 @@ models:
   type: rerank
   provider: dashscope
   description: gte-rerank-v2重排序模型，4000上下文窗口
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   capability: []
   is_omni: false
@@ -1023,7 +1023,7 @@ models:
   type: rerank
   provider: dashscope
   description: gte-rerank重排序模型，4000上下文窗口
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   capability: []
   is_omni: false

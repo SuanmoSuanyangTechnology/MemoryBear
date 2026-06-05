@@ -2,8 +2,6 @@
 # Author: Eternity
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/10 13:33
-import datetime
-
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
@@ -11,6 +9,7 @@ from app.core.logging_config import get_logger
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.utils.secret_masker import mask_secrets
 
 logger = get_logger(__name__)
 
@@ -25,6 +24,9 @@ class EventStreamHandler:
         self.coordinator = output_coordinator
         self.variable_pool = variable_pool
         self.execution_id = execution_id
+
+    def _mask(self, value):
+        return mask_secrets(value, self.variable_pool.get_secret_values())
 
     def update_stream_output_status(self, activate: dict, data: dict):
         """
@@ -142,7 +144,7 @@ class EventStreamHandler:
                 break
             yield {
                 "event": "message",
-                "data": {"content": seg.literal}
+                "data": {"content": self._mask(seg.literal)}
             }
             end_info.cursor += 1
 
@@ -168,12 +170,11 @@ class EventStreamHandler:
                 yield {
                     "event": "message",
                     "data": {
-                        "content": data.get("chunk")
+                        "content": self._mask(data.get("chunk"))
                     }
                 }
 
-    @staticmethod
-    async def handle_node_error_event(data: dict):
+    async def handle_node_error_event(self, data: dict):
         """
         Handle node error events ("node_error") during workflow execution.
 
@@ -202,7 +203,7 @@ class EventStreamHandler:
                   }
         """
         node_id = data.get("node_id")
-        yield {
+        payload = {
             "event": "node_error",
             "data": {
                 "node_id": node_id,
@@ -214,6 +215,7 @@ class EventStreamHandler:
                 "error": data.get("error")
             }
         }
+        yield self._mask(payload)
 
     async def handle_debug_event(self, data: dict, input_data: dict):
         """
@@ -295,7 +297,7 @@ class EventStreamHandler:
             logger.info(
                 f"[NODE-END] Node '{node_name}' execution completed - execution_id: {self.execution_id}")
 
-            yield {
+            payload = {
                 "event": "node_end",
                 "data": {
                     "node_id": node_name,
@@ -309,11 +311,10 @@ class EventStreamHandler:
                     "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
                 }
             }
+            yield self._mask(payload)
 
-    @staticmethod
-    async def handle_cycle_item_event(data: dict):
-        yield {
+    async def handle_cycle_item_event(self, data: dict):
+        yield self._mask({
             "event": "cycle_item",
             "data": data.get("data")
-        }
-
+        })

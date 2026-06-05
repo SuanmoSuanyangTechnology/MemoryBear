@@ -438,6 +438,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, a
       onOpenChange={(visible) => {
         if (!visible) handlePopoverClose();
       }}
+      trigger="click"
       placement="right"
       autoAdjustOverflow
       getPopupContainer={() => document.body}

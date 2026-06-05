@@ -6,6 +6,7 @@
 
 import copy
 import logging
+import re
 from collections import defaultdict, deque
 from typing import Any, Union, TYPE_CHECKING
 
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 class WorkflowValidator:
     """工作流配置验证器"""
+
+    ENV_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+    ENV_ALLOWED_TYPES = {"string", "number", "secret"}
 
     @classmethod
     def pure_cycle_graph(cls, workflow_config: Union[dict[str, Any], Any], node_id) -> tuple[list, list]:
@@ -119,10 +123,20 @@ class WorkflowValidator:
         """
         workflow_config = copy.deepcopy(workflow_config)
         errors = []
+        workflow_type = workflow_config.get("workflow_type", "workflow") if isinstance(workflow_config, dict) \
+            else getattr(workflow_config, "workflow_type", "workflow")
+        environment_variables = workflow_config.get("environment_variables", []) if isinstance(workflow_config, dict) \
+            else getattr(workflow_config, "environment_variables", [])
         trigger_nodes_prepared = (
             isinstance(workflow_config, dict)
             and workflow_config.get(TRIGGER_NODES_PREPARED_FLAG) is True
         )
+
+        if workflow_type == "pure_workflow" and (workflow_config.get("variables", []) if isinstance(workflow_config, dict)
+                                                 else getattr(workflow_config, "variables", [])):
+            errors.append("pure_workflow 不支持会话变量 variables，请改用开始节点输入变量或 environment_variables")
+
+        errors.extend(cls._validate_environment_variables(environment_variables, publish=publish))
 
         graphs = cls.get_subgraph(workflow_config)
         for index, graph in enumerate(graphs):
@@ -226,6 +240,51 @@ class WorkflowValidator:
                             )
 
         return len(errors) == 0, errors
+
+    @classmethod
+    def _validate_environment_variables(
+        cls,
+        environment_variables: list[dict[str, Any]] | None,
+        *,
+        publish: bool = False,
+    ) -> list[str]:
+        errors: list[str] = []
+        names: set[str] = set()
+
+        for item in environment_variables or []:
+            name = item.get("name", "")
+            value_type = item.get("value_type")
+            value = item.get("value")
+            required = bool(item.get("required"))
+
+            if not name:
+                errors.append("environment_variables 中存在缺少 name 的变量")
+                continue
+            if name in names:
+                errors.append(f"environment variable '{name}' 重复定义")
+            names.add(name)
+
+            if not cls.ENV_NAME_PATTERN.match(name):
+                errors.append(f"environment variable '{name}' 名称不合法，必须以字母开头，只能包含字母、数字和下划线")
+
+            if value_type not in cls.ENV_ALLOWED_TYPES:
+                errors.append(
+                    f"environment variable '{name}' 的 value_type '{value_type}' 不支持，仅支持 string、number、secret"
+                )
+                continue
+
+            if value_type in {"string", "secret"} and value is not None and not isinstance(value, str):
+                errors.append(f"environment variable '{name}' 的值必须是字符串")
+            if value_type == "number" and value is not None and not isinstance(value, (int, float)):
+                errors.append(f"environment variable '{name}' 的值必须是数字")
+
+            if publish and required:
+                if value in (None, ""):
+                    errors.append(f"必填环境变量 '{name}' 尚未配置")
+                elif value_type == "secret" and value == "__SECRET__":
+                    errors.append(f"必填 secret 环境变量 '{name}' 仍为占位值，请先补全")
+
+        return errors
 
     @staticmethod
     def get_reachable_nodes(start_id: str, edges: list[dict]) -> set[str]:

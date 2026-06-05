@@ -1,4 +1,4 @@
-import { type FC, useState } from 'react';
+import { useState, forwardRef, useImperativeHandle } from 'react';
 import { Select, Divider, Tooltip } from 'antd';
 import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
@@ -24,8 +24,11 @@ interface CanvasToolbarProps {
   collapsed: boolean;
   runOpen: boolean;
 }
+export interface CanvasToolbarRef {
+  setIsVariableInspectorVisible: (visible: boolean) => void;
+}
 
-const CanvasToolbar: FC<CanvasToolbarProps> = ({
+const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
   selectedNode,
   miniMapRef,
   graphRef,
@@ -43,6 +46,10 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
 }) => {
   const { t } = useTranslation()
   const [isVariableInspectorVisible, setIsVariableInspectorVisible] = useState(false)
+
+  useImperativeHandle(ref, () => ({
+    setIsVariableInspectorVisible,
+  }))
 
   return (
     <>
@@ -158,6 +165,6 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
       }
     </>
   );
-};
+});
 
 export default CanvasToolbar;

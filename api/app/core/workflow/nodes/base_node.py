@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator
 from langgraph.config import get_stream_writer
 
 from app.core.config import settings
+from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES, WorkflowNodeCacheManager
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
@@ -64,6 +65,7 @@ class BaseNode(ABC):
         # 使用 or 运算符处理 None 值
         self.config = node_config.get("config") or {}
         self.error_handling = node_config.get("error_handling") or {}
+        self.cache_config = node_config.get("cache") or {}
 
         self.variable_change_able = False
 
@@ -188,6 +190,144 @@ class BaseNode(ABC):
         """
         return settings.WORKFLOW_NODE_TIMEOUT
 
+    def _get_cache_manager(self) -> WorkflowNodeCacheManager:
+        return WorkflowNodeCacheManager(
+            app_id=self.workflow_config.get("app_id"),
+            workflow_config_id=self.workflow_config.get("workflow_config_id"),
+            node_id=self.node_id,
+            node_type=self.node_type,
+            node_name=self.node_name,
+        )
+
+    def _get_runtime_options(self) -> dict[str, Any]:
+        return self.workflow_config.get("runtime_options") or {}
+
+    def _get_cache_source(self) -> str:
+        return self._get_runtime_options().get("cache_source", "workflow_execution")
+
+    def _is_cache_enabled(self) -> bool:
+        if self._get_runtime_options().get("bypass_node_cache"):
+            return False
+        execution_config = self.workflow_config.get("execution_config") or {}
+        if not execution_config.get("enable_cache", True):
+            return False
+        explicit = self.cache_config.get("enabled")
+        if explicit is not None:
+            return bool(explicit)
+        return self.node_type in DEFAULT_CACHEABLE_NODE_TYPES
+
+    def _get_cache_ttl_seconds(self) -> int | None:
+        raw_value = (
+            self.cache_config.get("ttl_seconds")
+            if "ttl_seconds" in self.cache_config
+            else self.cache_config.get("ttl")
+        )
+        if raw_value in (None, "", False):
+            return None
+        try:
+            ttl_seconds = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return ttl_seconds if ttl_seconds > 0 else None
+
+    async def _store_runtime_variables(self, extracted_output: Any, variable_pool: VariablePool) -> None:
+        if extracted_output is None:
+            return
+        runtime_vars = extracted_output
+        if not isinstance(extracted_output, dict):
+            runtime_vars = {"output": extracted_output}
+        for key, value in runtime_vars.items():
+            if key not in self.output_types:
+                continue
+            await variable_pool.new(self.node_id, key, value, self.output_types[key], mut=self.variable_change_able)
+
+    def _build_cache_input_snapshot(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        return self._extract_input(state, variable_pool)
+
+    def _build_state_update_from_cache(
+            self,
+            *,
+            cache_entry: dict[str, Any],
+            state: WorkflowState,
+            lookup_started_at: float,
+    ) -> dict[str, Any]:
+        cached_result = dict(cache_entry.get("result_data") or {})
+        original_elapsed = cached_result.get("elapsed_time")
+        cached_result["status"] = "completed"
+        cached_result["error"] = None
+        cached_result["elapsed_time"] = (time.time() - lookup_started_at) * 1000
+        cached_result["execution_order"] = time.monotonic_ns()
+        cached_result["cache_hit"] = True
+        cached_result["cache_key"] = cache_entry.get("cache_key")
+        cached_result["cache_id"] = str(cache_entry.get("id")) if cache_entry.get("id") else None
+        cached_result["cache_status"] = cache_entry.get("status")
+        cached_result["cache_hit_count"] = cache_entry.get("hit_count", 0)
+        if original_elapsed is not None:
+            cached_result["cache_origin_elapsed_time"] = original_elapsed
+        return {
+            "node_outputs": {
+                self.node_id: cached_result
+            },
+            "looping": state["looping"],
+        } | self.trans_activate(state)
+
+    async def _try_use_cache(
+            self,
+            state: WorkflowState,
+            variable_pool: VariablePool,
+            lookup_started_at: float,
+    ) -> dict[str, Any] | None:
+        if not self._is_cache_enabled():
+            return None
+        manager = self._get_cache_manager()
+        if not manager.is_available():
+            return None
+        cache_input = self._build_cache_input_snapshot(state, variable_pool)
+        cache_key = manager.build_cache_key(cache_input)
+        cache_entry = manager.get_active_cache(cache_key)
+        if not cache_entry:
+            return None
+        await self._store_runtime_variables((cache_entry.get("result_data") or {}).get("output"), variable_pool)
+        return self._build_state_update_from_cache(
+            cache_entry=cache_entry,
+            state=state,
+            lookup_started_at=lookup_started_at,
+        )
+
+    def _save_cache(
+            self,
+            *,
+            state: WorkflowState,
+            variable_pool: VariablePool,
+            node_output: dict[str, Any],
+    ) -> None:
+        if not self._is_cache_enabled():
+            return
+        if not isinstance(node_output, dict) or node_output.get("status") != "completed":
+            return
+        manager = self._get_cache_manager()
+        if not manager.is_available():
+            return
+        cache_input = self._build_cache_input_snapshot(state, variable_pool)
+        cache_key = manager.build_cache_key(cache_input)
+        cache_payload = dict(node_output)
+        cache_payload.pop("execution_order", None)
+        cache_payload.pop("cache_hit", None)
+        cache_payload.pop("cache_id", None)
+        cache_payload.pop("cache_status", None)
+        cache_payload.pop("cache_hit_count", None)
+        cache_payload.pop("cache_origin_elapsed_time", None)
+        manager.save_cache(
+            cache_key=cache_key,
+            input_data=cache_input,
+            result_data=cache_payload,
+            source=self._get_cache_source(),
+            ttl_seconds=self._get_cache_ttl_seconds(),
+            meta_data={
+                "execution_id": state.get("execution_id"),
+            },
+        )
+
     async def run(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """Runs the node with error handling and output wrapping (non-streaming).
 
@@ -207,9 +347,10 @@ class BaseNode(ABC):
         if not self.check_activate(state):
             return self.trans_activate(state)
 
-        import time
-
         start_time = time.time()
+        cached_state_update = await self._try_use_cache(state, variable_pool, start_time)
+        if cached_state_update:
+            return cached_state_update
 
         timeout = self.get_timeout()
 
@@ -230,17 +371,19 @@ class BaseNode(ABC):
 
             # Store extracted outputs as runtime variables for downstream nodes.
             if extracted_output is not None:
-                runtime_vars = extracted_output
-                if not isinstance(extracted_output, dict):
-                    runtime_vars = {"output": extracted_output}
-                for k, v in runtime_vars.items():
-                    await variable_pool.new(self.node_id, k, v, self.output_types[k], mut=self.variable_change_able)
+                await self._store_runtime_variables(extracted_output, variable_pool)
 
             # Return the wrapped output along with activation state updates.
-            return {
+            state_update = {
                 **wrapped_output,
                 "looping": state["looping"]
             } | self.trans_activate(state)
+            self._save_cache(
+                state=state,
+                variable_pool=variable_pool,
+                node_output=wrapped_output.get("node_outputs", {}).get(self.node_id, {}),
+            )
+            return state_update
 
         except TimeoutError:
             elapsed_time = (time.time() - start_time) * 1000
@@ -288,9 +431,11 @@ class BaseNode(ABC):
             logger.debug(f"jump node: {self.node_id}")
             return
 
-        import time
-
         start_time = time.time()
+        cached_state_update = await self._try_use_cache(state, variable_pool, start_time)
+        if cached_state_update:
+            yield cached_state_update
+            return
 
         timeout = self.get_timeout()
 
@@ -346,17 +491,18 @@ class BaseNode(ABC):
 
             # Store extracted output in runtime variables (for quick access by subsequent nodes)
             if extracted_output is not None:
-                runtime_vars = extracted_output
-                if not isinstance(extracted_output, dict):
-                    runtime_vars = {"output": extracted_output}
-                for k, v in runtime_vars.items():
-                    await variable_pool.new(self.node_id, k, v, self.output_types[k], mut=self.variable_change_able)
+                await self._store_runtime_variables(extracted_output, variable_pool)
 
             # Build complete state update (including node_outputs, runtime_vars, and final streaming buffer)
             state_update = {
                 **final_output,
                 "looping": state["looping"]
             }
+            self._save_cache(
+                state=state,
+                variable_pool=variable_pool,
+                node_output=final_output.get("node_outputs", {}).get(self.node_id, {}),
+            )
 
             # Finally yield state update
             # LangGraph will merge this into state
@@ -593,6 +739,7 @@ class BaseNode(ABC):
           - sys.xxx: System variables (e.g., message, execution_id, workspace_id,
             user_id, conversation_id)
           - conv.xxx: Conversation variables (persist across multiple turns)
+          - env.xxx: Environment variables (workflow-level, read-only)
           - node_id.xxx: Node outputs
 
         Args:
@@ -612,6 +759,7 @@ class BaseNode(ABC):
             conv_vars=variable_pool.lazy_namespace("conv", literal=True),
             node_outputs=variable_pool.lazy_all_node_outputs(literal=True),
             system_vars=variable_pool.lazy_namespace("sys", literal=True),
+            env_vars=variable_pool.lazy_namespace("env", literal=True),
             strict=strict
         )
 
@@ -622,6 +770,7 @@ class BaseNode(ABC):
         Supported variable namespaces:
           - sys.xxx: System variables
           - conv.xxx: Conversation variables
+          - env.xxx: Environment variables
           - node_id.xxx: Node outputs
 
         Args:
@@ -638,7 +787,8 @@ class BaseNode(ABC):
             expression=expression,
             conv_var=variable_pool.lazy_namespace("conv"),
             node_outputs=variable_pool.lazy_all_node_outputs(),
-            system_vars=variable_pool.lazy_namespace("sys")
+            system_vars=variable_pool.lazy_namespace("sys"),
+            env_vars=variable_pool.lazy_namespace("env"),
         )
 
     @staticmethod

@@ -5,14 +5,15 @@
 import uuid
 from typing import Any, Annotated, Literal
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, delete
 from fastapi import Depends
 
 from app.core.workflow.nodes.enums import NodeType
 from app.models.workflow_model import (
     WorkflowConfig,
     WorkflowExecution,
-    WorkflowNodeExecution
+    WorkflowNodeExecution,
+    WorkflowNodeCache,
 )
 from app.db import get_db
 
@@ -48,6 +49,7 @@ class WorkflowConfigRepository:
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
         variables: list[dict[str, Any]] | None = None,
+        environment_variables: list[dict[str, Any]] | None = None,
         execution_config: dict[str, Any] | None = None,
         features: dict[str, Any] | None = None,
         triggers: list[dict[str, Any]] | None = None,
@@ -59,7 +61,8 @@ class WorkflowConfigRepository:
             app_id: 应用 ID
             nodes: 节点列表
             edges: 边列表
-            variables: 变量列表
+            variables: 会话变量列表
+            environment_variables: 环境变量列表
             execution_config: 执行配置
             features: 功能特性
             triggers: 触发器列表
@@ -78,6 +81,8 @@ class WorkflowConfigRepository:
             existing.workflow_type = workflow_type
             if variables is not None:
                 existing.variables = variables
+            if environment_variables is not None:
+                existing.environment_variables = environment_variables
             if execution_config is not None:
                 existing.execution_config = execution_config
             if triggers is not None:
@@ -94,6 +99,7 @@ class WorkflowConfigRepository:
                 nodes=nodes,
                 edges=edges,
                 variables=variables or [],
+                environment_variables=environment_variables or [],
                 execution_config=execution_config or {},
                 features=features or {},
                 triggers=triggers or [],
@@ -232,6 +238,28 @@ class WorkflowNodeExecutionRepository:
     
     def __init__(self, db: Session):
         self.db = db
+
+    def create(self, **kwargs) -> WorkflowNodeExecution:
+        node_execution = WorkflowNodeExecution(**kwargs)
+        self.db.add(node_execution)
+        return node_execution
+
+    def bulk_create(
+        self,
+        items: list[dict[str, Any]]
+    ) -> list[WorkflowNodeExecution]:
+        if not items:
+            return []
+
+        node_executions = [WorkflowNodeExecution(**item) for item in items]
+        self.db.add_all(node_executions)
+        return node_executions
+
+    def delete_by_execution_id(self, execution_id: uuid.UUID) -> None:
+        stmt = delete(WorkflowNodeExecution).where(
+            WorkflowNodeExecution.execution_id == execution_id
+        )
+        self.db.execute(stmt)
     
     def get_by_execution_id(
         self,
@@ -274,6 +302,113 @@ class WorkflowNodeExecutionRepository:
         )
         return list(self.db.execute(stmt).scalars())
 
+    def get_latest_by_app_node(
+        self,
+        app_id: uuid.UUID,
+        node_id: str,
+        source: str | None = None,
+    ) -> WorkflowNodeExecution | None:
+        stmt = (
+            select(WorkflowNodeExecution)
+            .join(WorkflowExecution, WorkflowNodeExecution.execution_id == WorkflowExecution.id)
+            .where(
+                WorkflowExecution.app_id == app_id,
+                WorkflowNodeExecution.node_id == node_id,
+            )
+            .order_by(
+                desc(WorkflowNodeExecution.started_at),
+                desc(WorkflowNodeExecution.created_at),
+            )
+        )
+        if source is None:
+            row = self.db.execute(stmt.limit(1)).scalars().first()
+            return row
+
+        stmt = stmt.where(
+            WorkflowNodeExecution.meta_data["source"].as_string() == source
+        ).limit(1)
+        return self.db.execute(stmt).scalars().first()
+
+
+class WorkflowNodeCacheRepository:
+    """工作流节点缓存仓储"""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, **kwargs) -> WorkflowNodeCache:
+        cache = WorkflowNodeCache(**kwargs)
+        self.db.add(cache)
+        return cache
+
+    def get_active_by_key(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            cache_key: str,
+    ) -> WorkflowNodeCache | None:
+        stmt = (
+            select(WorkflowNodeCache)
+            .where(
+                WorkflowNodeCache.app_id == app_id,
+                WorkflowNodeCache.node_id == node_id,
+                WorkflowNodeCache.cache_key == cache_key,
+                WorkflowNodeCache.status == "active",
+            )
+            .order_by(desc(WorkflowNodeCache.updated_at), desc(WorkflowNodeCache.created_at))
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def get_latest_by_node(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            include_inactive: bool = False,
+    ) -> WorkflowNodeCache | None:
+        stmt = select(WorkflowNodeCache).where(
+            WorkflowNodeCache.app_id == app_id,
+            WorkflowNodeCache.node_id == node_id,
+        )
+        if not include_inactive:
+            stmt = stmt.where(WorkflowNodeCache.status == "active")
+        stmt = stmt.order_by(desc(WorkflowNodeCache.updated_at), desc(WorkflowNodeCache.created_at)).limit(1)
+        return self.db.execute(stmt).scalars().first()
+
+    def invalidate_by_node(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            *,
+            invalidated_at,
+            statuses: tuple[str, ...] = ("active", "expired"),
+    ) -> int:
+        stmt = (
+            select(WorkflowNodeCache)
+            .where(
+                WorkflowNodeCache.app_id == app_id,
+                WorkflowNodeCache.node_id == node_id,
+                WorkflowNodeCache.status.in_(statuses),
+            )
+        )
+        items = list(self.db.execute(stmt).scalars())
+        for item in items:
+            item.status = "invalidated"
+            item.invalidated_at = invalidated_at
+        return len(items)
+
+    def invalidate_expired(self, now) -> int:
+        stmt = select(WorkflowNodeCache).where(
+            WorkflowNodeCache.status == "active",
+            WorkflowNodeCache.expires_at.is_not(None),
+            WorkflowNodeCache.expires_at <= now,
+        )
+        items = list(self.db.execute(stmt).scalars())
+        for item in items:
+            item.status = "expired"
+            item.invalidated_at = now
+        return len(items)
+
 
 # ==================== 依赖注入函数 ====================
 
@@ -296,3 +431,10 @@ def get_workflow_node_execution_repository(
 ) -> WorkflowNodeExecutionRepository:
     """获取工作流节点执行记录仓储（依赖注入）"""
     return WorkflowNodeExecutionRepository(db)
+
+
+def get_workflow_node_cache_repository(
+    db: Annotated[Session, Depends(get_db)]
+) -> WorkflowNodeCacheRepository:
+    """获取工作流节点缓存仓储（依赖注入）"""
+    return WorkflowNodeCacheRepository(db)

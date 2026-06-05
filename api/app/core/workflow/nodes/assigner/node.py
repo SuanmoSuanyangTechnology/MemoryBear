@@ -59,6 +59,9 @@ class AssignerNode(BaseNode):
             variable_selector = assignment.variable_selector
             namespace = re.sub(pattern, r"\1", variable_selector).split('.')[0]
 
+            if namespace == "env":
+                raise ValueError(f"Environment variables are read-only and cannot be assigned. - {variable_selector}")
+
             # Only conversation variables ('conv') are allowed
             if namespace != 'conv' and namespace not in state["cycle_nodes"]:
                 raise ValueError(f"Only conversation or cycle variables can be assigned. - {variable_selector}")
