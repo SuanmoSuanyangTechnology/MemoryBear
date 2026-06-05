@@ -7,7 +7,7 @@ import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -169,27 +169,21 @@ def set_asyncio_event_loop():
 
 
 def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
-    """Gracefully shutdown pending async generators and tasks on the event loop.
+    """Cancel pending tasks but keep the loop open for reuse.
 
-    This prevents 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
-    by giving pending aclose() coroutines a chance to run before the loop is discarded.
-
-    Note: This only tears down the given loop. Callers that need a fresh event
-    loop afterwards should use ``set_asyncio_event_loop()`` explicitly.
+    Not closing the loop avoids 'Event loop is closed' from httpx AsyncClient.__del__ during GC.
     """
     try:
-        # Cancel and collect all remaining tasks
+        # Cancel remaining tasks to prevent leaks between Celery tasks
         all_tasks = asyncio.all_tasks(loop)
         if all_tasks:
             for task in all_tasks:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*all_tasks, return_exceptions=True))
-        # Shutdown async generators (triggers __aclose__ on httpx clients etc.)
-        loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
-    finally:
-        loop.close()
+    # NOTE: Do NOT close the loop. It will be reused by set_asyncio_event_loop()
+    # for subsequent Celery tasks on the same thread.
 
 
 @celery_app.task(name="tasks.process_item")
