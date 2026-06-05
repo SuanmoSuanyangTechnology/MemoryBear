@@ -37,7 +37,6 @@ from app.core.memory.agent.utils.messages_tools import (
 )
 from app.core.memory.agent.utils.type_classifier import status_typle
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
-from app.core.memory.memory_service import MemoryService
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.audit_logger import audit_logger
 from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
@@ -639,32 +638,7 @@ class MemoryAgentService:
             enforce_window=False,  # API 同步路径，详见 execute_pending_from_pool docstring
         )
 
-    async def _write_neo4j(
-            self,
-            end_user_id: str,
-            messages: list[MessageItem] | list[dict],
-            memory_config,
-            language: Language | str,
-            db: Session,
-    ) -> None:
-        """使用新流水线（MemoryService → WritePipeline）写入 Neo4j。"""
-        messages_dict = [
-            msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
-            for msg in messages
-        ]
-        service = MemoryService(
-            db=db,
-            config_id=memory_config.config_id,
-            end_user_id=end_user_id,
-        )
-        result = await service.write(
-            messages=messages_dict, language=language, ref_id='',
-        )
-        logger.info(
-            f"[WritePipeline] 完成: status={result.status}, "
-            f"elapsed={result.elapsed_seconds:.2f}s, "
-            f"extraction={result.extraction}"
-        )
+
 
     async def _invalidate_interest_cache(self, end_user_id: str) -> None:
         """写入完成后失效兴趣分布缓存。"""

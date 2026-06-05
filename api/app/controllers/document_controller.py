@@ -3,7 +3,7 @@ import os
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -15,6 +15,8 @@ from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -23,7 +25,10 @@ from app.models.user_model import User
 from app.schemas import document_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import document_service, file_service, knowledge_service
+from app.services.rag_access_service import require_current_workspace_document
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
+from app.schemas import knowledge_metadata_schema as metadata_schema
+from app.services.knowledge_metadata_service import KnowledgeMetadataService
 
 
 # Obtain a dedicated API logger
@@ -294,7 +299,7 @@ async def delete_document(
         if task_id:
             api_logger.warning(f"[DELETE] Revoking running parse task: task_id={task_id}, document_id={document_id}")
             try:
-                celery_app.control.revoke(task_id, terminate=True)
+                celery_app.control.revoke(task_id)
                 api_logger.warning(f"[DELETE] Revoke signal sent for task_id={task_id}")
             except NotImplementedError:
                 # ThreadPool does not support force termination; rely on Redis cancel marker
@@ -313,7 +318,11 @@ async def delete_document(
         # 4. Delete file (storage errors are swallowed internally)
         await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)
 
-        # 5. Delete document from DB (last — if DB fails, external resources are already cleaned)
+        # 5. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
+        api_logger.debug(f"Delete metadata bindings for document: {document_id}")
+        KnowledgeMetadataService.delete_document_metadata(db, document_id)
+
+        # 6. Delete document from DB (last — if DB fails, external resources are already cleaned)
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
         db.delete(db_document)
         db.commit()
@@ -405,3 +414,168 @@ async def parse_documents(
     except Exception as e:
         api_logger.error(f"Failed to parse document: document_id={document_id} - {str(e)}")
         raise
+
+
+@router.post("/metadata/batch", response_model=ApiResponse)
+async def batch_update_document_metadata(
+    data: metadata_schema.BatchUpdateMetadataRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量更新文档元数据
+    - 所有文档必须属于同一知识库且当前用户有权限访问
+    - 事务性：全成功或全回滚
+    """
+    api_logger.info(
+        f"Batch update document metadata: count={len(data.items)}, user={current_user.username}"
+    )
+
+    # 1. 校验所有文档的权限和归属（必须属于当前 workspace）
+    for item in data.items:
+        db_document = require_current_workspace_document(
+            db=db,
+            document_id=item.document_id,
+            current_user=current_user,
+        )
+        if not db_document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"文档不存在或无权访问: {item.document_id}"
+            )
+
+    items = [
+        {
+            "document_id": item.document_id,
+            "metadata": item.metadata,
+        }
+        for item in data.items
+    ]
+
+    result = KnowledgeMetadataService.batch_update_document_metadata(
+        db=db,
+        items=items,
+        tenant_id=current_user.tenant_id,
+        created_by=current_user.id,
+    )
+
+    return success(data=result, msg="批量更新完成")
+
+
+@router.put("/{document_id}/metadata", response_model=ApiResponse)
+async def update_document_metadata(
+    document_id: uuid.UUID,
+    data: metadata_schema.DocumentMetadataUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    更新单个文档的元数据
+    - 字段必须在知识库中已定义
+    - 值类型必须与字段定义一致
+    """
+    api_logger.info(
+        f"Update document metadata: document_id={document_id}, user={current_user.username}"
+    )
+
+    # 1. 校验文档存在且有权访问
+    db_document = require_current_workspace_document(
+        db=db,
+        document_id=document_id,
+        current_user=current_user
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    # 2. 调用 Service 更新
+    updated_doc = KnowledgeMetadataService.update_document_metadata(
+        db=db,
+        document_id=document_id,
+        metadata=data.metadata,
+        tenant_id=current_user.tenant_id,
+        created_by=current_user.id,
+    )
+
+    return success(
+        data=jsonable_encoder(document_schema.Document.model_validate(updated_doc)),
+        msg="文档元数据更新成功",
+    )
+
+
+@router.get("/{document_id}/metadata", response_model=ApiResponse)
+async def get_document_metadata(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取单个文档的元数据"""
+    api_logger.info(
+        f"Get document metadata: document_id={document_id}, user={current_user.username}"
+    )
+
+    # 校验文档存在且有权访问
+    db_document = require_current_workspace_document(
+        db=db,
+        document_id=document_id,
+        current_user=current_user
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    result = KnowledgeMetadataService.get_document_metadata(
+        db=db,
+        document_id=document_id,
+    )
+
+    return success(
+        data=result,
+        msg="获取文档元数据成功",
+    )
+
+
+@router.delete("/{document_id}/metadata", response_model=ApiResponse)
+async def delete_document_metadata(
+    document_id: uuid.UUID,
+    data: metadata_schema.DocumentMetadataDeleteRequest | None = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    删除单个文档的元数据
+    - 不传 body 或 field_names 为空时，清空全部元数据
+    - 传 field_names 时，仅删除指定字段
+    """
+    api_logger.info(
+        f"Delete document metadata: document_id={document_id}, user={current_user.username}"
+    )
+
+    # 校验文档存在且有权访问
+    db_document = require_current_workspace_document(
+        db=db,
+        document_id=document_id,
+        current_user=current_user
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    field_names = data.field_names if data else None
+
+    result = KnowledgeMetadataService.delete_document_metadata(
+        db=db,
+        document_id=document_id,
+        field_names=field_names,
+    )
+
+    return success(
+        data=result,
+        msg="文档元数据删除成功",
+    )

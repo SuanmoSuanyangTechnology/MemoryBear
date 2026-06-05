@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 14:06:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 14:12:04
+ * @Last Modified time: 2026-06-04 10:05:39
  */
 /**
  * GraphNetworkChart Component
@@ -13,6 +13,8 @@
  */
 import { type FC, useEffect, useRef, type SetStateAction, type Dispatch, useMemo } from 'react'
 import * as d3 from 'd3'
+import { useTranslation } from 'react-i18next'
+
 import PageEmpty from '@/components/Empty/PageEmpty'
 
 export const Colors = ['#155EEF', '#02AFD5', '#FF5D34', '#6473E9', '#369F21', '#4DA8FF', '#C86AFF', '#F7BA1E', '#5B6167']
@@ -63,6 +65,7 @@ interface GraphNetworkChartProps {
   onNodeClick: Dispatch<SetStateAction<Node | EdgeClickData | null>>;
   selectedNodeId?: string | null;
   selectedCategory?: string | null;
+  regionId?: string | null;
 }
 
 interface D3Node extends d3.SimulationNodeDatum {
@@ -83,6 +86,16 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   label?: string;
 }
 
+const regionMapping: Record<string, string[]> = {
+  prefrontal: ['Statement'],
+  frontal: ['ExtractedEntity'],
+  parietal: ['Perceptual'],
+  occipital: ['Chunk'],
+  cerebellum: ['AssistantPruned', 'AssistantOriginal'],
+  brainstem: ['Dialogue', 'Conversation'],
+  hippocampus: ['MemorySummary'],
+  amygdala: ['Statement'],
+}
 const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   nodes,
   links,
@@ -91,7 +104,9 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   onNodeClick,
   selectedNodeId,
   selectedCategory,
+  regionId,
 }) => {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const nodeSelRef = useRef<d3.Selection<SVGGElement, D3Node, SVGGElement, unknown> | null>(null)
@@ -99,7 +114,9 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   const linkLabelSelRef = useRef<d3.Selection<SVGTextElement, D3Link, SVGGElement, unknown> | null>(null)
   const graphStateRef = useRef<{ nodes: D3Node[]; links: D3Link[] } | null>(null)
   const zoomScaleRef = useRef<number>(1)
-
+  const transformRef = useRef<d3.ZoomTransform | null>(null)
+  const svgRef = useRef<d3.Selection<SVGSVGElement, unknown, any, unknown> | null>(null)
+  const isZoomingRef = useRef<boolean>(false)
   const graphState = useMemo(() => {
     if (!nodes || nodes.length === 0) return null
     
@@ -108,7 +125,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     
     const d3Nodes: D3Node[] = nodes.map(n => ({
       id: n.id,
-      name: n.name,
+      name: n.name || `${t(`userMemory.${n.caption}`)}_${n.id.slice(-5)}`,
       category: n.category,
       symbolSize: n.symbolSize || 35,
       color: n.itemStyle?.color || getColor(n.category),
@@ -144,31 +161,18 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       .attr('height', height)
       .style('width', '100%')
       .style('height', '100%')
+    
+    svgRef.current = svg
 
     const g = svg.append('g')
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 4])
-      .on('zoom', e => {
-        g.attr('transform', e.transform)
-        zoomScaleRef.current = e.transform.k
-        const currentZoom = e.transform.k
-        g.selectAll<SVGTextElement, D3Node>('g text')
-          .style('display', d => {
-            if (!d.name) return 'none'
-            const textWidth = d.name.length * 6
-            return d.symbolSize * currentZoom >= textWidth / 2 ? 'block' : 'none'
-          })
-      })
-    svg.call(zoom)
-
-    const defaultZoom = graphState.nodes.length < 50 ? 3 : graphState.nodes.length < 100 ? 2 : 1
-    if (defaultZoom !== 1) {
-      svg.call(zoom.transform, d3.zoomIdentity
-        .translate(width / 2 * (1 - defaultZoom), height / 2 * (1 - defaultZoom))
-        .scale(defaultZoom)
-      )
-    }
+    const simulation = d3.forceSimulation<D3Node>(graphState.nodes)
+      .force('link', d3.forceLink<D3Node, D3Link>(graphState.links).id(d => d.id).distance(120))
+      .force('charge', d3.forceManyBody().strength(-500))
+      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.1))
+      .force('collision', d3.forceCollide<D3Node>(d => d.symbolSize + 25))
+      .force('x', d3.forceX<D3Node>(width / 2).strength(0.05))
+      .force('y', d3.forceY<D3Node>(height / 2).strength(0.05))
 
     const defs = svg.append('defs')
     defs.append('marker')
@@ -191,11 +195,69 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       .attr('d', 'M0,-3L6,0L0,3')
       .attr('fill', 'rgba(91, 97, 103, 0.5)')
 
-    const simulation = d3.forceSimulation<D3Node>(graphState.nodes)
-      .force('link', d3.forceLink<D3Node, D3Link>(graphState.links).id(d => d.id).distance(80))
-      .force('charge', d3.forceManyBody().strength(-100))
-      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.1))
-      .force('collision', d3.forceCollide<D3Node>(d => d.symbolSize + 15))
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.2, 4])
+      .on('start', () => {
+        isZoomingRef.current = true
+        simulation.stop()
+      })
+      .on('zoom', e => {
+        transformRef.current = e.transform
+        g.attr('transform', e.transform)
+        zoomScaleRef.current = e.transform.k
+        const currentZoom = e.transform.k
+        g.selectAll<SVGGElement, D3Node>('g').each(function(d) {
+          const nodeGroup = d3.select(this)
+          const textEl = nodeGroup.select<SVGTextElement>('text')
+          
+          if (!d.name) {
+            textEl.style('display', 'none')
+            return
+          }
+          
+          const fontSize = Math.max(6, Math.min(12, d.symbolSize * 0.25 * currentZoom))
+          const maxWidth = d.symbolSize * currentZoom * 1.2
+          const charWidth = fontSize * 0.55
+          const maxChars = Math.floor(maxWidth / charWidth)
+          
+          if (d.name.length <= maxChars) {
+            textEl.text(d.name)
+          } else {
+            textEl.text(d.name.slice(0, maxChars - 1) + '...')
+          }
+          textEl.style('display', 'block')
+        })
+        
+        if (selectedNodeId && linkLabelSelRef.current) {
+          linkLabelSelRef.current.style('display', d => {
+            const sourceId = typeof d.source === 'string' ? d.source : d.source.id
+            const targetId = typeof d.target === 'string' ? d.target : d.target.id
+            if (sourceId === selectedNodeId || targetId === selectedNodeId) {
+              return 'block'
+            }
+            return 'none'
+          })
+        } else if (linkLabelSelRef.current) {
+          linkLabelSelRef.current.style('display', 'none')
+        }
+      })
+      .on('end', () => {
+        isZoomingRef.current = false
+        simulation.alpha(0.1).restart()
+      })
+    svg.call(zoom)
+
+    const defaultZoom = graphState.nodes.length < 30 ? 1.2 : graphState.nodes.length < 80 ? 0.9 : 0.6
+    if (transformRef.current) {
+      svg.call(zoom.transform, transformRef.current)
+      zoomScaleRef.current = transformRef.current.k
+    } else {
+      svg.call(zoom.transform, d3.zoomIdentity
+        .translate(width / 2 * (1 - defaultZoom), height / 2 * (1 - defaultZoom))
+        .scale(defaultZoom)
+      )
+      zoomScaleRef.current = defaultZoom
+    }
 
     const linkSel = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(graphState.links)
@@ -226,14 +288,13 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
     linkSelRef.current = linkSel
 
-    console.log('graphState', graphState.links.filter(l => l.label))
     const linkLabelSel = g.append('g').selectAll<SVGTextElement, D3Link>('text')
       .data(graphState.links.filter(l => l.label))
       .enter()
       .append('text')
       .text(d => d.label || '')
       .attr('text-anchor', 'middle')
-      .attr('font-size', '9px')
+      .attr('font-size', '12px')
       .attr('fill', '#5B6167')
       .attr('dy', -5)
       .style('pointer-events', 'none')
@@ -288,19 +349,69 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
 
     nodeSel.append('text')
-      .text(d => d.name)
       .attr('x', 0)
-      .attr('dy', 4)
+      .attr('y', 0)
       .attr('text-anchor', 'middle')
-      .attr('font-size', '10px')
+      .attr('dominant-baseline', 'middle')
+      .attr('font-size', d => {
+        const fontSize = Math.max(12, Math.min(14, d.symbolSize * 0.65))
+        return `${fontSize}px`
+      })
       .attr('fill', '#171719')
       .style('pointer-events', 'none')
       .style('user-select', 'none')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const currentZoom = defaultZoom
-        return d.symbolSize * currentZoom >= textWidth / 2 ? 'block' : 'none'
+      .each(function(d) {
+        const text = d3.select(this)
+        const name = d.name || ''
+        const fontSize = Math.max(6, Math.min(12, d.symbolSize * 0.25))
+        const maxWidth = d.symbolSize * 1.2
+        const lineHeight = fontSize * 1.2
+        const maxLines = Math.floor((d.symbolSize * 1.2) / lineHeight) || 1
+        
+        const words = name.split('')
+        let line: string[] = []
+        let lines: string[] = []
+        let currentWidth = 0
+        const charWidth = fontSize * 0.55
+        
+        for (let i = 0; i < words.length; i++) {
+          const word = words[i]
+          const wordWidth = charWidth
+          if (currentWidth + wordWidth > maxWidth && line.length > 0) {
+            lines.push(line.join(''))
+            line = [word]
+            currentWidth = wordWidth
+          } else {
+            line.push(word)
+            currentWidth += wordWidth
+          }
+        }
+        if (line.length > 0) {
+          lines.push(line.join(''))
+        }
+        
+        if (lines.length > maxLines) {
+          lines = lines.slice(0, maxLines)
+          if (lines[maxLines - 1]) {
+            lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + '...'
+          }
+        }
+        
+        text.selectAll('tspan').remove()
+        
+        if (lines.length === 1) {
+          text.text(lines[0])
+        } else {
+          const totalHeight = (lines.length - 1) * lineHeight
+          const startY = -totalHeight / 2
+          
+          lines.forEach((lineText, i) => {
+            text.append('tspan')
+              .attr('x', 0)
+              .attr('dy', i === 0 ? `${startY / fontSize}em` : `${lineHeight / fontSize}em`)
+              .text(lineText)
+          })
+        }
       })
 
     const highlightNodes = () => {
@@ -320,11 +431,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
         nodeSel.selectAll<SVGTextElement, D3Node>('text')
           .attr('fill', '#171719')
           .attr('font-weight', 'normal')
-          .style('display', d => {
-            if (!d.name) return 'none'
-            const textWidth = d.name.length * 6
-            return d.symbolSize * zoomScaleRef.current >= textWidth / 2 ? 'block' : 'none'
-          })
         linkSel
           .attr('stroke', '#A8ABB2')
           .attr('stroke-opacity', 0.4)
@@ -385,16 +491,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       nodeSel.selectAll<SVGTextElement, D3Node>('text')
         .attr('fill', d => highlightedLinkIds.size ? '#171719' : (highlightedNodeIds.has(d.id) ? '#171719' : '#bbb'))
         .attr('font-weight', d => selectedNodeId && !highlightedLinkIds.size && d.id === selectedNodeId ? 'bold' : 'normal')
-        .style('display', d => {
-          if (!d.name) return 'none'
-          const textWidth = d.name.length * 6
-          const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-          if (highlightedLinkIds.size) {
-            return shouldShow ? 'block' : 'none'
-          }
-          if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-          return 'none'
-        })
 
       linkSel
         .attr('stroke', d => {
@@ -518,14 +614,196 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   useEffect(() => {
     if (!selectedCategory || !nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
 
+    const { nodes: graphNodes } = graphStateRef.current
+
+    const highlightedNodeIds = new Set<string>()
+
+    graphNodes.forEach(node => {
+      if (node.caption === selectedCategory) {
+        highlightedNodeIds.add(node.id)
+      }
+    })
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8)
+      .attr('fill-opacity', d => highlightedNodeIds.has(d.id) ? 0.85 : 0.15)
+      .attr('stroke', d => highlightedNodeIds.has(d.id) ? '#fff' : '#ccc')
+      .attr('stroke-width', d => highlightedNodeIds.has(d.id) ? 1.5 : 0.5)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8)
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.6 : 0.1)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.4 : 0.1)
+
+    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+      .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
+      .attr('font-weight', 'normal')
+
+    linkSelRef.current
+      .attr('stroke', '#A8ABB2')
+      .attr('stroke-opacity', 0.4)
+      .attr('stroke-width', 0.8)
+      .attr('marker-end', 'url(#arrow)')
+      .attr('stroke-dasharray', 'none')
+
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current.style('display', 'none')
+    }
+
+  }, [selectedCategory])
+
+  useEffect(() => {
+    if (!nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
+
+    const { links: graphLinks } = graphStateRef.current
+    
+    const highlightedNodeIds = new Set<string>()
+    const highlightedLinkIds = new Set<string>()
+    
+    if (selectedNodeId) {
+      const isLink = graphLinks.some(link => link.id === selectedNodeId)
+      
+      if (isLink) {
+        highlightedLinkIds.add(selectedNodeId)
+      } else {
+        highlightedNodeIds.add(selectedNodeId)
+        graphLinks.forEach(link => {
+          const sourceId = typeof link.source === 'string' ? link.source : link.source.id
+          const targetId = typeof link.target === 'string' ? link.target : link.target.id
+          if (sourceId === selectedNodeId) {
+            highlightedNodeIds.add(targetId)
+            highlightedLinkIds.add(link.id)
+          }
+          if (targetId === selectedNodeId) {
+            highlightedNodeIds.add(sourceId)
+            highlightedLinkIds.add(link.id)
+          }
+        })
+      }
+    }
+
+    if (!selectedNodeId && !selectedCategory) {
+      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+        .transition()
+        .duration(200)
+        .attr('r', d => d.symbolSize)
+        .attr('fill-opacity', 0.85)
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 1.5)
+      
+      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+        .transition()
+        .duration(200)
+        .attr('r', d => d.symbolSize * 1.35)
+        .attr('stroke-opacity', 0.3)
+      
+      nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+        .attr('fill', '#171719')
+        .attr('font-weight', 'normal')
+      
+      linkSelRef.current
+        .attr('stroke', '#A8ABB2')
+        .attr('stroke-opacity', 0.4)
+        .attr('stroke-width', 0.8)
+        .attr('marker-end', 'url(#arrow)')
+        .attr('stroke-dasharray', 'none')
+
+      if (linkLabelSelRef.current) {
+        linkLabelSelRef.current.style('display', 'none')
+      }
+
+      return
+    }
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8)
+      .attr('fill-opacity', d => highlightedNodeIds.has(d.id) ? 0.85 : 0.15)
+      .attr('stroke', d => highlightedNodeIds.has(d.id) ? '#fff' : '#ccc')
+      .attr('stroke-width', d => highlightedNodeIds.has(d.id) ? 1.5 : 0.5)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8)
+    
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.6 : 0.1)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.4 : 0.1)
+    
+    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+      .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
+      .attr('font-weight', d => selectedNodeId && d.id === selectedNodeId ? 'bold' : 'normal')
+
+    linkSelRef.current
+      .attr('stroke', '#A8ABB2')
+      .attr('stroke-opacity', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 0.6 : 0.15
+      })
+      .attr('stroke-width', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 1.5 : 0.5
+      })
+      .attr('marker-end', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 'url(#arrow-highlight)' : 'url(#arrow)'
+      })
+      .attr('stroke-dasharray', 'none')
+
+      console.log('linkLabelSelRef', linkLabelSelRef)
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current
+        .style('display', d => {
+          const linkId = d.id as string
+          return highlightedLinkIds.has(linkId) ? 'block' : 'none'
+        })
+    }
+
+  }, [selectedNodeId])
+
+  useEffect(() => {
+    if (!regionId || !nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
+
     const { nodes: graphNodes, links: graphLinks } = graphStateRef.current
+
+    const targetTypes = regionMapping[regionId] || []
     
     const highlightedNodeIds = new Set<string>()
     const highlightedLinkIds = new Set<string>()
 
     graphNodes.forEach(node => {
-      if (node.caption === selectedCategory) {
-        highlightedNodeIds.add(node.id)
+      const originalNode = nodes.find(n => n.id === node.id)
+      if (!originalNode) return
+
+      const nodeType = originalNode.caption
+
+      if (regionId === 'amygdala') {
+        if (nodeType === 'Statement' && 
+            originalNode.properties && 
+            (originalNode.properties.emotion_type !== undefined || 
+             originalNode.properties.emotion_intensity !== undefined)) {
+          highlightedNodeIds.add(node.id)
+        }
+      } else {
+        if (targetTypes.includes(nodeType)) {
+          highlightedNodeIds.add(node.id)
+        }
       }
     })
 
@@ -561,13 +839,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
       .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
       .attr('font-weight', 'normal')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-        return 'none'
-      })
 
     linkSelRef.current
       .attr('stroke', '#A8ABB2')
@@ -585,127 +856,15 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
       .attr('stroke-dasharray', 'none')
 
-  }, [selectedCategory])
-
-  useEffect(() => {
-    if (!nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
-
-    const { links: graphLinks } = graphStateRef.current
-    
-    const highlightedNodeIds = new Set<string>()
-    const highlightedLinkIds = new Set<string>()
-    
-    if (selectedNodeId) {
-      const isLink = graphLinks.some(link => link.id === selectedNodeId)
-      
-      if (isLink) {
-        highlightedLinkIds.add(selectedNodeId)
-      } else {
-        highlightedNodeIds.add(selectedNodeId)
-        graphLinks.forEach(link => {
-          const sourceId = typeof link.source === 'string' ? link.source : link.source.id
-          const targetId = typeof link.target === 'string' ? link.target : link.target.id
-          if (sourceId === selectedNodeId) highlightedNodeIds.add(targetId)
-          if (targetId === selectedNodeId) highlightedNodeIds.add(sourceId)
-        })
-      }
-    }
-
-    if (!selectedNodeId && !selectedCategory) {
-      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
-        .transition()
-        .duration(200)
-        .attr('r', d => d.symbolSize)
-        .attr('fill-opacity', 0.85)
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 1.5)
-      
-      nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
-        .transition()
-        .duration(200)
-        .attr('r', d => d.symbolSize * 1.35)
-        .attr('stroke-opacity', 0.3)
-      
-      nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
-        .attr('fill', '#171719')
-        .attr('font-weight', 'normal')
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current
         .style('display', d => {
-          if (!d.name) return 'none'
-          const textWidth = d.name.length * 6
-          return d.symbolSize * zoomScaleRef.current >= textWidth / 2 ? 'block' : 'none'
+          const linkId = d.id as string
+          return highlightedLinkIds.has(linkId) ? 'block' : 'none'
         })
-      
-      linkSelRef.current
-        .attr('stroke', '#A8ABB2')
-        .attr('stroke-opacity', 0.4)
-        .attr('stroke-width', 0.8)
-        .attr('marker-end', 'url(#arrow)')
-        .attr('stroke-dasharray', 'none')
-      
-      return
     }
 
-    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize : (highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8))
-      .attr('fill-opacity', d => highlightedLinkIds.size ? 0.85 : (highlightedNodeIds.has(d.id) ? 0.85 : 0.15))
-      .attr('stroke', d => highlightedLinkIds.size ? '#fff' : (highlightedNodeIds.has(d.id) ? '#fff' : '#ccc'))
-      .attr('stroke-width', d => highlightedLinkIds.size ? 1.5 : (highlightedNodeIds.has(d.id) ? 1.5 : 0.5))
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize : (highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8))
-    
-    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize * 1.35 : (highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8))
-      .attr('stroke-opacity', d => highlightedLinkIds.size ? 0.3 : (highlightedNodeIds.has(d.id) ? 0.6 : 0.1))
-      .transition()
-      .duration(200)
-      .attr('r', d => highlightedLinkIds.size ? d.symbolSize * 1.35 : (highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8))
-      .attr('stroke-opacity', d => highlightedLinkIds.size ? 0.3 : (highlightedNodeIds.has(d.id) ? 0.4 : 0.1))
-    
-    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
-      .attr('fill', d => highlightedLinkIds.size ? '#171719' : (highlightedNodeIds.has(d.id) ? '#171719' : '#bbb'))
-      .attr('font-weight', d => selectedNodeId && !highlightedLinkIds.size && d.id === selectedNodeId ? 'bold' : 'normal')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-        if (highlightedLinkIds.size) {
-          return shouldShow ? 'block' : 'none'
-        }
-        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-        return 'none'
-      })
-
-    linkSelRef.current
-      .attr('stroke', '#A8ABB2')
-      .attr('stroke-opacity', d => {
-        const linkId = d.id as string
-        if (highlightedLinkIds.has(linkId)) return 0.6
-        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
-        const targetId = typeof d.target === 'string' ? d.target : d.target.id
-        return highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId) ? 0.6 : 0.15
-      })
-      .attr('stroke-width', d => {
-        const linkId = d.id as string
-        if (highlightedLinkIds.has(linkId)) return 1.5
-        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
-        const targetId = typeof d.target === 'string' ? d.target : d.target.id
-        return highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId) ? 1.5 : 0.5
-      })
-      .attr('marker-end', d => {
-        const linkId = d.id as string
-        if (highlightedLinkIds.has(linkId)) return 'url(#arrow-highlight)'
-        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
-        const targetId = typeof d.target === 'string' ? d.target : d.target.id
-        return highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId) ? 'url(#arrow-highlight)' : 'url(#arrow)'
-      })
-      .attr('stroke-dasharray', 'none')
-
-  }, [selectedNodeId])
+  }, [regionId, nodes])
 
   if (!nodes || nodes.length === 0) {
     return <PageEmpty />

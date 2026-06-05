@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 17:34:11
+ * @Last Modified time: 2026-06-03 17:51:18
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
 import type { ToolOption } from './components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
-import type { ChatVariable, GraphRef, WorkflowConfig } from '@/views/Workflow/types';
+import type { ChatVariable, GraphRef, WorkflowConfig, EnvVariable } from '@/views/Workflow/types';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import type { SkillConfigForm } from './components/Skill/types'
 import type { Capability } from '@/views/ModelManagement/types'
@@ -169,6 +169,8 @@ export interface WorkflowRef {
   /** Add variable */
   addVariable: () => void;
   chatVariables: ChatVariable[];
+  envVariables: EnvVariable[];
+  addEnvVariable: () => void;
   config: WorkflowConfig | null;
   features: WorkflowConfig['features'];
   handleFeaturesConfig?: () => void;

@@ -218,7 +218,12 @@ class Neo4jSearchService:
         ]
 
         for _ in range(RELATIONSHIP_LOOP_LIMIT):
-            response: AIMessage = await llm_with_tools.ainvoke(messages)
+            response: AIMessage = await llm_with_tools.ainvoke(
+                messages,
+                config={
+                    "callbacks": [],
+                }
+            )
             messages.append(response)
 
             if not response.tool_calls:

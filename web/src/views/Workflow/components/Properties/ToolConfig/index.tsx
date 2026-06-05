@@ -37,6 +37,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
     { value: 'mcp', label: t('tool.mcp'), isLeaf: false },
     { value: 'builtin', label: t('tool.inner'), isLeaf: false },
     { value: 'custom', label: t('tool.custom'), isLeaf: false },
+    { value: 'workflow', label: t('tool.workflow'), isLeaf: false },
   ])
   const [parameters, setParameters] = useState<Parameter[]>([])
 
@@ -182,6 +183,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
         const childOptions = vo.children?.filter(child => child.dataType === type || (type === 'integer' && child.dataType === 'number'))
 
         if (vo.dataType === type
+          || (vo.dataType === 'secret' && type === 'string')
           || (type === 'integer' && vo.dataType === 'number')
           || (type === 'array' && vo.dataType.includes(type))
           || (type === 'object' && vo.dataType === 'object')
@@ -198,6 +200,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
           })
         }
       } else if (vo.dataType === type
+        || (vo.dataType === 'secret' && type === 'string')
         || (type === 'integer' && vo.dataType === 'number')
         || (type === 'array' && vo.dataType.includes(type))
         || (type === 'object' && vo.dataType === 'object')) {

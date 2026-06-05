@@ -24,7 +24,7 @@ from .conversation_model import Conversation, Message
 from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from .memory_config_model import MemoryConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
-from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution, WorkflowNodeCache
 from .agent_execution_model import AgentExecution
 from .retrieval_info import RetrievalInfo
 from .prompt_optimizer_model import PromptOptimizerSession, PromptOptimizerSessionHistory
@@ -41,6 +41,7 @@ from .ontology_class import OntologyClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
 from .annotation_model import AppAnnotation, AppAnnotationSetting
 from .reflection_log_model import MemoryReflectionLog
+from .knowledge_metadata_model import KnowledgeMetadata, KnowledgeMetadataBinding
 from .message_feedback_model import MessageFeedback
 from .message_report_model import MessageReport
 from .conversation_share_model import ConversationShare
@@ -86,6 +87,7 @@ __all__ = [
     "WorkflowConfig",
     "WorkflowExecution",
     "WorkflowNodeExecution",
+    "WorkflowNodeCache",
     "AgentExecution",
     "RetrievalInfo",
     "PromptOptimizerSession",

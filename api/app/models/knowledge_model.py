@@ -102,6 +102,8 @@ class Knowledge(Base):
                            },
                            comment="default parser config")
     status = Column(Integer, index=True, default=1, comment="is it validate(0: disable, 1: enable, 2:Soft-delete)")
+    builtin_metadata_enabled = Column(Integer, default=0, nullable=False, server_default='0',
+                                      comment="builtin metadata switch (0: disabled, 1: enabled)")
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive)
 

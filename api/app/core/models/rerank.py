@@ -19,8 +19,12 @@ class RedBearRerank(BaseDocumentCompressor):
         """创建内部模型实例"""
         model_class = get_provider_rerank_class(config.provider)
         model_params = RedBearModelFactory.get_rerank_model_params(config)
-        print(model_params)
-        return model_class(**model_params)
+        instance = model_class(**model_params)
+        # DashScopeRerank.validate_environment always overwrites `model` with the
+        # default gte_rerank — restore the user-specified model name here.
+        if config.provider.lower() == ModelProvider.DASHSCOPE and hasattr(instance, "model"):
+            instance.model = config.model_name
+        return instance
 
     def compress_documents(
             self,

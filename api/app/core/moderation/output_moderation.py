@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class OutputModeration:
-    CHECK_INTERVAL = 200
+    CHECK_INTERVAL = 1
 
     def __init__(
         self,

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 10:42:27
+ * @Last Modified time: 2026-06-03 18:52:25
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -281,9 +281,11 @@ const VariableSelect: FC<VariableSelectProps> = ({
   };
   const sep = <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>;
   const isConversation = (parentOfSelected ?? selectedSuggestion)?.group === 'CONVERSATION' || 
-    (parentOfSelected ?? selectedSuggestion)?.group === 'SYSTEM'
+    (parentOfSelected ?? selectedSuggestion)?.group === 'SYSTEM' || 
+    (parentOfSelected ?? selectedSuggestion)?.group === 'ENV'
     || (selectedSuggestion?.group === 'CONVERSATION' && selectedSuggestion?.children?.some(c => `{{${c.value}}}` === value))
     || (selectedSuggestion?.group === 'SYSTEM' && selectedSuggestion?.children?.some(c => `{{${c.value}}}` === value))
+    || (selectedSuggestion?.group === 'ENV' && selectedSuggestion?.children?.some(c => `{{${c.value}}}` === value))
     || (selectedSuggestion ? filteredOptions.some(o => o.group === 'CONVERSATION' && o.children?.some(c => `{{${c.value}}}` === value)) : false);
   const nodeData = (parentOfSelected ?? selectedSuggestion)?.nodeData;
 

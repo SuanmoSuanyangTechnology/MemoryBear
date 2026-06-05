@@ -143,6 +143,7 @@ export interface KnowledgeBaseDocumentData { // 知识库文档数据
   created_at?: string; // 创建时间
   updated_at?: string; // 更新时间
   qa_prompt?: string; // 提示词
+  metadata?: Record<string, any>; // 文档元数据
 }
 export interface DocumentModalRef {
   handleOpen: (file?: KnowledgeBaseDocumentData | null) => void;
@@ -168,9 +169,27 @@ export interface CreateModalRef {
 export interface CreateModalRefProps {
   refreshTable?: () => void;
 }
-//
 export interface RecallTestDrawerRef {
   handleOpen: (knowledgeBaseId?: string) => void;
+}
+
+export interface MetadataDrawerRef {
+  handleOpen: (knowledgeBaseId: string) => void;
+}
+
+export interface MetadataField {
+  id: string;
+  type: 'string' | 'number' | 'time';
+  name: string;
+  is_builtin?: boolean;
+  count?: number;
+  created_at?: number;
+  updated_at?: number;
+  value?: string | number | null;
+}
+
+export interface MetadataModalRef {
+  handleOpen: (kbId: string, item?: MetadataField) => void;
 }
 
 export interface CreateFolderModalRef {

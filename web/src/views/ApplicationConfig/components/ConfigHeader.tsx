@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 17:10:01
+ * @Last Modified time: 2026-06-04 12:30:24
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -168,6 +168,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     workflowRef?.current?.addVariable()
   }
   /**
+   * Add environment variable to workflow
+   */
+  const addEnvVariable = () => {
+    workflowRef?.current?.addEnvVariable()
+  }
+  /**
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
@@ -236,14 +242,18 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
                 ></div>
               </Popover>
             }
-            {application?.type === 'pure_workflow' &&
-              <Popover content={t('workflow.systemVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-                <div
-                  className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                  onClick={() => systemVariableModalRef.current?.handleOpen()}
-                ></div>
-              </Popover>
-            }
+            <Popover content={t('workflow.systemVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/system.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={() => systemVariableModalRef.current?.handleOpen()}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.addEnvVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/env.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={addEnvVariable}
+              ></div>
+            </Popover>
             <Popover content={t('workflow.run')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/run.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"

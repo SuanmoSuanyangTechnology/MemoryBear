@@ -64,7 +64,8 @@ class TemplateRenderer:
             template: str,
             conv_vars: dict[str, Any] | LazyVariableDict,
             node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
-            system_vars: dict[str, Any] | LazyVariableDict | None = None
+            system_vars: dict[str, Any] | LazyVariableDict | None = None,
+            env_vars: dict[str, Any] | LazyVariableDict | None = None,
     ) -> str:
         """Render template
 
@@ -103,6 +104,7 @@ class TemplateRenderer:
             "conv": conv_vars,  # Conversation variables: {{conv.user_name}}
             "node": node_outputs,  # Node outputs: {{node.node_1.output}}
             "sys": system_vars,  # System variables: {{sys.execution_id}}
+            "env": env_vars,  # Environment variables: {{env.OPENAI_API_KEY}}
         }
 
         # Allow direct access to node outputs by node ID: {{llm_qa.output}}
@@ -168,6 +170,7 @@ def render_template(
         conv_vars: dict[str, Any] | LazyVariableDict,
         node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
         system_vars: dict[str, Any] | LazyVariableDict,
+        env_vars: dict[str, Any] | LazyVariableDict | None = None,
         strict: bool = True
 ) -> str:
     """Render template (convenience function)
@@ -192,7 +195,7 @@ def render_template(
         'Analyze: This is a text'
     """
     renderer = _strict_renderer if strict else _lenient_renderer
-    return renderer.render(template, conv_vars, node_outputs, system_vars)
+    return renderer.render(template, conv_vars, node_outputs, system_vars, env_vars)
 
 
 def validate_template(template: str) -> list[str]:

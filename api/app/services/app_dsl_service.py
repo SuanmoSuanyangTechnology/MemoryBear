@@ -108,6 +108,8 @@ class AppDslService:
             enriched = {**cfg}
             if "nodes" in cfg:
                 enriched["nodes"] = self._enrich_workflow_nodes(cfg["nodes"])
+            if "environment_variables" in cfg:
+                enriched["environment_variables"] = self._mask_environment_variables(cfg["environment_variables"])
             return enriched
         return cfg
 
@@ -116,6 +118,7 @@ class AppDslService:
             config = self.db.query(WorkflowConfig).filter(WorkflowConfig.app_id == app.id).first()
             config_data = {
                 "variables": config.variables if config else [],
+                "environment_variables": self._mask_environment_variables(config.environment_variables) if config else [],
                 "edges": config.edges if config else [],
                 "nodes": self._enrich_workflow_nodes(config.nodes) if config else [],
                 "features": config.features if config else {},
@@ -214,6 +217,16 @@ class AppDslService:
             
             enriched_nodes.append({**node, "config": config})
         return enriched_nodes
+
+    @staticmethod
+    def _mask_environment_variables(environment_variables: list[dict] | None) -> list[dict]:
+        result = []
+        for item in environment_variables or []:
+            if item.get("value_type") == "secret":
+                result.append({**item, "value": "__SECRET__"})
+            else:
+                result.append(item)
+        return result
 
     def _skill_ref(self, skill_id) -> Optional[dict]:
         if not skill_id:
@@ -407,6 +420,7 @@ class AppDslService:
                     nodes=[n.model_dump() for n in result.nodes],
                     edges=[e.model_dump() for e in result.edges],
                     variables=[v.model_dump() for v in result.variables],
+                    environment_variables=[v.model_dump() for v in result.environment_variables],
                     execution_config=raw_wf.get("execution_config", {}),
                     features=raw_wf.get("features", {}),
                     triggers=raw_wf.get("triggers", []),
@@ -418,6 +432,7 @@ class AppDslService:
                     existing.nodes = [n.model_dump() for n in result.nodes]
                     existing.edges = [e.model_dump() for e in result.edges]
                     existing.variables = [v.model_dump() for v in result.variables]
+                    existing.environment_variables = [v.model_dump() for v in result.environment_variables]
                     existing.execution_config = raw_wf.get("execution_config", {})
                     existing.features = raw_wf.get("features", {})
                     existing.triggers = raw_wf.get("triggers", [])
@@ -428,6 +443,7 @@ class AppDslService:
                         nodes=[n.model_dump() for n in result.nodes],
                         edges=[e.model_dump() for e in result.edges],
                         variables=[v.model_dump() for v in result.variables],
+                        environment_variables=[v.model_dump() for v in result.environment_variables],
                         execution_config=raw_wf.get("execution_config", {}),
                         features=raw_wf.get("features", {}),
                         triggers=raw_wf.get("triggers", []),

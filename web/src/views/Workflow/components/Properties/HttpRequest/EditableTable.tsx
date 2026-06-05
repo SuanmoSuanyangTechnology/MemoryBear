@@ -69,7 +69,7 @@ const EditableTable: FC<EditableTableProps> = ({
           ...vo,
           disabled: true
         })
-      } else if (vo.dataType !== 'array[file]') {
+      } else if (type !== 'file' && vo.dataType !== 'array[file]') {
         filterOptions.push(vo)
       }
     })

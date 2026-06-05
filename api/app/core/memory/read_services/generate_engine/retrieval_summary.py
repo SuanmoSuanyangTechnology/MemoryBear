@@ -20,7 +20,10 @@ class RetrievalSummaryProcessor:
                         f"<content>{content}{memory_l0_str}</content>"},
         ]
         try:
-            summary = await llm_client.ainvoke(messages) | StructResponse(mode='str')
+            summary = await llm_client.ainvoke(
+                messages,
+                config={"callbacks": []}
+            ) | StructResponse(mode='str')
             return summary
         except:
             logger.error("Failed to generate reply summary, returning original content", exc_info=True)

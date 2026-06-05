@@ -2,15 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 16:21:49
+ * @Last Modified time: 2026-06-03 20:16:01
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover } from 'antd';
+import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover, Tabs } from 'antd';
 
-import type { NodeConfig, ChatVariable } from '../../types'
+import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
 import Knowledge from './Knowledge/Knowledge';
@@ -49,7 +49,8 @@ import Retry from './Retry'
 import NextStep from './NextStep'
 import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisplay'
 import type { Application } from '@/views/ApplicationManagement/types'
-import CronTriggerConfig from './CronTriggerConfig'
+import Trigger from './Trigger'
+import { getWorkflowNodeLastRunDetail } from '@/api/application'
 
 /**
  * Props for Properties component
@@ -73,6 +74,8 @@ interface PropertiesProps {
   appId?: string;
   /** Chat variables */
   chatVariables: ChatVariable[];
+  /** Environment variables */
+  envVariables: EnvVariable[];
   /** Function to save workflow configuration */
   handleSave: (flag?: boolean) => Promise<unknown>;
   /** Handler for node click */
@@ -90,6 +93,7 @@ const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
   chatVariables,
+  envVariables,
   blankClick,
   config,
   appId,
@@ -102,7 +106,7 @@ const Properties: FC<PropertiesProps> = ({
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
   const values = Form.useWatch([], form);
-  const variableList = useVariableList(selectedNode, graphRef, chatVariables, appType)
+  const variableList = useVariableList(selectedNode, graphRef, chatVariables, envVariables, appType)
   const data = selectedNode.getData() || {}
   console.log('data', data)
 
@@ -411,7 +415,7 @@ const Properties: FC<PropertiesProps> = ({
 
     if ((nodeType === 'iteration' && key === 'output')) {
       if (!selectedNode) return [];
-      let filteredList = variableList.filter(variable => variable.value.includes('sys.'))
+      let filteredList = variableList.filter(variable => variable.value.includes('sys.') || variable.nodeData?.type === 'var-aggregator')
       const childVariables = getChildNodeVariables(selectedNode, graphRef);
       const existingKeys = new Set(filteredList.map(v => v.key));
       childVariables.forEach(v => {
@@ -457,6 +461,10 @@ const Properties: FC<PropertiesProps> = ({
       })
 
       return filteredList
+    }
+
+    if (nodeType === 'var-aggregator' || nodeType === 'assigner' || nodeType === 'jinja-render') {
+      return variableList.filter(variable => variable.dataType !== 'secret');
     }
 
     // For all other node types, add parent iteration variables if applicable
@@ -598,15 +606,33 @@ const Properties: FC<PropertiesProps> = ({
   const [nameHover, setNameHover] = useState(false)
   const [activeKey, setActiveKey] = useState('setting')
 
-  const [result, setResult] = useState<RunResult | null>(null)
+  const [result, setResult] = useState<RunResult>({} as RunResult)
   const [resultLoading, setResultLoading] = useState(false)
+
+  const getNodeLastRun = () => {
+    if (!appId || !data?.id) return
+    setResultLoading(true)
+    getWorkflowNodeLastRunDetail(appId, data?.id || '')
+      .then(res => {
+        setResult(res as RunResult)
+      })
+      .finally(() => {
+        setResultLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    if (!isRun) {
+      getNodeLastRun()
+    }
+  }, [isRun])
 
   useEffect(() => {
     if (activeKey === 'setting') {
-      setResult(null)
+      setResult({} as RunResult)
       setResultLoading(false)
     } else {
-      // Run result display
+      getNodeLastRun()
     }
   }, [activeKey])
   return (
@@ -657,7 +683,7 @@ const Properties: FC<PropertiesProps> = ({
           className="rb:h-full! rb:hover:shadow-none!"
           bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
         >
-          {/* <Tabs
+          <Tabs
             items={[
               { key: 'setting', label: t('workflow.config.setting') },
               { key: 'lastRun', label: t('workflow.config.lastRun') },
@@ -666,9 +692,8 @@ const Properties: FC<PropertiesProps> = ({
             onChange={setActiveKey}
             size="small"
             className={styles.tabs}
-          /> */}
-          {/* <div className="rb:h-[calc(100%-52px)] rb:overflow-y-auto!"> */}
-          <div className="rb:h-full rb:overflow-y-auto!">
+          />
+          <div className="rb:h-[calc(100%-52px)] rb:overflow-y-auto!">
             {activeKey === 'setting' &&
               <>
                 <div className="rb:px-3!">
@@ -701,7 +726,9 @@ const Properties: FC<PropertiesProps> = ({
                       <Button type="primary" size="small" className="rb:text-[12px]!" onClick={handleSureReplace}>{t('workflow.sureReplace')}</Button>
                     </>
                     : selectedNode?.data?.type === 'trigger'
-                      ? <CronTriggerConfig />
+                      ? <Trigger
+                        key={data.id || 'trigger'}
+                      />
                       : selectedNode?.data?.type === 'http-request'
                       ? <HttpRequest
                         options={variableList}
@@ -965,7 +992,7 @@ const Properties: FC<PropertiesProps> = ({
                                   key={key}
                                   label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                                   name={key}
-                                  options={variableList}
+                                  options={getFilteredVariableList(selectedNode?.data?.type, key)}
                                   isNeedType={config.isNeedType as boolean}
                                 />
                               }
@@ -1158,11 +1185,13 @@ const Properties: FC<PropertiesProps> = ({
               </>
             }
             {activeKey === 'lastRun' &&
-              <RunResultDisplay
-                result={result}
-                loading={resultLoading}
-                nodeData={data}
-              />
+              <div className="rb:px-3!">
+                <RunResultDisplay
+                  result={result}
+                  loading={resultLoading}
+                  nodeData={data}
+                />
+              </div>
             }
           </div>
         </RbCard>

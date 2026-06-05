@@ -177,6 +177,7 @@ async def create_end_user_id_indexes():
             ("Perceptual",        "user_perceptual"),
             ("AssistantOriginal", "user_assistant_original"),
             ("AssistantPruned",   "user_assistant_pruned"),
+            ("Conversation",      "user_conversation"),
         ]:
             await connector.execute_query(
                 f"""
@@ -241,6 +242,14 @@ async def create_unique_constraints():
             """
             CREATE CONSTRAINT assistant_pruned_id_unique IF NOT EXISTS
             FOR (p:AssistantPruned) REQUIRE p.id IS UNIQUE
+            """
+        )
+
+        # Conversation.id unique（会话级中心节点，MERGE 幂等的关键约束）
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT conversation_id_unique IF NOT EXISTS
+            FOR (c:Conversation) REQUIRE c.id IS UNIQUE
             """
         )
 

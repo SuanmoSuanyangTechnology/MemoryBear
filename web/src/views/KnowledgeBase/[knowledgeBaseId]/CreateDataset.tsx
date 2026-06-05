@@ -16,6 +16,7 @@ import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import SliderInput from '@/components/SliderInput';
 import DelimiterSelector from '../components/DelimiterSelector';
 import ParentChildBlockConfig, { parentChildBlockConfigValues, type ParentChildBlockConfigValues } from '../components/ParentChildBlockConfig';
+import StatusTag from '@/components/StatusTag';
 
 const { TextArea } = Input;
 
@@ -282,7 +283,9 @@ const CreateDataset = () => {
       key: 'progress',
       render: (value: number, record: any) => {
         // When value >= 1 it's complete, when 0～1 show progress bar
-        if (value >= 1) {
+        if ( record.run === 0 && typeof value === 'number' && value < 0) {
+          return <StatusTag status="error" text={t('knowledgeBase.failed')}></StatusTag>
+        } else if (value >= 1) {
           return (
             <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
               <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
@@ -558,7 +561,9 @@ const CreateDataset = () => {
     if (!knowledgeBaseId) return
     knowledgesChunkPolicy(knowledgeBaseId)
       .then(res => {
-        setIsParentChildMode((res as { parent_child_mode: boolean | null }).parent_child_mode)
+        const response = res as { parent_child_mode: boolean; } || {}
+        setIsParentChildMode(response.parent_child_mode)
+        setProcessingMethod(response.parent_child_mode ? 'parentChildBlock' : 'directBlock')
       })
 
   }

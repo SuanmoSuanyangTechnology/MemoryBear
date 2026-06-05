@@ -36,13 +36,15 @@ from app.core.workflow.nodes.configs import (
     ListOperatorNodeConfig,
     DocExtractorNodeConfig,
 )
-from app.schemas.workflow_schema import VariableDefinition as SchemaVariableDefinition
+from app.schemas.workflow_schema import (
+    VariableDefinition as SchemaVariableDefinition,
+    EnvironmentVariableDefinition,
+)
 from app.core.workflow.nodes.cycle_graph.config import (
     ConditionDetail as LoopConditionDetail,
     ConditionsConfig,
     CycleVariable
 )
-from app.core.workflow.nodes.list_operator.config import FilterCondition
 from app.core.workflow.nodes.enums import (
     ValueInputType,
     ComparisonOperator,
@@ -218,6 +220,26 @@ class DifyConverter(BaseConverter):
                     return origin_value
         except:
             raise Exception(f"convert variable failed: {target_type}")
+
+    def convert_environment_variable(self, variable: dict[str, Any]) -> EnvironmentVariableDefinition:
+        name = variable.get("name") or variable.get("variable") or variable.get("key")
+        value_type = variable.get("value_type") or variable.get("type") or "string"
+        if value_type not in {"string", "number", "secret"}:
+            raise Exception(f"unsupported environment variable type: {value_type}")
+
+        value = variable.get("value")
+        if value_type == "number" and value is not None:
+            value = self._convert_number(value)
+        elif value is not None:
+            value = self._convert_string(value)
+
+        return EnvironmentVariableDefinition(
+            name=name,
+            value_type=value_type,
+            required=variable.get("required", False),
+            value=value,
+            description=variable.get("description") or variable.get("label"),
+        )
 
     @staticmethod
     def convert_compare_operator(operator):

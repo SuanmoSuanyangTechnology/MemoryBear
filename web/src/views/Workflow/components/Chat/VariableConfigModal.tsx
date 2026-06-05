@@ -17,7 +17,7 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<{variables: Variable[]}>();
+  const [form] = Form.useForm<{variables: Variable[]; webhook_variables: Variable[]}>();
   const [loading, setLoading] = useState(false)
   const [initialValues, setInitialValues] = useState<Variable[]>([])
 
@@ -30,7 +30,9 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
 
   const handleOpen = (values: Variable[]) => {
     setVisible(true);
-    form.setFieldsValue({variables: values})
+    form.setFieldsValue({
+      variables: values,
+    })
     setInitialValues([...values])
   };
   // 封装保存方法，添加提交逻辑
@@ -82,7 +84,7 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                   <Form.Item
                     key={name}
                     name={[name, 'value']}
-                    label={field.type === 'boolean' ? undefined : `${field.name}·${field.display_name || field.description}`}
+                    label={field.type === 'boolean' ? undefined : [Array.isArray(field.name) ? field.name.join('.') : field.name, field.display_name || field.description].filter(Boolean).join('·')}
                     valuePropName={field.type === 'boolean' ? 'checked' : 'value'}
                     rules={[
                       { required: field.required, message: field.type === 'boolean' ? t('common.pleaseSelect') : t('common.pleaseEnter') },
