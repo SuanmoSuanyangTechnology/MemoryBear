@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import desc, nullslast, or_, cast, String, func
 from typing import List, Optional, Dict, Any
 import uuid
@@ -120,8 +120,17 @@ def get_workspace_end_users_paginated(
     business_logger.info(f"获取工作空间宿主列表（分页）: workspace_id={workspace_id}, keyword={keyword}, page={page}, pagesize={pagesize}, 操作者: {current_user.username}")
 
     try:
-        # 构建基础查询
-        base_query = db.query(EndUserModel).filter(
+        # 构建基础查询 — 只加载接口需要的列，避免加载大 Text 字段
+        _dashboard_columns = load_only(
+            EndUserModel.id,
+            EndUserModel.other_name,
+            EndUserModel.memory_count,
+            EndUserModel.app_id,
+            EndUserModel.memory_config_id,
+            EndUserModel.created_at,
+            EndUserModel.workspace_id,
+        )
+        base_query = db.query(EndUserModel).options(_dashboard_columns).filter(
             EndUserModel.workspace_id == workspace_id,
             EndUserModel.memory_count > 0 , # 只查询有记忆的宿主
         )
@@ -153,11 +162,9 @@ def get_workspace_end_users_paginated(
             desc(EndUserModel.id)
         ).offset((page - 1) * pagesize).limit(pagesize).all()
 
-        # 转换为 Pydantic 模型
-        end_users = [EndUserSchema.model_validate(eu) for eu in end_users_orm]
-
-        business_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
-        return {"items": end_users, "total": total}
+        # 直接返回 ORM 对象，controller 只需要 id/other_name/memory_count
+        business_logger.info(f"成功获取 {len(end_users_orm)} 个宿主记录，总计 {total} 条")
+        return {"items": end_users_orm, "total": total}
 
     except HTTPException:
         raise
@@ -210,6 +217,15 @@ def get_workspace_end_users_paginated_rag(
                 EndUserModel,
                 chunk_subquery.c.memory_count.label("memory_count"),
             )
+            .options(load_only(
+                EndUserModel.id,
+                EndUserModel.other_name,
+                EndUserModel.memory_count,
+                EndUserModel.app_id,
+                EndUserModel.memory_config_id,
+                EndUserModel.created_at,
+                EndUserModel.workspace_id,
+            ))
             .join(
                 chunk_subquery,
                 chunk_subquery.c.file_name == func.concat(cast(EndUserModel.id, String), ".txt"),
@@ -243,7 +259,7 @@ def get_workspace_end_users_paginated_rag(
         items = []
         for end_user_orm, memory_count in rows:
             items.append({
-                "end_user": EndUserSchema.model_validate(end_user_orm),
+                "end_user": end_user_orm,
                 "memory_count": int(memory_count or 0),
             })
 
