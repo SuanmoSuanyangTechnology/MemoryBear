@@ -232,7 +232,6 @@ class WorkflowExecutionRepository:
             WorkflowExecution.status == status
         ).count()
 
-
 class WorkflowNodeExecutionRepository:
     """工作流节点执行记录仓储"""
     
@@ -310,14 +309,14 @@ class WorkflowNodeExecutionRepository:
     ) -> WorkflowNodeExecution | None:
         stmt = (
             select(WorkflowNodeExecution)
-            .join(WorkflowExecution, WorkflowNodeExecution.execution_id == WorkflowExecution.id)
             .where(
-                WorkflowExecution.app_id == app_id,
+                WorkflowNodeExecution.app_id == app_id,
                 WorkflowNodeExecution.node_id == node_id,
             )
             .order_by(
-                desc(WorkflowNodeExecution.started_at),
+                desc(WorkflowNodeExecution.completed_at).nullslast(),
                 desc(WorkflowNodeExecution.created_at),
+                desc(WorkflowNodeExecution.started_at),
             )
         )
         if source is None:
@@ -396,6 +395,51 @@ class WorkflowNodeCacheRepository:
             item.status = "invalidated"
             item.invalidated_at = invalidated_at
         return len(items)
+
+    def invalidate_by_app(
+            self,
+            app_id: uuid.UUID,
+            *,
+            invalidated_at,
+            statuses: tuple[str, ...] = ("active", "expired"),
+            exclude_node_ids: tuple[str, ...] = (),
+    ) -> int:
+        stmt = (
+            select(WorkflowNodeCache)
+            .where(
+                WorkflowNodeCache.app_id == app_id,
+                WorkflowNodeCache.status.in_(statuses),
+            )
+        )
+        if exclude_node_ids:
+            stmt = stmt.where(WorkflowNodeCache.node_id.notin_(exclude_node_ids))
+        items = list(self.db.execute(stmt).scalars())
+        for item in items:
+            item.status = "invalidated"
+            item.invalidated_at = invalidated_at
+        return len(items)
+
+    def list_latest_by_app(
+            self,
+            app_id: uuid.UUID,
+            include_inactive: bool = False,
+    ) -> list[WorkflowNodeCache]:
+        stmt = select(WorkflowNodeCache).where(
+            WorkflowNodeCache.app_id == app_id,
+        )
+        if not include_inactive:
+            stmt = stmt.where(WorkflowNodeCache.status == "active")
+        stmt = stmt.order_by(
+            WorkflowNodeCache.node_id,
+            desc(WorkflowNodeCache.updated_at),
+            desc(WorkflowNodeCache.created_at),
+        )
+        items = list(self.db.execute(stmt).scalars())
+        latest_by_node: dict[str, WorkflowNodeCache] = {}
+        for item in items:
+            if item.node_id not in latest_by_node:
+                latest_by_node[item.node_id] = item
+        return list(latest_by_node.values())
 
     def invalidate_expired(self, now) -> int:
         stmt = select(WorkflowNodeCache).where(
