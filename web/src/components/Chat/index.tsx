@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:10:59
+ * @Last Modified time: 2026-06-05 19:20:53
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -18,50 +18,25 @@ const Chat: FC<ChatProps> = ({
   data,
   onChange,
   onSend,
-  streamLoading = false,
   loading,
   contentClassName = '',
   children,
-  labelFormat,
-  errorDesc,
   fileList,
   fileChange,
   className,
-  renderRuntime,
   conversationId,
-  userIcon,
-  assistantIcon,
-  isSupportTools = false,
-  handleFeedback,
-  isEnded = true,
-  readOnly = false,
-  deleteMsg,
-  reportMsg,
-  regenerateMessages,
-  handleVersionChange,
+  readOnly,
+  ...restProps
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
       {/* Chat content display area */}
       <ChatContent
-        userIcon={userIcon}
-        assistantIcon={assistantIcon}
         key={conversationId ?? 'new'}
         classNames={contentClassName}
         data={data}
-        streamLoading={streamLoading}
-        empty={empty}
-        labelFormat={labelFormat}
-        errorDesc={errorDesc}
-        renderRuntime={renderRuntime}
         onSend={onSend}
-        isSupportTools={isSupportTools}
-        handleFeedback={handleFeedback}
-        isEnded={isEnded}
-        deleteMsg={deleteMsg}
-        reportMsg={reportMsg}
-        regenerateMessages={regenerateMessages}
-        handleVersionChange={handleVersionChange}
+        {...restProps}
       />
 
       {/* Chat input area */}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 13:48:21
+ * @Last Modified time: 2026-06-05 18:18:02
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -149,7 +149,7 @@ export const useWorkflowGraph = ({
     if (!graphRef.current) return
     graphRef.current.getNodes().forEach(node => {
       const data = node.getData()
-      if (data?.type === 'if-else' || data?.type === 'question-classifier') {
+      if (['if-else', 'question-classifier', 'human-intervention'].includes(data?.type)) {
         node.setData({ ...data, chatVariables, envVariables })
       }
     })
@@ -286,7 +286,7 @@ export const useWorkflowGraph = ({
           id,
           type,
           name,
-          data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables, envVariables } : {}) },
+          data: { ...node, ...nodeLibraryConfig, ...((['if-else', 'question-classifier', 'human-intervention'].includes(type)) ? { chatVariables, envVariables } : {}) },
           ...position,
         }
 
@@ -379,6 +379,32 @@ export const useWorkflowGraph = ({
             ]
           };
         }
+        // Generate ports dynamically for human-intervention node based on actions
+        if (type === 'human-intervention' && config.actions && Array.isArray(config.actions)) {
+          const totalPorts = config.actions.length + 1; // IF/ELIF + ELSE
+
+          const portItems: PortMetadata[] = [
+            defaultPortItems[0],
+          ];
+          // Add action ports
+          for (let i = 0; i < totalPorts; i++) {
+            portItems.push({
+              group: 'right',
+              id: `CASE${i + 1}`,
+              args: {
+                x: nodeWidth,
+                y: getConditionNodeCasePortY(config.actions, i),
+              },
+            });
+          }
+
+          nodeConfig.ports = {
+            groups: defaultAbsolutePortGroups,
+            items: portItems
+          };
+
+          nodeConfig.height = calcConditionNodeTotalHeight(config.actions);
+        }
 
         return nodeConfig
       })
@@ -449,7 +475,7 @@ export const useWorkflowGraph = ({
         return arr.findIndex(e => {
           const sourceCell = graphRef.current?.getCellById(e.source);
           const sourceType = sourceCell?.getData()?.type;
-          const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+          const isMultiPortNode = ['question-classifier', 'if-else', 'human-intervention'].includes(sourceType);
 
           if (isMultiPortNode) {
             // Multi-port nodes need to compare source, target and label
@@ -483,6 +509,14 @@ export const useWorkflowGraph = ({
 
           // If question-classifier node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'question-classifier' && label) {
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
+          }
+          // If human-intervention node has label, match corresponding port by label
+          if (sourceCell.getData()?.type === 'human-intervention' && label) {
+            // Find matching port ID
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -673,6 +707,30 @@ export const useWorkflowGraph = ({
         rightPorts.forEach((_p, i) => {
           node.portProp(`CASE${i + 1}`, 'args/y', portItemArgsY * i + conditionNodePortItemArgsY)
         })
+        node.toFront()
+        graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
+          const tgt = graph.getCellById(e.getTargetCellId())
+          tgt?.toFront()
+        })
+      } else if (nodeData.type === 'human-intervention') {
+        const rightPorts = node.getPorts().filter(p => p.group === 'right')
+        const caseCount = rightPorts.length - 1 // last port is ELSE
+        const currentActions: any[] = nodeData.config?.actions?.defaultValue ?? []
+        const newActions = caseCount !== currentActions.length
+          ? Array.from({ length: caseCount }, (_, i) => currentActions[i] ?? { logical_operator: 'and', expressions: [] })
+          : currentActions
+        if (caseCount !== currentActions.length) {
+          node.setData({
+            ...nodeData,
+            config: { ...nodeData.config, actions: { ...nodeData.config.actions, defaultValue: newActions } }
+          }, { deep: false, silent: true })
+        }
+        // Sync node height and port Y positions
+        node.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(newActions) })
+        newActions.forEach((_c: any, i: number) => {
+          node.portProp(`CASE${i + 1}`, 'args/y', getConditionNodeCasePortY(newActions, i))
+        })
+        node.portProp(`CASE${newActions.length + 1}`, 'args/y', getConditionNodeCasePortY(newActions, newActions.length))
         node.toFront()
         graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
           const tgt = graph.getCellById(e.getTargetCellId())
@@ -1791,6 +1849,18 @@ export const useWorkflowGraph = ({
             };
           }
 
+          if (sourceCell?.getData()?.type === 'human-intervention') {
+            console.log('sourcePortId', sourcePortId)
+          }
+          // If human-intervention node right port connection, add label
+          if (sourceCell?.getData()?.type === 'human-intervention' && sourcePortId?.startsWith('CASE')) {
+            return {
+              source: sourceCell.getData().id,
+              target: targetCell?.getData().id,
+              label: sourcePortId,
+            };
+          }
+
           // If http-request node right port connection, add label
           if (['code', 'http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
             if (sourcePortId === 'ERROR') {
@@ -1820,7 +1890,7 @@ export const useWorkflowGraph = ({
               if (!e || !edge) return false;
               const sourceCell = graphRef.current?.getCellById(e.source);
               const sourceType = sourceCell?.getData()?.type;
-              const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+              const isMultiPortNode = ['question-classifier', 'if-else', 'human-intervention'].includes(sourceType);
 
               if (isMultiPortNode) {
                 // Multi-port nodes need to compare source, target and label

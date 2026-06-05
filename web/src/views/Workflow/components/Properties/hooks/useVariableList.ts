@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 18:53:06
+ * @Last Modified time: 2026-06-05 18:17:04
  */
 /**
  * useVariableList Hook
@@ -77,6 +77,10 @@ const NODE_VARIABLES = {
   'parameter-extractor': [
     { label: '__is_success', dataType: 'number', field: '__is_success' },
     { label: '__reason', dataType: 'string', field: '__reason' }
+  ],
+  'human-intervention': [
+    { label: '__action_id', dataType: 'string', field: '__action_id' },
+    { label: '__rendered_content', dataType: 'string', field: '__rendered_content' },
   ],
   'http-request': [
     { label: 'body', dataType: 'string', field: 'body' },
@@ -284,6 +288,14 @@ const processNodeVariables = (
         addVariable(variableList, addedKeys, `${dataNodeId}_webhook_raw`, 'webhook_raw', 'object', `${dataNodeId}.webhook_raw`, nodeData, undefined);
       }
       break;
+    case 'human-intervention':
+      // Add human intervention form fields as variables
+      (config.form_fields?.defaultValue || []).forEach((field: any) => {
+        if (field.id?.trim()) {
+          addVariable(variableList, addedKeys, `${dataNodeId}_${field.id}`, field.id, 'string', `${dataNodeId}.${field.id}`, nodeData, undefined, field.default_value);
+        }
+      });
+      break;
   }
 };
 
@@ -301,7 +313,8 @@ const hasOutputNodeTypes = [
   'jinja-render',
   'document-extractor',
   'list-operator',
-  'trigger'
+  'trigger',
+  'human-intervention',
 ];
 
 /**
@@ -317,12 +330,20 @@ export const getCurrentNodeVariables = (nodeData: any, values: any, upstreamVari
   const keys = new Set<string>(upstreamVariables.map(v => v.key));
   const dataNodeId = nodeData.id;
 
+  // Merge config with values, handling defaultValue format correctly
+  const mergedConfig = { ...nodeData.config };
+  Object.keys(values || {}).forEach(key => {
+    // If the original config has defaultValue format, preserve it
+    if (mergedConfig[key]?.defaultValue !== undefined) {
+      mergedConfig[key] = { defaultValue: values[key] };
+    } else {
+      mergedConfig[key] = values[key];
+    }
+  });
+
   processNodeVariables({
     ...nodeData,
-    config: {
-      ...nodeData.config,
-      ...values
-    }
+    config: mergedConfig
   }, dataNodeId, list, keys);
   
   // Special case: var-aggregator without group enabled returns no variables

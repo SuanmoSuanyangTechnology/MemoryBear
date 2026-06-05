@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>人工介入</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-开始" transform="translate(-718, -694)">
+            <g id="人工介入" transform="translate(718, 694)">
+                <rect id="矩形" fill="#02AFD5" x="0" y="0" width="24" height="24" rx="8"></rect>
+                <g id="编组-40" transform="translate(6.3, 5)" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2">
+                    <ellipse id="椭圆形" cx="5.58397984" cy="2.61333333" rx="2.57585929" ry="2.61333333"></ellipse>
+                    <path d="M5.76796979,7.24126332 L3.15,7.24126332 C1.41030304,7.24126332 1.96877035e-17,8.65156636 4.63776913e-16,10.3912633 L9.07866123e-16,13.9845722 L9.07866123e-16,13.9845722" id="路径-25"></path>
+                    <path d="M9.00082166,7.24126332 L9.00082166,11.6765257 C9.00082166,12.173582 8.59787794,12.5765257 8.10082166,12.5765257 L3.53657621,12.5765257 L3.53657621,12.5765257" id="路径-26"></path>
+                    <polyline id="路径" points="3.87312653 14 2.49320192 12.6 3.87312653 11.2"></polyline>
+                    <line x1="11.5400251" y1="7.24126332" x2="11.5400251" y2="12.6123883" id="路径-27"></line>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
