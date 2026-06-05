@@ -735,10 +735,6 @@ class NodeRunRequest(BaseModel):
         }]
     )
     stream: bool = Field(default=False, description="是否流式返回")
-    base_execution_id: Optional[str] = Field(
-        default=None,
-        description="基准执行 ID，用于基于某次整图执行快照恢复上下文后再单节点运行",
-    )
 
 
 class NodeCacheUpdateRequest(BaseModel):
@@ -797,10 +793,6 @@ class NodeRerunRequest(BaseModel):
     """基于最近一次单节点调试输入重跑"""
     invalidate_cache: bool = Field(default=False, description="重跑前是否先失效当前缓存")
     bypass_cache: bool = Field(default=False, description="重跑时是否跳过缓存直接真实执行")
-    base_execution_id: Optional[str] = Field(
-        default=None,
-        description="可选，覆盖最近一次单节点调试绑定的基准执行 ID",
-    )
 
 
 class DraftRunCompareRequest(BaseModel):
