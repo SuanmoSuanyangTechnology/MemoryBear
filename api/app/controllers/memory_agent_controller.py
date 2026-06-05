@@ -40,7 +40,7 @@ router = APIRouter(
 )
 
 
-@router.get("/health/status", response_model=ApiResponse)
+@router.get("/health/status", response_model=ApiResponse) # not used apifox中没有用例结果
 async def get_health_status(
         current_user: User = Depends(get_current_user)
 ):
@@ -58,7 +58,7 @@ async def get_health_status(
         return fail(BizCode.SERVICE_UNAVAILABLE, "健康状态查询失败", str(e))
 
 
-@router.get("/download_log")
+@router.get("/download_log") # not used apifox中没有用例结果
 async def download_log(
         log_type: str = Query("file", regex="^(file|transmission)$",
                               description="日志类型: file=完整文件, transmission=实时流式传输"),
@@ -203,7 +203,7 @@ async def write_server(
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
-@router.post("/writer_service_async", response_model=ApiResponse)
+@router.post("/writer_service_async", response_model=ApiResponse) # 发送celery任务写入记忆
 @cur_workspace_access_guard()
 async def write_server_async(
         user_input: Write_UserInput,
@@ -442,7 +442,7 @@ async def file_update(
         return fail(BizCode.INTERNAL_ERROR, "转换文本失败", str(e))
 
 
-@router.post("/read_service_async", response_model=ApiResponse)
+@router.post("/read_service_async", response_model=ApiResponse) # not used apifox中没有用例结果
 @cur_workspace_access_guard()
 async def read_server_async(
         user_input: UserInput,
@@ -486,7 +486,7 @@ async def read_server_async(
         return fail(BizCode.INTERNAL_ERROR, "回复对话消息失败", str(e))
 
 
-@router.get("/read_result/", response_model=ApiResponse)
+@router.get("/read_result/", response_model=ApiResponse) # not used apifox中没有用例结果，
 async def get_read_task_result(
         task_id: str,
         current_user: User = Depends(get_current_user)

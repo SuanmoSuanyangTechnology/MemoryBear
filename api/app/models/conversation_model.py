@@ -48,6 +48,13 @@ class Conversation(Base):
     # 滑动窗口写入游标：最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进
     write_cursor = Column(Integer, nullable=False, default=0, server_default="0", comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
 
+    # 记忆配置锁定：对话首次写入时锁定使用的记忆配置 ID
+    # NULL 时由 MemoryWriteCore 回退到 release.config["memory"]["memory_config_id"] 解析
+    memory_config_id = Column(UUID(as_uuid=True), nullable=True, comment="对话使用的记忆配置 ID（首次写入时锁定，NULL 时回退到 release.config 解析）")
+
+    # 对话创建来源标记，用于 ScanIdle 过滤 + 可观测性
+    source_tag = Column(String(32), nullable=True, comment='对话创建来源："agent" / "workflow" / "api_service"')
+
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否活跃")
 

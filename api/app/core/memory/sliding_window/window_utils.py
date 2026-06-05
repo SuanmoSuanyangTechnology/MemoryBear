@@ -642,7 +642,12 @@ async def execute_pending_from_pool(
     """
     from app.core.memory.pipelines.write_pipeline import WritePipeline
     from app.services.memory_config_service import MemoryConfigService
+    import asyncio as _asyncio
     import uuid as _uuid
+
+    # 重试配置
+    MAX_RETRIES = 3
+    _retry_delays = [1, 2, 4]  # 指数退避：1s, 2s, 4s
 
     if not conversation_id:
         logger.warning("[execute_pending_from_pool] conversation_id 为空，跳过")
@@ -787,25 +792,47 @@ async def execute_pending_from_pool(
                     )
                     break
 
+            # 上下文构建（不在重试范围内——DB 查询失败直接抛出）
             context_before = await build_context_before(conversation_id, target_seq)
             context_after = await build_context_after(conversation_id, target_seq)
 
-            await write_pipeline.run_with_window(
-                target_message=message,
-                context_before=context_before,
-                context_after=context_after,
-                conversation_id=conversation_id,
-                message_seq=target_seq,
-            )
-            processed += 1
+            # 带重试的写入操作
+            for attempt in range(MAX_RETRIES):
+                try:
+                    await write_pipeline.run_with_window(
+                        target_message=message,
+                        context_before=context_before,
+                        context_after=context_after,
+                        conversation_id=conversation_id,
+                        message_seq=target_seq,
+                    )
+                    processed += 1
+                    break
+                except Exception as e:
+                    if attempt < MAX_RETRIES - 1:
+                        delay = _retry_delays[attempt]
+                        logger.warning(
+                            f"[execute_pending_from_pool] 写入失败，{delay}s 后重试 "
+                            f"({attempt + 1}/{MAX_RETRIES}): "
+                            f"conv={conversation_id}, seq={target_seq}, err={e}"
+                        )
+                        await _asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            f"[execute_pending_from_pool] 写入失败，已重试 {MAX_RETRIES} 次，"
+                            f"中断本轮写入: conv={conversation_id}, seq={target_seq}, err={e}",
+                            exc_info=True,
+                        )
+                        raise
 
         except Exception as e:
+            # 非重试覆盖的异常（如 advance_write_cursor 失败、上下文构建失败）直接中断
             logger.error(
-                f"[execute_pending_from_pool] 消息处理异常，跳过: "
+                f"[execute_pending_from_pool] 处理失败，中断本轮写入: "
                 f"conv={conversation_id}, seq={target_seq}, err={e}",
                 exc_info=True,
             )
-            continue
+            raise
 
     logger.info(
         f"[execute_pending_from_pool] 完成: conv={conversation_id}, processed={processed}"

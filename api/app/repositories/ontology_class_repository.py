@@ -206,6 +206,10 @@ class OntologyClassRepository:
         
         按创建时间倒序排列。
         
+        查询完成后立即关闭事务，避免长时间 idle in transaction。
+        返回的 ORM 对象已从 session 中 expunge，列属性仍可访问，
+        但懒加载关系不再可用。
+        
         Args:
             scene_id: 场景ID
             
@@ -224,6 +228,12 @@ class OntologyClassRepository:
             ).order_by(
                 OntologyClass.created_at.desc()
             ).all()
+            
+            # 将查询结果从 session 中剔除，确保 rollback 后对象仍可读
+            for c in classes:
+                self.db.expunge(c)
+            # 只读查询无需 commit，rollback 关闭隐式事务
+            self.db.rollback()
             
             logger.info(
                 f"Found {len(classes)} ontology classes in scene_id: {scene_id}"

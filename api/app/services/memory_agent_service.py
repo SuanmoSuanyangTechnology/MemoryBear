@@ -420,7 +420,7 @@ class MemoryAgentService:
             for msg in messages
         ])
 
-        # ── Step 3: 写入存储 ── 根据 storage_type 分流到 RAG 或 Neo4j 流水线
+        # ── Step 3: 写入存储 ── 根据 storage_type 分流到 RAG 或 Neo4j 流水线 通过API service直接写入，应该更改为只有neo4j一种存储方式，好像不太对
         try:
             if storage_type == StorageType.RAG:
                 await write_rag(end_user_id, message_text, user_rag_memory_id)
