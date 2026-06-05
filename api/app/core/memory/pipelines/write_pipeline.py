@@ -1290,28 +1290,19 @@ class WritePipeline:
 
     async def _cleanup(self) -> None:
         """
-        清理资源：关闭 Neo4j 连接器和 HTTP 客户端。
-        在 run() 的 finally 块中调用，确保资源释放。
+        清理资源：关闭 Neo4j 连接器，断开客户端引用。
+
+        不再尝试反射关闭 httpx 内部 client——由 tasks.py 的
+        _shutdown_loop_gracefully 中 set_exception_handler 兜底，
+        抑制 GC 阶段 'Event loop is closed' 的噪音日志。
         """
-        # 关闭 Neo4j 连接器
         if self._neo4j_connector:
             try:
                 await self._neo4j_connector.close()
             except Exception as e:
                 logger.error(f"Error closing Neo4j connector: {e}")
 
-        # 关闭 LLM/Embedder 底层 httpx 客户端
-        # 防止 'RuntimeError: Event loop is closed' 在垃圾回收时触发
-        for client_obj in (self._llm_client, self._embedder_client):
-            try:
-                underlying = getattr(client_obj, "client", None) or getattr(
-                    client_obj, "model", None
-                )
-                if underlying is None:
-                    continue
-                inner = getattr(underlying, "_model", underlying)
-                http_client = getattr(inner, "async_client", None)
-                if http_client is not None and hasattr(http_client, "aclose"):
-                    await http_client.aclose()
-            except Exception:
-                pass
+        # 断开引用链，让 GC 尽早回收（减少 loop 关闭后残留对象的概率）
+        self._neo4j_connector = None
+        self._llm_client = None
+        self._embedder_client = None

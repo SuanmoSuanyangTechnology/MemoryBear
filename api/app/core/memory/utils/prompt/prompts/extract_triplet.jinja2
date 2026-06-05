@@ -51,9 +51,11 @@ Extract entities and knowledge triplets from the given statement.
 - `statement_type`: 上游提供的陈述类别，例如 `FACT` / `OPINION` / `OTHER`
 - `temporal_type`: 上游提供的时间类别，例如 `STATIC` / `DYNAMIC` / `ATEMPORAL`
 - `supporting_context`: 原始对话上下文
-- `supporting_context.msgs`: 上下文消息列表
-- `supporting_context.msgs[].role`: `User` / `Assistant`
-- `supporting_context.msgs[].msg`: 消息文本
+- `supporting_context.before_msgs`: 发生在 `statement_text` 来源消息**之前**的上下文消息列表（按时间升序）
+- `supporting_context.after_msgs`: 发生在 `statement_text` 来源消息**之后**的上下文消息列表（按时间升序）
+- `supporting_context.before_msgs[].role` / `supporting_context.after_msgs[].role`: `User` / `Assistant`
+- `supporting_context.before_msgs[].msg` / `supporting_context.after_msgs[].msg`: 消息文本
+- 注意：`statement_text` 在结构上夹在 `before_msgs` 与 `after_msgs` 之间，但与两侧消息**不一定直接相邻**
 - `speaker`: `user` / `assistant`
 - `dialog_at`: 会话时间，ISO 8601 时间点；每个实体 `description` 必须复制该值作为开头时间戳
 - `valid_at`: ISO 8601 时间点，或 `NULL`
@@ -66,9 +68,11 @@ Extract entities and knowledge triplets from the given statement.
 - `statement_type`: upstream statement category such as `FACT` / `OPINION` / `OTHER`
 - `temporal_type`: upstream temporal category such as `STATIC` / `DYNAMIC` / `ATEMPORAL`
 - `supporting_context`: original conversation context
-- `supporting_context.msgs`: context message list
-- `supporting_context.msgs[].role`: `User` / `Assistant`
-- `supporting_context.msgs[].msg`: message text
+- `supporting_context.before_msgs`: ordered list of messages that occurred **before** the source of `statement_text` (chronological)
+- `supporting_context.after_msgs`: ordered list of messages that occurred **after** the source of `statement_text` (chronological)
+- `supporting_context.before_msgs[].role` / `supporting_context.after_msgs[].role`: `User` / `Assistant`
+- `supporting_context.before_msgs[].msg` / `supporting_context.after_msgs[].msg`: message text
+- Note: `statement_text` sits structurally between `before_msgs` and `after_msgs`, but is **not necessarily directly adjacent** to either side
 - `speaker`: `user` / `assistant`
 - `dialog_at`: session time as an ISO 8601 timestamp; every entity `description` must copy this value as its leading timestamp
 - `valid_at`: ISO 8601 timestamp or `NULL`
@@ -126,10 +130,10 @@ Primary statement to analyze:
 {% if language == "zh" %}
 
 - 只把 `statement_text` 作为直接抽取目标。
-- `supporting_context.msgs` 只能用于解释 `statement_text` 中的代词、省略、主体身份和必要背景。
-- 不要从 `supporting_context.msgs` 中单独抽取实体或关系。
-- 如果某条信息只出现在 `supporting_context.msgs` 中，而没有出现在 `statement_text` 中，就不要输出它。
-- 如果 `supporting_context.msgs` 中的 Assistant 消息包含总结、猜测、解释或改写，这些内容只能作为理解辅助，不能直接作为抽取来源。
+- `supporting_context.before_msgs` 与 `supporting_context.after_msgs` 只能用于解释 `statement_text` 中的代词、省略、主体身份和必要背景。
+- 不要从 `before_msgs` 或 `after_msgs` 中单独抽取实体或关系。
+- 如果某条信息只出现在 `before_msgs` 或 `after_msgs` 中，而没有出现在 `statement_text` 中，就不要输出它。
+- 如果 `before_msgs` 或 `after_msgs` 中的 Assistant 消息包含总结、猜测、解释或改写，这些内容只能作为理解辅助，不能直接作为抽取来源。
 - `statement_type`、`temporal_type` 是辅助理解字段，不是抽取目标。
 - `dialog_at` 是辅助时间上下文字段，不是抽取目标。
 - `valid_at`、`invalid_at` 不用于决定是否创建实体或关系，但如果产生 triplet，必须原样复制到每个 triplet 的同名字段中。
@@ -138,10 +142,10 @@ Primary statement to analyze:
 - 对命名关系中新出现的称呼、别名、昵称、产品名，不要因为上下文可推断其所指而直接改写，它们应保持原样作为实体名。
   {% else %}
 - Treat `statement_text` as the only direct extraction target.
-- Use `supporting_context.msgs` only to interpret references, ellipsis, subject identity, and necessary background in `statement_text`.
-- Do not extract any standalone entity or relation from `supporting_context.msgs`.
-- If some information appears only in `supporting_context.msgs` but not in `statement_text`, do not include it in the output.
-- If Assistant messages in `supporting_context.msgs` contain summary, guess, interpretation, or rephrasing, use them only as interpretive support and never as a direct extraction source.
+- Use `supporting_context.before_msgs` and `supporting_context.after_msgs` only to interpret references, ellipsis, subject identity, and necessary background in `statement_text`.
+- Do not extract any standalone entity or relation from `before_msgs` or `after_msgs`.
+- If some information appears only in `before_msgs` or `after_msgs` but not in `statement_text`, do not include it in the output.
+- If Assistant messages in `before_msgs` or `after_msgs` contain summary, guess, interpretation, or rephrasing, use them only as interpretive support and never as a direct extraction source.
 - Treat `statement_type` and `temporal_type` as auxiliary context, not extraction targets.
 - Treat `dialog_at` as auxiliary session-time context, not an extraction target.
 - Do not use `valid_at` or `invalid_at` to decide whether to create entities or relations, but if any triplet is produced, copy them verbatim into every triplet field with the same names.
