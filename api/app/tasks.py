@@ -697,7 +697,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if db_document is not None:
             try:
                 db_document.progress = -1.0
-                db_document.progress_msg = _progress_msg() + f"Failed to vectorize and import the parsed document:{str(e)}\n"
+                progress_lines.append(f"{_progress_ts()} Failed to vectorize and import the parsed document:{str(e)}")
+                db_document.progress_msg = _progress_msg()
                 db_document.run = 0
                 db.commit()
             except Exception:
@@ -892,6 +893,12 @@ def import_qa_chunks(
     import io
 
     db = None
+    start_time = time.time()
+    progress_lines: list[str] = [f"{_progress_ts()} QA import task has been received."]
+
+    def _qa_progress_msg() -> str:
+        return "\n".join(progress_lines) + "\n"
+
     try:
         with get_db_context() as db:
             db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
@@ -899,6 +906,14 @@ def import_qa_chunks(
             if not db_document or not db_knowledge:
                 logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
                 return {"error": "document or knowledge not found", "imported": 0}
+
+            progress_lines.append(f"{_progress_ts()} Start to import QA.")
+            db_document.progress = 0.0
+            db_document.progress_msg = _qa_progress_msg()
+            db_document.process_begin_at = utcnow_naive()
+            db_document.process_duration = 0.0
+            db_document.run = 1
+            db.commit()
 
             if contents is None:
                 if not file_key:
@@ -952,13 +967,14 @@ def import_qa_chunks(
                     wb.close()
                 except Exception as e:
                     logger.error(f"[ImportQA] Excel parse failed: {e}")
-                    return {"error": f"Excel parse failed: {e}", "imported": 0}
+                    raise RuntimeError(f"Excel parse failed: {e}") from e
 
             if not qa_pairs:
                 logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
-                return {"error": "No valid QA pairs found", "imported": 0}
+                raise ValueError("No valid QA pairs found")
 
             logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+            progress_lines.append(f"{_progress_ts()} Parsed {len(qa_pairs)} QA pairs.")
 
             # 2. 写入 ES
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
@@ -999,7 +1015,10 @@ def import_qa_chunks(
             # 3. 更新 chunk_num 和 progress
             db_document.chunk_num += len(chunks)
             db_document.progress = 1.0
-            db_document.progress_msg = f"QA 导入完成: {len(chunks)} 条"
+            db_document.process_duration = time.time() - start_time
+            db_document.run = 0
+            progress_lines.append(f"{_progress_ts()} QA import done: {len(chunks)} chunks.")
+            db_document.progress_msg = _qa_progress_msg()
             db.commit()
 
             result = {"imported": len(chunks), "failed_rows": failed_rows}
@@ -1008,13 +1027,15 @@ def import_qa_chunks(
 
     except Exception as e:
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
-        # 尝试更新文档状态为失败
         try:
             with get_db_context() as err_db:
                 doc = err_db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
                 if doc:
+                    progress_lines.append(f"{_progress_ts()} QA import failed: {str(e)[:200]}")
                     doc.progress = -1.0
-                    doc.progress_msg = f"QA 导入失败: {str(e)[:200]}"
+                    doc.progress_msg = _qa_progress_msg()
+                    doc.process_duration = time.time() - start_time
+                    doc.run = 0
                     err_db.commit()
         except Exception:
             pass

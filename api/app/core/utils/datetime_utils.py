@@ -8,9 +8,13 @@ Project convention:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 UTC = timezone.utc
+_BARE_CLOCK_LINE_RE = re.compile(
+    r"(?m)^(?P<hour>[01]\d|2[0-3]):(?P<minute>[0-5]\d):(?P<second>[0-5]\d)(?P<rest>\s+)"
+)
 
 
 def utcnow() -> datetime:
@@ -49,6 +53,25 @@ def to_iso_z(dt: datetime | None) -> str | None:
     if aware_dt is None:
         return None
     return aware_dt.isoformat().replace("+00:00", "Z")
+
+
+def normalize_progress_message_timestamps(message: str | None, reference_dt: datetime | None) -> str | None:
+    """Convert legacy leading HH:MM:SS progress lines to explicit UTC ISO strings."""
+    if not message:
+        return message
+
+    reference = as_utc_aware(reference_dt) or utcnow()
+
+    def _replace(match: re.Match[str]) -> str:
+        normalized_dt = reference.replace(
+            hour=int(match.group("hour")),
+            minute=int(match.group("minute")),
+            second=int(match.group("second")),
+            microsecond=0,
+        )
+        return f"{to_iso_z(normalized_dt)}{match.group('rest')}"
+
+    return _BARE_CLOCK_LINE_RE.sub(_replace, message)
 
 
 def parse_timestamp_to_utc_naive(timestamp: int | float | None) -> datetime | None:
