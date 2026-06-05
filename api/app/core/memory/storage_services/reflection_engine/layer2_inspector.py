@@ -660,6 +660,30 @@ class Layer2Inspector:
 
         # Step 5: 写反思日志（仅 resolved=true 时）
         if validated.resolved:
+            # 过滤掉"用户"实体（与 Step 4 写入逻辑一致：用户节点不是被消解出的新实体）
+            resolved_entities = [
+                e for e in validated.entities if e.name.strip() != "用户"
+            ]
+
+            # 列表页摘要：消解指代: <首个实体> 等 N 个实体
+            if resolved_entities:
+                summary_text = (
+                    f"消解指代: {resolved_entities[0].name} "
+                    f"等 {len(resolved_entities)} 个实体"
+                )
+            else:
+                summary_text = "消解指代: 无新增实体"
+
+            # 详情页变更项：按实体逐行展示，附带实体类型
+            changes = [
+                {
+                    "field": "识别实体",
+                    "old": "未识别",
+                    "new": f"{e.name}（{e.type}）",
+                }
+                for e in resolved_entities
+            ]
+
             log_repo = self.log_repo_factory()
             log_repo.create(
                 end_user_id=end_user_id,
@@ -669,22 +693,16 @@ class Layer2Inspector:
                 strategy="RESOLVE",
                 confidence=None,
                 status="resolved",
-                summary_text=f"消解为: {', '.join(e.name for e in validated.entities[:3])}",
+                summary_text=summary_text[:256],
                 entity_ids=created_entity_ids,
                 statement_ids=[stmt["statement_id"]],
                 trigger_detail={
                     "statement_id": stmt["statement_id"],
-                    "statement_text": stmt["statement_text"],
+                    "statement_text": f"未识别语句：{stmt['statement_text']}",
                 },
                 solution_detail={
                     "title": "RESOLVE — 指代消解成功",
-                    "changes": [
-                        {
-                            "field": "unresolved_reference",
-                            "old": "未识别",
-                            "new": ", ".join(e.name for e in validated.entities),
-                        }
-                    ],
+                    "changes": changes,
                 },
                 execution_detail=tracker.to_dict(),
             )
