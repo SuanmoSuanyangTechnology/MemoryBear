@@ -177,21 +177,12 @@ def get_workspace_end_users(
     def _fire_and_forget_tasks(_end_user_ids, _workspace_id):
         """后台线程：执行 Redis 节流判断 + Celery 任务派发"""
         try:
-            import redis
-            from app.core.config import settings as _settings
+            from app.tasks import get_sync_redis_client
 
-            _pool = redis.ConnectionPool(
-                host=_settings.REDIS_HOST,
-                port=_settings.REDIS_PORT,
-                db=_settings.REDIS_DB_CELERY_BACKEND,
-                password=_settings.REDIS_PASSWORD,
-                decode_responses=True,
-                max_connections=10,
-                socket_connect_timeout=3,
-                socket_timeout=5,
-            )
-            _redis = redis.StrictRedis(connection_pool=_pool)
-            _redis.ping()
+            _redis = get_sync_redis_client()
+            if _redis is None:
+                api_logger.warning("后台任务 Redis 不可用，跳过")
+                return
         except Exception as _e:
             api_logger.warning(f"后台任务 Redis 不可用，跳过: {_e}")
             return
