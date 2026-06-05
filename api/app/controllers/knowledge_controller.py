@@ -43,6 +43,7 @@ from app.core.quota_stub import check_knowledge_capacity_quota
 api_logger = get_api_logger()
 
 _PARSE_DOCUMENT_TASK_NAME = "app.core.rag.tasks.parse_document"
+_IMPORT_QA_TASK_NAME = "app.core.rag.tasks.import_qa_chunks"
 _PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 _PARSE_TASK_TTL = 7200
 
@@ -100,11 +101,23 @@ def _dispatch_reparse_tasks_for_knowledge(db: Session, knowledge_id: uuid.UUID) 
             result["already_running"] += 1
             continue
 
+        file_name = getattr(db_file, "file_name", None) or db_document.file_name
+        parser_config = db_document.parser_config or {}
+        is_qa_doc = parser_config.get("doc_type") == "qa"
+
         try:
-            task = celery_app.send_task(
-                _PARSE_DOCUMENT_TASK_NAME,
-                args=[file_key, db_document.id, getattr(db_file, "file_name", None) or db_document.file_name],
-            )
+            if is_qa_doc:
+                task = celery_app.send_task(
+                    _IMPORT_QA_TASK_NAME,
+                    args=[str(knowledge_id), str(db_document.id), file_name],
+                    kwargs={"file_key": file_key, "clear_parse_task": True},
+                    queue="qa_import",
+                )
+            else:
+                task = celery_app.send_task(
+                    _PARSE_DOCUMENT_TASK_NAME,
+                    args=[file_key, db_document.id, file_name],
+                )
         except Exception as exc:
             result["failed"] += 1
             REDIS_CONN.delete(task_key)

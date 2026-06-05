@@ -98,6 +98,24 @@ def _progress_ts() -> str:
     return to_iso_z(utcnow())
 
 
+def _download_storage_file(file_key: str) -> bytes:
+    from app.services.file_storage_service import FileStorageService
+
+    storage_service = FileStorageService()
+
+    async def _download():
+        return await storage_service.download_file(file_key)
+
+    try:
+        return asyncio.run(_download())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_download())
+        finally:
+            loop.close()
+
+
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
 # 使用连接池而非单例客户端，提供更好的并发性能和自动重连
@@ -857,7 +875,14 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
-def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: bytes):
+def import_qa_chunks(
+    kb_id: str,
+    document_id: str,
+    filename: str,
+    contents: bytes | None = None,
+    file_key: str | None = None,
+    clear_parse_task: bool = False,
+):
     """
     异步导入 QA 问答对（CSV/Excel）
     
@@ -868,13 +893,20 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
 
     db = None
     try:
-        from app.db import get_db_context
         with get_db_context() as db:
             db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
             if not db_document or not db_knowledge:
                 logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
                 return {"error": "document or knowledge not found", "imported": 0}
+
+            if contents is None:
+                if not file_key:
+                    raise ValueError("contents or file_key is required for QA import")
+                contents = _download_storage_file(file_key)
+                if not contents:
+                    raise IOError(f"Downloaded empty QA file from storage: {file_key}")
+                logger.info(f"[ImportQA] Downloaded {len(contents)} bytes from storage key: {file_key}")
 
             # 1. 解析文件
             qa_pairs = []
@@ -932,9 +964,13 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             sort_id = 0
-            total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
-            if items:
-                sort_id = items[0].metadata["sort_id"]
+            if clear_parse_task:
+                vector_service.delete_by_metadata_field(key="document_id", value=document_id)
+                db_document.chunk_num = 0
+            else:
+                total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
+                if items:
+                    sort_id = items[0].metadata["sort_id"]
 
             chunks = []
             for pair in qa_pairs:
@@ -974,7 +1010,6 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
         # 尝试更新文档状态为失败
         try:
-            from app.db import get_db_context
             with get_db_context() as err_db:
                 doc = err_db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
                 if doc:
@@ -984,6 +1019,12 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
         except Exception:
             pass
         return {"error": str(e), "imported": 0}
+    finally:
+        if clear_parse_task:
+            try:
+                REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
+            except Exception:
+                logger.warning(f"[ImportQA] failed to clear Redis state for {document_id}", exc_info=True)
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
