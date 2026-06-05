@@ -1,23 +1,27 @@
-"""Pipeline stage snapshot — dump each extraction stage's output to JSON for comparison.
+"""Pipeline stage snapshot — dump each extraction stage's output to OSS for comparison.
 
 Usage:
-    snapshot = PipelineSnapshot("legacy")   # or "new"
+    snapshot = PipelineSnapshot(end_user_id="abc123-def456")
     snapshot.save_stage("1_statements", data)
     snapshot.save_stage("2_triplets", data)
     ...
 
-Output structure:
-    logs/memory-output/snapshots/
-        legacy_20260422_123456/
-            1_statements.json
-            2_triplets.json
-            3_nodes_edges.json
-            4_dedup.json
-        new_20260422_123500/
-            1_statements.json
-            2_triplets.json
-            3_nodes_edges.json
-            4_dedup.json
+Output structure (OSS):
+
+    Sliding-window 写入（推荐路径，含完整定位上下文）:
+        redbear-files/snapshot/
+            {end_user_id}/
+                {conversation_id}/
+                    seq_{message_seq:06d}_{YYYYmmdd_HHMMSS}/
+                        0_summary.json
+                        1_assistant_pruning.json
+                        2_statement_outputs.json
+                        ...
+
+    旧的整轮写入（无 conversation/seq 时的兼容路径）:
+        redbear-files/snapshot/
+            {end_user_id}_{YYYYmmdd_HHMMSS}/
+                ...
 
 Controlled by env var PIPELINE_SNAPSHOT_ENABLED (default: false).
 """
@@ -28,12 +32,15 @@ import json
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 _ENABLED: Optional[bool] = None
+_OSS_BUCKET: Optional[Any] = None
+
+# OSS 上快照文件的根前缀（对应 bucket 内的 "目录"）
+_OSS_SNAPSHOT_PREFIX = "snapshot"
 
 
 def _is_enabled() -> bool:
@@ -41,6 +48,52 @@ def _is_enabled() -> bool:
     if _ENABLED is None:
         _ENABLED = os.getenv("PIPELINE_SNAPSHOT_ENABLED", "false").lower() == "true"
     return _ENABLED
+
+
+def _get_oss_bucket():
+    """获取 oss2.Bucket 单例（同步），用于快照上传。"""
+    global _OSS_BUCKET
+    if _OSS_BUCKET is None:
+        import oss2
+        from app.core.config import settings
+
+        auth = oss2.Auth(settings.OSS_ACCESS_KEY_ID, settings.OSS_ACCESS_KEY_SECRET)
+        _OSS_BUCKET = oss2.Bucket(auth, settings.OSS_ENDPOINT, settings.OSS_BUCKET_NAME)
+    return _OSS_BUCKET
+
+
+def upload_stage_snapshot(
+    snapshot_dir: str, stage_name: str, data: Any
+) -> bool:
+    """将一个 stage 的数据序列化为 JSON 并上传到 OSS。
+
+    供没有 ``PipelineSnapshot`` 实例的调用方使用（典型场景：Celery worker
+    任务在主流水线之后异步落盘补充数据，需要写入主流水线已创建的同一个
+    OSS 前缀下）。
+
+    Args:
+        snapshot_dir: 主流水线在 OSS 上创建的前缀路径（例如
+            ``snapshot/{end_user_id}/{conversation_id}/seq_xxx_时间戳``）。
+        stage_name: 落盘的 stage 名（不带 ``.json`` 后缀），最终路径为
+            ``<snapshot_dir>/<stage_name>.json``。
+        data: 任意可序列化对象（Pydantic 模型 / dict / list / dataclass）。
+
+    Returns:
+        上传成功返回 True，失败返回 False（失败仅打 warning，不抛异常）。
+    """
+    try:
+        serialized = _safe_serialize(data)
+        json_bytes = json.dumps(
+            serialized, ensure_ascii=False, indent=2, default=str
+        ).encode("utf-8")
+
+        oss_key = f"{snapshot_dir}/{stage_name}.json"
+        _get_oss_bucket().put_object(oss_key, json_bytes)
+        logger.debug(f"[Snapshot] {stage_name} → oss://{oss_key}")
+        return True
+    except Exception as e:
+        logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
+        return False
 
 
 def _safe_serialize(obj: Any) -> Any:
@@ -65,56 +118,85 @@ def _safe_serialize(obj: Any) -> Any:
 
 
 class PipelineSnapshot:
-    """Dump each pipeline stage's output to a timestamped directory."""
+    """Dump each pipeline stage's output to OSS."""
 
-    def __init__(self, pipeline_name: str):
+    def __init__(
+        self,
+        end_user_id: str,
+        conversation_id: Optional[str] = None,
+        message_seq: Optional[int] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ):
         """
         Args:
-            pipeline_name: "legacy" or "new", used as directory prefix.
+            end_user_id: 终端用户 ID，作为 OSS 第一级目录。
+            conversation_id: 对话 ID（滑动窗口写入时传入）。
+                提供后会把它作为第二级目录，便于按对话归集快照。
+            message_seq: 目标 user 消息的 message_seq（滑动窗口写入时传入）。
+                提供后会写入叶子目录名（``seq_{message_seq:06d}_{时间戳}``），
+                字典序与数值序一致，方便在 OSS Browser 里顺序定位。
+            extra_metadata: 任意可序列化的额外字段，会写入 ``0_summary.json``，
+                典型字段：ref_id / dispatch_at / dialog_at / language /
+                target_content_preview。
         """
         self.enabled = _is_enabled()
-        self.pipeline_name = pipeline_name
-        self._dir: Optional[Path] = None
+        self.end_user_id = end_user_id
+        self.conversation_id = conversation_id
+        self.message_seq = message_seq
+        self.extra_metadata: Dict[str, Any] = dict(extra_metadata or {})
+        self._oss_prefix: Optional[str] = None
 
         if self.enabled:
-            from app.core.config import settings
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._dir = Path(settings.MEMORY_OUTPUT_DIR) / "snapshots" / f"{pipeline_name}_{ts}"
-            self._dir.mkdir(parents=True, exist_ok=True)
-            logger.debug(f"[Snapshot] 已启用，输出目录: {self._dir}")
+            if conversation_id:
+                # 滑动窗口路径：按 user / conversation / seq_xxx_时间戳 三级组织
+                seq_part = (
+                    f"seq_{int(message_seq):06d}_{ts}"
+                    if message_seq is not None
+                    else f"seq_unknown_{ts}"
+                )
+                self._oss_prefix = (
+                    f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}/"
+                    f"{conversation_id}/{seq_part}"
+                )
+            else:
+                # 兼容旧路径（整轮 messages 写入）
+                self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}_{ts}"
+            logger.debug(f"[Snapshot] 已启用，OSS 前缀: {self._oss_prefix}")
 
     @property
     def directory(self) -> Optional[str]:
-        """Absolute path (str) of this snapshot's output directory, or None when disabled."""
-        return str(self._dir) if self._dir is not None else None
+        """OSS 前缀路径，未启用时返回 None。"""
+        return self._oss_prefix
 
     def save_stage(self, stage_name: str, data: Any) -> None:
-        """Save a stage's output as JSON.
+        """Save a stage's output as JSON to OSS.
 
         Args:
             stage_name: e.g. "1_statements", "2_triplets"
             data: Any serializable data (Pydantic models, dicts, lists, dataclasses)
         """
-        if not self.enabled or self._dir is None:
+        if not self.enabled or self._oss_prefix is None:
             return
-
-        try:
-            path = self._dir / f"{stage_name}.json"
-            serialized = _safe_serialize(data)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(serialized, f, ensure_ascii=False, indent=2, default=str)
-            logger.debug(f"[Snapshot] {stage_name} → {path}")
-        except Exception as e:
-            logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
+        upload_stage_snapshot(self._oss_prefix, stage_name, data)
 
     def save_summary(self, stats: Dict[str, Any]) -> None:
-        """Save a summary with pipeline metadata and stats."""
-        if not self.enabled or self._dir is None:
+        """Save a summary with pipeline metadata and stats.
+
+        除统计信息外，还会写入定位元信息（end_user_id / conversation_id /
+        message_seq）以及构造时传入的 ``extra_metadata``，便于在 OSS 上
+        通过 ``0_summary.json`` 直接确认是哪一次写入产生的快照。
+        """
+        if not self.enabled or self._oss_prefix is None:
             return
 
-        summary = {
-            "pipeline": self.pipeline_name,
+        summary: Dict[str, Any] = {
+            "end_user_id": self.end_user_id,
+            "conversation_id": self.conversation_id,
+            "message_seq": self.message_seq,
             "timestamp": datetime.now().isoformat(),
             "stats": stats,
         }
+        if self.extra_metadata:
+            summary.update(_safe_serialize(self.extra_metadata) or {})
         self.save_stage("0_summary", summary)

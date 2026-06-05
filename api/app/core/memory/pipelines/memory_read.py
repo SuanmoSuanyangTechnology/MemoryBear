@@ -21,23 +21,23 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             includes=None
     ) -> MemorySearchResult:
         memory_l0 = None
-        if self.ctx.storage_type == StorageType.NEO4J:
+        if self.ctx.storage_type == StorageType.NEO4J:  
             memory_l0 = await self._get_search_service(includes).memory_l0()
 
         query = QueryPreprocessor.process(query)
         match search_switch:
             case SearchStrategy.DEEP:
-                res = await self._deep_read(query, history, limit, includes)
+                res = await self._deep_read(query, history, limit, includes=includes, memory_l0=memory_l0)
             case SearchStrategy.NORMAL:
-                res = await self._normal_read(query, history, limit, includes)
+                res = await self._normal_read(query, history, limit, includes=includes, memory_l0=memory_l0)
             case SearchStrategy.QUICK:
                 res = await self._quick_read(query, limit, includes)
             case _:
                 raise RuntimeError("Unsupported search strategy")
 
-        if memory_l0 is not None:
-            res.content_str = memory_l0.content + '\n' + res.content
-            res.memories.insert(0, memory_l0)
+        # if memory_l0 is not None:
+        #     res.content_str = memory_l0.content + '\n' + res.content
+        #     res.memories.insert(0, memory_l0)
         return res
 
     def _get_search_service(self, includes=None):
@@ -45,6 +45,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             return Neo4jSearchService(
                 self.ctx,
                 self.get_embedding_client(self.db, self.ctx.memory_config.embedding_model_id),
+                # self.get_rerank_client(self.db, self.ctx.memory_config.rerank_model_id),
                 self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id),
                 includes=includes,
             )
@@ -54,7 +55,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
                 self.db
             )
 
-    async def _deep_read(self, query: str, history: list, limit: int, includes=None) -> MemorySearchResult:
+    async def _deep_read(self, query: str, history: list, limit: int, includes=None, memory_l0=None) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
         questions = await QueryPreprocessor.split(
             query,
@@ -84,11 +85,12 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         results.content_str = await RetrievalSummaryProcessor.summary(
             query,
             results.content,
+            memory_l0.content if memory_l0 else '',
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
         return results
 
-    async def _normal_read(self, query: str, history: list, limit: int, includes=None) -> MemorySearchResult:
+    async def _normal_read(self, query: str, history: list, limit: int, includes=None, memory_l0=None) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
         questions = await QueryPreprocessor.split(
             query,
@@ -104,6 +106,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         results.content_str = await RetrievalSummaryProcessor.summary(
             query,
             results.content,
+            memory_l0.content if memory_l0 else '',
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
         return results

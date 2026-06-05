@@ -115,8 +115,8 @@ async def get_preview_chunks(
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
     from app.core.rag.app.naive import chunk
-    parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
-
+    parent_child_mode = db_document.is_parent_child_mode
+    api_logger.debug(f"当前文档分块模式：{db_document.is_parent_child_mode}")
     if parent_child_mode:
         from app.core.rag.app.naive import chunk_parent_child
         child_res, parent_res, parent_id_map = chunk_parent_child(
@@ -387,7 +387,8 @@ async def get_chunks(
     Paged query document chunk list
     - Support filtering by document_id
     - Support keyword search for segmented content
-    - Return paging metadata + file list
+    - For parent-child mode: return nested structure (parent chunks with children)
+    - For normal mode: return flat chunk list
     """
     api_logger.info(f"Paged query document chunk list: kb_id={kb_id}, document_id={document_id}, page={page}, pagesize={pagesize}, keywords={keywords}, username: {current_user.username}")
     # 1. parameter validation
@@ -405,12 +406,125 @@ async def get_chunks(
             detail="The knowledge base does not exist or access is denied"
         )
 
-    # 3. Execute paged query
+    # 3. 获取文档并判断分块模式
+    db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    def _build_nested_result(
+        parents: list[DocumentChunk],
+        children: list[DocumentChunk],
+        page_num: int,
+        page_size: int,
+        total: int,
+    ) -> dict:
+        """将 parent chunks 和 child chunks 组装为嵌套结构并返回分页结果."""
+        children_map: dict[str, list[DocumentChunk]] = {}
+        for child in children:
+            pid = child.metadata.get("parent_id")
+            if pid:
+                children_map.setdefault(pid, []).append(child)
+        nested = []
+        for parent in parents:
+            parent.children = children_map.get(parent.metadata.get("doc_id"), [])
+            nested.append(parent)
+        return {
+            "items": nested,
+            "page": {
+                "page": page_num,
+                "pagesize": page_size,
+                "total": total,
+                "has_next": page_num * page_size < total,
+            },
+        }
+
+    # 4. Execute paged query
     try:
         api_logger.debug("Start executing document chunk query")
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-        total, items = vector_service.search_by_segment(document_id=str(document_id), query=keywords, pagesize=pagesize, page=page, asc=True)
-        api_logger.info(f"Document chunk query successful: total={total}, returned={len(items)} records")
+        if db_document.is_parent_child_mode:
+            # 方案 1：两次查询 + parent 级分页
+            # 4.1 查询 parent chunks（按 sort_id 排序，分页）
+            total_parents, parent_items = vector_service.search_by_segment(
+                document_id=str(document_id),
+                query=keywords,
+                pagesize=pagesize,
+                page=page,
+                asc=True,
+                chunk_types="parent",
+            )
+
+            # fallback：如果 parent 查询为空（旧数据或 chunk_type 缺失），查所有 chunks 在内存中区分
+            if not parent_items and total_parents == 0:
+                api_logger.debug("Parent query returned empty, falling back to query all chunks")
+                total_all, all_items = vector_service.search_by_segment(
+                    document_id=str(document_id),
+                    query=keywords,
+                    pagesize=10000,
+                    page=1,
+                    asc=True,
+                )
+                parent_items = [item for item in all_items if (item.metadata or {}).get("chunk_type") == "parent"]
+                child_items_fallback = [item for item in all_items if (item.metadata or {}).get("chunk_type") == "child"]
+                total_parents = len(parent_items)
+
+                if not parent_items:
+                    # 仍然没有 parent，按普通分块模式返回
+                    result = {
+                        "items": all_items[(page - 1) * pagesize : page * pagesize],
+                        "page": {
+                            "page": page,
+                            "pagesize": pagesize,
+                            "total": total_all,
+                            "has_next": page * pagesize < total_all,
+                        },
+                    }
+                    return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
+
+                # 内存分页 + 组装
+                paginated_parents = parent_items[(page - 1) * pagesize : page * pagesize]
+                result = _build_nested_result(
+                    paginated_parents, child_items_fallback, page, pagesize, total_parents
+                )
+                return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
+
+            parent_doc_ids = [p.metadata["doc_id"] for p in parent_items]
+
+            # 4.2 查询这些 parent 下的所有 child chunks（按 sort_id 排序，不分页）
+            _, child_items = vector_service.search_by_segment(
+                document_id=str(document_id),
+                pagesize=10000,
+                page=1,
+                asc=True,
+                chunk_types="child",
+                parent_ids=parent_doc_ids,
+            )
+
+            # 4.3 组装嵌套结构
+            result = _build_nested_result(parent_items, child_items, page, pagesize, total_parents)
+        else:
+            # 普通分块模式：原有逻辑
+            total, items = vector_service.search_by_segment(
+                document_id=str(document_id),
+                query=keywords,
+                pagesize=pagesize,
+                page=page,
+                asc=True
+            )
+            result = {
+                "items": items,
+                "page": {
+                    "page": page,
+                    "pagesize": pagesize,
+                    "total": total,
+                    "has_next": page * pagesize < total
+                }
+            }
+
+        api_logger.info(f"Document chunk query successful: returned={len(result['items'])} records")
     except Exception as e:
         api_logger.error(f"Document chunk query failed: {str(e)}")
         raise HTTPException(
@@ -418,16 +532,6 @@ async def get_chunks(
             detail=f"Query failed: {str(e)}"
         )
 
-    # 4. Return structured response
-    result = {
-        "items": items,
-        "page": {
-            "page": page,
-            "pagesize": pagesize,
-            "total": total,
-            "has_next": True if page * pagesize < total else False
-        }
-    }
     return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
 
 
@@ -461,6 +565,25 @@ async def create_chunk(
             detail="The document does not exist or you do not have permission to access it"
         )
 
+    # 校验 chunk_type 与文档分块模式的一致性
+    if db_document.is_parent_child_mode:
+        if create_data.chunk_type not in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="父子分块模式下仅允许创建 parent 或 child 类型块"
+            )
+        if create_data.chunk_type == chunk_schema.ChunkType.CHILD and not create_data.parent_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="创建子块时必须提供 parent_id"
+            )
+    else:
+        if create_data.chunk_type in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="当前文档未启用父子分块模式，不允许创建 parent/child 类型块"
+            )
+
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
     # 2. Get the sort ID
@@ -480,8 +603,9 @@ async def create_chunk(
         "knowledge_id": str(kb_id),
         "sort_id": sort_id,
         "status": 1,
+        **create_data.type_metadata,
     }
-    # QA chunk: 注入 chunk_type/question/answer 到 metadata
+    # QA chunk: 注入 question/answer 到 metadata
     if create_data.is_qa:
         metadata.update(create_data.qa_metadata)
     chunk = DocumentChunk(page_content=content, metadata=metadata)
@@ -518,9 +642,33 @@ async def create_chunks_batch(
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The knowledge base does not exist or access is denied")
 
-    db_document = db.query(Document).filter(Document.id == document_id).first()
+    db_document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.kb_id == kb_id
+    ).first()
     if not db_document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The document does not exist or you do not have permission to access it")
+
+    # 批量校验 chunk_type
+    if db_document.is_parent_child_mode:
+        for item in batch_data.items:
+            if item.chunk_type not in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="父子分块模式下仅允许创建 parent 或 child 类型块"
+                )
+            if item.chunk_type == chunk_schema.ChunkType.CHILD and not item.parent_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="创建子块时必须提供 parent_id"
+                )
+    else:
+        for item in batch_data.items:
+            if item.chunk_type in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="当前文档未启用父子分块模式，不允许创建 parent/child 类型块"
+                )
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
@@ -543,6 +691,7 @@ async def create_chunks_batch(
             "knowledge_id": str(kb_id),
             "sort_id": sort_id,
             "status": 1,
+            **create_data.type_metadata,
         }
         if create_data.is_qa:
             metadata.update(create_data.qa_metadata)
@@ -863,17 +1012,20 @@ async def retrieve_chunks(
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
+    # default value is topk
+    topn = retrieve_data.top_k
+
     # 1 participle search, 2 semantic search, 3 hybrid search
     match retrieve_data.retrieve_type:
         case chunk_schema.RetrieveType.PARTICIPLE:
-            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
+            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case chunk_schema.RetrieveType.SEMANTIC:
-            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
+            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
-            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
-            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
+            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
+            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
             # Efficient deduplication
             seen_ids = set()
             unique_rs = []
@@ -901,6 +1053,6 @@ async def retrieve_chunks(
                     base_url=emb_key.api_base
                 )
                 doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
-                if doc:
+                if doc['page_content'].strip() != "":
                     rs.insert(0, doc)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")

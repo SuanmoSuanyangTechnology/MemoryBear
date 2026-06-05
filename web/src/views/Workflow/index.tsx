@@ -3,21 +3,27 @@ import clsx from 'clsx';
 
 import NodeLibrary from './components/NodeLibrary'
 import Properties from './components/Properties';
-import CanvasToolbar from './components/CanvasToolbar';
+import CanvasToolbar, { type CanvasToolbarRef } from './components/CanvasToolbar';
 import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
+import type { Application } from '@/views/ApplicationManagement/types'
 import Chat from './components/Chat/Chat';
 import type { ChatRef, AddChatVariableRef } from './types'
 import AddChatVariable from './components/AddChatVariable';
 import FeaturesConfigModal from '@/views/ApplicationConfig/components/FeaturesConfig/FeaturesConfigModal'
 
-const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
+interface WorkflowProps {
+  appType?: Application['type'];
+  onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
+}
+const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appType }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const miniMapRef = useRef<HTMLDivElement>(null);
   const addChatVariableRef = useRef<AddChatVariableRef>(null)
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const canvasToolbarRef = useRef<CanvasToolbarRef>(null)
   // 使用自定义Hook初始化工作流图
   const {
     config,
@@ -43,12 +49,14 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     canRedo,
     undo,
     redo,
+    lastExecuteId,
   } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
 
   const onDragOver = (event: React.DragEvent) => {
     event.preventDefault();
   };
   const handleRun = () => {
+    canvasToolbarRef.current?.setIsVariableInspectorVisible(false)
     chatRef.current?.handleOpen()
   }
   const handleToggle = () => {
@@ -82,7 +90,11 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
   return (
     <div className="rb:h-full rb:relative">
       {/* 左侧节点面板 */}
-      <NodeLibrary collapsed={collapsed} handleToggle={handleToggle} />
+      <NodeLibrary
+        appType={appType}
+        collapsed={collapsed}
+        handleToggle={handleToggle}
+      />
       
       {/* 右侧画布区域 */}
       <div 
@@ -93,6 +105,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
         <div ref={containerRef} className="rb:w-full rb:h-full" />
         {/* 地图工具栏 */}
         <CanvasToolbar
+          ref={canvasToolbarRef}
           selectedNode={selectedNode}
           miniMapRef={miniMapRef}
           graphRef={graphRef}
@@ -104,6 +117,9 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
           canRedo={canRedo}
           onUndo={undo}
           onRedo={redo}
+          lastExecuteId={lastExecuteId}
+          config={config}
+          collapsed={collapsed}
         />
       </div>
       
@@ -120,6 +136,8 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
           chatVariables={chatVariables}
           appId={config?.app_id}
           handleSave={handleSave}
+          nodeClick={nodeClick}
+          appType={appType}
         />
       }
       <Chat
@@ -128,8 +146,13 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
         features={features}
         graphRef={graphRef}
         appId={config?.app_id as string}
+        appType={appType}
       />
-      <PortClickHandler graph={graphRef.current} />
+      <PortClickHandler
+        graph={graphRef.current}
+        nodeClick={nodeClick}
+        appType={appType}
+      />
 
       <AddChatVariable
         ref={addChatVariableRef}

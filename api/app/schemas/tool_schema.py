@@ -117,6 +117,7 @@ class ToolConfigSchema(BaseModel):
     version: str = "1.0.0"
     tags: List[str] = Field(default_factory=list)
     tenant_id: str
+    is_active: bool = Field(True, description="是否可用（False 表示已删除）")
     created_at: datetime
     updated_at: datetime
 
@@ -165,11 +166,25 @@ class MCPToolConfigSchema(BaseModel):
         from_attributes = True
 
 
+class WorkflowToolConfigSchema(BaseModel):
+    """工作流工具配置模式"""
+    app_id: str = Field(..., description="关联的应用ID")
+    workflow_config_id: str = Field(..., description="工作流配置ID")
+    release_id: Optional[str] = Field(None, description="绑定的工作流发布版本ID")
+    input_parameters: List[Dict[str, Any]] = Field(default_factory=list, description="输入参数定义")
+    output_schema: Dict[str, Any] = Field(default_factory=dict, description="输出结构定义")
+    timeout: int = Field(300, description="超时时间（秒）")
+    workspace_id: Optional[str] = Field(None, description="所属空间ID")
+
+    class Config:
+        from_attributes = True
+
 class ToolDetailSchema(ToolConfigSchema):
     """工具详情模式（包含类型特定配置）"""
     builtin_config: Optional[BuiltinToolConfigSchema] = None
     custom_config: Optional[CustomToolConfigSchema] = None
     mcp_config: Optional[MCPToolConfigSchema] = None
+    workflow_config: Optional[WorkflowToolConfigSchema] = None
 
 
 class ToolExecutionSchema(BaseModel):
@@ -273,3 +288,23 @@ class CustomToolTestRequest(BaseModel):
     method: str = Field(..., description="HTTP方法")
     path: str = Field(..., description="API路径")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="请求参数")
+
+
+class WorkflowToolCreateRequest(BaseModel):
+    """创建工作流工具请求"""
+    name: str = Field(..., min_length=1, max_length=255, description="工具名称")
+    description: Optional[str] = Field(None, max_length=1000, description="工具描述")
+    icon: Optional[str] = Field(None, max_length=255, description="工具图标")
+    release_id: Optional[str] = Field(None, description="工作流发布版本ID，不传则使用当前发布版本")
+    timeout: int = Field(300, ge=10, le=600, description="超时时间（秒）")
+    tags: List[str] = Field(default_factory=list, description="工具标签")
+
+
+class WorkflowToolPublishPreviewSchema(BaseModel):
+    """工作流发布为工具前的预览信息"""
+    app_id: str = Field(..., description="应用ID")
+    release_id: str = Field(..., description="发布版本ID")
+    release_version: int = Field(..., description="发布版本号")
+    release_version_name: str = Field(..., description="发布版本名称")
+    input_parameters: List[Dict[str, Any]] = Field(default_factory=list, description="输入参数定义")
+    output_schema: Dict[str, Any] = Field(default_factory=dict, description="输出结构定义")

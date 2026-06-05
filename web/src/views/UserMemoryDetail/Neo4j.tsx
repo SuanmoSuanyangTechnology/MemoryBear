@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:57:59
+ * @Last Modified time: 2026-06-01 11:53:08
  */
 /**
  * Neo4j User Memory Detail View
@@ -30,6 +30,7 @@ import { useI18n } from '@/store/locale'
 
 import PrivateWrap from '@/components/PrivateWrap'
 import { BrainView } from '@redbear/memory-brick'
+import ReflectMemory from './components/ReflectMemory'
 
 
 const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
@@ -47,10 +48,12 @@ const Neo4j: FC = () => {
   const brainViewRef = useRef(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [brainMemories, setBrainMemories] = useState<string[]>([])
+  const [regionId, setRegionId] = useState<string | null>(null)
 
   /** Handle brain region memory types change */
-  const handleBrainMemoriesChange = (memories: string[]) => {
+  const handleBrainMemoriesChange = (memories: string[], regionId: string | null) => {
     setBrainMemories(memories)
+    setRegionId(regionId)
   }
 
   /** Update displayed name */
@@ -91,97 +94,119 @@ const Neo4j: FC = () => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedKey(type)
-    if (type !== 'Brain') setBrainMemories([])
+    if (type !== 'Brain') {
+      setBrainMemories([]);
+      setRegionId(null);
+    }
   }
 
   return (
     <div className="rb:h-screen rb:w-screen rb:p-3 rb:relative" onClick={() => { setSelectedKey(null); setBrainMemories([]) }}>
       <Flex className="rb:h-full!" gap={12}>
-        <Flex gap={15} vertical justify="space-between" align="center" className="rb:h-full! rb:px-4! rb:pt-6! rb:pb-5! rb:bg-white rb:w-20 rb:rounded-xl">
-          <Flex gap={15} vertical>
+        <Flex gap={15} vertical justify="space-between" align="center"
+          className="rb:h-full! rb:px-4! rb:pt-6! rb:pb-5! rb:bg-white rb:w-20 rb:rounded-xl"
+        >
+          <Flex gap={32} vertical>
             <Popover
               content={t('userMemory.memoryWindow', { name: name })}
               placement="right"
               arrow={false}
               trigger="hover"
             >
-              <div className="rb:mb-4.25! rb:size-12 rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logo.png')]"></div>
+              <div className="rb:size-12 rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logo.png')]"></div>
             </Popover>
-            {isSaas && BrainView && (
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#171719]': selectedKey === 'Brain',
-                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'Brain',
-              })}
-              onClick={(e) => onOpenChange(e, 'Brain')}
-            >
-              <div className={clsx("rb:size-6 rb:bg-cover", {
-                "rb:bg-[url('@/assets/images/userMemory/brain.svg')]": selectedKey !== 'Brain',
-                "rb:bg-[url('@/assets/images/userMemory/brain_active.svg')]": selectedKey === 'Brain'
-              })}></div>
-            </Flex>
-            )}
+            <Flex gap={16} vertical className="rb:max-h-[calc(100vh-243px)] rb:overflow-y-auto">
+              {isSaas && BrainView && (
+                <Flex
+                  align="center"
+                  justify="center"
+                  className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
+                    'rb:bg-[#171719]': selectedKey === 'Brain',
+                    'rb:hover:bg-[#EBEBEB]': selectedKey !== 'Brain',
+                  })}
+                  onClick={(e) => onOpenChange(e, 'Brain')}
+                >
+                  <div className={clsx("rb:size-6 rb:bg-cover", {
+                    "rb:bg-[url('@/assets/images/userMemory/brain.svg')]": selectedKey !== 'Brain',
+                    "rb:bg-[url('@/assets/images/userMemory/brain_active.svg')]": selectedKey === 'Brain'
+                  })}></div>
+                </Flex>
+              )}
 
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#171719]': selectedKey === 'userProfile',
-                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'userProfile',
-              })}
-              onClick={(e) => onOpenChange(e, 'userProfile')}
-            >
-              <div className={clsx("rb:size-6 rb:bg-cover", {
-                "rb:bg-[url('@/assets/images/userMemory/userProfile.svg')]": selectedKey !== 'userProfile',
-                "rb:bg-[url('@/assets/images/userMemory/userProfile_active.svg')]": selectedKey === 'userProfile'
-              })}></div>
-            </Flex>
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
+                  'rb:bg-[#171719]': selectedKey === 'userProfile',
+                  'rb:hover:bg-[#EBEBEB]': selectedKey !== 'userProfile',
+                })}
+                onClick={(e) => onOpenChange(e, 'userProfile')}
+              >
+                <div className={clsx("rb:size-6 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/userMemory/userProfile.svg')]": selectedKey !== 'userProfile',
+                  "rb:bg-[url('@/assets/images/userMemory/userProfile_active.svg')]": selectedKey === 'userProfile'
+                })}></div>
+              </Flex>
 
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#171719]': selectedKey === 'aboutMe',
-                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'aboutMe',
-              })}
-              onClick={(e) => onOpenChange(e, 'aboutMe')}
-            >
-              <div className={clsx("rb:size-6 rb:bg-cover", {
-                "rb:bg-[url('@/assets/images/userMemory/aboutMe.svg')]": selectedKey !== 'aboutMe',
-                "rb:bg-[url('@/assets/images/userMemory/aboutMe_active.svg')]": selectedKey === 'aboutMe'
-              })}></div>
-            </Flex>
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
+                  'rb:bg-[#171719]': selectedKey === 'aboutMe',
+                  'rb:hover:bg-[#EBEBEB]': selectedKey !== 'aboutMe',
+                })}
+                onClick={(e) => onOpenChange(e, 'aboutMe')}
+              >
+                <div className={clsx("rb:size-6 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/userMemory/aboutMe.svg')]": selectedKey !== 'aboutMe',
+                  "rb:bg-[url('@/assets/images/userMemory/aboutMe_active.svg')]": selectedKey === 'aboutMe'
+                })}></div>
+              </Flex>
 
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#171719]': selectedKey === 'interestDistribution',
-                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'interestDistribution',
-              })}
-              onClick={(e) => onOpenChange(e, 'interestDistribution')}
-            >
-              <div className={clsx("rb:size-6 rb:bg-cover", {
-                "rb:bg-[url('@/assets/images/userMemory/interestDistribution.svg')]": selectedKey !== 'interestDistribution',
-                "rb:bg-[url('@/assets/images/userMemory/interestDistribution_active.svg')]": selectedKey === 'interestDistribution'
-              })}></div>
-            </Flex>
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
+                  'rb:bg-[#171719]': selectedKey === 'interestDistribution',
+                  'rb:hover:bg-[#EBEBEB]': selectedKey !== 'interestDistribution',
+                })}
+                onClick={(e) => onOpenChange(e, 'interestDistribution')}
+              >
+                <div className={clsx("rb:size-6 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/userMemory/interestDistribution.svg')]": selectedKey !== 'interestDistribution',
+                  "rb:bg-[url('@/assets/images/userMemory/interestDistribution_active.svg')]": selectedKey === 'interestDistribution'
+                })}></div>
+              </Flex>
 
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#171719]': selectedKey === 'memoryInsight',
-                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'memoryInsight',
-              })}
-              onClick={(e) => onOpenChange(e, 'memoryInsight')}
-            >
-              <div className={clsx("rb:size-6 rb:bg-cover", {
-                "rb:bg-[url('@/assets/images/userMemory/memoryInsight.svg')]": selectedKey !== 'memoryInsight',
-                "rb:bg-[url('@/assets/images/userMemory/memoryInsight_active.svg')]": selectedKey === 'memoryInsight'
-              })}></div>
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
+                  'rb:bg-[#171719]': selectedKey === 'memoryInsight',
+                  'rb:hover:bg-[#EBEBEB]': selectedKey !== 'memoryInsight',
+                })}
+                onClick={(e) => onOpenChange(e, 'memoryInsight')}
+              >
+                <div className={clsx("rb:size-6 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/userMemory/memoryInsight.svg')]": selectedKey !== 'memoryInsight',
+                  "rb:bg-[url('@/assets/images/userMemory/memoryInsight_active.svg')]": selectedKey === 'memoryInsight'
+                })}></div>
+              </Flex>
+
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
+                  'rb:bg-[#171719]': selectedKey === 'reflect',
+                  'rb:hover:bg-[#EBEBEB]': selectedKey !== 'reflect',
+                })}
+                onClick={(e) => onOpenChange(e, 'reflect')}
+              >
+                <div className={clsx("rb:size-6 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/userMemory/reflectLogs.svg')]": selectedKey !== 'reflect',
+                  "rb:bg-[url('@/assets/images/userMemory/reflectLogs_active.svg')]": selectedKey === 'reflect'
+                })}></div>
+              </Flex>
             </Flex>
           </Flex>
 
@@ -195,23 +220,30 @@ const Neo4j: FC = () => {
 
         <Flex vertical className="rb:flex-1">
           <NodeStatistics highlightKeys={brainMemories} />
-          <RelationshipNetwork />
+          <RelationshipNetwork
+            regionId={regionId}
+            selectedKey={selectedKey}
+          />
         </Flex>
       </Flex>
       <div onClick={(e) => e.stopPropagation()}>
         <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
         <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
-        {/* <Provider> */}
         {BrainView && (
           <Suspense fallback={null}>
             <PrivateWrap>
-              <BrainView ref={brainViewRef} className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'} onMemoriesChange={handleBrainMemoriesChange} onClose={() => { setSelectedKey(null); setBrainMemories([]) }} />
+              <BrainView
+                ref={brainViewRef}
+                className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'}
+                onMemoriesChange={handleBrainMemoriesChange}
+                onClose={() => { setSelectedKey(null); setBrainMemories([]); setRegionId(null) }}
+              />
             </PrivateWrap>
           </Suspense>
         )}
-        {/* </Provider> */}
         <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
         <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
+        <ReflectMemory className={selectedKey === 'reflect' ? 'rb:block!' : 'rb:hidden!'} />
       </div>
     </div>
   )

@@ -9,6 +9,7 @@ import logging
 from collections import defaultdict, deque
 from typing import Any, Union, TYPE_CHECKING
 
+from app.core.workflow.triggers import TRIGGER_NODES_PREPARED_FLAG, validate_trigger_nodes
 from app.core.workflow.nodes.enums import NodeType
 
 if TYPE_CHECKING:
@@ -118,20 +119,41 @@ class WorkflowValidator:
         """
         workflow_config = copy.deepcopy(workflow_config)
         errors = []
+        trigger_nodes_prepared = (
+            isinstance(workflow_config, dict)
+            and workflow_config.get(TRIGGER_NODES_PREPARED_FLAG) is True
+        )
 
         graphs = cls.get_subgraph(workflow_config)
         for index, graph in enumerate(graphs):
             nodes = graph.get("nodes", [])
             edges = graph.get("edges", [])
             variables = graph.get("variables", [])
-            # 1. 验证 start 节点（有且只有一个）
-            start_nodes = [n for n in nodes if n.get("type") in [NodeType.START, NodeType.CYCLE_START]]
-            if len(start_nodes) == 0:
-                errors.append("工作流必须有一个 start 节点")
-            elif len(start_nodes) > 1:
-                errors.append(f"工作流只能有一个 start 节点，当前有 {len(start_nodes)} 个")
+            is_main_graph = index == len(graphs) - 1
 
-            if index == len(graphs) - 1:
+            # 1. 验证入口节点（主图支持 start/trigger，循环子图仅支持 cycle-start）
+            if is_main_graph:
+                entry_nodes = [
+                    n for n in nodes
+                    if n.get("type") in [NodeType.START, NodeType.TRIGGER]
+                ]
+                if len(entry_nodes) == 0:
+                    errors.append("工作流必须有一个入口节点（start 或 trigger）")
+                elif len(entry_nodes) > 1:
+                    errors.append(f"工作流只能有一个入口节点，当前有 {len(entry_nodes)} 个")
+                if not trigger_nodes_prepared:
+                    try:
+                        validate_trigger_nodes(nodes)
+                    except ValueError as exc:
+                        errors.append(str(exc))
+            else:
+                entry_nodes = [n for n in nodes if n.get("type") == NodeType.CYCLE_START]
+                if len(entry_nodes) == 0:
+                    errors.append("循环子图必须有一个 cycle-start 节点")
+                elif len(entry_nodes) > 1:
+                    errors.append(f"循环子图只能有一个 cycle-start 节点，当前有 {len(entry_nodes)} 个")
+
+            if is_main_graph:
                 # 2. 验证 主图end 节点（至少一个，output 节点也可作为终止节点）
                 end_nodes = [n for n in nodes if n.get("type") in [NodeType.END, NodeType.OUTPUT]]
                 if len(end_nodes) == 0:
@@ -169,14 +191,14 @@ class WorkflowValidator:
             if publish:
                 # 仅在发布时验证所有节点可达
                 # 6. 验证所有节点可达（从 start 节点出发）
-                if start_nodes and not errors:  # 只有在前面验证通过时才检查可达性
+                if entry_nodes and not errors:  # 只有在前面验证通过时才检查可达性
                     reachable = WorkflowValidator.get_reachable_nodes(
-                        start_nodes[0]["id"],
+                        entry_nodes[0]["id"],
                         edges
                     )
                     unreachable = node_id_set - reachable
                     if unreachable:
-                        errors.append(f"以下节点无法从 start 节点到达: {unreachable}")
+                        errors.append(f"以下节点无法从入口节点到达: {unreachable}")
 
             # 7. 检测循环依赖（非 loop 节点）
             if not errors:  # 只有在前面验证通过时才检查循环
@@ -311,7 +333,8 @@ class WorkflowValidator:
 
         # 1. 验证所有节点都有名称
         for node in nodes:
-            if node.get("type") not in [NodeType.START, NodeType.CYCLE_START, NodeType.END] and not node.get("name"):
+            if node.get("type") not in [NodeType.START, NodeType.TRIGGER, NodeType.CYCLE_START, NodeType.END] \
+                    and not node.get("name"):
                 errors.append(
                     f"节点 {node.get('name')} 缺少名称（发布时必须提供）"
                 )
@@ -319,7 +342,7 @@ class WorkflowValidator:
         # 2. 验证所有非 start/end 节点都有配置
         for node in nodes:
             node_type = node.get("type")
-            if node_type not in [NodeType.START, NodeType.CYCLE_START, NodeType.END, NodeType.BREAK]:
+            if node_type not in [NodeType.START, NodeType.TRIGGER, NodeType.CYCLE_START, NodeType.END, NodeType.BREAK]:
                 config = node.get("config")
                 if not config or not isinstance(config, dict):
                     errors.append(

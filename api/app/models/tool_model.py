@@ -15,6 +15,7 @@ class ToolType(StrEnum):
     BUILTIN = "builtin"
     CUSTOM = "custom"
     MCP = "mcp"
+    WORKFLOW = "workflow"
 
 
 class ToolStatus(StrEnum):
@@ -296,5 +297,20 @@ class ToolExecution(Base):
 #     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 #     last_loaded_at = Column(DateTime)
 #
-#     def __repr__(self):
-#         return f"<PluginConfig(id={self.id}, name={self.name}, version={self.version})>"
+class WorkflowToolConfig(Base):
+    """工作流工具配置模型"""
+    __tablename__ = "workflow_tool_configs"
+
+    id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
+    app_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    workflow_config_id = Column(UUID(as_uuid=True), nullable=False)
+    release_id = Column(UUID(as_uuid=True), ForeignKey("app_releases.id"), nullable=True, index=True)
+    input_parameters = Column(JSON, default=list)
+    output_schema = Column(JSON, default=dict)
+    timeout = Column(Integer, default=300)
+
+    # 关联关系
+    base_config = relationship("ToolConfig", foreign_keys=[id])
+    
+    def __repr__(self):
+        return f"<WorkflowToolConfig(id={self.id}, app_id={self.app_id})>"

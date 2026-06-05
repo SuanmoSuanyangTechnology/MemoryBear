@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:06 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:06 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-06-03 23:03:21
  */
 /**
  * Tool Selection Modal
@@ -43,6 +43,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
     { value: 'mcp', label: t('tool.mcp'), isLeaf: false },
     { value: 'builtin', label: t('tool.inner'), isLeaf: false },
     { value: 'custom', label: t('tool.custom'), isLeaf: false },
+    { value: 'workflow', label: t('tool.workflow'), isLeaf: false },
   ])
   const [selectdTools, setSelectedTools] = useState<ToolOption[]>([])
 
@@ -65,7 +66,10 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
     form.validateFields().then(() => {
       setLoading(false)
       let operation: any = undefined
-      if (selectdTools[0].value === 'mcp' || (selectdTools[0].value === 'builtin' && selectdTools[1]?.children && selectdTools[1].children.length > 1)) {
+      if (selectdTools[0].value === 'mcp'
+        || selectdTools[0].value === 'workflow'
+        || (selectdTools[0].value === 'builtin' && selectdTools[1]?.children && selectdTools[1].children.length > 1)
+      ) {
         operation = selectdTools[2].value
       } else if (selectdTools[0].value === 'custom') {
         operation = selectdTools[2].method_id

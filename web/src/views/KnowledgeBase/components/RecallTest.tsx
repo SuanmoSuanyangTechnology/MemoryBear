@@ -84,7 +84,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 kb_ids: knowledgeBaseId ? [knowledgeBaseId] : [],
                 similarity_threshold: values.similarity_threshold || 0.2,
                 vector_similarity_weight: values.vector_similarity_weight || 0.3,
-                top_k: values.top_k || 1024,
+                top_k: values.top_k || 100,
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
                 retrieve_type: retrieveType,
             };
@@ -127,9 +127,9 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               
               <Form.Item name="top_k" label={t('knowledgeBase.recallQuantity')}>
                   <InputNumber 
-                      placeholder='1 ~ 1024'
+                      placeholder='1 ~ 100'
                       min={1}
-                      max={1024}
+                      max={100}
                       style={{ width: '100%' }}
                   />
               </Form.Item>

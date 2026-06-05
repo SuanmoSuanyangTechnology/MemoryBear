@@ -50,4 +50,5 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
         aliases=row.get("aliases") or [],
         name_embedding=row.get("name_embedding") or [],
         connect_strength=row.get("connect_strength") or "",
+        is_explicit_memory=bool(row.get("is_explicit_memory", False)),
     )

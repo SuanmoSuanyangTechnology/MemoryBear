@@ -66,6 +66,15 @@ class MemoryMessage(Base):
     # 多模态文件信息（工作流 MemoryWriteNode 传入）
     files = Column(JSON, nullable=True, comment="文件信息列表，FileInput.model_dump(mode='json')")
 
+    # 业务侧会话发生时间（ISO 8601 字符串），由 API 调用方提供。
+    # 与 created_at 的区别：created_at 是入库时刻，dialog_at 是会话真正发生的时刻。
+    # 用于温度衰减、时间相关萃取（dialog_at 进入 jinja2 prompt 锚定相对时间）。
+    dialog_at = Column(
+        String(64),
+        nullable=True,
+        comment="业务侧会话发生时间（ISO 8601），调用方未提供时为 NULL",
+    )
+
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
 

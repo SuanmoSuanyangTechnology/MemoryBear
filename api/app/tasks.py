@@ -3,10 +3,11 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,6 +23,7 @@ from app.core.logging_config import get_logger
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
@@ -36,7 +38,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
 from app.db import get_db_context
-from app.models import Document, File, Knowledge
+from app.models import App, AppRelease, Document, File, Knowledge
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
@@ -64,6 +66,25 @@ EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 # auto_questions LLM 并发调用的最大线程数
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
+# 文档解析页数上限
+MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+
+def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
+    """快速获取 PDF 页数，失败返回 None（不阻断）"""
+    ext = os.path.splitext(file_name)[1].lower()
+    try:
+        if ext == ".pdf":
+            from app.core.rag.deepdoc.parser.pdf_parser import RAGPdfParser
+            return RAGPdfParser.total_page_number("", binary=file_binary)
+    except Exception:
+        pass
+    return None
+
+
+# Redis keys for document parse task tracking
+_PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
+_PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
@@ -229,6 +250,28 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     def _progress_msg() -> str:
         return "\n".join(progress_lines) + "\n"
 
+    def _should_abort(doc_id: uuid.UUID) -> bool:
+        """Check if the document has been deleted or marked for cancellation via Redis."""
+        cancel = REDIS_CONN.get(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
+        if cancel:
+            logger.info(f"[ParseDoc] document={doc_id} cancelled via Redis -- aborting")
+            return True
+        # Fallback to DB check only when Redis is unavailable
+        if not REDIS_CONN.is_alive():
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if doc is None:
+                logger.info(f"[ParseDoc] document={doc_id} deleted -- aborting")
+                return True
+        return False
+
+    def _clear_redis_state(doc_id: uuid.UUID):
+        """Clean up Redis tracking keys."""
+        try:
+            REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=doc_id))
+            REDIS_CONN.delete(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
+        except Exception:
+            logger.warning(f"[ParseDoc] failed to clear Redis state for {doc_id}", exc_info=True)
+
     with get_db_context() as db:
       try:
         if not isinstance(document_id, uuid.UUID):
@@ -265,6 +308,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             return await storage_service.download_file(file_key)
 
         try:
+            # Early-exit check after download
+            if _should_abort(document_id):
+                _clear_redis_state(document_id)
+                logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
+                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             file_binary = asyncio.run(_download())
         except RuntimeError:
             # If there's already a running loop (e.g. in some worker configurations)
@@ -277,6 +325,22 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             raise IOError(f"Downloaded empty file from storage: {file_key}")
         logger.info(f"[ParseDoc] Downloaded {len(file_binary)} bytes from storage key: {file_key}")
 
+        # 防线1：页数限制
+        estimated_pages = _get_estimated_pages(file_name, file_binary)
+        logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
+        if estimated_pages is None:
+            logger.info(f"[ParseDoc] document={document_id} not obtain page number, parse failed.")
+            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: not obtain page number")
+        elif estimated_pages > MAX_DOCUMENT_PAGES:
+            logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
+            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: page limit exceeded")
+            db_document.progress = -1.0
+            db_document.run = 0
+            db_document.progress_msg = _progress_msg()
+            db.commit()
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' failed: page limit exceeded"
+
         def progress_callback(prog=None, msg=None):
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.")
 
@@ -286,7 +350,13 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         from app.core.rag.app.naive import chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
-        parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
+        # Early-exit check before chunking
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+
+        parent_child_mode = db_document.is_parent_child_mode
         if parent_child_mode:
             from app.core.rag.app.naive import chunk_parent_child
             child_res, parent_res, parent_id_map = chunk_parent_child(
@@ -314,6 +384,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db_document.progress_msg = _progress_msg()
         db.commit()
         db.refresh(db_document)
+
+        # Early-exit check before vectorization
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
@@ -565,6 +641,15 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # Vectorization and data entry completed
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
+
+        # Early-exit check after data write: if doc deleted, remove written data
+        if _should_abort(document_id):
+            logger.info(f"[ParseDoc] document={document_id} deleted after data write -- rolling back vectors")
+            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+            _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped and es data deleted")
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+
         db_document.chunk_num = total_chunks
         db_document.progress = 1.0
         db_document.process_duration = time.time() - start_time
@@ -575,19 +660,26 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # GraphRAG: 异步派发到独立队列，不阻塞文档解析流程
         if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+            # Early-exit check before dispatching GraphRAG
+            if _should_abort(document_id):
+                _clear_redis_state(document_id)
+                logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
+                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
             db.commit()
             build_graphrag_for_document.delay(str(document_id), str(db_knowledge.id))
 
+        _clear_redis_state(document_id)
         result = f"parse document '{db_document.file_name}' processed successfully."
         logger.info(f"[ParseDoc] document={document_id} file='{db_document.file_name}' done in {db_document.process_duration:.1f}s, chunks={total_chunks}")
         return result
       except Exception as e:
         logger.error(f"[ParseDoc] document={document_id} failed: {e}", exc_info=True)
+        _clear_redis_state(document_id)
         if db_document is not None:
             try:
-                db.rollback()
+                db_document.progress = -1.0
                 db_document.progress_msg = _progress_msg() + f"Failed to vectorize and import the parsed document:{str(e)}\n"
                 db_document.run = 0
                 db.commit()
@@ -806,8 +898,8 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                 for i, row in enumerate(reader):
                     if i == 0:
                         continue
-                    if len(row) >= 2 and row[0].strip() and row[1].strip():
-                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip()})
+                    if len(row) >= 2 and row[0].strip():
+                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip() if row[1].strip() else ""})
                     elif len(row) >= 1 and row[0].strip():
                         failed_rows.append(i + 1)
 
@@ -819,10 +911,10 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                         for i, row in enumerate(sheet.iter_rows(values_only=True)):
                             if i == 0:
                                 continue
-                            if len(row) >= 2 and row[0] and row[1]:
+                            if len(row) >= 2 and row[0]:
                                 q = str(row[0]).strip()
-                                a = str(row[1]).strip()
-                                if q and a:
+                                a = str(row[1]).strip() if row[1] else ""
+                                if q:
                                     qa_pairs.append({"question": q, "answer": a})
                             elif len(row) >= 1 and row[0]:
                                 failed_rows.append(i + 1)
@@ -1048,7 +1140,14 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             case "Third-party":  # Integration of knowledge bases from three parties
                 yuque_user_id = db_knowledge.parser_config.get("yuque_user_id", "")
                 feishu_app_id = db_knowledge.parser_config.get("feishu_app_id", "")
-                if yuque_user_id:  # Yuque Knowledge Base
+
+                # Determine source by existing files; skip unrelated source to avoid auth errors
+                existing_files = db.query(File).filter(File.kb_id == db_knowledge.id).all()
+                has_yuque = any(f.file_url and "yuque.com" in f.file_url for f in existing_files)
+                has_feishu = any(f.file_url and "feishu.cn" in f.file_url for f in existing_files)
+
+                if yuque_user_id and yuque_user_id not in ("User ID", "", None) \
+                        and (not existing_files or has_yuque):  # Yuque Knowledge Base
                     yuque_token = db_knowledge.parser_config.get("yuque_token", "")
                     # Create yuqueAPIClient
                     api_client = YuqueAPIClient(
@@ -1211,7 +1310,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                     except Exception as e:
                         logger.error(f"[SyncKB] Error during fetch yuque: {e}", exc_info=True)
-                if feishu_app_id:  # Feishu Knowledge Base
+                if feishu_app_id and feishu_app_id not in ("App ID", "", None) \
+                        and (not existing_files or has_feishu):  # Feishu Knowledge Base
                     feishu_app_secret = db_knowledge.parser_config.get("feishu_app_secret", "")
                     feishu_folder_token = db_knowledge.parser_config.get("feishu_folder_token", "")
                     # Create feishuAPIClient
@@ -1241,11 +1341,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     continue
                                 else:  # --update
                                     # 1. update file
-                                    # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                    save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.id))
-                                    Path(save_dir).mkdir(parents=True,
-                                                         exist_ok=True)  # Ensure that the directory exists
+                                    # Use temp dir for download, will upload to storage backend later
+                                    save_dir = tempfile.mkdtemp()
 
                                     # download document from Feishu FileInfo
                                     async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
@@ -1256,11 +1353,22 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                                     file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
 
-                                    save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                    # update file
-                                    if os.path.exists(save_path):
-                                        os.remove(save_path)  # Delete a single file
-                                    shutil.copyfile(file_path, save_path)
+                                    # Upload to storage backend
+                                    from app.services.file_storage_service import generate_kb_file_key, FileStorageService
+                                    _file_key = generate_kb_file_key(
+                                        kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
+                                    )
+                                    _storage_service = FileStorageService()
+                                    with open(file_path, "rb") as _f:
+                                        _content = _f.read()
+
+                                    async def _do_upload():
+                                        await _storage_service.storage.upload(
+                                            file_key=_file_key, content=_content, content_type="application/octet-stream"
+                                        )
+
+                                    asyncio.run(_do_upload())
+
                                     # update db_file
                                     file_name = os.path.basename(file_path)
                                     _, file_extension = os.path.splitext(file_name)
@@ -1269,8 +1377,17 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     db_file.file_ext = file_extension.lower()
                                     db_file.file_size = file_size
                                     db_file.created_at = doc.modified_time
+                                    db_file.file_key = _file_key
                                     db.commit()
                                     db.refresh(db_file)
+
+                                    # Clean up local temp file
+                                    try:
+                                        if os.path.exists(file_path):
+                                            os.remove(file_path)
+                                    except Exception:
+                                        pass
+
                                     # 2. update a document
                                     db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
                                                                             Document.file_id == db_file.id).first()
@@ -1283,13 +1400,11 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         db.commit()
                                         db.refresh(db_document)
                                         # 3. Document parsing, vectorization, and storage
-                                        parse_document(file_path=save_path, document_id=db_document.id)
+                                        parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                             else:  # --add
                                 # 1. update file
-                                # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                        str(db_knowledge.id))
-                                Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
+                                # Use temp dir for download, will upload to storage backend later
+                                save_dir = tempfile.mkdtemp()
 
                                 # download document from Feishu FileInfo
                                 async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
@@ -1316,12 +1431,34 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 db_file = File(**upload_file.model_dump())
                                 db.add(db_file)
                                 db.commit()
-                                # Save file
-                                save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                # update file
-                                if os.path.exists(save_path):
-                                    os.remove(save_path)  # Delete a single file
-                                shutil.copyfile(file_path, save_path)
+                                # Upload to storage backend
+                                from app.services.file_storage_service import generate_kb_file_key, FileStorageService
+                                _file_key = generate_kb_file_key(
+                                    kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
+                                )
+                                _storage_service = FileStorageService()
+                                with open(file_path, "rb") as _f:
+                                    _content = _f.read()
+
+                                async def _do_upload2():
+                                    await _storage_service.storage.upload(
+                                        file_key=_file_key, content=_content, content_type="application/octet-stream"
+                                    )
+
+                                asyncio.run(_do_upload2())
+
+                                # Save file_key
+                                db_file.file_key = _file_key
+                                db.commit()
+                                db.refresh(db_file)
+
+                                # Clean up local temp file
+                                try:
+                                    if os.path.exists(file_path):
+                                        os.remove(file_path)
+                                except Exception:
+                                    pass
+
                                 # 2. Create a document
                                 create_document_data = document_schema.DocumentCreate(
                                     kb_id=db_knowledge.id,
@@ -1345,7 +1482,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 db.add(db_document)
                                 db.commit()
                                 # 3. Document parsing, vectorization, and storage
-                                parse_document(file_path=save_path, document_id=db_document.id)
+                                parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                         db_files = db.query(File).filter(File.kb_id == db_knowledge.id,
                                                          File.file_url.notin_(file_urls)).all()
                         if db_files:  # --delete
@@ -1358,15 +1495,23 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                                                             value=str(db_document.id))
                                     # 2. Delete document
                                     db.delete(db_document)
-                                # 3. Delete file
-                                file_path = Path(
+                                # 3. Delete file from storage backend
+                                if db_file.file_key:
+                                    from app.services.file_storage_service import FileStorageService
+                                    storage_service = FileStorageService()
+                                    try:
+                                        asyncio.run(storage_service.delete_file(db_file.file_key))
+                                    except Exception:
+                                        pass
+                                # 3.5 Delete local temp file (legacy)
+                                _legacy_path = Path(
                                     settings.FILE_PATH,
                                     str(db_file.kb_id),
                                     str(db_file.parent_id),
                                     f"{db_file.id}{db_file.file_ext}"
                                 )
-                                if file_path.exists():
-                                    file_path.unlink()  # Delete a single file
+                                if _legacy_path.exists():
+                                    _legacy_path.unlink()
                                 db.delete(db_file)
                             # commit transaction
                             db.commit()
@@ -1815,23 +1960,18 @@ def extract_emotion_batch_task(
 
         await asyncio.gather(*[_extract_one(s) for s in statements])
 
-        # 快照落盘（worker 端）：不影响 Neo4j 写入流程，失败只打日志
-        if snapshot_outputs is not None:
-            try:
-                from pathlib import Path as _Path
-                import json as _json
+        # 快照落盘（worker 端）：上传到 OSS，不影响 Neo4j 写入流程，失败只打日志
+        if snapshot_outputs is not None and snapshot_dir:
+            from app.core.memory.utils.debug.pipeline_snapshot import (
+                upload_stage_snapshot,
+            )
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "4_emotion_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+            if upload_stage_snapshot(
+                snapshot_dir, "4_emotion_outputs", snapshot_outputs
+            ):
                 logger.info(
-                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → {_path}"
-                )
-            except Exception as _e:
-                logger.warning(
-                    f"[Emotion][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → "
+                    f"oss://{snapshot_dir}/4_emotion_outputs.json"
                 )
 
         # Batch update Neo4j via write transaction
@@ -1883,6 +2023,39 @@ def extract_emotion_batch_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
+def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int = 36) -> bool:
+    """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_hours 小时则跳过。
+
+    通过 conversations.user_id（存的是 end_user_id 的 UUID 字符串）取该用户所有会话
+    的最新 updated_at（最后写入时间），与当前 UTC 时间比较。
+
+    Returns:
+        True  -> 跳过反思（无会话记录，或最近更新已超过 inactive_hours 小时）
+        False -> 正常执行反思
+    """
+    from sqlalchemy import func
+    from app.models.conversation_model import Conversation
+
+    try:
+        last_updated = (
+            db.query(func.max(Conversation.updated_at))
+            .filter(Conversation.user_id == str(end_user_id))
+            .scalar()
+        )
+    except Exception as e:
+        # 查询异常时不跳过，保证反思仍能执行（保守策略）
+        logger.warning(f"反思活跃度前置查询失败 user={end_user_id}: {e}")
+        return False
+
+    if last_updated is None:
+        # 无任何会话记录 -> 没有可反思的新数据，跳过
+        return True
+
+    # updated_at 为 UTC naive，当前时间取 UTC naive 以对齐比较
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if last_updated.tzinfo is not None:
+        last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
+    return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
 
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
@@ -1890,16 +2063,50 @@ def extract_emotion_batch_task(
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=600,
-    soft_time_limit=540,
 )
 def layer2_reflection_task(self) -> Dict[str, Any]:
-    """Layer 2 离线巡检（描述合并等）— 每 10 分钟
+    """Layer 2 离线巡检（描述合并等）
 
     遍历所有 workspace → app → end_user，对每个启用了 enable_self_reflexion 的配置
     调用 MemoryService.run_reflection_layer2()。
+
+    单例锁：单轮巡检耗时可能超过 10 分钟调度间隔，若不加锁，新一轮会与上一轮
+    重叠执行（并发数 > 1），两个实例同时加载实体 + embedding + 调 LLM 导致内存
+    叠加，超出容器内存上限被 OOMKill (SIGKILL)。这里用 RedisFairLock 保证任意时刻
+    只有一个实例在跑，重叠触发时直接跳过本轮。锁以主动释放为主、后台线程自动续期
+    保活、较短 expire(180s) 兜底：进程被 SIGKILL 后续期线程消失，锁很快自动过期。
     """
     start_time = time.time()
+
+    # 单例锁：防止上一轮未结束时本轮重叠执行造成内存叠加。
+    # 用 RedisFairLock 自动续期：持有期间后台线程每 expire/3 秒续期一次，任务跑多久
+    # 锁就有效多久；进程被 OOMKill/SIGKILL 时续期线程随之终止，锁靠较短的 expire(180s)
+    # 自动过期释放，既不会永久泄漏，也不会像 7200s 长 TTL 那样卡死后续轮次。
+    _lock_redis = get_sync_redis_client()
+    _lock = None
+    if _lock_redis is not None:
+        _lock = RedisFairLock(
+            key="lock:layer2_reflection_task",
+            redis_client=_lock_redis,
+            expire=180,
+            timeout=0,  # 非阻塞：抢不到立即返回，本轮跳过
+            auto_renewal=True,
+        )
+        try:
+            _acquired = _lock.acquire()
+        except Exception as e:
+            # Redis 异常时降级为不加锁，避免任务永久无法执行
+            logger.warning(f"反思引擎Layer2 获取单例锁异常，降级为不加锁执行: {e}")
+            _lock = None
+        else:
+            if not _acquired:
+                logger.warning("反思引擎Layer2 上一轮任务仍在执行，本轮跳过")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "previous run still in progress",
+                    "task_id": self.request.id,
+                    "elapsed_time": time.time() - start_time,
+                }
 
     async def _run() -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
@@ -1914,9 +2121,12 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                 logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
                 processed_users = 0
+                processed_user_ids = []
                 skipped_configs = 0
+                skipped_inactive = 0
                 total_dedup_merged = 0
                 total_desc_merged = 0
+                redis_client = get_sync_redis_client()
 
                 for workspace in workspaces:
                     service = WorkspaceAppService(db)
@@ -1937,45 +2147,85 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                             for user in end_users:
                                 try:
-                                    memory_service = MemoryService(
-                                        db=db,
-                                        config_id=config_id,
-                                        end_user_id=str(user['id']),
-                                        workspace_id=str(workspace.id),
-                                    )
-                                    r = await memory_service.run_reflection_layer2(
-                                        baseline=baseline,
-                                    )
-                                    processed_users += 1
-                                    # 增量统计
-                                    dedup_info = r.get("entity_dedup", {})
-                                    merge_info = r.get("description_merge", {})
-                                    total_dedup_merged += dedup_info.get("merged_count", 0)
-                                    total_desc_merged += merge_info.get("merged_count", 0)
-                                    # 只在有实际合并时输出详细日志
-                                    if merge_info.get("merged_count", 0) > 0:
-                                        logger.info(
-                                            f"反思引擎Layer2 用户 {user['id']} 描述合并: "
-                                            f"候选 {merge_info['candidate_count']}, "
-                                            f"合并 {merge_info['merged_count']}"
+                                    # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过（仅对活跃用户反思）
+                                    if _should_skip_reflection_by_inactivity(db, str(user['id'])):
+                                        skipped_inactive += 1
+                                        continue
+
+                                    # 获取 Redis 锁，和写入 pipeline 互斥
+                                    write_lock = None
+                                    if redis_client is not None:
+                                        write_lock = RedisFairLock(
+                                            key=f"memory_write:{user['id']}",
+                                            redis_client=redis_client,
+                                            expire=600,
+                                            timeout=30,
+                                            auto_renewal=True,
                                         )
-                                    if dedup_info.get("merged_count", 0) > 0:
-                                        logger.info(
-                                            f"反思引擎Layer2 用户 {user['id']} 去重合并: "
-                                            f"合并 {dedup_info['merged_count']}"
+                                        if not await asyncio.to_thread(write_lock.acquire):
+                                            logger.warning(
+                                                f"反思引擎Layer2 获取锁超时，跳过用户 {user['id']}"
+                                            )
+                                            # 锁超时的用户仍计入处理列表，保证与低频任务的用户口径一致
+                                            processed_users += 1
+                                            processed_user_ids.append(str(user['id']))
+                                            continue
+
+                                    try:
+                                        memory_service = MemoryService(
+                                            db=db,
+                                            config_id=config_id,
+                                            end_user_id=str(user['id']),
+                                            workspace_id=str(workspace.id),
                                         )
+                                        r = await memory_service.run_reflection_layer2(
+                                            baseline=baseline,
+                                        )
+                                        processed_users += 1
+                                        processed_user_ids.append(str(user['id']))
+                                        # 增量统计
+                                        dedup_info = r.get("entity_dedup", {})
+                                        merge_info = r.get("description_merge", {})
+                                        total_dedup_merged += dedup_info.get("merged_count", 0)
+                                        total_desc_merged += merge_info.get("merged_count", 0)
+                                        # 只在有实际合并时输出详细日志
+                                        if merge_info.get("merged_count", 0) > 0:
+                                            logger.info(
+                                                f"反思引擎Layer2 用户 {user['id']} 描述合并: "
+                                                f"候选 {merge_info['candidate_count']}, "
+                                                f"合并 {merge_info['merged_count']}"
+                                            )
+                                        if dedup_info.get("merged_count", 0) > 0:
+                                            logger.info(
+                                                f"反思引擎Layer2 用户 {user['id']} 去重合并: "
+                                                f"合并 {dedup_info['merged_count']}"
+                                            )
+                                    finally:
+                                        if write_lock is not None:
+                                            await asyncio.to_thread(write_lock.release)
                                 except Exception as e:
                                     logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
+                                    # 回滚失败事务，避免污染后续用户的查询
+                                    try:
+                                        db.rollback()
+                                    except Exception:
+                                        pass
+                                    # 失败用户仍计入处理列表，保证与低频任务的用户口径一致
+                                    processed_users += 1
+                                    processed_user_ids.append(str(user['id']))
 
                 logger.info(
                     f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
-                    f"跳过 {skipped_configs} 个未启用反思的配置"
+                    f"跳过 {skipped_configs} 个未启用反思的配置, "
+                    f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户"
                 )
 
                 return {
                     "status": "SUCCESS",
                     "processed_users": processed_users,
+                    "processed_user_ids": processed_user_ids,
                     "skipped_configs": skipped_configs,
+                    "skipped_inactive": skipped_inactive,
                     "total_dedup_merged": total_dedup_merged,
                     "total_desc_merged": total_desc_merged,
                 }
@@ -1991,28 +2241,68 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
         result = {"status": "FAILED", "error": str(e)}
     finally:
         _shutdown_loop_gracefully(loop)
+        # 释放单例锁：RedisFairLock 内部用 Lua 校验持有者后才删除，
+        # 并停止后台续期线程，避免误删后续实例的锁。
+        if _lock is not None:
+            try:
+                _lock.release()
+            except Exception as e:
+                logger.warning(f"反思引擎Layer2 释放单例锁失败（将靠 expire 自动过期）: {e}")
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
     logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
-    
+
 @celery_app.task(
     name="app.tasks.layer2_dedup_full_scan_task",
     bind=True,
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=1800,
-    soft_time_limit=1740,
 )
 def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
     """方案B：低频全量扫描去重（每天一次）
 
     复用 layer2_reflection_task 的调度模式：
     遍历所有 workspace → app → end_user，检查 enable_self_reflexion 配置。
+
+    单例锁：与高频 layer2_reflection_task 共用同一把锁 "lock:layer2_reflection_task"，
+    保证高频/低频两个 Layer2 任务任意时刻只有一个在跑，避免同时加载实体 + embedding +
+    调 LLM 造成内存叠加被 OOMKill。锁以主动释放为主、后台线程自动续期保活、较短
+    expire(180s) 兜底：进程被 SIGKILL 后续期线程消失，锁很快自动过期。
     """
     start_time = time.time()
+
+    # 单例锁：与 layer2_reflection_task 共用同一 key，实现高频/低频互斥。
+    # 用 RedisFairLock 自动续期：持有期间后台线程每 expire/3 秒续期一次，任务跑多久
+    # 锁就有效多久；进程被 OOMKill/SIGKILL 时续期线程随之终止，锁靠较短的 expire(180s)
+    # 自动过期释放，既不会永久泄漏，也不会像 7200s 长 TTL 那样卡死后续轮次。
+    _lock_redis = get_sync_redis_client()
+    _lock = None
+    if _lock_redis is not None:
+        _lock = RedisFairLock(
+            key="lock:layer2_reflection_task",
+            redis_client=_lock_redis,
+            expire=180,
+            timeout=0,  # 非阻塞：抢不到立即返回，本轮跳过
+            auto_renewal=True,
+        )
+        try:
+            _acquired = _lock.acquire()
+        except Exception as e:
+            # Redis 异常时降级为不加锁，避免任务永久无法执行
+            logger.warning(f"方案B全量扫描 获取单例锁异常，降级为不加锁执行: {e}")
+            _lock = None
+        else:
+            if not _acquired:
+                logger.warning("方案B全量扫描 Layer2 任务（高频或低频）仍在执行，本轮跳过")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "another layer2 task still in progress",
+                    "task_id": self.request.id,
+                    "elapsed_time": time.time() - start_time,
+                }
 
     async def _run() -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
@@ -2025,8 +2315,11 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
                 return {"status": "SUCCESS", "message": "无工作空间"}
 
             processed_users = 0
+            processed_user_ids = []
             skipped_configs = 0
+            skipped_inactive = 0
             total_merged = 0
+            redis_client = get_sync_redis_client()
 
             for workspace in workspaces:
                 service = WorkspaceAppService(db)
@@ -2047,34 +2340,74 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
 
                         for user in end_users:
                             try:
-                                memory_service = MemoryService(
-                                    db=db,
-                                    config_id=config_id,
-                                    end_user_id=str(user['id']),
-                                    workspace_id=str(workspace.id),
-                                )
-                                r = await memory_service.run_dedup_full_scan()
-                                processed_users += 1
-                                merged = r.get("merged_count", 0)
-                                total_merged += merged
-                                if merged > 0:
-                                    logger.info(
-                                        f"方案B全量扫描 用户 {user['id']} "
-                                        f"扫描类型 {r.get('scanned_types', 0)}, "
-                                        f"合并 {merged} 对"
+                                # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过
+                                if _should_skip_reflection_by_inactivity(db, str(user['id'])):
+                                    skipped_inactive += 1
+                                    continue
+
+                                # 获取 Redis 锁，和写入 pipeline 互斥
+                                write_lock = None
+                                if redis_client is not None:
+                                    write_lock = RedisFairLock(
+                                        key=f"memory_write:{user['id']}",
+                                        redis_client=redis_client,
+                                        expire=600,
+                                        timeout=30,
+                                        auto_renewal=True,
                                     )
+                                    if not await asyncio.to_thread(write_lock.acquire):
+                                        logger.warning(
+                                            f"方案B全量扫描 获取锁超时，跳过用户 {user['id']}"
+                                        )
+                                        # 锁超时的用户仍计入处理列表，保证与高频任务的用户口径一致
+                                        processed_users += 1
+                                        processed_user_ids.append(str(user['id']))
+                                        continue
+
+                                try:
+                                    memory_service = MemoryService(
+                                        db=db,
+                                        config_id=config_id,
+                                        end_user_id=str(user['id']),
+                                        workspace_id=str(workspace.id),
+                                    )
+                                    r = await memory_service.run_dedup_full_scan()
+                                    processed_users += 1
+                                    processed_user_ids.append(str(user['id']))
+                                    merged = r.get("merged_count", 0)
+                                    total_merged += merged
+                                    if merged > 0:
+                                        logger.info(
+                                            f"方案B全量扫描 用户 {user['id']} "
+                                            f"扫描类型 {r.get('scanned_types', 0)}, "
+                                            f"合并 {merged} 对"
+                                        )
+                                finally:
+                                    if write_lock is not None:
+                                        await asyncio.to_thread(write_lock.release)
                             except Exception as e:
                                 logger.error(f"方案B全量扫描失败 user={user['id']}: {e}")
+                                # 回滚失败事务，避免污染后续用户的查询
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                # 失败用户仍计入处理列表，保证与高频任务的用户口径一致
+                                processed_users += 1
+                                processed_user_ids.append(str(user['id']))
 
             logger.info(
                 f"方案B全量扫描完成: 处理 {processed_users} 用户, "
                 f"跳过 {skipped_configs} 个未启用配置, "
+                f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户, "
                 f"总合并 {total_merged} 对"
             )
             return {
                 "status": "SUCCESS",
                 "processed_users": processed_users,
+                "processed_user_ids": processed_user_ids,
                 "skipped_configs": skipped_configs,
+                "skipped_inactive": skipped_inactive,
                 "total_merged": total_merged,
             }
 
@@ -2085,6 +2418,13 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
         result = {"status": "FAILED", "error": str(e)}
     finally:
         _shutdown_loop_gracefully(loop)
+        # 释放单例锁：RedisFairLock 内部用 Lua 校验持有者后才删除，
+        # 并停止后台续期线程，避免误删其他实例的锁。
+        if _lock is not None:
+            try:
+                _lock.release()
+            except Exception as e:
+                logger.warning(f"方案B全量扫描 释放单例锁失败（将靠 expire 自动过期）: {e}")
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
@@ -2316,23 +2656,18 @@ def extract_metadata_batch_task(
         finally:
             await connector.close()
 
-        # 快照落盘
+        # 快照落盘：上传到 OSS
         if snapshot_outputs is not None and snapshot_dir:
-            try:
-                from pathlib import Path as _Path
-                import json as _json
+            from app.core.memory.utils.debug.pipeline_snapshot import (
+                upload_stage_snapshot,
+            )
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "9_metadata_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+            if upload_stage_snapshot(
+                snapshot_dir, "9_metadata_outputs", snapshot_outputs
+            ):
                 logger.info(
-                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → {_path}"
-                )
-            except Exception as _e:
-                logger.warning(
-                    f"[Metadata][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → "
+                    f"oss://{snapshot_dir}/9_metadata_outputs.json"
                 )
 
         return {"extracted": extracted, "failed": failed}
@@ -4227,3 +4562,130 @@ def scan_idle_conversations_task() -> None:
     logger.info(
         f"[ScanIdle] 扫描完成: 派发={dispatched}, 跳过(活跃)={skipped_active}, 跳过(已锁)={skipped_locked}"
     )
+
+
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks")
+def scan_workflow_schedule_triggers():
+    """扫描并派发已发布工作流中的定时触发器。"""
+    from app.services.workflow_service import WorkflowService
+
+    now = datetime.now(timezone.utc)
+    triggered = 0
+
+    with get_db_context() as db:
+        service = WorkflowService(db)
+        due_triggers = service.get_due_schedule_triggers(now)
+        logger.info(f"[WorkflowSchedule] 扫描到 {len(due_triggers)} 个待执行触发器")
+
+        for app, release, _config, trigger in due_triggers:
+            trigger_id = trigger.get("id")
+            try:
+                run_workflow_schedule_trigger.apply_async(
+                    kwargs={
+                        "app_id": str(app.id),
+                        "release_id": str(release.id),
+                        "trigger_id": trigger_id,
+                        "scheduled_at": now.isoformat(),
+                    },
+                    queue="workflow_trigger_tasks",
+                )
+                runtime = {
+                    **(trigger.get("runtime") or {}),
+                    "dispatch_status": "queued",
+                    "last_dispatched_at": now.isoformat(),
+                    "last_scheduled_at": now.isoformat(),
+                    "last_error": None,
+                }
+                service.update_release_trigger_runtime_state(release.id, trigger_id, runtime)
+                service.update_trigger_runtime_state(app.id, trigger_id, runtime)
+                triggered += 1
+                logger.info(
+                    f"[WorkflowSchedule] 已派发: app_id={app.id}, release_id={release.id}, trigger_id={trigger_id}"
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[WorkflowSchedule] 派发失败: app_id={app.id}, trigger_id={trigger_id}, error={exc}",
+                    exc_info=True,
+                )
+
+    return {"triggered": triggered, "scanned_at": now.isoformat()}
+
+
+@celery_app.task(name="app.tasks.run_workflow_schedule_trigger", queue="workflow_trigger_tasks")
+def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str, scheduled_at: str | None = None):
+    """执行单个已发布的 schedule trigger。"""
+    from app.services.workflow_service import WorkflowService
+
+    run_at = datetime.fromisoformat(scheduled_at) if scheduled_at else datetime.now(timezone.utc)
+    with get_db_context() as db:
+        service = WorkflowService(db)
+        app = db.get(App, uuid.UUID(app_id))
+        release = db.get(AppRelease, uuid.UUID(release_id))
+        if not app or not release:
+            logger.warning(
+                f"[WorkflowSchedule] 跳过不存在的任务: app_id={app_id}, release_id={release_id}, trigger_id={trigger_id}"
+            )
+            return {"status": "skipped", "reason": "app_or_release_not_found"}
+
+        if app.current_release_id != release.id:
+            logger.info(
+                f"[WorkflowSchedule] 跳过过期发布版本任务: "
+                f"app_id={app_id}, queued_release_id={release_id}, current_release_id={app.current_release_id}, "
+                f"trigger_id={trigger_id}"
+            )
+            return {"status": "skipped", "reason": "stale_release"}
+
+        config = service._build_runtime_workflow_config_from_release(
+            release,
+            real_config_id=(app.workflow_config.id if app.workflow_config else None),
+        )
+        trigger = service._find_trigger_node(config.nodes, trigger_id=trigger_id, trigger_type="schedule")
+        if not trigger:
+            logger.warning(f"[WorkflowSchedule] 跳过不存在的 trigger: trigger_id={trigger_id}")
+            return {"status": "skipped", "reason": "trigger_not_found"}
+
+        runtime = trigger.get("runtime") or {}
+        running_runtime = {
+            **runtime,
+            "dispatch_status": "running",
+            "last_started_at": datetime.now(timezone.utc).isoformat(),
+            "last_scheduled_at": run_at.isoformat(),
+            "last_error": None,
+        }
+        service.update_release_trigger_runtime_state(release.id, trigger_id, running_runtime)
+        service.update_trigger_runtime_state(app.id, trigger_id, running_runtime)
+
+        try:
+            asyncio.run(
+                service.invoke_schedule_trigger(
+                    app=app,
+                    release=release,
+                    config=config,
+                    trigger=trigger,
+                    now=run_at,
+                )
+            )
+            completed_runtime = {
+                **running_runtime,
+                "dispatch_status": "completed",
+                "last_triggered_at": run_at.isoformat(),
+                "last_completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": None,
+            }
+            service.update_release_trigger_runtime_state(release.id, trigger_id, completed_runtime)
+            service.update_trigger_runtime_state(app.id, trigger_id, completed_runtime)
+            return {"status": "completed", "trigger_id": trigger_id, "scheduled_at": run_at.isoformat()}
+        except Exception as exc:
+            failed_runtime = {
+                **running_runtime,
+                "dispatch_status": "failed",
+                "last_failed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": str(exc),
+            }
+            service.update_release_trigger_runtime_state(release.id, trigger_id, failed_runtime)
+            service.update_trigger_runtime_state(app.id, trigger_id, failed_runtime)
+            logger.error(
+                f"[WorkflowSchedule] 执行失败: app_id={app_id}, release_id={release_id}, trigger_id={trigger_id}, error={exc}",
+                exc_info=True,
+            )
+            raise

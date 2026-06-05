@@ -36,11 +36,13 @@ class PermissionType(enum.StrEnum):
     Share = "Share"
     Memory = "Memory"
 
+
 class Knowledge(Base):
     __tablename__ = "knowledges"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    external_id = Column(String(36), nullable=True, index=True, unique=False, comment="user-defined external identifier, workspace-unique")
+    external_id = Column(String(36), nullable=True, index=True, unique=False,
+                         comment="user-defined external identifier, workspace-unique")
     workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, comment="users.id")
     parent_id = Column(UUID(as_uuid=True), nullable=True, default=None, comment="parent folder id when type is Folder")
@@ -49,10 +51,14 @@ class Knowledge(Base):
     avatar = Column(String, comment="avatar url")
     type = Column(String, default="General", comment="Type:General|Web|Third-party|Folder")
     permission_id = Column(String, default="Private", comment="permission ID:Private|Share|Memory")
-    embedding_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default embedding model ID")
-    reranker_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default reranker model ID")
-    llm_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default llm model ID")
-    image2text_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True, comment="default image2text model ID")
+    embedding_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
+                          comment="default embedding model ID")
+    reranker_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
+                         comment="default reranker model ID")
+    llm_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
+                    comment="default llm model ID")
+    image2text_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
+                           comment="default image2text model ID")
     doc_num = Column(Integer, default=0, comment="doc num")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")
@@ -79,19 +85,19 @@ class Knowledge(Base):
                                "parent_chunk_token_num": 1024,
                                "parent_delimiter": "\n",
                                "graphrag": {
-                                    "use_graphrag": False,
-                                    "scene_name": "",
-                                    "entity_types": [
-                                        "organization",
-                                        "person",
-                                        "geo",
-                                        "event",
-                                        "category"
-                                    ],
-                                    "method": "general",
-                                    "resolution": True,
-                                    "community": True
-                                }
+                                   "use_graphrag": False,
+                                   "scene_name": "",
+                                   "entity_types": [
+                                       "organization",
+                                       "person",
+                                       "geo",
+                                       "event",
+                                       "category"
+                                   ],
+                                   "method": "general",
+                                   "resolution": True,
+                                   "community": True
+                               }
                            },
                            comment="default parser config")
     status = Column(Integer, index=True, default=1, comment="is it validate(0: disable, 1: enable, 2:Soft-delete)")
@@ -104,3 +110,17 @@ class Knowledge(Base):
     reranker = relationship("ModelConfig", foreign_keys=[reranker_id], uselist=False, backref="reranker")
     llm = relationship("ModelConfig", foreign_keys=[llm_id], uselist=False, backref="llm")
     image2text = relationship("ModelConfig", foreign_keys=[image2text_id], uselist=False, backref="image2text")
+
+    @property
+    def chunk_mode(self) -> int:
+        """获取知识库是否已经使用父子分块模式"""
+        # 1. None 还为设置模式
+        if "auto_questions" not in self.parser_config and "parent_chunk_mode" not in self.parser_config:
+            return 0
+        # 2. 此时为通用分块模式
+        elif "auto_questions" in self.parser_config and "parent_chunk_mode" not in self.parser_config and not self.parser_config.get(
+                "parent_child_mode", False):
+            return 1
+        # 3. 此时为父子分块模式
+        else:
+            return 2

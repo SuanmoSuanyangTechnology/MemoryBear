@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 14:05:33
+ * @Last Modified time: 2026-05-29 17:54:08
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -10,6 +10,7 @@ import type { Config, AppSharingForm, AnnotationSettingForm, AnnotationForm } fr
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams, ReportMessageData } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
+import type { WorkflowToolForm } from '@/views/ToolManagement/components/PublishAsToolModal'
 
 // Application list
 export const getApplicationListUrl = '/apps'
@@ -287,4 +288,17 @@ export const importAnnotation = (app_id: string, formData: FormData) => {
 export const getAnnotationHitHistoryUrl = (app_id: string, annotation_id: string) => `/apps/${app_id}/annotations/${annotation_id}/hit-logs`
 export const getAnnotationHitHistory = (app_id: string, annotation_id: string) => {
   return request.get(getAnnotationHitHistoryUrl(app_id, annotation_id))
+}
+
+// Preview workflow tool input and output parameters when publishing as tool
+export const previewWorkflowToolParams = (app_id: string) => {
+  return request.get(`/apps/${app_id}/publish_tool/preview`)
+}
+// Publish workflow as tool
+export const workflowPublishAsTool = (app_id: string, data: WorkflowToolForm) => {
+  return request.post(`/apps/${app_id}/publish_tool`, data)
+}
+// Get workflow execution details and variable snapshot
+export const getWorkflowExecutionDetail = (app_id: string, execution_id: string) => {
+  return request.get(`/apps/${app_id}/workflow/executions/${execution_id}`)
 }

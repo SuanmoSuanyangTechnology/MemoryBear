@@ -233,6 +233,7 @@ async def build_graph_nodes_and_edges(
                     created_at=dialog_data.created_at,
                     dialog_at=getattr(statement, "dialog_at", None),
                     config_id=dialog_data.config_id if hasattr(dialog_data, "config_id") else None,
+                    has_unsolved_reference=getattr(statement, "has_unsolved_reference", False),
                     emotion_type=getattr(statement, "emotion_type", None),
                     emotion_intensity=getattr(statement, "emotion_intensity", None),
                     emotion_keywords=getattr(statement, "emotion_keywords", None),

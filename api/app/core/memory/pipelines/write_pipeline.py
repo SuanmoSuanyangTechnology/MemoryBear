@@ -206,7 +206,16 @@ class WritePipeline:
                     WriteSnapshotRecorder,
                 )
 
-                self._recorder = WriteSnapshotRecorder("new")
+                # 整轮写入路径：仅按 end_user_id + 时间戳分目录（兼容旧行为），
+                # 但仍把 ref_id / language / mode 写到 0_summary.json 以便辨识。
+                self._recorder = WriteSnapshotRecorder(
+                    end_user_id=self.end_user_id,
+                    extra_metadata={
+                        "mode": "legacy_full_messages",
+                        "ref_id": ref_id,
+                        "language": self.language,
+                    },
+                )
 
                 # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
                 async with bear.step(1, 5, "预处理", "消息分块") as s:
@@ -335,7 +344,7 @@ class WritePipeline:
         ontology_types = self._load_ontology_types()
 
         # 复用 run() 中已创建的 recorder（剪枝阶段已使用同一实例）
-        recorder = getattr(self, "_recorder", None) or WriteSnapshotRecorder("new")
+        recorder = getattr(self, "_recorder", None) or WriteSnapshotRecorder(self.end_user_id)
         self._recorder = recorder
 
         # ── 新编排器：LLM 萃取 + 数据赋值 ──
@@ -986,7 +995,8 @@ class WritePipeline:
             logger.info(f"[LanguageDetect][run_with_window] detected={detected}, language={self.language}, text_len={len(user_content)}")
 
         _dialog_at = (
-            dispatch_at
+            target_message.get("dialog_at")
+            or dispatch_at
             or target_message.get("created_at", "")
             or ""
         )
@@ -1009,7 +1019,27 @@ class WritePipeline:
                 from app.core.memory.utils.debug.write_snapshot_recorder import (
                     WriteSnapshotRecorder,
                 )
-                self._recorder = WriteSnapshotRecorder("new")
+                # 滑动窗口写入：按 end_user / conversation / seq 三级组织 OSS 前缀，
+                # 并把定位元信息（ref_id / dispatch_at / dialog_at / 目标消息预览
+                # 等）写入 0_summary.json，便于在大量数据中精确定位本次快照。
+                _target_content = target_message.get("content", "") or ""
+                _preview = _target_content[:200]
+                self._recorder = WriteSnapshotRecorder(
+                    end_user_id=self.end_user_id,
+                    conversation_id=conversation_id,
+                    message_seq=message_seq,
+                    extra_metadata={
+                        "mode": "sliding_window",
+                        "ref_id": ref_id,
+                        "dispatch_at": dispatch_at,
+                        "dialog_at": _dialog_at,
+                        "language": self.language,
+                        "target_content_preview": _preview,
+                        "target_content_length": len(_target_content),
+                        "context_before_count": len(context_before or []),
+                        "context_after_count": len(context_after or []),
+                    },
+                )
 
                 from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
                 pruning_pipeline = PruningPipeline(
@@ -1018,7 +1048,7 @@ class WritePipeline:
                     language=self.language,
                 )
 
-                async with bear.step(1, 5, "剪枝", "构建 Pruned_Context") as s:
+                async with bear.step(1, 6, "剪枝", "构建 Pruned_Context") as s:
                     pruning_records: list = []
                     _before = context_before or []
                     _after = context_after or []
@@ -1063,7 +1093,7 @@ class WritePipeline:
                     pruning_pipeline=pruning_pipeline,
                 )
 
-                async with bear.step(2, 5, "预处理", "消息分块") as s:
+                async with bear.step(2, 6, "预处理", "消息分块") as s:
                     from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
                     recorder = getattr(self, "_recorder", None)
                     snapshot = recorder.snapshot if recorder else None
@@ -1080,7 +1110,7 @@ class WritePipeline:
                     )
                     s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
-                async with bear.step(3, 5, "萃取", "知识提取") as s:
+                async with bear.step(3, 6, "萃取", "知识提取") as s:
                     extraction_result = await self._extract(chunked_dialogs, is_pilot_run=False)
                     stats = extraction_result.stats
                     s.metadata(
@@ -1089,14 +1119,18 @@ class WritePipeline:
                         relations=stats["relation_count"],
                     )
 
-                async with bear.step(4, 5, "存储", "写入 Neo4j"):
+                async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
                 await self._post_store_async_tasks(extraction_result)
 
-                async with bear.step(5, 5, "聚类", "增量更新社区") as s:
+                async with bear.step(5, 6, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)
                     s.metadata(mode="async")
+
+                # Step 6: 摘要 - 生成情景记忆摘要
+                async with bear.step(6, 6, "摘要", "生成情景记忆"):
+                    await self._summarize(chunked_dialogs)
 
                 await self._advance_write_cursor(
                     conversation_id=conversation_id,

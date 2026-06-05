@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 14:20:34
+ * @Last Modified time: 2026-05-29 16:23:50
  */
 
 import { conditionNodePortItemArgsY, conditionNodeHeight } from './constant'
+import type { Application } from '@/views/ApplicationManagement/types';
 
 export const isSubExprSet = (sub: any) => {
   if (!sub?.key) return false;
@@ -69,4 +70,14 @@ export const getConditionNodeCasePortY = (cases: any[], caseIndex: number) => {
     y += 20 + exprsHeight + 4; // case height + Flex gap between cases
   }
   return y;
+};
+
+export const filterNodeByAppType = (nodeType: { type: string }, appType?: Application['type']) => {
+  if (appType === 'pure_workflow') {
+    return !['end', 'memory-read', 'memory-write'].includes(nodeType.type);
+  }
+  if (appType === 'workflow') {
+    return !['output', 'trigger'].includes(nodeType.type);
+  }
+  return true;
 };

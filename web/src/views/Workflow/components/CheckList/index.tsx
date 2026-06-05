@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 15:55:51
+ * @Last Modified time: 2026-05-29 19:46:06
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -43,6 +43,7 @@ const nodeConfigMap: Record<string, Record<string, any>> = Object.fromEntries(
 
 // Special validators for fields that need deeper checks beyond simple empty check
 const specialValidators: Record<string, (val: any) => boolean> = {
+  'output.outputs': (val: any[]) => !Array.isArray(val) || !val.every(m => m?.name && String(m.name).trim() && m?.value && String(m.value).trim()),
   // llm.messages: at least one message with non-empty content
   'llm.messages': (val: any[]) => !Array.isArray(val) || !val.some(m => m?.content && String(m.content).trim()),
   // knowledge-retrieval.knowledge_retrieval: knowledge_bases array must be non-empty
@@ -174,7 +175,7 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
 
       // Check connectivity
       const isChildNode = !!data.cycle
-      const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start'].includes(data.type) ? targetIds.has(node.id) : true
+      const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start', 'trigger'].includes(data.type) ? targetIds.has(node.id) : true
       if (!hasIncoming) {
         errors.push({ key: 'notConnected', message: t('workflow.notConnected') })
       }

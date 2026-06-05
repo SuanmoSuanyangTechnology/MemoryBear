@@ -110,7 +110,7 @@ class AppLogService:
             workspace_id=workspace_id
         )
 
-        if app_type == AppType.WORKFLOW:
+        if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             messages, node_executions_map = self._get_workflow_messages_and_nodes(conversation_id)
         else:
             messages = self.message_repository.get_messages_by_conversation(
@@ -232,7 +232,11 @@ class AppLogService:
 
             # --- assistant message（输出）---
             if execution.status == "completed":
-                output_content = _extract_text(execution.output_data)
+                # 输出审查触发时，用预设内容替代原始 AI 回复
+                if isinstance(execution.output_data, dict) and execution.output_data.get("moderation_flagged"):
+                    output_content = execution.output_data.get("preset_response", "") or _extract_text(execution.output_data)
+                else:
+                    output_content = _extract_text(execution.output_data)
                 meta = {"usage": execution.token_usage or {}, "elapsed_time": execution.elapsed_time}
             else:
                 output_content = _extract_text(execution.output_data) or ""

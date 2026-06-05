@@ -265,15 +265,18 @@ class PruningPipeline:
         original_content: str,
         pruned_content: str,
     ) -> None:
-        """将剪枝结果写入 Neo4j（AssistantOriginal + AssistantPruned 节点）。
+        """将剪枝结果写入 Neo4j（AssistantOriginal + AssistantPruned + Conversation 中心节点）。
 
         创建：
+        - Conversation 中心节点：id == conversation_id，MERGE 幂等，跨写入复用
         - AssistantOriginal 节点：存储原始 assistant 消息
         - AssistantPruned 节点：存储剪枝后内容（A'）
         - PRUNED_TO 边：连接 Original → Pruned
+        - BELONGS_TO_CONVERSATION 边：连接 Original → Conversation 中心节点，
+          使同一会话的 assistant 剪枝节点聚成一个连通子图
 
         Args:
-            conversation_id: 对话 ID（用作 dialog_id）
+            conversation_id: 对话 ID（用作 dialog_id 和 Conversation 中心节点 id）
             message_seq: 消息序号（用于节点命名）
             original_content: assistant 消息原始内容
             pruned_content: 剪枝后内容（A'）
@@ -282,12 +285,16 @@ class PruningPipeline:
             AssistantOriginalNode,
             AssistantPrunedNode,
             AssistantPrunedEdge,
+            ConversationNode,
+            AssistantConversationEdge,
         )
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.repositories.neo4j.cypher_queries import (
             ASSISTANT_ORIGINAL_NODE_SAVE,
             ASSISTANT_PRUNED_NODE_SAVE,
             ASSISTANT_PRUNED_EDGE_SAVE,
+            CONVERSATION_NODE_SAVE,
+            ASSISTANT_CONVERSATION_EDGE_SAVE,
         )
 
         now = datetime.now(timezone.utc)
@@ -330,10 +337,42 @@ class PruningPipeline:
             pair_id=pair_id,
         )
 
+        # Conversation 中心节点：id == conversation_id，跨写入任务用 MERGE 复用。
+        # 所有 AssistantOriginal 通过 BELONGS_TO_CONVERSATION 挂到该节点，
+        # 使同一会话的 assistant 剪枝节点在图谱中聚成一个连通子图。
+        conversation_node = ConversationNode(
+            id=conversation_id,
+            name=f"Conversation_{conversation_id}",
+            end_user_id=self.end_user_id,
+            run_id=run_id,
+            created_at=now,
+            conversation_id=conversation_id,
+        )
+
+        conversation_edge = AssistantConversationEdge(
+            source=original_id,
+            target=conversation_id,
+            end_user_id=self.end_user_id,
+            run_id=run_id,
+            created_at=now,
+        )
+
         # 确保 Neo4j 连接器已初始化
         self._ensure_neo4j_connector()
 
         async def _write_in_transaction(tx):
+            # 写入 Conversation 中心节点（MERGE 幂等）
+            conversation_data = [{
+                "id": conversation_node.id,
+                "name": conversation_node.name,
+                "end_user_id": conversation_node.end_user_id,
+                "conversation_id": conversation_node.conversation_id,
+                "run_id": conversation_node.run_id,
+                "created_at": conversation_node.created_at.isoformat(),
+            }]
+            result = await tx.run(CONVERSATION_NODE_SAVE, conversations=conversation_data)
+            await result.consume()
+
             # 写入 AssistantOriginal 节点
             original_data = [original_node.model_dump()]
             result = await tx.run(ASSISTANT_ORIGINAL_NODE_SAVE, originals=original_data)
@@ -354,6 +393,18 @@ class PruningPipeline:
                 "created_at": pruned_edge.created_at.isoformat(),
             }]
             result = await tx.run(ASSISTANT_PRUNED_EDGE_SAVE, edges=edge_data)
+            await result.consume()
+
+            # 写入 BELONGS_TO_CONVERSATION 边（Original → Conversation 中心节点）
+            conv_edge_data = [{
+                "id": conversation_edge.id,
+                "source": conversation_edge.source,
+                "target": conversation_edge.target,
+                "end_user_id": conversation_edge.end_user_id,
+                "run_id": conversation_edge.run_id,
+                "created_at": conversation_edge.created_at.isoformat(),
+            }]
+            result = await tx.run(ASSISTANT_CONVERSATION_EDGE_SAVE, edges=conv_edge_data)
             await result.consume()
 
         await self._neo4j_connector.execute_write_transaction(_write_in_transaction)

@@ -20,6 +20,7 @@ class BaseTool(ABC):
         self.tool_id = tool_id
         self.config = config
         self._status = ToolStatus.AVAILABLE
+        self._runtime_context: Dict[str, Any] = {}
     
     @property
     @abstractmethod
@@ -64,6 +65,16 @@ class BaseTool(ABC):
     def tags(self) -> List[str]:
         """工具标签"""
         return self.config.get("tags", [])
+
+    def set_runtime_context(self, **context: Any):
+        """设置运行时上下文，用于传递非业务参数。"""
+        self._runtime_context.update({k: v for k, v in context.items() if v is not None})
+
+    def get_runtime_context(self, key: Optional[str] = None, default: Any = None) -> Any:
+        """获取运行时上下文。"""
+        if key is None:
+            return dict(self._runtime_context)
+        return self._runtime_context.get(key, default)
     
     def validate_parameters(self, parameters: Dict[str, Any]) -> Dict[str, str]:
         """验证参数

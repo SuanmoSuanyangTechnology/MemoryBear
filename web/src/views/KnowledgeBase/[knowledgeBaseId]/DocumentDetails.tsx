@@ -50,6 +50,7 @@ const DocumentDetails: FC = () => {
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [total, setTotal] = useState(0);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
   const [fileUrl, setFileUrl] = useState('');
@@ -153,6 +154,7 @@ const DocumentDetails: FC = () => {
     ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
   };
 
+  const [isParentChildMode, setIsParentChildMode] = useState<string | boolean>('false');
   const fetchDocumentDetail = async () => {
     if (!documentId) return;
     setLoading(true);
@@ -162,7 +164,10 @@ const DocumentDetails: FC = () => {
       setInfoItems(formatDocumentInfo(response));
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
-      setParserMode(response?.parser_config?.auto_questions || 0)
+      const auto_questions = response?.parser_config?.auto_questions || 0
+      const parent_chunk_mode = response?.parser_config?.parent_chunk_mode || false
+      setParserMode(auto_questions)
+      setIsParentChildMode(auto_questions === 0 && parent_chunk_mode)
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
@@ -209,7 +214,7 @@ const DocumentDetails: FC = () => {
           score: item.metadata.score || null, // Chunk list has no similarity score
           status: item.metadata.status,
         },
-        children: null,
+        children: item.children || [],
       }));
       
       if (append) {
@@ -219,6 +224,7 @@ const DocumentDetails: FC = () => {
       }
       
       setHasMore(response.page?.has_next ?? false);
+      setTotal(response.page?.total ?? 0);
     } catch (error) {
       console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed') || '加载失败');
@@ -257,33 +263,62 @@ const DocumentDetails: FC = () => {
   const handleSearch = (value?: string) => {
     setKeywords(value || '');
   };
-  const handleInsert = () => {
+  const handleInsert = (parentChunkId?: string) => {
     if (!documentId) {
       message.error(t('knowledgeBase.documentIdRequired') || '文档ID不能为空');
       return;
     }
-    insertModalRef.current?.handleOpen(documentId);
+    insertModalRef.current?.handleOpen(documentId, undefined, undefined, parentChunkId);
   };
 
   // Handle insert/edit content
-  const handleInsertContent = async (_docId: string, content: string | Record<string, string>, chunkId?: string): Promise<boolean> => {
+  const handleInsertContent = async (_docId: string, content: string | Record<string, string>, chunkId?: string, parentChunkId?: string): Promise<boolean> => {
     try {
       if (chunkId) {
         // Edit mode: Update existing chunk
         const response = await updateDocumentChunk(knowledgeBaseId || '', documentId, chunkId, { content });
-        
-        // Update frontend list directly without waiting for backend cache refresh
-        setChunkList(prev => prev.map(item => 
-          item.metadata?.doc_id === chunkId 
-            ? { ...item, page_content: typeof content === 'object' ? `Q: ${response.metadata.question}\n A: ${response.metadata.answer}` :  response.page_content || content }
-            : item
-        ));
+
+        // Handle both regular chunks and child chunks
+        setChunkList(prev => prev.map(item => {
+          // Check if current item is the target chunk
+          if (item.metadata?.doc_id === chunkId) {
+            return {
+              ...item,
+              page_content: typeof content === 'object'
+                ? `Q: ${response.metadata.question}\n A: ${response.metadata.answer}`
+                :  response.page_content || content
+            };
+          }
+          
+          // Check if target chunk is a child of current item
+          if (item.children && item.children.length > 0) {
+            const updatedChildren = item.children.map(child => {
+              if (child.metadata?.doc_id === chunkId) {
+                return { 
+                  ...child, 
+                  page_content: typeof content === 'object' 
+                    ? `Q: ${response.metadata.question}\n A: ${response.metadata.answer}` 
+                    : response.page_content || content 
+                };
+              }
+              return child;
+            });
+            
+            // Check if any children were updated
+            const hasUpdates = updatedChildren.some((child, i) => child !== item.children?.[i]);
+            if (hasUpdates) {
+              return { ...item, children: updatedChildren };
+            }
+          }
+          
+          return item;
+        }));
         
         // Edit mode returns special flag to tell InsertModal not to call onSuccess
         return true;
       } else {
         // Insert mode: Create new chunk
-        await createDocumentChunk(knowledgeBaseId || '', documentId, { content });
+        await createDocumentChunk(knowledgeBaseId || '', documentId, { content, chunk_type: parentChunkId ? 'child' : undefined, parent_id: parentChunkId });
         return true;
       }
     } catch (error) {
@@ -295,8 +330,20 @@ const DocumentDetails: FC = () => {
   // Handle click on text chunk
   const handleChunkClick = (item: RecallTestData, index: number) => {
     if (!documentId) return;
+    
     const chunkId = String(item.metadata?.doc_id || index);
-    insertModalRef.current?.handleOpen(documentId, item.page_content, chunkId);
+    
+    // Check if this is a child chunk (sub-section)
+    const isChildChunk = index !== undefined;
+    
+    if (isChildChunk) {
+      // For child chunks, we still use the child's doc_id for editing
+      // The parentDocId is stored in metadata for reference
+      insertModalRef.current?.handleOpen(documentId, item.page_content, chunkId);
+    } else {
+      // For regular chunks
+      insertModalRef.current?.handleOpen(documentId, item.page_content, chunkId);
+    }
   };
 
   // Callback after successful insert (only for inserting new chunks, edit operations are already updated synchronously in handleInsertContent)
@@ -400,7 +447,7 @@ const DocumentDetails: FC = () => {
                 defaultValue={keywords}
               />
               <Button type='primary' onClick={handleAdjustmentParameter}>{t('knowledgeBase.adjustmentParameter') || '调整参数'}</Button>
-              <Button type="primary" onClick={handleInsert}>{t('knowledgeBase.insert') || '插入'}</Button>
+              <Button type="primary" onClick={() => handleInsert()}>{t('knowledgeBase.insert') || '插入'}</Button>
           </div>
         </div>
       </div>
@@ -431,6 +478,7 @@ const DocumentDetails: FC = () => {
           <RecallTestResult 
             refresh={refreshChunks}
             data={chunkList} 
+            total={total}
             showEmpty={false}
             hasMore={hasMore}
             loadMore={loadMoreChunks}
@@ -440,6 +488,7 @@ const DocumentDetails: FC = () => {
             onItemClick={handleChunkClick}
             parserMode={parserMode}
             handleCopy={handleCopy}
+            handleInsert={handleInsert}
           />
         </div>
       </div>
@@ -447,6 +496,7 @@ const DocumentDetails: FC = () => {
       {/* Insert content modal */}
       <InsertModal 
         ref={insertModalRef}
+        isParentChildMode={isParentChildMode}
         onInsert={handleInsertContent}
         onSuccess={handleInsertSuccess}
       />

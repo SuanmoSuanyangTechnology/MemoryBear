@@ -4,7 +4,7 @@ from pydantic import Field, BaseModel, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType, IterationErrorHandleMode
 
 
 class CycleVariable(BaseNodeConfig):
@@ -131,6 +131,11 @@ class IterationNodeConfig(BaseNodeConfig):
     output_type: VariableType = Field(
         default=None,
         description="Data type of the loop iteration output"
+    )
+
+    error_handle_mode: IterationErrorHandleMode = Field(
+        default=IterationErrorHandleMode.TERMINATED,
+        description="Error handling strategy for iteration: terminated, continue-on-error, or remove-abnormal-output"
     )
 
 

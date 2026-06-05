@@ -2,6 +2,7 @@
 
 from app.core.tools.base import BaseTool, ToolResult, ToolParameter
 from app.core.tools.langchain_adapter import LangchainAdapter
+from app.core.tools.serialization import serialize_tool_parameter
 
 # 可选导入，避免导入错误
 try:
@@ -14,11 +15,17 @@ try:
 except ImportError:
     MCPTool = None
 
+try:
+    from .workflow.base import WorkflowAsTool
+except ImportError:
+    WorkflowAsTool = None
+
 __all__ = [
     "BaseTool",
     "ToolResult", 
     "ToolParameter",
-    "LangchainAdapter"
+    "LangchainAdapter",
+    "serialize_tool_parameter",
 ]
 
 # 只有在成功导入时才添加到__all__
@@ -27,3 +34,6 @@ if CustomTool:
 
 if MCPTool:
     __all__.append("MCPTool")
+
+if WorkflowAsTool:
+    __all__.append("WorkflowAsTool")

@@ -146,6 +146,8 @@ celery_app.conf.update(
 
         # Sliding window idle scan → periodic_tasks queue (Beat scheduler)
         'app.tasks.scan_idle_conversations': {'queue': 'periodic_tasks'},
+        'app.tasks.scan_workflow_schedule_triggers': {'queue': 'periodic_tasks'},
+        'app.tasks.run_workflow_schedule_trigger': {'queue': 'workflow_trigger_tasks'},
     },
 )
 
@@ -208,6 +210,12 @@ beat_schedule_config = {
     #     "options": {"queue": "periodic_tasks"},
     # },
     # FIXME: Infinite task accumulation
+
+    "scan-workflow-schedule-triggers": {
+        "task": "app.tasks.scan_workflow_schedule_triggers",
+        "schedule": 60.0,
+        "options": {"queue": "periodic_tasks"},
+    },
 }
 
 celery_app.conf.beat_schedule = beat_schedule_config

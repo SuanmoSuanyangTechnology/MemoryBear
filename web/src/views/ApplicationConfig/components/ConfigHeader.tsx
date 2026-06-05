@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 14:31:02
+ * @Last Modified time: 2026-05-29 17:10:01
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -20,6 +20,7 @@ import CopyModal from './CopyModal'
 import PageHeader from '@/components/Layout/PageHeader'
 import CheckList from '@/views/Workflow/components/CheckList'
 import UploadModal from '@/views/ApplicationManagement/components/UploadModal'
+import SystemVariableModal, { type SystemVariableModalRef } from '@/views/Workflow/components/SystemVariableModal'
 
 /**
  * Tab keys for application configuration
@@ -60,8 +61,6 @@ interface ConfigHeaderProps {
   appRef?: React.RefObject<AgentRef | ClusterRef | WorkflowRef>
   /** Features config from parent state */
   features?: FeaturesConfigForm;
-  /** Callback to update features in parent */
-  onFeaturesChange?: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -79,6 +78,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const copyModalRef = useRef<CopyModalRef>(null);
   const uploadModalRef = useRef<UploadWorkflowModalRef>(null);
+  const systemVariableModalRef = useRef<SystemVariableModalRef>(null);
 
   /**
    * Format tab items for display
@@ -164,7 +164,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   /**
    * Add variable to workflow
    */
-  const addvariable = () => {
+  const addVariable = () => {
     workflowRef?.current?.addVariable()
   }
   /**
@@ -191,7 +191,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         avatarClassName={clsx({
           'rb:bg-[#155EEF]': application?.type === 'agent',
           'rb:bg-[#9C6FFF]!': application?.type === 'multi_agent',
-          'rb:bg-[#171719]': application?.type === 'workflow',
+          'rb:bg-[#171719]': application?.type.includes('workflow'),
         })}
         title={application?.name || ''}
         operation={source !== 'sharing' && <Dropdown
@@ -211,27 +211,39 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             className={styles.tabs}
           />
         </Flex>}
-        extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
+        extra={application?.type.includes('workflow') && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
             <CheckList workflowRef={workflowRef} appId={application?.id ?? ''} />
-            <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={handleFeaturesConfig}
-              ></div>
-            </Popover>
+            {application?.type === 'workflow' &&
+              <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+                <div
+                  className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                  onClick={handleFeaturesConfig}
+                ></div>
+              </Popover>
+            }
             <Popover content={t('workflow.clear')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/clear.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
                 onClick={clear}
               ></div>
             </Popover>
-            <Popover content={t('workflow.addvariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={addvariable}
-              ></div>
-            </Popover>
+            {application?.type === 'workflow' &&
+              <Popover content={t('workflow.addVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+                <div
+                  className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                  onClick={addVariable}
+                ></div>
+              </Popover>
+            }
+            {application?.type === 'pure_workflow' &&
+              <Popover content={t('workflow.systemVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+                <div
+                  className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                  onClick={() => systemVariableModalRef.current?.handleOpen()}
+                ></div>
+              </Popover>
+            }
             <Popover content={t('workflow.run')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/run.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
@@ -271,6 +283,10 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         ref={uploadModalRef}
         refresh={refresh}
         id={id as string}
+      />
+      <SystemVariableModal
+        ref={systemVariableModalRef}
+        appType={application?.type}
       />
     </>
   );

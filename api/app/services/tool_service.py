@@ -13,18 +13,28 @@ from app.core.exceptions import BusinessException
 from app.core.tools.mcp import MCPToolManager, SimpleMCPClient
 from app.repositories.tool_repository import (
     ToolRepository, BuiltinToolRepository, CustomToolRepository,
-    MCPToolRepository, ToolExecutionRepository
+    MCPToolRepository, WorkflowToolRepository, ToolExecutionRepository
 )
-
+from app.models.app_model import App
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
     ToolExecution, ToolType, ToolStatus, ExecutionStatus, AuthType
 )
-from app.schemas.tool_schema import ToolInfo, ToolResult
+from app.schemas.tool_schema import (
+    ToolInfo,
+    ToolResult,
+    ToolDetailSchema,
+    BuiltinToolConfigSchema,
+    CustomToolConfigSchema,
+    MCPToolConfigSchema,
+    WorkflowToolConfigSchema,
+)
 from app.core.logging_config import get_business_logger
 from app.core.tools.base import BaseTool
 from app.core.tools.custom.base import CustomTool
 from app.core.tools.mcp.base import MCPTool
+from app.core.tools.serialization import serialize_tool_parameter
+from app.core.tools.workflow.base import WorkflowAsTool
 
 logger = get_business_logger()
 
@@ -54,6 +64,7 @@ class ToolService:
         self.builtin_repo = BuiltinToolRepository()
         self.custom_repo = CustomToolRepository()
         self.mcp_repo = MCPToolRepository()
+        self.workflow_repo = WorkflowToolRepository()
         self.execution_repo = ToolExecutionRepository()
 
     def list_tools(
@@ -77,10 +88,15 @@ class ToolService:
             logger.error(f"获取工具列表失败: {e}")
             return []
 
-    def get_tool_info(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolInfo]:
-        """获取工具详情"""
+    def get_tool_summary(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolInfo]:
+        """获取工具基础信息"""
         config = self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
         return self._config_to_info(config) if config else None
+
+    def get_tool_detail(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolDetailSchema]:
+        """获取工具详情（包含类型特定配置）"""
+        config = self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
+        return self._config_to_detail(config) if config else None
 
     def _check_name_duplicate(self, name: str, tool_type: ToolType, tenant_id: uuid.UUID, exclude_id: Optional[uuid.UUID] = None):
         """检查工具名称是否重复"""
@@ -305,6 +321,7 @@ class ToolService:
             )
 
             # 执行工具
+            tool.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
             result = await tool.safe_execute(**parameters)
 
             # 记录执行完成
@@ -334,6 +351,8 @@ class ToolService:
                 return await self._test_custom_connection(config)
             elif config.tool_type == ToolType.BUILTIN.value:
                 return await self._test_builtin_connection(config)
+            elif config.tool_type == ToolType.WORKFLOW.value:
+                return {"success": True, "message": "工作流工具无需额外连接测试"}
             else:
                 return {"success": True, "message": "未知工具类型"}
 
@@ -405,6 +424,8 @@ class ToolService:
                 return await self._get_custom_tool_methods(config)
             elif config.tool_type == ToolType.MCP.value:
                 return await self._get_mcp_tool_methods(config)
+            elif config.tool_type == ToolType.WORKFLOW.value:
+                return await self._get_workflow_tool_methods(config)
             else:
                 return []
                 
@@ -465,17 +486,11 @@ class ToolService:
             return self._get_openclaw_tool_params(operation)
         
         # 其他工具的默认处理：返回除operation外的所有参数
-        return [{
-            "name": param.name,
-            "type": param.type.value,
-            "description": param.description,
-            "required": param.required,
-            "default": param.default,
-            "enum": param.enum,
-            "minimum": param.minimum,
-            "maximum": param.maximum,
-            "pattern": param.pattern
-        } for param in tool_instance.parameters if param.name != "operation"]
+        return [
+            serialize_tool_parameter(param)
+            for param in tool_instance.parameters
+            if param.name != "operation"
+        ]
     
     def _get_datetime_tool_params(self, operation: str) -> List[Dict[str, Any]]:
         """获取datetime_tool特定操作的参数"""
@@ -992,6 +1007,8 @@ class ToolService:
             return self._create_custom_instance(config)
         elif config.tool_type == ToolType.MCP.value:
             return self._create_mcp_instance(config)
+        elif config.tool_type == ToolType.WORKFLOW.value:
+            return self._create_workflow_instance(config)
         return None
 
     def _create_builtin_instance(self, config: ToolConfig) -> Optional[BaseTool]:
@@ -1049,6 +1066,25 @@ class ToolService:
 
         return MCPTool(str(config.id), tool_config)
 
+    def _create_workflow_instance(self, config: ToolConfig) -> Optional[WorkflowAsTool]:
+        """创建工作流工具实例"""
+        workflow_config = self.workflow_repo.find_by_tool_id(self.db, config.id)
+
+        if not workflow_config:
+            return None
+
+        return WorkflowAsTool(
+            db=self.db,
+            tool_id=str(config.id),
+            workflow_app_id=workflow_config.app_id,
+            release_id=workflow_config.release_id,
+            tool_name=config.name,
+            tool_description=config.description or "",
+            input_parameters=workflow_config.input_parameters or [],
+            output_schema=workflow_config.output_schema or {},
+            timeout=workflow_config.timeout or 300,
+        )
+
     def _config_to_info(self, config: ToolConfig) -> ToolInfo:
         """配置转换为信息对象"""
         config_data = config.config_data or {}
@@ -1074,6 +1110,17 @@ class ToolService:
                     "market_config_id": mcp_config.market_config_id,
                     "mcp_service_id": mcp_config.mcp_service_id
                 })
+        elif config.tool_type == ToolType.WORKFLOW.value:
+            workflow_config = self.workflow_repo.find_by_tool_id(self.db, config.id)
+            if workflow_config:
+                config_data.update({
+                    "app_id": str(workflow_config.app_id),
+                    "workflow_config_id": str(workflow_config.workflow_config_id),
+                    "release_id": str(workflow_config.release_id) if workflow_config.release_id else None,
+                    "input_parameters": workflow_config.input_parameters or [],
+                    "output_schema": workflow_config.output_schema or {},
+                    "timeout": workflow_config.timeout or 300,
+                })
         
         return ToolInfo(
             id=str(config.id),
@@ -1089,6 +1136,107 @@ class ToolService:
             is_active=config.is_active,
             created_at=config.created_at
         )
+
+    def _config_to_detail(self, config: ToolConfig) -> ToolDetailSchema:
+        """配置转换为详情对象。"""
+        info = self._config_to_info(config)
+        detail_data = info.model_dump()
+        detail_data["updated_at"] = config.updated_at or config.created_at
+
+        builtin_config = None
+        custom_config = None
+        mcp_config = None
+        workflow_config = None
+
+        if config.tool_type == ToolType.BUILTIN.value:
+            cfg = self.builtin_repo.find_by_tool_id(self.db, config.id)
+            if cfg:
+                builtin_config = BuiltinToolConfigSchema.model_validate(cfg)
+        elif config.tool_type == ToolType.CUSTOM.value:
+            cfg = self.custom_repo.find_by_tool_id(self.db, config.id)
+            if cfg:
+                custom_config = CustomToolConfigSchema.model_validate(cfg)
+        elif config.tool_type == ToolType.MCP.value:
+            cfg = self.mcp_repo.find_by_tool_id(self.db, config.id)
+            if cfg:
+                mcp_config = MCPToolConfigSchema.model_validate({
+                    "server_url": cfg.server_url,
+                    "connection_config": cfg.connection_config or {},
+                    "last_health_check": cfg.last_health_check,
+                    "health_status": cfg.health_status,
+                    "error_message": cfg.error_message,
+                    "available_tools": cfg.available_tools or [],
+                    "source_channel": cfg.source_channel,
+                    "market_id": str(cfg.market_id) if cfg.market_id else None,
+                    "market_config_id": str(cfg.market_config_id) if cfg.market_config_id else None,
+                    "mcp_service_id": cfg.mcp_service_id,
+                })
+        elif config.tool_type == ToolType.WORKFLOW.value:
+            cfg = self.workflow_repo.find_by_tool_id(self.db, config.id)
+            if cfg:
+                workspace_id = None
+                app = self.db.query(App).filter(App.id == cfg.app_id).first()
+                if app:
+                    workspace_id = str(app.workspace_id)
+                workflow_config = WorkflowToolConfigSchema.model_validate({
+                    "app_id": str(cfg.app_id),
+                    "workflow_config_id": str(cfg.workflow_config_id),
+                    "release_id": str(cfg.release_id) if cfg.release_id else None,
+                    "input_parameters": cfg.input_parameters or [],
+                    "output_schema": cfg.output_schema or {},
+                    "timeout": cfg.timeout or 300,
+                    "workspace_id": workspace_id,
+                })
+
+        detail_data.update({
+            "builtin_config": builtin_config,
+            "custom_config": custom_config,
+            "mcp_config": mcp_config,
+            "workflow_config": workflow_config,
+        })
+        detail_data["config_data"] = self._strip_type_specific_config_data_for_detail(
+            config.tool_type,
+            detail_data.get("config_data", {}),
+        )
+        return ToolDetailSchema.model_validate(detail_data)
+
+    @staticmethod
+    def _strip_type_specific_config_data_for_detail(
+        tool_type: str,
+        config_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """在详情返回中去掉已由类型配置承载的重复字段。"""
+        if not config_data:
+            return {}
+
+        duplicate_fields_map = {
+            ToolType.BUILTIN.value: {"tool_class", "requires_config", "is_enabled", "parameters"},
+            ToolType.CUSTOM.value: {"base_url", "auth_type", "auth_config", "timeout", "schema_content", "schema_url"},
+            ToolType.MCP.value: {
+                "last_health_check", "health_status", "available_tools",
+                "source_channel", "market_id", "market_config_id", "mcp_service_id",
+                "server_url", "connection_config", "error_message",
+            },
+            ToolType.WORKFLOW.value: {
+                "app_id", "workflow_config_id", "release_id", "input_parameters", "output_schema", "timeout",
+                "workspace_id"
+            },
+        }
+        duplicate_fields = duplicate_fields_map.get(tool_type, set())
+        return {k: v for k, v in config_data.items() if k not in duplicate_fields}
+
+    async def _get_workflow_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
+        """获取工作流工具的方法列表。"""
+        tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
+        if not tool_instance:
+            return []
+
+        return [{
+            "method_id": config.name,
+            "name": config.name,
+            "description": config.description,
+            "parameters": [serialize_tool_parameter(param) for param in tool_instance.parameters]
+        }]
 
     def _create_type_config(self, tool_config: ToolConfig, config: Dict[str, Any]):
         """创建类型特定配置"""

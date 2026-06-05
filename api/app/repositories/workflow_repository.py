@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, select
 from fastapi import Depends
 
+from app.core.workflow.nodes.enums import NodeType
 from app.models.workflow_model import (
     WorkflowConfig,
     WorkflowExecution,
@@ -35,6 +36,11 @@ class WorkflowConfigRepository:
             WorkflowConfig.app_id == app_id,
             WorkflowConfig.is_active.is_(True)
         ).first()
+
+    def list_active(self) -> list[WorkflowConfig]:
+        """获取所有启用中的工作流配置。"""
+        stmt = select(WorkflowConfig).where(WorkflowConfig.is_active.is_(True))
+        return list(self.db.execute(stmt).scalars())
     
     def create_or_update(
         self,
@@ -44,7 +50,8 @@ class WorkflowConfigRepository:
         variables: list[dict[str, Any]] | None = None,
         execution_config: dict[str, Any] | None = None,
         features: dict[str, Any] | None = None,
-        triggers: list[dict[str, Any]] | None = None
+        triggers: list[dict[str, Any]] | None = None,
+        workflow_type: str = "workflow"
     ) -> WorkflowConfig:
         """创建或更新工作流配置
         
@@ -56,6 +63,7 @@ class WorkflowConfigRepository:
             execution_config: 执行配置
             features: 功能特性
             triggers: 触发器列表
+            workflow_type: 工作流类型
         
         Returns:
             工作流配置
@@ -67,12 +75,15 @@ class WorkflowConfigRepository:
             # 更新现有配置
             existing.nodes = nodes
             existing.edges = edges
+            existing.workflow_type = workflow_type
             if variables is not None:
                 existing.variables = variables
             if execution_config is not None:
                 existing.execution_config = execution_config
             if triggers is not None:
                 existing.triggers = triggers
+            if features is not None:
+                existing.features = features
             self.db.commit()
             self.db.refresh(existing)
             return existing
@@ -85,12 +96,40 @@ class WorkflowConfigRepository:
                 variables=variables or [],
                 execution_config=execution_config or {},
                 features=features or {},
-                triggers=triggers or []
+                triggers=triggers or [],
+                workflow_type=workflow_type
             )
             self.db.add(config)
             self.db.commit()
             self.db.refresh(config)
             return config
+
+    def update_trigger_runtime(
+        self,
+        app_id: uuid.UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> WorkflowConfig | None:
+        """更新指定触发器的运行时状态。"""
+        config = self.get_by_app_id(app_id)
+        if not config:
+            return None
+
+        nodes = list(config.nodes or [])
+        updated = False
+        for node in nodes:
+            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
+                node["runtime"] = runtime
+                updated = True
+                break
+
+        if not updated:
+            return None
+
+        config.nodes = nodes
+        self.db.commit()
+        self.db.refresh(config)
+        return config
 
 
 class WorkflowExecutionRepository:

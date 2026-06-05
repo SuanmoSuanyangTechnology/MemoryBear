@@ -45,7 +45,13 @@ class EventStreamHandler:
         """
         for node_id in data.keys():
             if activate.get(node_id):
-                node_output_status = self.variable_pool.get_value(f"{node_id}.output", default=None, strict=False)
+                # For branch nodes (LLM, CODE), use branch_signal as status;
+                # for other nodes, use output
+                node_output_status = self.variable_pool.get_value(
+                    f"{node_id}.branch_signal", default=None, strict=False
+                ) or self.variable_pool.get_value(
+                    f"{node_id}.output", default=None, strict=False
+                )
                 self.coordinator.update_scope_activation(node_id, status=node_output_status)
 
     async def handle_updates_event(

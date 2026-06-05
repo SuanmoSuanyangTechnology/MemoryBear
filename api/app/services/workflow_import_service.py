@@ -87,20 +87,24 @@ class WorkflowImportService:
         if config is None:
             raise BusinessException("Configuration import timed out. Please try again.")
         config = json.loads(config)
-        unique_name = self.app_service._unique_app_name(name, workspace_id, AppType.WORKFLOW)
+        unique_name = self.app_service._unique_app_name(
+            name, workspace_id, config.get("workflow_type", AppType.WORKFLOW)
+        )
         app = self.app_service.create_app(
             user_id=user_id,
             workspace_id=workspace_id,
             data=AppCreate(
                 name=unique_name,
                 description=description,
-                type="workflow",
+                type=config.get("workflow_type", AppType.WORKFLOW),
                 workflow_config=WorkflowConfigCreate(
                     nodes=config["nodes"],
                     edges=config["edges"],
                     variables=config["variables"],
-                    features=config.get("features", {})
+                    features=config.get("features", {}),
+                    workflow_type=config.get("workflow_type", "workflow")
                 )
             )
         )
+
         return app

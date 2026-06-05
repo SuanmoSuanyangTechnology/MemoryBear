@@ -62,9 +62,9 @@ class MemorySearchResult(BaseModel):
             parts.append(self.content_str)
         else:
             parts.append("\n".join([memory.content for memory in self.memories]))
-        if self.relations:
-            from app.core.memory.read_services.search_engine.result_builder import build_relation_content
-            parts.append("\n".join([build_relation_content(rel) for rel in self.relations]))
+            if self.relations:
+                from app.core.memory.read_services.search_engine.result_builder import build_relation_content
+                parts.append("\n".join([build_relation_content(rel) for rel in self.relations]))
         return "\n".join(parts)
 
     @computed_field

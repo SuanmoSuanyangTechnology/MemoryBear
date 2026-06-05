@@ -115,6 +115,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "last_access_time": statement.last_access_time,
                 "access_count": statement.access_count,
                 "dialog_at": statement.dialog_at.isoformat() if statement.dialog_at else None,
+                "has_unsolved_reference": getattr(statement, "has_unsolved_reference", False),
             }
             flattened_statements.append(flattened_statement)
 

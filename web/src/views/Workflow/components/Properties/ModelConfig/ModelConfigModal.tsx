@@ -47,7 +47,7 @@ export const fieldConfigs: Record<string, any> = {
     max: 32000, 
     min: 256, 
     step: 1, 
-    defaultValue: 2000 
+    defaultValue: 8000 
   },
   json_output: {
     type: 'switch',

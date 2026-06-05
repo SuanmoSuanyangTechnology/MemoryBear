@@ -3,6 +3,8 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Coroutine
 
+import numpy as np
+
 from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.llm_tools import OpenAIEmbedderClient
 from app.core.memory.utils.data.text_utils import escape_lucene_query
@@ -26,11 +28,40 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_USER_METADATA,
     SEARCH_ENITITES_BY_RELATIONSHIP,
     SEARCH_RELATION_BETWEEN_ENTITIES,
-    SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS,
+    SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS, SEARCH_PERCEPTUAL_BY_USER_ID, SEARCH_PERCEPTUAL_BY_IDS,
+    USER_ID_QUERY_CYPHER_MAPPING,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
+
+
+def cosine_similarity_search(
+        query: list[float],
+        vectors: list[list[float]],
+        limit: int
+) -> dict[int, float]:
+    if not vectors:
+        return {}
+    vectors: np.ndarray = np.array(vectors, dtype=np.float32)
+    vectors_norm = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+    query: np.ndarray = np.array(query, dtype=np.float32)
+    norm = np.linalg.norm(query)
+    if norm == 0:
+        return {}
+    query_norm = query / norm
+
+    similarities = vectors_norm @ query_norm
+    similarities = np.clip(similarities, 0, 1)
+    top_k = min(limit, similarities.shape[0])
+    if top_k <= 0:
+        return {}
+    top_indices = np.argpartition(-similarities, top_k - 1)[:top_k]
+    top_indices = top_indices[np.argsort(-similarities[top_indices])]
+    result = {}
+    for idx in top_indices:
+        result[idx] = float(similarities[idx])
+    return result
 
 
 async def _update_activation_values_batch(
@@ -260,19 +291,45 @@ async def search_perceptual_by_embedding(
         end_user_id: Optional[str] = None,
         limit: int = 10,
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """Search Perceptual nodes using gds.similarity.cosine in Cypher."""
+    """
+    Search Perceptual memory nodes using embedding-based semantic search.
+
+    Uses cosine similarity on summary_embedding via the perceptual_summary_embedding_index.
+
+    Args:
+        connector: Neo4j connector
+        embedder_client: Embedding client with async response() method
+        query_text: Query text to embed
+        end_user_id: Optional user filter
+        limit: Max results
+
+    Returns:
+        Dictionary with 'perceptuals' key containing matched perceptual memory nodes
+    """
     embeddings = await embedder_client.response([query_text])
     if not embeddings or not embeddings[0]:
         logger.warning(f"search_perceptual_by_embedding: embedding generation failed for '{query_text[:50]}'")
         return {"perceptuals": []}
 
+    embedding = embeddings[0]
     try:
         perceptuals = await connector.execute_query(
-            COSINE_SEARCH_CYPHER_MAPPING[Neo4jNodeType.PERCEPTUAL],
+            SEARCH_PERCEPTUAL_BY_USER_ID,
             end_user_id=end_user_id,
-            embedding=embeddings[0],
-            limit=limit,
         )
+        ids = [item['id'] for item in perceptuals]
+        vectors = [item['summary_embedding'] for item in perceptuals]
+        sim_res = cosine_similarity_search(embedding, vectors, limit=limit)
+        perceptual_res = {
+            ids[idx]: score
+            for idx, score in sim_res.items()
+        }
+        perceptuals = await connector.execute_query(
+            SEARCH_PERCEPTUAL_BY_IDS,
+            ids=list(perceptual_res.keys())
+        )
+        for perceptual in perceptuals:
+            perceptual["score"] = perceptual_res[perceptual["id"]]
     except Exception as e:
         logger.warning(f"search_perceptual_by_embedding: vector search failed: {e}")
         perceptuals = []
@@ -310,11 +367,24 @@ async def search_by_embedding(
     """Cosine similarity search using gds.similarity.cosine in Cypher, single query."""
     try:
         records = await connector.execute_query(
-            COSINE_SEARCH_CYPHER_MAPPING[node_type],
+            USER_ID_QUERY_CYPHER_MAPPING[node_type],
             end_user_id=end_user_id,
-            embedding=query_embedding,
-            limit=limit,
         )
+        records = [record for record in records if record and record.get("embedding") is not None]
+        ids = [item['id'] for item in records]
+        vectors = [item['embedding'] for item in records]
+        sim_res = cosine_similarity_search(query_embedding, vectors, limit=limit)
+        records_score_map = {
+            ids[idx]: score
+            for idx, score in sim_res.items()
+        }
+        records = await connector.execute_query(
+            NODE_ID_QUERY_CYPHER_MAPPING[node_type],
+            ids=list(records_score_map.keys()),
+            json_format=True
+        )
+        for record in records:
+            record["score"] = records_score_map[record["id"]]
     except Exception as e:
         logger.warning(f"search_by_embedding: vector search failed: {e}, node_type:{node_type.value}",
                        exc_info=True)

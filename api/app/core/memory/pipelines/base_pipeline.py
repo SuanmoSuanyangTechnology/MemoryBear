@@ -5,8 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.memory.models.service_models import MemoryContext
-from app.core.models import RedBearModelConfig, RedBearLLM, RedBearEmbeddings
-from app.services.memory_config_service import MemoryConfigService
+from app.core.models import RedBearModelConfig, RedBearLLM, RedBearEmbeddings, RedBearRerank
 from app.services.model_service import ModelApiKeyService
 
 
@@ -26,14 +25,25 @@ class ModelClientMixin(ABC):
 
     @staticmethod
     def get_embedding_client(db: Session, model_id: uuid.UUID) -> RedBearEmbeddings:
-        config_service = MemoryConfigService(db)
-        embedder_client_config = config_service.get_embedder_config(str(model_id))
+        api_config = ModelApiKeyService.get_available_api_key(db, model_id)
         return RedBearEmbeddings(
             RedBearModelConfig(
-                model_name=embedder_client_config["model_name"],
-                provider=embedder_client_config["provider"],
-                api_key=embedder_client_config["api_key"],
-                base_url=embedder_client_config["base_url"],
+                model_name=api_config.model_name,
+                provider=api_config.provider,
+                api_key=api_config.api_key,
+                base_url=api_config.api_base,
+            )
+        )
+
+    @staticmethod
+    def get_rerank_client(db: Session, model_id: uuid.UUID) -> RedBearRerank:
+        api_config = ModelApiKeyService.get_available_api_key(db, model_id)
+        return RedBearRerank(
+            RedBearModelConfig(
+                model_name=api_config.model_name,
+                provider=api_config.provider,
+                api_key=api_config.api_key,
+                base_url=api_config.api_base,
             )
         )
 

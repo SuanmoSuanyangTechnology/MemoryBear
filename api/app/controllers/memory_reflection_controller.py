@@ -43,7 +43,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.utils.config_utils import resolve_config_id
-
+from typing import Optional
+from fastapi import Query, Path
+from app.repositories.reflection_log_repository import ReflectionLogRepository
+from app.schemas.memory_reflection_schemas import (
+    ReflectionLogListItem,
+    ReflectionLogDetail,
+    SubProblemEnum,
+    TriggerTypeEnum,
+    LogStatusEnum,
+)
+from app.core.response_utils import fail
+from app.core.error_codes import BizCode
+from app.models.end_user_model import EndUser
 # Load environment variables for configuration
 load_dotenv()
 
@@ -56,6 +68,132 @@ router = APIRouter(
     tags=["Memory"],
 )
 
+@router.get("/reflection/logs/stats")
+def get_reflection_log_stats(
+    end_user_id: str = Query(..., description="终端用户ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取反思日志统计概览
+
+    返回该用户的日志总数、各子问题数量、各状态数量和处理率。
+    用于顶部子问题卡片和统计面板。
+    """
+    try:
+        end_user_uuid = uuid.UUID(end_user_id)
+    except (ValueError, AttributeError):
+        return fail(BizCode.INVALID_PARAMETER, "请求参数无效", "无效的终端用户ID格式")
+
+    api_logger.info(f"用户 {current_user.username} 查询反思日志统计: end_user_id={end_user_id}")
+
+    try:
+        # 校验终端用户是否存在
+        from app.repositories.end_user_repository import EndUserRepository
+        end_user_repo = EndUserRepository(db)
+        end_user = end_user_repo.get_end_user_by_id(end_user_uuid)
+        if end_user is None:
+            return fail(BizCode.USER_NOT_FOUND, f"终端用户不存在: {end_user_id}", "end_user not found")
+
+        repo = ReflectionLogRepository(db)
+        stats = repo.get_stats(end_user_id)
+        return success(data=stats, msg="反思日志统计获取成功")
+    except Exception as e:
+        api_logger.error(f"查询反思日志统计失败: end_user_id={end_user_id}, error={e}")
+        return fail(BizCode.INTERNAL_ERROR, "查询统计失败", str(e))
+
+
+@router.get("/reflection/logs/{log_id}")
+def get_reflection_log_detail(
+    log_id: str = Path(..., description="日志ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取反思日志详情
+
+    返回单条日志的完整信息，包含 trigger_detail、solution_detail、execution_detail。
+    前端根据 sub_problem 字段条件渲染 trigger_detail 区域。
+    """
+    try:
+        uuid.UUID(log_id)
+    except (ValueError, AttributeError):
+        return fail(BizCode.INVALID_PARAMETER, "请求参数无效", "无效的日志ID格式")
+
+    api_logger.info(f"用户 {current_user.username} 查询反思日志详情: log_id={log_id}")
+
+    try:
+        repo = ReflectionLogRepository(db)
+        log = repo.get_by_id(log_id)
+        if not log:
+            return fail(BizCode.NOT_FOUND, "日志不存在")
+        detail = ReflectionLogDetail.model_validate(log)
+        return success(data=detail.model_dump(mode="json"), msg="反思日志详情获取成功")
+    except Exception as e:
+        api_logger.error(f"查询反思日志详情失败: log_id={log_id}, error={e}")
+        return fail(BizCode.INTERNAL_ERROR, "查询详情失败", str(e))
+
+
+@router.get("/reflection/logs")
+def get_reflection_logs(
+    end_user_id: str = Query(..., description="终端用户ID"),
+    sub_problem: Optional[SubProblemEnum] = Query(None, description="子问题类型筛选"),
+    status: Optional[LogStatusEnum] = Query(None, description="状态筛选"),
+    trigger_type: Optional[TriggerTypeEnum] = Query(None, description="触发方式筛选"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取反思日志列表（分页）
+
+    支持按 sub_problem、status、trigger_type 筛选。
+    按 created_at 倒序排列。
+    """
+    try:
+        end_user_uuid = uuid.UUID(end_user_id)
+    except (ValueError, AttributeError):
+        return fail(BizCode.INVALID_PARAMETER, "请求参数无效", "无效的终端用户ID格式")
+
+    api_logger.info(
+        f"用户 {current_user.username} 查询反思日志列表: "
+        f"end_user_id={end_user_id}, sub_problem={sub_problem}, "
+        f"status={status}, page={page}, pagesize={pagesize}"
+    )
+
+    try:
+        # 校验终端用户是否存在
+        from app.repositories.end_user_repository import EndUserRepository
+        end_user_repo = EndUserRepository(db)
+        end_user = end_user_repo.get_end_user_by_id(end_user_uuid)
+        if end_user is None:
+            return fail(BizCode.USER_NOT_FOUND, f"终端用户不存在: {end_user_id}", "end_user not found")
+
+        repo = ReflectionLogRepository(db)
+        total, items = repo.get_paginated(
+            end_user_id=end_user_id,
+            page=page,
+            pagesize=pagesize,
+            sub_problem=sub_problem.value if sub_problem else None,
+            status=status.value if status else None,
+            trigger_type=trigger_type.value if trigger_type else None,
+        )
+
+        data_items = [
+            ReflectionLogListItem.model_validate(log).model_dump(mode="json")
+            for log in items
+        ]
+
+        return success(data={
+            "items": data_items,
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": total,
+                "hasnext": (page * pagesize) < total,
+            },
+        }, msg="反思日志列表获取成功")
+    except Exception as e:
+        api_logger.error(f"查询反思日志列表失败: end_user_id={end_user_id}, error={e}")
+        return fail(BizCode.INTERNAL_ERROR, "查询日志列表失败", str(e))
 
 @router.post("/reflection/save")
 async def save_reflection_config(

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 18:17:00
+ * @Last Modified time: 2026-05-28 14:57:30
  */
 /**
  * useVariableList Hook
@@ -19,6 +19,36 @@ import { Graph, Node } from '@antv/x6';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import type { ChatVariable } from '../../../types';
 
+export const sysVariable = [
+  { name: "message", type: "string",
+    readonly: true
+  },
+  {
+    name: "conversation_id",
+    type: "string",
+    readonly: true
+  },
+  {
+    name: "execution_id",
+    type: "string",
+    readonly: true
+  },
+  {
+    name: "workspace_id",
+    type: "string",
+    readonly: true
+  },
+  {
+    name: "user_id",
+    type: "string",
+    readonly: true
+  },
+  {
+    name: "files",
+    type: "array[file]",
+    readonly: true
+  },
+]
 export const fileSubVariable = [
   { label: 'type', dataType: 'string', filed: 'type' },
   { label: 'size', dataType: 'number', filed: 'size' },
@@ -42,7 +72,7 @@ const NODE_VARIABLES = {
   ],
   'jinja-render': [{ label: 'output', dataType: 'string', field: 'output' }],
   tool: [{ label: 'data', dataType: 'string', field: 'data' }],
-  'knowledge-retrieval': [{ label: 'output', dataType: 'array[object]', field: 'output' }],
+  'knowledge-retrieval': [{ label: 'output', dataType: 'array[string]', field: 'output' }],
   'parameter-extractor': [
     { label: '__is_success', dataType: 'number', field: '__is_success' },
     { label: '__reason', dataType: 'string', field: '__reason' }
@@ -173,10 +203,6 @@ const processNodeVariables = (
             v.defaultValue ?? v.default,
           );
         }
-      });
-      // Add system variables
-      config?.variables?.sys?.forEach((v: any) => {
-        if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_sys_${v.name}`, `sys.${v.name}`, v.type, `sys.${v.name}`, nodeData);
       });
       break;
 
@@ -365,7 +391,8 @@ export const getChildNodeVariables = (
 export const useVariableList = (
   selectedNode: Node | null | undefined,
   graphRef: React.MutableRefObject<Graph | undefined>,
-  chatVariables: ChatVariable[]
+  chatVariables: ChatVariable[],
+  appType?: string
 ) => {
   const [trigger, setTrigger] = useState(0);
 
@@ -411,6 +438,12 @@ export const useVariableList = (
     const parentLoop = getParentLoop(selectedNode.id);
     const relevantIds = [...getPreviousNodes(selectedNode.id), ...childIds, ...(parentLoop ? getPreviousNodes(parentLoop.id) : [])];
 
+    // Add system variables
+    sysVariable.forEach((v: any) => {
+        if (v?.name && !(appType === 'pure_workflow' && v.name === 'message')) {
+          addVariable(list, keys, `sys_${v.name}`, `sys.${v.name}`, v.type, `sys.${v.name}`, { type: 'SYSTEM', name: 'SYSTEM', icon: '' }, { group: 'SYSTEM' });
+        }
+      });
     // Add chat variables
     chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }, v.defaultValue ?? v.default));
 
@@ -450,7 +483,7 @@ export const useVariableList = (
     }
 
     return list;
-  }, [selectedNode, graphRef, trigger, chatVariables]);
+  }, [selectedNode, graphRef, trigger, chatVariables, appType]);
 
   // Refresh variable list when graph changes
   useEffect(() => {

@@ -2,14 +2,17 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:38:06
+ * @Last Modified time: 2026-06-01 15:06:07
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
+import dayjs from 'dayjs';
 
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
+import { filterNodeByAppType } from '../utils';
+import type { Application } from '@/views/ApplicationManagement/types'
 
 
 // Shared helper: adjust loop/iteration container size to fit child nodes
@@ -46,9 +49,10 @@ export const adjustCycleContainerSize = (graph: any, cycleId: string) => {
 
 interface PortClickHandlerProps {
   graph: any;
+  nodeClick: ({ node }: { node: any }) => void;
+  appType?: Application['type'];
 }
-
-const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
+const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, appType }) => {
   const { t } = useTranslation();
   const [popoverVisible, setPopoverVisible] = useState(false);
   const [sourceNode, setSourceNode] = useState<any>(null);
@@ -84,6 +88,11 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     const isCycleSubNode = !!sourceNodeData.cycle;
     const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
     const newNodeType = selectedNodeType.type;
+
+    if (selectedNodeType.type === 'trigger' && selectedNodeType.config?.time) {
+      selectedNodeType.config.time.defaultValue = dayjs(selectedNodeType.config.time.defaultValue, 'h:mm A')
+    }
+
 
     // Save add-node placeholder position before disabling history
 
@@ -333,6 +342,8 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       addedCells.forEach(c => { if (c.isNode?.()) c.toFront(); });
     }
 
+    nodeClick({ node: newNode });
+
     // Re-enable history and manually push one batch frame for all added cells
     graph.enableHistory();
     const history = graph.getPlugin('history') as any;
@@ -378,6 +389,8 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
             nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
         }
+
+        filteredNodes = filteredNodes.filter(nodeType => filterNodeByAppType(nodeType, appType));
         
         if (filteredNodes.length === 0) return null;
         
@@ -415,6 +428,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       onOpenChange={(visible) => {
         if (!visible) handlePopoverClose();
       }}
+      trigger="click"
       placement="right"
       autoAdjustOverflow
       getPopupContainer={() => document.body}

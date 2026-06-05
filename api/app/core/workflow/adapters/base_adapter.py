@@ -37,6 +37,7 @@ class WorkflowParserResult(BaseModel):
     execution_config: ExecutionConfig
     origin_config: dict[str, Any]
     trigger: TriggerConfig | None
+    workflow_type: str = Field(default="workflow", description="target workflow type")
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
@@ -49,6 +50,7 @@ class WorkflowImportResult(BaseModel):
     success: bool
     temp_id: str | None = Field(..., description="cache id")
     workflow_id: str | None = Field(..., description="workflow id")
+    workflow_type: str = Field(default="workflow", description="target workflow type")
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)

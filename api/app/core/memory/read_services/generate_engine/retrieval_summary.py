@@ -9,16 +9,21 @@ logger = logging.getLogger(__name__)
 
 class RetrievalSummaryProcessor:
     @staticmethod
-    async def summary(query, content: str, llm_client: RedBearLLM):
+    async def summary(query, content: str, memory_l0_str: str, llm_client: RedBearLLM):
         system_prompt = prompt_manager.render(
             name="retrieval_summary"
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"<query>{query}</query><content>{content}</content>"},
+            {"role": "user",
+             "content": f"<query>{query}</query>"
+                        f"<content>{content}{memory_l0_str}</content>"},
         ]
         try:
-            summary = await llm_client.ainvoke(messages) | StructResponse(mode='str')
+            summary = await llm_client.ainvoke(
+                messages,
+                config={"callbacks": []}
+            ) | StructResponse(mode='str')
             return summary
         except:
             logger.error("Failed to generate reply summary, returning original content", exc_info=True)

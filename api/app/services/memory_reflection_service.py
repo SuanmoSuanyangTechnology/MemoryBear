@@ -88,7 +88,7 @@ class WorkspaceAppService:
         processed_configs: Set[str] = set()
         
         for release in app_releases:
-            memory_content = self._extract_memory_content(release.config)
+            memory_content = self._extract_memory_content(release.config, app.type)
             if memory_content and memory_content in processed_configs:
                 continue
 
@@ -107,12 +107,38 @@ class WorkspaceAppService:
 
             app_info["releases"].append(release_info)
 
-    def _extract_memory_content(self, config: Any) -> str:
-        """Extract memory_config_id from config (兼容新旧字段名)"""
-        if not config or not isinstance(config, dict):
+    def _extract_memory_content(self, release_config: Any, app_type: Optional[str] = None) -> Optional[str]:
+        """Extract memory_config_id from release config（类型感知）
+
+        - agent 应用：读取顶层 release_config.memory.memory_config_id
+        - workflow / pure_workflow 应用：扫描 release_config.nodes 中的记忆节点
+
+        复用 MemoryConfigService.extract_memory_config_id，按 app_type 分派；
+        若 app_type 缺失或解析失败，回退到旧的 agent 顶层 memory 结构。
+
+        Args:
+            release_config: 发布配置字典（app_releases.config）
+            app_type: 应用类型（agent / workflow / pure_workflow / multi_agent）
+
+        Returns:
+            memory_config_id 字符串，不存在时返回 None
+        """
+        if not release_config or not isinstance(release_config, dict):
             return None
 
-        memory_obj = config.get('memory')
+        if app_type:
+            from app.services.memory_config_service import MemoryConfigService
+            try:
+                config_id, _is_legacy = MemoryConfigService(self.db).extract_memory_config_id(app_type, release_config)
+                if config_id:
+                    return str(config_id)
+            except Exception as e:
+                api_logger.warning(
+                    f"提取 memory_config_id 失败，app_type: {app_type}, 错误: {str(e)}"
+                )
+
+        # 回退：兼容旧 agent 结构（顶层 memory 对象）
+        memory_obj = release_config.get('memory')
         if memory_obj and isinstance(memory_obj, dict):
             # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
             return memory_obj.get('memory_config_id') or memory_obj.get('memory_content')
@@ -160,8 +186,8 @@ class WorkspaceAppService:
                 "app_id": str(end_user.app_id)
             }
             app_info["end_users"].append(end_user_info)
-        print(100*'-')
-        print(app_info)
+        # print(100*'-')
+        # print(app_info)
 
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """

@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 17:02:08
+ * @Last Modified time: 2026-06-01 12:29:17
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
+
 import AddNode from './components/Nodes/AddNode';
 import ConditionNode from './components/Nodes/ConditionNode';
 import GroupStartNode from './components/Nodes/GroupStartNode';
@@ -48,40 +49,44 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           variables: {
             type: 'define',
-            sys: [
-              {
-                name: "message",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "conversation_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "execution_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "workspace_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "user_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "files",
-                type: "array[file]",
-                readonly: true
-              },
-            ],
             defaultValue: []
           }
+        }
+      },
+      { type: "trigger", icon: 'rb:bg-[url("@/assets/images/workflow/trigger.svg")]',
+        config: {
+          trigger_type: {
+            type: 'define',
+            required: true,
+          },
+          cron: {
+            type: 'define',
+            required: true,
+          },
+          enabled: {
+            type: 'define',
+            defaultValue: true
+          },
+          // frequency: {
+          //   type: 'define',
+          //   defaultValue: 'daily'
+          // },
+          // minute: {
+          //   type: 'define',
+          //   defaultValue: 0,
+          // },
+          // time: {
+          //   type: 'define',
+          //   defaultValue: '12:00 AM',
+          // },
+          // week_days: {
+          //   type: 'define',
+          //   defaultValue: []
+          // },
+          // month_days: {
+          //   type: 'define',
+          //   defaultValue: []
+          // },
         }
       },
       { type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
@@ -123,7 +128,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           max_tokens: { 
             type: 'define',
-            defaultValue: 2000 
+            defaultValue: 8000 
           },
           json_output: {
             type: 'define',
@@ -433,6 +438,14 @@ export const nodeLibrary: NodeLibrary[] = [
             filterNodeTypes: ['start', 'knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
             // filterVariableNames: ['message']
           },
+          output_type: {
+            type: 'define',
+          },
+          output: {
+            type: 'variableList',
+            required: true,
+            filterChildNodes: true
+          },
           parallel: {
             type: 'switch',
             defaultValue: false
@@ -446,18 +459,20 @@ export const nodeLibrary: NodeLibrary[] = [
             dependsOn: 'parallel',
             dependsOnValue: true
           },
+          error_handle_mode: {
+            type: 'select',
+            defaultValue: 'terminated',
+            needTranslation: true,
+            options: [
+              { label: 'workflow.config.iteration.terminated', value: 'terminated' },
+              { label: 'workflow.config.iteration.continue-on-error', value: 'continue-on-error' },
+              { label: 'workflow.config.iteration.remove-abnormal-output', value: 'remove-abnormal-output' },
+            ],
+          },
           flatten: { // Flatten output
             type: 'switch',
             defaultValue: false
           },
-          output: {
-            type: 'variableList',
-            required: true,
-            filterChildNodes: true
-          },
-          output_type: {
-            type: 'define',
-          }
         },
       },
       { type: "loop", icon: 'rb:bg-[url("@/assets/images/workflow/loop.svg")]',
@@ -616,6 +631,20 @@ export const nodeLibrary: NodeLibrary[] = [
             required: true,
             defaultValue: [{name: 'result', type: 'string'}]
           },
+          retry: {
+            type: 'retry',
+            defaultValue: {
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 1000,
+            }
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
+          }
         }
       },
       { type: "jinja-render", icon: 'rb:bg-[url("@/assets/images/workflow/template_rendering.svg")]',
@@ -969,6 +998,15 @@ export const defaultPortItems = [
  * Maps node types to their visual and structural properties
  */
 export const graphNodeLibrary: Record<string, NodeConfig> = {
+  'trigger': {
+    width: nodeWidth,
+    height: 76,
+    shape: 'normal-node',
+    ports: {
+      groups: { right: defaultPortGroup },
+      items: [defaultPortItems[1]],
+    },
+  },
   iteration: {
     width: nodeWidth,
     height: 140,
@@ -1116,11 +1154,6 @@ export interface OutputVariable {
   }>;
   /** Dynamically defined variable keys */
   define?: string[];
-  /** System-level output variables */
-  sys?: Array<{
-    name: string;
-    type: string;
-  }>;
   /** Error-related output variables */
   error?: Array<{
     name: string;

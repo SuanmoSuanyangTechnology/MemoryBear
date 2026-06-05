@@ -2,9 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 15:16:10
+ * @Last Modified time: 2026-05-29 18:50:18
  */
-import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection, type Edge } from '@antv/x6';
+import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
+  // Scroller,
+type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
@@ -13,6 +15,7 @@ import type { RefObject, Dispatch, SetStateAction, MutableRefObject, DragEvent }
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import dayjs from 'dayjs';
 
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
@@ -21,6 +24,7 @@ import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgs
 import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
+import type { Application } from '@/views/ApplicationManagement/types'
 
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
@@ -34,6 +38,8 @@ export interface UseWorkflowGraphProps {
   miniMapRef: RefObject<HTMLDivElement>;
   /** Callback when features config is loaded */
   onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
+  /** Application type */
+  appType?: Application['type'];
 }
 
 /**
@@ -93,6 +99,7 @@ export interface UseWorkflowGraphReturn {
   historyRecords: HistoryRecord[];
   /** Clear history records */
   clearHistoryRecords: () => void;
+  lastExecuteId: string;
 }
 
 /**
@@ -105,6 +112,7 @@ export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
   onFeaturesLoad,
+  appType,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
   // Hooks
   const { id } = useParams();
@@ -112,7 +120,9 @@ export const useWorkflowGraph = ({
   const { t } = useTranslation()
   const { user } = useUser();
   const { chatHistoryMap } = useWorkflowStore()
-  const chatHistory = Object.values(chatHistoryMap).at(-1) ?? []
+  const lastExecuteId = Object.keys(chatHistoryMap).at(-1) ?? ''
+  const chatHistory = chatHistoryMap[lastExecuteId] ?? []
+  console.log('chatHistoryMap', chatHistoryMap, 'lastExecuteId', lastExecuteId)
 
   // Refs
   const graphRef = useRef<Graph>();
@@ -136,11 +146,18 @@ export const useWorkflowGraph = ({
     graphRef.current.getNodes().forEach(node => {
       const data = node.getData()
       if (data?.type === 'if-else' || data?.type === 'question-classifier') {
-        console.log('chatVariables', chatVariables)
         node.setData({ ...data, chatVariables })
       }
     })
-  }, [chatVariables])
+  }, [chatVariables, graphRef.current])
+
+  useEffect(() => {
+    if (!appType || !graphRef.current) return
+    graphRef.current.getNodes().forEach(node => {
+      const data = node.getData()
+      node.setData({ ...data, appType })
+    })
+  }, [appType, graphRef.current])
 
   useEffect(() => {
     getConfig()
@@ -203,7 +220,9 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (type === 'loop' && key === 'condition' && nodeLibraryConfig.config) {
+            if (type === 'trigger' && key === 'time' && nodeLibraryConfig.config) {
+              nodeLibraryConfig.config[key].defaultValue = dayjs('12:00 AM', 'h:mm A')
+            } else if (type === 'loop' && key === 'condition' && nodeLibraryConfig.config) {
               const { condition } = config;
               console.log('condition', condition)
               nodeLibraryConfig.config[key].defaultValue = condition ? {
@@ -335,7 +354,7 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         // Check error_handle.method config for http-request node
-        if (['http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
+        if (['code', 'http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
@@ -466,7 +485,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node has label, match corresponding port by label
-          if (['http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
+          if (['code', 'http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -694,6 +713,13 @@ export const useWorkflowGraph = ({
         padding: 5,
       }),
     );
+    // graphRef.current.use(
+    //   new Scroller({
+    //     enabled: true,
+    //     pannable: false,
+    //     autoResize: true,
+    //   }),
+    // );
     graphRef.current.use(
       new Snapline({
         enabled: true,
@@ -1540,6 +1566,10 @@ export const useWorkflowGraph = ({
       .find(n => n.type === dragData.type);
     nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
 
+    if (nodeLibraryConfig.type === 'trigger' && nodeLibraryConfig.config?.time) {
+      nodeLibraryConfig.config.time.defaultValue = dayjs(nodeLibraryConfig.config.time.defaultValue, 'h:mm A')
+    }
+
     // Create clean node data, only keep necessary fields
     const cleanNodeData = {
       id: `${dragData.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -1645,7 +1675,9 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
+              if (data.type === 'trigger' && key === 'time' && data.config[key] && 'defaultValue' in data.config[key]) {
+                itemConfig[key] = dayjs(data.config[key].defaultValue, 'h:mm A').format('h:mm A')
+              } else if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const code = data.config[key].defaultValue || ''
                 itemConfig = {
                   ...itemConfig,
@@ -1753,7 +1785,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node right port connection, add label
-          if (['http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
+          if (['code', 'http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
             if (sourcePortId === 'ERROR') {
               return {
                 source: sourceCell.getData().id,
@@ -2000,5 +2032,6 @@ export const useWorkflowGraph = ({
     redo,
     historyRecords,
     clearHistoryRecords,
+    lastExecuteId,
   };
 };

@@ -24,7 +24,7 @@ class MessageCreate(BaseModel):
 
 class ChatRequest(BaseModel):
     """聊天请求（基于 share_token）"""
-    message: str = Field(..., description="用户消息")
+    message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
     conversation_id: Optional[uuid.UUID] = Field(None, description="会话ID（多轮对话）")
     user_id: Optional[str] = Field(None, description="用户ID（外部系统）")
     variables: Optional[Dict[str, Any]] = Field(None, description="变量参数")

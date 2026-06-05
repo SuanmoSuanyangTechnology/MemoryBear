@@ -9,18 +9,21 @@
 import { FileOutlined, FieldTimeOutlined, EditOutlined } from '@ant-design/icons';
 import { Skeleton, Flex, Space, App } from 'antd';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
+
 import type { RecallTestData } from '@/views/KnowledgeBase/types';
 import { NoData } from './noData';
 import { formatDateTime } from '@/utils/format';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import RbMarkdown from '@/components/Markdown';
-import { useMemo, type MouseEvent } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import { deleteDocumentChunk } from '@/api/knowledgeBase'
 
 interface RecallTestResultProps {
   data: RecallTestData[];
   showEmpty?: boolean;
   hasMore?: boolean;
+  total?: number;
   loadMore?: () => void;
   refresh?: () => void;
   loading?: boolean;
@@ -29,12 +32,14 @@ interface RecallTestResultProps {
   onItemClick?: (item: RecallTestData, index: number) => void; // Click item callback
   parserMode?: number; // Parser mode, 1 means QA format
   handleCopy?: (text?: string) => void;
+  handleInsert?: (parentChunkId?: string) => void;
 }
 
 const RecallTestResult = ({ 
   data, 
   showEmpty = true,
   hasMore = false,
+  total = 0,
   loadMore,
   refresh,
   loading = false,
@@ -43,9 +48,11 @@ const RecallTestResult = ({
   onItemClick,
   parserMode = 0,
   handleCopy,
+  handleInsert
 }: RecallTestResultProps) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp()
+  const [expandedChunks, setExpandedChunks] = useState<Record<string, boolean>>({});
   console.log('chunk data', data)
 
   // Parse QA format content
@@ -125,6 +132,43 @@ const RecallTestResult = ({
       onItemClick(item, index);
     }
   };
+  const handleChildItemClick = (e: React.MouseEvent, item: RecallTestData, childIndex: number, parentIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.target as HTMLElement;
+    
+    if (
+      target.tagName === 'IMG' || 
+      target.tagName === 'SVG' ||
+      target.tagName === 'PATH' ||
+      target.closest('.ant-image') ||
+      target.closest('.ant-image-preview') ||
+      target.closest('.ant-image-preview-wrap') ||
+      target.closest('.ant-image-preview-operations') ||
+      target.closest('.anticon') ||
+      target.classList.contains('ant-image-img') ||
+      target.classList.contains('ant-image-mask') ||
+      target.classList.contains('ant-image-preview-close') ||
+      target.classList.contains('anticon')
+    ) {
+      return;
+    }
+    
+    if (editable && onItemClick) {
+      const childItem = item.children?.[childIndex];
+      if (childItem) {
+        onItemClick({
+          ...childItem,
+          metadata: {
+            ...childItem.metadata,
+            parentDocId: item.metadata?.doc_id,
+            parentIndex,
+            childIndex,
+          }
+        } as unknown as RecallTestData, parentIndex);
+      }
+    }
+  };
 
   // Get color class based on score
   const getScoreColorClass = (score: number): string => {
@@ -137,11 +181,11 @@ const RecallTestResult = ({
       return 'rb:text-[#FF5D34]';
     }
   };
-  const handleDelete = (e: MouseEvent, item: RecallTestData) => {
+  const handleDelete = (e: MouseEvent, item: RecallTestData, type?: 'child') => {
     e.preventDefault();
     e.stopPropagation();
     modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: `chunk_${item.metadata?.sort_id}` }),
+      title: t('common.confirmDeleteDesc', { name: type === 'child' ? `C-${item.metadata?.sort_id + 1}` : `chunk_${item.metadata?.sort_id}` }),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',
@@ -183,6 +227,88 @@ const RecallTestResult = ({
     return null;
   }
 
+  const renderChild = (children: RecallTestData[], item: RecallTestData, index: number) => {
+    if (children.length === 0) {
+      return null;
+    }
+    const isExpanded = expandedChunks[`chunk_${item.metadata?.doc_id || index}`];
+    return (
+      <Flex vertical gap={8} className='rb:mt-3! rb:overflow-hidden'>
+        <Flex 
+          align="center"
+          justify="space-between"
+          className={clsx('rb:px-3! rb:py-2! rb:cursor-pointer', {
+            'rb:bg-[#c8ceda33] rb:rounded-lg': !isExpanded
+          })}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setExpandedChunks(prev => {
+              const key = `chunk_${item.metadata?.doc_id || index}`;
+              const newExpanded = { ...prev };
+              newExpanded[key] = !newExpanded[key];
+              return newExpanded;
+            });
+          }}
+        >
+          <Flex align="center" gap={8}>
+            <div
+              className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/caret_right_outlined.svg')]", {
+                'rb:rotate-90': isExpanded
+              })}
+            ></div>
+            <span className='rb:text-[12px] rb:font-medium'>
+              {children.length} {t('knowledgeBase.childSegmentation')}
+            </span>
+          </Flex>
+          {editable &&
+            <span className='rb:text-[12px] rb:text-[#155EEF]'
+              onClick={(e) => {
+                e.stopPropagation();
+                handleInsert?.(item.metadata?.doc_id);
+              }}
+            >+ {t('common.add')}</span>
+          }
+        </Flex>
+        {isExpanded && (
+          <Flex vertical gap={8} className="rb:pl-3! rb:border-l-2 rb:border-l-[#155EEF]">
+            {children?.map((child, childIndex) => (
+              <Flex
+                key={child.metadata?.doc_id || childIndex}
+                className="rb:group rb:bg-[#c8ceda33] rb:hover:bg-[rgba(21,94,239,0.25)]"
+              >
+                <Flex
+                  align="center"
+                  className='rb:text-[12px] rb:px-1! rb:bg-[#c8ceda66] rb:font-medium rb:shrink-0 rb:group-hover:bg-[#155EEF] rb:group-hover:text-[#FFFFFF]'
+                >
+                  C-{child.metadata?.sort_id + 1}
+                </Flex>
+                <Flex
+                  align="center"
+                  className='rb:flex-1! rb:whitespace-pre-wrap'
+                >
+                  {renderTextContent(child.page_content)}
+                </Flex>
+                {editable && (
+                  <Space>
+                    <div
+                      className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/edit.svg')]"
+                      onClick={(e) => handleChildItemClick(e, item, childIndex, index)}
+                    ></div>
+                    <div
+                      className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
+                      onClick={(e) => handleDelete(e, child, 'child')}
+                    ></div>
+                  </Space>
+                )}
+              </Flex>
+            ))}
+          </Flex>
+        )}
+      </Flex>
+    )
+  }
+
   const renderContent = () => (
     <div className='rb:flex rb:flex-col rb:mt-4'>
       {data.map((item, index) => {
@@ -190,7 +316,7 @@ const RecallTestResult = ({
         const scorePercentage = score * 100;
         const colorClass = getScoreColorClass(score);
         const showScore = item.metadata?.score !== null && item.metadata?.score !== undefined;
-        
+        const children = item.children || [];
         return (
           <div
             key={`${item.metadata?.sort_id || index}-${index}`}
@@ -198,7 +324,7 @@ const RecallTestResult = ({
             onClick={(e) => handleItemClick(e, item, index)}
           >
             {editable && (
-              <div className='rb:absolute rb:top-2 rb:right-2 rb:opacity-0 group-hover:rb:opacity-100 rb:transition-opacity'>
+              <div className='rb:absolute rb:top-2 rb:right-2 rb:opacity-0 rb:group-hover:rb:opacity-100 rb:transition-opacity'>
                 <EditOutlined className='rb:text-[#155EEF] rb:text-base' />
               </div>
             )}
@@ -229,8 +355,13 @@ const RecallTestResult = ({
                     const formattedContent = formatQAContent(qaContent.question, qaContent.answer);
                     return renderTextContent(formattedContent);
                   }
-                  return renderTextContent(item.page_content);
+                  return children?.length > 0
+                    ? <div className="rb:line-clamp-3 rb:overflow-hidden">
+                      {renderTextContent(item.page_content)}
+                    </div>
+                    : renderTextContent(item.page_content);
                 })()}
+                {renderChild(children, item, index)}
               </div>
             </div>
             <Flex align="center" justify={item.metadata?.file_created_at ? 'space-between' : 'end'} className="rb:mt-3!">
@@ -266,7 +397,7 @@ const RecallTestResult = ({
         <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>
           <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
           <span className='rb:text-gray-500 rb:text-xs rb:pt-0.5'>
-            (<span className='rb:text-[#155EEF]'>{data.length}</span> results)
+            (<span className='rb:text-[#155EEF]'>{total || data.length}</span> results)
           </span>
         </div>
         <InfiniteScroll

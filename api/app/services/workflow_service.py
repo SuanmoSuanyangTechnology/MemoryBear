@@ -11,6 +11,15 @@ import yaml
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.workflow.triggers import (
+    build_schedule_now_payload,
+    get_trigger_type,
+    is_trigger_enabled,
+    iter_trigger_nodes,
+    is_schedule_trigger_due,
+    normalize_trigger_nodes,
+    TRIGGER_NODES_PREPARED_FLAG,
+)
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
@@ -18,8 +27,8 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
-from app.models import App
-from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from app.models import App, AppRelease
+from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -35,8 +44,6 @@ from app.services.multimodal_service import MultimodalService
 from app.services.workspace_service import get_workspace_storage_type_without_auth
 
 logger = logging.getLogger(__name__)
-
-
 class WorkflowService:
     """工作流服务"""
 
@@ -49,6 +56,437 @@ class WorkflowService:
         self.multimodal_service = MultimodalService(db)
 
         self.registry = PlatformAdapterRegistry
+
+    @staticmethod
+    def _build_runtime_workflow_config_from_release(
+        release: AppRelease,
+        real_config_id: uuid.UUID | None = None,
+    ) -> WorkflowConfig:
+        """从发布版本快照重建运行时 WorkflowConfig。"""
+        cfg = release.config or {}
+        now = release.created_at or datetime.datetime.now()
+        normalized_nodes = WorkflowService._prepare_nodes(cfg.get("nodes", []))
+        return WorkflowConfig(
+            id=real_config_id or cfg.get("id") or uuid.uuid4(),
+            app_id=release.app_id,
+            nodes=normalized_nodes,
+            edges=cfg.get("edges", []),
+            variables=cfg.get("variables", []),
+            execution_config=cfg.get("execution_config", {}),
+            triggers=cfg.get("triggers", []),
+            features=cfg.get("features", {}),
+            workflow_type=cfg.get("workflow_type", "workflow"),
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
+    def _prepare_nodes(
+        nodes: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        try:
+            return normalize_trigger_nodes(nodes)
+        except ValueError as exc:
+            raise BusinessException(
+                code=BizCode.INVALID_PARAMETER,
+                message=f"工作流触发器配置无效: {exc}",
+            ) from exc
+
+    @staticmethod
+    def _prepare_triggers(
+        triggers: list[dict[str, Any]] | None,
+        _nodes: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        return triggers or []
+
+    def _prepare_workflow_config_dict(
+        self,
+        *,
+        nodes: list[dict[str, Any]] | None,
+        edges: list[dict[str, Any]] | None,
+        variables: list[dict[str, Any]] | None,
+        execution_config: dict[str, Any] | None,
+        features: dict[str, Any] | None,
+        triggers: list[dict[str, Any]] | None,
+        workflow_type: str | None,
+    ) -> dict[str, Any]:
+        normalized_nodes = self._prepare_nodes(nodes)
+        normalized_triggers = self._prepare_triggers(triggers, normalized_nodes)
+        return {
+            "nodes": normalized_nodes,
+            "edges": edges or [],
+            "variables": variables or [],
+            "execution_config": execution_config or {},
+            "features": features or {},
+            "triggers": normalized_triggers,
+            "workflow_type": workflow_type or "workflow",
+            TRIGGER_NODES_PREPARED_FLAG: True,
+        }
+
+    @staticmethod
+    def _merge_trigger_context(
+        input_data: dict[str, Any],
+        trigger_type: str,
+        trigger_id: str | None,
+        trigger_meta: dict[str, Any] | None,
+        trigger_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not trigger_id and not trigger_meta and trigger_type == "manual" and not trigger_payload:
+            return input_data
+
+        merged = dict(input_data)
+        merged["trigger"] = {
+            "type": trigger_type,
+            "id": trigger_id,
+            "meta": trigger_meta or {},
+        }
+        if trigger_payload is not None:
+            merged["trigger_payload"] = trigger_payload
+        return merged
+
+    @staticmethod
+    def _find_debug_trigger_node(
+        nodes: list[dict[str, Any]] | None,
+        *,
+        preferred_node_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if preferred_node_id:
+            for node in nodes or []:
+                if node.get("id") == preferred_node_id and node.get("type") == NodeType.TRIGGER:
+                    return node
+
+        for node in nodes or []:
+            if node.get("type") == NodeType.TRIGGER:
+                return node
+
+        return None
+
+    @staticmethod
+    def _build_debug_trigger_context(
+        trigger_node: dict[str, Any],
+    ) -> tuple[str, str | None, dict[str, Any], dict[str, Any]]:
+        trigger_type = get_trigger_type(trigger_node) or "manual"
+        trigger_id = trigger_node.get("id")
+        config = trigger_node.get("config") or {}
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+        generated_at = current_time.isoformat()
+
+        if trigger_type == "schedule":
+            return (
+                "schedule",
+                trigger_id,
+                {"source": "debug", "mode": "test_run", "generated_at": generated_at},
+                {
+                    "now": build_schedule_now_payload(current_time, config.get("timezone", "UTC")),
+                    "meta": {
+                        "trigger_type": "schedule",
+                        "source": "debug",
+                    },
+                },
+            )
+
+        if trigger_type == "webhook":
+            return (
+                "webhook",
+                trigger_id,
+                {"source": "debug", "mode": "test_run", "generated_at": generated_at},
+                {
+                    "body": {},
+                    "query": {},
+                    "headers": {},
+                    "meta": {
+                        "trigger_type": "webhook",
+                        "source": "debug",
+                    },
+                },
+            )
+
+        return (
+            trigger_type or "manual",
+            trigger_id,
+            {"source": "debug", "mode": "test_run", "generated_at": generated_at},
+            {},
+        )
+
+    def _ensure_debug_trigger_args(
+        self,
+        nodes: list[dict[str, Any]] | None,
+        trigger_type: str,
+        trigger_id: str | None,
+        trigger_meta: dict[str, Any] | None,
+        trigger_payload: dict[str, Any] | None,
+    ) -> tuple[str, str | None, dict[str, Any] | None, dict[str, Any] | None]:
+        if trigger_payload is not None:
+            return trigger_type, trigger_id, trigger_meta, trigger_payload
+
+        trigger_node = self._find_debug_trigger_node(nodes)
+        if not trigger_node:
+            return trigger_type, trigger_id, trigger_meta, trigger_payload
+
+        debug_trigger_type, debug_trigger_id, debug_trigger_meta, debug_trigger_payload = (
+            self._build_debug_trigger_context(trigger_node)
+        )
+        return (
+            debug_trigger_type,
+            debug_trigger_id,
+            trigger_meta or debug_trigger_meta,
+            debug_trigger_payload,
+        )
+
+    def _ensure_debug_trigger_input_data(
+        self,
+        nodes: list[dict[str, Any]] | None,
+        input_data: dict[str, Any],
+        *,
+        preferred_node_id: str | None = None,
+    ) -> dict[str, Any]:
+        if input_data.get("trigger_payload") is not None:
+            return input_data
+
+        trigger_node = self._find_debug_trigger_node(nodes, preferred_node_id=preferred_node_id)
+        if not trigger_node:
+            return input_data
+
+        trigger_type, trigger_id, trigger_meta, trigger_payload = self._build_debug_trigger_context(trigger_node)
+        merged = dict(input_data)
+        merged["trigger"] = {
+            "type": trigger_type,
+            "id": trigger_id,
+            "meta": trigger_meta,
+        }
+        merged["trigger_payload"] = trigger_payload
+        return merged
+
+    def update_trigger_runtime_state(
+        self,
+        app_id: uuid.UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> WorkflowConfig | None:
+        return self.config_repo.update_trigger_runtime(app_id, trigger_id, runtime)
+
+    def update_release_trigger_runtime_state(
+        self,
+        release_id: uuid.UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> AppRelease | None:
+        release = self.db.get(AppRelease, release_id)
+        if not release or not isinstance(release.config, dict):
+            return None
+
+        config = dict(release.config or {})
+        nodes = list(config.get("nodes") or [])
+        updated = False
+        for node in nodes:
+            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
+                node["runtime"] = runtime
+                updated = True
+                break
+
+        if not updated:
+            return None
+
+        config["nodes"] = nodes
+        release.config = config
+        self.db.commit()
+        self.db.refresh(release)
+        return release
+
+    @staticmethod
+    def _find_trigger_node(
+        nodes: list[dict[str, Any]] | None,
+        *,
+        trigger_id: str | None = None,
+        route_key: str | None = None,
+        trigger_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        for node in iter_trigger_nodes(nodes, trigger_type=trigger_type):
+            config = node.get("config") or {}
+            if trigger_id and node.get("id") == trigger_id:
+                return node
+            if route_key and config.get("route_key") == route_key:
+                return node
+        return None
+
+    def find_published_webhook_trigger(
+        self,
+        route_key: str,
+    ) -> tuple[App, AppRelease, WorkflowConfig, dict[str, Any]] | None:
+        apps = self.db.query(App).filter(
+            App.is_active.is_(True),
+            App.current_release_id.isnot(None),
+            App.type.in_(["workflow", "pure_workflow"]),
+        ).all()
+
+        for app in apps:
+            release = app.current_release
+            if not release or not isinstance(release.config, dict):
+                continue
+
+            config = self._build_runtime_workflow_config_from_release(
+                release,
+                real_config_id=(app.workflow_config.id if app.workflow_config else None),
+            )
+            trigger = self._find_trigger_node(
+                config.nodes,
+                route_key=route_key,
+                trigger_type="webhook",
+            )
+            if trigger and is_trigger_enabled(trigger):
+                return app, release, config, trigger
+        return None
+
+    def get_due_schedule_triggers(
+        self,
+        now: datetime.datetime | None = None,
+    ) -> list[tuple[App, AppRelease, WorkflowConfig, dict[str, Any]]]:
+        current_time = now or datetime.datetime.now(datetime.timezone.utc)
+        due_triggers: list[tuple[App, AppRelease, WorkflowConfig, dict[str, Any]]] = []
+        apps = self.db.query(App).filter(
+            App.is_active.is_(True),
+            App.current_release_id.isnot(None),
+            App.type.in_(["workflow", "pure_workflow"]),
+        ).all()
+
+        for app in apps:
+            release = app.current_release
+            if not release or not isinstance(release.config, dict):
+                continue
+
+            config = self._build_runtime_workflow_config_from_release(
+                release,
+                real_config_id=(app.workflow_config.id if app.workflow_config else None),
+            )
+            for trigger in iter_trigger_nodes(config.nodes, trigger_type="schedule"):
+                if not is_trigger_enabled(trigger):
+                    continue
+                if is_schedule_trigger_due(trigger, current_time):
+                    due_triggers.append((app, release, config, trigger))
+
+        return due_triggers
+
+    @staticmethod
+    def _build_draft_payload_from_trigger_data(
+        trigger_data: dict[str, Any],
+    ) -> DraftRunRequest:
+        return DraftRunRequest(
+            message=trigger_data.get("message"),
+            variables=trigger_data.get("variables") or {},
+            conversation_id=trigger_data.get("conversation_id"),
+            user_id=trigger_data.get("user_id"),
+            stream=False,
+            files=[],
+        )
+
+    @staticmethod
+    def _store_trigger_meta(
+        execution: WorkflowExecution,
+        trigger_id: str | None,
+        trigger_meta: dict[str, Any] | None,
+        external_event_id: str | None = None,
+    ) -> None:
+        execution.meta_data = {
+            **(execution.meta_data or {}),
+            "trigger_id": trigger_id,
+            "trigger_meta": trigger_meta or {},
+            "external_event_id": external_event_id,
+        }
+
+    async def run_with_trigger(
+        self,
+        *,
+        app_id: uuid.UUID,
+        payload: DraftRunRequest,
+        config: WorkflowConfig,
+        workspace_id: uuid.UUID,
+        trigger_type: str,
+        trigger_id: str | None = None,
+        trigger_meta: dict[str, Any] | None = None,
+        trigger_payload: dict[str, Any] | None = None,
+        release_id: uuid.UUID | None = None,
+        source: str = "",
+    ) -> dict[str, Any]:
+        return await self.run(
+            app_id=app_id,
+            payload=payload,
+            config=config,
+            workspace_id=workspace_id,
+            release_id=release_id,
+            source=source,
+            trigger_type=trigger_type,
+            trigger_id=trigger_id,
+            trigger_meta=trigger_meta,
+            trigger_payload=trigger_payload,
+        )
+
+    async def invoke_webhook_trigger(
+        self,
+        *,
+        app: App,
+        release: AppRelease,
+        config: WorkflowConfig,
+        trigger: dict[str, Any],
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
+        route_key = (trigger.get("config") or {}).get("route_key", "")
+        trigger_meta = {
+            "source": "webhook",
+            "route_key": route_key,
+            "request": {
+                "query": event.get("query", {}),
+                "headers": event.get("headers", {}),
+                "body": event.get("body"),
+            },
+        }
+        return await self.run_with_trigger(
+            app_id=app.id,
+            payload=DraftRunRequest(stream=False, variables={}, files=[]),
+            config=config,
+            workspace_id=app.workspace_id,
+            release_id=release.id,
+            trigger_type="webhook",
+            trigger_id=trigger.get("id"),
+            trigger_meta=trigger_meta,
+            trigger_payload=event,
+            source=HitLogSource.EXTERNAL,
+        )
+
+    async def invoke_schedule_trigger(
+        self,
+        *,
+        app: App,
+        release: AppRelease,
+        config: WorkflowConfig,
+        trigger: dict[str, Any],
+        now: datetime.datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = now or datetime.datetime.now(datetime.timezone.utc)
+        schedule_event = {
+            "now": build_schedule_now_payload(
+                current_time,
+                (trigger.get("config") or {}).get("timezone", "UTC"),
+            ),
+            "meta": {
+                "trigger_type": "schedule",
+                "app_id": str(app.id),
+            },
+        }
+        payload = DraftRunRequest(stream=False, variables={}, files=[])
+        result = await self.run_with_trigger(
+            app_id=app.id,
+            payload=payload,
+            config=config,
+            workspace_id=app.workspace_id,
+            release_id=release.id,
+            trigger_type="schedule",
+            trigger_id=trigger.get("id"),
+            trigger_meta={"source": "schedule", "run_at": current_time.isoformat()},
+            trigger_payload=schedule_event,
+            source="schedule",
+        )
+        return result
 
     def _check_annotation_match(self, app_id: uuid.UUID, message: str,
                               source: str = "") -> Optional[dict]:
@@ -116,6 +554,7 @@ class WorkflowService:
             execution_config: dict[str, Any] | None = None,
             features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
+            workflow_type: str = "workflow",
             validate: bool = True
     ) -> WorkflowConfig:
         """创建工作流配置
@@ -128,6 +567,7 @@ class WorkflowService:
             execution_config: 执行配置
             features: 功能特性
             triggers: 触发器列表
+            workflow_type: 工作流类型
             validate: 是否验证配置
 
         Returns:
@@ -136,15 +576,17 @@ class WorkflowService:
         Raises:
             BusinessException: 配置无效时抛出
         """
-        # 构建配置字典
-        config_dict = {
-            "nodes": nodes,
-            "edges": edges,
-            "variables": variables or [],
-            "execution_config": execution_config or {},
-            "features": features or {},
-            "triggers": triggers or []
-        }
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=nodes,
+            edges=edges,
+            variables=variables,
+            execution_config=execution_config,
+            features=features,
+            triggers=triggers,
+            workflow_type=workflow_type,
+        )
+        normalized_nodes = config_dict["nodes"]
+        normalized_triggers = config_dict["triggers"]
 
         # 验证配置
         if validate:
@@ -159,12 +601,13 @@ class WorkflowService:
         # 创建或更新配置
         config = self.config_repo.create_or_update(
             app_id=app_id,
-            nodes=nodes,
+            nodes=normalized_nodes,
             edges=edges,
             variables=variables,
             execution_config=execution_config,
             features=features,
-            triggers=triggers
+            triggers=normalized_triggers,
+            workflow_type=workflow_type
         )
 
         logger.info(f"创建工作流配置成功: app_id={app_id}, config_id={config.id}")
@@ -188,7 +631,9 @@ class WorkflowService:
             edges: list[dict[str, Any]] | None = None,
             variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
+            features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
+            workflow_type: str | None = None,
             validate: bool = True
     ) -> WorkflowConfig:
         """更新工作流配置
@@ -199,7 +644,9 @@ class WorkflowService:
             edges: 边列表
             variables: 变量列表
             execution_config: 执行配置
+            features: 功能特性
             triggers: 触发器列表
+            workflow_type: 工作流类型
             validate: 是否验证配置
 
         Returns:
@@ -217,20 +664,22 @@ class WorkflowService:
             )
 
         # 合并配置
-        updated_nodes = nodes if nodes is not None else config.nodes
-        updated_edges = edges if edges is not None else config.edges
-        updated_variables = variables if variables is not None else config.variables
-        updated_execution_config = execution_config if execution_config is not None else config.execution_config
-        updated_triggers = triggers if triggers is not None else config.triggers
-
-        # 构建配置字典
-        config_dict = {
-            "nodes": updated_nodes,
-            "edges": updated_edges,
-            "variables": updated_variables,
-            "execution_config": updated_execution_config,
-            "triggers": updated_triggers
-        }
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=nodes if nodes is not None else config.nodes,
+            edges=edges if edges is not None else config.edges,
+            variables=variables if variables is not None else config.variables,
+            execution_config=execution_config if execution_config is not None else config.execution_config,
+            features=features if features is not None else config.features,
+            triggers=triggers if triggers is not None else config.triggers,
+            workflow_type=workflow_type if workflow_type is not None else config.workflow_type,
+        )
+        updated_nodes = config_dict["nodes"]
+        updated_edges = config_dict["edges"]
+        updated_variables = config_dict["variables"]
+        updated_execution_config = config_dict["execution_config"]
+        updated_features = config_dict["features"]
+        updated_triggers = config_dict["triggers"]
+        updated_workflow_type = config_dict["workflow_type"]
 
         # 验证配置
         if validate:
@@ -249,7 +698,9 @@ class WorkflowService:
             edges=updated_edges,
             variables=updated_variables,
             execution_config=updated_execution_config,
-            triggers=updated_triggers
+            features=updated_features,
+            triggers=updated_triggers,
+            workflow_type=updated_workflow_type
         )
 
         logger.info(f"更新工作流配置成功: app_id={app_id}, config_id={config.id}")
@@ -314,14 +765,24 @@ class WorkflowService:
                 "工作流配置不存在，无法运行",
                 BizCode.CONFIG_MISSING
             )
-        # validator 现在支持直接接受 Pydantic 模型
-        is_valid, errors = validate_workflow_config(config, for_publish=False)
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=config.nodes,
+            edges=config.edges,
+            variables=config.variables,
+            execution_config=config.execution_config,
+            features=config.features,
+            triggers=config.triggers,
+            workflow_type=config.workflow_type,
+        )
+        is_valid, errors = validate_workflow_config(config_dict, for_publish=False)
         if not is_valid:
             logger.warning(f"工作流配置验证失败: {errors}")
             raise BusinessException(
                 code=BizCode.INVALID_PARAMETER,
                 message=f"工作流配置无效: {'; '.join(errors)}"
             )
+        config.nodes = config_dict["nodes"]
+        config.triggers = config_dict["triggers"]
         return config
 
     def validate_workflow_config_for_publish(
@@ -346,13 +807,15 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
-        config_dict = {
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables,
-            "execution_config": config.execution_config,
-            "triggers": config.triggers
-        }
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=config.nodes,
+            edges=config.edges,
+            variables=config.variables,
+            execution_config=config.execution_config,
+            features=config.features,
+            triggers=config.triggers,
+            workflow_type=config.workflow_type,
+        )
 
         return validate_workflow_config(config_dict, for_publish=True)
 
@@ -414,6 +877,73 @@ class WorkflowService:
             执行记录或 None
         """
         return self.execution_repo.get_by_execution_id(execution_id)
+
+    @staticmethod
+    def _serialize_execution_value(value: Any) -> Any:
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        if isinstance(value, datetime.datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: WorkflowService._serialize_execution_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [WorkflowService._serialize_execution_value(item) for item in value]
+        return value
+
+    def get_execution_detail(self, execution_id: str) -> dict[str, Any] | None:
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        input_data = self._serialize_execution_value(execution.input_data or {})
+        meta_data = self._serialize_execution_value(execution.meta_data or {})
+        snapshot = {}
+        if isinstance(output_data, dict):
+            snapshot = output_data.get("snapshot") or {}
+
+        return {
+            "execution_id": execution.execution_id,
+            "app_id": str(execution.app_id),
+            "workflow_config_id": str(execution.workflow_config_id),
+            "release_id": str(execution.release_id) if execution.release_id else None,
+            "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
+            "trigger_type": execution.trigger_type,
+            "status": execution.status,
+            "input_data": input_data,
+            "output_data": output_data,
+            "snapshot": snapshot,
+            "context": self._serialize_execution_value(execution.context or {}),
+            "meta_data": meta_data,
+            "error_message": execution.error_message,
+            "error_node_id": execution.error_node_id,
+            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+            "elapsed_time": execution.elapsed_time,
+            "token_usage": self._serialize_execution_value(execution.token_usage),
+            "node_executions": [
+                {
+                    "node_id": node_execution.node_id,
+                    "node_type": node_execution.node_type,
+                    "node_name": node_execution.node_name,
+                    "execution_order": node_execution.execution_order,
+                    "retry_count": node_execution.retry_count,
+                    "status": node_execution.status,
+                    "input_data": self._serialize_execution_value(node_execution.input_data or {}),
+                    "output_data": self._serialize_execution_value(node_execution.output_data or {}),
+                    "error_message": node_execution.error_message,
+                    "started_at": node_execution.started_at.isoformat() if node_execution.started_at else None,
+                    "completed_at": node_execution.completed_at.isoformat() if node_execution.completed_at else None,
+                    "elapsed_time": node_execution.elapsed_time,
+                    "token_usage": self._serialize_execution_value(node_execution.token_usage),
+                    "cache_hit": node_execution.cache_hit,
+                    "cache_key": node_execution.cache_key,
+                    "meta_data": self._serialize_execution_value(node_execution.meta_data or {}),
+                }
+                for node_execution in node_executions
+            ],
+        }
 
     def get_executions_by_app(
             self,
@@ -796,6 +1326,8 @@ class WorkflowService:
             error: str,
     ) -> None:
         """将失败时的用户消息和助手错误消息写入会话。"""
+        if not conversation_id:
+            return
         self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="user",
@@ -811,6 +1343,40 @@ class WorkflowService:
             meta_data={"error": error},
             sync_memory=False,
         )
+
+    @staticmethod
+    def _supports_conversation(config: WorkflowConfig) -> bool:
+        return getattr(config, "workflow_type", "workflow") == "workflow"
+
+    def _ensure_conversation(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            user_id: str | None,
+            conversation_id: uuid.UUID | None,
+            enable_conversation: bool,
+    ) -> uuid.UUID | None:
+        if not enable_conversation:
+            return conversation_id
+        if conversation_id:
+            return conversation_id
+
+        from app.models import Conversation as ConversationModel
+
+        conversation_id = uuid.uuid4()
+        new_conversation = ConversationModel(
+            id=conversation_id,
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            is_draft=True,
+            title="草稿会话",
+        )
+        self.db.add(new_conversation)
+        self.db.commit()
+        self.db.refresh(new_conversation)
+        return conversation_id
 
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
         executions = self.execution_repo.get_by_conversation_id(
@@ -852,6 +1418,10 @@ class WorkflowService:
             workspace_id: uuid.UUID,
             release_id: uuid.UUID | None = None,
             source: str = "",
+            trigger_type: str = "manual",
+            trigger_id: str | None = None,
+            trigger_meta: dict[str, Any] | None = None,
+            trigger_payload: dict[str, Any] | None = None,
     ):
         """运行工作流
 
@@ -876,6 +1446,16 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+        config.nodes = self._prepare_nodes(config.nodes)
+        trigger_type, trigger_id, trigger_meta, trigger_payload = self._ensure_debug_trigger_args(
+            config.nodes,
+            trigger_type,
+            trigger_id,
+            trigger_meta,
+            trigger_payload,
+        )
+
+        supports_conversation = self._supports_conversation(config)
 
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
@@ -887,36 +1467,38 @@ class WorkflowService:
         )
 
         input_data = {
-            "message": payload.message, "variables": resolved_variables,
-            "conversation_id": payload.conversation_id,
+            "variables": resolved_variables,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
+        if payload.message is not None:
+            input_data["message"] = payload.message
+        if payload.conversation_id:
+            input_data["conversation_id"] = payload.conversation_id
+        input_data = self._merge_trigger_context(input_data, trigger_type, trigger_id, trigger_meta, trigger_payload)
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        conversation_id_uuid = self._ensure_conversation(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=payload.user_id,
+            conversation_id=conversation_id_uuid,
+            enable_conversation=supports_conversation,
+        )
+        if conversation_id_uuid:
+            payload.conversation_id = str(conversation_id_uuid)
+            input_data["conversation_id"] = str(conversation_id_uuid)
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
-        annotation_match = self._check_annotation_match(app_id, payload.message,
-                                                        source=source or HitLogSource.CONSOLE)
+        annotation_match = None
+        if supports_conversation and payload.message:
+            annotation_match = self._check_annotation_match(
+                app_id, payload.message, source=source or HitLogSource.CONSOLE
+            )
         if annotation_match:
-            if not conversation_id_uuid:
-                conversation_id_uuid = uuid.uuid4()
-                from app.models import Conversation as ConversationModel
-                new_conversation = ConversationModel(
-                    id=conversation_id_uuid,
-                    app_id=app_id,
-                    workspace_id=workspace_id,
-                    user_id=payload.user_id,
-                    is_draft=True,
-                    title="草稿会话",
-                )
-                self.db.add(new_conversation)
-                self.db.commit()
-                self.db.refresh(new_conversation)
-
             message_id = uuid.uuid4()
             prev_messages = []
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             self.conversation_service.add_message(
@@ -937,12 +1519,13 @@ class WorkflowService:
             execution = self.create_execution(
                 workflow_config_id=config.id,
                 app_id=app_id,
-                trigger_type="manual",
+                trigger_type=trigger_type,
                 triggered_by=None,
                 conversation_id=conversation_id_uuid,
                 input_data=input_data,
                 release_id=release_id,
             )
+            self._store_trigger_meta(execution, trigger_id, trigger_meta)
             execution.status = "completed"
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
@@ -976,16 +1559,75 @@ class WorkflowService:
                 }
             }
 
+        # 1.5 输入审查（仅对话式工作流 AppType.WORKFLOW）
+        sensitive_cfg = feature_configs.get("sensitive_word_avoidance", {})
+        if payload.message and sensitive_cfg.get("enabled"):
+            from app.core.moderation.input_moderation import InputModeration
+            moderation_type = sensitive_cfg.get("type", "keywords")
+            stop, preset_response, _, _ = InputModeration().check(
+                app_id=str(app_id),
+                tenant_id=str(workspace_id),
+                moderation_type=moderation_type,
+                moderation_config=sensitive_cfg,
+                inputs=payload.variables or {},
+                query=payload.message,
+            )
+            if stop:
+                message_id = uuid.uuid4()
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="user",
+                        content=payload.message,
+                        meta_data={"files": []},
+                    )
+                    self.conversation_service.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=preset_response,
+                        meta_data={"usage": {}, "moderation_flagged": True},
+                    )
+                execution = self.create_execution(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type="manual",
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data={"message": payload.message, "moderation_flagged": True},
+                    release_id=release_id,
+                )
+                execution.status = "completed"
+                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
+                execution.elapsed_time = 0
+                execution.completed_at = datetime.datetime.now()
+                self.db.commit()
+                return {
+                    "execution_id": execution.execution_id,
+                    "status": "completed",
+                    "output": preset_response,
+                    "message": preset_response,
+                    "message_id": str(message_id),
+                    "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                    "error_message": None,
+                    "elapsed_time": 0,
+                    "token_usage": {},
+                    "citations": [],
+                    "moderation_flagged": True,
+                }
+
         # 2. 创建执行记录
         execution = self.create_execution(
             workflow_config_id=config.id,
             app_id=app_id,
-            trigger_type="manual",
+            trigger_type=trigger_type,
             triggered_by=None,
             conversation_id=conversation_id_uuid,
             input_data=input_data,
             release_id=release_id,
         )
+        self._store_trigger_meta(execution, trigger_id, trigger_meta)
+        self.db.commit()
 
         # 3. 构建工作流配置字典
         workflow_config_dict = {
@@ -1007,7 +1649,7 @@ class WorkflowService:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
@@ -1018,7 +1660,12 @@ class WorkflowService:
             is_new_conversation = init_message_length == 0
             if is_new_conversation:
                 opening_cfg = feature_configs.get("opening_statement", {})
-                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                if (
+                        conversation_id_uuid
+                        and isinstance(opening_cfg, dict)
+                        and opening_cfg.get("enabled")
+                        and opening_cfg.get("statement")
+                ):
                     statement = opening_cfg["statement"]
                     suggested_questions = opening_cfg.get("suggested_questions", [])
                     if payload.variables:
@@ -1044,6 +1691,25 @@ class WorkflowService:
                 memory_storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id
             )
+
+            # 输出审查（非流式）
+            if result.get("status") == "completed" and sensitive_cfg.get("enabled"):
+                outputs_enabled = sensitive_cfg.get("config", {}).get("outputs_config", {}).get("enabled", False)
+                if outputs_enabled:
+                    from app.core.moderation.output_moderation import OutputModeration
+                    output_moderation = OutputModeration(
+                        app_id=str(app_id),
+                        tenant_id=str(workspace_id),
+                        moderation_type=sensitive_cfg.get("type", "keywords"),
+                        moderation_config=sensitive_cfg,
+                    )
+                    output_text = result.get("output", "")
+                    output_moderation.accumulate(output_text)
+                    if output_moderation.check_final():
+                        result["output"] = output_moderation.preset_response
+                        result["preset_response"] = output_moderation.preset_response
+                        result["moderation_flagged"] = True
+
             # 更新执行结果
             if result.get("status") == "completed":
                 token_usage = result.get("token_usage", {}) or {}
@@ -1069,13 +1735,14 @@ class WorkflowService:
                                 })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
-                self.conversation_service.add_message(
-                    conversation_id=conversation_id_uuid,
-                    role="user",
-                    content=human_message,
-                    meta_data=human_meta,
-                    sync_memory=False,
-                )
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="user",
+                        content=human_message,
+                        meta_data=human_meta,
+                        sync_memory=False,
+                    )
                 # 过滤 citations
                 citations = result.get("citations", [])
                 citation_cfg = feature_configs.get("citation", {})
@@ -1092,14 +1759,15 @@ class WorkflowService:
                 assistant_meta = {"usage": token_usage, "audio_url": None}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
-                self.conversation_service.add_message(
-                    message_id=message_id,
-                    conversation_id=conversation_id_uuid,
-                    role="assistant",
-                    content=assistant_message,
-                    meta_data=assistant_meta,
-                    sync_memory=False,
-                )
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=assistant_message,
+                        meta_data=assistant_meta,
+                        sync_memory=False,
+                    )
                 self.update_execution_status(
                     execution.execution_id,
                     "completed",
@@ -1136,7 +1804,7 @@ class WorkflowService:
                 "message": result.get("output"),  # 最终输出（字符串）
                 "message_id": str(message_id),
                 # "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
-                "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
+                "conversation_id": result.get("conversation_id") or (str(conversation_id_uuid) if conversation_id_uuid else None),
                 "error_message": result.get("error"),
                 "elapsed_time": result.get("elapsed_time"),
                 "token_usage": result.get("token_usage"),
@@ -1162,6 +1830,10 @@ class WorkflowService:
             release_id: Optional[uuid.UUID] = None,
             public: bool = False,
             source: str = "",
+            trigger_type: str = "manual",
+            trigger_id: str | None = None,
+            trigger_meta: dict[str, Any] | None = None,
+            trigger_payload: dict[str, Any] | None = None,
     ):
         """运行工作流（流式）
 
@@ -1187,6 +1859,15 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+        config.nodes = self._prepare_nodes(config.nodes)
+        trigger_type, trigger_id, trigger_meta, trigger_payload = self._ensure_debug_trigger_args(
+            config.nodes,
+            trigger_type,
+            trigger_id,
+            trigger_meta,
+            trigger_payload,
+        )
+        supports_conversation = self._supports_conversation(config)
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
@@ -1197,37 +1878,38 @@ class WorkflowService:
         )
 
         input_data = {
-            "message": payload.message, "variables": resolved_variables,
-            "conversation_id": payload.conversation_id,
+            "variables": resolved_variables,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
+        if payload.message is not None:
+            input_data["message"] = payload.message
+        if payload.conversation_id:
+            input_data["conversation_id"] = payload.conversation_id
+        input_data = self._merge_trigger_context(input_data, trigger_type, trigger_id, trigger_meta, trigger_payload)
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        conversation_id_uuid = self._ensure_conversation(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=payload.user_id,
+            conversation_id=conversation_id_uuid,
+            enable_conversation=supports_conversation,
+        )
+        if conversation_id_uuid:
+            payload.conversation_id = str(conversation_id_uuid)
+            input_data["conversation_id"] = str(conversation_id_uuid)
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
-        annotation_match = self._check_annotation_match(app_id, payload.message,
-                                                        source=source or HitLogSource.CONSOLE)
+        annotation_match = None
+        if supports_conversation and payload.message:
+            annotation_match = self._check_annotation_match(
+                app_id, payload.message, source=source or HitLogSource.CONSOLE
+            )
         if annotation_match:
-            if not conversation_id_uuid:
-                from app.models import Conversation as ConversationModel
-                conversation_id_uuid = uuid.uuid4()
-                new_conversation = ConversationModel(
-                    id=conversation_id_uuid,
-                    app_id=app_id,
-                    workspace_id=workspace_id,
-                    user_id=payload.user_id,
-                    is_draft=True,
-                    title="草稿会话",
-                )
-                self.db.add(new_conversation)
-                self.db.commit()
-                self.db.refresh(new_conversation)
-                payload.conversation_id = str(conversation_id_uuid)
-
             message_id = uuid.uuid4()
             prev_messages = []
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             self.conversation_service.add_message(
@@ -1248,12 +1930,13 @@ class WorkflowService:
             execution = self.create_execution(
                 workflow_config_id=config.id,
                 app_id=app_id,
-                trigger_type="manual",
+                trigger_type=trigger_type,
                 triggered_by=None,
                 conversation_id=conversation_id_uuid,
                 input_data=input_data,
                 release_id=release_id,
             )
+            self._store_trigger_meta(execution, trigger_id, trigger_meta)
             execution.status = "completed"
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
@@ -1314,16 +1997,98 @@ class WorkflowService:
                 yield end_event
             return
 
+        # 1.5 输入审查（仅对话式工作流 AppType.WORKFLOW）
+        sensitive_cfg = feature_configs.get("sensitive_word_avoidance", {})
+        if payload.message and sensitive_cfg.get("enabled"):
+            from app.core.moderation.input_moderation import InputModeration
+            moderation_type = sensitive_cfg.get("type", "keywords")
+            stop, preset_response, _, _ = InputModeration().check(
+                app_id=str(app_id),
+                tenant_id=str(workspace_id),
+                moderation_type=moderation_type,
+                moderation_config=sensitive_cfg,
+                inputs=payload.variables or {},
+                query=payload.message,
+            )
+            if stop:
+                message_id = uuid.uuid4()
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="user",
+                        content=payload.message,
+                        meta_data={"files": []},
+                    )
+                    self.conversation_service.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=preset_response,
+                        meta_data={"usage": {}, "moderation_flagged": True},
+                    )
+                execution = self.create_execution(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type="manual",
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data={"message": payload.message, "moderation_flagged": True},
+                    release_id=release_id,
+                )
+                execution.status = "completed"
+                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
+                execution.elapsed_time = 0
+                execution.completed_at = datetime.datetime.now()
+                self.db.commit()
+
+                start_internal_event = {
+                    "event": "workflow_start",
+                    "data": {
+                        "conversation_id": str(conversation_id_uuid),
+                        "message_id": str(message_id)
+                    }
+                }
+                start_event = self._emit(public, start_internal_event)
+                if start_event:
+                    yield start_event
+
+                yield {
+                    "event": "message",
+                    "data": {
+                        "content": preset_response,
+                        "conversation_id": str(conversation_id_uuid),
+                    }
+                }
+
+                end_internal_event = {
+                    "event": "workflow_end",
+                    "data": {
+                        "conversation_id": str(conversation_id_uuid),
+                        "output": preset_response,
+                        "usage": {},
+                        "elapsed_time": 0,
+                        "status": "completed",
+                        "error": "",
+                        "moderation_flagged": True,
+                    }
+                }
+                end_event = self._emit(public, end_internal_event)
+                if end_event:
+                    yield end_event
+                return
+
         # 2. 创建执行记录
         execution = self.create_execution(
             workflow_config_id=config.id,
             app_id=app_id,
-            trigger_type="manual",
+            trigger_type=trigger_type,
             triggered_by=None,
             conversation_id=conversation_id_uuid,
             input_data=input_data,
             release_id=release_id,
         )
+        self._store_trigger_meta(execution, trigger_id, trigger_meta)
+        self.db.commit()
 
         # 3. 构建工作流配置字典
         workflow_config_dict = {
@@ -1342,7 +2107,7 @@ class WorkflowService:
             execution.input_data = input_data
             self.db.commit()
             self.update_execution_status(execution.execution_id, "running")
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
@@ -1355,7 +2120,12 @@ class WorkflowService:
             is_new_conversation = init_message_length == 0
             if is_new_conversation:
                 opening_cfg = feature_configs.get("opening_statement", {})
-                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                if (
+                        conversation_id_uuid
+                        and isinstance(opening_cfg, dict)
+                        and opening_cfg.get("enabled")
+                        and opening_cfg.get("statement")
+                ):
                     statement = opening_cfg["statement"]
                     suggested_questions = opening_cfg.get("suggested_questions", [])
                     if payload.variables:
@@ -1372,6 +2142,26 @@ class WorkflowService:
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
 
+            output_moderation = None
+            llm_node_ids: set[str] = set()
+            if sensitive_cfg.get("enabled"):
+                outputs_enabled = sensitive_cfg.get("config", {}).get("outputs_config", {}).get("enabled", False)
+                if outputs_enabled:
+                    from app.core.moderation.output_moderation import OutputModeration
+                    output_moderation = OutputModeration(
+                        app_id=str(app_id),
+                        tenant_id=str(workspace_id),
+                        moderation_type=sensitive_cfg.get("type", "keywords"),
+                        moderation_config=sensitive_cfg,
+                    )
+                    for node in (config.nodes or []):
+                        if node.get("type") == "llm":
+                            llm_node_ids.add(node.get("id", ""))
+
+
+            moderation_flagged = False
+            active_llm_nodes: set[str] = set()  # 已 node_start 但尚未 node_end 的 LLM 节点
+
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
@@ -1383,6 +2173,94 @@ class WorkflowService:
             ):
                 event_type = event.get("event")
                 event_data = event.get("data", {})
+
+                # 审查触发后，跳过所有后续 message 事件（不再向客户端输出模型流式文本）
+                if moderation_flagged and event_type == "message":
+                    continue
+
+                # message 事件：先审查再 yield，检测到关键词立即触发 message_replace 并结束流式
+                if event_type == "message" and output_moderation and not moderation_flagged:
+                    chunk = event_data.get("content", "")
+                    if output_moderation.accumulate(chunk):
+                        moderation_flagged = True
+                        yield {"event": "message_replace",
+                               "data": {"content": output_moderation.preset_response}}
+
+                        # 审查触发后，立即保存对话、更新执行状态，合成结束事件并退出循环
+                        preset_response = output_moderation.preset_response
+                        human_message, human_meta = self._extract_human_message_and_meta(
+                            [], payload.message or "", files
+                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                                sync_memory=False,
+                            )
+                            self.conversation_service.add_message(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content=preset_response,
+                                meta_data={"usage": {}, "audio_url": None, "moderation_flagged": True},
+                                sync_memory=False,
+                            )
+                        # 更新执行状态为完成，标记审查触发
+                        workflow_output_data = {
+                            "moderation_flagged": True,
+                            "preset_response": preset_response,
+                        }
+                        if _cycle_items and execution.output_data:
+                            import copy
+                            new_output_data = copy.deepcopy(execution.output_data)
+                            node_outputs = new_output_data.setdefault("node_outputs", {})
+                            for cycle_node_id, items in _cycle_items.items():
+                                if cycle_node_id in node_outputs:
+                                    node_outputs[cycle_node_id]["cycle_items"] = items
+                                else:
+                                    node_outputs[cycle_node_id] = {"cycle_items": items}
+                            workflow_output_data.update(new_output_data)
+                        self.update_execution_status(
+                            execution.execution_id,
+                            "completed",
+                            output_data=workflow_output_data,
+                        )
+                        # 合成 LLM node_end 事件：只为当前正在执行的 LLM 节点补发
+                        import datetime as _dt
+                        for llm_node_id in active_llm_nodes:
+                            node_end_event = {
+                                "event": "node_end",
+                                "data": {
+                                    "node_id": llm_node_id,
+                                    "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                                    "execution_id": execution.execution_id,
+                                    "timestamp": int(_dt.datetime.now().timestamp() * 1000),
+                                    "output": preset_response,
+                                    "elapsed_time": 0,
+                                }
+                            }
+                            node_end_mapped = self._emit(public, node_end_event)
+                            if node_end_mapped:
+                                yield node_end_mapped
+                        # 合成 workflow_end 事件并退出，不再等待 LLM 静默执行完成
+                        end_internal_event = {
+                            "event": "workflow_end",
+                            "data": {
+                                "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                                "output": preset_response,
+                                "usage": {},
+                                "elapsed_time": 0,
+                                "status": "completed",
+                                "error": "",
+                                "moderation_flagged": True,
+                            }
+                        }
+                        end_event = self._emit(public, end_internal_event)
+                        if end_event:
+                            yield end_event
+                        break
 
                 if event_type == "cycle_item":
                     cycle_id = event_data.get("cycle_id")
@@ -1415,13 +2293,14 @@ class WorkflowService:
                                         })
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
-                        self.conversation_service.add_message(
-                            conversation_id=conversation_id_uuid,
-                            role="user",
-                            content=human_message,
-                            meta_data=human_meta,
-                            sync_memory=False,
-                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                                sync_memory=False,
+                            )
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
                         citation_cfg = feature_configs.get("citation", {})
@@ -1438,18 +2317,24 @@ class WorkflowService:
                         assistant_meta = {"usage": token_usage, "audio_url": None}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
-                        self.conversation_service.add_message(
-                            message_id=message_id,
-                            conversation_id=conversation_id_uuid,
-                            role="assistant",
-                            content=assistant_message,
-                            meta_data=assistant_meta,
-                            sync_memory=False,
-                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content=assistant_message,
+                                meta_data=assistant_meta,
+                                sync_memory=False,
+                            )
+                        # 输出审查触发时，将 moderation 信息写入 execution output_data
+                        workflow_output_data = event.get("data") or {}
+                        if output_moderation and output_moderation.is_flagged:
+                            workflow_output_data["moderation_flagged"] = True
+                            workflow_output_data["preset_response"] = output_moderation.preset_response
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",
-                            output_data=event.get("data"),
+                            output_data=workflow_output_data,
                             token_usage=token_usage.get("total_tokens", None)
                         )
                         event.setdefault("data", {})["citations"] = filtered_citations
@@ -1483,6 +2368,11 @@ class WorkflowService:
                         self.db.commit()
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
+                # 记录活跃 LLM 节点：node_start 加入，node_end 移除，合成时只为活跃节点补发
+                if event_type == "node_start" and event_data.get("node_id") in llm_node_ids:
+                    active_llm_nodes.add(event_data.get("node_id"))
+                if event_type == "node_end" and event_data.get("node_id") in llm_node_ids:
+                    active_llm_nodes.discard(event_data.get("node_id"))
                 event = self._emit(public, event)
                 if event:
                     yield event
@@ -1516,6 +2406,12 @@ class WorkflowService:
             config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(code=BizCode.CONFIG_MISSING, message="工作流配置不存在")
+
+        input_data = self._ensure_debug_trigger_input_data(
+            config.nodes,
+            input_data,
+            preferred_node_id=node_id,
+        )
 
         node_config = next((n for n in config.nodes if n.get("id") == node_id), None)
         if not node_config:
@@ -1710,7 +2606,7 @@ class WorkflowService:
         for node in nodes:
             if node.get("type") == NodeType.START:
                 return node.get("config", {}).get("variables", [])
-        raise BusinessException("workflow config error - start node not found")
+        return []
 
     @staticmethod
     def is_memory_enable(config: dict) -> bool:

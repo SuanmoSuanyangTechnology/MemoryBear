@@ -177,6 +177,13 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
     except Exception:
         pass
 
+    # is_explicit_memory 合并（任一方为 True 则结果为 True）
+    try:
+        if getattr(ent, "is_explicit_memory", False) and not getattr(canonical, "is_explicit_memory", False):
+            canonical.is_explicit_memory = True
+    except Exception:
+        pass
+
     # 名称向量补全
     try:
         emb_a = getattr(canonical, "name_embedding", []) or []

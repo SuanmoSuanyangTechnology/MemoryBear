@@ -75,6 +75,10 @@ class NewExtractionOrchestrator:
         self.embedding_id = embedding_id
         self.progress_callback = progress_callback
 
+        # Snapshot/debug payload populated by ``_extract_all_statements`` —
+        # 在此初始化避免下游依赖 ``getattr`` 兜底。
+        self._last_statement_inputs: Dict[str, Dict[str, "StatementStepInput"]] = {}
+
         # Build shared context for all LLM-based steps
         self.context = StepContext(
             llm_client=llm_client,
@@ -310,6 +314,7 @@ class NewExtractionOrchestrator:
         # Store raw step outputs for snapshot/debugging
         self._last_stage_outputs = {
             "statement_results": all_stmt_results,
+            "statement_inputs": self._last_statement_inputs,
             "triplet_results": all_triplet_results,
             "emotion_results": {},
             "embedding_output": None,
@@ -463,6 +468,7 @@ class NewExtractionOrchestrator:
         # Store raw step outputs for snapshot/debugging
         self._last_stage_outputs = {
             "statement_results": all_stmt_results,
+            "statement_inputs": self._last_statement_inputs,
             "triplet_results": all_triplet_results,
             "emotion_results": {},
             "embedding_output": merged_emb,
@@ -492,7 +498,8 @@ class NewExtractionOrchestrator:
         """
         # Collect all (chunk, metadata) pairs
         tasks: List[Any] = []
-        task_meta: List[Tuple[str, str, str, SupportingContext]] = []
+        # task_meta: (dialog_id, chunk_id, speaker, supporting_context, step_input)
+        task_meta: List[Tuple[str, str, str, SupportingContext, StatementStepInput]] = []
 
         for dialog in dialog_data_list:
             ctx = self._build_supporting_context(dialog)
@@ -525,17 +532,19 @@ class NewExtractionOrchestrator:
                 )
                 tasks.append(self.statement_temporal_step.run(inp))
                 task_meta.append(
-                    (dialog.id, chunk.id, chunk_speaker, ctx)
+                    (dialog.id, chunk.id, chunk_speaker, ctx, inp)
                 )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Organise into nested dict
+        # Organise into nested dict;同时记录每个 chunk 的输入上下文，供 snapshot 落盘核查。
         stmt_map: Dict[str, Dict[str, List[StatementStepOutput]]] = {}
+        stmt_inputs_map: Dict[str, Dict[str, StatementStepInput]] = {}
         for i, result in enumerate(results):
-            dialog_id, chunk_id, speaker, _ = task_meta[i]
+            dialog_id, chunk_id, speaker, _, inp = task_meta[i]
             if dialog_id not in stmt_map:
                 stmt_map[dialog_id] = {}
+            stmt_inputs_map.setdefault(dialog_id, {})[chunk_id] = inp
 
             if isinstance(result, BaseException):
                 logger.error("Statement extraction failed for chunk %s: %s", chunk_id, result)
@@ -556,6 +565,9 @@ class NewExtractionOrchestrator:
                             {"statement": s.statement_text},
                         )
 
+        # Stash the inputs map so the orchestrator can attach it to
+        # ``_last_stage_outputs`` for snapshot/debugging.
+        self._last_statement_inputs = stmt_inputs_map
         return stmt_map
 
     async def _extract_all_triplets(
@@ -834,6 +846,10 @@ class NewExtractionOrchestrator:
         assigned_stmt_emb = 0
         assigned_chunk_emb = 0
         assigned_dialog_emb = 0
+        assigned_entity_emb = 0
+
+        # Embedding lookup table (key: f"{entity_idx}_{name}" — matches _build_entity_embedding_input)
+        entity_emb_map = embedding_output.entity_embeddings if embedding_output else {}
 
         for dialog in dialog_data_list:
             dialog_stmts = all_stmt_results.get(dialog.id, {})
@@ -876,9 +892,11 @@ class NewExtractionOrchestrator:
                                 type_description=getattr(e, "type_description", ""),
                                 description=e.description,
                                 is_explicit_memory=e.is_explicit_memory,
+                                name_embedding=entity_emb_map.get(f"{e.entity_idx}_{e.name}"),
                             )
                             for e in triplet_out.entities
                         ]
+                        assigned_entity_emb += sum(1 for e in entities if e.name_embedding is not None)
                         triplets = [
                             TripletRelation(
                                 subject_name=t.subject_name,
@@ -942,11 +960,12 @@ class NewExtractionOrchestrator:
 
         logger.info(
             "Data assignment complete — statements: %d, triplets: %d, "
-            "emotions: %d, stmt_emb: %d, chunk_emb: %d, dialog_emb: %d",
+            "emotions: %d, stmt_emb: %d, chunk_emb: %d, dialog_emb: %d, entity_emb: %d",
             total_stmts,
             assigned_triplets,
             assigned_emotions,
             assigned_stmt_emb,
             assigned_chunk_emb,
             assigned_dialog_emb,
+            assigned_entity_emb,
         )

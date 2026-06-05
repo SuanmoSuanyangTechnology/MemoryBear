@@ -28,6 +28,7 @@ logger = get_logger()
 class DifyAdapter(BasePlatformAdapter, DifyConverter):
     NODE_TYPE_MAPPING = {
         "start": NodeType.START,
+        "trigger": NodeType.TRIGGER,
         "llm": NodeType.LLM,
         "answer": NodeType.END,
         "end": NodeType.OUTPUT,
@@ -109,8 +110,18 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                 self.edges.append(edge)
 
         mode = self.config.get("app", {}).get("mode", "advanced-chat")
+        
+        # 确定目标工作流类型
+        if mode == "advanced-chat":
+            target_workflow_type = "workflow"
+        elif mode == "workflow":
+            target_workflow_type = "pure_workflow"
+        else:
+            target_workflow_type = mode
+        
         conv_variables = self.config.get("workflow").get("conversation_variables") or []
-        if mode == "workflow":
+        # 纯工作流没有会话变量
+        if target_workflow_type == "pure_workflow":
             conv_variables = []
         for variable in conv_variables:
             con_var = self._convert_variable(variable)
@@ -133,6 +144,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             execution_config=execution_config,
             origin_config=self.config,
             trigger=trigger,
+            workflow_type=target_workflow_type,
             edges=self.edges,
             nodes=self.nodes,
             variables=self.conv_variables,

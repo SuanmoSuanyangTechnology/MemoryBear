@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 12:25:53
+ * @Last Modified time: 2026-05-26 15:38:04
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -255,6 +255,20 @@ export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_sin
 export const generateRagProfile = (end_user_id: string) => {
   return request.post(`/dashboard/generate_rag_profile`, { end_user_id })
 }
+
+// Reflect Log Statistics Overview
+export const getReflectLogStats = (end_user_id: string) => {
+  return request.get(`/memory/reflection/logs/stats`, { end_user_id })
+}
+// Get Reflect Log List (Pagination)
+export const reflectLogListUrl = '/memory/reflection/logs'
+export const getReflectLogs = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
+  return request.get(reflectLogListUrl, data)
+}
+// Get Reflect Log Detail
+export const getReflectLogDetail = (reflect_log_id: string) => {
+  return request.get(`/memory/reflection/logs/${reflect_log_id}`)
+}
 /*************** end User Memory APIs ******************************/
 
 /****************** Memory Management APIs *******************************/
@@ -314,6 +328,11 @@ export const updateMemoryReflectionConfig = (values: SelfReflectionEngineConfig)
 // Reflection Engine - Pilot run
 export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; language_type: string; }) => {
   return request.get('/memory/reflection/run', values)
+}
+// User Memory - Reflection logs
+export const getMemoryReflectionLogsUrl = '/memory-storage/analytics/reflection_logs'
+export const getMemoryReflectionLogs = (end_user_id: string) => {
+  return request.get(getMemoryReflectionLogsUrl, { end_user_id })
 }
 
 /*************** end Memory Management APIs ******************************/

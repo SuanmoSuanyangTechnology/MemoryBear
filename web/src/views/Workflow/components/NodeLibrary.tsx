@@ -4,9 +4,21 @@ import { Flex, Tooltip } from 'antd'
 import clsx from 'clsx';
 
 import { nodeLibrary } from '../constant';
+import { filterNodeByAppType } from '../utils';
 import RbCard from '@/components/RbCard/Card';
+import type { Application } from '@/views/ApplicationManagement/types'
 
-const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ collapsed, handleToggle }) => {
+interface NodeLibraryProps {
+  appType?: Application['type'];
+  collapsed: boolean;
+  handleToggle: () => void;
+}
+
+const NodeLibrary: FC<NodeLibraryProps> = ({
+  appType,
+  collapsed,
+  handleToggle
+}) => {
   const { t } = useTranslation()
 
   return (
@@ -36,7 +48,7 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
           {collapsed
             ? nodeLibrary.flatMap(category =>
                 category.nodes
-                  .filter(node => node.type !== 'cycle-start' && node.type !== 'break')
+                  .filter(node => node.type !== 'cycle-start' && node.type !== 'break' && filterNodeByAppType(node, appType))
                   .map(node => (
                     <Tooltip key={node.type} title={t(`workflow.${node.type}`)} placement="right">
                       <div
@@ -52,33 +64,35 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
                     </Tooltip>
                   ))
               )
-            : nodeLibrary.map(category => (
-              <div
-                key={category.category}
-              >
-                <div className="rb:font-semibold rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:pl-1">{t(`workflow.${category.category}`)}</div>
-                <Flex gap={6} vertical>
-                  {category.nodes
-                    .filter(node => node.type !== 'cycle-start' && node.type !== 'break')
-                    .map((node) => (
-                      <Flex
-                        key={node.type}
-                        align="center"
-                        gap={8}
-                        className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('application/reactflow', node.type);
-                          e.dataTransfer.setData('application/json', JSON.stringify(node));
-                        }}
-                      >
-                        <div className={`rb:size-6 rb:bg-cover ${node.icon}`} />
-                        <span className="rb:font-medium rb:text-[12px] rb:leading-4">{t(`workflow.${node.type}`)}</span>
-                      </Flex>
-                    ))}
-                </Flex>
-              </div>
-            ))
+            : nodeLibrary.map(category => {
+                const filteredNodes = category.nodes.filter(
+                  node => node.type !== 'cycle-start' && node.type !== 'break' && filterNodeByAppType(node, appType)
+                );
+                if (filteredNodes.length === 0) return null;
+                return (
+                  <div key={category.category}>
+                    <div className="rb:font-semibold rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:pl-1">{t(`workflow.${category.category}`)}</div>
+                    <Flex gap={6} vertical>
+                      {filteredNodes.map((node) => (
+                        <Flex
+                          key={node.type}
+                          align="center"
+                          gap={8}
+                          className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/reactflow', node.type);
+                            e.dataTransfer.setData('application/json', JSON.stringify(node));
+                          }}
+                        >
+                          <div className={`rb:size-6 rb:bg-cover ${node.icon}`} />
+                          <span className="rb:font-medium rb:text-[12px] rb:leading-4">{t(`workflow.${node.type}`)}</span>
+                        </Flex>
+                      ))}
+                    </Flex>
+                  </div>
+                );
+              })
           }
         </Flex>
       </RbCard>
