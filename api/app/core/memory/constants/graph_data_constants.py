@@ -17,6 +17,7 @@ SUPPORTED_NODE_TYPES: FrozenSet[str] = frozenset({
     "Chunk",
     "AssistantOriginal",
     "AssistantPruned",
+    "Conversation",
     "Statement",
     "ExtractedEntity",
     "MemorySummary",
@@ -29,6 +30,7 @@ DEFAULT_PER_TYPE_LIMIT_MAP: Dict[str, int] = {
     "Chunk": 30,
     "AssistantOriginal": 20,
     "AssistantPruned": 20,
+    "Conversation": 20,
     "Statement": 50,
     "ExtractedEntity": 50,
     "MemorySummary": 20,
@@ -89,6 +91,10 @@ NODE_PROPERTY_WHITELIST: Dict[str, List[str]] = {
     # ``text``。前端按 ``properties.text`` 取节点正文内容。
     "AssistantOriginal": ["text", "created_at"],
     "AssistantPruned": ["text", "memory_type", "created_at"],
+    # 会话级中心节点（参见 ``graph_models.py`` 的 ``ConversationNode``）。
+    # 用于把同一会话的 AssistantOriginal / AssistantPruned 聚成一个连通子图。
+    # 前端按 ``properties.conversation_id`` 识别会话，``caption`` 回落到 label。
+    "Conversation": ["conversation_id", "name", "created_at"],
     # 注意：Community 由 /analytics/community_graph 接口独立处理，
     # 不出现在 SUPPORTED_NODE_TYPES 中。但保留白名单以支持其它流程
     # （如 Center_Mode 中心节点扩展碰巧命中 Community 邻居）的属性裁剪。

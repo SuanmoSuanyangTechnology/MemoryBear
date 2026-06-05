@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 12:20:24
+ * @Last Modified time: 2026-06-02 15:41:46
  */
 /**
  * Workflow Chat Component
@@ -174,6 +174,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     setChatList([])
     setVariables([])
     setExecutionId(null)
+    setConversationId(null)
     executionIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
@@ -286,6 +287,19 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
               return newList
             })
             break
+          case 'message_replace':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  content: content
+                }
+              }
+              return newList
+            })
+            break;
           // Track node execution start
           case 'node_start':
             setChatList(prev => {

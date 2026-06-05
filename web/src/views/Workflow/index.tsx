@@ -3,7 +3,7 @@ import clsx from 'clsx';
 
 import NodeLibrary from './components/NodeLibrary'
 import Properties from './components/Properties';
-import CanvasToolbar from './components/CanvasToolbar';
+import CanvasToolbar, { type CanvasToolbarRef } from './components/CanvasToolbar';
 import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
@@ -26,6 +26,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
 
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const canvasToolbarRef = useRef<CanvasToolbarRef>(null)
   // 使用自定义Hook初始化工作流图
   const {
     config,
@@ -60,6 +61,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     event.preventDefault();
   };
   const handleRun = () => {
+    canvasToolbarRef.current?.setIsVariableInspectorVisible(false)
     chatRef.current?.handleOpen()
   }
   const handleToggle = () => {
@@ -113,6 +115,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         <div ref={containerRef} className="rb:w-full rb:h-full" />
         {/* 地图工具栏 */}
         <CanvasToolbar
+          ref={canvasToolbarRef}
           selectedNode={selectedNode}
           miniMapRef={miniMapRef}
           graphRef={graphRef}

@@ -31,7 +31,9 @@ class QueryPreprocessor:
             {"role": "user", "content": f"<history>{history}</history><query>{query}</query>"},
         ]
         try:
-            sub_queries = await llm_client.ainvoke(messages) | StructResponse(mode='json')
+            sub_queries = await llm_client.ainvoke(messages, config={
+                "callbacks": []
+            }) | StructResponse(mode='json')
             queries = sub_queries["questions"]
         except Exception as e:
             logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")

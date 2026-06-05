@@ -257,6 +257,7 @@ async def import_qa_new_doc(
     request: Request,
     file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
     api_key_auth: ApiKeyAuth = None,
+    parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
     db: Session = Depends(get_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
@@ -271,6 +272,7 @@ async def import_qa_new_doc(
         kb_id=kb_id,
         file=file,
         db=db,
+        parent_id=parent_id,
         current_user=current_user,
         storage_service=storage_service,
     )
