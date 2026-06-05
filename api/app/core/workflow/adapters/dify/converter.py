@@ -3,6 +3,7 @@
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/25 18:21
 import base64
+import json
 import re
 from typing import Any
 from urllib.parse import quote
@@ -75,6 +76,11 @@ from app.core.workflow.nodes.http_request.config import (
 from app.core.workflow.nodes.if_else.config import ConditionDetail, ConditionBranchConfig
 from app.core.workflow.nodes.jinja_render.config import VariablesMappingConfig
 from app.core.workflow.nodes.llm.config import MemoryWindowSetting, MessageConfig
+from app.core.workflow.nodes.agent.config import (
+    AgentNodeConfig,
+    AgentErrorHandleConfig,
+    ToolSelector,
+)
 from app.core.workflow.nodes.parameter_extractor.config import ParamsConfig
 from app.core.workflow.nodes.question_classifier.config import ClassifierConfig
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
@@ -106,6 +112,7 @@ class DifyConverter(BaseConverter):
             NodeType.QUESTION_CLASSIFIER: self.convert_question_classifier_node_config,
             NodeType.VAR_AGGREGATOR: self.convert_variable_aggregator_node_config,
             NodeType.TOOL: self.convert_tool_node_config,
+            NodeType.AGENT: self.convert_agent_node_config,
             NodeType.NOTES: self.convert_notes_config,
             NodeType.LIST_OPERATOR: self.convert_list_operator_node_config,
             NodeType.DOCUMENT_EXTRACTOR: self.convert_document_extractor_node_config,
@@ -421,15 +428,137 @@ class DifyConverter(BaseConverter):
         self.config_validate(node["id"], node["data"]["title"], QuestionClassifierNodeConfig, result)
         return result
 
+    @staticmethod
+    def _get_dify_model_config(node_data: dict[str, Any]) -> dict[str, Any]:
+        model = node_data.get("model") or {}
+        if isinstance(model, dict) and isinstance(model.get("value"), dict):
+            return model["value"]
+        return model if isinstance(model, dict) else {}
+
+    @classmethod
+    def _get_dify_model_name(cls, node_data: dict[str, Any]) -> str | None:
+        model = cls._get_dify_model_config(node_data)
+        return model.get("name") or model.get("model")
+
+    @staticmethod
+    def _has_param(params: dict[str, Any], key: str) -> bool:
+        return key in params and params.get(key) not in (None, "")
+
+    @staticmethod
+    def _to_int(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_float(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _enabled_value(value: Any, default: Any = None) -> dict[str, Any]:
+        if value in (None, ""):
+            return {"enable": False, "value": default}
+        return {"enable": True, "value": value}
+
+    @classmethod
+    def _convert_dify_completion_params(cls, completion_params: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(completion_params, dict):
+            return {}
+
+        result: dict[str, Any] = {}
+
+        if cls._has_param(completion_params, "temperature"):
+            value = cls._to_float(completion_params.get("temperature"))
+            if value is not None:
+                result["temperature"] = value
+
+        if cls._has_param(completion_params, "max_tokens"):
+            value = cls._to_int(completion_params.get("max_tokens"))
+            if value is not None:
+                result["max_tokens"] = value
+
+        optional_params: dict[str, tuple[Any, Any]] = {
+            "top_p": (0.8, cls._to_float),
+            "top_k": (50, cls._to_int),
+            "seed": (1234, cls._to_int),
+            "repetition_penalty": (1.0, cls._to_float),
+            "presence_penalty": (0, cls._to_float),
+            "frequency_penalty": (0, cls._to_float),
+        }
+        for key, (default, converter) in optional_params.items():
+            if cls._has_param(completion_params, key):
+                value = converter(completion_params.get(key))
+                if value is not None:
+                    result[key] = cls._enabled_value(value, default)
+
+        if "enable_search" in completion_params:
+            result["search"] = bool(completion_params.get("enable_search"))
+        elif "search" in completion_params:
+            result["search"] = bool(completion_params.get("search"))
+
+        thinking_enabled = bool(completion_params.get("enable_thinking"))
+        thinking_budget = (
+            completion_params.get("thinking_budget")
+            if "thinking_budget" in completion_params
+            else completion_params.get("thinking_budget_tokens")
+        )
+        budget_value = cls._to_int(thinking_budget)
+        if "enable_thinking" in completion_params or budget_value is not None:
+            result["thinking"] = {
+                "enable": thinking_enabled,
+                "budget": {
+                    "enable": thinking_enabled and budget_value is not None,
+                    "value": budget_value if budget_value is not None else 256,
+                }
+            }
+
+        response_format = completion_params.get("response_format")
+        if isinstance(response_format, dict):
+            response_format_value = response_format.get("type") or response_format.get("value")
+        else:
+            response_format_value = response_format
+        if response_format_value:
+            result["response_format"] = cls._enabled_value(response_format_value, "text")
+        elif "response_format" in completion_params:
+            result["response_format"] = cls._enabled_value(None, "text")
+
+        if cls._has_param(completion_params, "extra_headers"):
+            extra_headers = completion_params.get("extra_headers")
+            if isinstance(extra_headers, (dict, list)):
+                extra_headers = json.dumps(extra_headers, ensure_ascii=False)
+            result["extra_headers"] = cls._enabled_value(str(extra_headers), None)
+        elif "extra_headers" in completion_params:
+            result["extra_headers"] = cls._enabled_value(None, None)
+
+        if cls._has_param(completion_params, "stop"):
+            stop = completion_params.get("stop")
+            if isinstance(stop, str):
+                stop = [stop]
+            elif not isinstance(stop, list):
+                stop = []
+            result["stop"] = cls._enabled_value(stop, [])
+
+        return result
+
     def convert_llm_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         self.warnings.append(
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                model_name=self._get_dify_model_name(node_data)
             )
         )
+        model_config = self._get_dify_model_config(node_data)
+        model_params = self._convert_dify_completion_params(model_config.get("completion_params"))
         context = self._process_list_variable_literal(node_data["context"]["variable_selector"])
         memory = MemoryWindowSetting(
             enable=bool(node_data.get("memory")),
@@ -463,7 +592,8 @@ class DifyConverter(BaseConverter):
             memory=memory,
             vision=vision,
             vision_input=vision_input,
-            messages=messages
+            messages=messages,
+            **model_params,
         ).model_dump()
         self.config_validate(node["id"], node["data"]["title"], LLMNodeConfig, result)
         return result
@@ -882,6 +1012,151 @@ class DifyConverter(BaseConverter):
             detail=f"Please reconfigure the tool node.",
         ))
         return {}
+
+    # Dify 内置工具名 → 记忆熊内置工具名 的映射表。
+    # 仅覆盖名称可对应的内置工具，其余 Dify 插件工具无法自动映射，需用户重新配置。
+    DIFY_TOOL_NAME_MAPPING = {
+        "web_search": "web_search",
+        "google_search": "web_search",
+        "bing_search": "web_search",
+        "current_time": "datetime_tool",
+        "current_date": "datetime_tool",
+        "datetime": "datetime_tool",
+        "json_process": "json_tool",
+        "json_processor": "json_tool",
+    }
+
+    def _match_dify_tool(self, node_id: str, node_name: str, raw_tool: dict) -> ToolSelector | None:
+        """将 Dify Agent 工具项映射为记忆熊 ToolSelector。
+
+        无法自动映射的工具产生 warning 提示用户重新配置。
+        """
+        tool_name = (
+            raw_tool.get("tool_name")
+            or raw_tool.get("tool_label")
+            or raw_tool.get("provider_name")
+            or ""
+        )
+        mapped = self.DIFY_TOOL_NAME_MAPPING.get(tool_name)
+        if not mapped:
+            self.warnings.append(ExceptionDefinition(
+                type=ExceptionType.CONFIG,
+                node_id=node_id,
+                node_name=node_name,
+                detail=f"Agent tool '{tool_name}' cannot be auto-mapped. Please reconfigure.",
+            ))
+            return None
+        # tool_id 暂用映射后的名称占位，导入后由前端工具选择器重新绑定真实工具 ID
+        return ToolSelector(
+            tool_id=mapped,
+            tool_type="builtin",
+            operation=None,
+            enabled=bool(raw_tool.get("enabled", True)),
+        )
+
+    def convert_agent_node_config(self, node: dict) -> dict:
+        """转换 Dify Agent 节点配置为记忆熊 AgentNodeConfig。
+
+        纯配置层字段映射，不涉及执行引擎。模型与插件工具无法自动映射，
+        产生 warning 提示用户在画布上手动补全后运行。
+        """
+        node_data = node["data"]
+
+        # 模型无法自动映射 → 产生 UnknownModelWarning，model_id 置空
+        model_config = self._get_dify_model_config(node_data)
+        model_name = self._get_dify_model_name(node_data)
+        model_params = self._convert_dify_completion_params(model_config.get("completion_params"))
+        self.warnings.append(
+            UnknownModelWarning(
+                node_id=node["id"],
+                node_name=node_data.get("title"),
+                model_name=model_name,
+            )
+        )
+
+        agent_parameters = node_data.get("agent_parameters") or {}
+
+        # 系统提示词：agent_parameters.prompt.value
+        prompt_param = agent_parameters.get("prompt") or {}
+        raw_prompt = prompt_param.get("value")
+        if isinstance(raw_prompt, list):
+            # mixed/messages 形态：拼接各段 text
+            raw_prompt = "\n".join(
+                seg.get("text", "") for seg in raw_prompt if isinstance(seg, dict)
+            )
+        system_prompt = self.trans_variable_format(raw_prompt) if raw_prompt else ""
+
+        # 工具列表：agent_parameters.tools.value[]
+        tools_param = agent_parameters.get("tools") or {}
+        raw_tools = tools_param.get("value") or []
+        if not isinstance(raw_tools, list):
+            raw_tools = []
+        tools: list[ToolSelector] = []
+        for raw_tool in raw_tools:
+            if not isinstance(raw_tool, dict):
+                continue
+            selector = self._match_dify_tool(node["id"], node_data.get("title"), raw_tool)
+            if selector:
+                tools.append(selector)
+
+        # 最大迭代次数
+        max_iterations = node_data.get("max_iteration") or node_data.get("max_iterations") or 10
+
+        # Agent 策略：映射 Dify 策略字段到记忆熊的策略字符串
+        dify_strategy_label_raw = node_data.get("agent_strategy_label") or ""
+        # Dify 旧版（agent_mode.strategy）兼容
+        if not dify_strategy_label_raw:
+            agent_mode = node_data.get("agent_mode") or {}
+            dify_strategy_label_raw = agent_mode.get("strategy", "")
+        # label（实现方式）映射：function_call → function_calling，其余 → react
+        if dify_strategy_label_raw in ("function_call", "function_calling"):
+            strategy = "function_calling"
+        else:
+            strategy = dify_strategy_label_raw or "react"
+
+        # 记忆配置（与 LLM 节点转换一致）
+        memory = MemoryWindowSetting(
+            enable=bool(node_data.get("memory")),
+            enable_window=bool(node_data.get("memory", {}).get("window", {}).get("enabled", False)),
+            window_size=int(node_data.get("memory", {}).get("window", {}).get("size", 20))
+        )
+
+        context = ""
+        raw_context = node_data.get("context") or {}
+        variable_selector = raw_context.get("variable_selector") if isinstance(raw_context, dict) else None
+        if isinstance(variable_selector, list):
+            processed_literal = self._process_list_variable_literal(variable_selector)
+            if processed_literal:
+                context = processed_literal
+
+        # 异常处理：fail-branch → BRANCH，其余 → NONE
+        error_strategy = node_data.get("error_strategy")
+        if error_strategy == "fail-branch":
+            error_handle = AgentErrorHandleConfig(method=HttpErrorHandle.BRANCH)
+            self.error_branch_node_cache.append(node["id"])
+        else:
+            error_handle = AgentErrorHandleConfig(method=HttpErrorHandle.NONE)
+
+        result_data = {
+            "model": {
+                "model_id": None,
+                "provider": model_config.get("provider"),
+                "model": model_config.get("model") or model_config.get("name"),
+                "model_type": model_config.get("model_type") or "llm",
+                "completion_params": model_params,
+            },
+            "system_prompt": system_prompt,
+            "message": "{{ sys.message }}",
+            "tools": tools,
+            "context": context,
+            "max_iterations": int(max_iterations),
+            "strategy": strategy,
+            "memory": memory,
+            "error_handle": error_handle,
+        }
+        result = AgentNodeConfig.model_validate(result_data).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], AgentNodeConfig, result)
+        return result
 
     @staticmethod
     def convert_notes_config(node: dict):

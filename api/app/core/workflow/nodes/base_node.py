@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import time
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -27,6 +28,17 @@ logger = logging.getLogger(__name__)
 
 # 匹配模板变量 {{xxx}} 的正则
 _TEMPLATE_PATTERN = re.compile(r"\{\{.*?\}\}")
+_MAX_DB_INTEGER = 2_147_483_647
+_execution_order = 0
+_execution_order_lock = threading.Lock()
+
+
+def _next_execution_order() -> int:
+    """Return a DB-safe monotonic order value for workflow node logs."""
+    global _execution_order
+    with _execution_order_lock:
+        _execution_order = (_execution_order % _MAX_DB_INTEGER) + 1
+        return _execution_order
 
 
 class NodeExecutionError(Exception):
@@ -270,7 +282,7 @@ class BaseNode(ABC):
         cached_result["status"] = "completed"
         cached_result["error"] = None
         cached_result["elapsed_time"] = (time.time() - lookup_started_at) * 1000
-        cached_result["execution_order"] = time.monotonic_ns()
+        cached_result["execution_order"] = _next_execution_order()
         cached_result["cache_hit"] = True
         cached_result["cache_key"] = cache_entry.get("cache_key")
         cached_result["cache_id"] = str(cache_entry.get("id")) if cache_entry.get("id") else None
@@ -583,7 +595,7 @@ class BaseNode(ABC):
             "token_usage": token_usage,
             "error": None,
             # 单调递增序号，用于日志按执行顺序排序（JSONB 不保证 key 顺序）
-            "execution_order": time.monotonic_ns(),
+            "execution_order": _next_execution_order(),
             **self._extract_extra_fields(business_result),
         }
         final_output = {
@@ -634,7 +646,7 @@ class BaseNode(ABC):
             "token_usage": None,
             "error": error_message,
             # 单调递增序号，用于日志按执行顺序排序
-            "execution_order": time.monotonic_ns(),
+            "execution_order": _next_execution_order(),
         }
 
         # if error_edge:

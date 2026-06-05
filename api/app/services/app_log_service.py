@@ -648,6 +648,7 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
         elapsed_time = output.pop("elapsed_time", None)
         token_usage = output.pop("token_usage", None)
         process = output.pop("process", None)
+        agent_log = output.pop("agent_log", None)
         # execution_order 仅用于排序，不返回给前端
         output.pop("execution_order", None)
         result.append(AppLogNodeExecution(
@@ -658,6 +659,7 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
             error=error,
             input=inp,
             process=process,
+            agent_log=agent_log,
             output=output if output else None,
             cycle_items=cycle_items,
             elapsed_time=elapsed_time,

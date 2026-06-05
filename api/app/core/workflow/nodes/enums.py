@@ -39,6 +39,7 @@ BRANCH_NODES = frozenset({
     NodeType.QUESTION_CLASSIFIER,
     NodeType.LLM,
     NodeType.CODE,
+    NodeType.AGENT,
     NodeType.HUMAN_INTERVENTION,
 })
 
@@ -110,6 +111,11 @@ class HttpErrorHandle(StrEnum):
     NONE = "none"
     DEFAULT = "default"
     BRANCH = "branch"
+
+
+class AgentStrategy(StrEnum):
+    REACT = "react"
+    FUNCTION_CALLING = "function_calling"
 
 
 class IterationErrorHandleMode(StrEnum):

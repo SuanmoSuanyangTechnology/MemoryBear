@@ -34,6 +34,7 @@ from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
 from app.core.workflow.nodes.llm import LLMNodeConfig
 from app.core.workflow.nodes.code import CodeNodeConfig
+from app.core.workflow.nodes.agent import AgentNodeConfig
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
 from app.core.workflow.variable.base_variable import VariableType
@@ -164,6 +165,11 @@ class GraphBuilder:
                 non_branch_nodes.append(node_info["id"])
             elif node_type == NodeType.CODE and \
                     CodeNodeConfig(**node_config).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
+            elif node_type == NodeType.AGENT and \
+                    AgentNodeConfig(**node_config).error_handle.method in [
                 HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
             ]:
                 non_branch_nodes.append(node_info["id"])
@@ -346,7 +352,7 @@ class GraphBuilder:
                     # For LLM nodes, use branch_signal field for routing (output is dynamic text)
                     # For human-intervention nodes, use __route field (not visible in node output)
                     # For other branch nodes (e.g. HTTP), use output field
-                    if node_type in (NodeType.LLM, NodeType.CODE):
+                    if node_type in (NodeType.LLM, NodeType.CODE, NodeType.AGENT):
                         route_field = "branch_signal"
                     elif node_type == NodeType.HUMAN_INTERVENTION:
                         route_field = "__route"

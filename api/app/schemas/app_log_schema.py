@@ -69,6 +69,7 @@ class AppLogNodeExecution(BaseModel):
     error: Optional[str] = None
     input: Optional[Any] = None
     process: Optional[Any] = None
+    agent_log: Optional[Any] = None
     output: Optional[Any] = None
     cycle_items: Optional[List[Any]] = None
     elapsed_time: Optional[float] = None
