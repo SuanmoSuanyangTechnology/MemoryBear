@@ -659,34 +659,17 @@ def create_long_term_memory_tool(
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
 
     @tool(args_schema=LongTermMemoryInput)
-    def long_term_memory(question: str, search_mode: str) -> str:
-        """
-        从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
+    async def long_term_memory(question: str, search_mode: str) -> str:
+        """检索用户的历史记忆，用于了解其背景、偏好和过往对话。
 
-        **何时使用此工具：**
-        - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
-        - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
-        - 需要基于历史上下文提供个性化建议
-        - 需要用户信息进行一些问题的推断
-
-        **何时不使用此工具：**
-        - 简单问候（如"你好"、"谢谢"、"再见"）
-        - 纯任务性请求（如"写代码"、"翻译文字"、"分析图片"）
-        - 用户已提供完整信息（如提供了文本、图片、文档等内容）
-        - 创作性任务（如"写诗"、"编故事"、"创作谜语"）
-
-        Args:
-            question: 需要检索的问题
-            search_mode: '0':深度检索  '1':普通检索  '2': 推理类型检索
-
-        Returns:
-            检索到的历史记忆内容
+        适用：用户询问历史/个人信息或偏好，或需基于历史上下文做个性化判断。
+        不适用：寒暄、纯任务请求(写代码/翻译)、用户已给全信息、纯创作类任务。
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
             with get_db_context() as db_ctx:
                 memory_service = MemoryService(db_ctx, config_id, end_user_id)
-                search_result = asyncio.run(memory_service.read(question, SearchStrategy(search_mode)))
+                search_result = await memory_service.read(question, SearchStrategy(search_mode))
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})

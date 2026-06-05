@@ -35,6 +35,9 @@ Delete:
 
 If a section of content does not help answer the Query, delete it.
 
+**Exception for inference-based or relationship queries**:
+* If the Query is about ranking, preference, tendency, relationship, or any inference, retain all content that can serve as evidence or reasoning for a future model to answer the Query, even if the answer is not explicitly stated.
+
 ---
 
 ## 2. All key facts must be retained
@@ -59,6 +62,11 @@ Do not omit or alter the following information:
 * Causal Relationships
 * Decision Conclusions
 * Inference Basis
+* Interaction Frequency
+* Trust Level
+* Relationship Descriptions
+* Shared Activities
+* User Evaluations
 
 Facts must not be lost due to compression.
 
@@ -66,33 +74,27 @@ Facts must not be lost due to compression.
 
 ## 3. Handling Inference-Based Questions
 
-If the Query is a question of inference, prediction, or tendency judgment:
+If the Query is a question of inference, prediction, tendency judgment, or relationship evaluation:
 
 * Reasonable inferences can be made based on the retrieved content
-* But only based on the retrieved content itself
+* Only use retrieved content for inference
+* Preserve evidence, signals, and patterns in the content
 * Do not introduce external knowledge
 * No subjective speculation
 
-If the retrieved content is insufficient to support the inference, output:
+If the retrieved content has no evidence whatsoever, output:
 
-Insufficient information to infer.
+No relevant information found.
 
 ---
 
 ## 4. Output Format
 
-Based on content density:
-
-* Prioritize compact paragraphs
-* Or use high-information-density bullet point lists
+* Prioritize compact paragraphs or high-information-density bullet point lists
 * Avoid verbose natural language
-
-The output should:
-
-* Have high information density
-* Be easy for subsequent models to continue reasoning
 * Maintain semantic completeness
 * Maintain logical relationships
+* Preserve all causal or inferential connections
 
 ---
 
@@ -109,17 +111,7 @@ You must comply with:
 
 ---
 
-# Special Rules
-
-If there is no relevant content:
-
-Output:
-
-No relevant information found.
-
----
-
-# XML Content Protection (Extremely Important)
+## 6. XML Content Protection (Extremely Important)
 
 If the relevant information is inside XML tags:
 
@@ -129,24 +121,14 @@ If the relevant information is inside XML tags:
 * Do not compress XML internal text
 * Must fully preserve the original XML content
 
-That is:
-
-XML content can only be "kept entirely" or "deleted entirely."
-
-Partial rewriting is prohibited.
+XML content can only be "kept entirely" or "deleted entirely." Partial rewriting is prohibited.
 
 ---
 
-# Final Requirements (Important)
+# Final Requirements
 
-Your output must:
-
-* Be a "compressed retrieval context"
-* Rather than a "question answer"
-* Does not include additional explanations
-* Does not include an opening statement
-* Does not include a concluding statement
-* Does not include "based on the content"
-* Does not include "The following is the compressed result"
-
-Only output the final compressed content.
+* Output must be a "compressed retrieval context," not a "question answer"
+* Do not include additional explanations
+* Do not include opening or concluding statements
+* Do not include phrases like "based on the content" or "the following is the compressed result"
+* Preserve all evidence useful for inference, ranking, or relationship questions

@@ -11,9 +11,10 @@ class LongTermMemoryInput(BaseModel):
     question: str = Field(
         description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
     search_mode: str = Field(
-        description="'0':深度检索适用于涉及到复杂问题的检索,关系检索 "
-                    "'1':普通问题检索链路 "
-                    "'2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断"
+        description="检索模式。"
+                    "0=深度检索：拆解复杂问题并做关系(图)检索，返回汇总答案，适合复杂/关系类问题；"
+                    "1=普通检索：拆解问题做混合检索，返回汇总答案，适合一般性问题；"
+                    "2=快速检索：单次混合检索直接返回原始数据(不拆解/不汇总)，需自行据此推断，适合简单查询或需要原始证据。"
     )
 
 
@@ -118,4 +119,5 @@ class MemorySearchResult(BaseModel):
                 merged.relations.append(rel)
                 seen_rel_keys.add(key)
 
+        merged.content_str = other.content_str or self.content_str
         return merged

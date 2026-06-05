@@ -5,9 +5,10 @@ import math
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from neo4j import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.core.memory.enums import Neo4jNodeType, TripletPredicate
+from app.core.memory.enums import Neo4jNodeType, TripletPredicate, StorageType
 from app.core.memory.models.service_models import (
     Memory,
     MemorySearchResult,
@@ -23,6 +24,7 @@ from app.core.memory.read_services.search_engine.tools import make_entity_search
 from app.core.memory.utils.llm.llm_utils import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
+from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
     search_graph_by_embedding
@@ -69,7 +71,7 @@ class Neo4jSearchService:
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
                 Neo4jNodeType.PERCEPTUAL,
-                Neo4jNodeType.COMMUNITY
+                # Neo4jNodeType.COMMUNITY
             ]
 
         self.relation_search_tool = make_relation_search_tool(self.ctx)
@@ -448,3 +450,76 @@ class RAGSearchService:
     async def relation_search(self, query: str) -> MemorySearchResult:
         logger.info("RAG does not support relation search")
         return MemorySearchResult(memories=[])
+
+
+class HistorySearchService:
+    def __init__(self, ctx: MemoryContext, db: Session):
+        self.ctx = ctx
+        self.db = db
+
+    async def run(self) -> MemorySearchResult:
+        conversation: Conversation | None = self.db.scalar(
+            select(Conversation).where(
+                Conversation.user_id == self.ctx.end_user_id
+            ).order_by(
+                Conversation.updated_at.desc()
+            ).offset(1).limit(1)
+        )
+
+        if conversation is None:
+            return MemorySearchResult(memories=[])
+
+        cursor = conversation.write_cursor
+        messages: list[MemoryMessage] | None = list(self.db.scalars(
+            select(MemoryMessage).where(
+                MemoryMessage.conversation_id == conversation.id,
+                MemoryMessage.message_seq > cursor
+            ).order_by(MemoryMessage.message_seq)
+        ))
+        if messages is None:
+            return MemorySearchResult(memories=[])
+
+        messages_lst = []
+        for message in messages:
+            message_dict = {
+                "role": message.role,
+                "content": message.content,
+                "files": message.files,
+            }
+            messages_lst.append(message_dict)
+        memory = Memory(
+            content='\n'.join([
+                f'{_["role"]}:{_['content']}'
+                for _ in messages_lst
+            ]),
+            source=Neo4jNodeType.HISTORY,
+            query="",
+            id=str(conversation.id),
+            data={"messages": messages_lst}
+        )
+        return MemorySearchResult(memories=[memory])
+
+
+class MetaSearchService:
+    def __init__(self, ctx: MemoryContext, db: Session):
+        self.ctx = ctx
+        self.db = db
+
+    async def run(self) -> MemorySearchResult:
+        if self.ctx.storage_type == StorageType.RAG:
+            return MemorySearchResult(memories=[])
+        else:
+            async with Neo4jConnector() as connector:
+                end_user_id = self.ctx.end_user_id
+                user_meta = await search_user_metadata(connector, end_user_id)
+                metadata = MetadataBuilder(user_meta)
+                memory = Memory(
+                    score=1,
+                    source=Neo4jNodeType.EXTRACTEDENTITY,
+                    query='',
+                    id=end_user_id,
+                    content=metadata.content,
+                    data=metadata.data,
+                )
+
+            return MemorySearchResult(memories=[memory])

@@ -260,13 +260,14 @@ async def create_unique_constraints():
             """
         )
 
+        # FIXME: 存在重复数据
         # Community.community_id unique（MERGE 以此字段为查找键，而非 id）
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT community_id_unique IF NOT EXISTS
-            FOR (c:Community) REQUIRE c.community_id IS UNIQUE
-            """
-        )
+        # await connector.execute_query(
+        #     """
+        #     CREATE CONSTRAINT community_id_unique IF NOT EXISTS
+        #     FOR (c:Community) REQUIRE c.community_id IS UNIQUE
+        #     """
+        # )
 
         # Perceptual.id unique
         await connector.execute_query(
