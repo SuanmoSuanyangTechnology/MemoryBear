@@ -32,7 +32,7 @@ class NodeType(StrEnum):
     NOTES = "notes"
 
 
-BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER, NodeType.LLM, NodeType.CODE})
+BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER, NodeType.LLM, NodeType.CODE, NodeType.AGENT})
 
 
 class ComparisonOperator(StrEnum):
@@ -102,6 +102,11 @@ class HttpErrorHandle(StrEnum):
     NONE = "none"
     DEFAULT = "default"
     BRANCH = "branch"
+
+
+class AgentStrategy(StrEnum):
+    REACT = "react"
+    FUNCTION_CALLING = "function_calling"
 
 
 class IterationErrorHandleMode(StrEnum):

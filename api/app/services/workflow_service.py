@@ -1483,6 +1483,7 @@ class WorkflowService:
             "input": payload.get("inputs", payload.get("input")),
             "output": payload.get("outputs", payload.get("output")),
             "process": payload.get("process"),
+            "agent_log": payload.get("agent_log"),
             "token_usage": payload.get("token_usage"),
             "elapsed_time": payload.get("elapsed_time"),
             "error": payload.get("error"),
@@ -1503,6 +1504,7 @@ class WorkflowService:
             "inputs": node_output.get("input"),
             "outputs": node_output.get("output"),
             "process": node_output.get("process"),
+            "agent_log": node_output.get("agent_log"),
             "token_usage": node_output.get("token_usage"),
             "elapsed_time": node_output.get("elapsed_time"),
             "error": node_output.get("error"),
@@ -1523,6 +1525,14 @@ class WorkflowService:
         if not isinstance(node_data, dict):
             return 0
         return int(node_data.get("execution_order", 0) or 0)
+
+    @staticmethod
+    def _safe_execution_order(value: Any, fallback: int) -> int:
+        try:
+            order = int(value or fallback)
+        except (TypeError, ValueError):
+            return fallback
+        return order if 0 < order <= 2_147_483_647 else fallback
 
     @staticmethod
     def _get_node_name_from_config(config: WorkflowConfig | None, node_id: str) -> str | None:
@@ -1556,12 +1566,16 @@ class WorkflowService:
                 started_at = completed_at - datetime.timedelta(seconds=elapsed_time)
 
         process_data = normalized.pop("process", None)
+        agent_log = normalized.pop("agent_log", None)
         return {
             "execution_id": execution.id,
             "node_id": node_id,
             "node_type": normalized.pop("node_type", "unknown"),
             "node_name": normalized.pop("node_name", fallback_node_name),
-            "execution_order": int(normalized.pop("execution_order", fallback_execution_order) or fallback_execution_order),
+            "execution_order": self._safe_execution_order(
+                normalized.pop("execution_order", fallback_execution_order),
+                fallback_execution_order,
+            ),
             "retry_count": int(normalized.pop("retry_count", 0) or 0),
             "input_data": normalized.pop("input", None),
             "output_data": normalized.pop("output", normalized or None),
@@ -1576,6 +1590,7 @@ class WorkflowService:
             "meta_data": {
                 "source": source,
                 "process_data": process_data,
+                "agent_log": agent_log,
                 "workflow_config_id": str(execution.workflow_config_id),
                 "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
                 "debug": source == "single_node_debug",
@@ -1678,14 +1693,18 @@ class WorkflowService:
             "inputs": node_execution.input_data,
             "outputs": node_execution.output_data,
             "process": meta_data.get("process_data"),
+            "input_data": node_execution.input_data,
+            "output_data": node_execution.output_data,
+            "process_data": meta_data.get("process_data"),
+            "agent_log": meta_data.get("agent_log"),
             "error_message": node_execution.error_message,
             "elapsed_time": node_execution.elapsed_time,
             "token_usage": node_execution.token_usage,
             "retry_count": node_execution.retry_count,
             "cache_hit": node_execution.cache_hit,
             "cache_key": node_execution.cache_key,
-            "started_at": node_execution.started_at,
-            "completed_at": node_execution.completed_at,
+            "started_at": to_iso_z(node_execution.started_at),
+            "completed_at": to_iso_z(node_execution.completed_at),
         }
 
     def get_node_last_run(
@@ -1927,6 +1946,10 @@ class WorkflowService:
         if app_id and execution.app_id != app_id:
             return None
 
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        input_data = self._serialize_execution_value(execution.input_data or {})
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        meta_data = self._serialize_execution_value(execution.meta_data or {})
         snapshot = self._build_execution_snapshot_from_record(execution)
         if self._get_execution_source(execution) == "single_node_debug":
             base_execution = self._resolve_base_execution(
@@ -1941,13 +1964,44 @@ class WorkflowService:
         payload = {
             "execution_id": execution.execution_id,
             "app_id": str(execution.app_id),
+            "workflow_config_id": str(execution.workflow_config_id),
+            "release_id": str(execution.release_id) if execution.release_id else None,
+            "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
+            "trigger_type": execution.trigger_type,
             "status": execution.status,
+            "input_data": input_data,
+            "output_data": output_data,
             "snapshot": snapshot,
+            "context": self._serialize_execution_value(execution.context or {}),
+            "meta_data": meta_data,
             "error_message": execution.error_message,
             "error_node_id": execution.error_node_id,
             "started_at": to_iso_z(execution.started_at),
             "completed_at": to_iso_z(execution.completed_at),
             "elapsed_time": execution.elapsed_time,
+            "token_usage": self._serialize_execution_value(execution.token_usage),
+            "node_executions": [
+                {
+                    "node_id": node_execution.node_id,
+                    "node_type": node_execution.node_type,
+                    "node_name": node_execution.node_name,
+                    "execution_order": node_execution.execution_order,
+                    "retry_count": node_execution.retry_count,
+                    "status": node_execution.status,
+                    "input_data": self._serialize_execution_value(node_execution.input_data or {}),
+                    "output_data": self._serialize_execution_value(node_execution.output_data or {}),
+                    "agent_log": self._serialize_execution_value((node_execution.meta_data or {}).get("agent_log")),
+                    "error_message": node_execution.error_message,
+                    "started_at": to_iso_z(node_execution.started_at),
+                    "completed_at": to_iso_z(node_execution.completed_at),
+                    "elapsed_time": node_execution.elapsed_time,
+                    "token_usage": self._serialize_execution_value(node_execution.token_usage),
+                    "cache_hit": node_execution.cache_hit,
+                    "cache_key": node_execution.cache_key,
+                    "meta_data": self._serialize_execution_value(node_execution.meta_data or {}),
+                }
+                for node_execution in node_executions
+            ],
         }
         workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         secret_values = self._extract_secret_values_from_environment_variables(
@@ -3622,6 +3676,7 @@ class WorkflowService:
                         )
 
             elapsed = (time.time() - start_time) * 1000
+            extra_fields = node._extract_extra_fields(final_result)
             event_payload = {
                 "event": "node_end",
                 "data": self._attach_debug_execution_id(
@@ -3631,7 +3686,8 @@ class WorkflowService:
                         "node_type": node_type,
                         "inputs": node._extract_input(state, variable_pool),
                         "outputs": node._extract_output(final_result),
-                        "process": node._extract_extra_fields(final_result).get("process"),
+                        "process": extra_fields.get("process"),
+                        "agent_log": extra_fields.get("agent_log"),
                         "token_usage": node._extract_token_usage(final_result),
                         "elapsed_time": elapsed,
                         "error": None,

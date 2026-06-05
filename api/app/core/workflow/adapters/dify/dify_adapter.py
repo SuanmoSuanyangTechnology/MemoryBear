@@ -48,6 +48,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "question-classifier": NodeType.QUESTION_CLASSIFIER,
         "variable-aggregator": NodeType.VAR_AGGREGATOR,
         "tool": NodeType.TOOL,
+        "agent": NodeType.AGENT,
         "list-operator": NodeType.LIST_OPERATOR,
         "document-extractor": NodeType.DOCUMENT_EXTRACTOR,
         "": NodeType.NOTES
@@ -170,6 +171,8 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
     def _init_node_output_map(self):
         for node in self.origin_nodes:
             if self.map_node_type(node["data"]["type"]) == NodeType.LLM:
+                self.node_output_map[f"{node['id']}.text"] = f"{node['id']}.output"
+            elif self.map_node_type(node["data"]["type"]) == NodeType.AGENT:
                 self.node_output_map[f"{node['id']}.text"] = f"{node['id']}.output"
             elif self.map_node_type(node["data"]["type"]) == NodeType.KNOWLEDGE_RETRIEVAL:
                 self.node_output_map[f"{node['id']}.result"] = f"{node['id']}.output"

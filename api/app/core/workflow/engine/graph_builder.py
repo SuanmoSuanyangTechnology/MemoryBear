@@ -22,6 +22,7 @@ from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
 from app.core.workflow.nodes.llm import LLMNodeConfig
 from app.core.workflow.nodes.code import CodeNodeConfig
+from app.core.workflow.nodes.agent import AgentNodeConfig
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
 from app.core.workflow.variable.base_variable import VariableType
@@ -152,6 +153,11 @@ class GraphBuilder:
                 non_branch_nodes.append(node_info["id"])
             elif node_type == NodeType.CODE and \
                     CodeNodeConfig(**node_config).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
+            elif node_type == NodeType.AGENT and \
+                    AgentNodeConfig(**node_config).error_handle.method in [
                 HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
             ]:
                 non_branch_nodes.append(node_info["id"])
@@ -332,7 +338,7 @@ class GraphBuilder:
                     # Used later to determine which branch to take based on the node's output
                     # For LLM nodes, use branch_signal field for routing (output is dynamic text)
                     # For other branch nodes (e.g. HTTP), use output field
-                    route_field = "branch_signal" if node_type in (NodeType.LLM, NodeType.CODE) else "output"
+                    route_field = "branch_signal" if node_type in (NodeType.LLM, NodeType.CODE, NodeType.AGENT) else "output"
                     related_edge[idx]['condition'] = (
                         f"node['{node_id}']['{route_field}'] == '{related_edge[idx].get('label') or 'SUCCESS'}'"
                     )
