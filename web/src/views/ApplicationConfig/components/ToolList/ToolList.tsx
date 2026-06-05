@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:22:53
+ * @Last Modified time: 2026-06-03 23:04:15
  */
 /**
  * Tool List Component
@@ -45,11 +45,12 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
 
             switch ((toolDetail as any).tool_type) {
               case 'mcp':
+              case 'workflow':
                 const mcpFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                 return {
                   ...item,
                   is_active: (toolDetail as any).is_active,
-                  label: mcpFilterItem?.description,
+                  label: (toolDetail as any).tool_type === 'workflow' ? mcpFilterItem?.name ||mcpFilterItem?.description : mcpFilterItem?.description,
                   method_id: mcpFilterItem?.method_id,
                   value: mcpFilterItem?.name,
                   description: mcpFilterItem?.description,
@@ -82,7 +83,7 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
                 return {
                   ...item,
                   is_active: (toolDetail as any).is_active,
-                  label: customFilterItem?.name,
+                  label: (toolDetail as any).tool_type === 'workflow' ? customFilterItem?.name ||customFilterItem?.description : customFilterItem?.name,
                   method_id: customFilterItem?.method_id,
                   value: customFilterItem?.name,
                   description: customFilterItem?.description,

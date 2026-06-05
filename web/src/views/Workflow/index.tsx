@@ -3,7 +3,7 @@ import clsx from 'clsx';
 
 import NodeLibrary from './components/NodeLibrary'
 import Properties from './components/Properties';
-import CanvasToolbar from './components/CanvasToolbar';
+import CanvasToolbar, { type CanvasToolbarRef } from './components/CanvasToolbar';
 import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
@@ -26,6 +26,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
 
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [runOpen, setRunOpen] = useState(false)
   // 使用自定义Hook初始化工作流图
   const {
     config,
@@ -53,14 +54,15 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     canRedo,
     undo,
     redo,
-    lastExecuteId,
-  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
+  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad, setRunOpen });
+
 
   const onDragOver = (event: React.DragEvent) => {
     event.preventDefault();
   };
   const handleRun = () => {
-    chatRef.current?.handleOpen()
+    blankClick()
+    setRunOpen(true)
   }
   const handleToggle = () => {
     setCollapsed(prev => !prev)
@@ -113,6 +115,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         <div ref={containerRef} className="rb:w-full rb:h-full" />
         {/* 地图工具栏 */}
         <CanvasToolbar
+          ref={canvasToolbarRef}
           selectedNode={selectedNode}
           miniMapRef={miniMapRef}
           graphRef={graphRef}
@@ -124,9 +127,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
           canRedo={canRedo}
           onUndo={undo}
           onRedo={redo}
-          lastExecuteId={lastExecuteId}
           config={config}
           collapsed={collapsed}
+          runOpen={runOpen}
         />
       </div>
       
@@ -155,6 +158,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         graphRef={graphRef}
         appId={config?.app_id as string}
         appType={appType}
+        open={runOpen}
+        onOpenChange={setRunOpen}
+        handleSave={handleSave}
       />
       <PortClickHandler
         graph={graphRef.current}

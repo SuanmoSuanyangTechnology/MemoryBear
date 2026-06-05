@@ -1,4 +1,4 @@
-import { type FC, useState } from 'react';
+import { useState, forwardRef, useImperativeHandle } from 'react';
 import { Select, Divider, Tooltip } from 'antd';
 import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
@@ -20,12 +20,15 @@ interface CanvasToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  lastExecuteId: string;
   config: WorkflowConfig | null;
   collapsed: boolean;
+  runOpen: boolean;
+}
+export interface CanvasToolbarRef {
+  setIsVariableInspectorVisible: (visible: boolean) => void;
 }
 
-const CanvasToolbar: FC<CanvasToolbarProps> = ({
+const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
   selectedNode,
   miniMapRef,
   graphRef,
@@ -37,17 +40,21 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
   addNotes,
   isHandMode,
   setIsHandMode,
-  lastExecuteId,
   config,
   collapsed,
+  runOpen,
 }) => {
   const { t } = useTranslation()
   const [isVariableInspectorVisible, setIsVariableInspectorVisible] = useState(false)
 
+  useImperativeHandle(ref, () => ({
+    setIsVariableInspectorVisible,
+  }))
+
   return (
     <>
       <div
-        className={clsx("rb:cursor-pointer rb:absolute rb:bottom-5 rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:text-[12px]", {
+        className={clsx("rb:cursor-pointer rb:z-9999  rb:absolute rb:bottom-5 rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:text-[12px]", {
           'rb:bottom-5': !isVariableInspectorVisible,
           'rb:bottom-88': isVariableInspectorVisible,
           'rb:left-73': !collapsed,
@@ -66,6 +73,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
             'rb:bottom-98': isVariableInspectorVisible,
             'rb:right-8': !selectedNode,
             'rb:right-95.5': selectedNode,
+            'rb:right-156': runOpen,
           })}
         ></div>
         {/* 缩放控制按钮 */}
@@ -74,6 +82,7 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
           'rb:right-95.5': selectedNode,
           'rb:bottom-5': !isVariableInspectorVisible,
           'rb:bottom-88': isVariableInspectorVisible,
+          'rb:right-156': runOpen,
         })}>
           <Tooltip title={t('workflow.pointerMode')}>
             <div
@@ -147,15 +156,15 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
       {/* 变量检查面板 */}
       {isVariableInspectorVisible &&
         <VariableInspector 
-          selectedNode={selectedNode} 
-          lastExecuteId={lastExecuteId}
+          selectedNode={selectedNode}
           config={config}
           onClose={() => setIsVariableInspectorVisible(false)}
           collapsed={collapsed}
+          runOpen={runOpen}
         />
       }
     </>
   );
-};
+});
 
 export default CanvasToolbar;

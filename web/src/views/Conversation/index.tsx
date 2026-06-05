@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 13:38:41
+ * @Last Modified time: 2026-06-01 15:56:01
  */
 /**
  * Conversation Page
@@ -308,7 +308,8 @@ const Conversation: FC = () => {
     citations?: any[],
     suggested_questions?: any[],
     error?: string,
-    message_id?: string
+    message_id?: string,
+    replace?: boolean
   ) => {
     if (!content && !audio_url && (!citations || citations?.length < 1) && (!suggested_questions || suggested_questions?.length < 1) && typeof error !== 'string') return
     if (streamLoadingRef.current) streamLoadingRef.current = false
@@ -321,7 +322,7 @@ const Conversation: FC = () => {
       const assistantMsg: ChatItem = {
         id: message_id,
         ...lastMsg,
-        content: lastMsg.content + content,
+        content: replace ? content : lastMsg.content + content,
         meta_data: {
           ...(lastMsg.meta_data || {}),
           audio_url: audio_url || lastMsg.meta_data?.audio_url,
@@ -511,6 +512,10 @@ const Conversation: FC = () => {
             break
           case 'message':
             updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
+            if (curId) currentConversationId = curId;
+            break
+          case 'message_replace': 
+            updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, citations, suggested_questions, error, undefined, true)
             if (curId) currentConversationId = curId;
             break
           case 'end':

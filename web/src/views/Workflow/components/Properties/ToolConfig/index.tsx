@@ -37,6 +37,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
     { value: 'mcp', label: t('tool.mcp'), isLeaf: false },
     { value: 'builtin', label: t('tool.inner'), isLeaf: false },
     { value: 'custom', label: t('tool.custom'), isLeaf: false },
+    { value: 'workflow', label: t('tool.workflow'), isLeaf: false },
   ])
   const [parameters, setParameters] = useState<Parameter[]>([])
 
