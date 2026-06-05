@@ -3,7 +3,7 @@ import clsx from 'clsx';
 
 import NodeLibrary from './components/NodeLibrary'
 import Properties from './components/Properties';
-import CanvasToolbar, { type CanvasToolbarRef } from './components/CanvasToolbar';
+import CanvasToolbar from './components/CanvasToolbar';
 import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
@@ -115,7 +115,6 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         <div ref={containerRef} className="rb:w-full rb:h-full" />
         {/* 地图工具栏 */}
         <CanvasToolbar
-          ref={canvasToolbarRef}
           selectedNode={selectedNode}
           miniMapRef={miniMapRef}
           graphRef={graphRef}
