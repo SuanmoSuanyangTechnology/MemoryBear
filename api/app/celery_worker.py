@@ -20,6 +20,7 @@ import app.tasks
 try:
     from premium.platform_admin.subscription_tasks import (  # noqa: F401
         process_expired_subscriptions_task,
+        subscription_expired_notice_task,
         subscription_expiration_reminder_task,
     )
 except ImportError:

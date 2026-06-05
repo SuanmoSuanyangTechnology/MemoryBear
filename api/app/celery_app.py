@@ -161,12 +161,18 @@ celery_app.autodiscover_tasks(['app'])
 try:
     import premium.platform_admin.subscription_tasks  # noqa: F401
     _HAS_SUBSCRIPTION_TASKS = True
+    # 状态变更任务 → subscription_state_tasks 队列（轻量，每 10 分钟一次）
     celery_app.conf.task_routes['subscription.process_expired_subscriptions'] = {
-        'queue': 'subscription_tasks'
+        'queue': 'subscription_state_tasks'
     }
+    # 邮件发送任务 → subscription_email_tasks 队列（长耗时，每小时一次，跑一小时）
     celery_app.conf.task_routes['subscription.expiration_reminder'] = {
-        'queue': 'subscription_tasks'
+        'queue': 'subscription_email_tasks'
     }
+    celery_app.conf.task_routes['subscription.expired_notice'] = {
+        'queue': 'subscription_email_tasks'
+    }
+    # 邮件任务自身也显式配置 acks_late/time_limit，避免硬超时后旧任务重新入队。
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
@@ -241,16 +247,19 @@ if _HAS_SUBSCRIPTION_TASKS:
         "process-expired-subscriptions": {
             "task": "subscription.process_expired_subscriptions",
             "schedule": crontab(minute="*/10"),
+            "options": {"queue": "subscription_state_tasks"},
         },
         # 兜底修复：每天北京凌晨 2:00（= UTC 18:00）再全量扫一次，
         # 处理主循环因异常/重启/时钟漂移遗漏的租户
         "process-expired-subscriptions-daily": {
             "task": "subscription.process_expired_subscriptions",
             "schedule": crontab(hour=18, minute=0),  # UTC 18:00 = CST 02:00
+            "options": {"queue": "subscription_state_tasks"},
         },
-        # 到期提醒：每天北京时间 10:00（= UTC 02:00）发送到期前3天/1天邮件提醒
+        # 到期提醒：每小时整点投递；旧扫描任务超过 1 小时未被消费则过期丢弃
         "subscription-expiration-reminder": {
             "task": "subscription.expiration_reminder",
-            "schedule": crontab(hour=2, minute=0),  # UTC 02:00 = CST 10:00
+            "schedule": crontab(minute=0),
+            "options": {"queue": "subscription_email_tasks", "expires": 3600},
         },
     })

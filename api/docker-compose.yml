@@ -63,16 +63,37 @@ services:
     networks:
       - celery
 
-  # Subscription worker - 订阅过期处理 & 到期提醒（独立 worker，轻量任务）
-  worker-subscription:
+  # Subscription-state worker - 订阅状态变更（process_expired_subscriptions）
+  # 轻量任务，每 10 分钟一次：
+  #   - time-limit=600s (10min) 硬超时：单轮不应超过此值，否则 DB/锁竞争异常
+  #   - prefetch-multiplier=1：避免长任务被单个 worker 进程预取过多
+  worker-subscription-state:
     image: redbear-mem-open:latest
-    container_name: worker-subscription
+    container_name: worker-subscription-state
     env_file:
       - .env
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=subscription_tasks --time-limit=600 --soft-time-limit=540 --max-tasks-per-child=200 --prefetch-multiplier=1 -n subscription_worker@%h
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=subscription_state_tasks --time-limit=600 --soft-time-limit=540 --max-tasks-per-child=200 --prefetch-multiplier=1 -n subscription_state_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
+  # Subscription-email worker - 到期提醒/到期失效邮件发送（expiration_reminder / expired_notice）
+  # 短任务循环模式：每 1 小时触发一次，单次执行 1h，未完成由下一轮继续
+  # 依赖 Redis 游标防重复发送，单次失败不影响后续轮次
+  #   - time-limit=3600s (1h) 硬超时
+  #   - prefetch-multiplier=1：避免长邮件任务被单个 worker 进程预取过多
+  worker-subscription-email:
+    image: redbear-mem-open:latest
+    container_name: worker-subscription-email
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=subscription_email_tasks --time-limit=3600 --soft-time-limit=3300 --max-tasks-per-child=50 --prefetch-multiplier=1 -n subscription_email_worker@%h
     restart: unless-stopped
     networks:
       - celery
