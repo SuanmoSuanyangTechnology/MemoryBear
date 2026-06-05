@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 12:14:43
+ * @Last Modified time: 2026-06-05 16:19:04
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -153,7 +153,6 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
                   <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton>
                 </>}
-                {data.current_release_id !== selectedVersion.id &&<RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
                 {/* <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton> */}
                 {!['multi_agent', 'pure_workflow'].includes(data?.type) && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
               </>}

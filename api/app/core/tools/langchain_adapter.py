@@ -6,6 +6,7 @@ from langchain.tools import BaseTool as LangchainBaseTool
 from langchain_core.tools import ToolException
 
 from app.core.tools.base import BaseTool, ToolResult, ToolParameter, ParameterType
+from app.core.tools.serialization import serialize_tool_parameter
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -333,17 +334,7 @@ class LangchainAdapter:
             "status": tool.status.value,
             "tags": tool.tags,
             "parameters": [
-                {
-                    "name": param.name,
-                    "type": param.type.value,
-                    "description": param.description,
-                    "required": param.required,
-                    "default": param.default,
-                    "enum": param.enum,
-                    "minimum": param.minimum,
-                    "maximum": param.maximum,
-                    "pattern": param.pattern
-                }
+                serialize_tool_parameter(param)
                 for param in tool.parameters
             ],
             "langchain_compatible": True

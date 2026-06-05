@@ -639,7 +639,10 @@ async def create_chunks_batch(
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The knowledge base does not exist or access is denied")
 
-    db_document = db.query(Document).filter(Document.id == document_id).first()
+    db_document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.kb_id == kb_id
+    ).first()
     if not db_document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The document does not exist or you do not have permission to access it")
 

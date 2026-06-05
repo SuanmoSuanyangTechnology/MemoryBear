@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 18:10:34
+ * @Last Modified time: 2026-06-05 13:48:21
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -40,6 +40,7 @@ export interface UseWorkflowGraphProps {
   onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
   /** Application type */
   appType?: Application['type'];
+  setRunOpen: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
@@ -102,7 +103,6 @@ export interface UseWorkflowGraphReturn {
   historyRecords: HistoryRecord[];
   /** Clear history records */
   clearHistoryRecords: () => void;
-  lastExecuteId: string;
 }
 
 /**
@@ -116,6 +116,7 @@ export const useWorkflowGraph = ({
   miniMapRef,
   onFeaturesLoad,
   appType,
+  setRunOpen,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
   // Hooks
   const { id } = useParams();
@@ -125,7 +126,6 @@ export const useWorkflowGraph = ({
   const { chatHistoryMap } = useWorkflowStore()
   const lastExecuteId = Object.keys(chatHistoryMap).at(-1) ?? ''
   const chatHistory = chatHistoryMap[lastExecuteId] ?? []
-  console.log('chatHistoryMap', chatHistoryMap, 'lastExecuteId', lastExecuteId)
 
   // Refs
   const graphRef = useRef<Graph>();
@@ -821,6 +821,7 @@ export const useWorkflowGraph = ({
    * @param node - Clicked node
    */
   const nodeClick = ({ node }: { node: Node }) => {
+    setRunOpen(false)
     // add-node type: dispatch port:click to open node selection popover
     // Must handle before blankClick() to avoid blank:click closing the popover immediately
     const nodeData = node.getData()
@@ -2040,6 +2041,5 @@ export const useWorkflowGraph = ({
     redo,
     historyRecords,
     clearHistoryRecords,
-    lastExecuteId,
   };
 };

@@ -561,7 +561,9 @@ const CreateDataset = () => {
     if (!knowledgeBaseId) return
     knowledgesChunkPolicy(knowledgeBaseId)
       .then(res => {
-        setIsParentChildMode((res as { parent_child_mode: boolean | null }).parent_child_mode)
+        const response = res as { parent_child_mode: boolean; } || {}
+        setIsParentChildMode(response.parent_child_mode)
+        setProcessingMethod(response.parent_child_mode ? 'parentChildBlock' : 'directBlock')
       })
 
   }
