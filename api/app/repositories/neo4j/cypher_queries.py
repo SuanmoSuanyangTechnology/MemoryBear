@@ -1666,7 +1666,7 @@ RETURN c.id AS id,
 # -------------------
 # search by fulltext
 # -------------------
-SEARCH_PERCEPTUALS_BY_KEYWORD = """
+SEARCH_PERCEPTUALS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("perceptualFulltext", $query) YIELD node AS p, score
 WHERE p.end_user_id = $end_user_id
 RETURN p.id AS id,
@@ -1686,7 +1686,7 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
-SEARCH_STATEMENTS_BY_KEYWORD = """
+SEARCH_STATEMENTS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
 RETURN s.id AS id,
@@ -1719,7 +1719,7 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
-SEARCH_CHUNKS_BY_CONTENT = """
+SEARCH_CHUNKS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 RETURN c.id AS id,
@@ -1731,7 +1731,7 @@ LIMIT $limit
 """
 
 # MemorySummary keyword search using fulltext index
-SEARCH_MEMORY_SUMMARIES_BY_KEYWORD = """
+SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
 WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
 OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
@@ -1752,7 +1752,7 @@ LIMIT $limit
 """
 
 # Community keyword search: matches name or summary via fulltext index
-SEARCH_COMMUNITIES_BY_KEYWORD = """
+SEARCH_COMMUNITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 RETURN c.community_id AS id,
@@ -1814,12 +1814,12 @@ RETURN n.description AS description,
 """
 
 FULLTEXT_QUERY_CYPHER_MAPPING = {
-    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_KEYWORD,
+    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_FULLTEXT,
     Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_FULLTEXT,
-    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_CONTENT,
-    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
-    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_KEYWORD,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_KEYWORD
+    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_FULLTEXT,
+    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT,
+    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_FULLTEXT,
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_FULLTEXT
 }
 USER_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_USER_ID,

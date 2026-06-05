@@ -22,7 +22,7 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_STATEMENTS_G_VALID_AT,
     SEARCH_STATEMENTS_L_CREATED_AT,
     SEARCH_STATEMENTS_L_VALID_AT,
-    SEARCH_PERCEPTUALS_BY_KEYWORD,
+    SEARCH_PERCEPTUALS_BY_FULLTEXT,
     FULLTEXT_QUERY_CYPHER_MAPPING,
     NODE_ID_QUERY_CYPHER_MAPPING,
     SEARCH_USER_METADATA,
@@ -240,7 +240,7 @@ async def search_perceptual_by_fulltext(
 ) -> Dict[str, List[Dict[str, Any]]]:
     try:
         perceptuals = await connector.execute_query(
-            SEARCH_PERCEPTUALS_BY_KEYWORD,
+            SEARCH_PERCEPTUALS_BY_FULLTEXT,
             query=escape_lucene_query(query),
             end_user_id=end_user_id,
             limit=limit,
