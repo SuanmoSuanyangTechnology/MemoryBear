@@ -381,7 +381,7 @@ export const batchUpdateDocumentMetadata = (data: Array<{ document_id: string; m
 export const updateDocumentMetadata = (document_id: string, data: {metadata: Record<string, any>}) => {
   return request.put(`/documents/${document_id}/metadata`, data);
 }
-// TODO: 删除单个文档元数据
+// 删除单个文档元数据
 export const deleteDocumentMetadata = (document_id: string, data: { field_names: string[] }) => {
-  return request.delete(`/documents/${document_id}/metadata`, { params: data });
+  return request.post(`/documents/${document_id}/metadata`, { params: data });
 }
