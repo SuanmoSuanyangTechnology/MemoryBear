@@ -161,6 +161,10 @@ class Layer2Inspector:
             end_user_id, baseline, language
         )
 
+        # 别名归并 — 处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+        # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点，
+        results["alias_merge"] = await self._run_alias_merge(end_user_id)
+
         # 子问题 3 — 复杂去重消歧（entity_dedup）
         results["entity_dedup"] = await self._run_entity_dedup(end_user_id, baseline)
 
@@ -172,6 +176,20 @@ class Layer2Inspector:
         # TODO: 子问题 4 — 本体 Metadata 校验（metadata_validation）
 
         return results
+
+    async def _run_alias_merge(self, end_user_id: str) -> Dict[str, Any]:
+        """别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+
+        将别名节点的 name/description 归并进规范实体，重定向其它边，
+        最后删除别名节点。逻辑迁移自原写入后处理任务。
+        """
+        from .deterministic.alias_merger import merge_alias_belongs_to
+
+        try:
+            return await merge_alias_belongs_to(self.connector, end_user_id)
+        except Exception as e:
+            logger.warning(f"[AliasMerge] 执行失败 end_user_id={end_user_id}: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _run_entity_dedup(self, end_user_id: str, baseline: str) -> Dict[str, Any]:
         """子问题 3 复杂去重 方案A：高频两路召回去重"""
