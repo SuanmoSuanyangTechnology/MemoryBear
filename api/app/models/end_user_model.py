@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -11,6 +11,21 @@ from app.core.utils.datetime_utils import utcnow_naive
 
 class EndUser(Base):
     __tablename__ = "end_users"
+    __table_args__ = (
+        Index(
+            "ix_end_users_workspace_memory",
+            "workspace_id",
+            "memory_count",
+            postgresql_where="memory_count > 0",
+        ),
+        Index(
+            "ix_end_users_workspace_created_desc",
+            "workspace_id",
+            "created_at",
+            "id",
+            postgresql_where="memory_count > 0",
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
     app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=True)
