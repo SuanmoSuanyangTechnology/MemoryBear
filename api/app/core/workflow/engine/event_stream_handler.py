@@ -307,6 +307,7 @@ class EventStreamHandler:
                     "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
                     "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
                     "process": result.get("node_outputs", {}).get(node_name, {}).get("process"),
+                    "agent_log": result.get("node_outputs", {}).get(node_name, {}).get("agent_log"),
                     "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
                     "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
                 }
@@ -316,5 +317,11 @@ class EventStreamHandler:
     async def handle_cycle_item_event(self, data: dict):
         yield self._mask({
             "event": "cycle_item",
+            "data": data.get("data")
+        })
+
+    async def handle_agent_log_event(self, data: dict):
+        yield self._mask({
+            "event": "agent_log",
             "data": data.get("data")
         })

@@ -235,6 +235,25 @@ class WorkflowExecutor:
                         async for cycle_event in self.event_handler.handle_cycle_item_event(data):
                             yield cycle_event
 
+                    elif event_type == "agent_log":
+                        async for agent_log_event in self.event_handler.handle_agent_log_event(data):
+                            yield agent_log_event
+
+                    elif event_type in ("agent_tool_start", "agent_tool_end", "agent_tool_error"):
+                        # Agent 节点工具调用中间状态，直接透传给前端展示
+                        yield {
+                            "event": event_type,
+                            "data": {
+                                "node_id": data.get("node_id"),
+                                "step_id": data.get("step_id"),
+                                "tool_name": data.get("tool_name"),
+                                "tool_input": data.get("tool_input"),
+                                "tool_output": data.get("tool_output"),
+                                "error": data.get("error"),
+                                "meta": data.get("meta"),
+                            }
+                        }
+
                 elif mode == "debug":
                     async for debug_event in self.event_handler.handle_debug_event(data, input_data):
                         yield debug_event
