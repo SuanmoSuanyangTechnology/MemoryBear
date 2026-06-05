@@ -2419,6 +2419,7 @@ export const zh = {
       notes: '便签',
       'document-extractor': '文档提取器',
       'list-operator': '列表操作',
+      agent: '智能体 (Agent)',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2723,6 +2724,15 @@ export const zh = {
         },
         output: {
           outputs: '输出变量',
+        },
+        agent: {
+          strategy: 'Agent 策略',
+          model_id: '模型',
+          tools: '工具列表',
+          system_prompt: '指令',
+          context: '上下文',
+          message: '查询',
+          max_iterations: '迭代次数',
         },
         name: '键',
         type: '类型',

@@ -35,4 +35,5 @@ export interface ModelConfigForm {
   stop?: EnableItem;
   presence_penalty?: EnableItem;
   frequency_penalty?: EnableItem;
+  [key: string]: any;
 }

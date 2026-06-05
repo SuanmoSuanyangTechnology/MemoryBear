@@ -152,7 +152,6 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
         }
       })
     }
-    console.log('allVariables', allVariables)
     setVariables([...allVariables])
     toolbarRef.current?.setVariables([...allVariables])
   }
@@ -213,7 +212,6 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
         }
       })
       webhookTriggerVariables.forEach(vo => {
-        console.log('webhookTriggerVariables vo', vo)
         const nameList = vo.name.split('.')
         if (!trigger_payload[nameList[0]]) {
           trigger_payload[nameList[0]] = {}
@@ -244,7 +242,9 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, execution_id, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
+        const { content, execution_id, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations,
+          agent_log
+        } = item.data as {
           content: string;
           execution_id: string | null;
           conversation_id: string | null;
@@ -265,7 +265,8 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
             file_name: string;
             knowledge_id: string;
             score: string;
-          }[]
+          }[];
+          agent_log?: Record<string, any>;
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
@@ -389,6 +390,28 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
                   newList[lastIndex] = {
                     ...newList[lastIndex],
                     subContent: newSubContent
+                  }
+                }
+              }
+              return newList
+            })
+            break
+          case 'agent_log':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                const newSubContent = newList[lastIndex].subContent || []
+                const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
+                if (filterIndex > -1) {
+                  const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                  newSubContent[filterIndex].agent_log = {
+                    ...lastAgentLog,
+                    meta: agent_log?.meta || {},
+                    iterations: [
+                      ...(lastAgentLog?.iterations || []),
+                      ...agent_log?.iterations || []
+                    ],
                   }
                 }
               }
@@ -541,7 +564,6 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
   const isNeedVariableConfig = variables?.some(
     vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === '')
   )
-
   return (
     <RbDrawer
       title={<Flex align="center" gap={10}>

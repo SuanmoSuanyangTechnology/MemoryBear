@@ -2457,6 +2457,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       notes: 'Sticky Note',
       'document-extractor': 'Document Extractor',
       'list-operator': 'List Operator',
+      agent: 'Agent',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2757,6 +2758,15 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         },
         output: {
           outputs: 'Output Variable',
+        },
+        agent: {
+          strategy: 'Agent Strategy',
+          model_id: 'Model',
+          tools: 'Tools',
+          system_prompt: 'Instruction',
+          context: 'Context',
+          message: 'Query',
+          max_iterations: 'Max Iterations',
         },
         name: 'Key',
         type: 'Type',

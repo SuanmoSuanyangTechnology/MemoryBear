@@ -71,6 +71,7 @@ interface NodeData {
     knowledge_id: string;
     score: string;
   }[]
+  agent_log?: any;
 }
 
 const TestChat: FC<TestChatProps> = ({
@@ -506,7 +507,7 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleWorkflowStreamMessage = (data: SSEMessage[]) => {
     data.forEach(item => {
-      const { content, conversation_id, citations } = item.data as NodeData;
+      const { content, conversation_id, citations, agent_log, node_id } = item.data as NodeData;
       switch (item.event) {
       // Append streaming text chunks to assistant message
         case 'message':
@@ -531,6 +532,28 @@ const TestChat: FC<TestChatProps> = ({
         // Update node with subContent
         case 'cycle_item':
           updateWorkflowCycleMessage(item.data as NodeData)
+          break
+        case 'agent_log':
+          setChatList(prev => {
+            const newList = [...prev]
+            const lastIndex = newList.length - 1
+            if (lastIndex >= 0) {
+              const newSubContent = newList[lastIndex].subContent || []
+              const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
+              if (filterIndex > -1) {
+                const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                newSubContent[filterIndex].agent_log = {
+                  ...lastAgentLog,
+                  meta: agent_log?.meta || {},
+                  iterations: [
+                    ...(lastAgentLog?.iterations || []),
+                    ...agent_log?.iterations || []
+                  ],
+                }
+              }
+            }
+            return newList
+          })
           break
         // Mark workflow as complete
         case 'workflow_end':
@@ -621,7 +644,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowCycleMessage = (data: NodeData) => {
-    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status } = data;
+    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, agent_log } = data;
     const { nodes } = config as WorkflowConfig
     const node = nodes.find(n => n.id === node_id);
     const { name, type } = node || {}
@@ -634,6 +657,7 @@ const TestChat: FC<TestChatProps> = ({
         const filterIndex = newSubContent.findIndex(vo => vo.id === cycle_id)
         if (filterIndex > -1) {
           const items = newSubContent[filterIndex].subContent || []
+          const lastAgentLog = newSubContent[filterIndex].agent_log || {}
           items.push({
             cycle_id,
             cycle_idx,
@@ -653,11 +677,19 @@ const TestChat: FC<TestChatProps> = ({
           })
           newSubContent[filterIndex] = {
             ...newSubContent[filterIndex],
-            subContent: [...items]
+            subContent: [...items],
+            agent_log: {
+              ...lastAgentLog,
+              meta: agent_log?.meta || {},
+              iterations: [
+                ...(lastAgentLog?.iterations || []),
+                ...agent_log?.iterations || []
+              ],
+            }
           }
           newList[lastIndex] = {
             ...newList[lastIndex],
-            subContent: newSubContent
+            subContent: newSubContent,
           }
         }
       }
@@ -704,7 +736,6 @@ const TestChat: FC<TestChatProps> = ({
     }
   }, [chatList.length, features?.opening_statement, variables])
 
-  console.log(chatList)
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard

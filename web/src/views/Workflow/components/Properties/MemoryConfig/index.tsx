@@ -6,9 +6,10 @@ import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import MessageEditor from '../MessageEditor'
 import RbSlider from "@/components/RbSlider";
 
-const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
+const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; needMsg?: boolean; }> = ({
   options,
-  parentName
+  parentName,
+  needMsg = true
 }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance();
@@ -16,13 +17,16 @@ const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
   
   const handleChangeEnable = (value: boolean) => {
     if (value) {
+      const newValue = {
+        ...form.getFieldValue(parentName),
+        enable_window: false,
+        window_size: 20,
+      }
+      if (needMsg) {
+        newValue.messages = "{{sys.message}}"
+      }
       form.setFieldsValue({
-        memory: {
-          ...form.getFieldValue(parentName),
-          enable_window: false,
-          window_size: 20,
-          messages: "{{sys.message}}"
-        }
+        memory: newValue
       })
     }
   }
@@ -33,19 +37,21 @@ const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
         <Switch onChange={handleChangeEnable} />
       </Form.Item>
       {values?.memory?.enable && <>
-        <Flex align="center" justify="space-between" className="rb:py-1.25! rb:px-2! rb:text-[12px] rb:leading-4.5 rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-2!">
-          {t('workflow.config.llm.memory')}
-          <span>{t('workflow.config.llm.inner')}</span>
-        </Flex>
-        <Form.Item layout="horizontal" name={[parentName, 'messages']} className="rb:mb-2!">
-          <MessageEditor
-            title="USER"
-            isArray={false}
-            parentName={[parentName, 'messages']}
-            options={options}
-            size="small"
-          />
-        </Form.Item>
+        {needMsg && <>
+          <Flex align="center" justify="space-between" className="rb:py-1.25! rb:px-2! rb:text-[12px] rb:leading-4.5 rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-2!">
+            {t('workflow.config.llm.memory')}
+            <span>{t('workflow.config.llm.inner')}</span>
+          </Flex>
+          <Form.Item layout="horizontal" name={[parentName, 'messages']} className="rb:mb-2!">
+            <MessageEditor
+              title="USER"
+              isArray={false}
+              parentName={[parentName, 'messages']}
+              options={options}
+              size="small"
+            />
+          </Form.Item>
+        </>}
         <div className="rb-border rb:rounded-lg rb:p-2 rb:mb-4">
           <Form.Item layout="horizontal" name={[parentName, 'enable_window']} label={t('workflow.config.llm.enable_window')} className="rb:mb-2!">
             <Switch />

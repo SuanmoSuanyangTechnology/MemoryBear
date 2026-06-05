@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 20:16:01
+ * @Last Modified time: 2026-06-04 18:58:27
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -51,6 +51,7 @@ import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisp
 import type { Application } from '@/views/ApplicationManagement/types'
 import Trigger from './Trigger'
 import { getWorkflowNodeLastRunDetail } from '@/api/application'
+import ToolList from './ToolList'
 
 /**
  * Props for Properties component
@@ -466,6 +467,9 @@ const Properties: FC<PropertiesProps> = ({
     if (nodeType === 'var-aggregator' || nodeType === 'assigner' || nodeType === 'jinja-render') {
       return variableList.filter(variable => variable.dataType !== 'secret');
     }
+    if (nodeType === 'agent' && key === 'context') {
+      return variableList.filter(variable => variable.dataType === 'array[object]');
+    }
 
     // For all other node types, add parent iteration variables if applicable
     let baseList = variableList;
@@ -767,8 +771,16 @@ const Properties: FC<PropertiesProps> = ({
                                 )
                               }
 
-                              if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                                return <ModelConfig key={key} variableOptions={getFilteredVariableList(selectedNode?.data?.type)} />
+                              if ((key === 'model_id' && selectedNode?.data?.type === 'llm')
+                                || (key === 'model' && selectedNode?.data?.type === 'agent')
+                              ) {
+                                return (
+                                  <ModelConfig
+                                    key={key}
+                                    parentName={selectedNode?.data?.type === 'agent' ? key : undefined}
+                                    variableOptions={getFilteredVariableList(selectedNode?.data?.type)}
+                                  />
+                                )
                               }
                               if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                                 // 为llm节点且isArray=true时添加context变量支持
@@ -953,6 +965,7 @@ const Properties: FC<PropertiesProps> = ({
                                   >
                                     <MemoryConfig
                                       parentName={key}
+                                      needMsg={config.needMsg as boolean}
                                       options={getFilteredVariableList('llm')}
                                     />
                                   </Form.Item>
@@ -1009,6 +1022,16 @@ const Properties: FC<PropertiesProps> = ({
 
                               if (key === 'vision_input' && !values?.vision) {
                                 return null
+                              }
+
+                              if (config.type === 'toolList') {
+                                return (
+                                  <Form.Item
+                                    key={key} name={key}
+                                  >
+                                    <ToolList />
+                                  </Form.Item>
+                                )
                               }
 
                               return (
