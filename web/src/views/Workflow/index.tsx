@@ -26,7 +26,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
 
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
-  const canvasToolbarRef = useRef<CanvasToolbarRef>(null)
+  const [runOpen, setRunOpen] = useState(false)
   // 使用自定义Hook初始化工作流图
   const {
     config,
@@ -54,15 +54,15 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     canRedo,
     undo,
     redo,
-    lastExecuteId,
-  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
+  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad, setRunOpen });
+
 
   const onDragOver = (event: React.DragEvent) => {
     event.preventDefault();
   };
   const handleRun = () => {
-    canvasToolbarRef.current?.setIsVariableInspectorVisible(false)
-    chatRef.current?.handleOpen()
+    blankClick()
+    setRunOpen(true)
   }
   const handleToggle = () => {
     setCollapsed(prev => !prev)
@@ -127,9 +127,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
           canRedo={canRedo}
           onUndo={undo}
           onRedo={redo}
-          lastExecuteId={lastExecuteId}
           config={config}
           collapsed={collapsed}
+          runOpen={runOpen}
         />
       </div>
       
@@ -158,6 +158,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         graphRef={graphRef}
         appId={config?.app_id as string}
         appType={appType}
+        open={runOpen}
+        onOpenChange={setRunOpen}
+        handleSave={handleSave}
       />
       <PortClickHandler
         graph={graphRef.current}
