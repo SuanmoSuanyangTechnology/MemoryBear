@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 import datetime
 import uuid
-from app.core.utils.datetime_utils import to_timestamp_ms
+from app.core.utils.datetime_utils import normalize_progress_message_timestamps, to_timestamp_ms
 
 
 class DocumentBase(BaseModel):
@@ -56,6 +56,10 @@ class Document(DocumentBase):
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return to_timestamp_ms(dt)
+
+    @field_serializer("progress_msg", when_used="json")
+    def _serialize_progress_msg(self, value: str):
+        return normalize_progress_message_timestamps(value, self.process_begin_at)
     
     model_config = ConfigDict(from_attributes=True)
 

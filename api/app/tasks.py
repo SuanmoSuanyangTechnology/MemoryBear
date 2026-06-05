@@ -94,6 +94,29 @@ def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
 _PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 _PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 
+
+def _progress_ts() -> str:
+    return to_iso_z(utcnow())
+
+
+def _download_storage_file(file_key: str) -> bytes:
+    from app.services.file_storage_service import FileStorageService
+
+    storage_service = FileStorageService()
+
+    async def _download():
+        return await storage_service.download_file(file_key)
+
+    try:
+        return asyncio.run(_download())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_download())
+        finally:
+            loop.close()
+
+
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
 # 使用连接池而非单例客户端，提供更好的并发性能和自动重连
@@ -248,7 +271,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     """
 
     db_document = None
-    progress_lines: list[str] = [f"{utcnow_naive().strftime('%H:%M:%S')} Task has been received."]
+    progress_lines: list[str] = [f"{_progress_ts()} Task has been received."]
 
     def _progress_msg() -> str:
         return "\n".join(progress_lines) + "\n"
@@ -292,7 +315,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             file_name = db_document.file_name
 
         # 1. Download file from storage backend
-        progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} Start to parse.")
+        progress_lines.append(f"{_progress_ts()} Start to parse.")
         start_time = time.time()
         db_document.progress = 0.0
         db_document.progress_msg = _progress_msg()
@@ -333,10 +356,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
         if estimated_pages is None:
             logger.info(f"[ParseDoc] document={document_id} not obtain page number, parse failed.")
-            progress_lines.append(utcnow_naive().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: not obtain page number")
+            progress_lines.append(_progress_ts() + f" parse document '{file_name or document_id}' failed: not obtain page number")
         elif estimated_pages > MAX_DOCUMENT_PAGES:
             logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
-            progress_lines.append(utcnow_naive().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: page limit exceeded")
+            progress_lines.append(_progress_ts() + f" parse document '{file_name or document_id}' failed: page limit exceeded")
             db_document.progress = -1.0
             db_document.run = 0
             db_document.progress_msg = _progress_msg()
@@ -345,7 +368,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             return f"parse document '{file_name or document_id}' failed: page limit exceeded"
 
         def progress_callback(prog=None, msg=None):
-            progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.")
+            progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
         # Prepare vision_model for parsing
         vision_model = _build_vision_model(file_name, db_knowledge)
@@ -382,7 +405,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         parser_config=db_document.parser_config,
                         is_root=False)
 
-        progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} Finish parsing.")
+        progress_lines.append(f"{_progress_ts()} Finish parsing.")
         db_document.progress = 0.8
         db_document.progress_msg = _progress_msg()
         db.commit()
@@ -396,10 +419,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
-        progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
+        progress_lines.append(f"{_progress_ts()} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
-            progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} No chunks generated, skipping vectorization.")
+            progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
             total_batches = ceil(total_chunks / EMBEDDING_BATCH_SIZE)
             progress_per_batch = 0.2 / total_batches
@@ -470,7 +493,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
 
                 progress_lines.append(
-                    f"{utcnow_naive().strftime('%H:%M:%S')} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
+                    f"{_progress_ts()} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
                     f"{len(child_chunks_list)} child chunks prepared.")
 
             elif auto_questions_topn:
@@ -525,7 +548,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         qa_map[global_idx] = pairs
 
                 progress_lines.append(
-                    f"{utcnow_naive().strftime('%H:%M:%S')} QA pairs generated for {total_chunks} chunks "
+                    f"{_progress_ts()} QA pairs generated for {total_chunks} chunks "
                     f"(workers={AUTO_QUESTIONS_MAX_WORKERS}).")
 
                 # 组装 chunks：source chunks + qa chunks
@@ -581,7 +604,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
 
                 progress_lines.append(
-                    f"{utcnow_naive().strftime('%H:%M:%S')} QA mode: {len(source_chunks)} source chunks + "
+                    f"{_progress_ts()} QA mode: {len(source_chunks)} source chunks + "
                     f"{len(qa_chunks)} QA chunks prepared.")
             else:
                 # 无 auto_questions：直接构建 chunks
@@ -635,7 +658,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
             # 所有 batch 完成后一次性更新进度
             db_document.progress = 0.8 + 0.2  # 直接到 1.0 前的状态
-            progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
+            progress_lines.append(f"{_progress_ts()} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
             db_document.progress_msg = _progress_msg()
             db_document.process_duration = time.time() - start_time
             db_document.run = 0
@@ -643,20 +666,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             db.refresh(db_document)
 
         # Vectorization and data entry completed
-        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
-
-        # Early-exit check after data write: if doc deleted, remove written data
-        if _should_abort(document_id):
-            logger.info(f"[ParseDoc] document={document_id} deleted after data write -- rolling back vectors")
-            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
-            _clear_redis_state(document_id)
-            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped and es data deleted")
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-
+        progress_lines.append(f"{_progress_ts()} Indexing done.")
         db_document.chunk_num = total_chunks
         db_document.progress = 1.0
         db_document.process_duration = time.time() - start_time
-        progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} Task done ({db_document.process_duration}s).")
+        progress_lines.append(f"{_progress_ts()} Task done ({db_document.process_duration}s).")
         db_document.progress_msg = _progress_msg()
         db_document.run = 0
         db.commit()
@@ -668,7 +682,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 _clear_redis_state(document_id)
                 logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
                 return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-            progress_lines.append(f"{utcnow_naive().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
+            progress_lines.append(f"{_progress_ts()} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
             db.commit()
             build_graphrag_for_document.delay(str(document_id), str(db_knowledge.id))
@@ -683,7 +697,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if db_document is not None:
             try:
                 db_document.progress = -1.0
-                db_document.progress_msg = _progress_msg() + f"Failed to vectorize and import the parsed document:{str(e)}\n"
+                progress_lines.append(f"{_progress_ts()} Failed to vectorize and import the parsed document:{str(e)}")
+                db_document.progress_msg = _progress_msg()
                 db_document.run = 0
                 db.commit()
             except Exception:
@@ -851,7 +866,7 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
 
             # 更新文档进度信息
             db_document.progress_msg = (db_document.progress_msg or "") + \
-                f"{utcnow_naive().strftime('%H:%M:%S')} Knowledge Graph done ({duration:.1f}s)\n"
+                f"{_progress_ts()} Knowledge Graph done ({duration:.1f}s)\n"
             db.commit()
 
             return f"build_graphrag_for_document '{document_id}' processed successfully."
@@ -861,7 +876,14 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
-def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: bytes):
+def import_qa_chunks(
+    kb_id: str,
+    document_id: str,
+    filename: str,
+    contents: bytes | None = None,
+    file_key: str | None = None,
+    clear_parse_task: bool = False,
+):
     """
     异步导入 QA 问答对（CSV/Excel）
     
@@ -871,14 +893,35 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
     import io
 
     db = None
+    start_time = time.time()
+    progress_lines: list[str] = [f"{_progress_ts()} QA import task has been received."]
+
+    def _qa_progress_msg() -> str:
+        return "\n".join(progress_lines) + "\n"
+
     try:
-        from app.db import get_db_context
         with get_db_context() as db:
             db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
             if not db_document or not db_knowledge:
                 logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
                 return {"error": "document or knowledge not found", "imported": 0}
+
+            progress_lines.append(f"{_progress_ts()} Start to import QA.")
+            db_document.progress = 0.0
+            db_document.progress_msg = _qa_progress_msg()
+            db_document.process_begin_at = utcnow_naive()
+            db_document.process_duration = 0.0
+            db_document.run = 1
+            db.commit()
+
+            if contents is None:
+                if not file_key:
+                    raise ValueError("contents or file_key is required for QA import")
+                contents = _download_storage_file(file_key)
+                if not contents:
+                    raise IOError(f"Downloaded empty QA file from storage: {file_key}")
+                logger.info(f"[ImportQA] Downloaded {len(contents)} bytes from storage key: {file_key}")
 
             # 1. 解析文件
             qa_pairs = []
@@ -924,21 +967,26 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                     wb.close()
                 except Exception as e:
                     logger.error(f"[ImportQA] Excel parse failed: {e}")
-                    return {"error": f"Excel parse failed: {e}", "imported": 0}
+                    raise RuntimeError(f"Excel parse failed: {e}") from e
 
             if not qa_pairs:
                 logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
-                return {"error": "No valid QA pairs found", "imported": 0}
+                raise ValueError("No valid QA pairs found")
 
             logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+            progress_lines.append(f"{_progress_ts()} Parsed {len(qa_pairs)} QA pairs.")
 
             # 2. 写入 ES
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             sort_id = 0
-            total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
-            if items:
-                sort_id = items[0].metadata["sort_id"]
+            if clear_parse_task:
+                vector_service.delete_by_metadata_field(key="document_id", value=document_id)
+                db_document.chunk_num = 0
+            else:
+                total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
+                if items:
+                    sort_id = items[0].metadata["sort_id"]
 
             chunks = []
             for pair in qa_pairs:
@@ -967,7 +1015,10 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
             # 3. 更新 chunk_num 和 progress
             db_document.chunk_num += len(chunks)
             db_document.progress = 1.0
-            db_document.progress_msg = f"QA 导入完成: {len(chunks)} 条"
+            db_document.process_duration = time.time() - start_time
+            db_document.run = 0
+            progress_lines.append(f"{_progress_ts()} QA import done: {len(chunks)} chunks.")
+            db_document.progress_msg = _qa_progress_msg()
             db.commit()
 
             result = {"imported": len(chunks), "failed_rows": failed_rows}
@@ -976,18 +1027,25 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
 
     except Exception as e:
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
-        # 尝试更新文档状态为失败
         try:
-            from app.db import get_db_context
             with get_db_context() as err_db:
                 doc = err_db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
                 if doc:
+                    progress_lines.append(f"{_progress_ts()} QA import failed: {str(e)[:200]}")
                     doc.progress = -1.0
-                    doc.progress_msg = f"QA 导入失败: {str(e)[:200]}"
+                    doc.progress_msg = _qa_progress_msg()
+                    doc.process_duration = time.time() - start_time
+                    doc.run = 0
                     err_db.commit()
         except Exception:
             pass
         return {"error": str(e), "imported": 0}
+    finally:
+        if clear_parse_task:
+            try:
+                REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
+            except Exception:
+                logger.warning(f"[ImportQA] failed to clear Redis state for {document_id}", exc_info=True)
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")

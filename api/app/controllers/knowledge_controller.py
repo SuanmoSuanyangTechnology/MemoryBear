@@ -20,6 +20,7 @@ from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.nlp import rag_tokenizer, search
 from app.core.rag.prompts.generator import graph_entity_types
+from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success, fail
 from app.db import get_db
@@ -41,11 +42,100 @@ from app.core.quota_stub import check_knowledge_capacity_quota
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
 
+_PARSE_DOCUMENT_TASK_NAME = "app.core.rag.tasks.parse_document"
+_IMPORT_QA_TASK_NAME = "app.core.rag.tasks.import_qa_chunks"
+_PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
+_PARSE_TASK_TTL = 7200
+
 router = APIRouter(
     prefix="/knowledges",
     tags=["knowledges"],
     dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
 )
+
+
+def _dispatch_reparse_tasks_for_knowledge(db: Session, knowledge_id: uuid.UUID) -> dict[str, int]:
+    """Dispatch parse tasks for all active documents in a knowledge base."""
+    result = {"queued": 0, "skipped": 0, "already_running": 0, "failed": 0}
+
+    rows = (
+        db.query(Document, file_model.File)
+        .join(file_model.File, Document.file_id == file_model.File.id)
+        .filter(
+            Document.kb_id == knowledge_id,
+            Document.status == 1,
+        )
+        .all()
+    )
+
+    for db_document, db_file in rows:
+        file_key = getattr(db_file, "file_key", None)
+        if not file_key:
+            result["skipped"] += 1
+            api_logger.warning(
+                "Skip document reparse because file has no storage key",
+                extra={
+                    "knowledge_id": str(knowledge_id),
+                    "document_id": str(db_document.id),
+                    "file_id": str(db_document.file_id),
+                },
+            )
+            continue
+
+        task_key = _PARSE_TASK_KEY.format(doc_id=db_document.id)
+        try:
+            claimed = REDIS_CONN.REDIS.set(task_key, "CLAIMED", ex=_PARSE_TASK_TTL, nx=True)
+        except Exception as exc:
+            result["failed"] += 1
+            api_logger.warning(
+                "Failed to claim document reparse task",
+                extra={
+                    "knowledge_id": str(knowledge_id),
+                    "document_id": str(db_document.id),
+                    "error": str(exc),
+                },
+            )
+            continue
+
+        if not claimed:
+            result["already_running"] += 1
+            continue
+
+        file_name = getattr(db_file, "file_name", None) or db_document.file_name
+        parser_config = db_document.parser_config or {}
+        is_qa_doc = parser_config.get("doc_type") == "qa"
+
+        try:
+            if is_qa_doc:
+                task = celery_app.send_task(
+                    _IMPORT_QA_TASK_NAME,
+                    args=[str(knowledge_id), str(db_document.id), file_name],
+                    kwargs={"file_key": file_key, "clear_parse_task": True},
+                    queue="qa_import",
+                )
+            else:
+                task = celery_app.send_task(
+                    _PARSE_DOCUMENT_TASK_NAME,
+                    args=[file_key, db_document.id, file_name],
+                )
+        except Exception as exc:
+            result["failed"] += 1
+            REDIS_CONN.delete(task_key)
+            api_logger.error(
+                "Failed to dispatch document reparse task",
+                extra={
+                    "knowledge_id": str(knowledge_id),
+                    "document_id": str(db_document.id),
+                    "file_key": file_key,
+                    "error": str(exc),
+                },
+            )
+            continue
+
+        REDIS_CONN.set(task_key, task.id, exp=_PARSE_TASK_TTL)
+        result["queued"] += 1
+
+    return result
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)
@@ -368,6 +458,7 @@ async def _update_knowledge(
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
         update_dict = update_data.dict(exclude_unset=True)
+        embedding_changed = False
         if "name" in update_dict:
             name = update_dict["name"]
             if name != db_knowledge.name:
@@ -382,6 +473,7 @@ async def _update_knowledge(
         if "embedding_id" in update_dict:
             embedding_id = update_dict["embedding_id"]
             if embedding_id != db_knowledge.embedding_id:
+                embedding_changed = True
                 if db_knowledge.embedding_id and db_knowledge.reranker_id:
                     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
                     vector_service.delete()
@@ -398,6 +490,11 @@ async def _update_knowledge(
                     setattr(db_knowledge, field, value)
                     updated_fields.append(f"{field}: {old_value} -> {value}")
 
+        if embedding_changed and db_knowledge.chunk_num != 0:
+            old_chunk_num = db_knowledge.chunk_num
+            db_knowledge.chunk_num = 0
+            updated_fields.append(f"chunk_num: {old_chunk_num} -> 0")
+
         if updated_fields:
             api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
@@ -407,6 +504,25 @@ async def _update_knowledge(
         db.commit()
         db.refresh(db_knowledge)
         api_logger.info(f"The knowledge base has been successfully updated: {db_knowledge.name} (ID: {db_knowledge.id})")
+
+        if embedding_changed:
+            try:
+                dispatch_result = _dispatch_reparse_tasks_for_knowledge(db=db, knowledge_id=db_knowledge.id)
+                api_logger.info(
+                    "Knowledge base embedding changed, document reparse tasks dispatched",
+                    extra={
+                        "knowledge_id": str(db_knowledge.id),
+                        **dispatch_result,
+                    },
+                )
+            except Exception as dispatch_error:
+                api_logger.error(
+                    "Failed to dispatch document reparse tasks after embedding change",
+                    extra={
+                        "knowledge_id": str(db_knowledge.id),
+                        "error": str(dispatch_error),
+                    },
+                )
 
         # 4. Return the updated knowledge base
         return db_knowledge

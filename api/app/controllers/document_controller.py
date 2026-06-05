@@ -491,7 +491,7 @@ async def update_document_metadata(
         )
 
     # 2. 调用 Service 更新
-    updated_doc = KnowledgeMetadataService.update_document_metadata(
+    result = KnowledgeMetadataService.update_document_metadata(
         db=db,
         document_id=document_id,
         metadata=data.metadata,
@@ -500,7 +500,7 @@ async def update_document_metadata(
     )
 
     return success(
-        data=jsonable_encoder(document_schema.Document.model_validate(updated_doc)),
+        data=result,
         msg="文档元数据更新成功",
     )
 
@@ -539,7 +539,7 @@ async def get_document_metadata(
     )
 
 
-@router.delete("/{document_id}/metadata", response_model=ApiResponse)
+@router.post("/{document_id}/metadata", response_model=ApiResponse)
 async def delete_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataDeleteRequest | None = Body(None),
