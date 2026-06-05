@@ -275,14 +275,14 @@ class KnowledgeMetadataService:
         metadata: dict[str, Any],
         tenant_id: uuid.UUID,
         created_by: uuid.UUID,
-    ) -> Document:
+    ) -> dict:
         """
         更新单个文档的元数据
         Args:
             document_id: 文档ID
             metadata: {field_name: value}
         Returns:
-            更新后的 Document
+            更新后的文档元数据详情
         """
         # 1. 查询文档
         doc = db.query(Document).filter(Document.id == document_id).first()
@@ -333,7 +333,7 @@ class KnowledgeMetadataService:
 
         db.commit()
         db.refresh(doc)
-        return doc
+        return KnowledgeMetadataService.get_document_metadata(db, document_id)
 
     @staticmethod
     def get_document_metadata(
@@ -407,14 +407,19 @@ class KnowledgeMetadataService:
             # 删除指定字段
             custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
             field_defs = {f.name: f for f in custom_fields}
+            skipped_fields = []
 
             for field_name in field_names:
+                field_def = field_defs.get(field_name)
+                if field_name not in doc.meta_data and not field_def:
+                    skipped_fields.append(field_name)
+                    continue
+
                 if field_name in doc.meta_data:
                     del doc.meta_data[field_name]
                     deleted_fields.append(field_name)
 
                 # 删除对应绑定
-                field_def = field_defs.get(field_name)
                 if field_def:
                     db.query(KnowledgeMetadataBinding).filter(
                         KnowledgeMetadataBinding.document_id == document_id,
@@ -423,6 +428,12 @@ class KnowledgeMetadataService:
 
             if deleted_fields:
                 flag_modified(doc, "meta_data")
+            if skipped_fields:
+                api_logger.warning(
+                    "Skipped unknown document metadata fields: "
+                    f"document_id={document_id}, knowledge_id={knowledge_id}, "
+                    f"field_names={skipped_fields}"
+                )
 
         db.commit()
         db.refresh(doc)
