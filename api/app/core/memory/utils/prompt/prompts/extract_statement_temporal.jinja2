@@ -45,7 +45,9 @@ Each output item should be a structured candidate memory statement.
 - target_content: 当前要处理的对话片段文本，也是唯一允许被抽取的目标文本
 - target_message_date: 目标文本对应的时间，可作为辅助时间背景；当与 dialog_at 同时存在时，优先使用 dialog_at 解析相对时间表达
 - supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
-- supporting_context.msgs: 按顺序提供的上下文消息，可包含 User 和 Assistant
+- supporting_context.before_msgs: 发生在 target_content **之前**的上下文消息列表（按时间升序），可包含 User 和 Assistant
+- supporting_context.after_msgs: 发生在 target_content **之后**的上下文消息列表（按时间升序），可包含 User 和 Assistant
+- 注意：target_content 在结构上夹在 before_msgs 与 after_msgs 之间，但与两侧消息**不一定直接相邻**，中间可能存在被剪枝或省略的消息
   {% else %}
 - chunk_id: unique chunk identifier
 - end_user_id: end-user identifier
@@ -53,24 +55,26 @@ Each output item should be a structured candidate memory statement.
 - target_content: the current dialogue fragment to process, and the only text span that may be extracted from
 - target_message_date: the time associated with the target content and may serve as supporting temporal context; when both exist, prefer `dialog_at` for resolving relative expressions
 - supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
-- supporting_context.msgs: ordered contextual messages, which may include User and Assistant messages
+- supporting_context.before_msgs: ordered list of messages that occurred **before** target_content (chronological), may include User and Assistant
+- supporting_context.after_msgs: ordered list of messages that occurred **after** target_content (chronological), may include User and Assistant
+- Note: target_content sits structurally between before_msgs and after_msgs, but is **not necessarily directly adjacent** to either side — pruned or omitted messages may exist in between
   {% endif %}
 
 === Scope ===
 {% if language == "zh" %}
 
 - 只从 `target_content` 中提取陈述句。
-- `supporting_context.msgs` 只用于解释 `target_content` 中的代词、省略、主体、时间和语义背景。
-- 不要从 `supporting_context.msgs` 中单独提取任何陈述句。
-- 如果某条信息没有出现在 `target_content` 中，即使它出现在 `supporting_context.msgs` 中，也不能把它作为独立 statement 输出。
-- 如果 Assistant 在 `supporting_context.msgs` 中提供了总结、猜测、解释或改写，这些内容只能作为理解辅助，不能被当作事实直接提取。
+- `supporting_context.before_msgs` 与 `supporting_context.after_msgs` 只用于解释 `target_content` 中的代词、省略、主体、时间和语义背景。
+- 不要从 `before_msgs` 或 `after_msgs` 中单独提取任何陈述句。
+- 如果某条信息没有出现在 `target_content` 中，即使它出现在 `before_msgs` 或 `after_msgs` 中，也不能把它作为独立 statement 输出。
+- 如果 Assistant 在 `before_msgs` 或 `after_msgs` 中提供了总结、猜测、解释或改写，这些内容只能作为理解辅助，不能被当作事实直接提取。
 - 每条输出的 statement 都必须能够在 `target_content` 中找到直接对应的表达依据。
   {% else %}
 - Extract statements only from `target_content`.
-- `supporting_context.msgs` is used only to interpret references, ellipsis, subjects, temporal expressions, and semantic background in `target_content`.
-- Do not extract any standalone statement from `supporting_context.msgs`.
-- If a piece of information does not appear in `target_content`, it must not be output as an independent statement even if it appears in `supporting_context.msgs`.
-- If the Assistant in `supporting_context.msgs` provides a summary, guess, interpretation, or rephrasing, treat it only as interpretive support and never as a direct factual source for extraction.
+- `supporting_context.before_msgs` and `supporting_context.after_msgs` are used only to interpret references, ellipsis, subjects, temporal expressions, and semantic background in `target_content`.
+- Do not extract any standalone statement from `before_msgs` or `after_msgs`.
+- If a piece of information does not appear in `target_content`, it must not be output as an independent statement even if it appears in `before_msgs` or `after_msgs`.
+- If the Assistant in `before_msgs` or `after_msgs` provides a summary, guess, interpretation, or rephrasing, treat it only as interpretive support and never as a direct factual source for extraction.
 - Every output statement must be directly grounded in wording from `target_content`.
   {% endif %}
 
@@ -324,7 +328,7 @@ Rewrite boundary:
   "target_content": "老李这学期要求还是一如既往地严，不过他讲课确实清晰透彻，而且每节课的结构都特别清楚。就是气场实在太吓人了，我每次被他点名都有点发怵。",
   "target_message_date": "2023-09-04T18:00:00",
   "supporting_context": {
-    "msgs": [
+    "before_msgs": [
       {
         "role": "User",
         "msg": "今天是九月第一周的星期一，上了本学期第一节数据库课。作为班长，我帮李教授发了教学大纲。老李宣布的期末项目考核标准特别严，看了一眼大纲上的作业量，我感觉这学期恐怕要脱层皮。不过老李讲课确实清晰透彻，就是气场实在太吓人了。"
@@ -333,7 +337,8 @@ Rewrite boundary:
         "role": "Assistant",
         "msg": "听起来你对这门课既佩服又有点压力，李教授应该是很有气场的老师。"
       }
-    ]
+    ],
+    "after_msgs": []
   }
 }
 
@@ -386,7 +391,7 @@ Rewrite boundary:
   "target_content": "我最近在学Python，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
-    "msgs": [
+    "before_msgs": [
       {
         "role": "User",
         "msg": "我最近在学Python。"
@@ -395,7 +400,8 @@ Rewrite boundary:
         "role": "Assistant",
         "msg": "Python 是一个很实用的语言。"
       }
-    ]
+    ],
+    "after_msgs": []
   }
 }
 
@@ -448,11 +454,17 @@ Rewrite boundary:
   "target_content": "去年冬天老师布置的那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
-    "msgs": [
+    "before_msgs": [
       {
         "role": "User",
-        "msg": "去年冬天老师布置的那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。"
+        "msg": "上次跟你说的那两个项目我还卡着。"
       },
+      {
+        "role": "Assistant",
+        "msg": "嗯，是去年冬天老师布置的那两个项目，是吧？"
+      }
+    ],
+    "after_msgs": [
       {
         "role": "Assistant",
         "msg": "听起来你卡在老师去年冬天布置的那两个项目上了，如果这周末还没进展，再去问助教也可以。"
@@ -510,7 +522,7 @@ Example Input: {
   "target_content": "Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating, and I get nervous every time he calls on me.",
   "target_message_date": "2023-09-04T18:00:00",
   "supporting_context": {
-    "msgs": [
+    "before_msgs": [
       {
         "role": "User",
         "msg": "Today was the Monday of the first week of September, and I had the first database class of the semester. As class monitor, I helped Professor Li distribute the syllabus. Professor Li said the grading criteria for the final project would be very strict. Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating."
@@ -519,7 +531,8 @@ Example Input: {
         "role": "Assistant",
         "msg": "It sounds like you admire the teaching but also feel pressured by Professor Li."
       }
-    ]
+    ],
+    "after_msgs": []
   }
 }
 
@@ -572,7 +585,7 @@ Example Input: {
   "target_content": "I've been learning Python recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
-    "msgs": [
+    "before_msgs": [
       {
         "role": "User",
         "msg": "I've been learning Python recently."
@@ -581,7 +594,8 @@ Example Input: {
         "role": "Assistant",
         "msg": "Python is a very practical language."
       }
-    ]
+    ],
+    "after_msgs": []
   }
 }
 
@@ -634,11 +648,13 @@ Example Input: {
   "target_content": "The two projects the teacher assigned last winter seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA.",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
-    "msgs": [
+    "before_msgs": [
       {
         "role": "User",
         "msg": "The two projects the teacher assigned last winter seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA."
       },
+    ],
+    "after_msgs": [
       {
         "role": "Assistant",
         "msg": "It sounds like you're stuck on the two projects assigned last winter, and asking the TA would make sense if there is still no progress by this weekend."

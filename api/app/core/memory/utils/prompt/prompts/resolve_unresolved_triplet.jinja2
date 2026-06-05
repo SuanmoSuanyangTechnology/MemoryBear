@@ -519,7 +519,7 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `predicate` 只能使用上方预定义的中文关系类型。
 - `predicate_id` 必须只由 `predicate` 决定，并严格使用“本体 ID 映射”中的整数。
 - `predicate_surface` 用于记录当前陈述中更贴近原文的关系表达；它可以比 `predicate` 更自然或更细，但不得改变 `predicate_id` 和 `predicate` 的 canonical 判断。
-- 如果没有任何预定义关系适用，返回 `triplets: []`。
+
 - 不要为了保留一句抽象判断或泛因果命题，而强行构造“用户-拥有-努力”“努力-导致-回报”这类低价值 triplet。
 - `关联于` 不用于补救无法成立的关系，也不用于连接“努力”“回报”“成功”“意义”这类抽象概念。
 - `偏好` 只用于具体、明确、用户特异且值得保留的对象或目标；如果相关内容过于抽象或空泛，不要抽取 `偏好`，应改写进相关实体的 `description`。
@@ -531,7 +531,7 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `predicate` must use one of the predefined Chinese relation labels above.
 - `predicate_id` must be determined only by `predicate` and must strictly use the integer from the ontology ID mapping.
 - `predicate_surface` records the relation expression closer to the source statement; it may be more natural or specific than `predicate`, but it must not change the canonical `predicate_id` or `predicate`.
-- If no predefined relation fits, return `triplets: []`.
+
 - Do not force low-value triplets such as "user-has-effort" or "effort-causes-reward" just to preserve a generic causal belief or slogan-like proposition.
 - Do not use `关联于` as a rescue relation when no real relation exists, and do not connect abstract concepts such as "effort", "reward", "success", or "meaning" with it.
 - Use `偏好` only for concrete, specific, user-grounded objects or goals worth retaining; if the relevant content is too abstract or generic, do not extract `偏好` and instead rewrite it into the relevant entity `description`.

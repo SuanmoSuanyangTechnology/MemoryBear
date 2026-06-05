@@ -1116,7 +1116,6 @@ async def run_single_workflow_node(
         "inputs": raw_inputs,
         "conversation_id": "",
         "conv_messages": [],
-        "base_execution_id": payload.base_execution_id,
     }
 
     if payload.stream:
@@ -1212,6 +1211,38 @@ async def invalidate_workflow_node_cache(
     return success(data={"affected": affected})
 
 
+@router.post("/{app_id}/workflow/cache/reset", summary="清空工作流调试缓存")
+@cur_workspace_access_guard()
+async def reset_workflow_debug_cache(
+        app_id: uuid.UUID,
+        db: Annotated[Session, Depends(get_db)] = None,
+        current_user: Annotated[User, Depends(get_current_user)] = None,
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+    result = workflow_service.reset_workflow_debug_cache(app_id=app_id)
+    return success(data=result)
+
+
+@router.get("/{app_id}/workflow/debug/state", summary="获取工作流当前调试状态")
+@cur_workspace_access_guard()
+async def get_workflow_debug_state(
+        app_id: uuid.UUID,
+        db: Annotated[Session, Depends(get_db)] = None,
+        current_user: Annotated[User, Depends(get_current_user)] = None,
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+    result = workflow_service.get_workflow_debug_state(app_id=app_id)
+    return success(data=result)
+
+
 @router.post("/{app_id}/workflow/nodes/{node_id}/rerun", summary="基于最近一次单节点调试输入重跑")
 @cur_workspace_access_guard()
 async def rerun_workflow_node(
@@ -1236,7 +1267,6 @@ async def rerun_workflow_node(
         workspace_id=workspace_id,
         invalidate_cache=payload.invalidate_cache,
         bypass_cache=payload.bypass_cache,
-        base_execution_id=payload.base_execution_id,
     )
     return success(data=result)
 
@@ -1257,28 +1287,6 @@ async def get_workflow_config(
     cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
     # 配置总是存在（不存在时返回默认模板）
     return success(data=WorkflowConfigSchema.model_validate(cfg))
-
-
-@router.get("/{app_id}/workflow/executions/{execution_id}")
-@cur_workspace_access_guard()
-async def get_workflow_execution_detail(
-        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
-        execution_id: Annotated[str, Path(description="执行 ID")],
-        db: Annotated[Session, Depends(get_db)],
-        current_user: Annotated[User, Depends(get_current_user)],
-        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
-):
-    """获取工作流执行详情与变量快照。"""
-    workspace_id = current_user.current_workspace_id
-    service = AppService(db)
-    app = service._get_app_or_404(app_id)
-    service._validate_app_accessible(app, workspace_id)
-
-    execution_detail = workflow_service.get_execution_detail(execution_id=execution_id, app_id=app_id)
-    if not execution_detail:
-        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
-
-    return success(data=execution_detail)
 
 
 @router.put("/{app_id}/workflow", summary="更新 Workflow 配置")

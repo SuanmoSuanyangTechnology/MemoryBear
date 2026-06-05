@@ -158,12 +158,25 @@ class WorkflowNodeExecution(Base):
     # 主键
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     
-    # 关联执行
+    # 关联执行（整图执行时关联，单节点调试可为空）
     execution_id = Column(
         UUID(as_uuid=True),
         ForeignKey("workflow_executions.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True
+    )
+
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     
     # 节点信息

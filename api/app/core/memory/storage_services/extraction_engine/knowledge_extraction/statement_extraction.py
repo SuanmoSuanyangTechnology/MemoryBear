@@ -126,9 +126,10 @@ class StatementExtractor:
                 "target_content": chunk_content,
                 "target_message_date": to_iso_z(utcnow_naive()),
                 "supporting_context": {
-                    "msgs": [
+                    "before_msgs": [
                         {"role": "context", "msg": dialogue_content}
-                    ] if dialogue_content else []
+                    ] if dialogue_content else [],
+                    "after_msgs": [],
                 },
             },
         )

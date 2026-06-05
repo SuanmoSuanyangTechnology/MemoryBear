@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 class WorkflowService:
     """工作流服务"""
 
+    DEBUG_STATE_NODE_ID = "__workflow_debug_state__"
+    DEBUG_STATE_NODE_TYPE = "debug-state"
+    DEBUG_STATE_NODE_NAME = "Workflow Debug State"
+    DEBUG_STATE_SOURCE = "debug_state"
+
     def __init__(self, db: Session):
         self.db = db
         self.config_repo = WorkflowConfigRepository(db)
@@ -131,6 +136,30 @@ class WorkflowService:
             "triggers": normalized_triggers,
             "workflow_type": workflow_type or "workflow",
             TRIGGER_NODES_PREPARED_FLAG: True,
+        }
+
+    def _build_runtime_workflow_config_dict(
+        self,
+        *,
+        app_id: uuid.UUID,
+        workflow_config: WorkflowConfig,
+        features: dict[str, Any] | None = None,
+        runtime_options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "app_id": str(app_id),
+            "workflow_config_id": str(workflow_config.id),
+            **self._prepare_workflow_config_dict(
+                nodes=workflow_config.nodes,
+                edges=workflow_config.edges,
+                variables=workflow_config.variables,
+                environment_variables=workflow_config.environment_variables,
+                execution_config=workflow_config.execution_config,
+                features=features if features is not None else workflow_config.features,
+                triggers=workflow_config.triggers,
+                workflow_type=workflow_config.workflow_type,
+            ),
+            "runtime_options": runtime_options or {},
         }
 
     @staticmethod
@@ -1064,40 +1093,6 @@ class WorkflowService:
             return execution
         return None
 
-    def _resolve_base_execution(
-            self,
-            *,
-            app_id: uuid.UUID,
-            explicit_execution_id: str | None = None,
-            debug_execution: WorkflowExecution | None = None,
-    ) -> WorkflowExecution | None:
-        candidate: WorkflowExecution | None = None
-        if explicit_execution_id:
-            candidate = self.get_execution(explicit_execution_id)
-            if not candidate or candidate.app_id != app_id:
-                raise BusinessException("基准执行不存在", BizCode.NOT_FOUND)
-        elif debug_execution:
-            stored_execution_id = (debug_execution.meta_data or {}).get("base_execution_id")
-            if stored_execution_id:
-                candidate = self.get_execution(stored_execution_id)
-                if candidate and candidate.app_id != app_id:
-                    candidate = None
-
-        if candidate and self._get_execution_source(candidate) == "single_node_debug":
-            nested_execution_id = (candidate.meta_data or {}).get("base_execution_id")
-            if nested_execution_id and nested_execution_id != candidate.execution_id:
-                nested_execution = self.get_execution(nested_execution_id)
-                if nested_execution and nested_execution.app_id == app_id:
-                    candidate = nested_execution
-
-        if candidate:
-            return candidate
-
-        return self._find_latest_base_execution(
-            app_id,
-            exclude_execution_id=debug_execution.execution_id if debug_execution else None,
-        )
-
     @staticmethod
     def _coerce_variable_type(var_type: Any, value: Any = None) -> VariableType:
         if isinstance(var_type, VariableType):
@@ -1198,24 +1193,29 @@ class WorkflowService:
             result[name] = item.get("value")
         return WorkflowService._serialize_execution_value(result)
 
-    def _build_execution_snapshot(
+    def _build_snapshot_type_maps(
+            self,
+            workflow_config: WorkflowConfig | None,
+    ) -> dict[str, Any]:
+        return {
+            "system": self._build_system_variable_type_map(),
+            "conversation": self._build_conversation_variable_type_map(
+                workflow_config.variables if workflow_config else []
+            ),
+            "environment": self._build_environment_variable_type_map(
+                workflow_config.environment_variables if workflow_config else []
+            ),
+            "nodes": self._build_node_variable_type_maps(
+                workflow_config.nodes if workflow_config else []
+            ),
+        }
+
+    def _extract_execution_snapshot_raw_groups(
             self,
             *,
-            execution: WorkflowExecution,
-            node_executions: list[WorkflowNodeExecution],
             output_data: dict[str, Any],
+            workflow_config: WorkflowConfig | None,
     ) -> dict[str, Any]:
-        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
-        conversation_type_map = self._build_conversation_variable_type_map(
-            workflow_config.variables if workflow_config else []
-        )
-        system_type_map = self._build_system_variable_type_map()
-        node_type_maps = self._build_node_variable_type_maps(
-            workflow_config.nodes if workflow_config else []
-        )
-        environment_type_map = self._build_environment_variable_type_map(
-            workflow_config.environment_variables if workflow_config else []
-        )
         snapshot_data = output_data.get("snapshot") if isinstance(output_data, dict) else {}
         variables_data = output_data.get("variables") if isinstance(output_data, dict) else {}
 
@@ -1235,52 +1235,66 @@ class WorkflowService:
                 workflow_config.environment_variables if workflow_config else []
             )
 
+        return {
+            "system": raw_system_vars or {},
+            "conversation": raw_conversation_vars or {},
+            "environment": raw_environment_vars or {},
+            "nodes": raw_node_vars or {},
+        }
+
+    @classmethod
+    def _build_typed_node_snapshot(
+            cls,
+            node_value: Any,
+            *,
+            type_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(node_value, dict):
+            return cls._normalize_typed_group(
+                node_value,
+                type_map=type_map,
+            )
+        return {
+            "output": cls._build_typed_variable(
+                node_value,
+                type_map.get("output") if type_map else None,
+            )
+        }
+
+    @classmethod
+    def _build_ordered_node_snapshots(
+            cls,
+            *,
+            node_executions: list[WorkflowNodeExecution],
+            raw_node_vars: Any,
+            node_type_maps: dict[str, dict[str, str]],
+    ) -> dict[str, Any]:
         ordered_node_vars: dict[str, Any] = {}
-        serialized_raw_node_vars = self._serialize_execution_value(raw_node_vars or {})
+        serialized_raw_node_vars = cls._serialize_execution_value(raw_node_vars or {})
+
         for node_execution in node_executions:
             node_id = node_execution.node_id
-            node_type_map = node_type_maps.get(node_id)
             if node_id in ordered_node_vars:
                 continue
+            node_type_map = node_type_maps.get(node_id)
             if isinstance(serialized_raw_node_vars, dict) and node_id in serialized_raw_node_vars:
-                ordered_node_vars[node_id] = self._normalize_typed_group(
+                ordered_node_vars[node_id] = cls._build_typed_node_snapshot(
                     serialized_raw_node_vars[node_id],
                     type_map=node_type_map,
                 )
                 continue
-            serialized_output = self._serialize_execution_value(node_execution.output_data or {})
+            serialized_output = cls._serialize_execution_value(node_execution.output_data or {})
             if isinstance(serialized_output, dict) and "output" in serialized_output:
-                node_value = serialized_output.get("output")
-                if isinstance(node_value, dict):
-                    ordered_node_vars[node_id] = self._normalize_typed_group(
-                        node_value,
-                        type_map=node_type_map,
-                    )
-                else:
-                    ordered_node_vars[node_id] = {
-                        "output": self._build_typed_variable(
-                            node_value,
-                            node_type_map.get("output") if node_type_map else None,
-                        )
-                    }
-            else:
-                if isinstance(serialized_output, dict):
-                    ordered_node_vars[node_id] = self._normalize_typed_group(
-                        serialized_output,
-                        type_map=node_type_map,
-                    )
-                else:
-                    ordered_node_vars[node_id] = {
-                        "output": self._build_typed_variable(
-                            serialized_output,
-                            node_type_map.get("output") if node_type_map else None,
-                        )
-                    }
+                serialized_output = serialized_output.get("output")
+            ordered_node_vars[node_id] = cls._build_typed_node_snapshot(
+                serialized_output,
+                type_map=node_type_map,
+            )
 
         if isinstance(serialized_raw_node_vars, dict):
             for node_id, node_value in serialized_raw_node_vars.items():
                 if node_id not in ordered_node_vars:
-                    ordered_node_vars[node_id] = self._normalize_typed_group(
+                    ordered_node_vars[node_id] = cls._build_typed_node_snapshot(
                         node_value,
                         type_map=node_type_maps.get(node_id),
                     )
@@ -1289,20 +1303,66 @@ class WorkflowService:
             node_vars = ordered_node_vars.setdefault(node_id, {})
             for var_name, var_type in type_map.items():
                 if var_name not in node_vars:
-                    node_vars[var_name] = self._build_missing_typed_variable(var_type)
+                    node_vars[var_name] = cls._build_missing_typed_variable(var_type)
 
+        return ordered_node_vars
+
+    def _build_execution_snapshot(
+            self,
+            *,
+            execution: WorkflowExecution,
+            node_executions: list[WorkflowNodeExecution],
+            output_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        type_maps = self._build_snapshot_type_maps(workflow_config)
+        raw_groups = self._extract_execution_snapshot_raw_groups(
+            output_data=output_data,
+            workflow_config=workflow_config,
+        )
+        ordered_node_vars = self._build_ordered_node_snapshots(
+            node_executions=node_executions,
+            raw_node_vars=raw_groups["nodes"],
+            node_type_maps=type_maps["nodes"],
+        )
         return {
             "system": self._normalize_typed_group(
-                raw_system_vars or {},
-                type_map=system_type_map,
+                raw_groups["system"],
+                type_map=type_maps["system"],
             ),
             "conversation": self._normalize_typed_group(
-                raw_conversation_vars or {},
-                type_map=conversation_type_map,
+                raw_groups["conversation"],
+                type_map=type_maps["conversation"],
             ),
             "environment": self._normalize_typed_group(
-                raw_environment_vars or {},
-                type_map=environment_type_map,
+                raw_groups["environment"],
+                type_map=type_maps["environment"],
+            ),
+            "nodes": ordered_node_vars,
+        }
+
+    def _build_public_execution_snapshot_record(
+            self,
+            *,
+            execution: WorkflowExecution,
+            node_executions: list[WorkflowNodeExecution],
+            output_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        type_maps = self._build_snapshot_type_maps(workflow_config)
+        raw_groups = self._extract_execution_snapshot_raw_groups(
+            output_data=output_data,
+            workflow_config=workflow_config,
+        )
+        ordered_node_vars = self._build_ordered_node_snapshots(
+            node_executions=node_executions,
+            raw_node_vars=raw_groups["nodes"],
+            node_type_maps=type_maps["nodes"],
+        )
+        return {
+            "conversation": self._normalize_typed_group(
+                raw_groups["conversation"],
+                type_map=type_maps["conversation"],
             ),
             "nodes": ordered_node_vars,
         }
@@ -1316,6 +1376,322 @@ class WorkflowService:
             output_data=output_data if isinstance(output_data, dict) else {},
         )
 
+    def _build_public_execution_snapshot_from_record(self, execution: WorkflowExecution) -> dict[str, Any]:
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        return self._build_public_execution_snapshot_record(
+            execution=execution,
+            node_executions=node_executions,
+            output_data=output_data if isinstance(output_data, dict) else {},
+        )
+
+    @staticmethod
+    def _normalize_public_debug_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(snapshot, dict):
+            return {
+                "conversation": {},
+                "nodes": {},
+            }
+        return {
+            "conversation": snapshot.get("conversation") or {},
+            "nodes": snapshot.get("nodes") or {},
+        }
+
+    def _build_reset_conversation_snapshot(
+            self,
+            workflow_config: WorkflowConfig | None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for item in (workflow_config.variables if workflow_config else []) or []:
+            name = item.get("name")
+            if not name:
+                continue
+            if item.get("default") is not None:
+                result[name] = self._build_typed_variable(
+                    item.get("default"),
+                    item.get("type"),
+                )
+            else:
+                result[name] = self._build_typed_variable(
+                    None,
+                    item.get("type"),
+                )
+        return result
+
+    def _build_default_debug_state_snapshot(
+            self,
+            workflow_config: WorkflowConfig | None,
+    ) -> dict[str, Any]:
+        return self._normalize_public_debug_snapshot(
+            {
+                "conversation": self._build_reset_conversation_snapshot(workflow_config),
+                "nodes": {},
+            }
+        )
+
+    @classmethod
+    def _build_public_node_snapshot_from_cache_result(
+            cls,
+            result_data: dict[str, Any] | None,
+            *,
+            type_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        serialized_result = cls._serialize_execution_value(result_data or {})
+        if isinstance(serialized_result, dict) and "output" in serialized_result:
+            serialized_result = serialized_result.get("output")
+        return cls._build_typed_node_snapshot(
+            serialized_result,
+            type_map=type_map,
+        )
+
+    @staticmethod
+    def _extract_snapshot_node_order(snapshot: dict[str, Any] | None) -> list[str]:
+        if not isinstance(snapshot, dict):
+            return []
+        nodes = snapshot.get("nodes")
+        if not isinstance(nodes, dict):
+            return []
+        return [node_id for node_id in nodes.keys() if isinstance(node_id, str)]
+
+    @classmethod
+    def _apply_snapshot_node_order(
+            cls,
+            snapshot: dict[str, Any] | None,
+            node_order: list[str] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(snapshot, dict):
+            return snapshot or {}
+        nodes = snapshot.get("nodes")
+        if not isinstance(nodes, dict):
+            return snapshot
+        ordered_nodes: dict[str, Any] = {}
+        seen_node_ids: set[str] = set()
+        for node_id in node_order or []:
+            if node_id in nodes:
+                ordered_nodes[node_id] = nodes[node_id]
+                seen_node_ids.add(node_id)
+        for node_id, node_value in nodes.items():
+            if node_id not in seen_node_ids:
+                ordered_nodes[node_id] = node_value
+        result = dict(snapshot)
+        result["nodes"] = ordered_nodes
+        return result
+
+    def _normalize_debug_state_snapshot(
+            self,
+            *,
+            snapshot: dict[str, Any] | None,
+            node_order: list[str] | None = None,
+    ) -> tuple[dict[str, Any], list[str]]:
+        normalized_snapshot = self._normalize_public_debug_snapshot(snapshot)
+        resolved_node_order = node_order if isinstance(node_order, list) else self._extract_snapshot_node_order(
+            normalized_snapshot
+        )
+        return self._apply_snapshot_node_order(normalized_snapshot, resolved_node_order), resolved_node_order
+
+    @classmethod
+    def _normalize_debug_state_messages(
+            cls,
+            messages: Any,
+    ) -> list[dict[str, Any]]:
+        serialized_messages = cls._serialize_execution_value(messages or [])
+        return serialized_messages if isinstance(serialized_messages, list) else []
+
+    def _build_debug_state_persist_payload(
+            self,
+            *,
+            snapshot: dict[str, Any] | None,
+            messages: Any = None,
+            execution_id: str | None = None,
+            source: str | None = None,
+            node_order: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_snapshot, resolved_node_order = self._normalize_debug_state_snapshot(
+            snapshot=snapshot,
+            node_order=node_order,
+        )
+        normalized_messages = self._normalize_debug_state_messages(messages)
+        normalized_source = source or self.DEBUG_STATE_SOURCE
+        return {
+            "snapshot": normalized_snapshot,
+            "messages": normalized_messages,
+            "node_order": resolved_node_order,
+            "execution_id": execution_id,
+            "source": normalized_source,
+            "result_data": {
+                "snapshot": normalized_snapshot,
+                "messages": normalized_messages,
+                "node_order": resolved_node_order,
+                "execution_id": execution_id,
+                "source": normalized_source,
+            },
+            "meta_data": {
+                "messages_count": len(normalized_messages),
+                "node_order": resolved_node_order,
+                "execution_id": execution_id,
+                "source": normalized_source,
+            },
+        }
+
+    def _build_debug_state_cache_manager(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig | None,
+    ) -> WorkflowNodeCacheManager:
+        return self._build_node_cache_manager(
+            app_id=app_id,
+            workflow_config_id=workflow_config.id if workflow_config else None,
+            node_id=self.DEBUG_STATE_NODE_ID,
+            node_type=self.DEBUG_STATE_NODE_TYPE,
+            node_name=self.DEBUG_STATE_NODE_NAME,
+        )
+
+    def _read_workflow_debug_state(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig | None,
+    ) -> dict[str, Any]:
+        manager = self._build_debug_state_cache_manager(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        state_cache = manager.get_latest_cache(include_inactive=False)
+        result_data = state_cache.get("result_data") if state_cache else {}
+        snapshot = (result_data or {}).get("snapshot") if isinstance(result_data, dict) else None
+        if not isinstance(snapshot, dict):
+            snapshot = self._build_default_debug_state_snapshot(workflow_config)
+        snapshot, node_order = self._normalize_debug_state_snapshot(
+            snapshot=snapshot,
+            node_order=result_data.get("node_order") if isinstance(result_data, dict) else None,
+        )
+        messages = self._normalize_debug_state_messages(
+            result_data.get("messages") if isinstance(result_data, dict) else None
+        )
+        return {
+            "cache": state_cache or {},
+            "snapshot": snapshot,
+            "messages": messages,
+            "execution_id": result_data.get("execution_id") if isinstance(result_data, dict) else None,
+            "source": result_data.get("source") if isinstance(result_data, dict) else None,
+            "node_order": node_order,
+        }
+
+    @classmethod
+    def _compose_runtime_snapshot(
+            cls,
+            *,
+            base_snapshot: dict[str, Any] | None,
+            debug_snapshot: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        base_snapshot = base_snapshot if isinstance(base_snapshot, dict) else {}
+        debug_snapshot = cls._normalize_public_debug_snapshot(debug_snapshot)
+        return {
+            "system": dict(base_snapshot.get("system") or {}),
+            "conversation": dict(debug_snapshot.get("conversation") or {}),
+            "environment": dict(base_snapshot.get("environment") or {}),
+            "nodes": dict(debug_snapshot.get("nodes") or {}),
+        }
+
+    @classmethod
+    def _build_runtime_node_outputs(
+            cls,
+            *,
+            base_node_outputs: dict[str, Any] | None,
+            debug_snapshot: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        base_node_outputs = base_node_outputs if isinstance(base_node_outputs, dict) else {}
+        debug_nodes = (debug_snapshot or {}).get("nodes") if isinstance(debug_snapshot, dict) else {}
+        if not isinstance(debug_nodes, dict):
+            return result
+        for node_id, node_group in debug_nodes.items():
+            base_item = base_node_outputs.get(node_id)
+            merged_item = dict(base_item) if isinstance(base_item, dict) else {}
+            merged_item["output"] = cls._unwrap_typed_group(node_group)
+            result[node_id] = merged_item
+        return result
+
+    def _write_workflow_debug_state(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig | None,
+            snapshot: dict[str, Any],
+            messages: Any = None,
+            execution_id: str | None = None,
+            source: str | None = None,
+    ) -> dict[str, Any]:
+        persist_payload = self._build_debug_state_persist_payload(
+            snapshot=snapshot,
+            messages=messages,
+            execution_id=execution_id,
+            source=source,
+        )
+        manager = self._build_debug_state_cache_manager(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        saved_cache = manager.save_cache(
+            cache_key=manager.build_cache_key({"kind": self.DEBUG_STATE_SOURCE}),
+            input_data={"kind": self.DEBUG_STATE_SOURCE},
+            result_data=persist_payload["result_data"],
+            source=self.DEBUG_STATE_SOURCE,
+            ttl_seconds=None,
+            meta_data=persist_payload["meta_data"],
+        )
+        return {
+            "cache": saved_cache or {},
+            "snapshot": persist_payload["snapshot"],
+            "messages": persist_payload["messages"],
+            "execution_id": persist_payload["execution_id"],
+            "source": persist_payload["source"],
+            "node_order": persist_payload["node_order"],
+        }
+
+    def _sync_workflow_debug_state_node(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig | None,
+            node_id: str,
+            node_snapshot: dict[str, Any] | None = None,
+            source: str | None = None,
+            execution_id: str | None = None,
+    ) -> dict[str, Any]:
+        debug_state = self._read_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        debug_snapshot = dict(debug_state["snapshot"])
+        nodes_snapshot = dict(debug_snapshot.get("nodes") or {})
+        if node_snapshot is None:
+            nodes_snapshot.pop(node_id, None)
+        else:
+            nodes_snapshot[node_id] = node_snapshot
+        debug_snapshot["nodes"] = nodes_snapshot
+        return self._write_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+            snapshot=debug_snapshot,
+            messages=debug_state.get("messages"),
+            execution_id=execution_id if execution_id is not None else debug_state.get("execution_id"),
+            source=source,
+        )
+
+    def _refresh_workflow_debug_state_from_execution(self, execution: WorkflowExecution) -> None:
+        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        snapshot = self._build_public_execution_snapshot_from_record(execution)
+        self._write_workflow_debug_state(
+            app_id=execution.app_id,
+            workflow_config=workflow_config,
+            snapshot=snapshot or self._build_default_debug_state_snapshot(workflow_config),
+            messages=self._extract_execution_messages(execution),
+            execution_id=execution.execution_id,
+            source=self._get_execution_source(execution),
+        )
+
     def _extract_execution_messages(self, execution: WorkflowExecution | None) -> list[dict[str, Any]]:
         if not execution or not isinstance(execution.output_data, dict):
             return []
@@ -1327,6 +1703,158 @@ class WorkflowService:
             return {}
         node_outputs = self._serialize_execution_value(execution.output_data.get("node_outputs") or {})
         return node_outputs if isinstance(node_outputs, dict) else {}
+
+    def _extract_execution_runtime_state(
+            self,
+            execution: WorkflowExecution | None,
+    ) -> dict[str, Any]:
+        return {
+            "execution": execution,
+            "snapshot": self._build_execution_snapshot_from_record(execution) if execution else None,
+            "messages": self._extract_execution_messages(execution),
+            "node_outputs": self._extract_execution_node_outputs(execution),
+        }
+
+    def _build_single_node_runtime_seed(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig | None,
+    ) -> dict[str, Any]:
+        base_state = self._extract_execution_runtime_state(
+            self._find_latest_base_execution(app_id)
+        )
+        debug_state = self._read_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        debug_snapshot = debug_state["snapshot"]
+        return {
+            "base_execution": base_state["execution"],
+            "debug_state": debug_state,
+            "debug_snapshot": debug_snapshot,
+            "runtime_snapshot": self._compose_runtime_snapshot(
+                base_snapshot=base_state["snapshot"],
+                debug_snapshot=debug_snapshot,
+            ),
+            "messages": debug_state.get("messages") or base_state["messages"],
+            "node_outputs": self._build_runtime_node_outputs(
+                base_node_outputs=base_state["node_outputs"],
+                debug_snapshot=debug_snapshot,
+            ),
+        }
+
+    async def _prepare_single_node_start_input(
+            self,
+            *,
+            node_config: dict[str, Any],
+            input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        if node_config.get("type") != NodeType.START:
+            return input_data
+        start_node_vars = node_config.get("config", {}).get("variables", [])
+        start_node_id = node_config.get("id")
+        inputs = input_data.get("inputs") or {}
+        variables = dict(input_data.get("variables") or {})
+        for var_def in start_node_vars:
+            var_name = var_def.get("name")
+            keyed_value = inputs.get(f"{start_node_id}.{var_name}")
+            bare_value = inputs.get(var_name)
+            value = keyed_value if keyed_value is not None else bare_value
+            if value is not None:
+                variables[var_name] = value
+        input_data["variables"] = await self._resolve_start_node_file_variables(
+            start_node_vars,
+            variables,
+        )
+        return input_data
+
+    async def _prepare_single_node_input_files(
+            self,
+            input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_files = input_data.get("files") or []
+        if not raw_files:
+            return input_data
+        from app.schemas.app_schema import FileInput
+        file_inputs = [
+            FileInput(**f) if isinstance(f, dict) else f
+            for f in raw_files
+        ]
+        input_data["files"] = await self._handle_file_input(file_inputs)
+        return input_data
+
+    @staticmethod
+    def _build_single_node_cycle_nodes(workflow_config_dict: dict[str, Any]) -> list[str]:
+        return [
+            node.get("id") for node in workflow_config_dict.get("nodes", [])
+            if node.get("type") in [NodeType.LOOP, NodeType.ITERATION]
+        ]
+
+    def _build_single_node_workflow_state(
+            self,
+            *,
+            workflow_state_cls,
+            node_id: str,
+            execution_id: str,
+            workspace_id: uuid.UUID,
+            input_data: dict[str, Any],
+            workflow_config_dict: dict[str, Any],
+            runtime_seed: dict[str, Any],
+            storage_type: str | None,
+            user_rag_memory_id: str | None,
+    ):
+        cycle_nodes = self._build_single_node_cycle_nodes(workflow_config_dict)
+        return workflow_state_cls(
+            messages=input_data.get("conv_messages") or runtime_seed["messages"],
+            node_outputs=runtime_seed["node_outputs"],
+            execution_id=execution_id,
+            workspace_id=str(workspace_id),
+            user_id=input_data.get("user_id", ""),
+            error=None,
+            error_node=None,
+            cycle_nodes=cycle_nodes,
+            looping=0,
+            activate={node_id: True},
+            memory_storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+
+    @staticmethod
+    def _build_single_node_execution_id() -> str:
+        return f"node_{uuid.uuid4().hex[:16]}"
+
+    @staticmethod
+    def _build_execution_context(
+            execution_context_cls,
+            *,
+            execution_id: str,
+            workspace_id: uuid.UUID,
+            input_data: dict[str, Any],
+            storage_type: str | None,
+            user_rag_memory_id: str | None,
+    ):
+        return execution_context_cls.create(
+            execution_id=execution_id,
+            workspace_id=str(workspace_id),
+            user_id=input_data.get("user_id", ""),
+            conversation_id=input_data.get("conversation_id", ""),
+            memory_storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+
+    async def _inject_single_node_flat_inputs(
+            self,
+            *,
+            variable_pool,
+            input_data: dict[str, Any],
+    ) -> None:
+        for key, value in (input_data.get("inputs") or {}).items():
+            if "." not in key:
+                continue
+            ref_node_id, var_name = key.split(".", 1)
+            var_type = VariableType.type_map(value)
+            await variable_pool.new(ref_node_id, var_name, value, var_type, mut=False)
 
     async def _restore_snapshot_group_to_variable_pool(
             self,
@@ -1569,6 +2097,8 @@ class WorkflowService:
         agent_log = normalized.pop("agent_log", None)
         return {
             "execution_id": execution.id,
+            "app_id": execution.app_id,
+            "workflow_config_id": execution.workflow_config_id,
             "node_id": node_id,
             "node_type": normalized.pop("node_type", "unknown"),
             "node_name": normalized.pop("node_name", fallback_node_name),
@@ -1626,70 +2156,216 @@ class WorkflowService:
         self.node_execution_repo.bulk_create(items)
         self.db.commit()
 
-    def _create_single_node_debug_execution(
+    @staticmethod
+    def _build_single_node_run_id() -> str:
+        return f"node_{uuid.uuid4().hex[:16]}"
+
+    def _persist_single_node_execution(
             self,
             *,
             app_id: uuid.UUID,
             workflow_config: WorkflowConfig,
             node_id: str,
-            input_data: dict[str, Any],
-            base_execution_id: str | None = None,
-    ) -> WorkflowExecution:
-        conversation_id = input_data.get("conversation_id")
-        conversation_id_uuid = uuid.UUID(conversation_id) if conversation_id else None
-        execution = self.create_execution(
-            workflow_config_id=workflow_config.id,
-            app_id=app_id,
-            trigger_type="debug",
-            triggered_by=None,
-            conversation_id=conversation_id_uuid,
-            input_data=input_data,
-        )
-        execution.meta_data = {
-            **(execution.meta_data or {}),
-            "debug": True,
-            "source": "single_node_debug",
-            "node_id": node_id,
-            "base_execution_id": base_execution_id,
-        }
-        self.db.commit()
-        self.db.refresh(execution)
-        return execution
-
-    def _persist_single_node_execution(
-            self,
-            *,
-            execution: WorkflowExecution,
-            node_id: str,
             node_type: str,
             node_name: str | None,
             payload: dict[str, Any],
-    ) -> None:
+            run_id: str,
+            debug_input_data: dict[str, Any] | None = None,
+    ) -> WorkflowNodeExecution:
         normalized_payload = self._normalize_single_node_payload(node_type, node_name, payload)
-        self.node_execution_repo.delete_by_execution_id(execution.id)
-        self.node_execution_repo.create(
-            **self._build_node_execution_record(
-                execution=execution,
-                node_id=node_id,
-                node_data=normalized_payload,
-                source="single_node_debug",
-                fallback_execution_order=1,
-                fallback_node_name=node_name,
-            )
+        now = utcnow_naive()
+        elapsed_time = normalized_payload.get("elapsed_time")
+        completed_at = now
+        started_at = now
+        if isinstance(elapsed_time, (int, float)) and elapsed_time:
+            started_at = completed_at - datetime.timedelta(milliseconds=elapsed_time)
+        process_data = normalized_payload.get("process")
+        node_execution = self.node_execution_repo.create(
+            execution_id=None,
+            app_id=app_id,
+            workflow_config_id=workflow_config.id,
+            node_id=node_id,
+            node_type=node_type,
+            node_name=node_name,
+            execution_order=1,
+            retry_count=0,
+            input_data=normalized_payload.get("input"),
+            output_data=normalized_payload.get("output"),
+            status=normalized_payload.get("status", "completed"),
+            error_message=normalized_payload.get("error"),
+            started_at=started_at,
+            completed_at=completed_at,
+            elapsed_time=elapsed_time,
+            token_usage=normalized_payload.get("token_usage"),
+            cache_hit=bool(normalized_payload.get("cache_hit", False)),
+            cache_key=normalized_payload.get("cache_key"),
+            meta_data={
+                "source": "single_node_debug",
+                "process_data": process_data,
+                "workflow_config_id": str(workflow_config.id),
+                "conversation_id": payload.get("conversation_id"),
+                "debug": True,
+                "run_id": run_id,
+                "debug_input": normalize_cache_value(debug_input_data or {}),
+            },
         )
         self.db.commit()
+        self.db.refresh(node_execution)
+        return node_execution
+
+    def _build_rerun_input_from_latest_state(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig,
+            node_type: str | None,
+            debug_input_data: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        raw_input = dict(debug_input_data or {}) if isinstance(debug_input_data, dict) else {}
+        latest_execution = self._find_latest_base_execution(app_id)
+        latest_execution_input = (
+            dict(latest_execution.input_data or {})
+            if latest_execution and isinstance(latest_execution.input_data, dict)
+            else {}
+        )
+        latest_messages = self._extract_execution_messages(latest_execution)
+        debug_state = self._read_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        debug_snapshot = debug_state["snapshot"] if isinstance(debug_state, dict) else {}
+        debug_source = debug_state.get("source") if isinstance(debug_state, dict) else None
+        debug_messages = debug_state.get("messages") if isinstance(debug_state, dict) else []
+        prefer_single_node_debug_input = debug_source == "single_node_debug"
+        latest_conv = self._unwrap_typed_group(
+            debug_snapshot.get("conversation") if isinstance(debug_snapshot, dict) else {}
+        )
+
+        rerun_input = {
+            "message": (
+                raw_input.get("message")
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("message", raw_input.get("message"))
+            ),
+            "files": (
+                raw_input.get("files")
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("files", raw_input.get("files"))
+            ),
+            "user_id": (
+                raw_input.get("user_id")
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("user_id", raw_input.get("user_id"))
+            ),
+            "trigger": (
+                raw_input.get("trigger")
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("trigger", raw_input.get("trigger"))
+            ),
+            "trigger_payload": (
+                raw_input.get("trigger_payload")
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("trigger_payload", raw_input.get("trigger_payload"))
+            ),
+            "conversation_id": (
+                raw_input.get("conversation_id", "")
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("conversation_id") or raw_input.get("conversation_id", "")
+            ),
+            "conv_messages": (
+                debug_messages or raw_input.get("conv_messages") or latest_messages or []
+                if prefer_single_node_debug_input
+                else debug_messages or latest_messages or raw_input.get("conv_messages") or []
+            ),
+            "variables": dict(
+                raw_input.get("variables") or latest_execution_input.get("variables") or {}
+                if prefer_single_node_debug_input
+                else latest_execution_input.get("variables") or raw_input.get("variables") or {}
+            ),
+            "conv": (
+                dict(raw_input.get("conv") or latest_conv or {})
+                if prefer_single_node_debug_input
+                else latest_conv or dict(raw_input.get("conv") or {})
+            ),
+        }
+        if node_type == NodeType.START:
+            rerun_input["inputs"] = dict(raw_input.get("inputs") or {})
+        else:
+            rerun_input["inputs"] = {}
+        return normalize_cache_value(rerun_input)
+
+    def _build_public_conversation_snapshot_from_variable_pool(
+            self,
+            *,
+            workflow_config: WorkflowConfig | None,
+            variable_pool,
+    ) -> dict[str, Any]:
+        if not variable_pool:
+            return {}
+        type_map = self._build_snapshot_type_maps(workflow_config)["conversation"]
+        return self._normalize_typed_group(
+            variable_pool.get_all_conversation_vars(),
+            type_map=type_map,
+        )
+
+    def _refresh_workflow_debug_state_from_single_node_payload(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig,
+            node_id: str,
+            payload: dict[str, Any],
+            run_id: str,
+            messages: list[dict[str, Any]] | None = None,
+            variable_pool=None,
+    ) -> None:
+        type_maps = self._build_snapshot_type_maps(workflow_config)
+        debug_state = self._read_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        debug_snapshot = dict(debug_state["snapshot"])
+        debug_snapshot["conversation"] = self._build_public_conversation_snapshot_from_variable_pool(
+            workflow_config=workflow_config,
+            variable_pool=variable_pool,
+        ) or debug_snapshot.get("conversation") or {}
+        nodes_snapshot = dict(debug_snapshot.get("nodes") or {})
+        node_snapshot = self._build_public_node_snapshot_from_cache_result(
+            {"output": payload.get("outputs")},
+            type_map=type_maps["nodes"].get(node_id),
+        )
+        if node_snapshot:
+            nodes_snapshot[node_id] = node_snapshot
+        else:
+            nodes_snapshot.pop(node_id, None)
+        debug_snapshot["nodes"] = nodes_snapshot
+        self._write_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+            snapshot=debug_snapshot,
+            messages=messages,
+            execution_id=run_id,
+            source="single_node_debug",
+        )
 
     def _serialize_last_node_execution(self, node_execution: WorkflowNodeExecution) -> dict[str, Any]:
-        execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
+        execution = node_execution.execution or (
+            self.db.get(WorkflowExecution, node_execution.execution_id) if node_execution.execution_id else None
+        )
         meta_data = node_execution.meta_data or {}
+        source = meta_data.get("source", "workflow_execution")
+        run_id = meta_data.get("run_id")
+        workflow_execution_id = execution.execution_id if execution else None
         return {
             "node_id": node_execution.node_id,
             "node_type": node_execution.node_type,
             "node_name": node_execution.node_name,
             "status": node_execution.status,
-            "source": meta_data.get("source", "workflow_execution"),
-            "execution_id": execution.execution_id if execution else "",
-            "workflow_execution_id": node_execution.execution_id,
+            "source": source,
+            # Keep execution_id for backward compatibility. For single-node runs it aliases run_id.
+            "execution_id": workflow_execution_id or run_id or "",
+            "run_id": run_id,
+            "workflow_execution_id": workflow_execution_id,
             "inputs": node_execution.input_data,
             "outputs": node_execution.output_data,
             "process": meta_data.get("process_data"),
@@ -1713,17 +2389,15 @@ class WorkflowService:
             node_id: str,
             source: str | None = None,
     ) -> dict[str, Any] | None:
+        config = self.get_workflow_config(app_id)
         node_execution = self.node_execution_repo.get_latest_by_app_node(app_id, node_id, source=source)
         if not node_execution:
             return None
 
-        config = self.get_workflow_config(app_id)
         secret_values = self._extract_secret_values_from_environment_variables(
             config.environment_variables if config else []
         )
         payload = self._serialize_last_node_execution(node_execution)
-        payload["cache"] = self.get_node_cache(app_id=app_id, node_id=node_id)
-        payload["can_rerun_from_last_debug"] = self._has_single_node_debug_input(app_id, node_id)
         return self._mask_payload_with_secret_values(payload, secret_values)
 
     @staticmethod
@@ -1870,6 +2544,17 @@ class WorkflowService:
         )
         if not updated:
             return None
+        node_type_maps = self._build_snapshot_type_maps(config)["nodes"]
+        self._sync_workflow_debug_state_node(
+            app_id=app_id,
+            workflow_config=config,
+            node_id=node_id,
+            node_snapshot=self._build_public_node_snapshot_from_cache_result(
+            next_result_data,
+            type_map=node_type_maps.get(node_id),
+            ),
+            source="cache_update",
+        )
         serialized = self._serialize_node_cache(updated)
         secret_values = self._extract_secret_values_from_environment_variables(config.environment_variables)
         return self._mask_payload_with_secret_values(serialized, secret_values)
@@ -1884,7 +2569,67 @@ class WorkflowService:
             node_type=node.get("type") if node else None,
             node_name=node.get("name") if node else None,
         )
-        return manager.invalidate_latest_cache()
+        affected = manager.invalidate_latest_cache()
+        if affected > 0:
+            self._sync_workflow_debug_state_node(
+                app_id=app_id,
+                workflow_config=config,
+                node_id=node_id,
+                node_snapshot=None,
+                source="cache_invalidate",
+            )
+        return affected
+
+    def reset_workflow_debug_cache(self, *, app_id: uuid.UUID) -> dict[str, Any]:
+        workflow_config = self.get_workflow_config(app_id)
+        reset_snapshot = self._build_default_debug_state_snapshot(workflow_config)
+        invalidated_caches = self.node_cache_repo.invalidate_by_app(
+            app_id=app_id,
+            invalidated_at=utcnow_naive(),
+            exclude_node_ids=(self.DEBUG_STATE_NODE_ID,),
+        )
+        self.db.commit()
+        self._write_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+            snapshot=reset_snapshot,
+            messages=[],
+            execution_id=None,
+            source="reset",
+        )
+        secret_values = self._extract_secret_values_from_environment_variables(
+            workflow_config.environment_variables if workflow_config else []
+        )
+        logger.info(
+            "清空工作流调试缓存完成: app_id=%s, invalidated_caches=%s",
+            app_id,
+            invalidated_caches,
+        )
+        return {
+            "invalidated_caches": invalidated_caches,
+            "active_cache_count": 0,
+            "execution_id": None,
+            "source": "reset",
+            "snapshot": self._mask_payload_with_secret_values(reset_snapshot, secret_values),
+        }
+
+    def get_workflow_debug_state(self, *, app_id: uuid.UUID) -> dict[str, Any]:
+        workflow_config = self.get_workflow_config(app_id)
+        debug_state = self._read_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        snapshot = debug_state["snapshot"]
+        secret_values = self._extract_secret_values_from_environment_variables(
+            workflow_config.environment_variables if workflow_config else []
+        )
+        return {
+            "active_cache_count": len((snapshot.get("nodes") or {})) if isinstance(snapshot, dict) else 0,
+            "execution_id": debug_state.get("execution_id"),
+            "source": debug_state.get("source"),
+            "snapshot": self._mask_payload_with_secret_values(snapshot, secret_values),
+            "messages": self._mask_payload_with_secret_values(debug_state.get("messages") or [], secret_values),
+        }
 
     def _has_single_node_debug_input(self, app_id: uuid.UUID, node_id: str) -> bool:
         node_execution = self.node_execution_repo.get_latest_by_app_node(
@@ -1894,8 +2639,8 @@ class WorkflowService:
         )
         if not node_execution:
             return False
-        execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
-        return bool(execution and isinstance(execution.input_data, dict))
+        meta_data = node_execution.meta_data or {}
+        return bool(isinstance(meta_data.get("debug_input"), dict) or isinstance(node_execution.input_data, dict))
 
     async def rerun_node_from_last_debug(
             self,
@@ -1906,7 +2651,6 @@ class WorkflowService:
             workspace_id: uuid.UUID,
             invalidate_cache: bool = False,
             bypass_cache: bool = False,
-            base_execution_id: str | None = None,
     ) -> dict[str, Any]:
         node_execution = self.node_execution_repo.get_latest_by_app_node(
             app_id=app_id,
@@ -1915,18 +2659,21 @@ class WorkflowService:
         )
         if not node_execution:
             raise BusinessException("没有可用于重跑的单节点调试输入", BizCode.NOT_FOUND)
-        execution = node_execution.execution or self.db.get(WorkflowExecution, node_execution.execution_id)
-        if not execution or not isinstance(execution.input_data, dict):
+        meta_data = node_execution.meta_data or {}
+        debug_input_data = meta_data.get("debug_input")
+        if not isinstance(debug_input_data, dict):
+            debug_input_data = {}
+        if not debug_input_data and not isinstance(node_execution.input_data, dict):
             raise BusinessException("未找到可复用的单节点调试输入", BizCode.NOT_FOUND)
         if invalidate_cache:
             self.invalidate_node_cache(app_id=app_id, node_id=node_id)
-        rerun_input = dict(execution.input_data or {})
-        rerun_input["bypass_cache"] = bypass_cache
-        rerun_input["base_execution_id"] = (
-            base_execution_id
-            or rerun_input.get("base_execution_id")
-            or (execution.meta_data or {}).get("base_execution_id")
+        rerun_input = self._build_rerun_input_from_latest_state(
+            app_id=app_id,
+            workflow_config=config,
+            node_type=node_execution.node_type,
+            debug_input_data=debug_input_data,
         )
+        rerun_input["bypass_cache"] = bypass_cache
         return await self.run_single_node(
             app_id=app_id,
             node_id=node_id,
@@ -2694,17 +3441,11 @@ class WorkflowService:
         self.db.commit()
 
         # 3. 构建工作流配置字典
-        workflow_config_dict = {
-            "app_id": str(app_id),
-            "workflow_config_id": str(config.id),
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables,
-            "environment_variables": config.environment_variables,
-            "execution_config": config.execution_config,
-            "features": feature_configs,
-            "runtime_options": {},
-        }
+        workflow_config_dict = self._build_runtime_workflow_config_dict(
+            app_id=app_id,
+            workflow_config=config,
+            features=feature_configs,
+        )
 
         try:
             files = await self._handle_file_input(payload.files)
@@ -2844,6 +3585,7 @@ class WorkflowService:
                 )
                 execution = self.get_execution(execution.execution_id)
                 self._persist_workflow_node_executions(execution, config, result)
+                self._refresh_workflow_debug_state_from_execution(execution)
 
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
@@ -2855,6 +3597,7 @@ class WorkflowService:
                 )
                 execution = self.get_execution(execution.execution_id)
                 self._persist_workflow_node_executions(execution, config, result)
+                self._refresh_workflow_debug_state_from_execution(execution)
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
                 final_messages = result.get("messages", [])[init_message_length:]
@@ -3165,17 +3908,11 @@ class WorkflowService:
         self.db.commit()
 
         # 3. 构建工作流配置字典
-        workflow_config_dict = {
-            "app_id": str(app_id),
-            "workflow_config_id": str(config.id),
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables,
-            "environment_variables": config.environment_variables,
-            "execution_config": config.execution_config,
-            "features": feature_configs,
-            "runtime_options": {},
-        }
+        workflow_config_dict = self._build_runtime_workflow_config_dict(
+            app_id=app_id,
+            workflow_config=config,
+            features=feature_configs,
+        )
 
         try:
             files = await self._handle_file_input(payload.files)
@@ -3446,6 +4183,7 @@ class WorkflowService:
                         self.db.commit()
                     if status in {"completed", "failed"} and execution.output_data:
                         self._persist_workflow_node_executions(execution, config, execution.output_data)
+                        self._refresh_workflow_debug_state_from_execution(execution)
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                 # 记录活跃 LLM 节点：node_start 加入，node_end 移除，合成时只为活跃节点补发
@@ -3496,105 +4234,60 @@ class WorkflowService:
         if not node_config:
             raise BusinessException(code=BizCode.NOT_FOUND, message=f"节点不存在: node_id={node_id}")
 
-        base_execution = self._resolve_base_execution(
+        runtime_seed = self._build_single_node_runtime_seed(
             app_id=app_id,
-            explicit_execution_id=input_data.get("base_execution_id"),
+            workflow_config=config,
         )
-        if base_execution:
-            input_data["base_execution_id"] = base_execution.execution_id
+        input_data = await self._prepare_single_node_start_input(
+            node_config=node_config,
+            input_data=input_data,
+        )
 
-        # 如果目标节点是开始节点，将 inputs 中的变量值注入到 variables（sys.input_variables）
-        if node_config.get("type") == NodeType.START:
-            start_node_vars = node_config.get("config", {}).get("variables", [])
-            start_node_id = node_config.get("id")
-            inputs = input_data.get("inputs") or {}
-            variables = input_data.get("variables") or {}
-            for var_def in start_node_vars:
-                var_name = var_def.get("name")
-                # 优先匹配 start_node_id.var_name 格式，其次匹配裸 var_name
-                keyed_value = inputs.get(f"{start_node_id}.{var_name}")
-                bare_value = inputs.get(var_name)
-                value = keyed_value if keyed_value is not None else bare_value
-                if value is not None:
-                    variables[var_name] = value
-            # 解析开始节点文件类型的变量值
-            variables = await self._resolve_start_node_file_variables(start_node_vars, variables)
-            input_data["variables"] = variables
-
-        workflow_config_dict = {
-            "app_id": str(app_id),
-            "workflow_config_id": str(config.id),
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables or [],
-            "environment_variables": config.environment_variables or [],
-            "execution_config": config.execution_config or {},
-            "features": config.features or {},
-            "runtime_options": {
+        workflow_config_dict = self._build_runtime_workflow_config_dict(
+            app_id=app_id,
+            workflow_config=config,
+            runtime_options={
                 "bypass_node_cache": bool(input_data.get("bypass_cache")),
                 "cache_source": "single_node_debug",
             },
-        }
+        )
 
         storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
-        execution_id = f"node_{uuid.uuid4().hex[:16]}"
-
-        execution_context = ExecutionContext.create(
+        execution_id = self._build_single_node_execution_id()
+        execution_context = self._build_execution_context(
+            ExecutionContext,
             execution_id=execution_id,
-            workspace_id=str(workspace_id),
-            user_id=input_data.get("user_id", ""),
-            conversation_id=input_data.get("conversation_id", ""),
-            memory_storage_type=storage_type,
+            workspace_id=workspace_id,
+            input_data=input_data,
+            storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
         )
 
-        # sys.files 转换为 FileObject 格式
-        raw_files = input_data.get("files") or []
-        if raw_files:
-            from app.schemas.app_schema import FileInput
-            file_inputs = [
-                FileInput(**f) if isinstance(f, dict) else f
-                for f in raw_files
-            ]
-            input_data["files"] = await self._handle_file_input(file_inputs)
+        input_data = await self._prepare_single_node_input_files(input_data)
 
         variable_pool = VariablePool()
         await VariablePoolInitializer(workflow_config_dict).initialize(variable_pool, input_data, execution_context)
-        if base_execution:
-            await self._restore_variable_pool_from_snapshot(
-                variable_pool=variable_pool,
-                snapshot=self._build_execution_snapshot_from_record(base_execution),
-            )
+        await self._restore_variable_pool_from_snapshot(
+            variable_pool=variable_pool,
+            snapshot=runtime_seed["runtime_snapshot"],
+        )
         await self._apply_input_data_overrides_to_variable_pool(
             variable_pool=variable_pool,
             input_data=input_data,
         )
-
-        # 注入节点输入变量，支持扁平格式 {"node_id.var": value}
-        for key, value in (input_data.get("inputs") or {}).items():
-            if "." in key:
-                ref_node_id, var_name = key.split(".", 1)
-                var_type = VariableType.type_map(value)
-                await variable_pool.new(ref_node_id, var_name, value, var_type, mut=False)
-
-        cycle_nodes = [
-            n.get("id") for n in workflow_config_dict.get("nodes", [])
-            if n.get("type") in [NodeType.LOOP, NodeType.ITERATION]
-        ]
-        base_messages = self._extract_execution_messages(base_execution)
-        base_node_outputs = self._extract_execution_node_outputs(base_execution)
-        state = WorkflowState(
-            messages=input_data.get("conv_messages") or base_messages,
-            node_outputs=base_node_outputs,
+        await self._inject_single_node_flat_inputs(
+            variable_pool=variable_pool,
+            input_data=input_data,
+        )
+        state = self._build_single_node_workflow_state(
+            workflow_state_cls=WorkflowState,
+            node_id=node_id,
             execution_id=execution_id,
-            workspace_id=str(workspace_id),
-            user_id=input_data.get("user_id", ""),
-            error=None,
-            error_node=None,
-            cycle_nodes=cycle_nodes,
-            looping=0,
-            activate={node_id: True},
-            memory_storage_type=storage_type,
+            workspace_id=workspace_id,
+            input_data=input_data,
+            workflow_config_dict=workflow_config_dict,
+            runtime_seed=runtime_seed,
+            storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
         )
 
@@ -3614,13 +4307,7 @@ class WorkflowService:
         node_config, node, state, variable_pool = await self._build_node_context(
             app_id, node_id, config, workspace_id, input_data
         )
-        debug_execution = self._create_single_node_debug_execution(
-            app_id=app_id,
-            workflow_config=config,
-            node_id=node_id,
-            input_data=input_data,
-            base_execution_id=input_data.get("base_execution_id"),
-        )
+        run_id = self._build_single_node_run_id()
         try:
             state_update = await node.run(state, variable_pool)
             node_output = (state_update.get("node_outputs") or {}).get(node_id) or {}
@@ -3629,27 +4316,32 @@ class WorkflowService:
                 node_type=node_config.get("type"),
                 node_output=node_output,
             )
-            payload = self._attach_debug_execution_id(payload, debug_execution.execution_id)
-            self.update_execution_status(
-                debug_execution.execution_id,
-                "completed",
-                token_usage=(payload.get("token_usage") or {}).get("total_tokens"),
-                output_data=self._build_debug_execution_output(node_id, "completed"),
-            )
-            debug_execution = self.get_execution(debug_execution.execution_id)
+            payload = self._attach_debug_execution_id(payload, run_id)
             self._persist_single_node_execution(
-                execution=debug_execution,
+                app_id=app_id,
+                workflow_config=config,
                 node_id=node_id,
                 node_type=node_config.get("type"),
                 node_name=node_config.get("name"),
                 payload=payload,
+                run_id=run_id,
+                debug_input_data=input_data,
+            )
+            self._refresh_workflow_debug_state_from_single_node_payload(
+                app_id=app_id,
+                workflow_config=config,
+                node_id=node_id,
+                payload=payload,
+                run_id=run_id,
+                messages=state.get("messages"),
+                variable_pool=variable_pool,
             )
             return self._mask_runtime_secrets(payload, variable_pool)
         except Exception as e:
             logger.error(f"单节点执行失败: node_id={node_id}, error={e}", exc_info=True)
             payload = {
                 "status": "failed",
-                "execution_id": debug_execution.execution_id,
+                "execution_id": run_id,
                 "node_id": node_id,
                 "node_type": node_config.get("type"),
                 "inputs": node._extract_input(state, variable_pool),
@@ -3658,20 +4350,15 @@ class WorkflowService:
                 "elapsed_time": None,
                 "error": str(e),
             }
-            self.update_execution_status(
-                debug_execution.execution_id,
-                "failed",
-                output_data=self._build_debug_execution_output(node_id, "failed"),
-                error_message=str(e),
-                error_node_id=node_id,
-            )
-            debug_execution = self.get_execution(debug_execution.execution_id)
             self._persist_single_node_execution(
-                execution=debug_execution,
+                app_id=app_id,
+                workflow_config=config,
                 node_id=node_id,
                 node_type=node_config.get("type"),
                 node_name=node_config.get("name"),
                 payload=payload,
+                run_id=run_id,
+                debug_input_data=input_data,
             )
             return self._mask_runtime_secrets(payload, variable_pool)
 
@@ -3693,13 +4380,7 @@ class WorkflowService:
             app_id, node_id, config, workspace_id, input_data
         )
         node_type = node_config.get("type")
-        debug_execution = self._create_single_node_debug_execution(
-            app_id=app_id,
-            workflow_config=config,
-            node_id=node_id,
-            input_data=input_data,
-            base_execution_id=input_data.get("base_execution_id"),
-        )
+        run_id = self._build_single_node_run_id()
         start_time = time.time()
 
         yield {
@@ -3707,7 +4388,7 @@ class WorkflowService:
             "data": {
                 "node_id": node_id,
                 "node_type": node_type,
-                "execution_id": debug_execution.execution_id,
+                "execution_id": run_id,
             }
         }
 
@@ -3724,22 +4405,27 @@ class WorkflowService:
                             node_type=node_type,
                             node_output=node_output,
                         ),
-                        debug_execution.execution_id,
+                        run_id,
                     )
                 }
-                self.update_execution_status(
-                    debug_execution.execution_id,
-                    "completed",
-                    token_usage=(event_payload["data"].get("token_usage") or {}).get("total_tokens"),
-                    output_data=self._build_debug_execution_output(node_id, "completed"),
-                )
-                debug_execution = self.get_execution(debug_execution.execution_id)
                 self._persist_single_node_execution(
-                    execution=debug_execution,
+                    app_id=app_id,
+                    workflow_config=config,
                     node_id=node_id,
                     node_type=node_type,
                     node_name=node_config.get("name"),
                     payload=event_payload["data"],
+                    run_id=run_id,
+                    debug_input_data=input_data,
+                )
+                self._refresh_workflow_debug_state_from_single_node_payload(
+                    app_id=app_id,
+                    workflow_config=config,
+                    node_id=node_id,
+                    payload=event_payload["data"],
+                    run_id=run_id,
+                    messages=state.get("messages"),
+                    variable_pool=variable_pool,
                 )
                 yield self._mask_runtime_secrets(event_payload, variable_pool)
                 return
@@ -3756,7 +4442,7 @@ class WorkflowService:
                                 "data": {
                                     "node_id": node_id,
                                     "chunk": chunk,
-                                    "execution_id": debug_execution.execution_id,
+                                    "execution_id": run_id,
                                 }
                             },
                             variable_pool
@@ -3779,7 +4465,7 @@ class WorkflowService:
                         "elapsed_time": elapsed,
                         "error": None,
                     },
-                    debug_execution.execution_id,
+                    run_id,
                 )
             }
             node_output = self._normalize_single_node_payload(node_type, node_config.get("name"), event_payload["data"])
@@ -3788,19 +4474,24 @@ class WorkflowService:
                 variable_pool=variable_pool,
                 node_output=node_output,
             )
-            self.update_execution_status(
-                debug_execution.execution_id,
-                "completed",
-                token_usage=(event_payload["data"].get("token_usage") or {}).get("total_tokens"),
-                output_data=self._build_debug_execution_output(node_id, "completed"),
-            )
-            debug_execution = self.get_execution(debug_execution.execution_id)
             self._persist_single_node_execution(
-                execution=debug_execution,
+                app_id=app_id,
+                workflow_config=config,
                 node_id=node_id,
                 node_type=node_type,
                 node_name=node_config.get("name"),
                 payload=event_payload["data"],
+                run_id=run_id,
+                debug_input_data=input_data,
+            )
+            self._refresh_workflow_debug_state_from_single_node_payload(
+                app_id=app_id,
+                workflow_config=config,
+                node_id=node_id,
+                payload=event_payload["data"],
+                run_id=run_id,
+                messages=state.get("messages"),
+                variable_pool=variable_pool,
             )
             yield self._mask_runtime_secrets(event_payload, variable_pool)
         except Exception as e:
@@ -3809,7 +4500,7 @@ class WorkflowService:
             event_payload = {
                 "event": "node_error",
                 "data": {
-                    "execution_id": debug_execution.execution_id,
+                    "execution_id": run_id,
                     "node_id": node_id,
                     "node_type": node_type,
                     "inputs": node._extract_input(state, variable_pool),
@@ -3817,16 +4508,9 @@ class WorkflowService:
                     "error": str(e),
                 }
             }
-            self.update_execution_status(
-                debug_execution.execution_id,
-                "failed",
-                output_data=self._build_debug_execution_output(node_id, "failed"),
-                error_message=str(e),
-                error_node_id=node_id,
-            )
-            debug_execution = self.get_execution(debug_execution.execution_id)
             self._persist_single_node_execution(
-                execution=debug_execution,
+                app_id=app_id,
+                workflow_config=config,
                 node_id=node_id,
                 node_type=node_type,
                 node_name=node_config.get("name"),
@@ -3837,6 +4521,8 @@ class WorkflowService:
                     "process": None,
                     "token_usage": None,
                 },
+                run_id=run_id,
+                debug_input_data=input_data,
             )
             yield self._mask_runtime_secrets(event_payload, variable_pool)
 

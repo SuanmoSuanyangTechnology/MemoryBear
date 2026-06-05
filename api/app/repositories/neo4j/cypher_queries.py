@@ -861,6 +861,16 @@ neo4j_query_all = """
                 other as entity2
                           """
 
+'''按 elementId 查询 ExtractedEntity 的事件时间线字段'''
+Memory_Timeline_Entity_Events = """
+MATCH (e:ExtractedEntity)
+WHERE elementId(e) = $id
+RETURN e.name AS entity_name,
+       e.entity_type AS entity_type,
+       e.description_summary AS description_summary,
+       e.event_timeline AS event_timeline
+"""
+
 '''针对当前节点下扩长的句子，实体和总结'''
 Memory_Timeline_ExtractedEntity = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
@@ -2223,15 +2233,17 @@ FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
 )
 WITH keeper, loser
 OPTIONAL MATCH (loser)-[r:EXTRACTED_RELATIONSHIP]->(target)
-WHERE target <> keeper AND NOT (keeper)-[:EXTRACTED_RELATIONSHIP]->(target)
+WHERE target <> keeper
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
-  CREATE (keeper)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(target)
+  MERGE (keeper)-[nr:EXTRACTED_RELATIONSHIP {predicate: r.predicate}]->(target)
+  SET nr += properties(r)
 )
 WITH keeper, loser
 OPTIONAL MATCH (source)-[r:EXTRACTED_RELATIONSHIP]->(loser)
-WHERE source <> keeper AND NOT (source)-[:EXTRACTED_RELATIONSHIP]->(keeper)
+WHERE source <> keeper
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
-  CREATE (source)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(keeper)
+  MERGE (source)-[nr:EXTRACTED_RELATIONSHIP {predicate: r.predicate}]->(keeper)
+  SET nr += properties(r)
 )
 WITH keeper, loser
 DETACH DELETE loser
