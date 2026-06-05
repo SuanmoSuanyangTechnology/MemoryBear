@@ -169,7 +169,7 @@ def set_asyncio_event_loop():
 
 
 def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
-    """Cancel pending tasks but keep the loop open for reuse.
+    """Cancel pending tasks and finalize async generators, but keep the loop open for reuse.
 
     Not closing the loop avoids 'Event loop is closed' from httpx AsyncClient.__del__ during GC.
     """
@@ -180,10 +180,11 @@ def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
             for task in all_tasks:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*all_tasks, return_exceptions=True))
+        # Finalize async generators so network/client resources are properly cleaned up.
+        # This does NOT close the loop.
+        loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
-    # NOTE: Do NOT close the loop. It will be reused by set_asyncio_event_loop()
-    # for subsequent Celery tasks on the same thread.
 
 
 @celery_app.task(name="tasks.process_item")
