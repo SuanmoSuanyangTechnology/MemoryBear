@@ -1530,12 +1530,11 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
 def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) -> Dict[str, Dict[str, Any]]:
     """
-    批量获取多个终端用户关联的记忆配置（优化版本，减少数据库查询次数）
+    批量获取多个终端用户关联的记忆配置。
 
-    使用与 get_end_user_connected_config 相同的逻辑：
+    逻辑：
     1. 优先使用 end_user.memory_config_id
-    2. 如果没有，尝试从 AppRelease.config 提取并回填
-    3. 如果仍然没有，回退到工作空间默认配置
+    2. 如果没有，回退到工作空间默认配置
 
     Args:
         end_user_ids: 终端用户ID列表
@@ -1543,154 +1542,51 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
 
     Returns:
         字典，key 为 end_user_id，value 为包含 memory_config_id 和 memory_config_name 的字典
-        格式: {
-            "user_id_1": {"memory_config_id": "xxx", "memory_config_name": "xxx"},
-            "user_id_2": {"memory_config_id": None, "memory_config_name": None},
-            ...
-        }
     """
-    import json as json_module
-
-    from sqlalchemy import select
+    from sqlalchemy.orm import load_only
 
     from app.models.app_model import App
-    from app.models.app_release_model import AppRelease
     from app.models.end_user_model import EndUser
     from app.models.memory_config_model import MemoryConfig
-    from app.services.memory_config_service import MemoryConfigService
 
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")
 
-    result = {}
+    result: Dict[str, Dict[str, Any]] = {}
 
     if not end_user_ids:
         return result
 
-    # 1. 批量查询所有 end_user 及其 app_id 和 memory_config_id
-    end_users = db.query(EndUser).filter(EndUser.id.in_(end_user_ids)).all()
+    # 1. 批量查询所有 end_user，只加载需要的列
+    end_users = (
+        db.query(EndUser)
+        .options(load_only(EndUser.id, EndUser.app_id, EndUser.memory_config_id))
+        .filter(EndUser.id.in_(end_user_ids))
+        .all()
+    )
 
-    # 创建映射 - 保留 EndUser 对象引用以便回填
-    end_user_map = {str(eu.id): eu for eu in end_users}
     user_data = {str(eu.id): {"app_id": eu.app_id, "memory_config_id": eu.memory_config_id} for eu in end_users}
 
     # 记录未找到的用户
-    found_user_ids = set(user_data.keys())
-    missing_user_ids = set(end_user_ids) - found_user_ids
-    if missing_user_ids:
-        logger.warning(f"End users not found: {missing_user_ids}")
-        for user_id in missing_user_ids:
-            result[user_id] = {"memory_config_id": None, "memory_config_name": None}
+    missing_user_ids = set(end_user_ids) - set(user_data.keys())
+    for user_id in missing_user_ids:
+        result[user_id] = {"memory_config_id": None, "memory_config_name": None}
 
-    # 2. 批量获取所有相关应用以获取 workspace_id 和 type
-    app_ids = list(set(data["app_id"] for data in user_data.values()))
+    # 2. 批量获取所有相关应用的 workspace_id
+    app_ids = list(set(data["app_id"] for data in user_data.values() if data["app_id"]))
     if not app_ids:
+        for user_id in user_data:
+            result[user_id] = {"memory_config_id": None, "memory_config_name": None}
         return result
 
-    apps = db.query(App).filter(App.id.in_(app_ids)).all()
-    app_map = {app.id: app for app in apps}
+    apps = (
+        db.query(App)
+        .options(load_only(App.id, App.workspace_id))
+        .filter(App.id.in_(app_ids))
+        .all()
+    )
     app_to_workspace = {app.id: app.workspace_id for app in apps}
 
-    # 3. 对于没有 memory_config_id 的用户，尝试从 AppRelease.config 提取
-    users_needing_migration = [
-        (end_user_id, data["app_id"])
-        for end_user_id, data in user_data.items()
-        if not data["memory_config_id"]
-    ]
-
-    if users_needing_migration:
-        # 批量获取相关应用的最新发布版本
-        migration_app_ids = list(set(app_id for _, app_id in users_needing_migration))
-
-        # 查询每个应用的最新活跃发布版本
-        app_latest_releases = {}
-        for app_id in migration_app_ids:
-            stmt = (
-                select(AppRelease)
-                .where(AppRelease.app_id == app_id, AppRelease.is_active.is_(True))
-                .order_by(AppRelease.version.desc())
-                .limit(1)
-            )
-            latest_release = db.scalars(stmt).first()
-            if latest_release:
-                app_latest_releases[app_id] = latest_release
-
-        # 为每个需要迁移的用户提取 memory_config_id
-        config_service = MemoryConfigService(db)
-        users_to_backfill = []  # [(end_user, memory_config_id), ...]
-
-        for end_user_id, app_id in users_needing_migration:
-            latest_release = app_latest_releases.get(app_id)
-            if not latest_release:
-                continue
-
-            config = latest_release.config or {}
-
-            # 如果 config 是字符串，解析为字典
-            if isinstance(config, str):
-                try:
-                    config = json_module.loads(config)
-                except json_module.JSONDecodeError:
-                    logger.warning(f"Failed to parse config JSON for release {latest_release.id}")
-                    continue
-
-            # 使用 MemoryConfigService 的提取方法
-            app = app_map.get(app_id)
-            if not app:
-                continue
-
-            legacy_config_id, is_legacy_int = config_service.extract_memory_config_id(
-                app_type=app.type,
-                config=config
-            )
-
-            if legacy_config_id:
-                # 更新 user_data 中的 memory_config_id
-                user_data[end_user_id]["memory_config_id"] = legacy_config_id
-
-                # 记录需要回填的用户（稍后验证配置存在后再回填）
-                end_user = end_user_map.get(end_user_id)
-                if end_user:
-                    users_to_backfill.append((end_user, legacy_config_id))
-            elif is_legacy_int:
-                logger.info(
-                    f"Legacy int config detected for end_user {end_user_id}, will use workspace default"
-                )
-
-        # 验证提取的 config_id 是否存在于数据库中
-        if users_to_backfill:
-            config_ids_to_validate = list(set(cid for _, cid in users_to_backfill))
-            existing_configs = db.query(MemoryConfig).filter(
-                MemoryConfig.config_id.in_(config_ids_to_validate)
-            ).all()
-            valid_config_ids = {mc.config_id for mc in existing_configs}
-
-            # 只回填存在的配置
-            valid_backfills = [
-                (eu, cid) for eu, cid in users_to_backfill
-                if cid in valid_config_ids
-            ]
-            invalid_backfills = [
-                (eu, cid) for eu, cid in users_to_backfill
-                if cid not in valid_config_ids
-            ]
-
-            if invalid_backfills:
-                invalid_ids = [str(cid) for _, cid in invalid_backfills]
-                logger.warning(
-                    f"Skipping backfill for non-existent memory_config_ids: {invalid_ids}"
-                )
-                # 清除 user_data 中无效的 config_id
-                for eu, cid in invalid_backfills:
-                    user_data[str(eu.id)]["memory_config_id"] = None
-
-            # 批量回填 end_user.memory_config_id
-            if valid_backfills:
-                for end_user, memory_config_id in valid_backfills:
-                    end_user.memory_config_id = memory_config_id
-                db.commit()
-                logger.info(f"Migrated memory_config_id for {len(valid_backfills)} end_users")
-
-    # 4. 收集需要查询的 memory_config_id 和需要回退的 workspace_id
+    # 3. 分类：有直接配置的 vs 需要回退到工作空间默认的
     direct_config_ids = []
     workspace_fallback_users = []  # [(end_user_id, workspace_id), ...]
 
@@ -1702,32 +1598,41 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
             if workspace_id:
                 workspace_fallback_users.append((end_user_id, workspace_id))
 
-    # 5. 批量查询直接分配的配置
+    # 4. 批量查询直接分配的配置
     config_id_to_config = {}
     if direct_config_ids:
-        configs = db.query(MemoryConfig).filter(MemoryConfig.config_id.in_(direct_config_ids)).all()
+        configs = (
+            db.query(MemoryConfig)
+            .options(load_only(MemoryConfig.config_id, MemoryConfig.config_name))
+            .filter(MemoryConfig.config_id.in_(direct_config_ids))
+            .all()
+        )
         config_id_to_config = {mc.config_id: mc for mc in configs}
 
-    # 6. 获取工作空间默认配置（需要逐个查询，因为 get_workspace_default_config 有复杂逻辑）
-    workspace_default_configs = {}
+    # 5. 批量获取工作空间默认配置
+    workspace_default_configs: Dict[Any, Any] = {}
     unique_workspace_ids = list(set(ws_id for _, ws_id in workspace_fallback_users))
 
     if unique_workspace_ids:
-        config_service = MemoryConfigService(db)
-        for workspace_id in unique_workspace_ids:
-            default_config = config_service.get_workspace_default_config(workspace_id)
-            if default_config:
-                workspace_default_configs[workspace_id] = default_config
+        default_configs = (
+            db.query(MemoryConfig)
+            .options(load_only(MemoryConfig.config_id, MemoryConfig.config_name, MemoryConfig.workspace_id))
+            .filter(
+                MemoryConfig.workspace_id.in_(unique_workspace_ids),
+                MemoryConfig.is_default.is_(True),
+                MemoryConfig.state.is_(True),
+            )
+            .all()
+        )
+        workspace_default_configs = {mc.workspace_id: mc for mc in default_configs}
 
-    # 7. 构建最终结果
+    # 6. 构建最终结果
     for end_user_id, data in user_data.items():
         memory_config = None
 
-        # 优先使用 end_user 直接分配的配置
         if data["memory_config_id"]:
             memory_config = config_id_to_config.get(data["memory_config_id"])
 
-        # 回退到工作空间默认配置
         if not memory_config:
             workspace_id = app_to_workspace.get(data["app_id"])
             if workspace_id:
