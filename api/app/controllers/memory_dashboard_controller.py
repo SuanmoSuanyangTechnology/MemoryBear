@@ -171,52 +171,34 @@ def get_workspace_end_users(
         }
     }
 
-    # Redis 节流 + Celery 任务分发放到后台线程，不阻塞接口响应
-    import threading
+    # Redis 节流 + Celery 任务派发（同步内联，操作极轻量，无需开线程）
+    try:
+        from app.tasks import get_sync_redis_client
+        from app.celery_app import celery_app as _celery_app
 
-    def _fire_and_forget_tasks(_end_user_ids, _workspace_id):
-        """后台线程：执行 Redis 节流判断 + Celery 任务派发"""
-        try:
-            from app.tasks import get_sync_redis_client
-
-            _redis = get_sync_redis_client()
-            if _redis is None:
-                api_logger.warning("后台任务 Redis 不可用，跳过")
-                return
-        except Exception as _e:
-            api_logger.warning(f"后台任务 Redis 不可用，跳过: {_e}")
-            return
-
-        try:
-            from app.celery_app import celery_app as _celery_app
-
+        _redis = get_sync_redis_client()
+        if _redis is not None:
             # 按需初始化任务（节流 60s）
-            _throttle_key = f"dashboard:init_tasks:throttle:{_workspace_id}"
+            _throttle_key = f"dashboard:init_tasks:throttle:{workspace_id}"
             if _redis.set(_throttle_key, "1", nx=True, ex=60):
                 _celery_app.send_task(
                     "app.tasks.init_implicit_emotions_for_users",
-                    kwargs={"end_user_ids": _end_user_ids},
+                    kwargs={"end_user_ids": end_user_ids},
                 )
                 _celery_app.send_task(
                     "app.tasks.init_interest_distribution_for_users",
-                    kwargs={"end_user_ids": _end_user_ids},
+                    kwargs={"end_user_ids": end_user_ids},
                 )
 
             # 社区聚类补全任务（节流 60s）
-            _cluster_key = f"dashboard:cluster_task:throttle:{_workspace_id}"
+            _cluster_key = f"dashboard:cluster_task:throttle:{workspace_id}"
             if _redis.set(_cluster_key, "1", nx=True, ex=60):
                 _celery_app.send_task(
                     "app.tasks.init_community_clustering_for_users",
-                    kwargs={"end_user_ids": _end_user_ids, "workspace_id": str(_workspace_id)},
+                    kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
                 )
-        except Exception as _e:
-            api_logger.warning(f"后台任务派发失败（不影响已返回响应）: {_e}")
-
-    threading.Thread(
-        target=_fire_and_forget_tasks,
-        args=(end_user_ids, workspace_id),
-        daemon=True,
-    ).start()
+    except Exception as _e:
+        api_logger.warning(f"后台任务派发失败（不影响已返回响应）: {_e}")
 
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
     return success(data=result, msg="宿主列表获取成功")
