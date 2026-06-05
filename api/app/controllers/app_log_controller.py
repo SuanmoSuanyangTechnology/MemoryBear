@@ -122,10 +122,14 @@ def get_app_log_detail(
                 created_at=m.created_at,
             ))
 
+    # 聚合人工介入信息，结构与 /public/share/conversations/{conversation_id} 一致
+    pending_intervention_map = log_service.build_pending_intervention_map(conversation_id)
+
     detail = AppLogConversationDetail(
         **base.model_dump(),
         messages=msg_list,
         node_executions_map=node_executions_map,
+        pending_intervention=pending_intervention_map,
     )
 
     return success(data=detail)

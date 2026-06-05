@@ -50,6 +50,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "tool": NodeType.TOOL,
         "list-operator": NodeType.LIST_OPERATOR,
         "document-extractor": NodeType.DOCUMENT_EXTRACTOR,
+        "human-input": NodeType.HUMAN_INTERVENTION,
         "": NodeType.NOTES
     }
 

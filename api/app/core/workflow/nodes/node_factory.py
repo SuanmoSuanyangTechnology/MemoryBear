@@ -15,6 +15,7 @@ from app.core.workflow.nodes.cycle_graph.node import CycleGraphNode
 from app.core.workflow.nodes.end import EndNode
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.nodes.http_request import HttpRequestNode
+from app.core.workflow.nodes.human_intervention import HumanInterventionNode
 from app.core.workflow.nodes.if_else import IfElseNode
 from app.core.workflow.nodes.jinja_render import JinjaRenderNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
@@ -57,7 +58,8 @@ WorkflowNode = Union[
     CodeNode,
     DocExtractorNode,
     ListOperatorNode,
-    OutputNode
+    OutputNode,
+    HumanInterventionNode,
 ]
 
 
@@ -93,6 +95,7 @@ class NodeFactory:
         NodeType.DOCUMENT_EXTRACTOR: DocExtractorNode,
         NodeType.LIST_OPERATOR: ListOperatorNode,
         NodeType.OUTPUT: OutputNode,
+        NodeType.HUMAN_INTERVENTION: HumanInterventionNode,
     }
 
     @classmethod

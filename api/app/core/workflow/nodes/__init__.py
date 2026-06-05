@@ -10,6 +10,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.code import CodeNode
 from app.core.workflow.nodes.end import EndNode
 from app.core.workflow.nodes.http_request import HttpRequestNode
+from app.core.workflow.nodes.human_intervention import HumanInterventionNode
 from app.core.workflow.nodes.if_else import IfElseNode
 from app.core.workflow.nodes.jinja_render import JinjaRenderNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
@@ -35,6 +36,7 @@ __all__ = [
     "KnowledgeRetrievalNode",
     "AssignerNode",
     "HttpRequestNode",
+    "HumanInterventionNode",
     "JinjaRenderNode",
     "ParameterExtractorNode",
     "QuestionClassifierNode",

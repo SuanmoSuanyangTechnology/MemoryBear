@@ -27,12 +27,20 @@ class NodeType(StrEnum):
     DOCUMENT_EXTRACTOR = "document-extractor"
     LIST_OPERATOR = "list-operator"
     OUTPUT = "output"
+    HUMAN_INTERVENTION = "human-intervention"
 
     UNKNOWN = "unknown"
     NOTES = "notes"
 
 
-BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER, NodeType.LLM, NodeType.CODE})
+BRANCH_NODES = frozenset({
+    NodeType.IF_ELSE,
+    NodeType.HTTP_REQUEST,
+    NodeType.QUESTION_CLASSIFIER,
+    NodeType.LLM,
+    NodeType.CODE,
+    NodeType.HUMAN_INTERVENTION,
+})
 
 
 class ComparisonOperator(StrEnum):

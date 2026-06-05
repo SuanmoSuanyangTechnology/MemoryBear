@@ -48,13 +48,42 @@ class EventStreamHandler:
         """
         for node_id in data.keys():
             if activate.get(node_id):
-                # For branch nodes (LLM, CODE), use branch_signal as status;
-                # for other nodes, use output
-                node_output_status = self.variable_pool.get_value(
-                    f"{node_id}.branch_signal", default=None, strict=False
-                ) or self.variable_pool.get_value(
-                    f"{node_id}.output", default=None, strict=False
-                )
+                node_data = data.get(node_id)
+                if not isinstance(node_data, dict):
+                    logger.debug(
+                        f"[UPDATES] skip non-dict update for node {node_id}: "
+                        f"type={type(node_data).__name__}, value={node_data!r}"
+                    )
+                    continue
+                node_output_status = self.variable_pool.get_value(f"{node_id}.output", default=None, strict=False)
+                if node_output_status is None:
+                    node_outputs = node_data.get("node_outputs", {}) or {}
+                    node_output_info = node_outputs.get(node_id, {}) or {}
+                    raw_output = node_output_info.get("output")
+                    if isinstance(raw_output, dict):
+                        node_output_status = raw_output.get("output")
+                    elif raw_output is not None:
+                        node_output_status = raw_output
+                # NOP control nodes return {"activate": {target: bool}} instead
+                # of having an "output" field. Extract the activation signal.
+                if node_output_status is None:
+                    node_data_raw = data[node_id]
+                    act_dict = node_data_raw.get("activate")
+                    if isinstance(act_dict, dict) and act_dict:
+                        node_output_status = str(list(act_dict.values())[0])
+                # Branch nodes that use internal routing fields (e.g. human_intervention
+                # uses __route, LLM uses branch_signal) strip these from the visible
+                # output via _extract_output, so they won't appear in node_outputs.
+                # The variable pool still has them (injected by _inject_route_variable),
+                # so look there as a fallback.
+                if node_output_status is None:
+                    for route_field in ("__route", "branch_signal"):
+                        route_value = self.variable_pool.get_value(
+                            f"{node_id}.{route_field}", default=None, strict=False
+                        )
+                        if route_value is not None:
+                            node_output_status = route_value
+                            break
                 self.coordinator.update_scope_activation(node_id, status=node_output_status)
 
     async def handle_updates_event(
@@ -84,8 +113,8 @@ class EventStreamHandler:
             dict: Streamed output event, each chunk in the format:
                   {"event": "message", "data": {"chunk": ...}}
         """
-        state = graph.get_state(config=checkpoint_config).values
-        activate = state.get("activate", {})
+        state = await graph.aget_state(config=checkpoint_config)
+        activate = state.values.get("activate", {}) if state.values else {}
 
         self.update_stream_output_status(activate, data)
         wait = False
@@ -106,10 +135,9 @@ class EventStreamHandler:
         Handle streaming chunk events from individual nodes ("node_chunk").
 
         This method processes output segments for the currently active End node.
-        If the segment depends on the provided node_id:
-          - If the node has finished execution (`done=True`), advance the cursor.
-          - If all segments are processed, deactivate the End node.
-          - Otherwise, yield the current chunk as a streaming message.
+        It handles literal prefixes before variable segments, emits chunks directly
+        when there's no active End node (fallback), and tracks streamed scopes
+        to prevent duplicate emission in emit_activate_chunk.
 
         Literal-text segments between variable segments are emitted automatically
         so the cursor can advance past them during streaming without waiting for
@@ -127,8 +155,70 @@ class EventStreamHandler:
                   {"event": "message", "data": {"content": ...}}
         """
         node_id = data.get("node_id")
-        if not self.coordinator.activate_end:
-            return
+        chunk = data.get("chunk")
+        done = data.get("done")
+
+        if self.coordinator.activate_end:
+            end_info = self.coordinator.current_activate_end_info
+            if not end_info or end_info.cursor >= len(end_info.outputs):
+                return
+
+            # Scan from cursor to find the variable segment that depends on node_id.
+            # If there are literal segments before it, emit them first (literal prefix handling).
+            # This handles templates like "Result: {{llm.output}}"
+            target_segment_idx = None
+            for i in range(end_info.cursor, len(end_info.outputs)):
+                seg = end_info.outputs[i]
+                if seg.is_variable and seg.depends_on_scope(node_id):
+                    target_segment_idx = i
+                    break
+
+            if target_segment_idx is not None and target_segment_idx > end_info.cursor:
+                # Emit literal/variable segments between cursor and target
+                for i in range(end_info.cursor, target_segment_idx):
+                    seg = end_info.outputs[i]
+                    if not seg.is_variable:
+                        yield {"event": "message", "data": {"content": seg.literal}}
+                    else:
+                        # Another variable segment before our target - resolve from pool
+                        try:
+                            val = self.variable_pool.get_literal(seg.literal)
+                            yield {"event": "message", "data": {"content": val}}
+                        except Exception:
+                            pass
+                # Advance cursor to the target variable segment
+                end_info.cursor = target_segment_idx
+
+            current_output = end_info.outputs[end_info.cursor]
+            if current_output.is_variable and current_output.depends_on_scope(node_id):
+                if done:
+                    # Mark scope as streamed to prevent duplicate emission in emit_activate_chunk
+                    self.coordinator.mark_scope_streamed(node_id)
+                    end_info.cursor += 1
+                    if end_info.cursor >= len(end_info.outputs):
+                        self.coordinator.pop_current_activate_end()
+                else:
+                    yield {
+                        "event": "message",
+                        "data": {
+                            "content": chunk
+                        }
+                    }
+        else:
+            # Fallback: No active End node, but chunks are arriving.
+            # Find End nodes that depend on this node_id scope and emit chunks directly.
+            # This handles edge cases where End node activation timing differs.
+            dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
+            if dependent_ends:
+                if done:
+                    self.coordinator.mark_scope_streamed(node_id)
+                elif chunk:
+                    yield {
+                        "event": "message",
+                        "data": {
+                            "content": chunk
+                        }
+                    }
 
         end_info = self.coordinator.current_activate_end_info
         if not end_info or end_info.cursor >= len(end_info.outputs):

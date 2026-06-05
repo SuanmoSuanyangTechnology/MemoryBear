@@ -2,6 +2,7 @@
 工作流服务层
 """
 import datetime
+import asyncio
 import time
 import logging
 import uuid
@@ -11,7 +12,14 @@ import yaml
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.core.utils.datetime_utils import (
+    as_utc_aware,
+    parse_iso_to_utc_naive,
+    to_iso_z,
+    to_timestamp_ms,
+    utcnow,
+    utcnow_naive,
+)
 from app.core.workflow.node_cache import normalize_cache_value, WorkflowNodeCacheManager
 from app.core.workflow.utils.secret_masker import mask_secrets
 from app.core.workflow.triggers import (
@@ -31,7 +39,7 @@ from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
-from app.models import App, AppRelease
+from app.models import App, AppRelease, Conversation
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
@@ -207,7 +215,7 @@ class WorkflowService:
         trigger_type = get_trigger_type(trigger_node) or "manual"
         trigger_id = trigger_node.get("id")
         config = trigger_node.get("config") or {}
-        current_time = datetime.datetime.now(datetime.timezone.utc)
+        current_time = utcnow()
         generated_at = to_iso_z(current_time)
 
         if trigger_type == "schedule":
@@ -402,7 +410,7 @@ class WorkflowService:
         self,
         now: datetime.datetime | None = None,
     ) -> list[tuple[App, AppRelease, WorkflowConfig, dict[str, Any]]]:
-        current_time = now or datetime.datetime.now(datetime.timezone.utc)
+        current_time = now or utcnow()
         due_triggers: list[tuple[App, AppRelease, WorkflowConfig, dict[str, Any]]] = []
         apps = self.db.query(App).filter(
             App.is_active.is_(True),
@@ -522,7 +530,7 @@ class WorkflowService:
         trigger: dict[str, Any],
         now: datetime.datetime | None = None,
     ) -> dict[str, Any]:
-        current_time = now or datetime.datetime.now(datetime.timezone.utc)
+        current_time = now or utcnow()
         schedule_event = {
             "now": build_schedule_now_payload(
                 current_time,
@@ -2024,13 +2032,19 @@ class WorkflowService:
             node_type: str | None,
             node_output: dict[str, Any],
     ) -> dict[str, Any]:
+        process = node_output.get("process")
+        status = (
+            "preview"
+            if isinstance(process, dict) and process.get("preview")
+            else node_output.get("status", "completed")
+        )
         return {
-            "status": node_output.get("status", "completed"),
+            "status": status,
             "node_id": node_id,
             "node_type": node_type,
             "inputs": node_output.get("input"),
             "outputs": node_output.get("output"),
-            "process": node_output.get("process"),
+            "process": process,
             "token_usage": node_output.get("token_usage"),
             "elapsed_time": node_output.get("elapsed_time"),
             "error": node_output.get("error"),
@@ -2903,6 +2917,287 @@ class WorkflowService:
         return resolved
 
     @staticmethod
+    def _iso_to_ms(iso_str: str | None) -> int | None:
+        if not iso_str:
+            return None
+        try:
+            return to_timestamp_ms(parse_iso_to_utc_naive(iso_str))
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _parse_iso_datetime(iso_str: str | None) -> datetime.datetime | None:
+        try:
+            return as_utc_aware(parse_iso_to_utc_naive(iso_str))
+        except (ValueError, TypeError):
+            return None
+
+    @classmethod
+    def _intervention_is_expired(cls, intervention: dict | None) -> bool:
+        timeout_at = cls._parse_iso_datetime((intervention or {}).get("timeout_at"))
+        if timeout_at is None:
+            return False
+        return timeout_at <= utcnow()
+
+    @staticmethod
+    def _find_intervention_by_node_id(interventions: list[dict], node_id: str) -> dict | None:
+        return next(
+            (
+                intr for intr in interventions
+                if isinstance(intr, dict) and intr.get("node_id") == node_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _resolved_intervention_node_ids(intervention_ctx: dict) -> set[str]:
+        return {
+            i.get("node_id")
+            for i in (intervention_ctx.get("resolved_interventions") or [])
+            if i.get("node_id")
+        }
+
+    def _touch_conversation(self, conversation_id: uuid.UUID | str | None) -> None:
+        if not conversation_id:
+            return
+        try:
+            cid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
+        except (TypeError, ValueError):
+            return
+        conversation = self.db.get(Conversation, cid)
+        if conversation:
+            conversation.updated_at = utcnow_naive()
+
+    @staticmethod
+    def _build_intervention_timeout_event(
+            execution_id: str,
+            node_id: str,
+            intervention_ctx: dict | None = None,
+    ) -> dict:
+        intervention_ctx = intervention_ctx or {}
+        interventions = [
+            *(intervention_ctx.get("interventions") or []),
+            *(intervention_ctx.get("intervention_backlog") or []),
+        ]
+        intr = next((i for i in interventions if i.get("node_id") == node_id), None)
+        return {
+            "event": "intervention_timeout",
+            "data": {
+                "execution_id": execution_id,
+                "node_id": node_id,
+                "node_name": (intr or {}).get("node_name", ""),
+                "action_id": "__timeout__",
+                "timeout_at": (intr or {}).get("timeout_at"),
+            },
+        }
+
+    @staticmethod
+    def _node_config_from_workflow(workflow_config: Any, node_id: str) -> dict | None:
+        if not workflow_config or not node_id:
+            return None
+        if isinstance(workflow_config, dict):
+            nodes = workflow_config.get("nodes") or []
+        else:
+            nodes = getattr(workflow_config, "nodes", None) or []
+        return next((n for n in nodes if isinstance(n, dict) and n.get("id") == node_id), None)
+
+    @classmethod
+    def _calculate_visible_intervention_timeout_at(
+            cls,
+            workflow_config: Any,
+            node_id: str,
+    ) -> datetime.datetime | None:
+        node_cfg = cls._node_config_from_workflow(workflow_config, node_id)
+        if not node_cfg or node_cfg.get("type") != "human-intervention":
+            return None
+
+        config = node_cfg.get("config") or {}
+        timeout_cfg = config.get("timeout")
+        if timeout_cfg is None:
+            timeout_cfg = {"unit": "minutes", "value": 1}
+
+        if isinstance(timeout_cfg, dict):
+            unit = timeout_cfg.get("unit", "minutes")
+            value = timeout_cfg.get("value", 1)
+        else:
+            unit = getattr(timeout_cfg, "unit", "minutes")
+            value = getattr(timeout_cfg, "value", 1)
+
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = 1
+        if value <= 0:
+            return None
+
+        if unit == "days":
+            delta = datetime.timedelta(days=value)
+        elif unit == "hours":
+            delta = datetime.timedelta(hours=value)
+        elif unit == "seconds":
+            delta = datetime.timedelta(seconds=value)
+        else:
+            delta = datetime.timedelta(minutes=value)
+        return utcnow() + delta
+
+    def _activate_visible_intervention_timeout(
+            self,
+            execution_id: str,
+            node_id: str,
+            workflow_config: Any,
+    ) -> str | None:
+        timeout_at = self._calculate_visible_intervention_timeout_at(workflow_config, node_id)
+        if timeout_at is None:
+            return None
+
+        from app.core.workflow.nodes.human_intervention.node import InterventionRegistry, TimeoutEntry
+        InterventionRegistry.register_timeout(TimeoutEntry(
+            execution_id=execution_id,
+            node_id=node_id,
+            timeout_at=timeout_at,
+        ))
+        return to_iso_z(timeout_at)
+
+    @staticmethod
+    def _replace_intervention_timeout_at(
+            interventions: list[dict],
+            node_id: str,
+            timeout_at: str | None,
+    ) -> list[dict]:
+        updated = []
+        for intr in interventions:
+            item = dict(intr)
+            if item.get("node_id") == node_id:
+                item["timeout_at"] = timeout_at
+            updated.append(item)
+        return updated
+
+    def _activate_intervention_event_timeout(
+            self,
+            execution_id: str,
+            event: dict,
+            workflow_config: Any,
+    ) -> tuple[dict, str | None]:
+        node_id = (event.get("data") or {}).get("node_id", "")
+        timeout_at = self._activate_visible_intervention_timeout(
+            execution_id, node_id, workflow_config
+        )
+        if timeout_at is not None:
+            event = {
+                **event,
+                "data": {
+                    **(event.get("data") or {}),
+                    "timeout_at": self._iso_to_ms(timeout_at),
+                },
+            }
+        return event, timeout_at
+
+    @staticmethod
+    def _first_visible_intervention(interventions: list[dict]) -> list[dict]:
+        return [dict(interventions[0])] if interventions else []
+
+    @staticmethod
+    def _interventions_by_node_ids(
+            interventions: list[dict],
+            node_ids: set[str],
+    ) -> list[dict]:
+        return [
+            dict(intr)
+            for intr in interventions
+            if intr.get("node_id") in node_ids
+        ]
+
+    def _set_human_intervention_state(
+            self,
+            execution: WorkflowExecution,
+            visible_interventions: list[dict] | None = None,
+            backlog_interventions: list[dict] | None = None,
+    ) -> None:
+        current_context = execution.context or {}
+        intr_ctx = dict(current_context.get("human_intervention") or {})
+        if visible_interventions is not None:
+            intr_ctx["interventions"] = [dict(i) for i in visible_interventions]
+        if backlog_interventions is not None:
+            intr_ctx["intervention_backlog"] = [dict(i) for i in backlog_interventions]
+        execution.context = {
+            **current_context,
+            "human_intervention": intr_ctx,
+        }
+
+    def _archive_resolved_intervention(
+            self,
+            execution: WorkflowExecution,
+            node_id: str,
+            action_id: str,
+            form_data: dict | None,
+            kind: str | None,
+    ) -> None:
+        """Persist a submitted human-intervention node as resolved history."""
+        if not node_id:
+            return
+
+        current_context = execution.context or {}
+        intr_ctx = dict(current_context.get("human_intervention") or {})
+        interventions = [dict(i) for i in (intr_ctx.get("interventions") or [])]
+        intervention_backlog = [
+            dict(i) for i in (intr_ctx.get("intervention_backlog") or [])
+        ]
+        resolved_interventions = [
+            dict(i) for i in (intr_ctx.get("resolved_interventions") or [])
+        ]
+
+        matched = None
+        for idx, intr in enumerate(interventions):
+            if intr.get("node_id") == node_id:
+                updated = {
+                    **intr,
+                    "resolved_action_id": action_id,
+                    "resolved_form_data": form_data or {},
+                }
+                interventions[idx] = updated
+                matched = updated
+                break
+
+        for idx, intr in enumerate(intervention_backlog):
+            if intr.get("node_id") == node_id:
+                updated = {
+                    **intr,
+                    "resolved_action_id": action_id,
+                    "resolved_form_data": form_data or {},
+                }
+                intervention_backlog[idx] = updated
+                if matched is None:
+                    matched = updated
+                break
+
+        if matched is None:
+            return
+
+        already_archived = any(
+            i.get("node_id") == node_id for i in resolved_interventions
+        )
+        if not already_archived:
+            resolved_interventions.append({
+                **matched,
+                "resolved_action_id": action_id,
+                "resolved_form_data": form_data or {},
+                "resolved_at": to_iso_z(utcnow_naive()),
+                "resolved_kind": kind or "interrupt",
+            })
+
+        execution.context = {
+            **current_context,
+            "human_intervention": {
+                **intr_ctx,
+                "interventions": interventions,
+                "intervention_backlog": intervention_backlog,
+                "resolved_interventions": resolved_interventions,
+            },
+        }
+        self._touch_conversation(intr_ctx.get("conversation_id"))
+        self.db.commit()
+
+    @staticmethod
     def _map_public_event(event: dict) -> dict | None:
         """
         Map internal workflow events to public-facing event formats.
@@ -2933,15 +3228,20 @@ class WorkflowService:
                     "event": "start",
                     "data": {
                         "conversation_id": payload.get("conversation_id"),
-                        "message_id": payload.get("message_id")
+                        "message_id": payload.get("message_id"),
+                        "execution_id": payload.get("execution_id")
                     }
                 }
             case "workflow_end":
                 data = {
+                    "status": payload.get("status", "completed"),
                     "elapsed_time": payload.get("elapsed_time"),
                     "message_length": len(payload.get("output", "")),
-                    "error": payload.get("error", "")
+                    "error": payload.get("error", ""),
+                    "output": payload.get("output", ""),
                 }
+                if payload.get("error_node_id"):
+                    data["error_node_id"] = payload["error_node_id"]
                 if "citations" in payload and payload["citations"]:
                     data["citations"] = payload["citations"]
                 return {
@@ -3516,16 +3816,12 @@ class WorkflowService:
                 )
                 filtered_citations = []
 
-            # 返回增强的响应结构
-            return {
+            response_data = {
                 "execution_id": execution.execution_id,
                 "status": result.get("status"),
-                # "variables": result.get("variables"),
-                # "messages": result.get("messages"),
-                "output": result.get("output"),  # 最终输出（字符串）
-                "message": result.get("output"),  # 最终输出（字符串）
+                "output": result.get("output"),
+                "message": result.get("output"),
                 "message_id": str(message_id),
-                # "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
                 "conversation_id": result.get("conversation_id") or (str(conversation_id_uuid) if conversation_id_uuid else None),
                 "error_message": result.get("error"),
                 "elapsed_time": result.get("elapsed_time"),
@@ -3533,6 +3829,25 @@ class WorkflowService:
                 "citations": filtered_citations,
             }
 
+            if result.get("status") == "waiting_human":
+                # Non-streaming execution does not support human intervention nodes.
+                # Clean up checkpointer before raising to prevent memory leak.
+                cp_thread_id = result.get("checkpoint_thread_id", "")
+                if cp_thread_id:
+                    from app.core.workflow.engine.graph_builder import remove_checkpointer
+                    remove_checkpointer(cp_thread_id)
+                from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+                InterventionRegistry.cleanup(execution.execution_id)
+                self.update_execution_status(execution.execution_id, "failed", error_message="非流式执行不支持人工介入节点")
+                raise BusinessException(
+                    code=BizCode.BAD_REQUEST,
+                    message="当前工作流包含人工介入节点，非流式执行不支持，请使用流式接口"
+                )
+
+            return response_data
+
+        except BusinessException:
+            raise
         except Exception as e:
             logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
             self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
@@ -3837,6 +4152,7 @@ class WorkflowService:
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = uuid.uuid4()
             _cycle_items: dict[str, list] = {}
+            intervention_list = []
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
@@ -3880,6 +4196,8 @@ class WorkflowService:
                         if node.get("type") == "llm":
                             llm_node_ids.add(node.get("id", ""))
 
+            accumulated_content = ""
+            queued_intervention_events = []
 
             moderation_flagged = False
             active_llm_nodes: set[str] = set()  # 已 node_start 但尚未 node_end 的 LLM 节点
@@ -3984,6 +4302,9 @@ class WorkflowService:
                             yield end_event
                         break
 
+                if event_type == "message":
+                    accumulated_content += event_data.get("content", "") or ""
+
                 if event_type == "cycle_item":
                     cycle_id = event_data.get("cycle_id")
                     if cycle_id not in _cycle_items:
@@ -4074,6 +4395,179 @@ class WorkflowService:
                         self.update_execution_status(
                             execution.execution_id, "failed", output_data=event.get("data")
                         )
+                    elif status == "waiting_human":
+                        from app.services.intervention_registry import register_intervention, register_pending
+
+                        event_data = event.get("data", {})
+                        interventions_raw = event_data.get("interventions", [])
+
+                        # Persist node_outputs from the graph state so pre-intervention
+                        # nodes are visible in the execution log.
+                        graph_node_outputs = event_data.get("node_outputs") or {}
+                        if graph_node_outputs:
+                            import copy as _copy
+                            new_output_data = _copy.deepcopy(execution.output_data or {})
+                            merged_node_outputs = new_output_data.setdefault("node_outputs", {})
+                            for nid, nout in graph_node_outputs.items():
+                                merged_node_outputs[nid] = nout
+                            execution.output_data = new_output_data
+
+                        # Compute max execution_order so intervention nodes get correct ordering
+                        max_exec_order = 0
+                        if execution.output_data:
+                            for nout in (execution.output_data.get("node_outputs") or {}).values():
+                                if isinstance(nout, dict):
+                                    max_exec_order = max(max_exec_order, nout.get("execution_order", 0))
+
+                        intervention_list = []
+                        interrupt_map = {}
+                        registry_node_ids = set()  # nodes whose interrupt was lost (from registry)
+                        for intr_raw in interventions_raw:
+                            if not isinstance(intr_raw, dict):
+                                continue
+                            intr_info = {
+                                "node_id": intr_raw.get("node_id", ""),
+                                "node_name": intr_raw.get("node_name", ""),
+                                "rendered_content": intr_raw.get("rendered_content", ""),
+                                "form_fields": intr_raw.get("form_fields", []),
+                                "actions": intr_raw.get("actions", []),
+                                "timeout_at": intr_raw.get("timeout_at"),
+                            }
+                            is_from_registry = intr_raw.get("__from_registry__", False)
+                            iid = intr_raw.get("__interrupt_id__", "")
+                            if iid and not is_from_registry:
+                                intr_info["interrupt_id"] = iid
+                                interrupt_map[intr_info["node_id"]] = iid
+                            else:
+                                # Synthetic interrupt — node was cancelled by LangGraph
+                                # before it could save its interrupt to the checkpointer.
+                                # Treat it as a "pending" node so resume uses Command(goto=...).
+                                registry_node_ids.add(intr_info["node_id"])
+                            intervention_list.append(intr_info)
+
+                            if execution.output_data is not None:
+                                import copy as _copy
+                                new_output_data = _copy.deepcopy(execution.output_data or {})
+                                node_outputs = new_output_data.setdefault("node_outputs", {})
+                                node_outputs[intr_info["node_id"]] = {
+                                    "node_type": "human-intervention",
+                                    "node_name": intr_raw.get("node_name", ""),
+                                    "status": "waiting",
+                                    "input": None,
+                                    "output": {
+                                        "rendered_content": intr_info["rendered_content"],
+                                        "actions": intr_info["actions"],
+                                        "delivery_method": intr_raw.get("delivery_method", {
+                                            "webapp": {"enabled": True},
+                                            "email": {"enabled": False},
+                                        }),
+                                    },
+                                    "elapsed_time": None,
+                                    "token_usage": None,
+                                    "error": None,
+                                    "execution_order": max_exec_order + 1,
+                                }
+                                execution.output_data = new_output_data
+
+                        if intervention_list:
+                            first_node_id = intervention_list[0].get("node_id", "")
+                            timeout_at = self._activate_visible_intervention_timeout(
+                                execution.execution_id, first_node_id, config
+                            )
+                            if timeout_at is not None:
+                                intervention_list = self._replace_intervention_timeout_at(
+                                    intervention_list, first_node_id, timeout_at
+                                )
+
+                        execution.status = "waiting_human"
+                        execution.context = {
+                            **(execution.context or {}),
+                            "human_intervention": {
+                                "message_id": str(message_id),
+                                "conversation_id": str(conversation_id_uuid),
+                                "checkpoint_thread_id": event_data.get("checkpoint_thread_id", ""),
+                                "interventions": self._first_visible_intervention(intervention_list),
+                                "intervention_backlog": intervention_list,
+                            },
+                        }
+                        self.db.commit()
+                        self.db.refresh(execution)
+
+                        # Save the user message so that the conversation title
+                        # gets updated from the first user message, rather than
+                        # staying as "New Conversation".
+                        human_message = payload.message or ""
+                        human_meta = {"files": []}
+                        for f in files or []:
+                            if isinstance(f, dict):
+                                human_meta["files"].append({
+                                    "type": f.get("type"),
+                                    "url": f.get("url"),
+                                    "file_type": f.get("file_type"),
+                                    "name": f.get("name"),
+                                    "size": f.get("size"),
+                                })
+                        self.conversation_service.add_message(
+                            conversation_id=conversation_id_uuid,
+                            role="user",
+                            content=human_message,
+                            meta_data=human_meta,
+                            sync_memory=False,
+                        )
+
+                        # Save an assistant message marked as waiting_human.
+                        # Content is intentionally EMPTY — the intervention UI
+                        # (form, buttons, rendered_content) comes from
+                        # pending_intervention in the conversation API, not
+                        # from the message content itself. The message only
+                        # acts as an anchor so the frontend can locate the
+                        # intervention form in the message list.
+                        # Use the same message_id as workflow_start so the
+                        # frontend's local placeholder and the DB message
+                        # share the same ID. On resume, this message is
+                        # updated in-place with the final output content.
+                        self.conversation_service.add_message(
+                            message_id=message_id,
+                            conversation_id=conversation_id_uuid,
+                            role="assistant",
+                            content="",
+                            meta_data={"waiting_human": True, "execution_id": execution.execution_id},
+                            sync_memory=False,
+                        )
+
+                        # message_id is already saved in execution.context["human_intervention"]["message_id"]
+                        # at line ~1653, so resume_intervention_stream can find it there.
+
+                        logger.info(
+                            f"Workflow paused for human intervention: "
+                            f"execution_id={execution.execution_id}, "
+                            f"interrupt_nodes={list(interrupt_map.keys())}, "
+                            f"registry_nodes={list(registry_node_ids)}"
+                        )
+
+                        if intervention_list:
+                            register_intervention(execution.execution_id, interrupt_map)
+                            if registry_node_ids:
+                                register_pending(execution.execution_id, registry_node_ids)
+
+                            for intr_info in intervention_list:
+                                queued_intervention_events.append({
+                                    "event": "intervention_required",
+                                    "data": {
+                                        "execution_id": execution.execution_id,
+                                        "node_id": intr_info["node_id"],
+                                        "node_name": intr_info.get("node_name", ""),
+                                        "rendered_content": intr_info["rendered_content"],
+                                        "form_fields": intr_info.get("form_fields", []),
+                                        "actions": intr_info["actions"],
+                                        "timeout_at": self._iso_to_ms(intr_info.get("timeout_at")),
+                                    }
+                                })
+                            # Emit only the first intervention; the rest will be
+                            # emitted one at a time after each cycle completes.
+                            if queued_intervention_events:
+                                yield queued_intervention_events.pop(0)
+                            break
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
                     # 把积累的 cycle_item 写入 workflow_executions.output_data["node_outputs"]
@@ -4102,15 +4596,836 @@ class WorkflowService:
                 if event:
                     yield event
 
+            if intervention_list:
+                from app.services.intervention_registry import wait_for_next, register_intervention, cleanup_intervention, register_pending
+
+                all_intervention_node_ids = {info.get("node_id") for info in intervention_list if info.get("node_id")}
+                current_pending_node_ids = set(registry_node_ids)
+
+                # Track resolved nodes across ALL resume cycles.
+                # Any node the user has clicked is "resolved" and must NEVER
+                # appear again in intervention_required events, regardless of
+                # what the graph state or registry says.
+                resolved_node_ids: set[str] = set()
+
+                while True:
+                    node_id, action_id, form_data, interrupt_id, kind = await wait_for_next(execution.execution_id)
+                    if not node_id:
+                        break
+
+                    # ★ Archive the just-resolved node into resolved_interventions
+                    # (append-only) so the API can return its original form
+                    # content + the user's submitted action/form_data later,
+                    # even after a later intervention node overwrites the
+                    # pending `interventions` list.
+                    intx_ctx = (execution.context or {}).get("human_intervention", {})
+                    _original = next(
+                        (
+                            i for i in [
+                                *(intx_ctx.get("interventions") or []),
+                                *(intx_ctx.get("intervention_backlog") or []),
+                            ]
+                            if i.get("node_id") == node_id
+                        ),
+                        None,
+                    )
+                    if _original is not None:
+                        _archived = {
+                            **_original,
+                            "resolved_action_id": action_id,
+                            "resolved_form_data": form_data,
+                            "resolved_at": to_iso_z(utcnow_naive()),
+                            "resolved_kind": kind,
+                        }
+                        execution.context = {
+                            **(execution.context or {}),
+                            "human_intervention": {
+                                **intx_ctx,
+                                "resolved_interventions": [
+                                    *(intx_ctx.get("resolved_interventions") or []),
+                                    _archived,
+                                ],
+                            },
+                        }
+                        self.db.commit()
+
+                    # Handle timeout signal from the background scheduler
+                    # Resume the workflow via the timeout branch (TIMEOUT) instead of terminating
+                    if kind == "timeout":
+                        logger.info(
+                            f"[RUN] received timeout signal, resuming via timeout branch "
+                            f"for execution={execution.execution_id}, node={node_id}"
+                        )
+                        # Clean up timeout tracking — InterventionRegistry.remove_timeout
+                        # was already called by the scheduler, but ensure cleanup here too
+                        from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
+                        _IR.remove_timeout(execution.execution_id, node_id)
+                        timeout_event = self._emit(
+                            public,
+                            self._build_intervention_timeout_event(
+                                execution.execution_id, node_id, intx_ctx
+                            ),
+                        )
+                        if timeout_event:
+                            yield timeout_event
+
+                    # Mark this node as resolved BEFORE resuming
+                    resolved_node_ids.add(node_id)
+
+                    more_pending = False
+                    pending_intervention_events = []
+                    captured_formatted_output = None
+
+                    resume_kind = kind if kind in ("interrupt", "pending") else "interrupt"
+                    if kind == "timeout" and not interrupt_id:
+                        resume_kind = "pending"
+
+                    async for resume_event in self.resume_workflow_stream(
+                        execution_id=execution.execution_id,
+                        app_id=app_id,
+                        interrupt_id=interrupt_id,
+                        action_id=action_id,
+                        form_data=form_data,
+                        filter_node_ids=all_intervention_node_ids,
+                        resumed_node_id=node_id,
+                        kind=resume_kind,
+                        pending_node_ids=current_pending_node_ids,
+                    ):
+                        if resume_event.get("event") == "workflow_end" and resume_event.get("data", {}).get("status") == "waiting_human":
+                            more_pending = True
+                            remaining = resume_event.get("data", {}).get("interventions", [])
+                            # Capture formatted output for potential use in Path 2
+                            captured_formatted_output = resume_event.get("data", {}).get("formatted_output")
+                            new_map = {}
+                            new_pending = set()
+                            clean_remaining = []
+                            for intr in remaining:
+                                iid = intr.get("__interrupt_id__", "")
+                                nid = intr.get("node_id", "")
+
+                                if nid in resolved_node_ids:
+                                    logger.info(
+                                        f"[RUN] filtering resolved node {nid} from interventions, "
+                                        f"execution_id={execution.execution_id}"
+                                    )
+                                    continue
+
+                                if iid:
+                                    new_map[nid] = iid
+                                clean = {
+                                    "node_id": nid,
+                                    "node_name": intr.get("node_name", nid),
+                                    "rendered_content": intr.get("rendered_content", ""),
+                                    "form_fields": intr.get("form_fields", []),
+                                    "actions": intr.get("actions", []),
+                                    "timeout_at": intr.get("timeout_at"),
+                                }
+                                if iid:
+                                    clean["interrupt_id"] = iid
+                                clean_remaining.append(clean)
+                                all_intervention_node_ids.add(nid)
+                                if not iid:
+                                    new_pending.add(nid)
+
+                            if clean_remaining:
+                                # ★ Persist the new pending interventions back to
+                                # execution.context. Without this, the resume path
+                                # only emits via SSE and never updates DB, so on
+                                # reconnect the API would only see the original
+                                # interventions list (and miss any new node that
+                                # was triggered by the resume).
+                                self._set_human_intervention_state(
+                                    execution,
+                                    visible_interventions=[],
+                                    backlog_interventions=clean_remaining,
+                                )
+                                self.db.commit()
+
+                                register_intervention(execution.execution_id, new_map)
+                                if new_pending:
+                                    register_pending(execution.execution_id, new_pending)
+                                    current_pending_node_ids.update(new_pending)
+                                for intr_info in clean_remaining:
+                                    pending_intervention_events.append({
+                                        "event": "intervention_required",
+                                        "data": {
+                                            "execution_id": execution.execution_id,
+                                            "node_id": intr_info["node_id"],
+                                            "node_name": intr_info.get("node_name", ""),
+                                            "rendered_content": intr_info["rendered_content"],
+                                            "form_fields": intr_info["form_fields"],
+                                            "actions": intr_info["actions"],
+                                            "timeout_at": self._iso_to_ms(intr_info.get("timeout_at")),
+                                        }
+                                    })
+                            else:
+                                more_pending = False
+                                # All remaining interventions were already resolved
+                                # by the user. resume_workflow_stream yielded a
+                                # workflow_end with status="waiting_human" (because
+                                # stale interrupts lingered in graph state), which
+                                # was intercepted by the if-branch above and NOT
+                                # yielded to the client. We must synthesize a
+                                # proper "completed" workflow_end here so the
+                                # frontend knows the workflow has finished.
+                                execution.status = "completed"
+                                execution.completed_at = utcnow_naive()
+                                execution.elapsed_time = (
+                                    execution.completed_at - execution.started_at
+                                ).total_seconds()
+
+                                # Save the formatted output (built by
+                                # resume_workflow_stream via build_final_output)
+                                # as output_data so the log view displays the
+                                # correct End node outputs, not a raw state dump.
+                                # Use accumulated_content (from message events) as the
+                                # final output to avoid duplicating content across cycles.
+                                if captured_formatted_output:
+                                    if not accumulated_content and captured_formatted_output.get("output"):
+                                        accumulated_content = captured_formatted_output["output"]
+                                    captured_formatted_output["output"] = accumulated_content
+                                    execution.output_data = captured_formatted_output
+                                    if captured_formatted_output.get("token_usage"):
+                                        execution.token_usage = captured_formatted_output["token_usage"]
+
+                                # ★ Always clear waiting_human on the original
+                                # message, even when accumulated_content is empty
+                                # (e.g. workflow has no LLM after the interventions).
+                                # Otherwise the message keeps the
+                                # `waiting_human: true` flag forever and the
+                                # frontend can't tell the intervention is done.
+                                _resolved_meta = {
+                                    "waiting_human": False,
+                                    "execution_id": execution.execution_id,
+                                }
+                                if accumulated_content:
+                                    _assistant_meta = {"usage": execution.token_usage or {}}
+                                    if captured_formatted_output and captured_formatted_output.get("citations"):
+                                        _assistant_meta["citations"] = captured_formatted_output["citations"]
+                                    _resolved_meta.update(_assistant_meta)
+                                    self.conversation_service.update_message(
+                                        message_id=message_id,
+                                        content=accumulated_content,
+                                        meta_data=_resolved_meta,
+                                    )
+                                else:
+                                    self.conversation_service.update_message(
+                                        message_id=message_id,
+                                        meta_data=_resolved_meta,
+                                    )
+
+                                # Commit AFTER the message update so the change
+                                # is durable across requests. update_message()
+                                # only flushes; it relies on the caller to commit.
+                                self.db.commit()
+
+                                from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
+                                _IR.cleanup(execution.execution_id)
+
+                                # Clean up checkpointer from cache to prevent memory leak
+                                intervention_ctx = (execution.context or {}).get("human_intervention", {})
+                                cp_thread_id = intervention_ctx.get("checkpoint_thread_id", "")
+                                if cp_thread_id:
+                                    from app.core.workflow.engine.graph_builder import remove_checkpointer
+                                    remove_checkpointer(cp_thread_id)
+
+                                yield self._emit(public, {
+                                    "event": "workflow_end",
+                                    "data": {
+                                        "status": "completed",
+                                        "execution_id": execution.execution_id,
+                                        "elapsed_time": execution.elapsed_time,
+                                        "output": accumulated_content,
+                                    }
+                                })
+                                logger.info(
+                                    f"[RUN] all remaining interventions filtered out, workflow complete, "
+                                    f"resolved={resolved_node_ids}, execution_id={execution.execution_id}"
+                                )
+                        else:
+                            # Accumulate message event content for the final output.
+                            # Only message events carry the actual streaming text;
+                            # captured_formatted_output.output / resume_data.output
+                            # overlap with message content and must NOT be added here
+                            # to avoid duplication across resume cycles.
+                            if resume_event.get("event") == "message":
+                                accumulated_content += resume_event.get("data", {}).get("content", "") or ""
+
+                            if resume_event.get("event") == "workflow_end" and resume_event.get("data", {}).get("status") == "completed":
+                                # Persist full accumulated output to DB
+                                resume_data = resume_event.get("data", {})
+
+                                # Fallback: if no message events were received during
+                                # resume, use the output from formatted_output built
+                                # by resume_workflow_stream (which extracts End node output
+                                # from graph state).
+                                if not accumulated_content and resume_data.get("output"):
+                                    accumulated_content = resume_data["output"]
+
+                                resume_data["output"] = accumulated_content
+                                execution.output_data = resume_data
+                                execution.status = "completed"
+                                execution.completed_at = utcnow_naive()
+                                execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
+                                if resume_data.get("token_usage"):
+                                    execution.token_usage = resume_data["token_usage"]
+
+                                # ★ Always clear waiting_human on the original
+                                # message, even when accumulated_content is empty
+                                # (e.g. workflow has no LLM after the interventions).
+                                # Otherwise the message keeps the
+                                # `waiting_human: true` flag forever and the
+                                # frontend can't tell the intervention is done.
+                                _resolved_meta = {
+                                    "waiting_human": False,
+                                    "execution_id": execution.execution_id,
+                                }
+                                if accumulated_content:
+                                    _assistant_meta = {"usage": resume_data.get("token_usage", {}) or {}}
+                                    if resume_data.get("citations"):
+                                        _assistant_meta["citations"] = resume_data["citations"]
+                                    _resolved_meta.update(_assistant_meta)
+                                    self.conversation_service.update_message(
+                                        message_id=message_id,
+                                        content=accumulated_content,
+                                        meta_data=_resolved_meta,
+                                    )
+                                else:
+                                    self.conversation_service.update_message(
+                                        message_id=message_id,
+                                        meta_data=_resolved_meta,
+                                    )
+
+                                # Commit AFTER the message update so the change
+                                # is durable across requests. update_message()
+                                # only flushes; it relies on the caller to commit.
+                                self.db.commit()
+
+                                logger.info(
+                                    f"[RUN] workflow completed via intervention loop, "
+                                    f"accumulated_output_length={len(accumulated_content)}, "
+                                    f"execution_id={execution.execution_id}"
+                                )
+                            emitted = self._emit(public, resume_event)
+                            if emitted:
+                                if resume_event.get("event") == "workflow_end" and resume_event.get("data", {}).get("status") == "completed":
+                                    emitted["data"]["output"] = accumulated_content
+                                yield emitted
+
+                    if not more_pending:
+                        # The resumed branch ended the workflow (completed,
+                        # failed, timeout, etc.). Do not emit any previously
+                        # queued parallel intervention events after a terminal
+                        # workflow_end event.
+                        queued_intervention_events.clear()
+                        cleanup_intervention(execution.execution_id)
+                        break
+
+                    # Merge newly discovered interventions into the queue,
+                    # deduplicating by node_id to avoid showing the same
+                    # intervention twice.
+                    existing_ids = {e["data"]["node_id"] for e in queued_intervention_events}
+                    for evt in pending_intervention_events:
+                        nid = evt["data"]["node_id"]
+                        if nid not in existing_ids:
+                            queued_intervention_events.append(evt)
+                            existing_ids.add(nid)
+
+                    # Emit the next queued intervention event (one at a time),
+                    # skipping nodes that have already been resolved.
+                    while queued_intervention_events:
+                        next_evt = queued_intervention_events.pop(0)
+                        next_node_id = next_evt["data"]["node_id"]
+                        if next_node_id not in resolved_node_ids:
+                            next_evt, timeout_at = self._activate_intervention_event_timeout(
+                                execution.execution_id, next_evt, config
+                            )
+                            _cur_ctx = (execution.context or {}).get("human_intervention", {})
+                            _backlog = _cur_ctx.get("intervention_backlog") or []
+                            commit_context = False
+                            if timeout_at is not None:
+                                _backlog = self._replace_intervention_timeout_at(
+                                    _backlog, next_node_id, timeout_at
+                                )
+                                self._set_human_intervention_state(
+                                    execution,
+                                    backlog_interventions=_backlog,
+                                )
+                                commit_context = True
+                            _visible = self._interventions_by_node_ids(_backlog, {next_node_id})
+                            if _visible:
+                                self._set_human_intervention_state(
+                                    execution,
+                                    visible_interventions=_visible,
+                                )
+                                commit_context = True
+                            if commit_context:
+                                self.db.commit()
+                            yield next_evt
+                            break
+
         except Exception as e:
             logger.error(
                 f"Workflow streaming execution failed: execution_id={execution.execution_id}, error={e}",
                 exc_info=True
             )
             self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            # Clean up registry on failure to avoid leaks.
+            from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+            InterventionRegistry.cleanup(execution.execution_id)
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
             self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
+            # On failure, update the waiting_human message in-place:
+            # clear the flag and set content to the error message.
+            if conversation_id_uuid and message_id:
+                self.conversation_service.update_message(
+                    message_id=message_id,
+                    content=str(e),
+                    meta_data={
+                        "waiting_human": False,
+                        "execution_id": execution.execution_id,
+                        "error": str(e),
+                    },
+                )
             yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
+
+    async def resume_intervention_stream(
+            self,
+            execution_id: str,
+            app_id: uuid.UUID,
+            node_id: str,
+            action_id: str,
+            form_data: dict[str, Any] | None = None,
+            public: bool = False,
+    ):
+        """Resume a workflow that is waiting for human intervention.
+
+        Used when the SSE stream was lost (page refresh) and the user
+        submits their action via a new HTTP request. This method
+        re-registers the intervention queue, pushes the user's action,
+        and re-enters the intervention handling loop to produce SSE events.
+
+        Args:
+            execution_id: The execution_id of the waiting_human execution.
+            app_id: The app ID (for workflow config lookup).
+            node_id: The intervention node ID the user is responding to.
+            action_id: The action the user chose.
+            form_data: Optional form data from the user.
+            public: Whether to emit public-facing events.
+
+        Yields:
+            SSE events (same format as run_stream).
+        """
+        from app.services.intervention_registry import (
+            register_intervention, wait_for_next, cleanup_intervention,
+        )
+        from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
+
+        execution = self.get_execution(execution_id)
+        if not execution:
+            raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+        if execution.status != "waiting_human":
+            raise BusinessException(
+                f"当前执行状态为 '{execution.status}'，不接受人工介入响应",
+                BizCode.BAD_REQUEST,
+            )
+
+        intervention_ctx = (execution.context or {}).get("human_intervention", {})
+        resolved_node_ids = self._resolved_intervention_node_ids(intervention_ctx)
+        conversation_id_str = intervention_ctx.get("conversation_id", "")
+        conversation_id_uuid = uuid.UUID(conversation_id_str) if conversation_id_str else None
+
+        # Retrieve the message_id of the original waiting_human assistant
+        # message saved in execution context by run_stream. This allows us
+        # to update the same message instead of creating a new one.
+        hitl_message_id_str = intervention_ctx.get("message_id", "")
+        hitl_message_id = uuid.UUID(hitl_message_id_str) if hitl_message_id_str else None
+
+        visible_interventions = intervention_ctx.get("interventions") or []
+        saved_interventions = (
+                intervention_ctx.get("intervention_backlog")
+                or visible_interventions
+                or []
+        )
+        submitted_intervention = self._find_intervention_by_node_id(
+            [*visible_interventions, *saved_interventions],
+            node_id,
+        )
+        is_expired_submit = self._intervention_is_expired(submitted_intervention)
+        effective_action_id = "__timeout__" if is_expired_submit else action_id
+        effective_form_data = None if is_expired_submit else form_data
+
+        # Build interrupt_map from saved interventions (only those with interrupt_id)
+        interrupt_map = {}
+        pending_node_ids = set()
+        all_intervention_node_ids = set(resolved_node_ids)
+        for intr in saved_interventions:
+            nid = intr.get("node_id", "")
+            iid = intr.get("interrupt_id", "")
+            if nid:
+                all_intervention_node_ids.add(nid)
+            if iid and nid:
+                interrupt_map[nid] = iid
+            elif nid:
+                pending_node_ids.add(nid)
+
+        # Re-register the intervention queue so wait_for_next can consume.
+        # Must cleanup first to discard the old queue (the original SSE
+        # stream's generator is stuck waiting on it), then create a fresh
+        # queue that our new generator will consume.
+        cleanup_intervention(execution_id)
+        register_intervention(execution_id, interrupt_map)
+        if pending_node_ids:
+            from app.services.intervention_registry import register_pending
+            register_pending(execution_id, pending_node_ids)
+
+        if is_expired_submit:
+            logger.info(
+                f"[RESUME-INT] intervention submit expired, routing timeout branch: "
+                f"execution={execution_id}, node={node_id}"
+            )
+            from app.services.intervention_registry import signal_timeout
+            result = signal_timeout(execution_id, node_id)
+            result_kind = "timeout" if result else None
+        else:
+            # Push the user's action into the queue immediately
+            from app.services.intervention_registry import submit_intervention
+            result_kind = submit_intervention(
+                execution_id, node_id, effective_action_id, effective_form_data
+            )
+        if not result_kind:
+            raise BusinessException(
+                "提交干预请求失败，请重试",
+                BizCode.BAD_REQUEST,
+            )
+
+        # Record resolved action/form_data in the execution context so the
+        # conversation endpoint can show the completed intervention even after
+        # the workflow finishes (preserves history, not just pending state).
+        execution = self.get_execution(execution_id)
+        if execution:
+            intr_ctx = (execution.context or {}).get("human_intervention", {})
+            interventions = intr_ctx.get("interventions") or []
+            _matched = None
+            for intr in interventions:
+                if intr.get("node_id") == node_id:
+                    intr["resolved_action_id"] = effective_action_id
+                    intr["resolved_form_data"] = effective_form_data or {}
+                    _matched = intr
+                    break
+
+            # ★ Append the just-resolved intervention to resolved_interventions
+            # (append-only). Without this, when the resume loop later replaces
+            # `interventions` with the next pending node, the resolved node's
+            # data is lost — the API would then only see the new pending node
+            # and not the history.
+            # Determine the kind: the registry routes based on whether the
+            # node is in pending_nodes ("pending") or node_map ("interrupt").
+            from app.services.intervention_registry import _state as _ir_state
+            _entry = _ir_state.get(execution_id)
+            _archived_kind = result_kind or "interrupt"
+            if _entry is not None and _archived_kind != "timeout":
+                if node_id in _entry.get("pending_nodes", set()):
+                    _archived_kind = "pending"
+                elif node_id in _entry.get("node_map", {}):
+                    _archived_kind = "interrupt"
+            if _matched is not None:
+                _archived = {
+                    **_matched,
+                    "resolved_action_id": effective_action_id,
+                    "resolved_form_data": effective_form_data or {},
+                    "resolved_at": to_iso_z(utcnow_naive()),
+                    "resolved_kind": _archived_kind,
+                }
+                intr_ctx["resolved_interventions"] = [
+                    *(intr_ctx.get("resolved_interventions") or []),
+                    _archived,
+                ]
+
+            intr_ctx["interventions"] = interventions
+            if execution.context is None:
+                execution.context = {}
+            execution.context["human_intervention"] = intr_ctx
+            self.db.commit()
+            self.db.refresh(execution)
+            intervention_ctx = (execution.context or {}).get("human_intervention", {})
+            resolved_node_ids = self._resolved_intervention_node_ids(intervention_ctx)
+            resolved_node_ids.add(node_id)
+            all_intervention_node_ids.update(resolved_node_ids)
+
+        config = self.get_workflow_config(app_id)
+        if not config:
+            raise BusinessException("工作流配置不存在", BizCode.CONFIG_MISSING)
+
+        # Clean up the resumed node from InterventionRegistry
+        _IR.cleanup_node(execution_id, node_id)
+
+        current_pending_node_ids = set(pending_node_ids)
+        accumulated_content = ""
+        message_id = uuid.uuid4()
+
+        while True:
+            next_node_id, next_action_id, next_form_data, next_interrupt_id, next_kind = \
+                await wait_for_next(execution_id)
+            if not next_node_id:
+                break
+
+            if next_kind == "timeout":
+                logger.info(
+                    f"[RESUME-INT] timeout signal for execution={execution_id}, node={next_node_id}"
+                )
+                _IR.remove_timeout(execution_id, next_node_id)
+                timeout_event = self._emit(
+                    public,
+                    self._build_intervention_timeout_event(
+                        execution_id, next_node_id, intervention_ctx
+                    ),
+                )
+                if timeout_event:
+                    yield timeout_event
+
+            execution = self.get_execution(execution_id)
+            if execution:
+                self._archive_resolved_intervention(
+                    execution, next_node_id, next_action_id, next_form_data, next_kind
+                )
+                self.db.refresh(execution)
+                intervention_ctx = (execution.context or {}).get("human_intervention", {})
+                resolved_node_ids.update(self._resolved_intervention_node_ids(intervention_ctx))
+                all_intervention_node_ids.update(resolved_node_ids)
+
+            resolved_node_ids.add(next_node_id)
+
+            more_pending = False
+            pending_intervention_events = []
+            captured_formatted_output = None
+
+            resume_kind = next_kind if next_kind in ("interrupt", "pending") else "interrupt"
+            if next_kind == "timeout" and not next_interrupt_id:
+                resume_kind = "pending"
+
+            async for resume_event in self.resume_workflow_stream(
+                execution_id=execution_id,
+                app_id=app_id,
+                interrupt_id=next_interrupt_id,
+                action_id=next_action_id,
+                form_data=next_form_data,
+                filter_node_ids=all_intervention_node_ids,
+                resumed_node_id=next_node_id,
+                kind=resume_kind,
+                pending_node_ids=current_pending_node_ids,
+            ):
+                if resume_event.get("event") == "workflow_end" and \
+                        resume_event.get("data", {}).get("status") == "waiting_human":
+                    more_pending = True
+                    remaining = resume_event.get("data", {}).get("interventions", [])
+                    captured_formatted_output = resume_event.get("data", {}).get("formatted_output")
+                    new_map = {}
+                    new_pending = set()
+                    clean_remaining = []
+                    for intr in remaining:
+                        iid = intr.get("__interrupt_id__", "")
+                        nid = intr.get("node_id", "")
+                        if nid in resolved_node_ids:
+                            continue
+                        if iid:
+                            new_map[nid] = iid
+                        clean = {
+                            "node_id": nid,
+                            "node_name": intr.get("node_name", nid),
+                            "rendered_content": intr.get("rendered_content", ""),
+                            "form_fields": intr.get("form_fields", []),
+                            "actions": intr.get("actions", []),
+                            "timeout_at": intr.get("timeout_at"),
+                        }
+                        if iid:
+                            clean["interrupt_id"] = iid
+                        else:
+                            new_pending.add(nid)
+                        clean_remaining.append(clean)
+                        all_intervention_node_ids.add(nid)
+
+                    if clean_remaining:
+                        first_node_id = clean_remaining[0].get("node_id", "")
+                        timeout_at = self._activate_visible_intervention_timeout(
+                            execution_id, first_node_id, config
+                        )
+                        if timeout_at is not None:
+                            clean_remaining = self._replace_intervention_timeout_at(
+                                clean_remaining, first_node_id, timeout_at
+                            )
+
+                        register_intervention(execution_id, new_map)
+                        if new_pending:
+                            from app.services.intervention_registry import register_pending
+                            register_pending(execution_id, new_pending)
+                            current_pending_node_ids.update(new_pending)
+                        for intr_info in clean_remaining:
+                            pending_intervention_events.append({
+                                "event": "intervention_required",
+                                "data": {
+                                    "execution_id": execution_id,
+                                    "node_id": intr_info["node_id"],
+                                    "node_name": intr_info.get("node_name", ""),
+                                    "rendered_content": intr_info["rendered_content"],
+                                    "form_fields": intr_info["form_fields"],
+                                    "actions": intr_info["actions"],
+                                    "timeout_at": self._iso_to_ms(intr_info.get("timeout_at")),
+                                }
+                            })
+                    else:
+                        # All remaining resolved — synthesize completed end
+                        more_pending = False
+                        execution.status = "completed"
+                        execution.completed_at = utcnow_naive()
+                        execution.elapsed_time = (
+                            execution.completed_at - execution.started_at
+                        ).total_seconds()
+                        if captured_formatted_output:
+                            if not accumulated_content and captured_formatted_output.get("output"):
+                                accumulated_content = captured_formatted_output["output"]
+                            captured_formatted_output["output"] = accumulated_content
+                            execution.output_data = captured_formatted_output
+                            if captured_formatted_output.get("token_usage"):
+                                execution.token_usage = captured_formatted_output["token_usage"]
+                        self._touch_conversation(conversation_id_uuid)
+                        self.db.commit()
+
+                        if conversation_id_uuid and accumulated_content:
+                            assistant_meta = {"usage": execution.token_usage or {}}
+                            if captured_formatted_output and captured_formatted_output.get("citations"):
+                                assistant_meta["citations"] = captured_formatted_output["citations"]
+
+                        # Update the original waiting_human message in-place
+                        # instead of creating a new assistant message.
+                        # Use hitl_message_id (saved in execution context) if
+                        # available; otherwise fall back to query-based
+                        # resolve_intervention_message.
+                        # ★ Always clear waiting_human, even when accumulated_content
+                        # is empty (e.g. workflow has no LLM after the interventions).
+                        if conversation_id_uuid:
+                            resolved_meta = {"waiting_human": False, "execution_id": execution_id}
+                            if accumulated_content:
+                                resolved_meta.update(assistant_meta or {})
+                            if hitl_message_id:
+                                if accumulated_content:
+                                    self.conversation_service.update_message(
+                                        hitl_message_id,
+                                        content=accumulated_content,
+                                        meta_data=resolved_meta,
+                                    )
+                                else:
+                                    self.conversation_service.update_message(
+                                        hitl_message_id,
+                                        meta_data=resolved_meta,
+                                    )
+                            elif accumulated_content:
+                                self.conversation_service.resolve_intervention_message(
+                                    conversation_id_uuid,
+                                    execution_id,
+                                    content=accumulated_content,
+                                    extra_meta=resolved_meta,
+                                )
+
+                        # Commit AFTER the message update so it's durable.
+                        self._touch_conversation(conversation_id_uuid)
+                        self.db.commit()
+
+                        _IR.cleanup(execution_id)
+                        intervention_ctx2 = (execution.context or {}).get("human_intervention", {})
+                        cp_thread_id = intervention_ctx2.get("checkpoint_thread_id", "")
+                        if cp_thread_id:
+                            from app.core.workflow.engine.graph_builder import remove_checkpointer
+                            remove_checkpointer(cp_thread_id)
+
+                        yield self._emit(public, {
+                            "event": "workflow_end",
+                            "data": {
+                                "status": "completed",
+                                "execution_id": execution_id,
+                                "elapsed_time": execution.elapsed_time,
+                                "output": accumulated_content,
+                            }
+                        })
+
+                    # Update DB context with remaining interventions
+                    visible_interventions = self._first_visible_intervention(clean_remaining)
+                    current_context = execution.context or {}
+                    current_intervention_ctx = current_context.get("human_intervention", {})
+                    execution.context = {
+                        **current_context,
+                        "human_intervention": {
+                            **current_intervention_ctx,
+                            "interventions": visible_interventions,
+                            "intervention_backlog": clean_remaining if clean_remaining else [],
+                        },
+                    }
+                    self._touch_conversation(
+                        current_intervention_ctx.get("conversation_id") or conversation_id_uuid
+                    )
+                    self.db.commit()
+                    self.db.refresh(execution)
+
+                    for evt in pending_intervention_events[:1]:
+                        yield evt
+                else:
+                    # Non-waiting_human events: yield immediately for real-time streaming
+                    if resume_event.get("event") == "message":
+                        accumulated_content += resume_event.get("data", {}).get("content", "") or ""
+
+                    if resume_event.get("event") == "workflow_end" and \
+                            resume_event.get("data", {}).get("status") == "completed":
+                        resume_data = resume_event.get("data", {})
+                        if not accumulated_content and resume_data.get("output"):
+                            accumulated_content = resume_data["output"]
+                        resume_data["output"] = accumulated_content
+                        execution.output_data = resume_data
+                        execution.status = "completed"
+                        execution.completed_at = utcnow_naive()
+                        execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
+                        if resume_data.get("token_usage"):
+                            execution.token_usage = resume_data["token_usage"]
+                        if conversation_id_uuid:
+                            resolved_meta = {"waiting_human": False, "execution_id": execution_id}
+                            if accumulated_content:
+                                assistant_meta = {"usage": resume_data.get("token_usage", {}) or {}}
+                                if resume_data.get("citations"):
+                                    assistant_meta["citations"] = resume_data["citations"]
+                                resolved_meta.update(assistant_meta)
+                            if hitl_message_id:
+                                if accumulated_content:
+                                    self.conversation_service.update_message(
+                                        hitl_message_id,
+                                        content=accumulated_content,
+                                        meta_data=resolved_meta,
+                                    )
+                                else:
+                                    self.conversation_service.update_message(
+                                        hitl_message_id,
+                                        meta_data=resolved_meta,
+                                    )
+                            elif accumulated_content:
+                                self.conversation_service.resolve_intervention_message(
+                                    conversation_id_uuid,
+                                    execution_id,
+                                    content=accumulated_content,
+                                    extra_meta=resolved_meta,
+                                )
+
+                        # Commit AFTER the message update so the change is
+                        # durable across requests.
+                        self._touch_conversation(conversation_id_uuid)
+                        self.db.commit()
+                    emitted = self._emit(public, resume_event)
+                    if emitted:
+                        if resume_event.get("event") == "workflow_end" and \
+                                resume_event.get("data", {}).get("status") == "completed":
+                            emitted["data"]["output"] = accumulated_content
+                        yield emitted
+
+            if not more_pending:
+                cleanup_intervention(execution_id)
+                break
 
     async def _build_node_context(
             self,
@@ -4149,6 +5464,16 @@ class WorkflowService:
             node_config=node_config,
             input_data=input_data,
         )
+
+        hi_action_id = None
+        hi_form_data = {}
+        if node_config.get("type") == NodeType.HUMAN_INTERVENTION:
+            inputs_dict = input_data.get("inputs") or {}
+            if isinstance(inputs_dict, dict):
+                hi_action_id = inputs_dict.pop("__action_id", None)
+                hi_form_data = inputs_dict.pop("__form_data", {}) or {}
+                if not isinstance(hi_form_data, dict):
+                    hi_form_data = {}
 
         workflow_config_dict = self._build_runtime_workflow_config_dict(
             app_id=app_id,
@@ -4198,6 +5523,13 @@ class WorkflowService:
             user_rag_memory_id=user_rag_memory_id,
         )
 
+        # 人工介入节点单节点试运行：注入标志和用户操作数据
+        if node_config.get("type") == NodeType.HUMAN_INTERVENTION:
+            state["__single_node_run"] = True
+            if hi_action_id:
+                state["__single_node_action_id"] = hi_action_id
+                state["__single_node_form_data"] = hi_form_data
+
         node = NodeFactory.create_node(node_config, workflow_config_dict, [])
         return node_config, node, state, variable_pool
 
@@ -4215,14 +5547,48 @@ class WorkflowService:
             app_id, node_id, config, workspace_id, input_data
         )
         run_id = self._build_single_node_run_id()
+        start_time = time.time()
         try:
-            state_update = await node.run(state, variable_pool)
-            node_output = (state_update.get("node_outputs") or {}).get(node_id) or {}
-            payload = self._build_single_node_payload_from_node_output(
-                node_id=node_id,
-                node_type=node_config.get("type"),
-                node_output=node_output,
-            )
+            cached_state_update = await node._try_use_cache(state, variable_pool, start_time)
+            if cached_state_update:
+                node_output = (cached_state_update.get("node_outputs") or {}).get(node_id) or {}
+                payload = self._build_single_node_payload_from_node_output(
+                    node_id=node_id,
+                    node_type=node_config.get("type"),
+                    node_output=node_output,
+                )
+            else:
+                result = await asyncio.wait_for(
+                    node.execute(state, variable_pool),
+                    timeout=node.get_timeout(),
+                )
+                elapsed = (time.time() - start_time) * 1000
+                output = node._extract_output(result)
+
+                process = node._extract_extra_fields(result).get("process")
+                is_preview = isinstance(result, dict) and result.get("__preview")
+                if isinstance(process, dict) and process.get("preview"):
+                    is_preview = True
+                payload = {
+                    "status": "preview" if is_preview else "completed",
+                    "node_id": node_id,
+                    "node_type": node_config.get("type"),
+                    "inputs": node._extract_input(state, variable_pool),
+                    "outputs": output,
+                    "process": process,
+                    "token_usage": node._extract_token_usage(result),
+                    "elapsed_time": elapsed,
+                    "error": None,
+                }
+                node._save_cache(
+                    state=state,
+                    variable_pool=variable_pool,
+                    node_output=self._normalize_single_node_payload(
+                        node_config.get("type"),
+                        node_config.get("name"),
+                        payload,
+                    ),
+                )
             payload = self._attach_debug_execution_id(payload, run_id)
             self._persist_single_node_execution(
                 app_id=app_id,
@@ -4245,6 +5611,12 @@ class WorkflowService:
             )
             return self._mask_runtime_secrets(payload, variable_pool)
         except Exception as e:
+            elapsed = (time.time() - start_time) * 1000
+            error_message = (
+                f"Node execution timed out ({node.get_timeout()} seconds)."
+                if isinstance(e, TimeoutError)
+                else str(e)
+            )
             logger.error(f"单节点执行失败: node_id={node_id}, error={e}", exc_info=True)
             payload = {
                 "status": "failed",
@@ -4254,8 +5626,8 @@ class WorkflowService:
                 "inputs": node._extract_input(state, variable_pool),
                 "outputs": None,
                 "token_usage": None,
-                "elapsed_time": None,
-                "error": str(e),
+                "elapsed_time": elapsed,
+                "error": error_message,
             }
             self._persist_single_node_execution(
                 app_id=app_id,
@@ -4356,16 +5728,20 @@ class WorkflowService:
                         )
 
             elapsed = (time.time() - start_time) * 1000
+            is_preview = isinstance(final_result, dict) and final_result.get("__preview")
+            process = node._extract_extra_fields(final_result).get("process")
+            if isinstance(process, dict) and process.get("preview"):
+                is_preview = True
             event_payload = {
                 "event": "node_end",
                 "data": self._attach_debug_execution_id(
                     {
-                        "status": "completed",
+                        "status": "preview" if is_preview else "completed",
                         "node_id": node_id,
                         "node_type": node_type,
                         "inputs": node._extract_input(state, variable_pool),
                         "outputs": node._extract_output(final_result),
-                        "process": node._extract_extra_fields(final_result).get("process"),
+                        "process": process,
                         "token_usage": node._extract_token_usage(final_result),
                         "elapsed_time": elapsed,
                         "error": None,
@@ -4512,6 +5888,673 @@ class WorkflowService:
                         f"{label} File size exceeds the limit (maximum {max_mb} MB, current {size_mb:.1f} MB)",
                         BizCode.BAD_REQUEST
                     )
+
+    async def resume_workflow_stream(
+            self,
+            execution_id: str,
+            app_id: uuid.UUID,
+            interrupt_id: str | None = None,
+            action_id: str | None = None,
+            form_data: dict | None = None,
+            filter_node_ids: set[str] | None = None,
+            resumed_node_id: str | None = None,
+            kind: str = "interrupt",
+            pending_node_ids: set[str] | None = None,
+    ):
+        """流式恢复被人工介入暂停的工作流执行
+
+        Args:
+            execution_id: 执行记录 ID
+            app_id: 应用 ID
+            interrupt_id: 要恢复的 interrupt ID（interrupt 模式）
+            action_id: 用户选择的操作 ID
+            filter_node_ids: 需要过滤 node_start 事件的人工介入节点 ID 集合
+            resumed_node_id: 当前恢复的节点 ID，用于 updates 过滤
+            kind: "interrupt" = 恢复 interrupt, "pending" = 重新执行 pending 节点
+            pending_node_ids: 之前以 __pending__ 占位完成的干预节点 ID 集合（用于过滤事件）
+
+        Yields:
+            dict: SSE 格式的流式事件
+        """
+        from langgraph.types import Command
+        from app.core.workflow.executor import WorkflowExecutor
+        from app.core.workflow.engine.runtime_schema import ExecutionContext
+        from app.core.workflow.engine.variable_pool import VariablePoolInitializer
+
+        execution = self.get_execution(execution_id)
+        if not execution:
+            raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+
+        intervention_ctx = (execution.context or {}).get("human_intervention", {})
+        thread_id_str = intervention_ctx.get("checkpoint_thread_id")
+
+        config = self.get_workflow_config(app_id)
+        if not config:
+            raise BusinessException("工作流配置不存在", BizCode.CONFIG_MISSING)
+
+        workflow_config_dict = {
+            "nodes": config.nodes,
+            "edges": config.edges,
+            "variables": config.variables,
+            "execution_config": config.execution_config,
+            "features": config.features or {},
+        }
+
+        execution_context = ExecutionContext(
+            execution_id=execution_id,
+            workspace_id=str(execution.app.workspace_id) if execution.app else "",
+            user_id=str(execution.triggered_by) if execution.triggered_by else "",
+            conversation_id=intervention_ctx.get("conversation_id", ""),
+            memory_storage_type="neo4j",
+            user_rag_memory_id="",
+            checkpoint_config={
+                "configurable": {
+                    "thread_id": uuid.UUID(thread_id_str) if thread_id_str else uuid.uuid4(),
+                }
+            }
+        )
+
+        executor = WorkflowExecutor(
+            workflow_config=workflow_config_dict,
+            execution_context=execution_context,
+        )
+
+        graph = executor.build_graph(stream=True)
+
+        # 恢复执行时,重新注入 sys.* 变量(sys.message / sys.conversation_id / ...)
+        # 否则下游节点解析 {{sys.*}} 会拿不到值。
+        try:
+            saved_input = execution.input_data or {}
+            await VariablePoolInitializer(workflow_config_dict).initialize(
+                executor.variable_pool, saved_input, execution_context
+            )
+        except Exception as e:
+            logger.warning(f"[RESUME] 重建 sys 变量失败,继续执行: {e}")
+
+        try:
+            from app.core.workflow.variable.variable_objects import create_variable_instance
+            from app.core.workflow.variable.base_variable import VariableType
+            from app.core.workflow.engine.variable_pool import VariableStruct
+            current_state = (await graph.aget_state(execution_context.checkpoint_config)).values
+            for nid, ninfo in (current_state.get("node_outputs") or {}).items():
+                raw_output = ninfo.get("output") if isinstance(ninfo, dict) else None
+                if raw_output is None:
+                    continue
+                if isinstance(raw_output, dict):
+                    for k, v in raw_output.items():
+                        inst = create_variable_instance(VariableType.STRING, str(v) if v is not None else "")
+                        executor.variable_pool.variables.setdefault(nid, {})[k] = VariableStruct(type=VariableType.STRING, instance=inst, mut=True)
+                else:
+                    inst = create_variable_instance(VariableType.STRING, str(raw_output))
+                    executor.variable_pool.variables.setdefault(nid, {})["output"] = VariableStruct(type=VariableType.STRING, instance=inst, mut=True)
+
+            # Pre-populate StreamOutputCoordinator activation state from graph state.
+            # During resume, nodes that completed BEFORE the human intervention don't
+            # re-execute, so their activation signals never reach the coordinator.
+            # We must replay the activation for all already-completed nodes so that
+            # End nodes downstream of the intervention can properly stream output.
+            executor.stream_coordinator.update_scope_activation("sys")
+            activate_state = current_state.get("activate", {})
+            node_outputs = current_state.get("node_outputs", {})
+            for nid, is_active in activate_state.items():
+                if not is_active:
+                    continue
+                # Determine the node's output status for branch routing
+                node_output_status = executor.variable_pool.get_value(
+                    f"{nid}.output", default=None, strict=False
+                )
+                if node_output_status is None:
+                    ninfo = node_outputs.get(nid)
+                    if isinstance(ninfo, dict):
+                        raw_out = ninfo.get("output")
+                        if isinstance(raw_out, dict):
+                            node_output_status = raw_out.get("output")
+                        elif raw_out is not None:
+                            node_output_status = raw_out
+                    # Branch nodes that use internal routing fields (__route,
+                    # branch_signal) strip them from visible output. Try the
+                    # variable pool as a fallback (same logic as update_stream_output_status).
+                    if node_output_status is None:
+                        for route_field in ("__route", "branch_signal"):
+                            route_value = executor.variable_pool.get_value(
+                                f"{nid}.{route_field}", default=None, strict=False
+                            )
+                            if route_value is not None:
+                                node_output_status = route_value
+                                break
+                # 分支节点没有 output status 时（例如被 interrupt 的 HITL 节点），
+                # 跳过 scope activation，避免 update_activate 抛 RuntimeError。
+                # 这些节点会在 HITL 专用预激活阶段被正确处理。
+                if node_output_status is None:
+                    logger.debug(
+                        f"[RESUME-PREPOP] Skipping scope activation for node {nid}: "
+                        f"no output status available, execution_id={execution_id}"
+                    )
+                    continue
+                executor.stream_coordinator.update_scope_activation(nid, status=node_output_status)
+
+            # Pre-populate _streamed_scopes for all already-completed nodes.
+            # These nodes' outputs were streamed via node_chunk events in previous
+            # resume cycles and consumed by their downstream End nodes. Without
+            # this, emit_activate_chunk() would re-emit them as one large message
+            # event from the variable pool, causing duplicate output.
+            #
+            # IMPORTANT: Skip human-intervention nodes. They never produce
+            # node_chunk events (they use interrupt/resume instead), so their
+            # output is only available via the variable pool. Marking them as
+            # "streamed" would cause emit_activate_chunk to skip End node
+            # variable segments that reference HITL output (e.g.
+            # {{hitl.__rendered_content}}), producing no message event at all.
+            from app.core.workflow.nodes.enums import BRANCH_NODES
+            for nid, ninfo in node_outputs.items():
+                if isinstance(ninfo, dict) and ninfo.get("status") == "completed":
+                    raw_output = ninfo.get("output")
+                    if raw_output is not None:
+                        # Determine node type from workflow config to skip HITL nodes
+                        node_type = None
+                        for n in workflow_config_dict.get("nodes", []):
+                            if n.get("id") == nid:
+                                node_type = n.get("type")
+                                break
+                        if node_type == "human-intervention":
+                            logger.debug(
+                                f"[RESUME-PREPOP] Skipping _streamed_scopes for HITL node {nid}: "
+                                f"no node_chunk events, output only in variable_pool, "
+                                f"execution_id={execution_id}"
+                            )
+                            continue
+                        executor.stream_coordinator.mark_scope_streamed(nid)
+
+            # Remove already-completed End nodes from end_outputs to prevent
+            # re-emitting their output (literal or variable) in this resume cycle.
+            # End nodes that completed in previous cycles have already been emitted;
+            # re-emitting them causes duplicate message events.
+            completed_node_ids = {
+                nid for nid, ninfo in node_outputs.items()
+                if isinstance(ninfo, dict) and ninfo.get("status") == "completed"
+            }
+            removed_ends = []
+            for end_id in list(executor.stream_coordinator.end_outputs.keys()):
+                if end_id in completed_node_ids:
+                    executor.stream_coordinator.end_outputs.pop(end_id)
+                    removed_ends.append(end_id)
+                    # Also clean up from queue and tracking lists
+                    if end_id in executor.stream_coordinator.output_queue:
+                        executor.stream_coordinator.output_queue.remove(end_id)
+                    if end_id in executor.stream_coordinator.processed_outputs:
+                        executor.stream_coordinator.processed_outputs.remove(end_id)
+                    if executor.stream_coordinator.activate_end == end_id:
+                        executor.stream_coordinator.activate_end = None
+
+            # Set activate_end from queue after cleanup
+            if executor.stream_coordinator.activate_end is None and executor.stream_coordinator.output_queue:
+                executor.stream_coordinator.activate_end = executor.stream_coordinator.output_queue.popleft()
+
+            if removed_ends:
+                logger.info(
+                    f"[RESUME] Removed already-completed End nodes from coordinator: "
+                    f"{removed_ends}, execution_id={execution_id}"
+                )
+
+            logger.info(
+                f"[RESUME] Pre-populated stream coordinator activation from graph state: "
+                f"activated_nodes={sum(1 for v in activate_state.values() if v)}, "
+                f"end_outputs_active={bool(executor.stream_coordinator.activate_end)}, "
+                f"execution_id={execution_id}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to populate variable pool from graph state: {e}")
+
+        # --- Pre-activate HITL scope and emit End node content before graph.astream ---
+        # During resume, we know the action_id (user's response) so we can determine the
+        # __route value before the graph executes. This pre-activates End nodes downstream
+        # of the HITL node, emitting their literal content immediately — matching the
+        # event ordering of LLM streaming workflows where message events arrive between
+        # the predecessor node's start and end (instead of after its end).
+        if action_id and resumed_node_id:
+            # Determine __route from action_id and HITL node actions config
+            route_value = None
+            nodes_list = workflow_config_dict.get("nodes", [])
+            hitl_node_cfg = next(
+                (n for n in nodes_list
+                 if n.get("id") == resumed_node_id
+                 and n.get("type") == "human-intervention"),
+                None
+            )
+            if action_id == "__timeout__":
+                route_value = "TIMEOUT"
+            else:
+                if hitl_node_cfg:
+                    actions_cfg = (hitl_node_cfg.get("config") or {}).get("actions", [])
+                    if isinstance(actions_cfg, list):
+                        action_ids = [
+                            a.get("id", "") if isinstance(a, dict) else str(a)
+                            for a in actions_cfg
+                        ]
+                        if action_id in action_ids:
+                            route_value = f"CASE{action_ids.index(action_id) + 1}"
+
+            if route_value:
+                # Inject __route and __action_id into variable pool so End node
+                # variable segments referencing HITL output can resolve them.
+                from app.core.workflow.variable.variable_objects import create_variable_instance
+                from app.core.workflow.variable.base_variable import VariableType
+                from app.core.workflow.engine.variable_pool import VariableStruct
+
+                route_inst = create_variable_instance(VariableType.STRING, route_value)
+                executor.variable_pool.variables.setdefault(resumed_node_id, {})["__route"] = VariableStruct(
+                    type=VariableType.STRING, instance=route_inst, mut=True
+                )
+                action_inst = create_variable_instance(VariableType.STRING, action_id)
+                executor.variable_pool.variables.setdefault(resumed_node_id, {})["__action_id"] = VariableStruct(
+                    type=VariableType.STRING, instance=action_inst, mut=True
+                )
+                # Inject form_data field values so {{hitl.field_id}} in End templates resolves
+                if form_data and isinstance(form_data, dict):
+                    for field_id, field_val in form_data.items():
+                        field_inst = create_variable_instance(
+                            VariableType.STRING, str(field_val) if field_val is not None else ""
+                        )
+                        executor.variable_pool.variables.setdefault(resumed_node_id, {})[field_id] = VariableStruct(
+                            type=VariableType.STRING, instance=field_inst, mut=True
+                        )
+
+                # Inject __rendered_content so {{hitl.__rendered_content}} in End templates resolves.
+                # The value comes from InterventionRegistry which stored it before interrupt().
+                # {{form_field:id}} placeholders are replaced with actual field values
+                # so the End node message shows completed content, not raw template markers.
+                from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+                hitl_registry_data = InterventionRegistry.get_all(execution_id).get(resumed_node_id) or {}
+                rendered_content = hitl_registry_data.get("rendered_content", "")
+                if rendered_content:
+                    # Replace {{form_field:id}} with actual values (form_data or variable_ref)
+                    hitl_config = ((hitl_node_cfg or {}).get("config") or {})
+                    hitl_form_fields = hitl_config.get("form_fields", [])
+                    for field in hitl_form_fields:
+                        field_id = field.get("id")
+                        placeholder = f"{{{{form_field:{field_id}}}}}"
+                        if field.get("variable_ref") is not None:
+                            var_ref = field.get("variable_ref")
+                            field_value = executor.variable_pool.get_value(var_ref, default=None, strict=False) if var_ref else None
+                        else:
+                            field_value = (form_data or {}).get(field_id, field.get("default_value"))
+                        replacement = str(field_value) if field_value is not None else ""
+                        rendered_content = rendered_content.replace(placeholder, replacement)
+
+                    rendered_inst = create_variable_instance(VariableType.STRING, rendered_content)
+                    executor.variable_pool.variables.setdefault(resumed_node_id, {})["__rendered_content"] = VariableStruct(
+                        type=VariableType.STRING, instance=rendered_inst, mut=True
+                    )
+
+                # Pre-activate HITL scope in StreamOutputCoordinator:
+                #   - control_resolved = True  (route matches End's control_nodes)
+                #   - output_resolved = True   (HITL removed from upstream_output_nodes)
+                #   → End node becomes globally active
+                executor.stream_coordinator.update_scope_activation(resumed_node_id, status=route_value)
+
+                # Emit End node content that's now available (literals & resolved variables).
+                # These arrive BEFORE HITL's node_end, consistent with LLM streaming pattern.
+                async for msg_event in executor.stream_coordinator.emit_activate_chunk(executor.variable_pool):
+                    yield msg_event
+
+                logger.info(
+                    f"[RESUME] Pre-activated HITL scope: node={resumed_node_id}, "
+                    f"route={route_value}, execution_id={execution_id}"
+                )
+
+        start_time = utcnow_naive()
+        full_content = ""
+        filter_nodes = filter_node_ids if filter_node_ids is not None else {
+            info.get("node_id") for info in (intervention_ctx.get("interventions") or [])
+        }
+        effective_pending_nodes = pending_node_ids or set()
+        if kind == "pending" and resumed_node_id:
+            effective_pending_nodes.discard(resumed_node_id)
+
+        # Track remaining pending nodes for post-stream computation.
+        # Only used for kind=="pending" to include service-layer tracked
+        # pending nodes that aren't in the graph state anymore.
+        pending_node_remaining: set[str] = set()
+
+        # Build the appropriate Command based on kind
+        if kind == "interrupt":
+            resume_map = {interrupt_id: {"action_id": action_id, "form_data": form_data}}
+            current_state_obj = await graph.aget_state(execution_context.checkpoint_config)
+            for intr in getattr(current_state_obj, 'interrupts', ()):
+                if intr.id and intr.id != interrupt_id:
+                    resume_map[intr.id] = {"__pending__": True}
+                    intr_value = getattr(intr, 'value', None)
+                    if isinstance(intr_value, dict):
+                        nid = intr_value.get("node_id", "")
+                        if nid:
+                            effective_pending_nodes.add(nid)
+            logger.info(f"[RESUME-INTERRUPT] resume_map keys: {list(resume_map.keys())}, "
+                         f"pending_nodes: {effective_pending_nodes}")
+
+            # Inject __pre_action_id: "__pending__" into pending nodes' state.
+            # When these nodes re-execute (LangGraph re-runs all interrupted tasks
+            # on resume), they detect this marker and return early without calling
+            # interrupt() again. This prevents them from creating new interrupts
+            # that would persist in graph state and cause cycling on subsequent resumes.
+            pending_state_update = {}
+            if effective_pending_nodes:
+                pending_state_update = {
+                    "node_outputs": {
+                        nid: {"__pre_action_id": "__pending__"}
+                        for nid in effective_pending_nodes
+                    }
+                }
+            command = Command(resume=resume_map, update=pending_state_update)
+
+            # Clean up only the resumed node (the one actually resolved by the user)
+            # from InterventionRegistry. Other nodes (B, C) still have active interrupts
+            # in LangGraph state (they returned __pending__) and their registry data
+            # must be preserved for recovery in case LangGraph loses their interrupt
+            # (e.g. the 3rd parallel task cancellation bug).
+            from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
+            if resumed_node_id:
+                _IR.cleanup_node(execution_id, resumed_node_id)
+                logger.debug(f"[RESUME-INTERRUPT] cleaned up registry node: {resumed_node_id}")
+        elif kind == "pending":
+            # For pending nodes, re-execute the node via Command(goto=...).
+            # The node detects __pre_action_id and returns quickly (no interrupt()).
+            # This produces node_start/node_end events for the frontend.
+            from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
+
+            logger.info(
+                f"[RESUME-PENDING] node {resumed_node_id} with action {action_id} "
+                f"- using Command(goto=...), execution_id={execution_id}"
+            )
+
+            # Inject the real action_id into state so the node reads it on re-execution.
+            # The node checks __pre_action_id: if it's not "__pending__", it uses it as
+            # the action and returns without calling interrupt().
+            pending_state_update = {
+                "node_outputs": {
+                    resumed_node_id: {"__pre_action_id": action_id, "__form_data": form_data}
+                }
+            }
+            command = Command(goto=resumed_node_id, update=pending_state_update)
+
+            # Clean up the pending node from InterventionRegistry
+            _IR.cleanup_node(execution_id, resumed_node_id)
+
+            # Compute remaining pending nodes (from service-layer tracking).
+            # These won't appear in graph state interrupts (they were consumed
+            # in the first interrupt resume cycle), so we need to track them here.
+            pending_node_remaining = set(pending_node_ids) - {resumed_node_id}
+
+        try:
+            async for event in graph.astream(
+                command,
+                stream_mode=["updates", "debug", "custom"],
+                config=execution_context.checkpoint_config,
+            ):
+                if isinstance(event, tuple) and len(event) == 2:
+                    mode, data = event
+                else:
+                    continue
+
+                if mode == "custom":
+                    event_type = data.get("type", "node_chunk")
+                    if event_type == "node_chunk":
+                        async for msg_event in executor.event_handler.handle_node_chunk_event(data):
+                            full_content += msg_event["data"]["content"]
+                            yield msg_event
+                    elif event_type == "node_error":
+                        async for error_event in executor.event_handler.handle_node_error_event(data):
+                            yield error_event
+                    elif event_type == "cycle_item":
+                        async for cycle_event in executor.event_handler.handle_cycle_item_event(data):
+                            yield cycle_event
+
+                elif mode == "debug":
+                    payload = data.get("payload", {})
+                    node_name = payload.get("name")
+                    event_type = data.get("type")
+                    if filter_nodes and node_name in filter_nodes and event_type == "task":
+                        continue
+                    if node_name in effective_pending_nodes and event_type == "task":
+                        continue
+                    if node_name in effective_pending_nodes and event_type == "task_result":
+                        continue
+                    async for debug_event in executor.event_handler.handle_debug_event(
+                        data, {"conversation_id": intervention_ctx.get("conversation_id", "")}
+                    ):
+                        yield debug_event
+
+                elif mode == "updates":
+                    filtered_data = dict(data)
+                    if filter_nodes:
+                        for node_id in list(filtered_data.keys()):
+                            if node_id == resumed_node_id:
+                                continue
+                            if node_id in filter_nodes:
+                                del filtered_data[node_id]
+                    if effective_pending_nodes:
+                        for node_id in list(filtered_data.keys()):
+                            if node_id in effective_pending_nodes:
+                                del filtered_data[node_id]
+                    if filtered_data:
+                        async for msg_event in executor.event_handler.handle_updates_event(
+                            filtered_data, graph, execution_context.checkpoint_config
+                        ):
+                            full_content += msg_event["data"]["content"]
+                            yield msg_event
+
+            logger.info(
+                f"[RESUME] graph.astream() completed for kind={kind}, "
+                f"resumed_node={resumed_node_id}, execution_id={execution_id}"
+            )
+
+            async for msg_event in executor.stream_coordinator.flush_remaining_chunk(executor.variable_pool):
+                full_content += msg_event["data"]["content"]
+                yield msg_event
+
+            graph_state = await graph.aget_state(execution_context.checkpoint_config)
+            elapsed_time = (utcnow_naive() - start_time).total_seconds()
+            logger.info(
+                f"[RESUME] state fetched: interrupts={len(tuple(getattr(graph_state, 'interrupts', ()) or ()))}, "
+                f"elapsed={elapsed_time:.2f}s, execution_id={execution_id}"
+            )
+
+            pending_intervention_info = []
+            if kind == "interrupt" and effective_pending_nodes:
+                for nid in effective_pending_nodes:
+                    intervention_ctx_interventions = intervention_ctx.get("interventions") or []
+                    ctx_match = next((i for i in intervention_ctx_interventions if i.get("node_id") == nid), None)
+                    pending_intervention_info.append({
+                        "node_id": nid,
+                        "rendered_content": ctx_match.get("rendered_content", "") if ctx_match else "",
+                        "actions": ctx_match.get("actions", []) if ctx_match else [],
+                    })
+
+            # Use top-level flat interrupts tuple (more reliable than traversing tasks)
+            all_state_interrupts = tuple(getattr(graph_state, 'interrupts', ()) or ())
+            remaining_interrupts = []
+            for intr in all_state_interrupts:
+                if kind == "interrupt" and intr.id == interrupt_id:
+                    continue
+                intr_value = getattr(intr, 'value', None)
+                if intr_value and isinstance(intr_value, dict):
+                    intr_copy = dict(intr_value)
+                    intr_copy["__interrupt_id__"] = intr.id
+                    remaining_interrupts.append(intr_copy)
+
+            # Also check InterventionRegistry for lost interrupts during resume
+            from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+            all_registered = InterventionRegistry.get_all(execution_id)
+            collected_node_ids = {intr.get("node_id") for intr in remaining_interrupts}
+            for node_id, reg_data in all_registered.items():
+                if node_id not in collected_node_ids and node_id != resumed_node_id:
+                    logger.warning(
+                        f"[RESUME] Recovering lost interrupt from registry: node={node_id}, "
+                        f"execution_id={execution_id}"
+                    )
+                    synthetic = dict(reg_data)
+                    synthetic["__interrupt_id__"] = ""
+                    synthetic["__from_registry__"] = True
+                    remaining_interrupts.append(synthetic)
+
+            # For pending nodes: also include service-layer tracked pending nodes
+            # that aren't in graph state (they were consumed in the first resume cycle).
+            # Filter out resolved nodes to prevent them from reappearing.
+            if pending_node_remaining:
+                collected_node_ids = {intr.get("node_id") for intr in remaining_interrupts}
+                intervention_ctx_interventions_all = intervention_ctx.get("interventions") or []
+                for nid in pending_node_remaining:
+                    if nid not in collected_node_ids:
+                        ctx_intr = next(
+                            (i for i in intervention_ctx_interventions_all if i.get("node_id") == nid),
+                            None,
+                        )
+                        if ctx_intr:
+                            remaining_interrupts.append({
+                                "node_id": nid,
+                                "rendered_content": ctx_intr.get("rendered_content", ""),
+                                "actions": ctx_intr.get("actions", []),
+                                "__interrupt_id__": "",
+                            })
+                            logger.info(
+                                f"[RESUME] added pending node to remaining: {nid}, "
+                                f"execution_id={execution_id}"
+                            )
+            # NOTE: Per-node cleanup happens when nodes are resolved (see the
+            # kind=="interrupt" and kind=="pending" blocks above).  Full
+            # execution-level cleanup happens only when the workflow fully
+            # completes (no remaining interventions).
+
+            # Deduplicate: pending_intervention_info may contain nodes already
+            # in remaining_interrupts (e.g. when a node marked __pending__ still
+            # has an active interrupt in LangGraph state). Only include pending
+            # nodes that are NOT already represented in remaining_interrupts.
+            remaining_node_ids = {intr.get("node_id") for intr in remaining_interrupts}
+            unique_pending_info = [
+                p for p in pending_intervention_info
+                if p["node_id"] not in remaining_node_ids
+            ]
+
+            has_remaining = remaining_interrupts or unique_pending_info
+            logger.info(
+                f"[RESUME] has_remaining={bool(has_remaining)}, "
+                f"remaining_interrupts={len(remaining_interrupts)}, "
+                f"pending_info={len(pending_intervention_info)} -> unique={len(unique_pending_info)}, "
+                f"kind={kind}, execution_id={execution_id}"
+            )
+
+            if has_remaining:
+                execution.status = "waiting_human"
+                all_interventions = []
+                for intr in remaining_interrupts:
+                    all_interventions.append({
+                        "node_id": intr.get("node_id", ""),
+                        "rendered_content": intr.get("rendered_content", ""),
+                        "actions": intr.get("actions", []),
+                        "interrupt_id": intr.get("__interrupt_id__", ""),
+                    })
+                all_interventions.extend(unique_pending_info)
+                current_context = execution.context or {}
+                current_intervention_ctx = current_context.get("human_intervention", {})
+                execution.context = {
+                    **current_context,
+                    "human_intervention": {
+                        **current_intervention_ctx,
+                        "interventions": all_interventions,
+                    },
+                }
+                self.db.commit()
+
+                # Include formatted output so that run_stream Path 2 can use it
+                # when all remaining interventions are filtered as resolved.
+                formatted_output = executor.result_builder.build_final_output(
+                    graph_state.values, execution_context, executor.variable_pool,
+                    elapsed_time, full_content, success=True
+                )
+                yield {
+                    "event": "workflow_end",
+                    "data": {
+                        "status": "waiting_human",
+                        "execution_id": execution_id,
+                        "interventions": remaining_interrupts + [
+                            {"node_id": p["node_id"], "rendered_content": p["rendered_content"], "actions": p["actions"]}
+                            for p in unique_pending_info
+                        ],
+                        "formatted_output": formatted_output,
+                    }
+                }
+            else:
+                result = graph_state.values
+                execution.status = "completed"
+                execution.completed_at = utcnow_naive()
+                execution.elapsed_time = (
+                    execution.completed_at - execution.started_at
+                ).total_seconds()
+
+                # Fallback: if streaming did not produce message events (e.g. End
+                # node output was not streamed during resume), extract the End
+                # node output directly from graph state node_outputs.
+                if not full_content:
+                    node_outputs = result.get("node_outputs", {})
+                    for nid, ninfo in node_outputs.items():
+                        if isinstance(ninfo, dict) and ninfo.get("node_type") == "end":
+                            end_output = ninfo.get("output")
+                            if isinstance(end_output, dict):
+                                full_content = end_output.get("output", "")
+                            elif isinstance(end_output, str):
+                                full_content = end_output
+                            if full_content:
+                                break
+
+                # Use build_final_output to format output_data so that the log
+                # view gets a top-level "output" field. Raw graph_state.values
+                # lacks it, causing _extract_text to dump the entire state as JSON.
+                formatted_output = executor.result_builder.build_final_output(
+                    result, execution_context, executor.variable_pool,
+                    elapsed_time, full_content, success=True
+                )
+                execution.output_data = formatted_output
+                if formatted_output.get("token_usage"):
+                    execution.token_usage = formatted_output["token_usage"]
+                self.db.commit()
+
+                # Workflow fully completed — safe to clean up the registry now.
+                from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+                InterventionRegistry.cleanup(execution_id)
+                InterventionRegistry.remove_timeout(execution_id)
+
+                # Clean up checkpointer from cache to prevent memory leak
+                if thread_id_str:
+                    from app.core.workflow.engine.graph_builder import remove_checkpointer
+                    remove_checkpointer(thread_id_str)
+
+                yield {
+                    "event": "workflow_end",
+                    "data": formatted_output
+                }
+
+        except Exception as e:
+            logger.error(
+                f"Resume workflow failed: execution_id={execution_id}, error={e}",
+                exc_info=True,
+            )
+            execution.status = "failed"
+            execution.error_message = str(e)
+            execution.completed_at = utcnow_naive()
+            self.db.commit()
+
+            # Workflow failed — clean up registry to avoid leaks.
+            from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+            InterventionRegistry.cleanup(execution_id)
+            InterventionRegistry.remove_timeout(execution_id)
+
+            yield {
+                "event": "workflow_end",
+                "data": {
+                    "status": "failed",
+                    "error": str(e),
+                    "execution_id": execution_id,
+                }
+            }
 
 
 # ==================== 依赖注入函数 ====================

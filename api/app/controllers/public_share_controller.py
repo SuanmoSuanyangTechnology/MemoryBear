@@ -12,10 +12,12 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.quota_manager import check_end_user_quota
 from app.core.response_utils import success, fail
+from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
+from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
@@ -39,6 +41,16 @@ from app.models import Message
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
+
+
+def _to_ms(iso_str: str | None) -> int | None:
+    """将 ISO 8601 时间字符串转换为毫秒时间戳，失败返回 None"""
+    if not iso_str:
+        return None
+    try:
+        return to_timestamp_ms(parse_iso_to_utc_naive(iso_str))
+    except (ValueError, TypeError):
+        return None
 
 
 def get_base_url(request: Request) -> str:
@@ -372,6 +384,80 @@ def get_conversation(
 
     conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
     conv_dict["messages"] = message_responses
+
+    # Aggregate human-intervention data across all executions in this
+    # conversation. Structure: { message_id: { execution_id, status, interventions } }
+    # - `interventions` is the MERGED list of (resolved_interventions ∪ interventions)
+    #   for that execution, so multiple intervention nodes triggered within the
+    #   same waiting_human cycle (or across resume cycles) are ALL preserved
+    #   instead of being overwritten by the latest one.
+    intervention_map: dict[str, dict] = {}
+    for wf_exec in db.query(WorkflowExecution).filter(
+        WorkflowExecution.conversation_id == conversation_id,
+    ).order_by(WorkflowExecution.created_at.asc()):
+        intr_ctx = (wf_exec.context or {}).get("human_intervention", {})
+        if not intr_ctx:
+            continue
+        message_id = intr_ctx.get("message_id")
+        if not message_id:
+            continue
+
+        resolved_list = intr_ctx.get("resolved_interventions") or []
+        pending_list = intr_ctx.get("interventions") or []
+
+        # Merge by node_id. Order: resolved first, then pending overlays
+        # non-resolved fields. Crucially, pending data must NOT clobber a
+        # already-resolved action_id/form_data with null — the resolved
+        # data wins for those fields.
+        merged_by_node: dict[str, dict] = {i["node_id"]: dict(i) for i in resolved_list if i.get("node_id")}
+        for i in pending_list:
+            nid = i.get("node_id")
+            if not nid:
+                continue
+            base = merged_by_node.get(nid, {})
+            merged = dict(base)
+            for k, v in i.items():
+                if k in ("resolved_action_id", "resolved_form_data", "resolved_at", "resolved_kind"):
+                    # Only overlay if the base has no resolved value yet,
+                    # so a stale pending snapshot doesn't wipe resolved data.
+                    if base.get(k) in (None, "", []):
+                        merged[k] = v
+                else:
+                    merged[k] = v
+            merged_by_node[nid] = merged
+
+        # Stable order: resolved (by resolved_at) first, then never-resolved
+        # pending nodes at the end.
+        def _sort_key(item: dict):
+            return (
+                item.get("resolved_at") or "9999-12-31T23:59:59",
+                item.get("node_id") or "",
+            )
+        ordered = sorted(merged_by_node.values(), key=_sort_key)
+
+        def _public_resolved_kind(kind: str | None):
+            if kind == "pending":
+                return "interrupt"
+            return kind
+
+        intervention_map[message_id] = {
+            "execution_id": wf_exec.execution_id,
+            "status": wf_exec.status,
+            "interventions": [{
+                "node_id": i["node_id"],
+                "node_name": i.get("node_name", ""),
+                "rendered_content": i.get("rendered_content", ""),
+                "form_fields": i.get("form_fields", []),
+                "actions": i.get("actions", []),
+                "timeout_at": _to_ms(i.get("timeout_at")),
+                "resolved_action_id": i.get("resolved_action_id"),
+                "resolved_form_data": i.get("resolved_form_data"),
+                "resolved_at": i.get("resolved_at"),
+                "resolved_kind": _public_resolved_kind(i.get("resolved_kind")),
+            } for i in ordered],
+        }
+
+    conv_dict["pending_intervention"] = intervention_map
 
     return success(data=conv_dict)
 
@@ -712,6 +798,132 @@ async def chat(
 
     else:
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.post(
+    "/workflow/interventions/{execution_id}/submit",
+    summary="提交人工介入响应（分享链接，通知 SSE 流继续执行）",
+)
+async def submit_shared_human_intervention(
+        execution_id: str,
+        payload: dict,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    from app.services.intervention_registry import submit_intervention
+    
+    node_id = payload.get("node_id", "")
+    action_id = payload.get("action_id", "")
+    form_data = payload.get("form_data")
+    if not node_id:
+        raise BusinessException("node_id 不能为空", BizCode.BAD_REQUEST)
+    if not action_id:
+        raise BusinessException("action_id 不能为空", BizCode.BAD_REQUEST)
+
+    share_service = SharedChatService(db)
+    share_token = share_data.share_token
+    share, release = share_service.get_release_by_share_token(share_token)
+
+    workflow_service = WorkflowService(db)
+    execution = workflow_service.get_execution(execution_id)
+    if not execution:
+        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+
+    # Validate that the execution belongs to the shared app's workspace
+    # (the release's app_id might differ from execution.app_id due to release/app ID mapping)
+    if execution.app.workspace_id != release.app.workspace_id:
+        raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
+
+    if execution.status != "waiting_human":
+        raise BusinessException(
+            f"当前执行状态为 '{execution.status}'，不接受人工介入响应",
+            BizCode.BAD_REQUEST,
+        )
+
+    if not submit_intervention(execution_id, node_id, action_id, form_data):
+        raise BusinessException(
+            "未找到等待中的干预请求，可能 SSE 连接已断开",
+            BizCode.BAD_REQUEST,
+        )
+
+    return success(data={
+        "execution_id": execution_id,
+        "node_id": node_id,
+        "action_id": action_id,
+        "form_data": form_data,
+    })
+
+
+@router.post(
+    "/workflow/interventions/{execution_id}/resume-submit",
+    summary="恢复 SSE 流并提交人工介入响应（页面刷新后使用）",
+)
+async def resume_and_submit_intervention(
+        execution_id: str,
+        payload: dict,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+        app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
+):
+    """Resume an interrupted workflow SSE stream and submit the user's action.
+
+    Use this endpoint when the original SSE stream was lost (page refresh,
+    connection drop). It re-establishes the SSE stream, pushes the user's
+    action, and returns a new StreamingResponse with the resumed workflow events.
+    """
+    node_id = payload.get("node_id", "")
+    action_id = payload.get("action_id", "")
+    form_data = payload.get("form_data")
+    if not node_id:
+        raise BusinessException("node_id 不能为空", BizCode.BAD_REQUEST)
+    if not action_id:
+        raise BusinessException("action_id 不能为空", BizCode.BAD_REQUEST)
+
+    share_service = SharedChatService(db)
+    share_token = share_data.share_token
+    share, release = share_service.get_release_by_share_token(share_token)
+
+    workflow_service = WorkflowService(db)
+    execution = workflow_service.get_execution(execution_id)
+    if not execution:
+        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+
+    # Validate workspace relationship instead of direct app_id comparison
+    if execution.app.workspace_id != release.app.workspace_id:
+        raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
+
+    intervention_ctx = (execution.context or {}).get("human_intervention", {})
+    start_event_data = {
+        "conversation_id": intervention_ctx.get("conversation_id"),
+        "message_id": intervention_ctx.get("message_id"),
+        "execution_id": execution_id,
+    }
+
+    async def event_generator():
+        yield f"event: start\ndata: {json.dumps(start_event_data, default=str, ensure_ascii=False)}\n\n"
+
+        async for event in app_chat_service.workflow_resume_intervention_stream(
+            execution_id=execution_id,
+            app_id=execution.app_id,  # Use the execution's actual app_id, not release.app_id
+            node_id=node_id,
+            action_id=action_id,
+            form_data=form_data,
+            public=True,
+        ):
+            event_type = event.get("event", "message")
+            event_data = event.get("data", {})
+            sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
+            yield sse_message
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @router.get("/config", summary="获取应用启动配置")

@@ -36,6 +36,15 @@ from app.core.workflow.nodes.configs import (
     ListOperatorNodeConfig,
     DocExtractorNodeConfig,
 )
+from app.core.workflow.nodes.human_intervention.config import (
+    HumanInterventionNodeConfig,
+    DeliveryMethodConfig,
+    WebappConfig,
+    EmailConfig as HITLEmailConfig,
+    FormFieldConfig,
+    ActionConfig,
+    TimeoutConfig,
+)
 from app.schemas.workflow_schema import (
     VariableDefinition as SchemaVariableDefinition,
     EnvironmentVariableDefinition,
@@ -100,6 +109,7 @@ class DifyConverter(BaseConverter):
             NodeType.NOTES: self.convert_notes_config,
             NodeType.LIST_OPERATOR: self.convert_list_operator_node_config,
             NodeType.DOCUMENT_EXTRACTOR: self.convert_document_extractor_node_config,
+            NodeType.HUMAN_INTERVENTION: self.convert_human_intervention_node_config,
             NodeType.CYCLE_START: lambda x: {},
             NodeType.BREAK: lambda x: {},
         }
@@ -927,6 +937,135 @@ class DifyConverter(BaseConverter):
             file_selector=file_selector,
         ).model_dump()
         self.config_validate(node["id"], node["data"]["title"], DocExtractorNodeConfig, result)
+        return result
+
+    def convert_human_intervention_node_config(self, node: dict) -> dict:
+        """Convert Dify human-input node to MemoryBear human-intervention node.
+
+        Dify HumanInputNodeType:
+          delivery_methods: [{id, type, enabled, config}]
+          form_content: string (uses {{#nodeId.var#}} and {{#$output.varName#}} syntax)
+          inputs: [{type, output_variable_name, default: {selector, type, value}}]
+          user_actions: [{id, title, button_style}]
+          timeout: number
+          timeout_unit: 'hour' | 'day'
+
+        MemoryBear HumanInterventionNodeConfig:
+          delivery_method: {webapp: {enabled}, email: {enabled}}
+          content: string (uses {{ nodeId.var }} syntax)
+          form_fields: [{id, label, mode, placeholder, default_value, variable_ref}]
+          actions: [{id, label, variant}]
+          timeout: {unit, value}
+        """
+        node_data = node["data"]
+
+        # --- delivery_method ---
+        dify_delivery_methods = node_data.get("delivery_methods") or []
+        webapp_enabled = False
+        email_enabled = False
+        for dm in dify_delivery_methods:
+            if dm.get("enabled", False):
+                dm_type = dm.get("type", "")
+                if dm_type in ("webapp", "WEBAPP"):
+                    webapp_enabled = True
+                elif dm_type in ("email", "EMAIL"):
+                    email_enabled = True
+        # Default: webapp enabled if no delivery methods specified
+        if not dify_delivery_methods:
+            webapp_enabled = True
+        delivery_method = DeliveryMethodConfig(
+            webapp=WebappConfig(enabled=webapp_enabled),
+            email=HITLEmailConfig(enabled=email_enabled),
+        )
+
+        # --- content ---
+        # Dify uses {{#nodeId.var#}} and {{#$output.varName#}} syntax
+        # MemoryBear uses {{ nodeId.var }} syntax
+        # Convert Dify's variable format to MemoryBear's format
+        dify_form_content = node_data.get("form_content", "")
+        # FIRST: replace HITL input field markers {{#$output.varName#}} with {{form_field:varName}}
+        # Must do this BEFORE trans_variable_format which would mangle the $output prefix
+        content = re.sub(
+            r"\{\{#\$output\.(\w+)#\}\}",
+            lambda m: f"{{{{form_field:{m.group(1)}}}}}",
+            dify_form_content,
+        )
+        # THEN: convert remaining {{#nodeId.var#}} syntax to {{ nodeId.var }}
+        content = self.trans_variable_format(content)
+
+        # --- form_fields ---
+        dify_inputs = node_data.get("inputs") or []
+        form_fields = []
+        for inp in dify_inputs:
+            field_id = inp.get("output_variable_name", "")
+
+            # 类型由 Dify 的 default.type 推导：
+            #   Dify: default.type = "constant" -> default_value
+            #   Dify: default.type = "variable" -> variable_ref
+            default_config = inp.get("default") or {}
+            default_type = default_config.get("type", "constant")
+            if default_type == "variable":
+                selector = default_config.get("selector") or []
+                variable_ref = "{{ " + self.process_var_selector(".".join(selector)) + " }}" if selector else None
+                default_value = None
+            else:
+                default_value = default_config.get("value") or None
+                variable_ref = None
+
+            form_fields.append(FormFieldConfig(
+                id=field_id,
+                default_value=default_value,
+                variable_ref=variable_ref,
+            ))
+
+        # --- actions ---
+        dify_user_actions = node_data.get("user_actions") or []
+        actions = []
+        # Cache action IDs for edge port mapping
+        self.branch_node_cache[node["id"]] = []
+        for ua in dify_user_actions:
+            # Dify uses "title", MemoryBear uses "label"
+            # Dify uses "button_style" enum, MemoryBear uses "variant" string
+            style_map = {
+                "primary": "primary",
+                "default": "default",
+                "accent": "primary",
+                "ghost": "default",
+            }
+            variant = style_map.get(ua.get("button_style", ""), "default")
+            actions.append(ActionConfig(
+                id=ua.get("id", ""),
+                label=ua.get("title", ""),
+                variant=variant,
+            ))
+            # Cache action IDs for sourceHandle -> CASE label mapping
+            self.branch_node_cache[node["id"]].append(ua.get("id", ""))
+
+        # Ensure at least one action (required by MemoryBear config)
+        if not actions:
+            actions.append(ActionConfig(id="action_1", label="Submit", variant="primary"))
+
+        # --- timeout ---
+        dify_timeout = node_data.get("timeout", 1)
+        dify_timeout_unit = node_data.get("timeout_unit", "hour")
+        unit_map = {
+            "hour": "hours",
+            "day": "days",
+        }
+        timeout_unit = unit_map.get(dify_timeout_unit, "hours")
+        timeout = TimeoutConfig(
+            unit=timeout_unit,
+            value=int(dify_timeout),
+        )
+
+        result = HumanInterventionNodeConfig.model_construct(
+            delivery_method=delivery_method,
+            content=content,
+            form_fields=form_fields,
+            actions=actions,
+            timeout=timeout,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], HumanInterventionNodeConfig, result)
         return result
 
     @staticmethod
