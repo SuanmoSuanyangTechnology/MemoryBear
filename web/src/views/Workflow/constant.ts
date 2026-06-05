@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 16:05:27
+ * @Last Modified time: 2026-06-05 14:13:39
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -436,6 +436,8 @@ export const nodeLibrary: NodeLibrary[] = [
               { value: '0', label: 'memoryConversation.deepThinking' },
               { value: '1', label: 'memoryConversation.normalReply' },
               { value: '2', label: 'memoryConversation.quickReply' },
+              { value: '3', label: 'memoryConversation.conv' },
+              { value: '4', label: 'memoryConversation.metadata' },
             ],
             needTranslation: true
           }

@@ -3,10 +3,9 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-18 16:27:41
- * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-19 19:59:36
+ * @LastEditors: ZhaoYing
+ * @LastEditTime: 2026-06-05 13:39:40 
  */
-import { Divider } from 'antd';
 import type { ReactElement } from 'react';
 
 export interface InfoItem {
@@ -25,12 +24,11 @@ interface InfoPanelProps {
 const InfoPanel = ({ title, items, className = '' }: InfoPanelProps) => {
   return (
     <div className={`rb:w-full ${className}`}>
-      <h2 className="rb:text-lg rb:font-medium">{title}</h2>
-      <Divider />
+      <h2 className="rb:text-lg rb:font-medium rb:mb-3">{title}</h2>
       <div className='rb:flex rb:flex-col rb:items-start rb:gap-6'>
         {items.map((item) => (
           <div key={item.key} className='rb:flex rb:w-full rb:items-start rb:justify-start rb:gap-2'>
-            {item.icon && <img src={item.icon} className='rb:size-4 rb:mt-[2px]' alt="" />}
+            {item.icon && <img src={item.icon} className='rb:size-4 rb:mt-0.5' alt="" />}
             <div className='rb:flex rb:flex-col rb:text-left rb:gap-2'>
               <span className='rb:text-gray-500 rb:text-sm'>{item.label}</span>
               <span className='rb:text-gray-800'>{item.value ?? '-'}</span>
