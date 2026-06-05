@@ -1840,7 +1840,7 @@ export const en = {
       expired_detection: 'Expired Detection',
       factual_contradiction: 'Contradiction',
       ontology_verification: 'Ontology Verification',
-      unrecognized_entity: 'Unrecognized Entity',
+      unresolved_entity: 'Unrecognized Entity',
       to_be_implemented: 'To be Implemented',
       allStatus: 'All Status',
       resolved: 'Resolved',
