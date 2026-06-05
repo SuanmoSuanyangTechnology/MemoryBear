@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:49:37
+ * @Last Modified time: 2026-06-05 19:57:15
  */
 /**
  * Workflow Chat Component
@@ -163,7 +163,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
     }
-    console.log('allVariables', allVariables)
     setVariables([...allVariables])
     toolbarRef.current?.setVariables([...allVariables])
   }
@@ -235,7 +234,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
       webhookTriggerVariables.forEach(vo => {
-        console.log('webhookTriggerVariables vo', vo)
         const nameList = vo.name.split('.')
         if (!trigger_payload[nameList[0]]) {
           trigger_payload[nameList[0]] = {}
@@ -270,6 +268,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           execution_id, content, conversation_id, node_id, node_name, cycle_id, cycle_idx,
           input, output, process, error, elapsed_time, status, citations,
           rendered_content, form_fields, actions, timeout_at,
+          agent_log
         } = item.data as {
           content: string;
           execution_id?: string;
@@ -303,6 +302,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
             variant: string;
           }[];
           timeout_at?: number;
+          agent_log?: Record<string, any>;
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
@@ -518,6 +518,28 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                   newList[lastIndex] = {
                     ...newList[lastIndex],
                     subContent: newSubContent
+                  }
+                }
+              }
+              return newList
+            })
+            break
+          case 'agent_log':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                const newSubContent = newList[lastIndex].subContent || []
+                const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
+                if (filterIndex > -1) {
+                  const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                  newSubContent[filterIndex].agent_log = {
+                    ...lastAgentLog,
+                    meta: agent_log?.meta || {},
+                    iterations: [
+                      ...(lastAgentLog?.iterations || []),
+                      ...agent_log?.iterations || []
+                    ],
                   }
                 }
               }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 15:32:33
+ * @Last Modified time: 2026-06-05 19:56:28
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -83,6 +83,7 @@ interface NodeData {
     variant: string;
   }[];
   timeout_at?: number;
+  agent_log?: any;
 }
 
 const TestChat: FC<TestChatProps> = ({
@@ -524,6 +525,7 @@ const TestChat: FC<TestChatProps> = ({
         node_name: name,
         content, conversation_id, citations,
         rendered_content, form_fields, actions, timeout_at,
+        agent_log,
       } = item.data as NodeData;
       switch (item.event) {
       // Append streaming text chunks to assistant message
@@ -599,6 +601,28 @@ const TestChat: FC<TestChatProps> = ({
         // Update node with subContent
         case 'cycle_item':
           updateWorkflowCycleMessage(item.data as NodeData)
+          break
+        case 'agent_log':
+          setChatList(prev => {
+            const newList = [...prev]
+            const lastIndex = newList.length - 1
+            if (lastIndex >= 0) {
+              const newSubContent = newList[lastIndex].subContent || []
+              const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
+              if (filterIndex > -1) {
+                const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                newSubContent[filterIndex].agent_log = {
+                  ...lastAgentLog,
+                  meta: agent_log?.meta || {},
+                  iterations: [
+                    ...(lastAgentLog?.iterations || []),
+                    ...agent_log?.iterations || []
+                  ],
+                }
+              }
+            }
+            return newList
+          })
           break
         // Mark workflow as complete
         case 'workflow_end':
@@ -689,7 +713,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowCycleMessage = (data: NodeData) => {
-    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status } = data;
+    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, agent_log } = data;
     const { nodes } = config as WorkflowConfig
     const node = nodes.find(n => n.id === node_id);
     const { name, type } = node || {}
@@ -702,6 +726,7 @@ const TestChat: FC<TestChatProps> = ({
         const filterIndex = newSubContent.findIndex(vo => vo.id === cycle_id)
         if (filterIndex > -1) {
           const items = newSubContent[filterIndex].subContent || []
+          const lastAgentLog = newSubContent[filterIndex].agent_log || {}
           items.push({
             cycle_id,
             cycle_idx,
@@ -721,11 +746,19 @@ const TestChat: FC<TestChatProps> = ({
           })
           newSubContent[filterIndex] = {
             ...newSubContent[filterIndex],
-            subContent: [...items]
+            subContent: [...items],
+            agent_log: {
+              ...lastAgentLog,
+              meta: agent_log?.meta || {},
+              iterations: [
+                ...(lastAgentLog?.iterations || []),
+                ...agent_log?.iterations || []
+              ],
+            }
           }
           newList[lastIndex] = {
             ...newList[lastIndex],
-            subContent: newSubContent
+            subContent: newSubContent,
           }
         }
       }

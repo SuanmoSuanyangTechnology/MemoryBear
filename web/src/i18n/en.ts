@@ -2493,6 +2493,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       'document-extractor': 'Document Extractor',
       'list-operator': 'List Operator',
       'human-intervention': 'Human Intervention',
+      agent: 'Agent',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2840,6 +2841,15 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           seconds: 'Seconds',
           selectButtonStyle: 'Select Button Style',
           buttonStyle: 'Button Style',
+        },
+        agent: {
+          strategy: 'Agent Strategy',
+          model_id: 'Model',
+          tools: 'Tools',
+          system_prompt: 'Instruction',
+          context: 'Context',
+          message: 'Query',
+          max_iterations: 'Max Iterations',
         },
         name: 'Key',
         type: 'Type',

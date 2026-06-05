@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 14:55:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-21 18:52:52
+ * @Last Modified time: 2026-06-04 18:22:45
  */
 import { type FC, useEffect, useState, useRef } from "react";
 import { useTranslation } from 'react-i18next'
@@ -14,7 +14,7 @@ import ModelConfigModal, { fieldConfigs } from './ModelConfigModal';
 import type { ModelConfigModalRef, ModelConfigForm } from './type'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 
-const ModelConfig: FC<{ variableOptions: Suggestion[] }> = ({ variableOptions }) => {
+const ModelConfig: FC<{ parentName?: string; variableOptions: Suggestion[] }> = ({ parentName, variableOptions }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
   const values = Form.useWatch<ModelConfigForm>([], form)
@@ -36,10 +36,14 @@ const ModelConfig: FC<{ variableOptions: Suggestion[] }> = ({ variableOptions })
   }, [model_id, options])
 
   const handleSetConfig = () => {
-    modelConfigModalRef.current?.handleOpen(values as ModelConfigForm)
+    modelConfigModalRef.current?.handleOpen(parentName ? values?.[parentName] : values as ModelConfigForm)
   }
   const handleRefresh = (values?: ModelConfigForm) => {
-    form.setFieldsValue(values)
+    if (parentName) {
+      form.setFieldValue(parentName, values)
+    } else {
+      form.setFieldsValue(values)
+    }
   }
 
   return (
@@ -49,7 +53,7 @@ const ModelConfig: FC<{ variableOptions: Suggestion[] }> = ({ variableOptions })
         required
       >
         <Flex align="center" gap={12}>
-          <Form.Item name="model_id" className="rb:flex-1! rb:mb-0!">
+          <Form.Item name={parentName ? [parentName, "model_id"] : "model_id"} className="rb:flex-1! rb:mb-0!">
             <ModelSelect
               placeholder={t('common.pleaseSelect')}
               params={{ type: 'llm,chat' }}
@@ -67,7 +71,7 @@ const ModelConfig: FC<{ variableOptions: Suggestion[] }> = ({ variableOptions })
       </Form.Item>
 
       {Object.keys(fieldConfigs).map(key => (
-        <Form.Item key={key} name={key} hidden />
+        <Form.Item key={key} name={parentName ? [parentName, key] : key} hidden />
       ))}
 
       <ModelConfigModal
@@ -78,4 +82,5 @@ const ModelConfig: FC<{ variableOptions: Suggestion[] }> = ({ variableOptions })
     </>
   );
 };
+
 export default ModelConfig;

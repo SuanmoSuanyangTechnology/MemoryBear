@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:17:04
+ * @Last Modified time: 2026-06-05 19:57:49
  */
 /**
  * useVariableList Hook
@@ -101,7 +101,13 @@ const NODE_VARIABLES = {
     { label: 'result', dataType: 'array[string]', field: 'result' },
     { label: 'first_record', dataType: 'string', field: 'first_record' },
     { label: 'last_record', dataType: 'string', field: 'last_record' },
-  ] // dataType will be overridden dynamically
+  ],
+  'agent': [
+    { label: 'output', dataType: 'string', field: 'output' },
+    { label: 'usage', dataType: 'object', field: 'usage' },
+    { label: 'files', dataType: 'array[file]', field: 'files' },
+    { label: 'json', dataType: 'array[object]', field: 'json' },
+  ]
 } as const;
 
 export const triggerParams: Record<string, string> = {
@@ -315,6 +321,7 @@ const hasOutputNodeTypes = [
   'list-operator',
   'trigger',
   'human-intervention',
+  'agent'
 ];
 
 /**

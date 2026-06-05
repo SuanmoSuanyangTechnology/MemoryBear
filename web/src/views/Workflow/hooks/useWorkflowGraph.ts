@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:18:02
+ * @Last Modified time: 2026-06-05 19:57:59
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -20,7 +20,7 @@ import dayjs from 'dayjs';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
-import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode } from '../constant';
+import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode, hasErrorHandleNodes } from '../constant';
 import type { ChatVariable, EnvVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
@@ -359,7 +359,7 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         // Check error_handle.method config for http-request node
-        if (['code', 'http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
+        if (hasErrorHandleNodes.includes(type) && (config as any)?.error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
@@ -524,7 +524,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node has label, match corresponding port by label
-          if (['code', 'http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
+          if (hasErrorHandleNodes.includes(sourceCell.getData()?.type) && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -1740,7 +1740,14 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.type === 'trigger' && key === 'time' && data.config[key] && 'defaultValue' in data.config[key]) {
+              if (key === 'tools' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const tools = data.config[key].defaultValue || []
+                itemConfig[key] = tools?.map((item: any) => ({
+                    tool_id: item.tool_id,
+                    operation: item.operation,
+                    enabled: item.enabled || false
+                  }))
+              } else if (data.type === 'trigger' && key === 'time' && data.config[key] && 'defaultValue' in data.config[key]) {
                 itemConfig[key] = dayjs(data.config[key].defaultValue, 'h:mm A').format('h:mm A')
               } else if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const code = data.config[key].defaultValue || ''
@@ -1753,7 +1760,7 @@ export const useWorkflowGraph = ({
                 let memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
                 itemConfig = {
                   ...itemConfig,
-                  messages: rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
+                  messages: data.type === 'llm' && rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
                   memory: { ...rest },
                 }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
@@ -1862,7 +1869,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node right port connection, add label
-          if (['code', 'http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
+          if (hasErrorHandleNodes.includes(sourceCell?.getData()?.type)) {
             if (sourcePortId === 'ERROR') {
               return {
                 source: sourceCell.getData().id,
