@@ -97,12 +97,25 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
     # ── Lifecycle ──
 
     async def render_prompt(self, input_data: StatementStepInput) -> str:
-        # Build optional dialogue context from supporting_context messages
+        ctx = input_data.supporting_context
+        has_any_ctx = bool(ctx.before_msgs or ctx.after_msgs)
+
+        # Build optional dialogue context — kept for prompts that use the
+        # legacy ``dialogue_context`` flag; preserves before → after order so
+        # the LLM sees the natural temporal flow with target_content sitting
+        # logically in between the two halves.
         dialogue_content = None
-        if self.include_dialogue_context and input_data.supporting_context.msgs:
-            dialogue_content = "\n".join(
-                f"{m.role}: {m.msg}" for m in input_data.supporting_context.msgs
-            )
+        if self.include_dialogue_context and has_any_ctx:
+            parts: List[str] = []
+            if ctx.before_msgs:
+                parts.append(
+                    "\n".join(f"{m.role}: {m.msg}" for m in ctx.before_msgs)
+                )
+            if ctx.after_msgs:
+                parts.append(
+                    "\n".join(f"{m.role}: {m.msg}" for m in ctx.after_msgs)
+                )
+            dialogue_content = "\n---\n".join(parts)
 
         input_json = {
             "chunk_id": input_data.chunk_id,
@@ -111,10 +124,12 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
             "target_content": input_data.target_content,
             "target_message_date": input_data.target_message_date,
             "supporting_context": {
-                "msgs": [
-                    {"role": m.role, "msg": m.msg}
-                    for m in input_data.supporting_context.msgs
-                ]
+                "before_msgs": [
+                    {"role": m.role, "msg": m.msg} for m in ctx.before_msgs
+                ],
+                "after_msgs": [
+                    {"role": m.role, "msg": m.msg} for m in ctx.after_msgs
+                ],
             },
         }
 
