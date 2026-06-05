@@ -284,7 +284,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed' | 'running' | 'paused',
+          status?: 'completed' | 'failed' | 'running' | 'waiting_human',
           citations?: {
             document_id: string;
             file_name: string;
@@ -350,7 +350,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                     node_name: name,
                     node_type: type,
                     icon,
-                    status: 'paused',
+                    status: 'waiting_human',
                     content: {},
                   }
                 } else {
@@ -360,7 +360,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                     node_name: name,
                     node_type: type,
                     icon,
-                    status: 'paused',
+                    status: 'waiting_human',
                     content: {},
                     meta_data: {
                       waiting_human: true,
@@ -369,7 +369,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                 }
                 newList[lastIndex] = {
                   ...newList[lastIndex],
-                  status: 'paused',
+                  status: 'waiting_human',
                   subContent: newSubContent,
                   meta_data: {
                     ...newList[lastIndex].meta_data,

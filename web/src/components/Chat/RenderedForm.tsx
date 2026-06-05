@@ -129,10 +129,7 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
       formData.forEach((value, key) => {
         fieldValues[key] = String(value)
       })
-      
-      console.log('Form submitted with action id:', actionId)
-      console.log('Form field values:', fieldValues)
-      
+
       // 调用回调函数
       if (onActionClick && actionId) {
         onActionClick(String(actionId), fieldValues)
@@ -146,7 +143,6 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
       // 添加事件监听
       document.addEventListener('click', handleButtonClick)
       form = document.getElementById('rendered-form') as HTMLFormElement
-      console.log('Add event listeners', form)
       if (form) {
         form.addEventListener('submit', handleFormSubmit)
       }
@@ -168,8 +164,10 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
   if (!editable) {
     return <div className="rb:text-gray-600 rb:text-sm">
       <Markdown content={renderedContent} />
-      <Divider />
-      {t('memoryConversation.triggeredAction')}: {resolved_action_id || ''}
+      {resolved_action_id && <>
+        <Divider />
+        {t('memoryConversation.triggeredAction')}: {resolved_action_id || ''}
+      </>}
     </div>
   }
   

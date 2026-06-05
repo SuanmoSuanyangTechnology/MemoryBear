@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:18:51
+ * @Last Modified time: 2026-06-05 20:12:22
  */
 /**
  * Conversation Page
@@ -228,6 +228,13 @@ const Conversation: FC = () => {
               return item
             })
           } else if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
+            const pendingIntervention = msg.id ? response?.pending_intervention?.[msg.id] || {} : {}
+            msg.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
+              ...intervention,
+              execution_id: pendingIntervention.execution_id,
+            }))
+            return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+          } else if (msg.role === 'assistant') {
             const pendingIntervention = msg.id ? response?.pending_intervention?.[msg.id] || {} : {}
             msg.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
               ...intervention,

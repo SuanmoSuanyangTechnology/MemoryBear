@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-06-04 14:56:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 15:28:43
+ * @Last Modified time: 2026-06-05 20:08:55
  */
 import React from 'react'
 import { Flex } from 'antd'
@@ -16,7 +16,8 @@ interface InterventionItemProps {
   index: number;
   isExpanded: boolean
   onToggle: (messageIndex: number, interventionIndex: number) => void
-  onActionClick: (actionId: string, fieldValues: Record<string, string>, executionId?: string, nodeId?: string) => void
+  onActionClick: (actionId: string, fieldValues: Record<string, string>, executionId?: string, nodeId?: string) => void;
+  editable: boolean;
 }
 
 const InterventionItem: React.FC<InterventionItemProps> = ({
@@ -25,9 +26,10 @@ const InterventionItem: React.FC<InterventionItemProps> = ({
   index,
   isExpanded,
   onToggle,
-  onActionClick
+  onActionClick,
+  editable
 }) => {
-  const isEditable = !intervention?.resolved_action_id
+  const isEditable = !intervention?.resolved_action_id && editable
   // 不可编辑状态时默认收起，使用外部传入的展开状态
   const shouldExpand = isEditable || isExpanded
 
@@ -85,7 +87,8 @@ interface InterventionListProps {
   messageIndex: number;
   isExpanded: (messageIndex: number, interventionIndex: number, resolved_action_id?: string) => boolean
   toggle: (messageIndex: number, interventionIndex: number) => void
-  onActionClick: (actionId: string, fieldValues: Record<string, string>, executionId?: string, nodeId?: string) => void
+  onActionClick: (actionId: string, fieldValues: Record<string, string>, executionId?: string, nodeId?: string) => void;
+  isEdit: boolean;
 }
 
 const InterventionList: React.FC<InterventionListProps> = ({
@@ -93,7 +96,8 @@ const InterventionList: React.FC<InterventionListProps> = ({
   messageIndex,
   isExpanded,
   toggle,
-  onActionClick
+  onActionClick,
+  isEdit
 }) => {
   return interventions.map((intervention, idx: number) => (
     <InterventionItem
@@ -104,6 +108,7 @@ const InterventionList: React.FC<InterventionListProps> = ({
       isExpanded={isExpanded(messageIndex, idx, intervention.resolved_action_id)}
       onToggle={toggle}
       onActionClick={onActionClick}
+      editable={isEdit}
     />
   ))
 }

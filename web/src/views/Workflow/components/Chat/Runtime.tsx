@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 15:33:22
+ * @Last Modified time: 2026-06-05 20:06:06
  */
 /*
  * Runtime Component
@@ -67,7 +67,7 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
       ? 'rb:text-[#369F21]!'
       : status === 'failed'
       ? 'rb:text-[#FF5D34]!'
-      : status === 'paused'
+      : status === 'waiting_human'
       ? 'rb:text-[#FF5D34]!'
       : 'rb:text-[#5B6167]!'
   }
@@ -190,7 +190,7 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
                       ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
                       : vo.status === 'failed'
                       ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                      : vo.status === 'paused'
+                      : vo.status === 'waiting_human'
                       ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
                       : <LoadingOutlined className={`rb:mr-1 ${getStatus(vo.status)}`} />
                     }
@@ -279,7 +279,7 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
             ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
             : item.status === 'failed'
             ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
-            : item.status === 'paused'
+            : item.status === 'waiting_human'
             ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
             : <LoadingOutlined className={`rb:mr-1 ${getStatus(item.status)}`} />
           }
