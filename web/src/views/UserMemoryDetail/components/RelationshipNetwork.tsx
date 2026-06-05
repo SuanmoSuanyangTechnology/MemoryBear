@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 12:26:24
+ * @Last Modified time: 2026-06-04 10:00:50
  */
 /**
  * Relationship Network Component
@@ -106,15 +106,15 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
         }
         let symbolSize = 0
         if (connections <= 1) {
-          symbolSize = 5
+          symbolSize = 30
         } else if (connections <= 10) {
-          symbolSize = 10
+          symbolSize = 40
         } else if (connections <= 15) {
-          symbolSize = 15
+          symbolSize = 50
         } else if (connections <= 20) {
-          symbolSize = 25
+          symbolSize = 60
         } else {
-          symbolSize = 35
+          symbolSize = 70
         }
 
         curNodes.push({
@@ -253,7 +253,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                     <div className={clsx(`rb:size-1.25 rb:rounded-full rb:mr-2`)}
                       style={{ backgroundColor: Colors[index] }}
                     ></div>
-                    {item.name}
+                    {t(`userMemory.${item.name}`)}
                     <div className="rb:px-1 rb:rounded-full rb:bg-[#F6F6F6] rb:text-[10px] rb:h-3.5">{item.value}</div>
                   </Flex>
                 ))}

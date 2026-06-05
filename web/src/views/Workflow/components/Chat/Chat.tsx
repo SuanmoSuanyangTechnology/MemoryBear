@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 12:20:24
+ * @Last Modified time: 2026-06-05 14:50:07
  */
 /**
  * Workflow Chat Component
@@ -27,7 +27,6 @@ import { App, Flex, Button } from 'antd'
 import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
-import RbDrawer from '@/components/RbDrawer';
 import { draftRun } from '@/api/application';
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
@@ -47,9 +46,22 @@ import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfig
 import type { VariableConfigModalRef } from '@/views/Workflow/types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import { triggerParams } from '../Properties/hooks/useVariableList'
+import RbCard from '@/components/RbCard/Card'
 
-const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type']; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm; }>(({ // eslint-disable-line
-  appId, graphRef, features, appType
+
+interface ChatProps {
+  appId: string;
+  appType?: Application['type'];
+  graphRef: GraphRef;
+  data: WorkflowConfig | null;
+  features?: FeaturesConfigForm;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Function to save workflow configuration */
+  handleSave: (flag?: boolean) => Promise<unknown>;
+}
+const Chat = forwardRef<ChatRef, ChatProps>(({
+  appId, graphRef, features, appType, open, onOpenChange, handleSave
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
@@ -61,7 +73,6 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     (toolbarRef as React.MutableRefObject<ChatToolbarRef | null>).current = node
     setToolbarReady(!!node)
   }, [])
-  const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [chatList, setChatList] = useState<ChatItem[]>([])
   const [variables, setVariables] = useState<Variable[]>([])
@@ -74,12 +85,10 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
   const executionIdRef = useRef<string>('draft')
 
   /**
-   * Opens the chat drawer and loads workflow variables from the start node
+   * Initializes chat with opening statement if configured
    */
-  const handleOpen = () => {
-    setOpen(true)
-
-    if (features?.opening_statement?.enabled && features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
+  useEffect(() => {
+    if (open && features?.opening_statement?.enabled && features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
       setChatList([{
         role: 'assistant',
         created_at: Date.now(),
@@ -88,14 +97,16 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
           suggested_questions: features?.opening_statement?.suggested_questions || []
         }
       }])
+    } else {
+      handleClose(false)
     }
-  }
+  }, [open])
 
   useEffect(() => {
-    if (open && (toolbarReady || appType === 'pure_workflow')) {
+    if (toolbarReady || appType === 'pure_workflow') {
       getVariables()
     }
-  }, [open, toolbarReady, appType])
+  }, [toolbarReady, appType])
   /**
    * Extracts variables from the workflow's start node and merges with previous values
    */
@@ -159,7 +170,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
   /**
    * Closes the drawer and resets all state
    */
-  const handleClose = () => {
+  const handleClose = (flag: boolean = true) => {
     setChatHistory(executionIdRef.current, chatList.map((item: ChatItem) => ({
       ...item,
       subContent: item.subContent?.map(sub => ({
@@ -169,11 +180,11 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     })))
     abortRef.current?.()
     abortRef.current = null;
-    setOpen(false)
     setToolbarReady(false)
     setChatList([])
     setVariables([])
     setExecutionId(null)
+    setConversationId(null)
     executionIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
@@ -181,6 +192,17 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     setFileList([])
     setLoading(false)
     setStreamLoading(false)
+
+    if (flag) {
+      onOpenChange?.(false)
+    }
+  }
+
+  const handleSend = (msg?: string) => {
+    handleSave(false)
+      .then(() => {
+        handleSendMsg(msg)
+      })
   }
   /**
    * Sends a message to execute the workflow
@@ -194,7 +216,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
    * 
    * @param msg - Optional message to send (uses state if not provided)
    */
-  const handleSend = async (msg?: string) => {
+  const handleSendMsg = async (msg?: string) => {
     if (loading || !appId) return
     // Validate required variables before sending
     let isCanSend = true
@@ -286,6 +308,19 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
               return newList
             })
             break
+          case 'message_replace':
+            setChatList(prev => {
+              const newList = [...prev]
+              const lastIndex = newList.length - 1
+              if (lastIndex >= 0) {
+                newList[lastIndex] = {
+                  ...newList[lastIndex],
+                  content: content
+                }
+              }
+              return newList
+            })
+            break;
           // Track node execution start
           case 'node_start':
             setChatList(prev => {
@@ -416,15 +451,16 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
             })
             setStreamLoading(false)
             setLoading(false)
+            console.log('execution_id', execution_id, executionId)
+            if (execution_id && executionId !== execution_id) {
+              executionIdRef.current = execution_id
+              setExecutionId(execution_id)
+            }
             break
         }
 
         if (conversation_id && conversationId !== conversation_id) {
           setConversationId(conversation_id)
-        }
-        if (execution_id && executionId !== execution_id) {
-          executionIdRef.current = execution_id
-          setExecutionId(execution_id)
         }
       })
     }
@@ -507,6 +543,14 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     toolbarRef.current?.setFiles([...list || []])
   }
 
+  /**
+   * Ref methods for external control
+   */
+  const handleOpen = () => {
+    // Chat panel is now always visible, just refresh variables
+    getVariables()
+  }
+
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -542,80 +586,82 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === '')
   )
 
-  return (
-    <RbDrawer
-      title={<Flex align="center" gap={10}>
-        {t('workflow.run')}
-      </Flex>}
-      classNames={{
-        body: 'rb:p-0!'
-      }}
-      open={open}
-      onClose={handleClose}
-    >
-      <ChatContent
-        classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-86px)]"
-        contentClassNames="rb:max-w-[400px]!'"
-        empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
-        data={chatList}
-        streamLoading={streamLoading}
-        labelPosition="bottom"
-        labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-        // errorDesc={t('application.ReplyException')}
-        renderRuntime={(item, index) => {
-          return <Runtime item={item} index={index} source={appType as string} />
-        }}
-        onSend={handleSend}
-      />
+  if (!open) return null
 
-      {appType === 'workflow' &&
-        <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
-          <ChatInput
-            message={message}
-            className="rb:relative!"
-            loading={loading}
-            fileChange={updateFileList}
-            fileList={fileList}
-            onSend={handleSend}
-            onChange={(msg) => setMessage(msg)}
-          >
-            <ChatToolbar
-              ref={toolbarCallbackRef}
-              features={features as FeaturesConfigForm}
-              onFilesChange={setFileList}
-              onVariablesChange={setVariables}
-            />
-          </ChatInput>
-        </Flex>
-      }
-      {appType === 'pure_workflow' &&
-        <Flex align="center" justify="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
-          {variables.length > 0 &&
-            <Button
-              danger={isNeedVariableConfig}
-              icon={<div className={clsx("rb:size-4 rb:bg-cover", {
-                "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
-                "rb:bg-[url('@/assets/images/conversation/variables.svg')]": !isNeedVariableConfig
-              })} />}
-              onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
+  return (
+    <div className="rb:w-150 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5">
+      <RbCard
+        title={t('workflow.run')}
+        extra={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={() => handleClose()}></div>}
+        headerType="borderless"
+        headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
+        className="rb:h-full! rb:hover:shadow-none!"
+        bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
+      >
+        <ChatContent
+          classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-134px)]"
+          contentClassNames="rb:max-w-[400px]!'"
+          empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
+          data={chatList}
+          streamLoading={streamLoading}
+          labelPosition="bottom"
+          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+          // errorDesc={t('application.ReplyException')}
+          renderRuntime={(item, index) => {
+            return <Runtime item={item} index={index} source={appType as string} />
+          }}
+          onSend={handleSend}
+        />
+
+        {appType === 'workflow' &&
+          <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
+            <ChatInput
+              message={message}
+              className="rb:relative!"
+              loading={loading}
+              fileChange={updateFileList}
+              fileList={fileList}
+              onSend={handleSend}
+              onChange={(msg) => setMessage(msg)}
             >
-              {t('memoryConversation.variableConfig')}
+              <ChatToolbar
+                ref={toolbarCallbackRef}
+                features={features as FeaturesConfigForm}
+                onFilesChange={setFileList}
+                onVariablesChange={setVariables}
+              />
+            </ChatInput>
+          </Flex>
+        }
+        {appType === 'pure_workflow' &&
+          <Flex align="center" justify="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
+            {variables.length > 0 &&
+              <Button
+                danger={isNeedVariableConfig}
+                icon={<div className={clsx("rb:size-4 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
+                  "rb:bg-[url('@/assets/images/conversation/variables.svg')]": !isNeedVariableConfig
+                })} />}
+                onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
+              >
+                {t('memoryConversation.variableConfig')}
+              </Button>
+            }
+            <Button
+              type="primary"
+              onClick={() => handleSend()}
+              loading={loading}
+            >
+              {t('workflow.startRun')}
             </Button>
-          }
-          <Button
-            type="primary"
-            onClick={() => handleSend()}
-            loading={loading}
-          >
-            {t('workflow.startRun')}
-          </Button>
-        </Flex>
-      }
-      <VariableConfigModal
-        ref={variableConfigModalRef}
-        refresh={setVariables}
-      />
-    </RbDrawer>
+          </Flex>
+        }
+        <VariableConfigModal
+          ref={variableConfigModalRef}
+          refresh={setVariables}
+        />
+      </RbCard>
+    </div>
   )
 })
 

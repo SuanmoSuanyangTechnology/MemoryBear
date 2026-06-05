@@ -51,6 +51,7 @@ const DocumentDetails: FC = () => {
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [total, setTotal] = useState(0);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
   const [fileUrl, setFileUrl] = useState('');
@@ -154,6 +155,7 @@ const DocumentDetails: FC = () => {
     ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
   };
 
+  const [isParentChildMode, setIsParentChildMode] = useState<string | boolean>('false');
   const fetchDocumentDetail = async () => {
     if (!documentId) return;
     setLoading(true);
@@ -163,7 +165,10 @@ const DocumentDetails: FC = () => {
       setInfoItems(formatDocumentInfo(response));
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
-      setParserMode(response?.parser_config?.auto_questions || 0)
+      const auto_questions = response?.parser_config?.auto_questions || 0
+      const parent_chunk_mode = response?.parser_config?.parent_chunk_mode || false
+      setParserMode(auto_questions)
+      setIsParentChildMode(auto_questions === 0 && parent_chunk_mode)
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
@@ -220,6 +225,7 @@ const DocumentDetails: FC = () => {
       }
       
       setHasMore(response.page?.has_next ?? false);
+      setTotal(response.page?.total ?? 0);
     } catch (error) {
       console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed') || '加载失败');
@@ -478,6 +484,7 @@ const DocumentDetails: FC = () => {
           <RecallTestResult 
             refresh={refreshChunks}
             data={chunkList} 
+            total={total}
             showEmpty={false}
             hasMore={hasMore}
             loadMore={loadMoreChunks}
@@ -495,6 +502,7 @@ const DocumentDetails: FC = () => {
       {/* Insert content modal */}
       <InsertModal 
         ref={insertModalRef}
+        isParentChildMode={isParentChildMode}
         onInsert={handleInsertContent}
         onSuccess={handleInsertSuccess}
       />

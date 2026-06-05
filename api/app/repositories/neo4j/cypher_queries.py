@@ -41,7 +41,8 @@ SET s += {
     access_history: statement.access_history,
     last_access_time: statement.last_access_time,
     access_count: statement.access_count,
-    dialog_at: statement.dialog_at
+    dialog_at: statement.dialog_at,
+    has_unsolved_reference: statement.has_unsolved_reference
 }
 RETURN s.id AS uuid
 """
@@ -371,82 +372,6 @@ RETURN s.id AS id,
 ORDER BY score DESC
 LIMIT $limit
 """
-# 第二层去重：批量精确匹配（按 name 或 alias，不依赖全文索引，立即一致）
-# 输入 $rows: [{incoming_id, name}]，返回与 SEARCH_ENTITIES_BY_NAME 字段对齐
-BATCH_EXACT_MATCH_ENTITIES_BY_NAME = """
-UNWIND $rows AS r
-WITH r, toLower(r.name) AS lname
-MATCH (e:ExtractedEntity)
-WHERE e.end_user_id = $end_user_id
-  AND (toLower(e.name) = lname
-       OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = lname))
-OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
-OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
-RETURN r.incoming_id AS incoming_id,
-       e.id AS id,
-       e.name AS name,
-       e.end_user_id AS end_user_id,
-       e.entity_type AS entity_type,
-       e.created_at AS created_at,
-       e.entity_idx AS entity_idx,
-       e.statement_id AS statement_id,
-       e.description AS description,
-       e.aliases AS aliases,
-       e.name_embedding AS name_embedding,
-       e.connect_strength AS connect_strength,
-       collect(DISTINCT s.id) AS statement_ids,
-       collect(DISTINCT c.id) AS chunk_ids,
-       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
-       COALESCE(e.importance_score, 0.5) AS importance_score,
-       e.last_access_time AS last_access_time,
-       COALESCE(e.access_count, 0) AS access_count,
-       1.0 AS score
-"""
-
-# 第二层去重：用 APOC 批量合并被淘汰节点到规范节点（重定向边 + 删除冗余节点）
-# 输入 $redirects: [{old_id, new_id}]，返回被删除的节点数
-MERGE_DEDUPED_ENTITIES = """
-UNWIND $redirects AS r
-MATCH (canonical:ExtractedEntity {id: r.new_id})
-MATCH (old:ExtractedEntity {id: r.old_id})
-WHERE canonical <> old
-CALL apoc.refactor.mergeNodes([canonical, old], {
-    properties: 'discard',
-    mergeRels: true,
-    produceSelfRel: false
-}) YIELD node
-RETURN count(node) AS deleted_count
-"""
-
-# 查询实体名称包含指定字符串的实体
-SEARCH_ENTITIES_BY_NAME = """
-CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
-WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
-OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
-OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
-RETURN e.id AS id,
-       e.name AS name,
-       e.end_user_id AS end_user_id,
-       e.entity_type AS entity_type,
-       e.created_at AS created_at,
-       e.entity_idx AS entity_idx,
-       e.statement_id AS statement_id,
-       e.description AS description,
-       e.aliases AS aliases,
-       e.name_embedding AS name_embedding,
-       // TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
-       // COALESCE(e.fact_summary, '') AS fact_summary,
-       e.connect_strength AS connect_strength,
-       collect(DISTINCT s.id) AS statement_ids,
-       collect(DISTINCT c.id) AS chunk_ids,
-       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
-       COALESCE(e.importance_score, 0.5) AS importance_score,
-       e.last_access_time AS last_access_time,
-       COALESCE(e.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
 
 SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
@@ -482,6 +407,7 @@ RETURN e.id AS id,
        e.aliases AS aliases,
        e.name_embedding AS name_embedding,
        e.connect_strength AS connect_strength,
+       e.is_explicit_memory AS is_explicit_memory,
        collect(DISTINCT s.id) AS statement_ids,
        collect(DISTINCT c.id) AS chunk_ids,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
@@ -1491,101 +1417,6 @@ RETURN (
 ) AS is_complete
 """
 
-# 别名归并：将 predicate="别名属于" 的 EXTRACTED_RELATIONSHIP 边的 source.name
-# 合并进 target.aliases（去重），并将 source.description 追加到 target.description（分号分隔）
-MERGE_ALIAS_BELONGS_TO = """
-// 先按 target 分组，将所有 source.name 和 source.description 聚合，
-// 再一次性 SET，避免多条 别名属于 边对同一 target 反复覆盖。
-MATCH (source:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(target:ExtractedEntity {end_user_id: $end_user_id})
-WHERE r.predicate = '别名属于'
-WITH target,
-     coalesce(target.aliases, []) AS existing_aliases,
-     coalesce(target.description, '') AS tgt_desc,
-     collect(DISTINCT source.name) AS source_names,
-     collect(DISTINCT coalesce(source.description, '')) AS source_descs
-
-// 1. 合并 aliases：将所有 source.name 追加到 target.aliases（去重，忽略空值）
-WITH target, tgt_desc, source_names, source_descs, existing_aliases,
-     existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT n IN existing_aliases] AS new_aliases
-
-// 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
-WITH target, new_aliases, existing_aliases, source_descs,
-     reduce(desc = tgt_desc, src IN source_descs |
-         CASE
-             WHEN src <> '' AND NOT desc CONTAINS src
-             THEN CASE WHEN desc = '' THEN src ELSE desc + '；' + src END
-             ELSE desc
-         END
-     ) AS new_description
-
-SET target.aliases = new_aliases,
-    target.description = new_description
-
-RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_aliases) - size(existing_aliases) AS added_count
-"""
-
-# 边重定向：将指向别名节点（"别名属于"关系的 source）的所有其他边，重定向到用户节点（target）。
-# 处理两类边：
-#   1. EXTRACTED_RELATIONSHIP：其他实体 → 别名节点 或 别名节点 → 其他实体
-#   2. STATEMENT_ENTITY：陈述句 → 别名节点
-# 对于每条需要重定向的边，创建一条指向用户节点的新边（复制所有属性），然后删除旧边。
-REDIRECT_ALIAS_EDGES = """
-// 找到所有 别名→用户 的映射
-MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
-WHERE ar.predicate = '别名属于'
-WITH collect({alias_id: elementId(alias), user_id: elementId(user), alias_eid: alias.id, user_eid: user.id}) AS mappings
-
-// 1. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 target 的情况
-UNWIND mappings AS m
-MATCH (other)-[r:EXTRACTED_RELATIONSHIP]->(alias:ExtractedEntity {end_user_id: $end_user_id})
-WHERE alias.id = m.alias_eid
-  AND r.predicate <> '别名属于'
-  AND other.id <> m.user_eid
-WITH m, other, r, alias
-MATCH (user:ExtractedEntity {id: m.user_eid, end_user_id: $end_user_id})
-CREATE (other)-[nr:EXTRACTED_RELATIONSHIP]->(user)
-SET nr = properties(r)
-DELETE r
-WITH count(*) AS redirected_incoming
-
-// 2. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 source 的情况
-MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar2:EXTRACTED_RELATIONSHIP]->(user2:ExtractedEntity {end_user_id: $end_user_id})
-WHERE ar2.predicate = '别名属于'
-WITH alias, user2, redirected_incoming
-MATCH (alias)-[r:EXTRACTED_RELATIONSHIP]->(other)
-WHERE r.predicate <> '别名属于'
-  AND other.id <> user2.id
-WITH user2, other, r, redirected_incoming
-CREATE (user2)-[nr:EXTRACTED_RELATIONSHIP]->(other)
-SET nr = properties(r)
-DELETE r
-WITH redirected_incoming, count(*) AS redirected_outgoing
-
-// 3. 重定向 STATEMENT_ENTITY 边：陈述句 → 别名节点
-MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar3:EXTRACTED_RELATIONSHIP]->(user3:ExtractedEntity {end_user_id: $end_user_id})
-WHERE ar3.predicate = '别名属于'
-WITH alias, user3, redirected_incoming, redirected_outgoing
-MATCH (stmt)-[r:STATEMENT_ENTITY]->(alias)
-WITH user3, stmt, r, redirected_incoming, redirected_outgoing
-CREATE (stmt)-[nr:STATEMENT_ENTITY]->(user3)
-SET nr = properties(r)
-DELETE r
-
-RETURN redirected_incoming, redirected_outgoing, count(*) AS redirected_stmt
-"""
-
-# 删除别名节点：在别名归并和边重定向完成后，删除所有 predicate="别名属于" 关系的 source 节点。
-# 此时这些节点的其他边已被 REDIRECT_ALIAS_EDGES 重定向完毕，
-# 唯一剩余的边就是 (alias)-[:EXTRACTED_RELATIONSHIP {predicate:'别名属于'}]->(user)，
-# 使用 DETACH DELETE 一并删除节点和该关系。
-DELETE_ALIAS_NODES = """
-MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
-WHERE r.predicate = '别名属于'
-WITH alias, count(r) AS rel_count
-DETACH DELETE alias
-RETURN count(alias) AS deleted_count
-"""
-
 CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING = """
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
 RETURN (
@@ -2219,6 +2050,32 @@ UNWIND $edges AS edge
 MATCH (orig:AssistantOriginal {id: edge.source, end_user_id: edge.end_user_id})
 MATCH (dialog:Dialogue {id: edge.target, end_user_id: edge.end_user_id})
 MERGE (orig)-[r:BELONGS_TO_DIALOG]->(dialog)
+ON CREATE SET r.id = edge.id,
+    r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
+"""
+
+# Conversation hub node：会话级中心节点，用 MERGE 保证跨写入任务幂等复用。
+# 所有 AssistantOriginal 通过 BELONGS_TO_CONVERSATION 挂到该节点上，
+# 从而把同一会话的 assistant 剪枝节点聚成一个连通子图。
+CONVERSATION_NODE_SAVE = """
+UNWIND $conversations AS c
+MERGE (n:Conversation {id: c.id})
+ON CREATE SET n.name = c.name,
+    n.end_user_id = c.end_user_id,
+    n.conversation_id = c.conversation_id,
+    n.run_id = c.run_id,
+    n.created_at = c.created_at
+RETURN n.id AS uuid
+"""
+
+ASSISTANT_CONVERSATION_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (orig:AssistantOriginal {id: edge.source, end_user_id: edge.end_user_id})
+MATCH (conv:Conversation {id: edge.target})
+MERGE (orig)-[r:BELONGS_TO_CONVERSATION]->(conv)
 ON CREATE SET r.id = edge.id,
     r.end_user_id = edge.end_user_id,
     r.run_id = edge.run_id,
