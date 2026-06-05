@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 11:55:54
+ * @Last Modified time: 2026-06-04 17:33:18
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -10,7 +10,7 @@ import { Button, Flex, Form, Input, InputNumber, Select, Checkbox } from 'antd'
 import { Node } from '@antv/x6'
 import clsx from 'clsx'
 
-import { nodeRun } from '@/api/application'
+import { nodeRun, nodeRunWithCache } from '@/api/application'
 import RbCard from '@/components/RbCard/Card'
 import styles from '../Properties/properties.module.css'
 import ContextList from './ContextList'
@@ -148,6 +148,22 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
           })
           .finally(() => setLoading(false))
       })
+  }
+  const handleRunWithCache = () => {
+    setLoading(true)
+    setResult({ status: 'running' })
+    nodeRunWithCache(appId, nodeData.id, {
+      invalidate_cache: false,
+      bypass_cache: false
+    })
+      .then(res => {
+        setResult(res as RunResult)
+      })
+      .catch(err => {
+        setResult({ status: 'failed', error: err.message })
+        setLoading(false)
+      })
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => {
@@ -294,11 +310,14 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
               })()}
 
               {/* Run button */}
-              {(!isAutoRun || result?.status) &&
+              {(!isAutoRun || result?.status) && <Flex gap={12}>
                 <Button type="primary" block onClick={handleRun} loading={!result?.status && loading} disabled={loading}>
                   {result?.status ? t('workflow.reStartRun') : t('workflow.startRun')}
                 </Button>
-              }
+                <Button type="primary" block onClick={handleRunWithCache} loading={!result?.status && loading} disabled={loading}>
+                  {t('workflow.runWithCache')}
+                </Button>
+              </Flex>}
 
               <RunResultDisplay result={result} loading={loading} nodeData={nodeData} />
             </Flex>
