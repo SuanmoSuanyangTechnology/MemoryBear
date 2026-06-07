@@ -10,6 +10,7 @@ from functools import cached_property
 from typing import Any, AsyncGenerator
 
 from langgraph.config import get_stream_writer
+from langgraph.errors import GraphInterrupt
 
 from app.core.config import settings
 from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES, WorkflowNodeCacheManager
@@ -109,8 +110,19 @@ class BaseNode(ABC):
 
         Returns:
             bool: True if the node is activated, False otherwise.
+            Returns False if the node_id is not present in the activate dict
+            (e.g. during LangGraph resume when nodes that completed before the
+            interrupt are re-scheduled but have no activation signal).
         """
-        return state["activate"][self.node_id]
+        activate = state.get("activate", {})
+        if self.node_id not in activate:
+            # During resume, LangGraph may re-schedule nodes that completed
+            # before the interrupt. These nodes have no activation signal in
+            # the checkpoint state because their trans_activate already ran.
+            # Treat them as deactivated so they skip execution and propagate
+            # False to downstream nodes (which are also already completed).
+            return False
+        return activate[self.node_id]
 
     def trans_activate(self, state: WorkflowState):
         """Transform the activation state for downstream nodes.
@@ -411,6 +423,8 @@ class BaseNode(ABC):
                 state,
                 variable_pool,
             )
+        except GraphInterrupt:
+            raise
         except Exception as e:
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(
@@ -533,6 +547,8 @@ class BaseNode(ABC):
                 variable_pool
             )
             yield error_output
+        except GraphInterrupt:
+            raise
         except Exception as e:
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(f"Node {self.node_id} execution failed: {e}", exc_info=True)

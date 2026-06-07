@@ -16,6 +16,7 @@ from app.core.workflow.engine.variable_pool import LazyVariableDict
 logger = logging.getLogger(__name__)
 
 _NORMALIZE_PATTERN = re.compile(r"\{\{\s*(\d+)\.(\w+)\s*}}")
+_FORM_FIELD_PATTERN = re.compile(r"\{\{form_field:([^}]+)\}}")
 
 
 class SafeUndefined(Undefined):
@@ -111,15 +112,19 @@ class TemplateRenderer:
         if node_outputs:
             context.update(node_outputs)
 
-        # # 支持直接访问会话变量（不需要 conv. 前缀）：{{user_name}}
-        # if conv_vars:
-        #     context.update(conv_vars)
-        #
-        # context["nodes"] = node_outputs or {}  # 旧语法兼容
+        # Protect {{form_field:...}} placeholders from Jinja2 parsing.
+        # These use {{ }} delimiters but contain colons which are not valid Jinja2 syntax.
+        # Replace them with temporary markers, render, then restore.
+        form_field_slots: list[str] = []
+        def _save_form_field(m: re.Match) -> str:
+            form_field_slots.append(m.group(0))
+            return f"__FORM_FIELD_SLOT_{len(form_field_slots) - 1}__"
+        template = _FORM_FIELD_PATTERN.sub(_save_form_field, template)
+
         template = self.normalize_template(template)
         try:
             tmpl = self.env.from_string(template)
-            return tmpl.render(**context)
+            result = tmpl.render(**context)
 
         except TemplateSyntaxError as e:
             logger.error(f"Template syntax error: {template}, error: {e}")
@@ -130,6 +135,12 @@ class TemplateRenderer:
         except Exception as e:
             logger.error(f"Template rendering error: {template}, error: {e}")
             raise ValueError(f"Template rendering failed: {e}")
+
+        # Restore {{form_field:...}} placeholders
+        for i, original in enumerate(form_field_slots):
+            result = result.replace(f"__FORM_FIELD_SLOT_{i}__", original)
+
+        return result
 
     def validate(self, template: str) -> list[str]:
         """Validate template syntax
@@ -150,8 +161,13 @@ class TemplateRenderer:
         """
         errors = []
 
+        # Protect {{form_field:...}} placeholders before validation
+        protected = _FORM_FIELD_PATTERN.sub(
+            lambda m: f"__FORM_FIELD_SLOT__", template
+        )
+
         try:
-            self.env.from_string(template)
+            self.env.from_string(self.normalize_template(protected))
         except TemplateSyntaxError as e:
             errors.append(f"Template syntax error: {e}")
         except Exception as e:

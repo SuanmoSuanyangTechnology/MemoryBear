@@ -81,3 +81,8 @@ class AppLogConversationDetail(AppLogConversation):
     """会话详情（包含消息列表）"""
     messages: List[AppLogMessage] = Field(default_factory=list)
     node_executions_map: Dict[str, List[AppLogNodeExecution]] = Field(default_factory=dict, description="按消息ID分组的节点执行记录")
+    pending_intervention: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="人工介入信息：key=message_id，value={execution_id, status, interventions: [...]}，"
+                    "结构与 /public/share/conversations/{conversation_id} 接口的 pending_intervention 一致",
+    )

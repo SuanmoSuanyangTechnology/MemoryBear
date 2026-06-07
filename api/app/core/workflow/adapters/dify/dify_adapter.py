@@ -51,6 +51,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "agent": NodeType.AGENT,
         "list-operator": NodeType.LIST_OPERATOR,
         "document-extractor": NodeType.DOCUMENT_EXTRACTOR,
+        "human-input": NodeType.HUMAN_INTERVENTION,
         "": NodeType.NOTES
     }
 

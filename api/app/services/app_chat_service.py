@@ -9,6 +9,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.agent.langchain_agent import LangChainAgent
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
@@ -322,7 +323,6 @@ class AppChatService:
                 )
 
         # 创建 Agent 执行记录（pending 状态，对齐工作流行为）
-        import datetime as dt
         from app.models.app_model import App
         agent_exec_repo = AgentExecutionRepository(self.db)
         app_obj = self.db.get(App, config.app_id)
@@ -335,7 +335,7 @@ class AppChatService:
             triggered_by=None,
             steps=[],
             status="running",
-            started_at=dt.datetime.fromtimestamp(start_time),
+            started_at=parse_timestamp_to_utc_naive(start_time),
             meta_data={
                 "model": api_key_obj.model_name,
                 "provider": api_key_obj.provider,
@@ -722,7 +722,6 @@ class AppChatService:
                     )
 
             # 创建 Agent 执行记录（running 状态）
-            import datetime as dt
             from app.models.app_model import App
             agent_exec_repo = AgentExecutionRepository(self.db)
             app_obj = self.db.get(App, config.app_id)
@@ -735,7 +734,7 @@ class AppChatService:
                 triggered_by=None,
                 steps=[],
                 status="running",
-                started_at=dt.datetime.fromtimestamp(start_time),
+                started_at=parse_timestamp_to_utc_naive(start_time),
                 meta_data={
                     "model": api_key_obj.model_name,
                     "provider": api_key_obj.provider,
@@ -1213,6 +1212,26 @@ class AppChatService:
                 release_id=release_id,
                 public=public,
                 source=source
+        ):
+            yield event
+
+    async def workflow_resume_intervention_stream(
+            self,
+            execution_id: str,
+            app_id: uuid.UUID,
+            node_id: str,
+            action_id: str,
+            form_data: Optional[Dict[str, Any]] = None,
+            public: bool = False,
+    ) -> AsyncGenerator[dict, None]:
+        """Resume a waiting-human workflow via SSE stream (page refresh case)."""
+        async for event in self.workflow_service.resume_intervention_stream(
+            execution_id=execution_id,
+            app_id=app_id,
+            node_id=node_id,
+            action_id=action_id,
+            form_data=form_data,
+            public=public,
         ):
             yield event
 
