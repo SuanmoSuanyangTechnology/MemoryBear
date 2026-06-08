@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class KnowledgeRetrievalNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
-        self.typed_config: KnowledgeRetrievalNodeConfig | None = None
+        self.typed_config: KnowledgeRetrievalNodeConfig = KnowledgeRetrievalNodeConfig(**self.config)
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -326,7 +326,6 @@ class KnowledgeRetrievalNode(BaseNode):
         Raises:
             RuntimeError: If no valid knowledge base is found or access is denied.
         """
-        self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
         if not self.typed_config.knowledge_bases:
             return []
         query = self._render_template(self.typed_config.query, variable_pool)
