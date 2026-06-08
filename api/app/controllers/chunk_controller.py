@@ -1099,7 +1099,8 @@ async def retrieve_chunks(
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
     # default value is topk
-    topn = retrieve_data.top_k
+    topn = 100
+    # topn = retrieve_data.top_k
 
     # Helper: exclude documents in document_ids_filter (blacklist)
     exclude_ids = set(document_ids_filter) if document_ids_filter else set()
@@ -1113,11 +1114,11 @@ async def retrieve_chunks(
     # 1 participle search, 2 semantic search, 3 hybrid search
     match retrieve_data.retrieve_type:
         case chunk_schema.RetrieveType.PARTICIPLE:
-            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
             rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case chunk_schema.RetrieveType.SEMANTIC:
-            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
             rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
