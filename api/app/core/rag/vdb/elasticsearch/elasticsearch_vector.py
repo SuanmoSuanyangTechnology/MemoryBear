@@ -779,7 +779,7 @@ class ElasticSearchVector(BaseVector):
                 for doc in docs
             ]
 
-            reranked_docs = list(self.reranker.compress_documents(documents, query))
+            reranked_docs = list(self.reranker.compress_documents(documents, query, top_k))
             logger.debug(f"[rerank] returned {len(reranked_docs)} docs")
 
             reranked_docs.sort(
@@ -789,9 +789,10 @@ class ElasticSearchVector(BaseVector):
             result = []
             for item in reranked_docs[:top_k]:
                 for doc in docs:
-                    if doc.page_content == item.page_content:
+                    if doc.page_content == item.page_content and doc.metadata['doc_id'] == item.metadata['doc_id']:
                         doc.metadata["score"] = item.metadata["relevance_score"]
                         result.append(doc)
+                        break
             return result
         except Exception as e:
             logger.warning(f"Rerank failed, falling back to original results: {str(e)}")
