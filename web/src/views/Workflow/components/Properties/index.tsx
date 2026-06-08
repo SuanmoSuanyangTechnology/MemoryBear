@@ -13,7 +13,7 @@ import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type M
 import type { NodeConfig, NodeProperties, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
-import Knowledge from './Knowledge/Knowledge';
+import Knowledge from '@/components/Knowledge';
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import VariableSelect from './VariableSelect';
 import ParamsList from './ParamsList';
@@ -888,7 +888,7 @@ const Properties: FC<PropertiesProps> = ({
                                     key={key}
                                     name={key}
                                   >
-                                    <Knowledge />
+                                    <Knowledge variant="workflow" />
                                   </Form.Item>
                                 )
                               }
