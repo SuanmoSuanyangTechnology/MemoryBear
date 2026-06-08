@@ -59,7 +59,7 @@ const Webhook: FC<{ selectedNode?: any; graphRef?: any; }> = () => {
 
   const path = useMemo(() => {
     return values?.route_key
-      ? `${window.location.origin}/workflows/triggers/webhook/${values.route_key}`
+      ? `${window.location.origin}/api/workflows/triggers/webhook/${values.route_key}`
       : undefined
   }, [values?.route_key])
 
