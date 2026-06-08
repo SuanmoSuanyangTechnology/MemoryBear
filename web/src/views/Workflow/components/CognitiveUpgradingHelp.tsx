@@ -12,43 +12,49 @@ const shakeAnimation = `
     }
   }
   .shake-animation {
-    animation: shake 4.4s ease-in-out infinite;
+    animation: shake 1.4s ease-in-out infinite;
   }
   @keyframes dotMove {
     0% {
-      left: 6%;
+      left: 4%;
       opacity: 0;
     }
-    6% {
+    5% {
       opacity: 1;
     }
-    28% {
-      left: 33%;
+    18% {
+      left: 20%;
     }
-    52% {
-      left: 60%;
+    34% {
+      left: 36%;
     }
-    78% {
+    50% {
+      left: 54%;
+    }
+    66% {
+      left: 72%;
+    }
+    82% {
       left: 90%;
     }
     92% {
-      left: 92%;
+      left: 96%;
       opacity: 1;
     }
     100% {
-      left: 92%;
+      left: 96%;
       opacity: 0;
     }
   }
   .dot-move-animation {
-    animation: dotMove 2.5s ease-in-out infinite;
+    animation: dotMove 3s ease-in-out infinite;
   }
   @keyframes nodeHighlight1 {
-    0%, 4%, 18%, 100% {
+    0%, 10%, 24%, 100% {
       opacity: 0.55;
       transform: translateY(0);
     }
-    8%, 14% {
+    10%, 20% {
       opacity: 1;
       transform: translateY(-2px);
     }
@@ -64,36 +70,68 @@ const shakeAnimation = `
     }
   }
   @keyframes nodeHighlight3 {
-    0%, 48%, 62%, 100% {
+    0%, 42%, 56%, 100% {
       opacity: 0.55;
       transform: translateY(0);
     }
-    52%, 58% {
+    46%, 52% {
       opacity: 1;
       transform: translateY(-2px);
     }
   }
   @keyframes nodeHighlight4 {
+    0%, 58%, 72%, 100% {
+      opacity: 0.55;
+      transform: translateY(0);
+    }
+    62%, 68% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+  @keyframes nodeHighlight5 {
     0%, 74%, 88%, 100% {
       opacity: 0.55;
       transform: translateY(0);
     }
-    82%, 84% {
+    78%, 84% {
       opacity: 1;
       transform: translateY(-2px);
     }
   }
   .node-highlight-1 {
-    animation: nodeHighlight1 2.5s ease-in-out infinite;
+    animation: nodeHighlight1 3s ease-in-out infinite;
   }
   .node-highlight-2 {
-    animation: nodeHighlight2 2.5s ease-in-out infinite;
+    animation: nodeHighlight2 3s ease-in-out infinite;
   }
   .node-highlight-3 {
-    animation: nodeHighlight3 2.5s ease-in-out infinite;
+    animation: nodeHighlight3 3s ease-in-out infinite;
   }
   .node-highlight-4 {
-    animation: nodeHighlight4 2.5s ease-in-out infinite;
+    animation: nodeHighlight4 3s ease-in-out infinite;
+  }
+  .node-highlight-5 {
+    animation: nodeHighlight5 3s ease-in-out infinite;
+  }
+  .node-hover-highlight:hover {
+    opacity: 1 !important;
+    transform: translateY(-2px) !important;
+  }
+  @keyframes questionHalo {
+    0% {
+      box-shadow: 0 0 0 0 rgba(21, 94, 239, 0.25);
+    }
+
+    70% {
+      box-shadow: 0 0 0 7px rgba(21, 94, 239, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(21, 94, 239, 0);
+    }
+  }
+  .question-halo {
+    animation: questionHalo 1.8s ease-in-out infinite;
   }
 `;
 export interface CognitiveUpgradingNode {
@@ -126,6 +164,11 @@ const cognitiveUpgradingWorkflowNodes: CognitiveUpgradingNode[] = [
     labelKey: 'workflow.llm',
   },
   {
+    type: 'end',
+    icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
+    labelKey: 'workflow.end',
+  },
+  {
     type: 'memory-write',
     icon: 'rb:bg-[url("@/assets/images/workflow/memory-write.svg")]',
     labelKey: 'workflow.memory-write',
@@ -155,13 +198,13 @@ const CognitiveUpgradingHelp = () => {
       <div className="rb:font-medium rb:mb-3 rb:text-[14px]">{t('workflow.cognitiveUpgrading.usageHelp')}</div>
       <div className="rb:bg-[#F9F9F9] rb:rounded-xl rb:py-3 rb:px-3.5">
         <div className="rb:text-center rb:mb-3">{t('workflow.cognitiveUpgrading.recommendedUsage')}</div>
-        <div className="rb:relative rb:grid rb:grid-cols-7 rb:gap-1">
+        <div className="rb:relative rb:grid rb:grid-cols-9 rb:gap-1">
           <span className="rb:absolute rb:top-3 rb:size-2 rb:rounded-full rb:bg-[#155EEF] dot-move-animation"></span>
           {cognitiveUpgradingWorkflowNodes.map((node, index) => (
             <React.Fragment key={node.type}>
               <Flex 
                 vertical gap={4} align="center"
-                className={`rb:text-[center] rb:transition-[opacity_.3s] node-highlight-${index + 1}`}
+                className={`rb:text-[center] rb:transition-[all_.3s] node-highlight-${index + 1} node-hover-highlight`}
               >
                 <div className={`rb:size-6.5 rb:bg-cover ${node.icon}`}></div>
                 <span className="rb:text-[10px] rb:text-center">{t(node.labelKey)}</span>
@@ -195,7 +238,9 @@ const CognitiveUpgradingHelp = () => {
           trigger="click"
           placement="right"
         >
-          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>
+          <div className="rb:relative rb:size-4 rb:shrink-0">
+            <div className="rb:relative rb:rounded-full question-halo rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:z-10"></div>
+          </div>
         </Popover>
         <span 
           className="rb:bg-[#155EEF] rb:text-[#FFFFFF] rb:text-[10px] rb:px-1.5 rb:py-0.75 rb:rounded-md! rb:inline-block shake-animation"

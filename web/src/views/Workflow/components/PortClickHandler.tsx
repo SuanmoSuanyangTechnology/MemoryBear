@@ -13,7 +13,7 @@ import dayjs from 'dayjs';
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
 import { filterNodeByAppType } from '../utils';
 import type { Application } from '@/views/ApplicationManagement/types'
-// import CognitiveUpgradingHelp from './CognitiveUpgradingHelp';
+import CognitiveUpgradingHelp from './CognitiveUpgradingHelp';
 
 
 // Shared helper: adjust loop/iteration container size to fit child nodes
@@ -398,18 +398,18 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, a
         return (
           <div key={category.category}>
             
-            {/* {category.category === 'cognitiveUpgrading'
+            {category.category === 'cognitiveUpgrading'
               ? <Flex align="center" gap={4} className="rb:mb-2!">
                 <div className="rb:font-semibold rb:text-[12px] rb:leading-4.5 rb:pl-1">
                   {t(`workflow.${category.category}.label`)}
                 </div>
                 <CognitiveUpgradingHelp />
               </Flex>
-              : */}
+              :
               <div className="rb:font-semibold rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:pl-1">
                         {category.category === 'cognitiveUpgrading' ? t(`workflow.${category.category}.label`) : t(`workflow.${category.category}`)}
               </div>
-            {/* } */}
+            }
             <Flex gap={6} vertical>
               {filteredNodes.map((nodeType) => (
                 <Flex
