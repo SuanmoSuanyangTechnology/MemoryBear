@@ -81,7 +81,7 @@ const NodeLibrary: FC<NodeLibraryProps> = ({
                       </Flex>
                       : */}
                       <div className="rb:font-semibold rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:pl-1">
-                        {t(`workflow.${category.category}`)}
+                        {category.category === 'cognitiveUpgrading' ? t(`workflow.${category.category}.label`) : t(`workflow.${category.category}`)}
                       </div>
                     {/* } */}
                     <Flex gap={6} vertical>
