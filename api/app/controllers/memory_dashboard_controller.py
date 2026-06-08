@@ -62,7 +62,10 @@ def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[s
                 kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
             )
     except Exception as _e:
-        api_logger.warning(f"后台任务派发失败（不影响已返回响应）: {_e}")
+        api_logger.warning(
+            f"后台任务派发失败（不影响已返回响应）: {_e}",
+            exc_info=True,
+        )
 
 router = APIRouter(
     prefix="/dashboard",

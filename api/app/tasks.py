@@ -173,17 +173,17 @@ def get_sync_redis_client() -> Optional[redis.StrictRedis]:
 def warmup_sync_redis_pool() -> bool:
     """应用启动时预热 Redis 连接池。
 
-    构造连接池并发一次 ``PING`` 完成 TCP 握手，把"首次请求需要建池"的 50–200ms
-    冷启动开销前置到启动阶段。任何失败都只记录日志，不影响进程启动。
+    复用 ``get_sync_redis_client`` 构造客户端，再发一次 ``PING`` 完成 TCP 握手，
+    把"首次请求需要建池"的 50–200ms 冷启动开销前置到启动阶段。
+    任何失败都只记录日志，不影响进程启动。
 
     Returns:
         bool: 预热成功返回 True；失败或 Redis 不可用返回 False。
     """
     try:
-        pool = _get_or_create_redis_pool()
-        if pool is None:
+        client = get_sync_redis_client()
+        if client is None:
             return False
-        client = redis.StrictRedis(connection_pool=pool)
         client.ping()
         logger.info("Sync Redis pool warmed up (PING ok)")
         return True
