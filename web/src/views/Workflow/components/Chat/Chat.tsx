@@ -59,9 +59,10 @@ interface ChatProps {
   onOpenChange: (open: boolean) => void;
   /** Function to save workflow configuration */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  refreshCache: () => void;
 }
 const Chat = forwardRef<ChatRef, ChatProps>(({
-  appId, graphRef, features, appType, open, onOpenChange, handleSave
+  appId, graphRef, features, appType, open, onOpenChange, handleSave, refreshCache
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
@@ -651,6 +652,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
       }).finally(() => {
         setLoading(false)
         setStreamLoading(false)
+        refreshCache()
       })
   }
 

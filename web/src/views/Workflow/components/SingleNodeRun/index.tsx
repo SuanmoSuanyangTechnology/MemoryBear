@@ -44,9 +44,10 @@ interface SingleNodeRunProps {
   selectedNode: Node
   appId: string
   variableList: Suggestion[]
+  refreshCache: () => void;
 }
 
-const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, appId, variableList }) => {
+const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, appId, variableList, refreshCache }) => {
   const { t } = useTranslation()
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
@@ -146,6 +147,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
         nodeRun(appId, nodeData.id, { inputs: params, stream: false })
           .then(res => {
             setResult(res as RunResult)
+            refreshCache()
           })
           .catch(err => {
             setResult({ status: 'failed', error: err.message })
