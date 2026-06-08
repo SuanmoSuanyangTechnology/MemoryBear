@@ -379,6 +379,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'select',
             options: [
               { label: 'ReAct', value: 'react' },
+              { label: 'FunctionCalling', value: 'function_calling' },
             ],
             defaultValue: 'react',
           },
