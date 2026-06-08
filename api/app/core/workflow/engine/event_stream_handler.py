@@ -178,12 +178,12 @@ class EventStreamHandler:
                 for i in range(end_info.cursor, target_segment_idx):
                     seg = end_info.outputs[i]
                     if not seg.is_variable:
-                        yield {"event": "message", "data": {"content": seg.literal}}
+                        yield {"event": "message", "data": {"content": self._mask(seg.literal)}}
                     else:
                         # Another variable segment before our target - resolve from pool
                         try:
                             val = self.variable_pool.get_literal(seg.literal)
-                            yield {"event": "message", "data": {"content": val}}
+                            yield {"event": "message", "data": {"content": self._mask(val)}}
                         except Exception:
                             pass
                 # Advance cursor to the target variable segment
@@ -191,6 +191,14 @@ class EventStreamHandler:
 
             current_output = end_info.outputs[end_info.cursor]
             if current_output.is_variable and current_output.depends_on_scope(node_id):
+                # Field-level matching: route real-time chunks only to the segment
+                # that references the same field. Chunks carrying "reasoning_content"
+                # flow to {{node.reasoning_content}}, "output" to {{node.output}}.
+                chunk_field = data.get("field", "output")
+                segment_field = current_output.get_field() or "output"
+                if chunk_field != segment_field:
+                    return
+
                 if done:
                     # Mark scope as streamed to prevent duplicate emission in emit_activate_chunk
                     self.coordinator.mark_scope_streamed(node_id)
@@ -201,7 +209,7 @@ class EventStreamHandler:
                     yield {
                         "event": "message",
                         "data": {
-                            "content": chunk
+                            "content": self._mask(chunk)
                         }
                     }
         else:
@@ -216,53 +224,9 @@ class EventStreamHandler:
                     yield {
                         "event": "message",
                         "data": {
-                            "content": chunk
+                            "content": self._mask(chunk)
                         }
                     }
-
-        end_info = self.coordinator.current_activate_end_info
-        if not end_info or end_info.cursor >= len(end_info.outputs):
-            return
-
-        # Emit any activated literal-text segments before the target variable
-        # so the cursor can reach the next variable segment during streaming.
-        while end_info.cursor < len(end_info.outputs):
-            seg = end_info.outputs[end_info.cursor]
-            if seg.is_variable:
-                break
-            if not seg.activate and not end_info.force:
-                break
-            yield {
-                "event": "message",
-                "data": {"content": self._mask(seg.literal)}
-            }
-            end_info.cursor += 1
-
-        if end_info.cursor >= len(end_info.outputs):
-            self.coordinator.pop_current_activate_end()
-            return
-
-        current_output = end_info.outputs[end_info.cursor]
-        if current_output.is_variable and current_output.depends_on_scope(node_id):
-            # Field-level matching: route real-time chunks only to the segment
-            # that references the same field. Chunks carrying "reasoning_content"
-            # flow to {{node.reasoning_content}}, "output" to {{node.output}}.
-            chunk_field = data.get("field", "output")
-            segment_field = current_output.get_field() or "output"
-            if chunk_field != segment_field:
-                return
-
-            if data.get("done"):
-                end_info.cursor += 1
-                if end_info.cursor >= len(end_info.outputs):
-                    self.coordinator.pop_current_activate_end()
-            else:
-                yield {
-                    "event": "message",
-                    "data": {
-                        "content": self._mask(data.get("chunk"))
-                    }
-                }
 
     async def handle_node_error_event(self, data: dict):
         """
