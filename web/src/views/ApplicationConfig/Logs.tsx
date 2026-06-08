@@ -203,7 +203,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
     },
   ]
   const isHasAnnotations = useMemo(() => {
-    return application.type !== 'multi_agent' && source !== 'sharing'
+    return ['multi_agent', 'pure_workflow'].includes(application?.type as string) && source !== 'sharing'
   }, [source, application.type])
   return (
     <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
