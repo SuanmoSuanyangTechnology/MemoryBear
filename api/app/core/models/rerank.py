@@ -30,6 +30,7 @@ class RedBearRerank(BaseDocumentCompressor):
             self,
             documents: Sequence[Document],
             query: str,
+            topn: Optional[int] = 100,
             callbacks: Optional[Callbacks] = None,
     ) -> Sequence[Document]:
         """
@@ -44,7 +45,7 @@ class RedBearRerank(BaseDocumentCompressor):
             A sequence of compressed documents.
         """
         compressed = []
-        for res in self.rerank(documents, query):
+        for res in self.rerank(documents, query, top_n=topn):
             doc = documents[res["index"]]
             doc_copy = Document(doc.page_content, metadata=deepcopy(doc.metadata))
             doc_copy.metadata["relevance_score"] = res["relevance_score"]
