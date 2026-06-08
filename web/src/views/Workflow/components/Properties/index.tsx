@@ -13,7 +13,7 @@ import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type M
 import type { NodeConfig, NodeProperties, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
-import Knowledge from './Knowledge/Knowledge';
+import Knowledge from '@/components/Knowledge';
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import VariableSelect from './VariableSelect';
 import ParamsList from './ParamsList';
@@ -655,62 +655,51 @@ const Properties: FC<PropertiesProps> = ({
   return (
     <div className={clsx("rb:h-[calc(100vh-88px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical" className="rb:h-full!">
-      <RbCard
-        title={() => (
-          <Flex gap={4} align="center">
-            <div className={clsx("rb:size-6 rb:bg-cover rb:shrink-0", data.icon)}></div>
-            <Form.Item name="name" noStyle>
-              <Input
-                placeholder={t('common.pleaseEnter')}
-                variant="underlined"
-                size="large"
-                onFocus={() => setNameHover(true)}
-                onBlur={() => setNameHover(false)}
-                className={clsx('rb:px-1! rb:py-0!', {
-                  'rb:border-b-[#FFFFFF]!': !nameHover,
-                  'rb:border-b-[#EBEBEB]!': nameHover
-                })}
-              />
-            </Form.Item>
-          </Flex>
-        )}
-        extra={<Space>
-          {!cannotRunNodes.includes(selectedNode?.data?.type) && <Popover content={t('workflow.singleRun')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-            <div
-              className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/workflow/run.svg')]"
-              onClick={handleRun}
-            ></div>
-          </Popover>}
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex> },
-                // { key: 'copy', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></div>, label: t('common.copy') }
-              ],
-              onClick: handleClick
-            }}
-          >
-            <div className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url(@/assets/images/common/dash.svg)]">
-            </div>
-          </Dropdown>
-          <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={blankClick}></div>
-        </Space>}
-        headerType="borderless"
-        headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
-        className="rb:h-full! rb:hover:shadow-none!"
-        bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:px-3! rb:pt-0! rb:pb-3!')}
-      >
-          <Form.Item name="name" label={t('workflow.nodeName')}>
-            <Input
-              placeholder={t('common.pleaseEnter')}
-              onChange={(e) => {
-                updateNodeLabel(e.target.value);
+        <RbCard
+          title={() => (
+            <Flex gap={4} align="center">
+              <div className={clsx("rb:size-6 rb:bg-cover rb:shrink-0", data.icon)}></div>
+              <Form.Item name="name" noStyle>
+                <Input
+                  placeholder={t('common.pleaseEnter')}
+                  variant="underlined"
+                  size="large"
+                  onFocus={() => setNameHover(true)}
+                  onBlur={() => setNameHover(false)}
+                  className={clsx('rb:px-1! rb:py-0!', {
+                    'rb:border-b-[#FFFFFF]!': !nameHover,
+                    'rb:border-b-[#EBEBEB]!': nameHover
+                  })}
+                />
+              </Form.Item>
+            </Flex>
+          )}
+          extra={<Space>
+            {!cannotRunNodes.includes(selectedNode?.data?.type) && <Popover content={t('workflow.singleRun')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/workflow/run.svg')]"
+                onClick={handleRun}
+              ></div>
+            </Popover>}
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex> },
+                  // { key: 'copy', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></div>, label: t('common.copy') }
+                ],
+                onClick: handleClick
               }}
-            />
-          </Form.Item>
-          <Form.Item name="id" label="ID">
-            <Input disabled />
-          </Form.Item>
+            >
+              <div className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url(@/assets/images/common/dash.svg)]">
+              </div>
+            </Dropdown>
+            <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={blankClick}></div>
+          </Space>}
+          headerType="borderless"
+          headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
+          className="rb:h-full! rb:hover:shadow-none!"
+          bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:p-0! rb:pb-3!')}
+        >
           <Tabs
             items={[
               { key: 'setting', label: t('workflow.config.setting') },
@@ -721,7 +710,7 @@ const Properties: FC<PropertiesProps> = ({
             size="small"
             className={styles.tabs}
           />
-          <div className="rb:h-[calc(100%-52px)] rb:overflow-y-auto!">
+          <div className="rb:h-[calc(100%-54px)] rb:overflow-y-auto!">
             {activeKey === 'setting' &&
               <>
                 <div className="rb:px-3!">
@@ -899,7 +888,7 @@ const Properties: FC<PropertiesProps> = ({
                                     key={key}
                                     name={key}
                                   >
-                                    <Knowledge />
+                                    <Knowledge variant="workflow" />
                                   </Form.Item>
                                 )
                               }

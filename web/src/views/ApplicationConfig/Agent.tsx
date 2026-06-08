@@ -26,11 +26,11 @@ import type {
   FeaturesConfigForm
 } from './types'
 import type { Variable } from './components/VariableList/types'
-import type { KnowledgeConfig } from './components/Knowledge/types'
+import type { KnowledgeConfig, KnowledgeConfigForm } from '@/components/Knowledge/types'
 import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
 import { saveAgentConfig } from '@/api/application'
-import Knowledge from './components/Knowledge/Knowledge'
+import Knowledge from '@/components/Knowledge'
 import VariableList from './components/VariableList/VariableList'
 import { getApplicationConfig } from '@/api/application'
 import { memoryConfigListUrl } from '@/api/memory'
@@ -225,7 +225,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       knowledge_retrieval: knowledge_bases.length > 0 ? {
         ...data.knowledge_retrieval,
         ...knowledgeRest,
-        knowledge_bases: knowledge_bases.map(item => ({
+        knowledge_bases: knowledge_bases.map((item: KnowledgeConfigForm) => ({
           kb_id: item.kb_id || item.id,
           retrieve_type: item.retrieve_type,
           top_k: item.top_k,
