@@ -410,19 +410,39 @@ class UserMemoryService:
                 }
             
             # 构建响应数据（转换时间为毫秒时间戳）
-            # meta_data 只暴露四个核心字段
-            _META_FIELDS = ("goals", "traits", "interests", "core_facts")
+            # 字段优先级：other_name > aliases > relations > goals > core_facts
+            # > interests > traits > beliefs_or_stances > anchors
+            # 默认最多展示 6 个非空字段；other_name 即使为空也必显示并占 1 个名额。
+            TOP_FIELDS = ("other_name", "aliases")
+            META_FIELDS = (
+                "relations", "goals", "core_facts", "interests",
+                "traits", "beliefs_or_stances", "anchors",
+            )
+            ALWAYS_INCLUDE = {"other_name"}
+            MAX_VISIBLE = 6
+
             raw_meta = end_user_info_record.meta_data or {}
-            filtered_meta = {k: raw_meta[k] for k in _META_FIELDS if k in raw_meta}
+            candidates = (
+                [(f, getattr(end_user_info_record, f), True) for f in TOP_FIELDS]
+                + [(f, raw_meta.get(f), False) for f in META_FIELDS]
+            )
+
+            selected_top: Dict[str, Any] = {}
+            filtered_meta: Dict[str, Any] = {}
+            for field, value, is_top in candidates:
+                if len(selected_top) + len(filtered_meta) >= MAX_VISIBLE:
+                    break
+                if not value and field not in ALWAYS_INCLUDE:
+                    continue
+                (selected_top if is_top else filtered_meta)[field] = value
 
             response_data = {
                 "end_user_info_id": str(end_user_info_record.id),
                 "end_user_id": str(end_user_info_record.end_user_id),
-                "other_name": end_user_info_record.other_name,
-                "aliases": end_user_info_record.aliases,
+                **selected_top,
                 "meta_data": filtered_meta,
                 "created_at": datetime_to_timestamp(end_user_info_record.created_at),
-                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at),
             }
             
             logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
