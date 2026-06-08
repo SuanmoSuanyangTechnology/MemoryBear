@@ -142,9 +142,9 @@ const MetadataDrawer = forwardRef<MetadataDrawerRef>((_props, ref) => {
                       <span className="rb:font-medium">{item.name}</span>
                       <Tag color="blue">{item.type}</Tag>
                     </div>
-                    <span className="rb:text-[12px] rb:text-[#5B6167]">
+                    {/* <span className="rb:text-[12px] rb:text-[#5B6167]">
                       {item.count || 0} {t('knowledgeBase.metadata.valueCount')}
-                    </span>
+                    </span> */}
                     <Space size={8} className="rb:absolute rb:right-0 rb:hidden! rb:group-hover:inline-flex! rb:bg-white rb:p-2! rb:rounded-tr-lg rb:rounded-br-lg">
                       <div
                         className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/edit.svg')]"
@@ -192,12 +192,7 @@ const MetadataDrawer = forwardRef<MetadataDrawerRef>((_props, ref) => {
                       <span className="rb:font-medium">{item.name}</span>
                       <Tag color="blue">{item.type}</Tag>
                     </div>
-                    {builtinEnabled
-                      ? <span className="rb:text-[12px] rb:text-[#5B6167]">
-                        {item.count || 0} {t('knowledgeBase.metadata.valueCount')}
-                      </span>
-                      : t('knowledgeBase.metadata.builtinDisabled')
-                    }
+                    {!builtinEnabled && t('knowledgeBase.metadata.builtinDisabled')}
                   </Flex>
                 ))}
               </Flex>
