@@ -1250,11 +1250,16 @@ class AgentRunService:
                     yield self._format_sse_event("tool_end", {"step_id": chunk.get("step_id"), "name": chunk["name"], "output": chunk.get("output"), "meta": chunk.get("meta")})
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
                     yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
-                else:
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    yield self._format_sse_event("agent_log", chunk)
+                elif isinstance(chunk, str):
                     full_content += chunk
                     yield self._format_sse_event("message", {"content": chunk})
                     if tts_task is not None:
                         await text_queue.put(chunk)
+                elif isinstance(chunk, dict):
+                    event_type = str(chunk.get("type") or "unknown")
+                    yield self._format_sse_event(event_type, chunk)
 
             # 文本结束，通知 TTS
             if tts_task is not None:
