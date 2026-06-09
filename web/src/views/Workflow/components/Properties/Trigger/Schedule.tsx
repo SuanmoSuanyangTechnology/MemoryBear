@@ -144,8 +144,9 @@ const Schedule: FC = () => {
   };
 
   const calculateNextSchedules = () => {
-    const { config = {} } = values || {};
-    const { cron, frequency, minute, time, week_days, month_days } = config;
+
+    console.log('calculateNextSchedules', values)
+    const { cron, frequency, minute, time, week_days, month_days } = values || {};
     const schedules: Array<{ date: string; display: string }> = [];
     
     if (!frequency && !cron) {

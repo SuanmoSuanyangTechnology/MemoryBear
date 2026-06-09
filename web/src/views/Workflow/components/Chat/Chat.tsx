@@ -59,9 +59,10 @@ interface ChatProps {
   onOpenChange: (open: boolean) => void;
   /** Function to save workflow configuration */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  refreshCache: () => void;
 }
 const Chat = forwardRef<ChatRef, ChatProps>(({
-  appId, graphRef, features, appType, open, onOpenChange, handleSave
+  appId, graphRef, features, appType, open, onOpenChange, handleSave, refreshCache
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
@@ -100,6 +101,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     } else {
       handleClose(false)
     }
+    getVariables()
   }, [open])
 
   useEffect(() => {
@@ -163,6 +165,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
     }
+    console.log('startNodes', allVariables)
     setVariables([...allVariables])
     toolbarRef.current?.setVariables([...allVariables])
   }
@@ -651,6 +654,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
       }).finally(() => {
         setLoading(false)
         setStreamLoading(false)
+        refreshCache()
       })
   }
 
@@ -744,7 +748,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         extra={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={() => handleClose()}></div>}
         headerType="borderless"
         headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
-        className="rb:h-full! rb:hover:shadow-none!"
+        className="rb:h-full!"
         bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
     >
       <ChatContent

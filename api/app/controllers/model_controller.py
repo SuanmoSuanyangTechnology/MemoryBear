@@ -86,7 +86,7 @@ def get_model_list(
             unique_flat_capability = list(dict.fromkeys(flat_capability))
             capability_list = unique_flat_capability
 
-        api_logger.error(f"获取模型type_list: {type_list}")
+        api_logger.info(f"获取模型type_list: {type_list}")
         query = model_schema.ModelConfigQuery(
             type=type_list,
             provider=provider,

@@ -379,8 +379,10 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'select',
             options: [
               { label: 'ReAct', value: 'react' },
+              { label: 'FunctionCalling', value: 'function_calling' },
             ],
             defaultValue: 'react',
+            required: true,
           },
           model: {
             type: 'define',
@@ -388,6 +390,7 @@ export const nodeLibrary: NodeLibrary[] = [
               acc[key] = value.defaultValue;
               return acc;
             }, {} as Record<string, any>),
+            required: true,
           },
           tools: {
             type: 'toolList',
@@ -397,7 +400,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
+            required: true,
           },
 
           context: {
@@ -408,7 +412,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
+            required: true,
           },
           max_iterations: {
             type: 'slider',
@@ -593,17 +598,19 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           delivery_method: {
             type: 'define',
-            defaultValue: []
+            defaultValue: [],
+            required: true,
           },
           content: {
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'common.pleaseEnter'
+            placeholder: 'common.pleaseEnter',
           },
           actions: {
             type: 'define',
-            defaultValue: []
+            defaultValue: [],
+            required: true,
           },
           timeout: {
             type: 'timeout',
@@ -1259,9 +1266,9 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       groups: defaultAbsolutePortGroups,
       items: [
         defaultPortItems[0],
-        ...(['TIMEOUT'].map((_text, index) => ({
+        ...(['TIMEOUT'].map((text, index) => ({
           group: 'right',
-          id: `CASE${index + 1}`,
+          id: text,
           args: {
             ...portArgs,
             y: portItemArgsY * index + conditionNodePortItemArgsY,

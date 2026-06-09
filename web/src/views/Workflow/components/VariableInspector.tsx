@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Collapse, Flex, Input, InputNumber, Select, Checkbox, Button, Form, message } from 'antd';
 import { CodeOutlined } from '@ant-design/icons';
 import clsx from 'clsx';
@@ -35,6 +35,11 @@ interface VariableInspectorProps {
   runOpen: boolean;
 }
 
+export interface VariableInspectorRef {
+  refresh: () => void;
+  clearCache: () => void;
+}
+
 interface VariableData {
   name: string;
   value: any;
@@ -42,13 +47,13 @@ interface VariableData {
   nodeKey?: string;
 }
 
-const VariableInspector: FC<VariableInspectorProps> = ({ 
+const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProps>(({ 
   selectedNode,
   config,
   onClose,
   collapsed,
   runOpen,
- }) => {
+ }, ref) => {
   const { t } = useTranslation();
   const { id } = useParams()
   const [form] = Form.useForm()
@@ -96,6 +101,11 @@ const VariableInspector: FC<VariableInspectorProps> = ({
     getVariables()
   }, [id])
 
+  useImperativeHandle(ref, () => ({
+    refresh: getVariables,
+    clearCache: handleClearCache,
+  }))
+
   const getVariables = () => {
     if (!id) return
     getWorkflowDebugState(id)
@@ -122,8 +132,6 @@ const VariableInspector: FC<VariableInspectorProps> = ({
           })
         })
         setVariables(newVariables);
-
-        console.log('VariableInspector allVariables', newVariables, flattenVariables(newVariables))
         
         if (selectedVariable) {
           const updatedVariable = flattenVariables(newVariables).find(
@@ -131,6 +139,7 @@ const VariableInspector: FC<VariableInspectorProps> = ({
                  v.nodeKey === selectedVariable.nodeKey
           );
           if (updatedVariable) {
+            form.setFieldValue([updatedVariable.nodeKey, updatedVariable.name], updatedVariable.value);
             setSelectedVariable(updatedVariable);
           }
         }
@@ -243,28 +252,39 @@ const VariableInspector: FC<VariableInspectorProps> = ({
     );
   };
 
-  const getNodeIcon = (nodeKey: string): string | null => {
+  const getNodeIcon = (nodeKey: string): {
+    icon: string | null;
+    name: string;
+  } | null => {
     const nodeInConfig = config?.nodes.find(n => n.id === nodeKey);
+    const nodeInfo: {
+      icon: string | null;
+      name: string;
+    } = {
+      icon: null,
+      name: nodeInConfig?.name || nodeKey,
+    }
     if (!nodeInConfig) return null;
     for (const category of nodeLibrary) {
       const nodeInLib = category.nodes.find(n => n.type === nodeInConfig.type);
-      if (nodeInLib?.icon) return nodeInLib.icon;
+      if (nodeInLib?.icon) nodeInfo.icon = nodeInLib.icon;
     }
-    return null;
+    return nodeInfo;
   };
 
   const renderNodeGroup = (nodeKey: string) => {
     const items = variables[nodeKey] || [];
     
     if (!Object.keys(items).length) return null;
-    const nodeIcon = getNodeIcon(nodeKey);
+    const nodeInfo = getNodeIcon(nodeKey);
 
+    if (!nodeInfo) return null;
     return (
       <Collapse.Panel
         header={
           <div className="rb:flex rb:items-center rb:gap-2">
-            {nodeIcon && <div className={clsx("rb:size-5 rb:bg-cover", nodeIcon)} />}
-            <span className="rb:text-sm rb:text-[#1D2129]">{nodeKey}</span>
+            {nodeInfo.icon && <div className={clsx("rb:size-5 rb:bg-cover", nodeInfo.icon)} />}
+            <span className="rb:text-sm rb:text-[#1D2129]">{nodeInfo.name}</span>
           </div>
         }
         key={nodeKey}
@@ -328,9 +348,9 @@ const VariableInspector: FC<VariableInspectorProps> = ({
                       {selectedVariable.nodeKey && (
                         <>
                           {getNodeIcon(selectedVariable.nodeKey) && (
-                            <div className={clsx("rb:size-3.5 rb:bg-cover", getNodeIcon(selectedVariable.nodeKey))} />
+                            <div className={clsx("rb:size-3.5 rb:bg-cover", getNodeIcon(selectedVariable.nodeKey)?.icon)} />
                           )}
-                          {selectedVariable.nodeKey} /
+                          {getNodeIcon(selectedVariable.nodeKey)?.name} /
                         </>
                       )}
                       <span className="rb:text-sm rb:font-medium rb:text-[#1D2129]">{selectedVariable.name}</span>
@@ -352,14 +372,22 @@ const VariableInspector: FC<VariableInspectorProps> = ({
                 </Flex>
               </Form>
             ) : (
-              <div className="rb:h-full rb:flex rb:flex-col rb:items-center rb:justify-center rb:text-center">
-                <div className="rb:w-12 rb:h-12 rb:bg-[#F0F1F5] rb:rounded-full rb:flex rb:items-center rb:justify-center rb:mb-3">
-                  <CodeOutlined className="rb:text-[#BBBFC4] rb:text-xl" />
-                </div>
-                <div className="rb:text-xs rb:text-[#BBBFC4]">
-                  {t('workflow.selectVariable')}
-                </div>
-              </div>
+              <Flex vertical justify="center" className="rb:h-full!">
+                <Flex justify="end">
+                  <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/close_grey.svg')]"
+                    onClick={onClose}
+                  ></div>
+                </Flex>
+
+                <Flex vertical align="center" justify="center" className="rb:flex-1 rb:text-center">
+                  <div className="rb:w-12 rb:h-12 rb:bg-[#F0F1F5] rb:rounded-full rb:flex rb:items-center rb:justify-center rb:mb-3">
+                    <CodeOutlined className="rb:text-[#BBBFC4] rb:text-xl" />
+                  </div>
+                  <div className="rb:text-xs rb:text-[#BBBFC4]">
+                    {t('workflow.selectVariable')}
+                  </div>
+                </Flex>
+              </Flex>
             )}
           </div>
         </Flex>
@@ -376,6 +404,6 @@ const VariableInspector: FC<VariableInspectorProps> = ({
       }
     </div>
   );
-};
+});
 
 export default VariableInspector;

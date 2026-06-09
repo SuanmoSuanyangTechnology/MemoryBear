@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-06-05 13:33:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 13:38:34
+ * @Last Modified time: 2026-06-08 09:58:25
  */
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -183,14 +183,6 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
           <Button
             type="text"
             onClick={handleStartEdit}
-            icon={
-              <span
-                className="rb:inline-block rb:w-4 rb:h-4 rb:bg-cover rb:mr-1"
-                style={{
-                  backgroundImage: `url('@/assets/images/common/edit.svg')`,
-                }}
-              />
-            }
           >
             {t('common.edit')}
           </Button>
