@@ -61,6 +61,8 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
   const [selectedVariable, setSelectedVariable] = useState<VariableData | null>(null);
   const formValues = Form.useWatch([], form);
 
+  console.log('VariableInspector config', config)
+
   const handleUpdateCache = useCallback((values: Record<string, any>) => {
     if (!id || !selectedVariable || !selectedVariable?.nodeKey || !values || !Object.keys(values).length) return;
 
@@ -284,13 +286,13 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
     if (!Object.keys(items).length) return null;
     const nodeInfo = getNodeIcon(nodeKey);
 
-    if (!nodeInfo) return null;
+    if (!nodeInfo && !['conversation'].includes(nodeKey)) return null;
     return (
       <Collapse.Panel
         header={
           <div className="rb:flex rb:items-center rb:gap-2">
-            {nodeInfo.icon && <div className={clsx("rb:size-5 rb:bg-cover", nodeInfo.icon)} />}
-            <span className="rb:text-sm rb:text-[#1D2129]">{nodeInfo.name}</span>
+            {nodeInfo?.icon !== 'conversation' && nodeInfo?.icon && <div className={clsx("rb:size-5 rb:bg-cover", nodeInfo.icon)} />}
+            <span className="rb:text-sm rb:text-[#1D2129]">{nodeInfo?.name || nodeKey.toUpperCase()}</span>
           </div>
         }
         key={nodeKey}
