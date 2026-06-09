@@ -43,7 +43,7 @@ const EnvVariableModal = forwardRef<EnvVariableModalRef, EnvVariableModalProps>(
     if (variable) {
       form.setFieldsValue({
         ...variable,
-        value: '********************'
+        value: variable.value ? '********************' : undefined
       });
       setEditIndex(index);
     } else {

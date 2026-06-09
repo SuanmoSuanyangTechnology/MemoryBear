@@ -90,7 +90,7 @@ const AddEnvVariable = forwardRef<AddEnvVariableRef, AddEnvVariableProps>(({
                     </div>
                   </Flex>
                   <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:wrap-break-word rb:line-clamp-1 rb:max-w-[calc(100%-60px)]">
-                    ********************
+                    {item.value ? '********************' : null}
                   </div>
                   <Flex gap={12} className="rb:absolute rb:right-4 rb:top-[50%] rb:transform-[translateY(-50%)] rb:bg-white">
                     <div
