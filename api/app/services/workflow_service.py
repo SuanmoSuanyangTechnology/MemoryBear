@@ -2579,10 +2579,17 @@ class WorkflowService:
         )
         latest_cache = manager.get_latest_cache(include_inactive=False)
         next_result_data = self._sanitize_cache_result_data(result_data or {})
+        if patches:
+            if latest_cache:
+                patch_base = latest_cache.get("result_data") or {}
+            else:
+                debug_state = self._read_workflow_debug_state(
+                    app_id=app_id, workflow_config=config
+                )
+                debug_nodes = (debug_state.get("snapshot") or {}).get("nodes") or {}
+                patch_base = self._unwrap_typed_group(debug_nodes.get(node_id) or {})
+            next_result_data = self._apply_cache_result_patches(patch_base, patches)
         if not latest_cache:
-            # No existing cache record — create one on-the-fly so that nodes
-            # which are not normally cached (e.g. "start") can still have their
-            # debug output persisted when the user edits it in the UI.
             cache_key = manager.build_cache_key(next_result_data)
             updated = manager.save_cache(
                 cache_key=cache_key,
@@ -2592,25 +2599,31 @@ class WorkflowService:
                 ttl_seconds=None,
             )
         else:
-            if patches:
-                next_result_data = self._apply_cache_result_patches(
-                    latest_cache.get("result_data") or {},
-                    patches,
-                )
             updated = manager.update_latest_cache(
                 result_data=next_result_data,
             )
         if not updated:
             return None
         node_type_maps = self._build_snapshot_type_maps(config)["nodes"]
+        # Build the new snapshot for this node from the patched result_data.
+        # Then merge it with the existing snapshot so fields not covered by
+        # the patch (e.g. user_id, workspace_id on the start node) are kept.
+        new_node_snapshot = self._build_public_node_snapshot_from_cache_result(
+            next_result_data,
+            type_map=node_type_maps.get(node_id),
+        )
+        existing_debug_state = self._read_workflow_debug_state(
+            app_id=app_id, workflow_config=config
+        )
+        existing_node_snapshot = (
+            existing_debug_state.get("snapshot") or {}
+        ).get("nodes", {}).get(node_id) or {}
+        merged_node_snapshot = self._merge_typed_group(existing_node_snapshot, new_node_snapshot)
         self._sync_workflow_debug_state_node(
             app_id=app_id,
             workflow_config=config,
             node_id=node_id,
-            node_snapshot=self._build_public_node_snapshot_from_cache_result(
-            next_result_data,
-            type_map=node_type_maps.get(node_id),
-            ),
+            node_snapshot=merged_node_snapshot,
             source="cache_update",
         )
         serialized = self._serialize_node_cache(updated)
