@@ -2925,6 +2925,9 @@ export const zh = {
         'tool.tool_id': '工具',
         'trigger.trigger_type': '触发器类型',
         'trigger.cron': 'Cron 表达式',
+        'agent.model': '模型',
+        'agent.system_prompt': '指令',
+        'agent.message': '查询',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {

@@ -382,6 +382,7 @@ export const nodeLibrary: NodeLibrary[] = [
               { label: 'FunctionCalling', value: 'function_calling' },
             ],
             defaultValue: 'react',
+            required: true,
           },
           model: {
             type: 'define',
@@ -389,6 +390,7 @@ export const nodeLibrary: NodeLibrary[] = [
               acc[key] = value.defaultValue;
               return acc;
             }, {} as Record<string, any>),
+            required: true,
           },
           tools: {
             type: 'toolList',
@@ -398,7 +400,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
+            required: true,
           },
 
           context: {
@@ -409,7 +412,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
+            required: true,
           },
           max_iterations: {
             type: 'slider',
