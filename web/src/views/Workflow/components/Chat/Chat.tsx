@@ -23,7 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App, Flex, Button } from 'antd'
+import { App, Flex, Button, type ButtonProps } from 'antd'
 import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
@@ -302,7 +302,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           actions?: {
             id: string;
             label: string;
-            variant: string;
+            variant: ButtonProps['type'];
           }[];
           timeout_at?: number;
           agent_log?: Record<string, any>;

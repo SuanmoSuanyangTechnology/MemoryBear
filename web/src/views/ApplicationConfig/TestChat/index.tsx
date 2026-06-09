@@ -6,7 +6,7 @@
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App } from 'antd'
+import { App, type ButtonProps } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -80,7 +80,7 @@ interface NodeData {
   actions?: {
     id: string;
     label: string;
-    variant: string;
+    variant: ButtonProps['type'];
   }[];
   timeout_at?: number;
   agent_log?: any;
