@@ -68,6 +68,7 @@ class MemoryService:
             workspace_id: str | None = None,
             storage_type: str = "neo4j",
             user_rag_memory_id: str | None = None,
+            conversation_id: str | None = None,
             language: str = "zh",
     ):
         config_service = MemoryConfigService(db)
@@ -90,6 +91,7 @@ class MemoryService:
             storage_type=StorageType(storage_type),
             user_rag_memory_id=user_rag_memory_id,
             language=language,
+            conversation_id=conversation_id
         )
 
     async def write(
