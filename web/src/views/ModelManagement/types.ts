@@ -346,4 +346,5 @@ export interface Model {
   created_at: number;
   updated_at: number;
   api_keys: ModelApiKey[];
+  is_deprecated: boolean;
 }
