@@ -13,7 +13,7 @@ from langgraph.config import get_stream_writer
 from langgraph.errors import GraphInterrupt
 
 from app.core.config import settings
-from app.core.workflow.node_cache import WorkflowNodeCacheManager
+from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES, WorkflowNodeCacheManager
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
@@ -230,8 +230,6 @@ class BaseNode(ABC):
         return self._get_runtime_options().get("cache_source", "workflow_execution")
 
     def _is_cache_enabled(self) -> bool:
-        from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES
-
         if self._get_runtime_options().get("bypass_node_cache"):
             return False
         execution_config = self.workflow_config.get("execution_config") or {}
