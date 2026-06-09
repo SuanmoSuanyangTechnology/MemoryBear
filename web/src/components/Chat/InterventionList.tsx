@@ -71,7 +71,7 @@ const InterventionItem: React.FC<InterventionItemProps> = ({
           <RenderedForm
             key={intervention.node_id || index}
             content={intervention.rendered_content || ''}
-            formFields={isEditable
+            formFields={(isEditable || isTimeout)
                 ? intervention.form_fields || []
                 : Object.entries(intervention.resolved_form_data || {}).map(([id, value]) => ({ id, default_value: value }))
             }
