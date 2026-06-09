@@ -2955,6 +2955,7 @@ export const zh = {
       formFieldAdd: '添加输入字段',
       saveResponseAs: '保存响应为',
       saveResponseAsPlaceholder: '为此变量命名以便将来引用',
+      prefillMode: '预填充字段模式',
       prefillField: '预填充字段',
       prefillFieldPlaceholder: '用户将最初看到此内容，或留空。',
       addStaticContent: '静态内容',

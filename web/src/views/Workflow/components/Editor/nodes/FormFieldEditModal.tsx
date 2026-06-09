@@ -1,10 +1,11 @@
 import { useState, useImperativeHandle, forwardRef } from 'react'
-import { Form, Input, Button, Flex } from 'antd'
+import { Form, Input } from 'antd'
 import { useTranslation } from 'react-i18next'
 import RbModal from '@/components/RbModal'
 
 import VariableSelect from '../../Properties/VariableSelect'
 import type { Suggestion } from '../plugin/AutocompletePlugin'
+import RadioGroupBtn from '../../Properties/RadioGroupBtn'
 
 const { Item: FormItem } = Form
 
@@ -86,7 +87,7 @@ const FormFieldEditModal = forwardRef<FormFieldEditModalRef, FormFieldEditModalP
       onCancel={onCancel}
       onOk={handleSave}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" size="middle">
         <FormItem
           name="id"
           label={t('workflow.saveResponseAs')}
@@ -98,24 +99,19 @@ const FormFieldEditModal = forwardRef<FormFieldEditModalRef, FormFieldEditModalP
           />
         </FormItem>
 
-        <Flex align="center" gap={8} className="rb:mb-2">
-          <Button 
-            type="link"
-            size="small" 
-            className={prefillMode === 'static' ? '' : 'text-blue-500'}
-            onClick={() => handleModeChange('static')}
-          >
-            {t('workflow.addStaticContent')}
-          </Button>
-          {t('workflow.or')}
-          <Button 
-            type="link"
-            size="small"
-            onClick={() => handleModeChange('variable')}
-          >
-            {`{x}`} {t('workflow.nodeVariable')}
-          </Button>
-        </Flex>
+        <FormItem
+          label={t('workflow.prefillMode')}
+        >
+          <RadioGroupBtn
+            options={[
+              { value: 'static', label: t('workflow.addStaticContent') },
+              { value: 'variable', label: t('workflow.nodeVariable') }
+            ]}
+            value={prefillMode}
+            onChange={(value) => handleModeChange(value as PrefillMode)}
+            type="outer"
+          />
+        </FormItem>
         {prefillMode === 'static' && (
           <FormItem
             name="default_value"

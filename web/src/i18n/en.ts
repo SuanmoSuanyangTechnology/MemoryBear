@@ -2956,6 +2956,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       formFieldEdit: 'Edit Input Field',
       saveResponseAs: 'Save Response As',
       saveResponseAsPlaceholder: 'Name this variable for future reference',
+      prefillMode: 'Prefill Mode',
       prefillField: 'Prefill Field',
       prefillFieldPlaceholder: 'Users will initially see this content, or leave empty.',
       addStaticContent: 'Static Content',
