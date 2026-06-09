@@ -2808,6 +2808,7 @@ export const zh = {
           seconds: '秒',
           selectButtonStyle: '选择按钮样式',
           buttonStyle: '按钮样式',
+          contentExtra: '按 / 插入变量，按 ctr+/ 插入输入字段',
         },
         agent: {
           strategy: 'Agent 策略',
