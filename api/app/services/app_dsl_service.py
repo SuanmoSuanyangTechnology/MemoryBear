@@ -428,11 +428,10 @@ class AppDslService:
             for w in result.warnings:
                 warnings.append(f"[节点警告] {w.node_name or w.node_id}: {w.detail}")
             wf_service = WorkflowService(self.db)
-            if self._has_secret_environment_variables([v.model_dump() for v in result.environment_variables]):
+            raw_env_vars = [v.model_dump() for v in result.environment_variables]
+            if self._has_secret_environment_variables(raw_env_vars):
                 warnings.append("检测到 secret 类型环境变量，导入时其值已清空，请在导入后重新配置。")
-            environment_variables = self._clear_imported_secret_environment_variables(
-                [v.model_dump() for v in result.environment_variables]
-            )
+            environment_variables = self._clear_imported_secret_environment_variables(raw_env_vars)
             if create:
                 wf_service.create_workflow_config(
                     app_id=app_id,
