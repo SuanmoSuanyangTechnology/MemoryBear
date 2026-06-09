@@ -2961,6 +2961,8 @@ export const zh = {
       addStaticContent: '静态内容',
       nodeVariable: '变量',
       or: '或',
+      generateContent: '生成内容',
+      goBack: '返回',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

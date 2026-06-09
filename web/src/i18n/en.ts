@@ -2962,6 +2962,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       addStaticContent: 'Static Content',
       nodeVariable: 'Variable',
       or: 'or',
+      generateContent: 'Generate Content',
+      goBack: 'Go Back',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

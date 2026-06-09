@@ -369,9 +369,11 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                 })()}
               </>}
               {nodeData.type === 'human-intervention' && step === 1 && <>
-                {inputVars.length > 0 &&
-                  <Button type="link" onClick={() => setStep(0)}>{t('common.goBack')}</Button>
-                }
+                <Flex justify="start">
+                  {inputVars.length > 0 &&
+                    <Button type="link" onClick={() => setStep(0)}>{t('workflow.goBack')}</Button>
+                  }
+                </Flex>
                 {/* 渲染后的内容展示 */}
                 {renderedContent && (
                   <div className="rb:mt-4">

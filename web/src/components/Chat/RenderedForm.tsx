@@ -59,6 +59,10 @@ export const renderContent = (
     
     // 尝试从 variables 中获取对应的值
     
+    if (trimmedVarName.split('.').length === 3) {
+      const [namespace, type, ...keys] = trimmedVarName.split('.')
+      return variables?.[namespace]?.[type]?.[keys.join('.')] || match
+    }
     return variables?.[trimmedVarName] || match
   })
   
