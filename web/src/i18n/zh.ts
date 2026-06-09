@@ -2925,6 +2925,9 @@ export const zh = {
         'tool.tool_id': '工具',
         'trigger.trigger_type': '触发器类型',
         'trigger.cron': 'Cron 表达式',
+        'agent.model': '模型',
+        'agent.system_prompt': '指令',
+        'agent.message': '查询',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {
@@ -2952,6 +2955,7 @@ export const zh = {
       formFieldAdd: '添加输入字段',
       saveResponseAs: '保存响应为',
       saveResponseAsPlaceholder: '为此变量命名以便将来引用',
+      prefillMode: '预填充字段模式',
       prefillField: '预填充字段',
       prefillFieldPlaceholder: '用户将最初看到此内容，或留空。',
       addStaticContent: '静态内容',
