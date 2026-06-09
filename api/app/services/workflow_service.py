@@ -3661,19 +3661,20 @@ class WorkflowService:
             history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            self.conversation_service.add_message(
-                conversation_id=conversation_id_uuid,
-                role="user",
-                content=payload.message,
-                meta_data={"files": []}
-            )
-            self.conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conversation_id_uuid,
-                role="assistant",
-                content=annotation_match["answer"],
-                meta_data={"usage": {}}
-            )
+            if conversation_id_uuid:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id_uuid,
+                    role="user",
+                    content=payload.message,
+                    meta_data={"files": []}
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id_uuid,
+                    role="assistant",
+                    content=annotation_match["answer"],
+                    meta_data={"usage": {}}
+                )
 
             # 创建 WorkflowExecution 记录，用于日志显示
             execution = self.create_execution(
@@ -4091,19 +4092,20 @@ class WorkflowService:
             history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            self.conversation_service.add_message(
-                conversation_id=conversation_id_uuid,
-                role="user",
-                content=payload.message,
-                meta_data={"files": []}
-            )
-            self.conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conversation_id_uuid,
-                role="assistant",
-                content=annotation_match["answer"],
-                meta_data={"usage": {}}
-            )
+            if conversation_id_uuid:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id_uuid,
+                    role="user",
+                    content=payload.message,
+                    meta_data={"files": []}
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id_uuid,
+                    role="assistant",
+                    content=annotation_match["answer"],
+                    meta_data={"usage": {}}
+                )
 
             # 创建 WorkflowExecution 记录，用于日志显示
             execution = self.create_execution(
@@ -4649,33 +4651,34 @@ class WorkflowService:
                                     "name": f.get("name"),
                                     "size": f.get("size"),
                                 })
-                        self.conversation_service.add_message(
-                            conversation_id=conversation_id_uuid,
-                            role="user",
-                            content=human_message,
-                            meta_data=human_meta,
-                            sync_memory=False,
-                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                                sync_memory=False,
+                            )
 
-                        # Save an assistant message marked as waiting_human.
-                        # Content is intentionally EMPTY — the intervention UI
-                        # (form, buttons, rendered_content) comes from
-                        # pending_intervention in the conversation API, not
-                        # from the message content itself. The message only
-                        # acts as an anchor so the frontend can locate the
-                        # intervention form in the message list.
-                        # Use the same message_id as workflow_start so the
-                        # frontend's local placeholder and the DB message
-                        # share the same ID. On resume, this message is
-                        # updated in-place with the final output content.
-                        self.conversation_service.add_message(
-                            message_id=message_id,
-                            conversation_id=conversation_id_uuid,
-                            role="assistant",
-                            content="",
-                            meta_data={"waiting_human": True, "execution_id": execution.execution_id},
-                            sync_memory=False,
-                        )
+                            # Save an assistant message marked as waiting_human.
+                            # Content is intentionally EMPTY — the intervention UI
+                            # (form, buttons, rendered_content) comes from
+                            # pending_intervention in the conversation API, not
+                            # from the message content itself. The message only
+                            # acts as an anchor so the frontend can locate the
+                            # intervention form in the message list.
+                            # Use the same message_id as workflow_start so the
+                            # frontend's local placeholder and the DB message
+                            # share the same ID. On resume, this message is
+                            # updated in-place with the final output content.
+                            self.conversation_service.add_message(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content="",
+                                meta_data={"waiting_human": True, "execution_id": execution.execution_id},
+                                sync_memory=False,
+                            )
 
                         # message_id is already saved in execution.context["human_intervention"]["message_id"]
                         # at line ~1653, so resume_intervention_stream can find it there.
