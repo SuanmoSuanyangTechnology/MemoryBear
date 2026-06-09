@@ -1896,6 +1896,44 @@ class WorkflowService:
                 mut=mut,
             )
 
+    async def _apply_start_node_cache_to_variable_pool(
+            self,
+            *,
+            variable_pool,
+            runtime_snapshot: dict[str, Any] | None,
+            workflow_config: WorkflowConfig | None,
+    ) -> None:
+        """Promote start-node cached output fields into sys.* variables.
+
+        When the user edits the start node's output in the debug panel
+        (e.g. changes 'message' to '你是谁'), the value is stored in
+        debug_snapshot.nodes[start_node_id].  This method reads that snapshot
+        and writes the relevant fields back to sys.* so that rerun of any
+        downstream node sees the overridden values.
+        """
+        if not isinstance(runtime_snapshot, dict):
+            return
+        nodes_snapshot = runtime_snapshot.get("nodes") or {}
+        if not isinstance(nodes_snapshot, dict) or not nodes_snapshot:
+            return
+        # Find the start node id from workflow config
+        start_node_id = next(
+            (n.get("id") for n in (getattr(workflow_config, "nodes", None) or []) if n.get("type") == NodeType.START),
+            None,
+        )
+        if not start_node_id or start_node_id not in nodes_snapshot:
+            return
+        start_output = self._unwrap_typed_group(nodes_snapshot[start_node_id])
+        if not isinstance(start_output, dict):
+            return
+        sys_field_map = {
+            "message": VariableType.STRING,
+            "files": VariableType.ARRAY_FILE,
+        }
+        for field, var_type in sys_field_map.items():
+            if field in start_output and start_output[field] is not None:
+                await variable_pool.new("sys", field, start_output[field], var_type, mut=False)
+
     async def _restore_variable_pool_from_snapshot(
             self,
             *,
@@ -2545,17 +2583,28 @@ class WorkflowService:
             node_name=node.get("name"),
         )
         latest_cache = manager.get_latest_cache(include_inactive=False)
-        if not latest_cache:
-            return None
         next_result_data = self._sanitize_cache_result_data(result_data or {})
-        if patches:
-            next_result_data = self._apply_cache_result_patches(
-                latest_cache.get("result_data") or {},
-                patches,
+        if not latest_cache:
+            # No existing cache record — create one on-the-fly so that nodes
+            # which are not normally cached (e.g. "start") can still have their
+            # debug output persisted when the user edits it in the UI.
+            cache_key = manager.build_cache_key(next_result_data)
+            updated = manager.save_cache(
+                cache_key=cache_key,
+                input_data={},
+                result_data=next_result_data,
+                source="manual",
+                ttl_seconds=None,
             )
-        updated = manager.update_latest_cache(
-            result_data=next_result_data,
-        )
+        else:
+            if patches:
+                next_result_data = self._apply_cache_result_patches(
+                    latest_cache.get("result_data") or {},
+                    patches,
+                )
+            updated = manager.update_latest_cache(
+                result_data=next_result_data,
+            )
         if not updated:
             return None
         node_type_maps = self._build_snapshot_type_maps(config)["nodes"]
@@ -5599,6 +5648,13 @@ class WorkflowService:
         await self._apply_input_data_overrides_to_variable_pool(
             variable_pool=variable_pool,
             input_data=input_data,
+        )
+        # Promote start-node cached output (e.g. user-edited "message") into sys.*
+        # AFTER input_data overrides so it takes the highest priority.
+        await self._apply_start_node_cache_to_variable_pool(
+            variable_pool=variable_pool,
+            runtime_snapshot=runtime_seed["runtime_snapshot"],
+            workflow_config=config,
         )
         await self._inject_single_node_flat_inputs(
             variable_pool=variable_pool,
