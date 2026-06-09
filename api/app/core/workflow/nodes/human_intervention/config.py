@@ -87,12 +87,15 @@ class HumanInterventionNodeConfig(BaseNodeConfig):
     @field_validator("delivery_method", mode="before")
     @classmethod
     def coerce_delivery_method(cls, v):
-        """兼容旧版配置：delivery_method 为字符串时转换为 DeliveryMethodConfig"""
+        """兼容旧版配置：delivery_method 为字符串或非法类型时转换为 DeliveryMethodConfig"""
         if isinstance(v, str):
             # 旧格式: "webapp" / "email" — 转换为对应的嵌套配置
             if v == "email":
                 return {"webapp": {"enabled": False}, "email": {"enabled": True}}
             # 默认视为 webapp
+            return {"webapp": {"enabled": True}, "email": {"enabled": False}}
+        # 兼容空列表等非 dict 类型（旧配置或前端未发送该字段）
+        if not isinstance(v, dict):
             return {"webapp": {"enabled": True}, "email": {"enabled": False}}
         return v
     content: str = Field(
