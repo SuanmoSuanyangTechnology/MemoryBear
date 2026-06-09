@@ -1260,9 +1260,9 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       groups: defaultAbsolutePortGroups,
       items: [
         defaultPortItems[0],
-        ...(['TIMEOUT'].map((_text, index) => ({
+        ...(['TIMEOUT'].map((text, index) => ({
           group: 'right',
-          id: `CASE${index + 1}`,
+          id: text,
           args: {
             ...portArgs,
             y: portItemArgsY * index + conditionNodePortItemArgsY,

@@ -2841,6 +2841,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           seconds: 'Seconds',
           selectButtonStyle: 'Select Button Style',
           buttonStyle: 'Button Style',
+          contentExtra: 'Press / to insert variables, press ctr+/ to insert input fields',
         },
         agent: {
           strategy: 'Agent Strategy',
