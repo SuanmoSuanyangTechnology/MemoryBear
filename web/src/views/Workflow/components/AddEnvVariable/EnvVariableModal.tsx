@@ -43,7 +43,7 @@ const EnvVariableModal = forwardRef<EnvVariableModalRef, EnvVariableModalProps>(
     if (variable) {
       form.setFieldsValue({
         ...variable,
-        value: variable.value ? '********************' : undefined
+        value: variable.value && variable.value_type === 'secret' ? '********************' : variable.value
       });
       setEditIndex(index);
     } else {
@@ -54,7 +54,7 @@ const EnvVariableModal = forwardRef<EnvVariableModalRef, EnvVariableModalProps>(
 
   const handleSave = () => {
     form.validateFields().then((values) => {
-      refresh({ ...values, value_type: 'secret' as const }, editIndex);
+      refresh({ ...values }, editIndex);
       handleClose();
     });
   };
