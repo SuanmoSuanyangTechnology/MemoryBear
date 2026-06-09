@@ -598,17 +598,19 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           delivery_method: {
             type: 'define',
-            defaultValue: []
+            defaultValue: [],
+            required: true,
           },
           content: {
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'common.pleaseEnter'
+            placeholder: 'common.pleaseEnter',
           },
           actions: {
             type: 'define',
-            defaultValue: []
+            defaultValue: [],
+            required: true,
           },
           timeout: {
             type: 'timeout',

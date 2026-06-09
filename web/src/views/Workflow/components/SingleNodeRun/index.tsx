@@ -219,6 +219,8 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
       if (nodeData?.type === 'iteration' || inputVars.length < 1 && !hasContext && !(isLlm && nodeData?.config?.vision?.defaultValue)) {
         if (nodeData?.type === 'human-intervention') {
           setStep(1)
+          setIsAutoRun(nodeData?.config?.content?.defaultValue?.trim() === '')
+          setRenderedContent(nodeData?.config?.content?.defaultValue)
         } else {
           setIsAutoRun(true)
         }

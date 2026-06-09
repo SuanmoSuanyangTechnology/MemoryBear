@@ -2928,6 +2928,8 @@ export const zh = {
         'agent.model': '模型',
         'agent.system_prompt': '指令',
         'agent.message': '查询',
+        'human-intervention.delivery_method': '提交方式',
+        'human-intervention.actions': '用户操作',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {
