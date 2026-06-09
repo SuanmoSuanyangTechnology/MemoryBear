@@ -25,6 +25,10 @@ from app.core.rag.models.chunk import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
+VECTOR_SEARCH_MODE_ENV = "ELASTICSEARCH_VECTOR_SEARCH_MODE"
+VECTOR_SEARCH_MODE_KNN = "knn"
+VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
+
 
 class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
@@ -501,6 +505,18 @@ class ElasticSearchVector(BaseVector):
         return max(top_k * 10, 100)
 
     @staticmethod
+    def _resolve_vector_search_mode() -> str:
+        raw_value = os.getenv(VECTOR_SEARCH_MODE_ENV, VECTOR_SEARCH_MODE_SCRIPT_SCORE)
+        mode = raw_value.strip().lower()
+        if mode == VECTOR_SEARCH_MODE_KNN:
+            return VECTOR_SEARCH_MODE_KNN
+        if mode in ("", VECTOR_SEARCH_MODE_SCRIPT_SCORE):
+            return VECTOR_SEARCH_MODE_SCRIPT_SCORE
+
+        logger.warning(f"Invalid {VECTOR_SEARCH_MODE_ENV} value: {raw_value}, using script_score")
+        return VECTOR_SEARCH_MODE_SCRIPT_SCORE
+
+    @staticmethod
     def _build_vector_script_query(
         query_vector: list[float],
         filters: list[dict[str, Any]],
@@ -620,27 +636,28 @@ class ElasticSearchVector(BaseVector):
             f"excluded_document_id_count={len(document_ids_filter or [])}"
         )
 
-        try:
-            result = self._search_by_knn(
-                indices=indices,
-                query_vector=query_vector,
-                top_k=top_k,
-                filters=filters,
-                knn_num_candidates=kwargs.get("knn_num_candidates"),
-            )
-            docs = self._vector_search_result_to_chunks(
-                result,
-                score_threshold,
-                normalize_script_score=False,
-                resolve_parents=resolve_parents,
-            )
-            logger.debug(
-                f"[ES search_by_vector] mode=knn hits={len(result.get('hits', {}).get('hits', []))} "
-                f"returned_docs={len(docs)} score_threshold={score_threshold}"
-            )
-            return docs
-        except Exception as exc:
-            logger.warning(f"[ES search_by_vector] KNN search failed, falling back to script_score: {exc}")
+        if self._resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
+            try:
+                result = self._search_by_knn(
+                    indices=indices,
+                    query_vector=query_vector,
+                    top_k=top_k,
+                    filters=filters,
+                    knn_num_candidates=kwargs.get("knn_num_candidates"),
+                )
+                docs = self._vector_search_result_to_chunks(
+                    result,
+                    score_threshold,
+                    normalize_script_score=False,
+                    resolve_parents=resolve_parents,
+                )
+                logger.debug(
+                    f"[ES search_by_vector] mode=knn hits={len(result.get('hits', {}).get('hits', []))} "
+                    f"returned_docs={len(docs)} score_threshold={score_threshold}"
+                )
+                return docs
+            except Exception as exc:
+                logger.warning(f"[ES search_by_vector] KNN search failed, falling back to script_score: {exc}")
 
         result = self._search_by_vector_script(
             indices=indices,
@@ -1089,4 +1106,3 @@ class ElasticSearchVectorFactory:
                 logger.info(f"Updated mapping for {index_name}: added {list(update_body['properties'].keys())}")
         except Exception as e:
             logger.warning(f"Failed to update mapping for {index_name}: {e}")
-
