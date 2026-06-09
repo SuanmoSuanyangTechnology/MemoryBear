@@ -462,7 +462,7 @@ class KnowledgeRetrievalService:
                 )
                 for doc in docs
             ]
-            reranked_docs = list(reranker.compress_documents(documents, query, top_k))
+            reranked_docs = list(reranker.compress_documents(documents, query, topn=top_k))
             reranked_docs.sort(
                 key=lambda item: item.metadata.get("relevance_score", 0),
                 reverse=True,
