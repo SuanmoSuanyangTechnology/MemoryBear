@@ -880,7 +880,7 @@ class ElasticSearchVector(BaseVector):
                 for doc in docs
             ]
 
-            reranked_docs = list(self.reranker.compress_documents(documents, query, top_k))
+            reranked_docs = list(self.reranker.compress_documents(documents, query, top_n=top_k))
             logger.debug(f"[rerank] returned {len(reranked_docs)} docs")
 
             reranked_docs.sort(
