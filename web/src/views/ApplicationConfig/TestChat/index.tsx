@@ -611,13 +611,31 @@ const TestChat: FC<TestChatProps> = ({
               const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
               if (filterIndex > -1) {
                 const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                const lastIterations: {
+                  index: number;
+                  [key: string]: any;
+                }[] = lastAgentLog?.iterations || []
+                const newIterations: {
+                  index: number;
+                  [key: string]: any;
+                }[] = agent_log?.iterations || []
+
+                const indexMap = new Map<number, typeof lastIterations[0]>()
+                
+                lastIterations.forEach(item => {
+                  indexMap.set(item.index, item)
+                })
+                
+                newIterations.forEach(item => {
+                  indexMap.set(item.index, item)
+                })
+                
+                const mergedIterations = Array.from(indexMap.values()).sort((a, b) => a.index - b.index)
+
                 newSubContent[filterIndex].agent_log = {
                   ...lastAgentLog,
                   meta: agent_log?.meta || {},
-                  iterations: [
-                    ...(lastAgentLog?.iterations || []),
-                    ...agent_log?.iterations || []
-                  ],
+                  iterations: mergedIterations,
                 }
               }
             }
