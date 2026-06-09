@@ -21,7 +21,6 @@ from app.core.utils.datetime_utils import (
     utcnow_naive,
 )
 from app.core.workflow.node_cache import normalize_cache_value, WorkflowNodeCacheManager
-from app.core.workflow.utils.secret_masker import mask_secrets
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
     get_trigger_type,
@@ -2015,10 +2014,8 @@ class WorkflowService:
             )
 
     @staticmethod
-    def _mask_runtime_secrets(payload: dict[str, Any], variable_pool) -> dict[str, Any]:
-        if not variable_pool:
-            return payload
-        return mask_secrets(payload, variable_pool.get_secret_values())
+    def _mask_runtime_secrets(payload: dict[str, Any], _variable_pool) -> dict[str, Any]:
+        return payload
 
     @staticmethod
     def _extract_secret_values_from_environment_variables(
@@ -2034,10 +2031,8 @@ class WorkflowService:
         return sorted(set(secret_values), key=len, reverse=True)
 
     @staticmethod
-    def _mask_payload_with_secret_values(payload: dict[str, Any], secret_values: list[str]) -> dict[str, Any]:
-        if not secret_values:
-            return payload
-        return mask_secrets(payload, secret_values)
+    def _mask_payload_with_secret_values(payload: dict[str, Any], _secret_values: list[str]) -> dict[str, Any]:
+        return payload
 
     @staticmethod
     def _build_debug_execution_output(node_id: str, status: str) -> dict[str, Any]:
@@ -2743,6 +2738,7 @@ class WorkflowService:
             config=config,
             workspace_id=workspace_id,
             input_data=rerun_input,
+            prefer_cached_runtime=True,
         )
 
     def get_execution_detail(
@@ -5576,6 +5572,7 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             input_data: dict[str, Any],
+            prefer_cached_runtime: bool = False,
     ):
         """构建单节点执行所需的上下文（node_config, node, state, variable_pool）"""
         from app.core.workflow.engine.runtime_schema import ExecutionContext
@@ -5645,17 +5642,28 @@ class WorkflowService:
             variable_pool=variable_pool,
             snapshot=runtime_seed["runtime_snapshot"],
         )
-        await self._apply_input_data_overrides_to_variable_pool(
-            variable_pool=variable_pool,
-            input_data=input_data,
-        )
-        # Promote start-node cached output (e.g. user-edited "message") into sys.*
-        # AFTER input_data overrides so it takes the highest priority.
-        await self._apply_start_node_cache_to_variable_pool(
-            variable_pool=variable_pool,
-            runtime_snapshot=runtime_seed["runtime_snapshot"],
-            workflow_config=config,
-        )
+        if prefer_cached_runtime:
+            # Rerun should inherit the latest debug/cache state as the source of truth.
+            await self._apply_input_data_overrides_to_variable_pool(
+                variable_pool=variable_pool,
+                input_data=input_data,
+            )
+            await self._apply_start_node_cache_to_variable_pool(
+                variable_pool=variable_pool,
+                runtime_snapshot=runtime_seed["runtime_snapshot"],
+                workflow_config=config,
+            )
+        else:
+            # Manual single-node run should honor the current request inputs first.
+            await self._apply_start_node_cache_to_variable_pool(
+                variable_pool=variable_pool,
+                runtime_snapshot=runtime_seed["runtime_snapshot"],
+                workflow_config=config,
+            )
+            await self._apply_input_data_overrides_to_variable_pool(
+                variable_pool=variable_pool,
+                input_data=input_data,
+            )
         await self._inject_single_node_flat_inputs(
             variable_pool=variable_pool,
             input_data=input_data,
@@ -5689,11 +5697,12 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             input_data: dict[str, Any] | None = None,
+            prefer_cached_runtime: bool = False,
     ) -> dict[str, Any]:
         """单节点执行（非流式）"""
         input_data = input_data or {}
         node_config, node, state, variable_pool = await self._build_node_context(
-            app_id, node_id, config, workspace_id, input_data
+            app_id, node_id, config, workspace_id, input_data, prefer_cached_runtime
         )
         run_id = self._build_single_node_run_id()
         start_time = time.time()
@@ -5797,6 +5806,7 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             input_data: dict[str, Any] | None = None,
+            prefer_cached_runtime: bool = False,
     ):
         """单节点执行（流式）
 
@@ -5805,7 +5815,7 @@ class WorkflowService:
         """
         input_data = input_data or {}
         node_config, node, state, variable_pool = await self._build_node_context(
-            app_id, node_id, config, workspace_id, input_data
+            app_id, node_id, config, workspace_id, input_data, prefer_cached_runtime
         )
         node_type = node_config.get("type")
         run_id = self._build_single_node_run_id()

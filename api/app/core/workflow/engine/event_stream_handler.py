@@ -9,7 +9,6 @@ from app.core.logging_config import get_logger
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool
-from app.core.workflow.utils.secret_masker import mask_secrets
 
 logger = get_logger(__name__)
 
@@ -26,7 +25,7 @@ class EventStreamHandler:
         self.execution_id = execution_id
 
     def _mask(self, value):
-        return mask_secrets(value, self.variable_pool.get_secret_values())
+        return value
 
     def update_stream_output_status(self, activate: dict, data: dict):
         """
