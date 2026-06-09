@@ -26,7 +26,8 @@ class ModelConfigRepository:
         
         try:
             query = db.query(ModelConfig).options(
-                joinedload(ModelConfig.api_keys)
+                joinedload(ModelConfig.api_keys),
+                joinedload(ModelConfig.model_base),
             ).filter(ModelConfig.id == model_id)
             
             # 添加租户过滤
@@ -158,7 +159,8 @@ class ModelConfigRepository:
 
             # 构建基础查询
             base_query = db.query(ModelConfig).options(
-                joinedload(ModelConfig.api_keys)
+                joinedload(ModelConfig.api_keys),
+                joinedload(ModelConfig.model_base),
             )
 
             # 如果需要按provider筛选，需要join ModelApiKey表
@@ -234,7 +236,8 @@ class ModelConfigRepository:
             
             # 构建基础查询
             base_query = db.query(ModelConfig).options(
-                joinedload(ModelConfig.api_keys)
+                joinedload(ModelConfig.api_keys),
+                joinedload(ModelConfig.model_base),
             )
             
             if filters:
@@ -270,7 +273,8 @@ class ModelConfigRepository:
 
         try:
             query = db.query(ModelConfig).options(
-                joinedload(ModelConfig.api_keys)
+                joinedload(ModelConfig.api_keys),
+                joinedload(ModelConfig.model_base),
             ).filter(ModelConfig.type.in_([t.value for t in model_types]))
 
             if tenant_id:
