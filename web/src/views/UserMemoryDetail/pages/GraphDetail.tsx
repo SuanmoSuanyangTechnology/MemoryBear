@@ -87,7 +87,9 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
       .finally(() => setLoading(false))
   }
   const getTimelineMemoriesData = (vo: Node) => {
-    if (!vo.id || !vo.label || vo.label === 'ExtractedEntity') return
+    if (!vo.id || !vo.label
+      // || vo.label === 'ExtractedEntity'
+    ) return
     setTimelineLoading(true)
     getTimelineMemories({ id: vo.id as string, label: vo.label })
       .then(res => {

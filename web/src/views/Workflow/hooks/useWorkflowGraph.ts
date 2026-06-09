@@ -1918,6 +1918,17 @@ export const useWorkflowGraph = ({
           if (flag) {
             message.success({ content: t('common.saveSuccess'), duration: 1 })
           }
+          const { variables, environment_variables, ...rest } = res as WorkflowConfig
+          const initChatVariables = variables.map(v => {
+            const { default: _, ...cleanV } = v
+            return {
+              ...cleanV,
+              defaultValue: v.default ?? ''
+            }
+          })
+          setChatVariables(initChatVariables)
+          setEnvVariables(environment_variables ?? [])
+          setConfig({ ...rest, variables: initChatVariables, environment_variables: environment_variables ?? [] })
           resolve(res)
         }).catch(error => {
           reject(error)
