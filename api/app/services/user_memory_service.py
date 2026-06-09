@@ -411,12 +411,12 @@ class UserMemoryService:
             
             # 构建响应数据（转换时间为毫秒时间戳）
             # 字段优先级：other_name > aliases > relations > goals > core_facts
-            # > interests > traits > beliefs_or_stances > anchors
+            # > interests > traits > beliefs_or_stances > anchors > events
             # 默认最多展示 6 个非空字段；other_name 即使为空也必显示并占 1 个名额。
             TOP_FIELDS = ("other_name", "aliases")
             META_FIELDS = (
                 "relations", "goals", "core_facts", "interests",
-                "traits", "beliefs_or_stances", "anchors",
+                "traits", "beliefs_or_stances", "anchors", "events",
             )
             ALWAYS_INCLUDE = {"other_name"}
             MAX_VISIBLE = 6
