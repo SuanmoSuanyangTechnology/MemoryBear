@@ -81,6 +81,14 @@ class ModelConfig(ModelConfigBase):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     api_keys: List["ModelApiKey"] = []
+    is_deprecated: bool = False
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        instance = super().model_validate(obj, **kwargs)
+        if hasattr(obj, "model_base") and obj.model_base is not None:
+            instance.is_deprecated = bool(obj.model_base.is_deprecated)
+        return instance
 
     @staticmethod
     def mask_api_key(key: str, prefix: int = 4, suffix: int = 4) -> str:
