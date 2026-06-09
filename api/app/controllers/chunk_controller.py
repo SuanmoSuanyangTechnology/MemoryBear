@@ -2,6 +2,7 @@ import json
 import os
 import csv
 import io
+import time
 from typing import Any, Optional
 import uuid
 
@@ -1098,9 +1099,7 @@ async def retrieve_chunks(
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
-    # default value is topk
-    topn = 100
-    # topn = retrieve_data.top_k
+    topn = retrieve_data.top_n or 20
 
     # Helper: exclude documents in document_ids_filter (blacklist)
     exclude_ids = set(document_ids_filter) if document_ids_filter else set()
@@ -1123,9 +1122,7 @@ async def retrieve_chunks(
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
             rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
-            api_logger.debug(f"[HybridSearch] vector search result: {json.dumps(jsonable_encoder(rs1), ensure_ascii=False)}")
             rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
-            api_logger.debug(f"[HybridSearch] text search result: {json.dumps(jsonable_encoder(rs2), ensure_ascii=False)}")
             # Efficient deduplication
             seen_ids = set()
             unique_rs = []
@@ -1133,12 +1130,10 @@ async def retrieve_chunks(
                 if doc.metadata["doc_id"] not in seen_ids:
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
-            api_logger.debug(f"[HybridSearch] unique result: {json.dumps(jsonable_encoder(unique_rs), ensure_ascii=False)}")
             rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
-            api_logger.debug(f"[HybridSearch] reranked result: {json.dumps(jsonable_encoder(rs), ensure_ascii=False)}")
+            api_logger.info(f"[HybridSearch] rerank: input={len(unique_rs)}, reranked output={len(rs)}")
             rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else (retrieve_data.vector_similarity_weight if retrieve_data.vector_similarity_weight is not None else 0.1)
             rs = [doc for doc in rs if doc.metadata.get("score", 0) > rerank_threshold]
-            api_logger.debug(f"[HybridSearch] rerank_threshold result: {json.dumps(jsonable_encoder(rs), ensure_ascii=False)}")
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
                 kb_ids = [str(kb_id) for kb_id in private_kb_ids]
                 workspace_ids = [str(workspace_id) for workspace_id in private_workspace_ids]
