@@ -107,7 +107,8 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   return (
     <>
       <PageHeader
-        title={vo?.label === 'ExtractedEntity' ? undefined : vo?.name}
+        // title={vo?.label === 'ExtractedEntity' ? undefined : vo?.name}
+        title={vo?.name}
         extra={
           <Space size={12}>
             <Button
@@ -120,9 +121,10 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
           </Space>
         }
       />
-      {vo?.label === 'ExtractedEntity'
+      {/* {vo?.label === 'ExtractedEntity'
         ? <ExtractedEntityGraphDetail />
-        : <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
+        : */}
+        <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
           <Col flex="480px" className="rb:h-full!">
             <RbCard
               title={t('userMemory.relationshipEvolution')}
@@ -178,7 +180,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
             </RbCard>
           </Col>
         </Row>
-      }
+      {/* } */}
     </>
   )
 })

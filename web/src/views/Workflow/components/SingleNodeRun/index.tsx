@@ -165,6 +165,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
     })
       .then(res => {
         setResult(res as RunResult)
+        refreshCache()
       })
       .catch(err => {
         setResult({ status: 'failed', error: err.message })
@@ -204,6 +205,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
     })
       .then(res => {
         setResult(res as RunResult)
+        refreshCache()
       })
       .catch(err => {
         setResult({ status: 'failed', error: err.message })
