@@ -122,8 +122,8 @@ class WorkflowConfigRepository:
 
         nodes = list(config.nodes or [])
         updated = False
+        from app.core.workflow.nodes.enums import NodeType
         for node in nodes:
-            from app.core.workflow.nodes.enums import NodeType
             if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
                 node["runtime"] = runtime
                 updated = True
