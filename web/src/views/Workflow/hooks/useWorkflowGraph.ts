@@ -381,7 +381,7 @@ export const useWorkflowGraph = ({
         }
         // Generate ports dynamically for human-intervention node based on actions
         if (type === 'human-intervention' && config.actions && Array.isArray(config.actions)) {
-          const totalPorts = config.actions.length + 1; // IF/ELIF + ELSE
+          const totalPorts = config.actions.length;
 
           const portItems: PortMetadata[] = [
             defaultPortItems[0],
@@ -397,6 +397,14 @@ export const useWorkflowGraph = ({
               },
             });
           }
+          portItems.push({
+            group: 'right',
+            id: `TIMEOUT`,
+            args: {
+              x: nodeWidth,
+              y: getConditionNodeCasePortY(config.actions, totalPorts),
+            },
+          });
 
           nodeConfig.ports = {
             groups: defaultAbsolutePortGroups,
@@ -1855,12 +1863,8 @@ export const useWorkflowGraph = ({
               label: sourcePortId,
             };
           }
-
-          if (sourceCell?.getData()?.type === 'human-intervention') {
-            console.log('sourcePortId', sourcePortId)
-          }
           // If human-intervention node right port connection, add label
-          if (sourceCell?.getData()?.type === 'human-intervention' && sourcePortId?.startsWith('CASE')) {
+          if (sourceCell?.getData()?.type === 'human-intervention' && (sourcePortId?.startsWith('CASE') || sourcePortId === 'TIMEOUT')) {
             return {
               source: sourceCell.getData().id,
               target: targetCell?.getData().id,
