@@ -5,6 +5,7 @@
  * @Last Modified time: 2026-06-05 20:01:24
  */
 import { type ReactNode } from 'react'
+import { type ButtonProps } from 'antd'
 
 /**
  * Chat message item interface
@@ -61,7 +62,7 @@ export interface Intervention {
   actions?: {
     id: string;
     label: string;
-    variant: string;
+    variant: ButtonProps['type'];
   }[];
   timeout_at?: number;
 
