@@ -17,7 +17,10 @@ from app.core.rag.metadata.filter_engine import (
     MetadataFilterEngine,
 )
 from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
+    ElasticSearchVector,
+    ElasticSearchVectorFactory,
+)
 from app.models import knowledge_model, knowledgeshare_model
 from app.models.models_model import ModelApiKey
 from app.repositories import knowledge_repository
@@ -100,6 +103,7 @@ class KnowledgeRetrievalService:
         vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_filter)
         full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_filter)
         unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
+        logger.debug(f"Retrieved {len(unique_chunks)} chunks")
         if not unique_chunks:
             chunks = []
         else:
@@ -120,7 +124,7 @@ class KnowledgeRetrievalService:
 
     @staticmethod
     def _search_vector(
-            vector_service: Any,
+            vector_service: ElasticSearchVector,
             request: KnowledgeRetrievalRequest,
             indices: str,
             document_ids_filter: list[str] | None,
@@ -131,12 +135,13 @@ class KnowledgeRetrievalService:
             indices=indices,
             score_threshold=request.vector_similarity_weight,
             document_ids_filter=document_ids_filter,
+            file_names_filter=request.file_names_filter,
             resolve_parents=True,
         )
 
     @staticmethod
     def _search_full_text(
-            vector_service: Any,
+            vector_service: ElasticSearchVector,
             request: KnowledgeRetrievalRequest,
             indices: str,
             document_ids_filter: list[str] | None,
@@ -147,6 +152,7 @@ class KnowledgeRetrievalService:
             indices=indices,
             score_threshold=request.similarity_threshold,
             document_ids_filter=document_ids_filter,
+            file_names_filter=request.file_names_filter,
             resolve_parents=True,
         )
 
@@ -155,7 +161,7 @@ class KnowledgeRetrievalService:
             cls,
             db: Session,
             request: KnowledgeRetrievalRequest,
-            vector_service: Any,
+            vector_service: ElasticSearchVector,
             chunks: list[DocumentChunk],
     ) -> list[DocumentChunk]:
         if request.rerank_id:
@@ -172,6 +178,8 @@ class KnowledgeRetrievalService:
                 docs=chunks,
                 top_k=request.top_k,
             )
+
+        logger.debug(f"[rerank]rerank_id:{request.rerank_id}, returned {len(reranked_chunks)} docs")
 
         rerank_score_threshold = request.rerank_score_threshold or request.vector_similarity_weight or 0.1
 
@@ -454,7 +462,7 @@ class KnowledgeRetrievalService:
                 )
                 for doc in docs
             ]
-            reranked_docs = list(reranker.compress_documents(documents, query))
+            reranked_docs = list(reranker.compress_documents(documents, query, top_k))
             reranked_docs.sort(
                 key=lambda item: item.metadata.get("relevance_score", 0),
                 reverse=True,

@@ -929,31 +929,6 @@ def get_retrieve_types():
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-def _build_knowledge_retrieval_request(
-        retrieve_data: chunk_schema.ChunkRetrieve,
-) -> KnowledgeRetrievalRequest:
-    return KnowledgeRetrievalRequest(
-        query=retrieve_data.query,
-        kb_ids=retrieve_data.kb_ids or [],
-        ex_ids=retrieve_data.ex_ids or [],
-        similarity_threshold=(
-            retrieve_data.similarity_threshold
-            if retrieve_data.similarity_threshold is not None
-            else 0.3
-        ),
-        vector_similarity_weight=(
-            retrieve_data.vector_similarity_weight
-            if retrieve_data.vector_similarity_weight is not None
-            else 0.3
-        ),
-        top_k=retrieve_data.top_k if retrieve_data.top_k is not None else 100,
-        retrieve_type=retrieve_data.retrieve_type or chunk_schema.RetrieveType.HYBRID,
-        rerank_score_threshold=retrieve_data.rerank_score_threshold,
-        metadata_filters=retrieve_data.metadata_filters or [],
-        metadata_filter_mode=retrieve_data.metadata_filter_mode,
-    )
-
-
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
@@ -966,7 +941,7 @@ async def retrieve_chunks(
     api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
 
     try:
-        request = _build_knowledge_retrieval_request(retrieve_data)
+        request = KnowledgeRetrievalRequest(**retrieve_data.model_dump(exclude_none=True))
         api_logger.info(f"retrieve chunk: request={request}")
         result = KnowledgeRetrievalService.retrieve(
             db=db,

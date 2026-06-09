@@ -11,6 +11,7 @@ class KnowledgeRetrievalRequest(BaseModel):
     query: str
     kb_ids: list[UUID] = Field(default_factory=list)
     ex_ids: list[str] = Field(default_factory=list)
+    file_names_filter: list[str] = Field(default_factory=list)
     similarity_threshold: float = Field(default=0.3, ge=0, le=1)
     vector_similarity_weight: float = Field(default=0.3, ge=0, le=1)
     top_k: int = Field(default=100, ge=1, le=100)
