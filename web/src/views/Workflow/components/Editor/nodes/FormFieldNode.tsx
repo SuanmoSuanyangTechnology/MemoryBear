@@ -44,8 +44,8 @@ const FormFieldComponent: React.FC<{ nodeKey: NodeKey; id: string; default_value
   const { updateFormFields, formFields, options } = useFormFieldContext();
   const modalRef = useRef<FormFieldEditModalRef>(null);
   const [displayId, setDisplayId] = useState(initialId);
-  const [displayDefaultValue, setDisplayDefaultValue] = useState(initialDefaultValue);
-  // const [isDragging, setIsDragging] = useState(false);
+
+  console.log('initialDefaultValue', initialDefaultValue, initialVariableRef)
 
   const handleDelete = () => {
     editor.update(() => {
@@ -72,7 +72,7 @@ const FormFieldComponent: React.FC<{ nodeKey: NodeKey; id: string; default_value
   };
 
   const handleEdit = () => {
-    modalRef.current?.open(displayId, displayDefaultValue || '', initialVariableRef || '');
+    modalRef.current?.open(displayId, initialDefaultValue, initialVariableRef);
   };
 
   // const handleDragStart = (e: React.DragEvent) => {
@@ -97,7 +97,6 @@ const FormFieldComponent: React.FC<{ nodeKey: NodeKey; id: string; default_value
     });
     
     setDisplayId(id);
-    setDisplayDefaultValue(defaultValue || '');
   }
 
   return (
@@ -121,7 +120,9 @@ const FormFieldComponent: React.FC<{ nodeKey: NodeKey; id: string; default_value
           <span className="rb:text-gray-700 rb:font-medium">{displayId}</span>
         </Space>
         
-        <div className="rb:flex-1 rb:min-w-0 rb:text-[12px] rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap rb:text-gray-500">{displayDefaultValue}</div>
+        <div className="rb:flex-1 rb:min-w-0 rb:text-[12px] rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap rb:text-gray-500">
+          {initialVariableRef || initialDefaultValue}
+        </div>
         <Flex align="center" gap={8} className="rb:flex rb:gap-0 rb:shrink-0">
           <div
             className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/edit.svg')]"
