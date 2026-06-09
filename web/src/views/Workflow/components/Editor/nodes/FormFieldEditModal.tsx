@@ -62,6 +62,8 @@ const FormFieldEditModal = forwardRef<FormFieldEditModalRef, FormFieldEditModalP
       .then(values => {
         const id = values.id || ''
         if (!id.trim()) return
+
+        console.log('values', values)
         
         if (prefillMode === 'static') {
           onSave(id.trim(), values.default_value || undefined, undefined)
