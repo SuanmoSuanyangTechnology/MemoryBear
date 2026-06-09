@@ -21,7 +21,6 @@ from app.core.utils.datetime_utils import (
     utcnow_naive,
 )
 from app.core.workflow.node_cache import normalize_cache_value, WorkflowNodeCacheManager
-from app.core.workflow.utils.secret_masker import mask_secrets
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
     get_trigger_type,
@@ -2016,9 +2015,7 @@ class WorkflowService:
 
     @staticmethod
     def _mask_runtime_secrets(payload: dict[str, Any], variable_pool) -> dict[str, Any]:
-        if not variable_pool:
-            return payload
-        return mask_secrets(payload, variable_pool.get_secret_values())
+        return payload
 
     @staticmethod
     def _extract_secret_values_from_environment_variables(
@@ -2035,9 +2032,7 @@ class WorkflowService:
 
     @staticmethod
     def _mask_payload_with_secret_values(payload: dict[str, Any], secret_values: list[str]) -> dict[str, Any]:
-        if not secret_values:
-            return payload
-        return mask_secrets(payload, secret_values)
+        return payload
 
     @staticmethod
     def _build_debug_execution_output(node_id: str, status: str) -> dict[str, Any]:
