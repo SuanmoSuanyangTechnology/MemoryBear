@@ -1872,7 +1872,9 @@ class AppService:
             publisher_id: uuid.UUID,
             version_name: str,
             workspace_id: Optional[uuid.UUID] = None,
-            release_notes: Optional[str] = None
+            release_notes: Optional[str] = None,
+            custom_title: Optional[str] = None,
+            custom_icon: Optional[str] = None,
     ) -> AppRelease:
         """发布应用（创建不可变快照）
 
@@ -2009,6 +2011,8 @@ class AppService:
             description=app.description,
             icon=app.icon,
             icon_type=app.icon_type,
+            custom_title=custom_title,
+            custom_icon=custom_icon,
             type=app.type,
             visibility=app.visibility,
             config=config,
@@ -2664,11 +2668,13 @@ def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UU
 
 
 def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,
-            version_name: str, release_notes: Optional[str] = None) -> AppRelease:
+            version_name: str, release_notes: Optional[str] = None, custom_title: Optional[str] = None,
+            custom_icon: Optional[str] = None) -> AppRelease:
     """发布应用（向后兼容接口）"""
     service = AppService(db)
     return service.publish(app_id=app_id, publisher_id=publisher_id, version_name=version_name,
-                           workspace_id=workspace_id, release_notes=release_notes)
+                           workspace_id=workspace_id, release_notes=release_notes,
+                           custom_title=custom_title, custom_icon=custom_icon)
 
 
 def get_current_release(

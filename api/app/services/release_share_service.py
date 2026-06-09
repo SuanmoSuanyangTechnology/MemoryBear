@@ -290,9 +290,9 @@ class ReleaseShareService:
                 # 需要密码但未提供，返回基本信息
                 release = self.db.get(AppRelease, share.release_id)
                 return release_share_schema.SharedReleaseInfo(
-                    app_name=release.name,
+                    app_name=self._get_release_display_name(release),
                     app_description=release.description,
-                    app_icon=release.icon,
+                    app_icon=self._get_release_display_icon(release),
                     app_type=release.type,
                     version=release.version,
                     release_notes=release.release_notes,
@@ -322,9 +322,9 @@ class ReleaseShareService:
         
         # 返回完整信息
         return release_share_schema.SharedReleaseInfo(
-            app_name=release.name,
+            app_name=self._get_release_display_name(release),
             app_description=release.description,
-            app_icon=release.icon,
+            app_icon=self._get_release_display_icon(release),
             app_type=release.type,
             version=release.version,
             release_notes=release.release_notes,
@@ -419,6 +419,14 @@ class ReleaseShareService:
         
         if app.workspace_id != workspace_id:
             raise BusinessException("无权访问该发布版本", BizCode.PERMISSION_DENIED)
+
+    @staticmethod
+    def _get_release_display_name(release: AppRelease) -> str:
+        return release.custom_title or release.name
+
+    @staticmethod
+    def _get_release_display_icon(release: AppRelease) -> Optional[str]:
+        return release.custom_icon or release.icon
     
     def _convert_to_schema(
         self,

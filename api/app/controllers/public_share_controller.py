@@ -935,28 +935,34 @@ async def config_query(
     share_service = SharedChatService(db)
     share_token = share_data.share_token
     share, release = share_service.get_release_by_share_token(share_token, password)
-    if release.app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+    app_name = release.custom_title or release.name
+    app_icon = release.custom_icon or release.icon
+
+    if release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         workflow_service = WorkflowService(db)
         content = {
-            "app_name": release.app.name,
-            "app_type": release.app.type,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "app_type": release.type,
             "variables": workflow_service.get_start_node_variables(release.config),
             "memory":  workflow_service.is_memory_enable(release.config),
             "features": release.config.get("features")
         }
-    elif release.app.type == AppType.AGENT:
+    elif release.type == AppType.AGENT:
         content = {
-            "app_name": release.app.name,
-            "app_type": release.app.type,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "app_type": release.type,
             "variables": release.config.get("variables"),
             "memory": release.config.get("memory", {}).get("enabled"),
             "features": release.config.get("features"),
             "model_parameters": release.config.get("model_parameters")
         }
-    elif release.app.type == AppType.MULTI_AGENT:
+    elif release.type == AppType.MULTI_AGENT:
         content = {
-            "app_name": release.app.name,
-            "app_type": release.app.type,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "app_type": release.type,
             "variables": [],
             "features": release.config.get("features")
         }
@@ -1283,4 +1289,3 @@ async def switch_message_version(
     )
 
     return success(data=result)
-

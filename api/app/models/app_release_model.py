@@ -1,11 +1,9 @@
-import datetime
 import uuid
 from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
-from app.models.app_model import IconType
 
 
 class AppRelease(Base):
@@ -29,6 +27,8 @@ class AppRelease(Base):
     description = Column(String, nullable=True)
     icon = Column(String, nullable=True)
     icon_type = Column(String, nullable=True)
+    custom_title = Column(String, nullable=True, comment="公开分享场景下的自定义标题")
+    custom_icon = Column(String, nullable=True, comment="公开分享场景下的自定义图标")
     type = Column(String, nullable=False)
     visibility = Column(String, default="private")
 

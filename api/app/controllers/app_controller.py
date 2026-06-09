@@ -351,7 +351,9 @@ def publish_app(
         publisher_id=current_user.id,
         workspace_id=workspace_id,
         version_name=payload.version_name,
-        release_notes=payload.release_notes
+        release_notes=payload.release_notes,
+        custom_title=payload.custom_title,
+        custom_icon=payload.custom_icon,
     )
     return success(data=app_schema.AppRelease.model_validate(release))
 
