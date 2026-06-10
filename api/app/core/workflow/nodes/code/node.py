@@ -65,8 +65,8 @@ class CodeNode(BaseNode):
 
     def _output_types(self) -> dict[str, VariableType]:
         output_dict = {}
-        for output in self.typed_config.output_variables:
-            output_dict[output.name] = output.type
+        for output in self.config.get("output_variables", []):
+            output_dict[output["name"]] = VariableType(output["type"])
         output_dict["branch_signal"] = VariableType.STRING
         return output_dict
 
