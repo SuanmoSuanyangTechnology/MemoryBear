@@ -461,9 +461,9 @@ async def get_hot_memory_tags_api(
     
     缓存策略：
     - 缓存键：workspace_id + limit
-    - 过期时间：5分钟（300秒）
+    - 过期时间：28小时（HOT_MEMORY_TAGS_CACHE_EXPIRE），由每日定时任务预热刷新
     - 缓存命中：~50ms
-    - 缓存未命中：~600-800ms（取决于LLM速度）
+    - 缓存未命中：~600-800ms（取决于LLM速度），实时查询后回写缓存作为兜底
     """
     workspace_id = current_user.current_workspace_id
 

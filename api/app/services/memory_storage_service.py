@@ -612,6 +612,10 @@ async def compute_hot_memory_tags(
         3. 调用一次 LLM 筛选（filter_tags_with_llm）
         4. 按频率/顺序过滤后返回前 limit 个
     """
+    # 防护：limit 可能来自 API 查询参数，非正值会导致 raw_limit 无效（Cypher LIMIT 无意义），
+    # 回退到默认值 10
+    if limit <= 0:
+        limit = 10
     raw_limit = limit * 4
 
     from app.db import SessionLocal

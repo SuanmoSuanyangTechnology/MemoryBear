@@ -3976,7 +3976,8 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     """定时任务：为所有活跃 workspace 预热热门记忆标签缓存（limit=10）。
 
-    每天北京 03:00（UTC 19:00）执行，缓存过期 28h，使白天请求全程命中缓存。
+    执行时间由 settings.HOT_MEMORY_TAGS_REFRESH_HOUR（UTC 小时）决定，
+    默认 19（= 北京时间 03:00）。缓存过期 28h，使白天请求全程命中缓存。
     """
     start_time = time.time()
 
