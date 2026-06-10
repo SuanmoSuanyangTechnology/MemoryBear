@@ -29,6 +29,7 @@ from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest, KnowledgeRetrievalResult
 from app.services import knowledge_service, knowledgeshare_service
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
+from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -414,21 +415,20 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
     ) -> list[str] | None:
-        if not request.metadata_filters:
+        if request.metadata_filter_mode == MetadataFilterMode.MANUAL and not request.metadata_filters:
             return None
-
-        if request.metadata_filter_mode != MetadataFilterMode.MANUAL:
-            raise BusinessException(
-                "metadata_filter_mode 暂仅支持 'manual'",
-                code=BizCode.INVALID_PARAMETER,
-            )
 
         metadata_defs_by_kb = {
             knowledge_id: KnowledgeMetadataService.get_metadata_defs_for_filtering(db, knowledge_id)
             for knowledge_id in knowledge_ids
         }
-        common_fields = cls._get_common_metadata_fields(metadata_defs_by_kb)
-        filter_groups = cls._build_common_filter_groups(request.metadata_filters, common_fields)
+        common_metadata_defs = cls._get_common_metadata_defs(metadata_defs_by_kb)
+        filter_groups = cls._build_metadata_filter_groups(
+            db=db,
+            request=request,
+            knowledge_ids=knowledge_ids,
+            common_metadata_defs=common_metadata_defs,
+        )
         if not filter_groups:
             logger.warning("[MetadataFilter] No common metadata fields matched; skipping metadata filter")
             return None
@@ -444,24 +444,86 @@ class KnowledgeRetrievalService:
             document_ids.update(matched_ids)
         return [str(document_id) for document_id in document_ids]
 
+    @classmethod
+    def _build_metadata_filter_groups(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            knowledge_ids: list[uuid.UUID],
+            common_metadata_defs: dict[str, dict],
+    ) -> list[EngineFilterGroup]:
+        if request.metadata_filter_mode == MetadataFilterMode.MANUAL:
+            if not request.metadata_filters:
+                return []
+            return cls._build_common_filter_groups(
+                request.metadata_filters,
+                set(common_metadata_defs.keys()),
+            )
+
+        if request.metadata_filter_mode == MetadataFilterMode.AUTO:
+            if not common_metadata_defs:
+                return []
+            llm = cls._build_metadata_auto_filter_llm(
+                db=db,
+                knowledge_id=knowledge_ids[0],
+            )
+            if not llm:
+                logger.warning("[MetadataAutoFilter] LLM is unavailable; skipping metadata filter")
+                return []
+            return MetadataAutoFilterService.generate_filter_groups(
+                query=request.query,
+                metadata_defs=common_metadata_defs,
+                llm=llm,
+            )
+
+        raise BusinessException(
+            f"metadata_filter_mode 不支持: {request.metadata_filter_mode}",
+            code=BizCode.INVALID_PARAMETER,
+        )
+
+    @classmethod
+    def _build_metadata_auto_filter_llm(
+            cls,
+            db: Session,
+            knowledge_id: uuid.UUID,
+    ) -> Base | None:
+        knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
+        if not knowledge or not knowledge.llm_id:
+            return None
+
+        api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id)
+        if not api_key:
+            return None
+        return cls._build_chat_model(api_key)
+
     @staticmethod
-    def _get_common_metadata_fields(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> set[str]:
+    def _get_common_metadata_defs(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> dict[str, dict]:
         field_names = set()
         for metadata_defs in metadata_defs_by_kb.values():
             field_names.update(metadata_defs.keys())
 
-        common_fields = set()
+        common_defs = {}
         for field_name in field_names:
-            field_types = set()
-            all_have_field = True
+            common_type = None
+            common_def = None
             for metadata_defs in metadata_defs_by_kb.values():
-                if field_name not in metadata_defs:
-                    all_have_field = False
+                field_def = metadata_defs.get(field_name)
+                if not field_def:
+                    common_def = None
                     break
-                field_types.add(metadata_defs[field_name]["type"])
-            if all_have_field and len(field_types) == 1:
-                common_fields.add(field_name)
-        return common_fields
+                if common_type is None:
+                    common_type = field_def["type"]
+                    common_def = field_def
+                elif common_type != field_def["type"]:
+                    common_def = None
+                    break
+            if common_def:
+                common_defs[field_name] = dict(common_def)
+        return common_defs
+
+    @staticmethod
+    def _get_common_metadata_fields(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> set[str]:
+        return set(KnowledgeRetrievalService._get_common_metadata_defs(metadata_defs_by_kb).keys())
 
     @staticmethod
     def _build_common_filter_groups(metadata_filters: list[Any], common_fields: set[str]) -> list[EngineFilterGroup]:
