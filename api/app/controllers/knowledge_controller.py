@@ -21,7 +21,10 @@ from app.core.rag.llm.chat_model import Base
 from app.core.rag.nlp import rag_tokenizer, search
 from app.core.rag.prompts.generator import graph_entity_types
 from app.core.rag.utils.redis_conn import REDIS_CONN
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
+    ElasticSearchVectorFactory,
+    ElasticSearchVectorIndexOps,
+)
 from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -475,8 +478,7 @@ async def _update_knowledge(
             if embedding_id != db_knowledge.embedding_id:
                 embedding_changed = True
                 if db_knowledge.embedding_id and db_knowledge.reranker_id:
-                    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-                    vector_service.delete()
+                    ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_index()
                 document_service.reset_documents_progress_by_kb_id(db, kb_id=db_knowledge.id, current_user=current_user)
 
         # 2. Update fields (only update non-null fields)

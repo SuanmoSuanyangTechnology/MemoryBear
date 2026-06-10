@@ -54,7 +54,7 @@ class ElasticSearchVector(BaseVector):
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
         # 仅在写入时检查并补充字段映射，避免每次检索都做冗余检查
-        # ElasticSearchVectorFactory._ensure_parent_id_mapping(self._client, self._collection_name)
+        # ElasticSearchVectorIndexOps.ensure_parent_id_mapping(self._client, self._collection_name)
 
         # QA chunks: embedding 只对 question 字段做；source/parent chunks: 不做 embedding
         texts_for_embedding = []
@@ -877,16 +877,15 @@ class ElasticSearchVector(BaseVector):
             self._client.indices.create(index=self._collection_name, body=index_mapping)
 
 
-class ElasticSearchVectorFactory:
-    """ES 向量服务工厂 - 单例共享连接"""
-
+class ElasticSearchVectorClientProvider:
+    """Shared Elasticsearch client provider."""
     _client: Elasticsearch | None = None
     _lock = threading.Lock()
     _version_checked = False
 
     @classmethod
-    def _get_shared_client(cls) -> Elasticsearch:
-        """获取共享的 ES 客户端（线程安全的懒加载单例）"""
+    def get_shared_client(cls) -> Elasticsearch:
+        """Get a thread-safe shared Elasticsearch client."""
         if cls._client is not None:
             return cls._client
 
@@ -945,33 +944,96 @@ class ElasticSearchVectorFactory:
 
         return cls._client
 
+
+class ElasticSearchVectorIndexOps:
+    """Lightweight Elasticsearch index operations that do not initialize model clients."""
+
+    def __init__(self, collection_name: str, client: Elasticsearch):
+        self._collection_name = collection_name
+        self._client = client
+
+    @staticmethod
+    def collection_name_for_knowledge(knowledge_id: Any) -> str:
+        return f"Vector_index_{knowledge_id}_Node".lower()
+
     @classmethod
-    def init_vector(cls, knowledge: Knowledge) -> ElasticSearchVector:
-        """创建向量服务实例（共享 ES 连接）"""
-        client = cls._get_shared_client()
-        collection_name = f"Vector_index_{knowledge.id}_Node"
+    def _get_shared_client(cls) -> Elasticsearch:
+        return ElasticSearchVectorClientProvider.get_shared_client()
 
-        if knowledge.embedding is None:
-            raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
-        if knowledge.reranker is None:
-            raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
-        embedding_config = knowledge.embedding.api_keys[0] if knowledge.embedding.api_keys else None
-        if not knowledge.embedding.api_keys:
-            logger.warning(f"No embedding api key found for knowledge {knowledge.id}")
-        reranker_config = knowledge.reranker.api_keys[0] if knowledge.reranker.api_keys else None
-        if not knowledge.reranker.api_keys:
-            logger.warning(f"No reranker api key found for knowledge {knowledge.id}")
-
-        return ElasticSearchVector(
-            index_name=collection_name,
-            client=client,
-            embedding_config=embedding_config,
-            reranker_config=reranker_config,
+    @classmethod
+    def for_knowledge(cls, knowledge_id: Any) -> "ElasticSearchVectorIndexOps":
+        return cls(
+            collection_name=cls.collection_name_for_knowledge(knowledge_id),
+            client=cls._get_shared_client(),
         )
 
+    def delete_index(self) -> None:
+        if self._client.indices.exists(index=self._collection_name):
+            self._client.indices.delete(index=self._collection_name, ignore=[400, 404])
+
+    def _get_ids_by_metadata_field(self, key: str, value: str) -> list[str] | None:
+        query = {"query": {"term": {f"{Field.METADATA_KEY.value}.{key}": value}}}
+        response = self._client.search(index=self._collection_name, body=query, size=10000)
+        if response["hits"]["hits"]:
+            return [hit["_id"] for hit in response["hits"]["hits"]]
+        return None
+
+    def delete_by_metadata_field(
+            self,
+            key: str,
+            value: str,
+            *,
+            refresh: bool = False,
+    ) -> bool:
+        if not self._client.indices.exists(index=self._collection_name):
+            return False
+
+        actual_ids = self._get_ids_by_metadata_field(key, value)
+        if not actual_ids:
+            return True
+
+        actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
+        try:
+            helpers.bulk(self._client, actions)
+            if refresh:
+                self._client.indices.refresh(index=self._collection_name)
+        except BulkIndexError as e:
+            for error in e.errors:
+                delete_error = error.get("delete", {})
+                status = delete_error.get("status")
+                doc_id = delete_error.get("_id")
+
+                if status == 404:
+                    logger.warning(f"Document not found for deletion: {doc_id}")
+                else:
+                    logger.error(f"Error deleting document: {error}")
+                    raise
+
+        return True
+
+    def change_document_status(self, document_id: str, status: int) -> int:
+        body = {
+            "script": {
+                "source": "ctx._source.metadata.status = params.new_status",
+                "params": {
+                    "new_status": status
+                }
+            },
+            "query": {
+                "term": {
+                    Field.DOCUMENT_ID.value: document_id
+                }
+            }
+        }
+        result = self._client.update_by_query(
+            index=self._collection_name,
+            body=body,
+        )
+        return result["updated"]
+
     @classmethod
-    def _ensure_parent_id_mapping(cls, client: Elasticsearch, index_name: str):
-        """为已有索引补充缺失的字段映射（仅追加，非破坏性）"""
+    def ensure_parent_id_mapping(cls, client: Elasticsearch, index_name: str):
+        """Add missing parent/QA mapping fields to an existing index."""
         if not client.indices.exists(index=index_name):
             return
         try:
@@ -981,21 +1043,17 @@ class ElasticSearchVectorFactory:
 
             update_body: dict[str, Any] = {"properties": {}}
 
-            # metadata.parent_id
             if metadata_props.get("parent_id", {}).get("type") != "keyword":
                 update_body["properties"]["metadata"] = {
                     "properties": {"parent_id": {"type": "keyword"}}
                 }
 
-            # top-level parent_id
             if props.get(Field.PARENT_ID.value, {}).get("type") != "keyword":
                 update_body["properties"][Field.PARENT_ID.value] = {"type": "keyword"}
 
-            # top-level chunk_type
             if Field.CHUNK_TYPE.value not in props:
                 update_body["properties"][Field.CHUNK_TYPE.value] = {"type": "keyword"}
 
-            # source_chunk_id
             if Field.SOURCE_CHUNK_ID.value not in props:
                 update_body["properties"][Field.SOURCE_CHUNK_ID.value] = {"type": "keyword"}
 
@@ -1006,3 +1064,29 @@ class ElasticSearchVectorFactory:
             logger.warning(f"Failed to update mapping for {index_name}: {e}")
 
 
+class ElasticSearchVectorFactory:
+    """Create full vector services that require configured model clients."""
+
+    @classmethod
+    def init_vector(cls, knowledge: Knowledge) -> ElasticSearchVector:
+        """Create a full vector service with configured model clients."""
+        client = ElasticSearchVectorClientProvider.get_shared_client()
+        collection_name = ElasticSearchVectorIndexOps.collection_name_for_knowledge(knowledge.id)
+
+        if knowledge.embedding is None:
+            raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
+        if knowledge.reranker is None:
+            raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        if not knowledge.embedding.api_keys:
+            raise ValueError(f"No embedding api key found for knowledge {knowledge.id}")
+        if not knowledge.reranker.api_keys:
+            raise ValueError(f"No reranker api key found for knowledge {knowledge.id}")
+        embedding_config = knowledge.embedding.api_keys[0]
+        reranker_config = knowledge.reranker.api_keys[0]
+
+        return ElasticSearchVector(
+            index_name=collection_name,
+            client=client,
+            embedding_config=embedding_config,
+            reranker_config=reranker_config,
+        )
