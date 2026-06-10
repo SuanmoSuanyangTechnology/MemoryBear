@@ -2556,6 +2556,55 @@ class WorkflowService:
         serialized = self._serialize_node_cache(cache)
         return self._mask_payload_with_secret_values(serialized, secret_values) if serialized else None
 
+    def _update_conversation_variable_cache(
+            self,
+            *,
+            app_id: uuid.UUID,
+            config,
+            result_data: dict[str, Any] | None = None,
+            patches: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """将会话变量写入 debug_state.snapshot.conversation，使其在 rerun 时生效。"""
+        debug_state = self._read_workflow_debug_state(app_id=app_id, workflow_config=config)
+        debug_snapshot = dict(debug_state["snapshot"])
+        existing_conv = dict(debug_snapshot.get("conversation") or {})
+
+        if patches:
+            patch_base = self._unwrap_typed_group(existing_conv)
+            # conversation 变量是扁平结构，patch 的 name/path 直接对应变量名，无 scope 层
+            type_map = self._build_snapshot_type_maps(config)["conversation"]
+            next_raw = dict(patch_base)
+            for patch in patches or []:
+                var_name = patch.get("name") or patch.get("path")
+                if not var_name:
+                    continue
+                next_raw[var_name] = patch.get("value")
+            new_conv_snapshot = self._normalize_typed_group(next_raw, type_map=type_map)
+        else:
+            # result_data 已经是 typed 格式，直接使用，过滤非已知会话变量字段
+            known_vars = {item.get("name") for item in (config.variables or []) if item.get("name")}
+            new_conv_snapshot = {
+                k: normalize_cache_value(v)
+                for k, v in (result_data or {}).items()
+                if k in known_vars
+            }
+
+        merged_conv = self._merge_typed_group(existing_conv, new_conv_snapshot)
+        debug_snapshot["conversation"] = merged_conv
+        self._write_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=config,
+            snapshot=debug_snapshot,
+            messages=debug_state.get("messages"),
+            execution_id=debug_state.get("execution_id"),
+            source="cache_update",
+        )
+        return {
+            "node_id": "conversation",
+            "node_type": "conversation",
+            "result_data": merged_conv,
+        }
+
     def update_node_cache(
             self,
             *,
@@ -2567,6 +2616,10 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             return None
+        if node_id == "conversation":
+            return self._update_conversation_variable_cache(
+                app_id=app_id, config=config, result_data=result_data, patches=patches
+            )
         node = next((item for item in config.nodes or [] if item.get("id") == node_id), None)
         if not node:
             return None
