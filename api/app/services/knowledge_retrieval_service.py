@@ -66,20 +66,23 @@ class KnowledgeRetrievalService:
         if not db_knowledge:
             raise KnowledgeRetrievalAccessDenied("The knowledge base does not exist or access is denied")
 
-        document_ids_filter = cls._build_metadata_document_filter(
+        document_ids_include = cls._build_metadata_document_filter(
             db=db,
             request=request,
             knowledge_ids=knowledge_ids,
         )
+        if document_ids_include == []:
+            return KnowledgeRetrievalResult(chunks=[])
+
         chunks = cls._retrieve_by_type(
             db=db,
             request=request,
             knowledge_ids=knowledge_ids,
             workspace_ids=workspace_ids,
             db_knowledge=db_knowledge,
-            document_ids_filter=document_ids_filter,
+            document_ids_include=document_ids_include,
         )
-        chunks = cls._exclude_document_ids(chunks, document_ids_filter)
+        chunks = cls._include_document_ids(chunks, document_ids_include)
         return KnowledgeRetrievalResult(chunks=chunks)
 
     @classmethod
@@ -90,18 +93,18 @@ class KnowledgeRetrievalService:
             knowledge_ids: list[uuid.UUID],
             workspace_ids: list[uuid.UUID],
             db_knowledge: Any,
-            document_ids_filter: list[str] | None,
+            document_ids_include: list[str] | None,
     ) -> list[Any]:
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         indices = ",".join(f"Vector_index_{knowledge_id}_Node".lower() for knowledge_id in knowledge_ids)
 
         if request.retrieve_type == RetrieveType.PARTICIPLE:
-            return cls._search_full_text(vector_service, request, indices, document_ids_filter)
+            return cls._search_full_text(vector_service, request, indices, document_ids_include)
         if request.retrieve_type == RetrieveType.SEMANTIC:
-            return cls._search_vector(vector_service, request, indices, document_ids_filter)
+            return cls._search_vector(vector_service, request, indices, document_ids_include)
 
-        vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_filter)
-        full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_filter)
+        vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_include)
+        full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_include)
         unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
         logger.debug(f"Retrieved {len(unique_chunks)} chunks")
         if not unique_chunks:
@@ -127,14 +130,14 @@ class KnowledgeRetrievalService:
             vector_service: ElasticSearchVector,
             request: KnowledgeRetrievalRequest,
             indices: str,
-            document_ids_filter: list[str] | None,
+            document_ids_include: list[str] | None,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_vector(
             query=request.query,
             top_k=request.top_k,
             indices=indices,
             score_threshold=request.vector_similarity_weight,
-            document_ids_filter=document_ids_filter,
+            document_ids_include=document_ids_include,
             file_names_filter=request.file_names_filter,
             resolve_parents=True,
         )
@@ -144,14 +147,14 @@ class KnowledgeRetrievalService:
             vector_service: ElasticSearchVector,
             request: KnowledgeRetrievalRequest,
             indices: str,
-            document_ids_filter: list[str] | None,
+            document_ids_include: list[str] | None,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_full_text(
             query=request.query,
             top_k=request.top_k,
             indices=indices,
             score_threshold=request.similarity_threshold,
-            document_ids_filter=document_ids_filter,
+            document_ids_include=document_ids_include,
             file_names_filter=request.file_names_filter,
             resolve_parents=True,
         )
@@ -486,18 +489,25 @@ class KnowledgeRetrievalService:
         return result
 
     @staticmethod
+    def _include_document_ids(
+            chunks: list[Any],
+            document_ids_include: list[str] | None,
+    ) -> list[Any]:
+        if document_ids_include is None:
+            return chunks
+        include_ids = set(document_ids_include)
+        return [
+            chunk
+            for chunk in chunks
+            if chunk.metadata.get("document_id") in include_ids
+        ]
+
+    @staticmethod
     def _exclude_document_ids(
             chunks: list[Any],
             document_ids_filter: list[str] | None,
     ) -> list[Any]:
-        if not document_ids_filter:
-            return chunks
-        exclude_ids = set(document_ids_filter)
-        return [
-            chunk
-            for chunk in chunks
-            if chunk.metadata.get("document_id") not in exclude_ids
-        ]
+        return KnowledgeRetrievalService._include_document_ids(chunks, document_ids_filter)
 
     @staticmethod
     def _build_chat_model(api_key: ModelApiKey) -> Base:

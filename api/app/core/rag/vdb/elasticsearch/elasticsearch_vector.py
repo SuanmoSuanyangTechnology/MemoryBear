@@ -522,15 +522,16 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        # If document_ids_filter is passed in, append to filter (blacklist: exclude these IDs)
-        document_ids_filter = kwargs.get("document_ids_filter")
-        if document_ids_filter:
+        document_ids_include = kwargs.get("document_ids_include")
+        if document_ids_include is None:
+            document_ids_include = kwargs.get("document_ids_filter")
+        if document_ids_include:
             query_str["bool"]["filter"].append({
-                "bool": {"must_not": {"terms": {"metadata.document_id": document_ids_filter}}}
+                "terms": {Field.DOCUMENT_ID.value: document_ids_include}
             })
-            logger.info(f"[ES search_by_vector] excluding document_ids: {document_ids_filter}")
+            logger.info(f"[ES search_by_vector] including document_ids: {document_ids_include}")
         else:
-            logger.info("[ES search_by_vector] no document_ids_filter")
+            logger.info("[ES search_by_vector] no document_ids_include")
 
         logger.debug(f"[ES search_by_vector] query DSL: {query_str}")
 
@@ -627,15 +628,16 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        # If document_ids_filter is passed in, append to filter (blacklist: exclude these IDs)
-        document_ids_filter = kwargs.get("document_ids_filter")
-        if document_ids_filter:
+        document_ids_include = kwargs.get("document_ids_include")
+        if document_ids_include is None:
+            document_ids_include = kwargs.get("document_ids_filter")
+        if document_ids_include:
             query_str["bool"]["filter"].append({
-                "bool": {"must_not": {"terms": {"metadata.document_id": document_ids_filter}}}
+                "terms": {Field.DOCUMENT_ID.value: document_ids_include}
             })
-            logger.info(f"[ES search_by_full_text] excluding document_ids: {document_ids_filter}")
+            logger.info(f"[ES search_by_full_text] including document_ids: {document_ids_include}")
         else:
-            logger.info("[ES search_by_full_text] no document_ids_filter")
+            logger.info("[ES search_by_full_text] no document_ids_include")
 
         logger.debug(f"[ES search_by_full_text] query DSL: {query_str}")
 
@@ -1062,7 +1064,6 @@ class ElasticSearchVectorIndexOps:
                 logger.info(f"Updated mapping for {index_name}: added {list(update_body['properties'].keys())}")
         except Exception as e:
             logger.warning(f"Failed to update mapping for {index_name}: {e}")
-
 
 class ElasticSearchVectorFactory:
     """Create full vector services that require configured model clients."""
