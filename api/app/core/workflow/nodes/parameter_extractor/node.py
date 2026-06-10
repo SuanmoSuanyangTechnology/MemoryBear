@@ -64,8 +64,8 @@ class ParameterExtractorNode(BaseNode):
 
     def _output_types(self) -> dict[str, VariableType]:
         outputs = {}
-        for param in self.typed_config.params:
-            outputs[param.name] = param.type
+        for param in self.config.get("params", []):
+            outputs[param["name"]] = VariableType(param["type"])
         return outputs
 
     @staticmethod
