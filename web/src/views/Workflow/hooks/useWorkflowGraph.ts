@@ -381,28 +381,30 @@ export const useWorkflowGraph = ({
         }
         // Generate ports dynamically for human-intervention node based on actions
         if (type === 'human-intervention' && config.actions && Array.isArray(config.actions)) {
-          const totalPorts = config.actions.length;
+          const actionCount = config.actions.length;
+          const newHeight = conditionNodeHeight + (actionCount - 1) * conditionNodeItemHeight;
 
           const portItems: PortMetadata[] = [
-            defaultPortItems[0],
+            defaultPortItems[0]
           ];
+
           // Add action ports
-          for (let i = 0; i < totalPorts; i++) {
+          config.actions.forEach((_action: any, index: number) => {
             portItems.push({
               group: 'right',
-              id: `CASE${i + 1}`,
+              id: `CASE${index + 1}`,
               args: {
                 x: nodeWidth,
-                y: getConditionNodeCasePortY(config.actions, i),
+                y: portItemArgsY * index + conditionNodePortItemArgsY,
               },
             });
-          }
+          });
           portItems.push({
             group: 'right',
             id: `TIMEOUT`,
             args: {
               x: nodeWidth,
-              y: getConditionNodeCasePortY(config.actions, totalPorts),
+              y: portItemArgsY * actionCount + conditionNodePortItemArgsY,
             },
           });
 
@@ -411,7 +413,7 @@ export const useWorkflowGraph = ({
             items: portItems
           };
 
-          nodeConfig.height = calcConditionNodeTotalHeight(config.actions);
+          nodeConfig.height = newHeight;
         }
 
         return nodeConfig
