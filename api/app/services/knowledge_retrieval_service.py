@@ -29,6 +29,7 @@ from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest, KnowledgeRetrievalResult
 from app.services import knowledge_service, knowledgeshare_service
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
+from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -66,20 +67,23 @@ class KnowledgeRetrievalService:
         if not db_knowledge:
             raise KnowledgeRetrievalAccessDenied("The knowledge base does not exist or access is denied")
 
-        document_ids_filter = cls._build_metadata_document_filter(
+        document_ids_include = cls._build_metadata_document_filter(
             db=db,
             request=request,
             knowledge_ids=knowledge_ids,
         )
+        if document_ids_include == []:
+            return KnowledgeRetrievalResult(chunks=[])
+
         chunks = cls._retrieve_by_type(
             db=db,
             request=request,
             knowledge_ids=knowledge_ids,
             workspace_ids=workspace_ids,
             db_knowledge=db_knowledge,
-            document_ids_filter=document_ids_filter,
+            document_ids_include=document_ids_include,
         )
-        chunks = cls._exclude_document_ids(chunks, document_ids_filter)
+        chunks = cls._include_document_ids(chunks, document_ids_include)
         return KnowledgeRetrievalResult(chunks=chunks)
 
     @classmethod
@@ -90,18 +94,18 @@ class KnowledgeRetrievalService:
             knowledge_ids: list[uuid.UUID],
             workspace_ids: list[uuid.UUID],
             db_knowledge: Any,
-            document_ids_filter: list[str] | None,
+            document_ids_include: list[str] | None,
     ) -> list[Any]:
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         indices = ",".join(f"Vector_index_{knowledge_id}_Node".lower() for knowledge_id in knowledge_ids)
 
         if request.retrieve_type == RetrieveType.PARTICIPLE:
-            return cls._search_full_text(vector_service, request, indices, document_ids_filter)
+            return cls._search_full_text(vector_service, request, indices, document_ids_include)
         if request.retrieve_type == RetrieveType.SEMANTIC:
-            return cls._search_vector(vector_service, request, indices, document_ids_filter)
+            return cls._search_vector(vector_service, request, indices, document_ids_include)
 
-        vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_filter)
-        full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_filter)
+        vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_include)
+        full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_include)
         unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
         logger.debug(f"Retrieved {len(unique_chunks)} chunks")
         if not unique_chunks:
@@ -127,14 +131,14 @@ class KnowledgeRetrievalService:
             vector_service: ElasticSearchVector,
             request: KnowledgeRetrievalRequest,
             indices: str,
-            document_ids_filter: list[str] | None,
+            document_ids_include: list[str] | None,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_vector(
             query=request.query,
             top_k=request.top_k,
             indices=indices,
             score_threshold=request.vector_similarity_weight,
-            document_ids_filter=document_ids_filter,
+            document_ids_include=document_ids_include,
             file_names_filter=request.file_names_filter,
             resolve_parents=True,
         )
@@ -144,14 +148,14 @@ class KnowledgeRetrievalService:
             vector_service: ElasticSearchVector,
             request: KnowledgeRetrievalRequest,
             indices: str,
-            document_ids_filter: list[str] | None,
+            document_ids_include: list[str] | None,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_full_text(
             query=request.query,
             top_k=request.top_k,
             indices=indices,
             score_threshold=request.similarity_threshold,
-            document_ids_filter=document_ids_filter,
+            document_ids_include=document_ids_include,
             file_names_filter=request.file_names_filter,
             resolve_parents=True,
         )
@@ -411,21 +415,20 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
     ) -> list[str] | None:
-        if not request.metadata_filters:
+        if request.metadata_filter_mode == MetadataFilterMode.MANUAL and not request.metadata_filters:
             return None
-
-        if request.metadata_filter_mode != MetadataFilterMode.MANUAL:
-            raise BusinessException(
-                "metadata_filter_mode 暂仅支持 'manual'",
-                code=BizCode.INVALID_PARAMETER,
-            )
 
         metadata_defs_by_kb = {
             knowledge_id: KnowledgeMetadataService.get_metadata_defs_for_filtering(db, knowledge_id)
             for knowledge_id in knowledge_ids
         }
-        common_fields = cls._get_common_metadata_fields(metadata_defs_by_kb)
-        filter_groups = cls._build_common_filter_groups(request.metadata_filters, common_fields)
+        common_metadata_defs = cls._get_common_metadata_defs(metadata_defs_by_kb)
+        filter_groups = cls._build_metadata_filter_groups(
+            db=db,
+            request=request,
+            knowledge_ids=knowledge_ids,
+            common_metadata_defs=common_metadata_defs,
+        )
         if not filter_groups:
             logger.warning("[MetadataFilter] No common metadata fields matched; skipping metadata filter")
             return None
@@ -441,24 +444,86 @@ class KnowledgeRetrievalService:
             document_ids.update(matched_ids)
         return [str(document_id) for document_id in document_ids]
 
+    @classmethod
+    def _build_metadata_filter_groups(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            knowledge_ids: list[uuid.UUID],
+            common_metadata_defs: dict[str, dict],
+    ) -> list[EngineFilterGroup]:
+        if request.metadata_filter_mode == MetadataFilterMode.MANUAL:
+            if not request.metadata_filters:
+                return []
+            return cls._build_common_filter_groups(
+                request.metadata_filters,
+                set(common_metadata_defs.keys()),
+            )
+
+        if request.metadata_filter_mode == MetadataFilterMode.AUTO:
+            if not common_metadata_defs:
+                return []
+            llm = cls._build_metadata_auto_filter_llm(
+                db=db,
+                knowledge_id=knowledge_ids[0],
+            )
+            if not llm:
+                logger.warning("[MetadataAutoFilter] LLM is unavailable; skipping metadata filter")
+                return []
+            return MetadataAutoFilterService.generate_filter_groups(
+                query=request.query,
+                metadata_defs=common_metadata_defs,
+                llm=llm,
+            )
+
+        raise BusinessException(
+            f"metadata_filter_mode 不支持: {request.metadata_filter_mode}",
+            code=BizCode.INVALID_PARAMETER,
+        )
+
+    @classmethod
+    def _build_metadata_auto_filter_llm(
+            cls,
+            db: Session,
+            knowledge_id: uuid.UUID,
+    ) -> Base | None:
+        knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
+        if not knowledge or not knowledge.llm_id:
+            return None
+
+        api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id)
+        if not api_key:
+            return None
+        return cls._build_chat_model(api_key)
+
     @staticmethod
-    def _get_common_metadata_fields(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> set[str]:
+    def _get_common_metadata_defs(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> dict[str, dict]:
         field_names = set()
         for metadata_defs in metadata_defs_by_kb.values():
             field_names.update(metadata_defs.keys())
 
-        common_fields = set()
+        common_defs = {}
         for field_name in field_names:
-            field_types = set()
-            all_have_field = True
+            common_type = None
+            common_def = None
             for metadata_defs in metadata_defs_by_kb.values():
-                if field_name not in metadata_defs:
-                    all_have_field = False
+                field_def = metadata_defs.get(field_name)
+                if not field_def:
+                    common_def = None
                     break
-                field_types.add(metadata_defs[field_name]["type"])
-            if all_have_field and len(field_types) == 1:
-                common_fields.add(field_name)
-        return common_fields
+                if common_type is None:
+                    common_type = field_def["type"]
+                    common_def = field_def
+                elif common_type != field_def["type"]:
+                    common_def = None
+                    break
+            if common_def:
+                common_defs[field_name] = dict(common_def)
+        return common_defs
+
+    @staticmethod
+    def _get_common_metadata_fields(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> set[str]:
+        return set(KnowledgeRetrievalService._get_common_metadata_defs(metadata_defs_by_kb).keys())
 
     @staticmethod
     def _build_common_filter_groups(metadata_filters: list[Any], common_fields: set[str]) -> list[EngineFilterGroup]:
@@ -486,18 +551,25 @@ class KnowledgeRetrievalService:
         return result
 
     @staticmethod
+    def _include_document_ids(
+            chunks: list[Any],
+            document_ids_include: list[str] | None,
+    ) -> list[Any]:
+        if document_ids_include is None:
+            return chunks
+        include_ids = set(document_ids_include)
+        return [
+            chunk
+            for chunk in chunks
+            if chunk.metadata.get("document_id") in include_ids
+        ]
+
+    @staticmethod
     def _exclude_document_ids(
             chunks: list[Any],
             document_ids_filter: list[str] | None,
     ) -> list[Any]:
-        if not document_ids_filter:
-            return chunks
-        exclude_ids = set(document_ids_filter)
-        return [
-            chunk
-            for chunk in chunks
-            if chunk.metadata.get("document_id") not in exclude_ids
-        ]
+        return KnowledgeRetrievalService._include_document_ids(chunks, document_ids_filter)
 
     @staticmethod
     def _build_chat_model(api_key: ModelApiKey) -> Base:

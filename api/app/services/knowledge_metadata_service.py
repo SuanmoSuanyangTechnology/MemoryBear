@@ -30,17 +30,126 @@ class KnowledgeMetadataService:
         获取知识库的所有元数据字段（自定义 + 内置）
         Returns: {"custom": [...], "builtin_enabled": bool, "builtin_fields": [...]}
         """
+        return KnowledgeMetadataService.list_metadata_fields_for_knowledge_ids(
+            db=db,
+            knowledge_ids=[knowledge_id],
+            include_builtin_when_disabled=True,
+            preserve_single_ids=True,
+        )
+
+    @staticmethod
+    def list_metadata_fields_for_knowledge_ids(
+        db: Session,
+        knowledge_ids: list[uuid.UUID],
+        *,
+        include_builtin_when_disabled: bool = False,
+        preserve_single_ids: bool = False,
+        include_counts: bool = True,
+    ) -> dict:
+        """List common metadata fields across knowledge bases."""
         from app.models.knowledge_model import Knowledge
 
-        custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
+        unique_knowledge_ids = list(dict.fromkeys(knowledge_ids))
+        if not unique_knowledge_ids:
+            return {
+                "custom": [],
+                "builtin_enabled": False,
+                "builtin_fields": [],
+            }
 
-        knowledge = db.query(Knowledge).filter(Knowledge.id == knowledge_id).first()
-        builtin_enabled = knowledge.builtin_metadata_enabled == 1 if knowledge else False
+        custom_fields = KnowledgeMetadataRepository.get_by_knowledge_ids(db, unique_knowledge_ids)
+        fields_by_kb = {knowledge_id: [] for knowledge_id in unique_knowledge_ids}
+        for field in custom_fields:
+            fields_by_kb.setdefault(field.knowledge_id, []).append(field)
+
+        counts_by_metadata_id = {}
+        if include_counts:
+            metadata_ids = [field.id for field in custom_fields]
+            counts_by_metadata_id = KnowledgeMetadataRepository.count_active_bindings_by_metadata_ids(
+                db,
+                metadata_ids,
+            )
+
+        knowledge_rows = (
+            db.query(Knowledge.id, Knowledge.builtin_metadata_enabled)
+            .filter(Knowledge.id.in_(unique_knowledge_ids))
+            .all()
+        )
+        builtin_enabled_by_kb = {
+            row[0]: row[1] == 1
+            for row in knowledge_rows
+        }
+        for knowledge_id in unique_knowledge_ids:
+            builtin_enabled_by_kb.setdefault(knowledge_id, False)
+
+        return KnowledgeMetadataService._build_common_metadata_fields_response(
+            fields_by_kb=fields_by_kb,
+            builtin_enabled_by_kb=builtin_enabled_by_kb,
+            counts_by_metadata_id=counts_by_metadata_id,
+            include_builtin_when_disabled=include_builtin_when_disabled,
+            preserve_single_ids=preserve_single_ids,
+        )
+
+    @staticmethod
+    def _build_common_metadata_fields_response(
+        fields_by_kb: dict[uuid.UUID, list[KnowledgeMetadata]],
+        builtin_enabled_by_kb: dict[uuid.UUID, bool],
+        counts_by_metadata_id: dict[uuid.UUID, int],
+        *,
+        include_builtin_when_disabled: bool = False,
+        preserve_single_ids: bool = False,
+    ) -> dict:
+        knowledge_ids = list(fields_by_kb.keys())
+        common_keys: set[tuple[str, str]] | None = None
+        field_lookup_by_kb: dict[uuid.UUID, dict[tuple[str, str], KnowledgeMetadata]] = {}
+
+        for knowledge_id, fields in fields_by_kb.items():
+            lookup = {(field.name, field.type): field for field in fields}
+            field_lookup_by_kb[knowledge_id] = lookup
+            keys = set(lookup.keys())
+            common_keys = keys if common_keys is None else common_keys & keys
+
+        common_keys = common_keys or set()
+        first_kb_id = knowledge_ids[0] if knowledge_ids else None
+        first_kb_fields = fields_by_kb.get(first_kb_id, []) if first_kb_id else []
+        ordered_keys = [
+            (field.name, field.type)
+            for field in first_kb_fields
+            if (field.name, field.type) in common_keys
+        ]
+
+        single_kb = len(knowledge_ids) == 1
+        custom_fields = []
+        for key in ordered_keys:
+            fields = [
+                field_lookup_by_kb[knowledge_id][key]
+                for knowledge_id in knowledge_ids
+            ]
+            count = sum(counts_by_metadata_id.get(field.id, 0) for field in fields)
+            first_field = fields[0]
+            custom_field = {
+                "id": first_field.id if single_kb and preserve_single_ids else None,
+                "type": first_field.type,
+                "name": first_field.name,
+                "is_builtin": False,
+                "count": count,
+            }
+            if single_kb and preserve_single_ids:
+                custom_field["created_at"] = first_field.created_at
+                custom_field["updated_at"] = first_field.updated_at
+            custom_fields.append(custom_field)
+
+        builtin_enabled = all(
+            builtin_enabled_by_kb.get(knowledge_id, False)
+            for knowledge_id in knowledge_ids
+        ) if knowledge_ids else False
 
         return {
             "custom": custom_fields,
             "builtin_enabled": builtin_enabled,
-            "builtin_fields": BuiltinFieldResolver.get_all() if builtin_enabled else [],
+            "builtin_fields": BuiltinFieldResolver.get_all()
+            if builtin_enabled or include_builtin_when_disabled
+            else [],
         }
 
     @staticmethod
@@ -143,7 +252,7 @@ class KnowledgeMetadataService:
 
         return {
             "enabled": enabled,
-            "fields": BuiltinFieldResolver.get_all() if enabled else [],
+            "fields": BuiltinFieldResolver.get_all(),
         }
 
     @staticmethod

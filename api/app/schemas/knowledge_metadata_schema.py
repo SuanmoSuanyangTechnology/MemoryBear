@@ -53,6 +53,7 @@ class KnowledgeMetadataResponse(BaseModel):
     type: str = Field(..., description="字段类型")
     name: str = Field(..., description="字段名")
     is_builtin: bool = Field(False, description="是否内置字段")
+    count: int | None = Field(None, description="字段被有效文档使用的数量（仅自定义字段）")
     created_at: datetime.datetime | int | None = Field(None, description="创建时间戳(ms)")
     updated_at: datetime.datetime | int | None = Field(None, description="更新时间戳(ms)")
 
@@ -80,6 +81,10 @@ class BuiltinMetadataEnableRequest(BaseModel):
 class BuiltinMetadataListResponse(BaseModel):
     enabled: bool = Field(..., description="开关状态")
     fields: list[KnowledgeMetadataResponse] = Field(..., description="内置字段列表")
+
+
+class KnowledgeMetadataFieldsRequest(BaseModel):
+    kb_ids: list[uuid.UUID] = Field(..., min_length=1, description="知识库ID列表")
 
 
 # === Batch Update Document Metadata Schemas ===
