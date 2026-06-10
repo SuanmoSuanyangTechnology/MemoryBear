@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
-import { Flex, Popover } from 'antd';
+import { Flex, Popover, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
+
+import { openHelpCenter } from '@/utils/help';
 
 const shakeAnimation = `
   @keyframes shake {
@@ -23,10 +25,10 @@ const shakeAnimation = `
       opacity: 1;
     }
     18% {
-      left: 20%;
+      left: 22%;
     }
     34% {
-      left: 36%;
+      left: 44%;
     }
     50% {
       left: 54%;
@@ -60,11 +62,11 @@ const shakeAnimation = `
     }
   }
   @keyframes nodeHighlight2 {
-    0%, 26%, 40%, 100% {
+    0%, 24%, 40%, 100% {
       opacity: 0.55;
       transform: translateY(0);
     }
-    30%, 36% {
+    26%, 36% {
       opacity: 1;
       transform: translateY(-2px);
     }
@@ -191,11 +193,27 @@ const cognitiveUpgradingNodeDescriptions: CognitiveUpgradingNodeDesc[] = [
 ];
 
 const CognitiveUpgradingHelp = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+
+  const gotoHelpCenter = () => {
+    const currentLang = i18n.language;
+    const lang = currentLang === 'zh' ? 'zh' : 'en';
+    openHelpCenter(lang, 'memory-read');
+  };
 
   const cognitiveUpgradingPopover = useMemo(() => (
     <div className="rb:w-100 rb:text-[12px]">
-      <div className="rb:font-medium rb:mb-3 rb:text-[14px]">{t('workflow.cognitiveUpgrading.usageHelp')}</div>
+      <Flex align="center" justify="space-between">
+        <div className="rb:font-medium rb:mb-3 rb:text-[14px]">{t('workflow.cognitiveUpgrading.usageHelp')}</div>
+        <Button
+          type="link"
+          size="small"
+          icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>}
+          onClick={gotoHelpCenter}
+        >
+          {t('workflow.cognitiveUpgrading.tutorial')}
+        </Button>
+      </Flex>
       <div className="rb:bg-[#F9F9F9] rb:rounded-xl rb:py-3 rb:px-3.5">
         <div className="rb:text-center rb:mb-3">{t('workflow.cognitiveUpgrading.recommendedUsage')}</div>
         <div className="rb:relative rb:grid rb:grid-cols-9 rb:gap-1">
