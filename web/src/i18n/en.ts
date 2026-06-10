@@ -1717,10 +1717,14 @@ export const en = {
       created_at: 'Created At',
       updated_at: 'Last Updated',
       fullScreen: 'Full Screen',
+      alias: 'Alias',
+      relations: 'Relations',
       goals: 'Goals',
-      traits: 'Traits',
-      interests: 'Interests',
       core_facts: 'Core Facts',
+      interests: 'Interests',
+      traits: 'Traits',
+      beliefs_or_stances: 'Belief',
+      anchors: 'Anchors',
 
       memoryWindow: "{{name}}'s Memory Overview",
       memory_insight: 'Overall Overview',
@@ -1742,6 +1746,7 @@ export const en = {
       ExtractedEntity_aliases: 'Aliases',
       ExtractedEntity_connect_strngth: 'Connection Strength',
       ExtractedEntity_importance_score: 'Importance Score',
+      ExtractedEntity_description_summary: 'Description Summary',
 
       AssistantPruned_memory_type: 'Memory Type',
 
@@ -1851,7 +1856,7 @@ export const en = {
       manual: 'Manual',
       solution_detail_noChanges: 'No changes',
       resetView: 'Reset View',
-      relationshipType: 'Relationship Type',
+      predicate: 'Predicate',
       sourceNode: 'Source Node',
       targetNode: 'Target Node',
       totalCategoryStats: 'Total events',

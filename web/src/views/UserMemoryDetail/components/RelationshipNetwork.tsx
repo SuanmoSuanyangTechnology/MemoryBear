@@ -292,29 +292,28 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
               const targetNode = nodes.find(n => n.id === (selectedNode as EdgeClickData).target)
               return (
                 <Flex vertical gap={12}>
-                {/* <div> */}
-                  {selectedNode.label && <Tag>{selectedNode.label}</Tag>}
-                {/* </div> */}
-                <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5">
-                  {(selectedNode as EdgeClickData).label}
-                </div>
-                <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.relationshipType')}</div>
-                <div className="rb:font-medium">
-                  {(selectedNode as Edge).caption}
-                </div>
+                  {(selectedNode as EdgeClickData).properties?.predicate_surface &&
+                    <div className="rb:text-[#212332]">
+                      {(selectedNode as EdgeClickData).properties?.predicate_surface}
+                    </div>
+                  }
+                  <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.predicate')}</div>
+                  <div className="rb:font-medium">
+                    {(selectedNode as EdgeClickData).properties?.predicate}
+                  </div>
 
-                <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.sourceNode')}</div>
-                <div className="rb:font-medium">
-                  {sourceNode?.name || (selectedNode as EdgeClickData).source}
-                  {sourceNode?.caption && ` (${sourceNode!.caption})`}
-                </div>
+                  <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.sourceNode')}</div>
+                  <div className="rb:font-medium">
+                    {sourceNode?.name || (selectedNode as EdgeClickData).source}
+                    {sourceNode?.caption && ` (${sourceNode!.caption})`}
+                  </div>
 
-                <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.targetNode')}</div>
-                <div className="rb:font-medium">
-                  {targetNode?.name || (selectedNode as EdgeClickData).target}
-                  {targetNode?.caption && ` (${targetNode!.caption})`}
-                </div>
-              </Flex>
+                  <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.targetNode')}</div>
+                  <div className="rb:font-medium">
+                    {targetNode?.name || (selectedNode as EdgeClickData).target}
+                    {targetNode?.caption && ` (${targetNode!.caption})`}
+                  </div>
+                </Flex>
               )
             })()
             : <>
@@ -386,7 +385,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
 
 
                       {selectedNode.label === 'ExtractedEntity' && <>
-                        {(['entity_type', 'aliases'] as const).map(key => {
+                        {(['description_summary', 'entity_type', 'aliases'] as const).map(key => {
                           const p = (selectedNode as Node).properties as ExtractedEntityNodeProperties
                           if (p[key]) {
                             return (
