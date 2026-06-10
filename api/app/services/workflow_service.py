@@ -2574,7 +2574,7 @@ class WorkflowService:
             # conversation 变量是扁平结构，patch 的 name/path 直接对应变量名，无 scope 层
             type_map = self._build_snapshot_type_maps(config)["conversation"]
             next_raw = dict(patch_base)
-            for patch in patches or []:
+            for patch in patches:
                 var_name = patch.get("name") or patch.get("path")
                 if not var_name:
                     continue
