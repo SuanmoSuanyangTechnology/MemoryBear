@@ -32,6 +32,7 @@ from app.models.user_model import User
 from app.schemas import knowledge_schema
 from app.schemas import file_schema
 from app.schemas.response_schema import ApiResponse
+from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
 from app.services import file_service
 from app.services.file_service import _is_qa_doc, _build_qa_export
@@ -46,6 +47,12 @@ _PARSE_DOCUMENT_TASK_NAME = "app.core.rag.tasks.parse_document"
 _IMPORT_QA_TASK_NAME = "app.core.rag.tasks.import_qa_chunks"
 _PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 _PARSE_TASK_TTL = 7200
+_SHARE_MIRRORED_MODEL_FIELDS = (
+    ("embedding_id", "embedding"),
+    ("reranker_id", "reranker"),
+    ("llm_id", "llm"),
+    ("image2text_id", "image2text"),
+)
 
 router = APIRouter(
     prefix="/knowledges",
@@ -136,6 +143,39 @@ def _dispatch_reparse_tasks_for_knowledge(db: Session, knowledge_id: uuid.UUID) 
         result["queued"] += 1
 
     return result
+
+
+def _build_knowledge_detail_data(
+        db: Session,
+        db_knowledge: knowledge_model.Knowledge
+) -> dict:
+    data = jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge))
+    if db_knowledge.permission_id != knowledge_model.PermissionType.Share:
+        return data
+
+    knowledgeshare = knowledgeshare_repository.get_knowledgeshare_by_id(db, db_knowledge.id)
+    if not knowledgeshare:
+        api_logger.warning(
+            "Share relation not found when mirroring knowledge model fields: knowledge_id=%s",
+            db_knowledge.id,
+        )
+        return data
+
+    source_knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledgeshare.source_kb_id)
+    if not source_knowledge or source_knowledge.status == 2:
+        api_logger.warning(
+            "Source knowledge not available when mirroring share model fields: "
+            "target_kb_id=%s, source_kb_id=%s",
+            db_knowledge.id,
+            knowledgeshare.source_kb_id,
+        )
+        return data
+
+    source_data = jsonable_encoder(knowledge_schema.Knowledge.model_validate(source_knowledge))
+    for id_field, model_field in _SHARE_MIRRORED_MODEL_FIELDS:
+        data[id_field] = source_data.get(id_field)
+        data[model_field] = source_data.get(model_field)
+    return data
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)
@@ -331,7 +371,7 @@ async def get_knowledge(
             )
 
         api_logger.info(f"Knowledge base query successful: {db_knowledge.name} (ID: {db_knowledge.id})")
-        return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="Successfully obtained knowledge base information")
+        return success(data=_build_knowledge_detail_data(db, db_knowledge), msg="Successfully obtained knowledge base information")
     except HTTPException:
         raise
     except Exception as e:
