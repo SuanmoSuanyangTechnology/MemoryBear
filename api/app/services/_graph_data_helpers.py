@@ -42,6 +42,7 @@ __all__ = [
     "compute_stat_types",
     "assemble_per_type_stat",
     "assemble_center_per_type_stat",
+    "build_edge_groups",
     # Neo4j 查询封装
     "query_nodes_by_type_limits",
     "query_rel_count_batch",
@@ -438,6 +439,79 @@ def assemble_center_per_type_stat(
             "truncated": truncated,
         }
     return per_type_stat
+
+
+def build_edge_groups(
+    edges: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """聚合「同一对节点之间的多条边」并按方向分桶（纯逻辑）。
+
+    业务背景：``EXTRACTED_RELATIONSHIP`` 等关系常常出现在同一对实体之间多次，
+    例如 (A)-[:关联于 {predicate_surface: 女朋友}]->(B) 与
+    (A)-[:关联于 {predicate_surface: 给…过生日}]->(B)。这些边在顶层 ``edges``
+    数组中是平铺的；前端如果想呈现「重边」效果，需要自己做一次 O(N) 聚合。
+    本函数把这部分逻辑下沉到后端，输出与方向无关的稳定分组。
+    
+    Args:
+        edges: 已经装配好的响应边列表。每项至少含 ``id`` / ``source`` /
+            ``target`` 三个字符串键；其它字段（type / properties / caption）
+            本函数不读取，由调用方维护。
+
+    Returns:
+        ``edge_groups`` 字段对应的列表。每个元素形如::
+
+            {
+                "node_a": "A",
+                "node_b": "B",
+                "total": 3,
+                "a_to_b": ["e1", "e3"],
+                "b_to_a": ["e2"],
+            }
+
+        当不存在任何重边对时返回 ``[]``。
+    """
+    # 用 dict 收口，键 = (node_a, node_b) 元组（已字典序排序）。
+    # 值同时记录两个方向的边 id 列表，避免二次遍历。
+    groups: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
+
+    for edge in edges:
+        edge_id = edge.get("id")
+        source = edge.get("source")
+        target = edge.get("target")
+        if not edge_id or not source or not target:
+            continue
+        if source == target:
+            # 自环不属于「双向重边」语义，跳过。
+            continue
+
+        if source < target:
+            node_a, node_b = source, target
+            direction = "a_to_b"
+        else:
+            node_a, node_b = target, source
+            # source > target 时，原边实际是 b_to_a 方向。
+            direction = "b_to_a"
+
+        bucket = groups.get((node_a, node_b))
+        if bucket is None:
+            bucket = {"a_to_b": [], "b_to_a": []}
+            groups[(node_a, node_b)] = bucket
+        bucket[direction].append(edge_id)
+
+    result: List[Dict[str, Any]] = []
+    for (node_a, node_b), bucket in sorted(groups.items()):
+        total = len(bucket["a_to_b"]) + len(bucket["b_to_a"])
+        if total < 2:
+            # 单边对不进 edge_groups；它已经在顶层 edges 中，前端无需再聚合。
+            continue
+        result.append({
+            "node_a": node_a,
+            "node_b": node_b,
+            "total": total,
+            "a_to_b": bucket["a_to_b"],
+            "b_to_a": bucket["b_to_a"],
+        })
+    return result
 
 
 # ---------------------------------------------------------------------------
