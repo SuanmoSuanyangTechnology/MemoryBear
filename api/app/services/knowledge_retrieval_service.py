@@ -235,16 +235,15 @@ class KnowledgeRetrievalService:
             return [], []
 
         if current_user is None:
-            rows = (
-                db.query(knowledge_model.Knowledge.id, knowledge_model.Knowledge.workspace_id)
+            knowledges = (
+                db.query(knowledge_model.Knowledge)
                 .filter(
                     knowledge_model.Knowledge.id.in_(requested_kb_ids),
-                    knowledge_model.Knowledge.chunk_num > 0,
                     knowledge_model.Knowledge.status == 1,
                 )
                 .all()
             )
-            return [row[0] for row in rows], [row[1] for row in rows]
+            return cls._expand_knowledges_to_leaf_kbs(db=db, knowledges=knowledges)
 
         return cls._resolve_accessible_chunk_kbs(
             db=db,
@@ -257,42 +256,119 @@ class KnowledgeRetrievalService:
         return list(dict.fromkeys(values))
 
     @classmethod
+    def _expand_knowledges_to_leaf_kbs(
+            cls,
+            db: Session,
+            knowledges: list[Any],
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        knowledge_ids = []
+        workspace_ids = []
+        for knowledge in knowledges:
+            expanded_ids, expanded_workspace_ids = cls._expand_folder_to_leaf_kbs(
+                db=db,
+                knowledge=knowledge,
+            )
+            knowledge_ids.extend(expanded_ids)
+            workspace_ids.extend(expanded_workspace_ids)
+        return cls._deduplicate_knowledge_pairs(knowledge_ids, workspace_ids)
+
+    @classmethod
+    def _expand_folder_to_leaf_kbs(
+            cls,
+            db: Session,
+            knowledge: Any,
+            visited: set[uuid.UUID] | None = None,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        if not knowledge or not knowledge.is_active:
+            return [], []
+        if knowledge.is_retrievable_leaf:
+            return [knowledge.id], [knowledge.workspace_id]
+        if not knowledge.is_folder:
+            return [], []
+
+        if visited is None:
+            visited = set()
+        if knowledge.id in visited:
+            logger.warning(
+                "Detected cyclic knowledge folder while expanding retrieval candidates: knowledge_id=%s",
+                knowledge.id,
+            )
+            return [], []
+        visited.add(knowledge.id)
+
+        knowledge_ids = []
+        workspace_ids = []
+        children = knowledge_repository.get_knowledges_by_parent_id(db=db, parent_id=knowledge.id)
+        for child in children:
+            if child.workspace_id != knowledge.workspace_id:
+                logger.warning(
+                    "Skipping child knowledge from another workspace while expanding folder: folder_id=%s, child_id=%s",
+                    knowledge.id,
+                    child.id,
+                )
+                continue
+            expanded_ids, expanded_workspace_ids = cls._expand_folder_to_leaf_kbs(
+                db=db,
+                knowledge=child,
+                visited=visited,
+            )
+            knowledge_ids.extend(expanded_ids)
+            workspace_ids.extend(expanded_workspace_ids)
+
+        return cls._deduplicate_knowledge_pairs(knowledge_ids, workspace_ids)
+
+    @staticmethod
+    def _deduplicate_knowledge_pairs(
+            knowledge_ids: list[uuid.UUID],
+            workspace_ids: list[uuid.UUID],
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        seen = set()
+        deduplicated_ids = []
+        deduplicated_workspace_ids = []
+        for knowledge_id, workspace_id in zip(knowledge_ids, workspace_ids):
+            if knowledge_id in seen:
+                continue
+            seen.add(knowledge_id)
+            deduplicated_ids.append(knowledge_id)
+            deduplicated_workspace_ids.append(workspace_id)
+        return deduplicated_ids, deduplicated_workspace_ids
+
+    @classmethod
     def _resolve_accessible_chunk_kbs(
             cls,
             db: Session,
             kb_ids: list[uuid.UUID],
             current_user: Any,
     ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        filters = [
-            knowledge_model.Knowledge.id.in_(kb_ids),
-            knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
-            knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
-            knowledge_model.Knowledge.chunk_num > 0,
-            knowledge_model.Knowledge.status == 1,
-        ]
-        private_items = knowledge_service.get_chunked_knowledgeids(
-            db=db,
-            filters=filters,
-            current_user=current_user,
+        private_targets = (
+            db.query(knowledge_model.Knowledge)
+            .filter(
+                knowledge_model.Knowledge.id.in_(kb_ids),
+                knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
+                knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
+                knowledge_model.Knowledge.status == 1,
+            )
+            .all()
         )
-        knowledge_ids = [item[0] for item in private_items]
-        workspace_ids = [item[1] for item in private_items]
-
-        filters = [
-            knowledge_model.Knowledge.id.in_(kb_ids),
-            knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
-            knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
-            knowledge_model.Knowledge.chunk_num > 0,
-            knowledge_model.Knowledge.status == 1,
-        ]
-        share_targets = knowledge_service.get_chunked_knowledgeids(
+        knowledge_ids, workspace_ids = cls._expand_knowledges_to_leaf_kbs(
             db=db,
-            filters=filters,
-            current_user=current_user,
+            knowledges=private_targets,
+        )
+
+        share_targets = (
+            db.query(knowledge_model.Knowledge)
+            .filter(
+                knowledge_model.Knowledge.id.in_(kb_ids),
+                knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
+                knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
+                knowledge_model.Knowledge.status == 1,
+            )
+            .all()
         )
         if share_targets:
+            share_target_ids = [target.id for target in share_targets]
             filters = [
-                knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids),
+                knowledgeshare_model.KnowledgeShare.target_kb_id.in_(share_target_ids),
                 knowledgeshare_model.KnowledgeShare.target_workspace_id == current_user.current_workspace_id,
             ]
             share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
@@ -300,10 +376,19 @@ class KnowledgeRetrievalService:
                 filters=filters,
                 current_user=current_user,
             )
-            knowledge_ids.extend([item[0] for item in share_items])
-            workspace_ids.extend([item[1] for item in share_items])
+            for source_kb_id, _source_workspace_id in share_items:
+                source_knowledge = knowledge_repository.get_knowledge_by_id(
+                    db=db,
+                    knowledge_id=source_kb_id,
+                )
+                expanded_ids, expanded_workspace_ids = cls._expand_folder_to_leaf_kbs(
+                    db=db,
+                    knowledge=source_knowledge,
+                )
+                knowledge_ids.extend(expanded_ids)
+                workspace_ids.extend(expanded_workspace_ids)
 
-        return knowledge_ids, workspace_ids
+        return cls._deduplicate_knowledge_pairs(knowledge_ids, workspace_ids)
 
     @staticmethod
     def _get_first_knowledge(
