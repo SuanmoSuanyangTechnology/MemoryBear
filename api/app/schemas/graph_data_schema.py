@@ -73,6 +73,32 @@ class GraphStatistics(BaseModel):
     )
 
 
+class GraphEdgeGroup(BaseModel):
+    """同一对节点之间的多边聚合（含双向）。
+
+    仅当两个节点间存在 ``>= 2`` 条边（无论方向）时，才会出现在响应的
+    ``edge_groups`` 数组中。``node_a`` / ``node_b`` 取两端 elementId 的字典序
+    升序，保证同一对节点对应唯一的分组——不论 Cypher 返回顺序如何，前端
+    都能用 ``(node_a, node_b)`` 作为稳定 key。
+
+    自环（``source == target``）不会构成分组。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    node_a: str = Field(..., description="按 elementId 字典序较小的端点")
+    node_b: str = Field(..., description="按 elementId 字典序较大的端点")
+    total: int = Field(..., ge=2, description="本组涵盖的边总数（双向合计），最少 2")
+    a_to_b: List[str] = Field(
+        default_factory=list,
+        description="source=node_a, target=node_b 的边 id 列表；按 edges 中出现顺序",
+    )
+    b_to_a: List[str] = Field(
+        default_factory=list,
+        description="source=node_b, target=node_a 的边 id 列表；按 edges 中出现顺序",
+    )
+
+
 class GraphDataResponse(BaseModel):
     """``analytics_graph_data`` 的返回结构。controller 仍包一层 ApiResponse。"""
 
@@ -80,6 +106,13 @@ class GraphDataResponse(BaseModel):
 
     nodes: List[GraphNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
+    edge_groups: List[GraphEdgeGroup] = Field(
+        default_factory=list,
+        description=(
+            "同一对节点之间存在多条边（双向合计 >= 2）的聚合视图。"
+            "便于前端在重边场景渲染聚合标签或多边弧线。"
+        ),
+    )
     statistics: GraphStatistics = Field(
         default_factory=GraphStatistics,
         description="节点/边统计信息，包含旧字段与新增 per_type",

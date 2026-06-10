@@ -29,6 +29,7 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
     assemble_center_per_type_stat,
+    build_edge_groups,
     compute_stat_types,
     resolve_mode_and_type_limits,
     _query_nodes_by_type_limits,
@@ -1729,7 +1730,9 @@ async def analytics_graph_data(
 
     Returns:
         ``GraphDataResponse.model_dump()`` 后的字典，顶层键为
-        ``nodes / edges / statistics``，必要时附带 ``message``。
+        ``nodes / edges / edge_groups / statistics``，必要时附带 ``message``。
+        ``edge_groups`` 把同一对节点之间的多条边按方向分桶（仅当某对节点的
+        总边数 ≥ 2 时才出现），便于前端做重边聚合渲染。
     """
     try:
         # 1. 用户校验
@@ -1760,6 +1763,9 @@ async def analytics_graph_data(
         # 6. Q3 边查询（try/except 降级，Requirement 8.4）
         edges, edge_type_counts = await _format_edges(node_ids)
 
+        # 6.1 同对节点重边聚合（双向分桶）。仅依赖 edges 列表，纯逻辑无 IO。
+        edge_groups = build_edge_groups(edges)
+
         # 7. Q4 全量计数 + statistics.per_type 装配
         per_type_stat = await _build_per_type_stat(
             mode=mode,
@@ -1785,7 +1791,8 @@ async def analytics_graph_data(
         )
         logger.info(
             f"图数据查询: end_user_id={end_user_id} mode={mode} "
-            f"nodes={len(nodes)} edges={len(edges)} per_type=[{per_type_log}]"
+            f"nodes={len(nodes)} edges={len(edges)} "
+            f"edge_groups={len(edge_groups)} per_type=[{per_type_log}]"
         )
 
         # 通过 GraphDataResponse 装配响应：拿到 ge=0 / 必填字段校验与向后兼容契约，
@@ -1793,6 +1800,7 @@ async def analytics_graph_data(
         response = GraphDataResponse(
             nodes=nodes,
             edges=edges,
+            edge_groups=edge_groups,
             statistics=statistics,
         )
         return response.model_dump(exclude_none=True)
