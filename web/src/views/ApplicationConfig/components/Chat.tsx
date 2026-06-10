@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 14:52:57
+ * @Last Modified time: 2026-06-10 17:58:47
  */
 /**
  * Chat debugging component for application testing
@@ -210,8 +210,8 @@ const Chat: FC<ChatProps> = ({
     })
   }
   /** Update assistant message when error occurs */
-  const updateErrorAssistantMessage = (message_length: number, model_config_id?: string) => {
-    if (!model_config_id) return
+  const updateErrorAssistantMessage = (message_length: number, model_config_id?: string, error?: { message?: string; }) => {
+    if (!model_config_id || !error) return
 
     if (message_length > 0) {
       updateChatList(prev => {
@@ -254,17 +254,17 @@ const Chat: FC<ChatProps> = ({
         const modelChatList = [...prev]
         const curModelChat = modelChatList[targetIndex]
         const curChatMsgList = curModelChat.list || []
-        const lastUserMsg = curChatMsgList[curChatMsgList.length - 2]
         const lastAssistantMsg = curChatMsgList[curChatMsgList.length - 1]
 
         if (!lastAssistantMsg.meta_data?.reasoning_content || lastAssistantMsg.meta_data?.reasoning_content.length === 0) {
           modelChatList[targetIndex] = {
             ...modelChatList[targetIndex],
             list: [
-              ...curChatMsgList.slice(0, curChatMsgList.length - 2),
+              ...curChatMsgList.slice(0, curChatMsgList.length - 1),
               {
-                ...lastUserMsg,
-                ...(lastUserMsg.role === 'user' ? { status: 'error' } : { content: null })
+                ...lastAssistantMsg,
+                status: 'failed',
+                content: error?.message || lastAssistantMsg.content
               }
             ]
           }
@@ -453,7 +453,7 @@ const Chat: FC<ChatProps> = ({
 
         const handleStreamMessage = (data: SSEMessage[]) => {
           data.map(item => {
-            const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions } = item.data as {
+            const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions, error } = item.data as {
               model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string;
               input?: any;
               output?: any;
@@ -485,6 +485,9 @@ const Chat: FC<ChatProps> = ({
                   compareLoadingRef.current = false
                 }
                 updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
+                break;
+              case 'model_error':
+                updateErrorAssistantMessage(message_length, model_config_id, error)
                 break;
               case 'model_end':
                 if (compareLoadingRef.current) {
@@ -526,7 +529,7 @@ const Chat: FC<ChatProps> = ({
                 if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
                   updateAssistantMessage(content, model_config_id, conversation_id, audio_url, citations, suggested_questions)
                 }
-                updateErrorAssistantMessage(message_length, model_config_id)
+                updateErrorAssistantMessage(message_length, model_config_id, error)
                 break;
               case 'compare_end':
                 if (compareLoadingRef.current) {
