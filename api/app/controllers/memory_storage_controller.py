@@ -21,6 +21,7 @@ from app.schemas.memory_storage_schema import (
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
+    HOT_MEMORY_TAGS_CACHE_EXPIRE,
     DataConfigService,
     MemoryStorageService,
     analytics_hot_memory_tags,
@@ -490,11 +491,11 @@ async def get_hot_memory_tags_api(
         api_logger.info(f"Cache miss for key: {cache_key}, executing query")
         result = await analytics_hot_memory_tags(db, current_user, limit)
 
-        # 写入缓存（过期时间：5分钟）
+        # 写入缓存（过期时间：28小时）
         # 注意：result是列表，需要转换为JSON字符串
         try:
             cache_data = json.dumps(result, ensure_ascii=False)
-            await aio_redis_set(cache_key, cache_data, expire=300)
+            await aio_redis_set(cache_key, cache_data, expire=HOT_MEMORY_TAGS_CACHE_EXPIRE)
             api_logger.info(f"Cached result for key: {cache_key}")
         except Exception as cache_error:
             # 缓存写入失败不影响主流程

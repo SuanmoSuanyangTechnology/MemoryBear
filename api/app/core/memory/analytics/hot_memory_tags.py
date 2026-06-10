@@ -92,8 +92,9 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
         return structured_response.meaningful_tags
 
     except Exception as e:
-        logger.error(f"LLM筛选过程中发生错误: {e}", exc_info=True)
-        # 在LLM失败时返回原始标签，确保流程继续
+        # LLM 不可用/不支持结构化输出时降级：不打印堆栈，仅一条简洁告警，
+        # 返回原始标签确保流程继续（标签未经 LLM 精筛，但功能可用）
+        logger.warning(f"LLM筛选不可用，降级使用原始标签: {e}")
         return tags
 
 async def filter_interests_with_llm(tags: List[str], end_user_id: str, language: str = "zh") -> List[str]:

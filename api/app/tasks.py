@@ -3964,6 +3964,104 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         }
 
 
+@celery_app.task(
+    name="app.tasks.refresh_hot_memory_tags_cache",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
+    """定时任务：为所有活跃 workspace 预热热门记忆标签缓存（limit=10）。
+
+    每天北京 03:00（UTC 19:00）执行，缓存过期 28h，使白天请求全程命中缓存。
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        import json as _json
+
+        from app.aioRedis import aio_redis_get, aio_redis_set
+        from app.models.workspace_model import Workspace
+        from app.services.memory_storage_service import (
+            HOT_MEMORY_TAGS_CACHE_EXPIRE,
+            HOT_MEMORY_TAGS_CACHE_PREFIX,
+            compute_hot_memory_tags,
+        )
+
+        limit = 10  # 前端首页固定 limit
+
+        # 1. 取全量启用（is_active=True）的 workspace id（短事务，取完即出）
+        #    与 write_all_workspaces_memory_task 一致，仅排除已停用/软删除的 workspace
+        with get_db_context() as db:
+            workspace_ids = [
+                str(wid) for (wid,) in db.query(Workspace.id).filter(
+                    Workspace.is_active.is_(True)
+                ).all()
+            ]
+
+        if not workspace_ids:
+            return {"status": "SUCCESS", "message": "无活跃工作空间", "total": 0}
+
+        logger.info(f"[HotTagsRefresh] 开始预热 {len(workspace_ids)} 个 workspace 的热门标签缓存")
+
+        refreshed = 0
+        empty = 0
+        failed = 0
+
+        # 2. 逐个 workspace 计算并写缓存（串行，避免 LLM 并发压力）
+        for workspace_id in workspace_ids:
+            try:
+                result = await compute_hot_memory_tags(workspace_id, limit)
+                if not result:
+                    empty += 1
+                cache_key = f"{HOT_MEMORY_TAGS_CACHE_PREFIX}:{workspace_id}:{limit}"
+                cache_data = _json.dumps(result, ensure_ascii=False)
+                await aio_redis_set(cache_key, cache_data, expire=HOT_MEMORY_TAGS_CACHE_EXPIRE)
+
+                # aio_redis_set 内部吞异常（写失败仅记日志、不抛），这里写后读回校验，
+                # 确保 refreshed 计数真实反映「缓存确实写入」，而非虚报成功
+                verify = await aio_redis_get(cache_key)
+                if verify is None:
+                    failed += 1
+                    logger.error(f"[HotTagsRefresh] 缓存写入校验失败（读回为空） key={cache_key}")
+                    continue
+
+                refreshed += 1
+                logger.info(
+                    f"[HotTagsRefresh] 缓存写入成功 key={cache_key} "
+                    f"tags={len(result)} expire={HOT_MEMORY_TAGS_CACHE_EXPIRE}s"
+                )
+            except Exception as e:
+                failed += 1
+                logger.error(f"[HotTagsRefresh] workspace={workspace_id} 预热失败: {e}", exc_info=True)
+
+        logger.info(f"[HotTagsRefresh] 预热完成: refreshed={refreshed}, empty={empty}, failed={failed}")
+        return {
+            "status": "SUCCESS",
+            "total": len(workspace_ids),
+            "refreshed": refreshed,
+            "empty": empty,
+            "failed": failed,
+        }
+
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    except Exception as e:
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": time.time() - start_time,
+            "task_id": self.request.id,
+        }
+
+
 # =============================================================================
 # 社区聚类补全任务（触发型）
 # =============================================================================

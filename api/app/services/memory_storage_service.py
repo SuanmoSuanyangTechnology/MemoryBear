@@ -592,78 +592,72 @@ async def search_all_batch(end_user_ids: List[str]) -> Dict[str, int]:
     return data
 
 
+# 热门记忆标签缓存 key 前缀（与 controller、清缓存接口保持一致）
+HOT_MEMORY_TAGS_CACHE_PREFIX = "hot_memory_tags"
+# 缓存过期：28 小时（= 24h 预热周期 + 4h 安全余量，避免次日预热前空窗）
+HOT_MEMORY_TAGS_CACHE_EXPIRE = 100800
+
+
+async def compute_hot_memory_tags(
+        workspace_id: str,
+        limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """计算指定 workspace 的热门记忆标签（不依赖 current_user）。
+
+    供接口实时查询与定时预热任务共用。
+
+    策略：
+        1. 按 workspace_id 取所有 end_user_id
+        2. 单次批量 Cypher 聚合标签频率（get_raw_tags_batch）
+        3. 调用一次 LLM 筛选（filter_tags_with_llm）
+        4. 按频率/顺序过滤后返回前 limit 个
+    """
+    raw_limit = limit * 4
+
+    from app.db import SessionLocal
+    from app.models.end_user_model import EndUser
+
+    def _get_end_user_ids_in_thread() -> List[str]:
+        """独立线程独立 session，避免跨线程共享连接。"""
+        with SessionLocal() as thread_db:
+            rows = thread_db.query(EndUser.id).filter(
+                EndUser.workspace_id == workspace_id
+            ).distinct().all()
+            return [str(eid) for (eid,) in rows]
+
+    end_user_ids = await asyncio.to_thread(_get_end_user_ids_in_thread)
+    if not end_user_ids:
+        return []
+
+    connector = Neo4jConnector()
+    try:
+        sorted_tags = await get_raw_tags_batch(connector, end_user_ids, limit=raw_limit)
+        if not sorted_tags:
+            return []
+
+        tag_names = [tag for tag, _ in sorted_tags]
+        first_end_user_id = end_user_ids[0]
+        filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)
+
+        filtered_set = set(filtered_tag_names)
+        final_tags = [(tag, freq) for tag, freq in sorted_tags if tag in filtered_set]
+        top_tags = final_tags[:limit]
+        return [{"name": t, "frequency": f} for t, f in top_tags]
+    finally:
+        await connector.close()
+
 async def analytics_hot_memory_tags(
         db: Session,
         current_user: User,
         limit: int = 10
 ) -> List[Dict[str, Any]]:
-    """
-    获取热门记忆标签，按数量排序并返回前N个
-    
-    原方案的策略：
+    """获取热门记忆标签（接口入口）。
 
-        1.获取 workspace 下所有 end_user
-        2.逐个用户串行查询 Neo4j，每人取 top 40 标签
-        3.应用层合并所有结果，相同标签频率累加
-        4.排序取 top 40
-        5.调用一次 LLM 筛选
-        6. 返回前 limit 个
-
-    优化策略：
-        1. 获取 workspace 下所有 end_user_id
-        2. 单次批量 Cypher 查询聚合所有用户的标签频率（替代 N 次串行查询）
-        3. 调用一次 LLM 进行筛选
-        4. 返回前 limit 个
-    
-    性能对比：
-    - 优化前：N 次 Neo4j 往返 + 应用层聚合 → ~600-1600ms（N=20）
-    - 优化后：1 次 Neo4j 往返（数据库侧聚合）→ ~30-80ms
+    从 current_user 取 workspace 后委托 compute_hot_memory_tags。
+    签名保持不变（db / current_user 仍保留），controller 调用方零改动。
     """
     workspace_id = current_user.current_workspace_id
-    raw_limit = limit * 4
-
-    from app.db import SessionLocal
-    from app.services.memory_dashboard_service import get_workspace_end_users
-
-    def _get_end_users_in_thread():
-        """在独立线程中使用独立 session，避免跨线程共享连接"""
-        with SessionLocal() as thread_db:
-            return get_workspace_end_users(thread_db, workspace_id, current_user)
-
-    end_users = await asyncio.to_thread(_get_end_users_in_thread)
-
-    if not end_users:
-        return []
-
-    # 收集所有 end_user_id
-    end_user_ids = [str(eu.id) for eu in end_users]
-
-    connector = Neo4jConnector()
-    try:
-        # 单次批量查询：在 Neo4j 侧完成聚合 + 排序 + 截断
-        sorted_tags = await get_raw_tags_batch(
-            connector,
-            end_user_ids,
-            limit=raw_limit
-        )
-
-        if not sorted_tags:
-            return []
-
-        # LLM 筛选
-        tag_names = [tag for tag, _ in sorted_tags]
-        first_end_user_id = end_user_ids[0]
-        filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)
-
-        # 根据 LLM 结果过滤，保留频率和顺序
-        filtered_set = set(filtered_tag_names)
-        final_tags = [(tag, freq) for tag, freq in sorted_tags if tag in filtered_set]
-        top_tags = final_tags[:limit]
-
-        return [{"name": t, "frequency": f} for t, f in top_tags]
-
-    finally:
-        await connector.close()
+    return await compute_hot_memory_tags(str(workspace_id), limit)
 
 
 async def analytics_recent_activity_stats(workspace_id: Optional[str] = None) -> Dict[str, Any]:

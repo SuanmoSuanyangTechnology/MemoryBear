@@ -139,6 +139,7 @@ celery_app.conf.update(
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
+        'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
         'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
@@ -184,6 +185,7 @@ implicit_emotions_update_schedule = crontab(
 )
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
+hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 # 构建定时任务配置
 beat_schedule_config = {
     # "run-workspace-reflection": {
@@ -221,6 +223,11 @@ beat_schedule_config = {
     "run-layer2-dedup-full-scan": {
         "task": "app.tasks.layer2_dedup_full_scan_task",
         "schedule": layer2_dedup_full_scan_schedule,
+        "args": (),
+    },
+    "refresh-hot-memory-tags-cache": {
+        "task": "app.tasks.refresh_hot_memory_tags_cache",
+        "schedule": hot_memory_tags_refresh_schedule,
         "args": (),
     },
     # "scan-idle-conversations": {
