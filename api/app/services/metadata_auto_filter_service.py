@@ -93,7 +93,7 @@ class MetadataAutoFilterService:
         )
         if not conditions:
             return []
-        return [EngineFilterGroup(conditions=conditions, logic="and")]
+        return [EngineFilterGroup(conditions=conditions, logic="AND")]
 
     @classmethod
     def _extract_metadata_conditions(
