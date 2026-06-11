@@ -6,9 +6,10 @@
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { Spin, Flex, Button, Pagination, Tooltip } from 'antd'
+import { Spin, Flex, Button, Pagination, Tooltip, App } from 'antd'
 import { SoundOutlined, WarningOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import copy from 'copy-to-clipboard'
 
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps, ChatItem, CitationItem } from './types'
@@ -47,7 +48,8 @@ const ChatContent: FC<ChatContentProps> = ({
   handleInterventionActionClick,
 }) => {
   const { t } = useTranslation()
-  // Scroll container reference for controlling auto-scroll to bottom
+  const { message } = App.useApp()
+   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
   const prevDataLengthRef = useRef(data.length);
   const isScrolledToBottomRef = useRef(true);
@@ -161,6 +163,11 @@ const ChatContent: FC<ChatContentProps> = ({
   const onFormSubmit = (values: Record<string, any>) => {
     onSend?.(JSON.stringify(values))
   }
+  const handleCopy = (text?: string) => {
+    if (!text) return
+    copy(text)
+    message.success(t('common.copySuccess'))
+  }
 
   const formatContent = (item: ChatItem) => {
     return renderRuntime && item.content && item.content.length > 0
@@ -174,7 +181,15 @@ const ChatContent: FC<ChatContentProps> = ({
         : errorDesc ?? ''
   }
   const moreDropdownItems = (item: ChatItem) => {
-    const items = []
+    let items = [];
+    if (item.content) {
+      items.push({
+        key: 'copy',
+        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/copy_dark.svg')]" />,
+        label: t('common.copy'),
+        onClick: () => handleCopy(item.content as string)
+      })
+    }
     if (deleteMsg) {
       items.push({
         key: 'delete',
