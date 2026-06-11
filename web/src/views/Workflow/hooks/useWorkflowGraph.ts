@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:57:59
+ * @Last Modified time: 2026-06-11 14:34:53
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -145,6 +145,14 @@ export const useWorkflowGraph = ({
   const lastHistoryRef = useRef<{ cellIds: string[]; timestamp: number; type: string } | null>(null)
   const syncChildRelationshipsRef = useRef<() => void>(() => { })
   const isSyncingRef = useRef(false)
+  /**
+   * Tracks whether `initWorkflow` has been invoked for the initial
+   * config load. Subsequent `setConfig` calls (e.g. after saving
+   * the workflow) must NOT trigger a re-initialization, otherwise
+   * the graph would be torn down and rebuilt, losing any local
+   * edits and duplicating edges.
+   */
+  const workflowInitializedRef = useRef(false)
   useEffect(() => {
     if (!graphRef.current) return
     graphRef.current.getNodes().forEach(node => {
@@ -190,6 +198,9 @@ export const useWorkflowGraph = ({
   }
 
   useEffect(() => {
+    if (!config || !graphRef.current) return
+    if (workflowInitializedRef.current) return
+    workflowInitializedRef.current = true
     initWorkflow()
   }, [config, graphRef.current])
 
