@@ -4,7 +4,7 @@
 供 extraction_engine 和 reflection_engine 共用。
 """
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from app.core.memory.models.graph_models import ExtractedEntityNode
 
@@ -86,7 +86,8 @@ def has_exact_alias_match(e1: ExtractedEntityNode, e2: ExtractedEntityNode) -> b
 
 
 def name_similarity_with_aliases(
-    e1: ExtractedEntityNode, e2: ExtractedEntityNode
+    e1: ExtractedEntityNode, e2: ExtractedEntityNode,
+    emb_sim: Optional[float] = None,
 ) -> Tuple[float, float, float, float, float, bool]:
     """名称相似度综合评分
 
@@ -102,15 +103,23 @@ def name_similarity_with_aliases(
     - 有完全匹配：embedding(40%) + primary_jaccard(20%) + max_alias_sim(40%)
     - 无完全匹配：embedding(60%) + primary_jaccard(20%) + max_alias_sim(20%)
 
+    Args:
+        e1, e2: 实体节点
+        emb_sim: 主名称向量相似度。若调用方已在 Neo4j 侧用
+            vector.similarity.cosine 算好则直接传入，避免在 Python 侧用
+            name_embedding 重新计算（省向量传输与内存）；为 None 时回退到
+            Python 内部用 _cosine 计算。
+
     Returns:
         (综合相似度, 向量相似度, 主名称Jaccard, 别名Jaccard,
          最佳别名匹配度, 是否完全匹配)
     """
-    # 1. 主名称向量相似度
-    emb_sim = _cosine(
-        getattr(e1, "name_embedding", []) or [],
-        getattr(e2, "name_embedding", []) or [],
-    )
+    # 1. 主名称向量相似度：优先用外部传入（Neo4j 已算），否则 Python 兜底计算
+    if emb_sim is None:
+        emb_sim = _cosine(
+            getattr(e1, "name_embedding", []) or [],
+            getattr(e2, "name_embedding", []) or [],
+        )
 
     # 2. 主名称 token 相似度
     tokens1 = set(_tokenize(getattr(e1, "name", "") or ""))
