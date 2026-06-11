@@ -2307,6 +2307,11 @@ _NODE_FIELD_VALUE_MAPPERS: Dict[str, Callable[[Any], Any]] = {
     "entity_type": lambda v: type_mapping.get(v, ""),
     "emotion_type": lambda v: EmotionType.EMOTION_MAPPING.get(v),
     "emotion_subject": lambda v: EmotionSubject.SUBJECT_MAPPING.get(v),
+    # description 存储为分号分隔的字符串，API 返回时拆分为数组
+    "description": lambda v: (
+        [d.strip() for d in v.replace("；", ";").split(";") if d.strip()]
+        if isinstance(v, str) else (v if isinstance(v, list) else [])
+    ),
 }
 
 
