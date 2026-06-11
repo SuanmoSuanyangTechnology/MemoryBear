@@ -43,19 +43,29 @@ def get_thread_safe_redis() -> redis.StrictRedis:
       ``_shutdown_loop_gracefully`` which closes the loop after each run)
     """
     current_pid = os.getpid()
+    # 用 get_running_loop()：仅返回"当前正在运行"的 loop，
+    # 避免 get_event_loop() 在线程里隐式创建一个无关的新 loop。
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
     cached_loop = getattr(_thread_local, "loop", None)
-    loop_stale = cached_loop is not None and cached_loop.is_closed()
+    # 只要 running loop 与 cached loop 不是同一个对象（包含 cached loop 已关闭），
+    # 就必须重建连接池，否则池里的 socket 仍然绑在旧 loop 上，
+    # 在新 loop 里 await 会抛 "Future attached to a different loop"。
+    loop_changed = (
+        running_loop is not None and cached_loop is not running_loop
+    ) or (cached_loop is not None and cached_loop.is_closed())
 
     if not hasattr(_thread_local, "pool") \
             or getattr(_thread_local, "pid", None) != current_pid \
-            or loop_stale:
+            or loop_changed:
+        # 旧池由 GC 回收即可：ConnectionPool.disconnect() 是协程，
+        # 在这个同步函数里既不能 await，也不应在已离开的旧 loop 上调度，
+        # 否则会抛 "coroutine was never awaited"。
         _thread_local.pid = current_pid
-        # Python 3.10+: get_event_loop() raises RuntimeError in threads
-        # where no loop has been set yet (e.g. Celery --pool=threads).
-        try:
-            _thread_local.loop = asyncio.get_event_loop()
-        except RuntimeError:
-            _thread_local.loop = None
+        _thread_local.loop = running_loop
         _thread_local.pool = ConnectionPool.from_url(
             _REDIS_URL,
             db=settings.REDIS_DB,

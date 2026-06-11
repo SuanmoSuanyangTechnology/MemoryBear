@@ -2491,61 +2491,55 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
     logger.info(f"反思引擎去重消岐全量扫描任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
 
-def _sync_end_user_info_pg(
+def _sync_metadata_to_pg(
     end_user_id: str,
-    aliases: List[str],
-    extracted_metadata: Optional[Dict[str, Any]],
+    metadata: Dict[str, List[str]],
 ) -> None:
-    """将别名和元数据增量同步到 PostgreSQL end_user_info 表。
+    """以 Neo4j patch 后的最新值覆盖 PG end_user_info.meta_data 中对应 key。
 
-    - aliases 合并到 end_user_info.aliases（去重）
-    - end_user_info.other_name 若为空则取 aliases[0]
-    - end_user.other_name 与 end_user_info.other_name 保持同步
-    - extracted_metadata 各字段列表合并到 end_user_info.meta_data（去重）
+    此函数仅处理 8 个被 metadata patch 管理的字段（core_facts、traits、
+    relations、goals、interests、beliefs_or_stances、anchors、events）。
+    `aliases` 和 `other_name` 不在本函数管辖范围内（保持原有别名同步链路）。
 
-    失败只记日志，不抛异常，不影响主流程。
+    覆盖语义但不丢失历史的两道保护：
+        1. 入参 metadata 来自 Neo4j patch 后的最新读回值——它已经叠加了历史
+        2. 仅覆盖 metadata 中显式提供的 key，`meta_data` 里其它 key 原样保留
+
+    早返回与副作用：
+        - 当 ``metadata`` 为空 dict 时直接返回，不读取也不更新 PG，
+          因此不会刷新 ``end_user_info`` 的 ``updated_at``。下游若依赖该
+          时间戳判断"上次同步时间"，需要自行处理"零变更"场景。
+        - 失败只记日志，不抛异常，不影响主流程。
     """
+    if not metadata:
+        return
     try:
         import uuid as _uuid
         from app.db import get_db_context
         from app.repositories.end_user_info_repository import EndUserInfoRepository
-        from app.repositories.end_user_repository import EndUserRepository
 
         eu_uuid = _uuid.UUID(end_user_id)
 
         with get_db_context() as db:
             info_repo = EndUserInfoRepository(db)
-            info = info_repo.update_aliases_and_metadata(
+            info = info_repo.replace_metadata_fields(
                 end_user_id=eu_uuid,
-                new_aliases=aliases or [],
-                new_metadata=extracted_metadata,
+                metadata=metadata,
             )
             if info is None:
                 logger.warning(
-                    f"[Metadata][PG] end_user_info 记录不存在，跳过同步: end_user_id={end_user_id}"
+                    f"[Metadata][PG] end_user_info 记录不存在，跳过 metadata 覆盖: "
+                    f"end_user_id={end_user_id}"
                 )
                 return
 
-            # 同步 end_user.other_name（与 end_user_info.other_name 保持一致）
-            new_other_name = (info.other_name or "").strip()
-            if new_other_name:
-                eu_repo = EndUserRepository(db)
-                end_user = eu_repo.get_end_user_by_id(eu_uuid)
-                if end_user and not (end_user.other_name or "").strip():
-                    end_user.other_name = new_other_name
-                    db.commit()
-                    logger.info(
-                        f"[Metadata][PG] 同步 end_user.other_name={new_other_name}: "
-                        f"end_user_id={end_user_id}"
-                    )
-
         logger.info(
-            f"[Metadata][PG] end_user_info 同步完成: end_user_id={end_user_id}, "
-            f"aliases_count={len(aliases or [])}"
+            f"[Metadata][PG] end_user_info.meta_data 覆盖完成: "
+            f"end_user_id={end_user_id}, fields={list(metadata.keys())}"
         )
     except Exception as e:
         logger.warning(
-            f"[Metadata][PG] 同步 end_user_info 失败（不影响主流程）: "
+            f"[Metadata][PG] 覆盖 end_user_info.meta_data 失败（不影响主流程）: "
             f"end_user_id={end_user_id}, error={e}",
             exc_info=True,
         )
@@ -2556,6 +2550,8 @@ def _sync_end_user_info_pg(
     name="app.tasks.extract_metadata_batch",
     max_retries=2,
     default_retry_delay=30,
+    soft_time_limit=90,
+    time_limit=120,
 )
 def extract_metadata_batch_task(
     self,
@@ -2568,15 +2564,20 @@ def extract_metadata_batch_task(
 
     在主写入流水线完成后异步执行。从用户实体的 description 中提取
     结构化元数据（core_facts、traits、relations 等），增量回写到 Neo4j，
-    同时将 aliases 和 extracted_metadata 同步到 PostgreSQL end_user_info 表。
+    随后以 Neo4j 为权威源覆盖 PostgreSQL end_user_info.meta_data 中
+    对应的 8 个字段。aliases / other_name 由反思阶段的 alias_merger
+    单独承接，本任务不再触发别名同步。
 
     Args:
-        user_entities: 用户实体列表，每项包含:
+        user_entities: 用户实体列表，每项预期包含:
             - entity_id: 实体 ID
             - entity_name: 实体名称
             - descriptions: description 文本列表
-            - aliases: 实体别名列表（来自 "别名属于" 关系归并后的结果）
             - end_user_id: 终端用户 ID（用于写入 PostgreSQL）
+
+            注：上游 collector（``collect_user_entities_for_metadata``）当前
+            还会附带 ``aliases`` 字段，本任务**显式忽略**该字段。别名同步由
+            reflection 阶段的 ``alias_merger`` 单独承接。
         llm_model_id: LLM 模型 UUID 字符串
         language: 语言 ("zh" / "en")
         snapshot_dir: 可选的快照目录路径（调试模式下使用）
@@ -2594,16 +2595,27 @@ def extract_metadata_batch_task(
         return {"status": "SUCCESS", "total": 0, "extracted": 0, "failed": 0, "task_id": task_id}
 
     async def _run() -> Dict[str, Any]:
+        from app.core.memory.models.metadata_models import ALLOWED_METADATA_FIELDS
         from app.core.memory.models.variate_config import ExtractionPipelineConfig
         from app.core.memory.storage_services.extraction_engine.steps.base import StepContext
         from app.core.memory.storage_services.extraction_engine.steps.metadata_step import MetadataExtractionStep
         from app.core.memory.storage_services.extraction_engine.steps.schema import (
             MetadataStepInput,
+            MetadataStepOutput,
         )
         from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
         from app.db import get_db_context
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.repositories.neo4j.cypher_queries import ENTITY_METADATA_UPDATE, ENTITY_METADATA_QUERY
+        from app.repositories.neo4j.cypher_queries import (
+            ENTITY_METADATA_PATCH,
+            ENTITY_METADATA_QUERY,
+        )
+
+        # ── 边界保护常量 ──
+        # 单实体 LLM 单次返回的 op 数量硬上限（超出截断并告警）
+        MAX_OPS_PER_ENTITY = 50
+        # 单字段（Neo4j 列表属性）允许的最大长度；add 时若已超此值，跳过并告警
+        MAX_LIST_LEN_PER_FIELD = 200
 
         # Build LLM client
         with get_db_context() as db:
@@ -2622,36 +2634,149 @@ def extract_metadata_batch_task(
         failed = 0
         snapshot_outputs: Dict[str, Any] = {} if snapshot_dir else None  # type: ignore[assignment]
 
+        # ── 内联 helpers：保持闭包，便于复用 connector / step / extracted 计数 ──
+
+        async def _load_existing_metadata(entity_id: str) -> Dict[str, List[str]]:
+            """读取 Neo4j 当前 8 字段值作为 LLM 增量去重 + old_value 校验的输入。"""
+            existing: Dict[str, List[str]] = {f: [] for f in ALLOWED_METADATA_FIELDS}
+            try:
+                records = await connector.execute_query(
+                    ENTITY_METADATA_QUERY, entity_id=entity_id
+                )
+            except Exception as e:
+                logger.warning(f"[Metadata] 查询已有元数据失败: {e}")
+                return existing
+            if not records:
+                return existing
+            rec = records[0]
+            for field in ALLOWED_METADATA_FIELDS:
+                val = rec.get(field)
+                existing[field] = list(val) if val else []
+            return existing
+
+        def _filter_invalid_old_values(
+            result: MetadataStepOutput,
+            existing_metadata: Dict[str, List[str]],
+            entity_name: str,
+            entity_id: str,
+        ) -> int:
+            """就地过滤 result.operations 中 old_value 不在 Neo4j 当前列表的 op。
+
+            防止 Cypher 列表推导静默失败：``[x | CASE WHEN x = old THEN new ELSE x END]``
+            匹配不到 old_value 时不会报错，但也不会改值。
+
+            Returns:
+                被丢弃的 op 数量，仅用于审计日志。
+            """
+            valid_ops: List[Any] = []
+            skipped = 0
+            for op in result.operations:
+                if op.op in ("delete", "update"):
+                    cur_list = existing_metadata.get(op.field) or []
+                    if op.old_value not in cur_list:
+                        skipped += 1
+                        logger.warning(
+                            f"[Metadata] 实体 {entity_name}({entity_id}) "
+                            f"丢弃 {op.op} op：old_value 在当前 {op.field} 中不存在: "
+                            f"old_value={op.old_value!r}"
+                        )
+                        continue
+                valid_ops.append(op)
+            result.operations = valid_ops
+            return skipped
+
+        def _build_patch_params(
+            result: MetadataStepOutput, entity_id: str,
+            existing_metadata: Dict[str, List[str]],
+            entity_name: str,
+        ) -> Dict[str, Any]:
+            """按字段把 add / delete / update 拼成 ENTITY_METADATA_PATCH 的参数。
+
+            对 add 路径做长度保护：若该字段当前长度 + 即将 add 的数量 >
+            ``MAX_LIST_LEN_PER_FIELD``，只保留能容纳的部分，其余截断并告警。
+            """
+            adds = result.adds_by_field()
+            deletes = result.deletes_by_field()
+            updates = result.updates_by_field()
+            params: Dict[str, Any] = {"entity_id": entity_id}
+            for field in ALLOWED_METADATA_FIELDS:
+                # delete 和 update 不增加长度，无需限制
+                params[f"{field}_delete"] = deletes.get(field, [])
+                params[f"{field}_update"] = [
+                    {"old": old, "new": new}
+                    for (old, new) in updates.get(field, [])
+                ]
+                # add 路径做长度保护
+                field_adds = adds.get(field, [])
+                current_len = len(existing_metadata.get(field) or [])
+                capacity = max(0, MAX_LIST_LEN_PER_FIELD - current_len)
+                if len(field_adds) > capacity:
+                    overflow = len(field_adds) - capacity
+                    field_adds = field_adds[:capacity]
+                    logger.warning(
+                        f"[Metadata] 实体 {entity_name}({entity_id}) "
+                        f"字段 {field} 长度将超上限({MAX_LIST_LEN_PER_FIELD})，"
+                        f"截断 {overflow} 条 add"
+                    )
+                params[f"{field}_add"] = field_adds
+            return params
+
+        def _extract_post_state(patch_records: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+            """从 patch RETURN 中取出权威的 8 字段值用于覆盖式同步到 PG。"""
+            if not patch_records:
+                return {}
+            rec = patch_records[0]
+            return {
+                field: list(rec.get(field) or [])
+                for field in ALLOWED_METADATA_FIELDS
+            }
+
         connector = Neo4jConnector()
         try:
             for entity_dict in user_entities:
                 entity_id = entity_dict["entity_id"]
                 entity_name = entity_dict.get("entity_name", "")
                 descriptions = entity_dict.get("descriptions", [])
-                aliases = entity_dict.get("aliases", [])
                 end_user_id = entity_dict.get("end_user_id", "")
 
                 if not descriptions:
                     logger.debug(f"[Metadata] 跳过无 description 的实体: {entity_id}")
                     continue
 
+                post_state: Dict[str, List[str]] = {}
                 try:
-                    # 查询已有元数据用于增量去重
-                    existing_metadata = {}
+                    # ── 分布式锁：同一 entity_id 的 patch 操作串行化 ──
+                    # 防止并发 patch 导致 Lost Update（Neo4j WITH-SET 非原子读改写）。
+                    # TTL 30s 足够覆盖一次 LLM 调用 + patch + PG 同步；
+                    # 锁超时后自动释放，不会永久阻塞。
+                    # 锁竞争时本次跳过该实体：数据不丢失——下一轮 write_pipeline
+                    # 仍会触发新的 metadata 任务，此时描述已在 Neo4j 中累积。
+                    lock_key = f"metadata:patch:{entity_id}"
+                    lock_value = f"{task_id}:{entity_id}"
+                    lock_acquired = False
+                    _lock_redis = None
                     try:
-                        records = await connector.execute_query(
-                            ENTITY_METADATA_QUERY, entity_id=entity_id
+                        from app.aioRedis import get_thread_safe_redis
+                        _lock_redis = get_thread_safe_redis()
+                        lock_acquired = bool(
+                            _lock_redis.set(lock_key, lock_value, nx=True, ex=30)
                         )
-                        if records:
-                            rec = records[0]
-                            for field in (
-                                "core_facts", "traits", "relations", "goals",
-                                "interests", "beliefs_or_stances", "anchors", "events",
-                            ):
-                                val = rec.get(field)
-                                existing_metadata[field] = val if val else []
-                    except Exception as e:
-                        logger.warning(f"[Metadata] 查询已有元数据失败: {e}")
+                    except Exception as lock_err:
+                        # Redis 不可用时退化为无锁模式（打 warning 继续执行）
+                        logger.warning(
+                            f"[Metadata] 获取分布式锁失败，退化为无锁模式: "
+                            f"entity_id={entity_id}, error={lock_err}"
+                        )
+                        lock_acquired = True  # 继续执行，不因锁组件故障卡死
+
+                    if not lock_acquired:
+                        logger.info(
+                            f"[Metadata] 实体 {entity_name}({entity_id}) 已被其他任务锁定，"
+                            f"本次跳过（下一轮 write 仍会触发 metadata 提取）"
+                        )
+                        continue
+
+                    existing_metadata = await _load_existing_metadata(entity_id)
 
                     inp = MetadataStepInput(
                         entity_id=entity_id,
@@ -2661,50 +2786,69 @@ def extract_metadata_batch_task(
                     )
                     result = await step.run(inp)
 
-                    if result.has_any():
-                        # 回写 Neo4j
-                        await connector.execute_query(
-                            ENTITY_METADATA_UPDATE,
-                            entity_id=entity_id,
-                            core_facts=result.core_facts,
-                            traits=result.traits,
-                            relations=result.relations,
-                            goals=result.goals,
-                            interests=result.interests,
-                            beliefs_or_stances=result.beliefs_or_stances,
-                            anchors=result.anchors,
-                            events=result.events,
-                        )
-                        extracted += 1
-                        logger.info(
-                            f"[Metadata] 实体 {entity_name}({entity_id}) 元数据提取并回写成功"
+                    # ── 边界保护：单实体 op 数量硬截断 ──
+                    if len(result.operations) > MAX_OPS_PER_ENTITY:
+                        truncated_count = len(result.operations) - MAX_OPS_PER_ENTITY
+                        result.operations = result.operations[:MAX_OPS_PER_ENTITY]
+                        logger.warning(
+                            f"[Metadata] 实体 {entity_name}({entity_id}) LLM 返回 op 数"
+                            f"超过上限({MAX_OPS_PER_ENTITY})，已截断 {truncated_count} 条"
                         )
 
-                        # 同步写入 PostgreSQL end_user_info
-                        if end_user_id:
-                            _sync_end_user_info_pg(
+                    if result.has_any():
+                        skipped_ops_count = _filter_invalid_old_values(
+                            result, existing_metadata, entity_name, entity_id
+                        )
+
+                        if not result.has_any():
+                            logger.info(
+                                f"[Metadata] 实体 {entity_name}({entity_id}) 所有 op 均被过滤，跳过 patch"
+                            )
+                            if snapshot_outputs is not None:
+                                snapshot_outputs[entity_id] = {
+                                    "entity_name": entity_name,
+                                    "descriptions": descriptions,
+                                    "operations": [],
+                                    "skipped_ops": skipped_ops_count,
+                                }
+                            continue
+
+                        # 单语句原子 patch，并直接拿到 Neo4j 上 patch 后的最新 8 字段值
+                        patch_records = await connector.execute_query(
+                            ENTITY_METADATA_PATCH,
+                            **_build_patch_params(result, entity_id, existing_metadata, entity_name),
+                        )
+
+                        counts = result.counts()
+                        logger.info(
+                            f"[Metadata] 实体 {entity_name}({entity_id}) patch 完成: "
+                            f"add={counts['add']}, delete={counts['delete']}, "
+                            f"update={counts['update']}, skipped={skipped_ops_count}"
+                        )
+                        extracted += 1
+
+                        post_state = _extract_post_state(patch_records)
+
+                        # 同步写入 PostgreSQL end_user_info：metadata 8 字段以 Neo4j 为准覆盖
+                        if end_user_id and post_state:
+                            _sync_metadata_to_pg(
                                 end_user_id=end_user_id,
-                                aliases=aliases,
-                                extracted_metadata=result.model_dump(),
+                                metadata=post_state,
                             )
                     else:
-                        # 即使无新增元数据，也同步 aliases 到 PostgreSQL
-                        if end_user_id and aliases:
-                            _sync_end_user_info_pg(
-                                end_user_id=end_user_id,
-                                aliases=aliases,
-                                extracted_metadata=None,
-                            )
                         logger.debug(
                             f"[Metadata] 实体 {entity_name}({entity_id}) 无新增元数据"
                         )
 
                     if snapshot_outputs is not None:
-                        snapshot_outputs[entity_id] = {
+                        snap_entry: Dict[str, Any] = {
                             "entity_name": entity_name,
                             "descriptions": descriptions,
-                            "extracted_metadata": result.model_dump(),
+                            "operations": [op.model_dump() for op in result.operations],
                         }
+                        if post_state:
+                            snap_entry["post_state"] = post_state
+                        snapshot_outputs[entity_id] = snap_entry
 
                 except Exception as e:
                     failed += 1
@@ -2713,6 +2857,18 @@ def extract_metadata_batch_task(
                     logger.warning(
                         f"[Metadata] 实体 {entity_id} 元数据提取失败: {e}"
                     )
+                finally:
+                    # 释放分布式锁（仅当前 task 持有时删除）
+                    if lock_acquired and _lock_redis is not None:
+                        try:
+                            stored = _lock_redis.get(lock_key)
+                            if stored and (
+                                stored == lock_value
+                                or stored == lock_value.encode()
+                            ):
+                                _lock_redis.delete(lock_key)
+                        except Exception:
+                            pass  # 锁超时自动释放即可，不影响主流程
         finally:
             await connector.close()
 

@@ -70,76 +70,62 @@ class EndUserInfoRepository:
         logger.info(f"删除用户所有信息记录: end_user_id={end_user_id}, count={count}")
         return count
 
-    def update_aliases_and_metadata(
+    def replace_metadata_fields(
         self,
         end_user_id: uuid.UUID,
-        new_aliases: Optional[List[str]] = None,
-        new_metadata: Optional[dict] = None,
-    ) -> Optional[EndUserInfo]:
-        """增量更新用户别名列表和元数据。
+        metadata: Dict[str, List[str]],
+    ) -> Optional["EndUserInfo"]:
+        """以 Neo4j 为权威源，覆盖 ``meta_data`` 中指定字段。
 
-        - aliases：将 new_aliases 合并到现有列表（去重，忽略大小写），不覆盖
-        - meta_data：将 new_metadata 的各字段列表合并到现有 meta_data（去重），不覆盖
-        - other_name：若当前为空且 aliases 非空，则取 aliases[0] 作为 other_name
+        语义：
+            - 只覆盖 ``metadata`` 中显式提供的 key；其他 key 原样保留
+              （避免误伤未管理字段或别的链路写入的内容）
+            - ``aliases`` 与 ``other_name`` 不在本方法管辖范围内，原值保留
+            - 入参 dict 的 value 必须是 list；非 list 类型会被忽略
 
         Args:
             end_user_id: 终端用户 ID
-            new_aliases: 本次新增的别名列表
-            new_metadata: 本次提取的 extracted_metadata 字典
+            metadata: 要覆盖的字段字典，例如
+                {"core_facts": [...], "traits": [...], ...}
 
         Returns:
-            更新后的 EndUserInfo，若记录不存在则返回 None
+            更新后的 EndUserInfo；记录不存在时返回 None
         """
+        if not metadata:
+            return self.get_by_end_user_id(end_user_id)
+
         end_user_info = self.get_by_end_user_id(end_user_id)
         if not end_user_info:
-            logger.warning(f"[EndUserInfo] 记录不存在，跳过更新: end_user_id={end_user_id}")
+            logger.warning(
+                f"[EndUserInfo] 记录不存在，跳过 metadata 覆盖: end_user_id={end_user_id}"
+            )
             return None
 
+        existing_meta = dict(end_user_info.meta_data or {})
         changed = False
-
-        # ── 合并 aliases（去重，忽略大小写）──
-        if new_aliases:
-            existing = list(end_user_info.aliases or [])
-            existing_lower = {a.lower() for a in existing}
-            for alias in new_aliases:
-                alias = alias.strip()
-                if alias and alias.lower() not in existing_lower:
-                    existing.append(alias)
-                    existing_lower.add(alias.lower())
-            end_user_info.aliases = existing
+        for field, values in metadata.items():
+            if not isinstance(values, list):
+                logger.warning(
+                    f"[EndUserInfo] meta_data.{field} 期望 list，实际为 "
+                    f"{type(values).__name__}，已跳过该字段: end_user_id={end_user_id}"
+                )
+                continue
+            existing_meta[field] = list(values)
             changed = True
 
-        # ── 同步 other_name：取 aliases[0]（若当前为空）──
-        if end_user_info.aliases and not (end_user_info.other_name or "").strip():
-            end_user_info.other_name = end_user_info.aliases[0]
-            changed = True
+        if not changed:
+            return end_user_info
 
-        # ── 合并 meta_data（各字段列表去重追加）──
-        if new_metadata:
-            existing_meta = dict(end_user_info.meta_data or {})
-            for field, values in new_metadata.items():
-                if not isinstance(values, list):
-                    continue
-                existing_list = list(existing_meta.get(field) or [])
-                existing_set = {str(v).lower() for v in existing_list}
-                for v in values:
-                    if str(v).lower() not in existing_set:
-                        existing_list.append(v)
-                        existing_set.add(str(v).lower())
-                existing_meta[field] = existing_list
-            end_user_info.meta_data = existing_meta
-            changed = True
-
-        if changed:
-            self.db.commit()
-            self.db.refresh(end_user_info)
-            logger.info(
-                f"[EndUserInfo] 更新完成: end_user_id={end_user_id}, "
-                f"aliases_count={len(end_user_info.aliases or [])}"
-            )
+        end_user_info.meta_data = existing_meta
+        self.db.commit()
+        self.db.refresh(end_user_info)
+        logger.info(
+            f"[EndUserInfo] meta_data 字段覆盖完成: end_user_id={end_user_id}, "
+            f"fields={list(metadata.keys())}"
+        )
         return end_user_info
 
-    def remove_aliases(
+    def remove_aliases( # NOTE：刘淼 别名移除
         self,
         end_user_id: uuid.UUID,
         aliases_to_remove: List[str],

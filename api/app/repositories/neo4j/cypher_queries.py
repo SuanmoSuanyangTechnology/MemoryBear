@@ -135,56 +135,108 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
 RETURN e.id AS uuid
 """
 
-# ── 元数据增量回写：将 LLM 提取的元数据追加到用户实体节点 ──
-ENTITY_METADATA_UPDATE = """
-MATCH (e:ExtractedEntity {id: $entity_id})
-SET e.core_facts = CASE
-        WHEN $core_facts IS NOT NULL AND size($core_facts) > 0
-        THEN reduce(acc = coalesce(e.core_facts, []), item IN $core_facts |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.core_facts, []) END,
-    e.traits = CASE
-        WHEN $traits IS NOT NULL AND size($traits) > 0
-        THEN reduce(acc = coalesce(e.traits, []), item IN $traits |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.traits, []) END,
-    e.relations = CASE
-        WHEN $relations IS NOT NULL AND size($relations) > 0
-        THEN reduce(acc = coalesce(e.relations, []), item IN $relations |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.relations, []) END,
-    e.goals = CASE
-        WHEN $goals IS NOT NULL AND size($goals) > 0
-        THEN reduce(acc = coalesce(e.goals, []), item IN $goals |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.goals, []) END,
-    e.interests = CASE
-        WHEN $interests IS NOT NULL AND size($interests) > 0
-        THEN reduce(acc = coalesce(e.interests, []), item IN $interests |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.interests, []) END,
-    e.beliefs_or_stances = CASE
-        WHEN $beliefs_or_stances IS NOT NULL AND size($beliefs_or_stances) > 0
-        THEN reduce(acc = coalesce(e.beliefs_or_stances, []), item IN $beliefs_or_stances |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.beliefs_or_stances, []) END,
-    e.anchors = CASE
-        WHEN $anchors IS NOT NULL AND size($anchors) > 0
-        THEN reduce(acc = coalesce(e.anchors, []), item IN $anchors |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.anchors, []) END,
-    e.events = CASE
-        WHEN $events IS NOT NULL AND size($events) > 0
-        THEN reduce(acc = coalesce(e.events, []), item IN $events |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.events, []) END
-RETURN e.id AS uuid
-"""
-
 # ── 查询用户实体已有的元数据（供增量提取时去重） ──
 ENTITY_METADATA_QUERY = """
 MATCH (e:ExtractedEntity {id: $entity_id})
 RETURN e.core_facts AS core_facts,
+       e.traits AS traits,
+       e.relations AS relations,
+       e.goals AS goals,
+       e.interests AS interests,
+       e.beliefs_or_stances AS beliefs_or_stances,
+       e.anchors AS anchors,
+       e.events AS events
+"""
+
+# ── 元数据 patch 回写：对 8 字段统一应用 delete / update / add 三段操作 ──
+# 设计要点：
+#   1. 8 个字段一次原子 SET，纯 Cypher（不依赖 APOC），无 race 风险
+#   2. delete: [x IN list WHERE NOT x IN $field_delete] —— 仅精确剔除被指名项
+#   3. update: [x IN list | CASE WHEN x = pair.old THEN pair.new ELSE x END]
+#              对每个 (old, new) pair 顺序应用一次，匹配不到则保持原值
+#   4. add:    reduce 去重追加，原值不会丢失
+#   5. 输入参数（每字段三类）：
+#        $<field>_delete : List[str]
+#        $<field>_update : List[{old: str, new: str}]
+#        $<field>_add    : List[str]
+#      上层调用方对未变更字段传空数组即可，避免 Cypher 内部出现 NULL 分支。
+ENTITY_METADATA_PATCH = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+
+// ── core_facts ──
+WITH e,
+     [x IN coalesce(e.core_facts, []) WHERE NOT x IN $core_facts_delete] AS cf0
+WITH e, reduce(acc = cf0, pair IN $core_facts_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS cf1
+WITH e, reduce(acc = cf1, item IN $core_facts_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS cf2
+SET e.core_facts = cf2
+
+// ── traits ──
+WITH e,
+     [x IN coalesce(e.traits, []) WHERE NOT x IN $traits_delete] AS tr0
+WITH e, reduce(acc = tr0, pair IN $traits_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS tr1
+WITH e, reduce(acc = tr1, item IN $traits_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS tr2
+SET e.traits = tr2
+
+// ── relations ──
+WITH e,
+     [x IN coalesce(e.relations, []) WHERE NOT x IN $relations_delete] AS re0
+WITH e, reduce(acc = re0, pair IN $relations_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS re1
+WITH e, reduce(acc = re1, item IN $relations_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS re2
+SET e.relations = re2
+
+// ── goals ──
+WITH e,
+     [x IN coalesce(e.goals, []) WHERE NOT x IN $goals_delete] AS go0
+WITH e, reduce(acc = go0, pair IN $goals_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS go1
+WITH e, reduce(acc = go1, item IN $goals_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS go2
+SET e.goals = go2
+
+// ── interests ──
+WITH e,
+     [x IN coalesce(e.interests, []) WHERE NOT x IN $interests_delete] AS in0
+WITH e, reduce(acc = in0, pair IN $interests_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS in1
+WITH e, reduce(acc = in1, item IN $interests_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS in2
+SET e.interests = in2
+
+// ── beliefs_or_stances ──
+WITH e,
+     [x IN coalesce(e.beliefs_or_stances, []) WHERE NOT x IN $beliefs_or_stances_delete] AS be0
+WITH e, reduce(acc = be0, pair IN $beliefs_or_stances_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS be1
+WITH e, reduce(acc = be1, item IN $beliefs_or_stances_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS be2
+SET e.beliefs_or_stances = be2
+
+// ── anchors ──
+WITH e,
+     [x IN coalesce(e.anchors, []) WHERE NOT x IN $anchors_delete] AS an0
+WITH e, reduce(acc = an0, pair IN $anchors_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS an1
+WITH e, reduce(acc = an1, item IN $anchors_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS an2
+SET e.anchors = an2
+
+// ── events ──
+WITH e,
+     [x IN coalesce(e.events, []) WHERE NOT x IN $events_delete] AS ev0
+WITH e, reduce(acc = ev0, pair IN $events_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS ev1
+WITH e, reduce(acc = ev1, item IN $events_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS ev2
+SET e.events = ev2
+
+RETURN e.id AS uuid,
+       e.core_facts AS core_facts,
        e.traits AS traits,
        e.relations AS relations,
        e.goals AS goals,
