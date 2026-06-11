@@ -5,76 +5,143 @@ standalone metadata extraction pipeline (post-dedup async Celery task).
 
 The field definitions align with the Jinja2 prompt template
 ``extract_user_metadata.jinja2``.
+
+Output schema: ``operations`` patch list, where each item is one of
+``add`` / ``delete`` / ``update`` against one of 8 metadata fields.
+
+The 9th field ``aliases`` referenced by the prompt template is intentionally
+filtered out at runtime — alias merging is handled by the reflection-engine
+``alias_merger`` pipeline and stays decoupled from this metadata patch flow.
 """
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+# ── Fields managed by metadata patch ──
+# NOTE: ``aliases`` is intentionally excluded; see module docstring.
+ALLOWED_METADATA_FIELDS: tuple[str, ...] = (
+    "core_facts",
+    "traits",
+    "relations",
+    "goals",
+    "interests",
+    "beliefs_or_stances",
+    "anchors",
+    "events",
+)
+
+# Fields the prompt template documents but the runtime intentionally rejects.
+# Used to give a clearer error than "unknown field" when LLM honors the prompt
+# but ignores the runtime whitelist.
+FILTERED_METADATA_FIELDS: tuple[str, ...] = ("aliases",)
+
+OperationLiteral = Literal["add", "delete", "update"]
+
+
+class MetadataOperation(BaseModel):
+    """Single patch operation produced by the LLM.
+
+    Per the prompt template, exactly one of the following layouts is valid:
+
+    - ``add``    : ``op``, ``field``, ``value``
+    - ``delete`` : ``op``, ``field``, ``old_value``
+    - ``update`` : ``op``, ``field``, ``old_value``, ``new_value``
+
+    Validation is permissive on extra keys (LLM noise is dropped) but strict
+    on required keys per ``op``.
+
+    The ``op`` field is typed as ``Literal["add","delete","update"]`` so that
+    Pydantic / mypy reject unknown ops up-front; ``_validate_shape`` only
+    handles ``field`` whitelisting and per-op required-key combinations.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    op: OperationLiteral
+    field: str
+    value: Optional[str] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "MetadataOperation":
+        field = (self.field or "").strip()
+        if field in FILTERED_METADATA_FIELDS:
+            raise ValueError(
+                f"field {self.field!r} is filtered at runtime "
+                f"(handled by a separate pipeline)"
+            )
+        if field not in ALLOWED_METADATA_FIELDS:
+            raise ValueError(f"unknown field: {self.field!r}")
+        self.field = field
+
+        if self.op == "add":
+            v = (self.value or "").strip()
+            if not v:
+                raise ValueError("`add` operation requires non-empty `value`")
+            self.value = v
+        elif self.op == "delete":
+            ov = (self.old_value or "").strip()
+            if not ov:
+                raise ValueError("`delete` operation requires non-empty `old_value`")
+            self.old_value = ov
+        else:  # update
+            ov = (self.old_value or "").strip()
+            nv = (self.new_value or "").strip()
+            if not ov or not nv:
+                raise ValueError(
+                    "`update` operation requires both `old_value` and `new_value`"
+                )
+            self.old_value = ov
+            self.new_value = nv
+        return self
 
 
 class MetadataExtractionResponse(BaseModel):
     """LLM 元数据提取响应结构。
 
-    字段与 extract_user_metadata.jinja2 模板的输出 JSON 一一对应。
-    每个字段都是字符串数组，表示本次新增的元数据条目。
+    仅保留 ``operations`` 一个顶层字段；任何不合法或越界的 op 在
+    ``model_validator(mode="before")`` 阶段通过尝试构造 :class:`MetadataOperation`
+    静默丢弃，校验逻辑只在 ``MetadataOperation._validate_shape`` 一处。
+
+    Pydantic v2 默认 ``revalidate_instances="never"``，因此 before-validator
+    构造好的实例不会再被外层字段重新校验，没有双重校验开销。
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    aliases: List[str] = Field(
+    operations: List[MetadataOperation] = Field(
         default_factory=list,
-        description="用户别名、昵称、称呼",
-    )
-    core_facts: List[str] = Field(
-        default_factory=list,
-        description="用户稳定的基础事实（身份、年龄、国籍、所在地等）",
-    )
-    traits: List[str] = Field(
-        default_factory=list,
-        description="用户稳定的人格特质、风格、行为倾向",
-    )
-    relations: List[str] = Field(
-        default_factory=list,
-        description="用户与他人/群体/宠物/重要对象之间的长期关系",
-    )
-    goals: List[str] = Field(
-        default_factory=list,
-        description="用户明确、稳定的长期目标或计划",
-    )
-    interests: List[str] = Field(
-        default_factory=list,
-        description="用户稳定的兴趣、偏好、长期爱好",
-    )
-    beliefs_or_stances: List[str] = Field(
-        default_factory=list,
-        description="用户稳定的信念、价值立场",
-    )
-    anchors: List[str] = Field(
-        default_factory=list,
-        description="对用户有长期意义的物品、收藏、纪念物",
-    )
-    events: List[str] = Field(
-        default_factory=list,
-        description="对用户画像有长期价值的个人经历、事件、里程碑",
+        description="LLM 输出的元数据 patch 操作列表",
     )
 
-    # ── 便捷属性 ──
+    @model_validator(mode="before")
+    @classmethod
+    def _filter_operations(cls, data: object) -> object:
+        """通过 try/except 静默丢弃 LLM 输出的无效 / 越界 op。
 
-    METADATA_FIELDS: List[str] = [
-        "core_facts", "traits", "relations", "goals",
-        "interests", "beliefs_or_stances", "anchors", "events",
-    ]
+        被静默丢弃的情形（均由 ``MetadataOperation._validate_shape`` 决定）：
+            - 非 dict、未知 op、未知或被白名单过滤的 field（如 ``aliases``）
+            - shape 不符（例如 ``add`` 缺 ``value``、``update`` 缺 ``new_value``）
 
-    def has_any_metadata(self) -> bool:
-        """是否提取到了任何元数据（不含 aliases）。"""
-        return any(
-            bool(getattr(self, field, []))
-            for field in self.METADATA_FIELDS
-        )
+        丢弃计数写入 ``data["_dropped_ops_count"]``，供上层 task 记日志。
+        由于 ``model_config = ConfigDict(extra="ignore")``，该 key 不会
+        出现在最终模型实例上（Pydantic 自动忽略）。
+        """
+        if not isinstance(data, dict):
+            return data
+        raw_ops = data.get("operations")
+        if not isinstance(raw_ops, list):
+            return data
 
-    def to_metadata_dict(self) -> dict:
-        """返回 8 个元数据字段的字典（不含 aliases），用于 Neo4j 回写。"""
-        return {
-            field: getattr(self, field, [])
-            for field in self.METADATA_FIELDS
-        }
+        cleaned: List[MetadataOperation] = []
+        dropped = 0
+        for item in raw_ops:
+            try:
+                cleaned.append(MetadataOperation.model_validate(item))
+            except Exception:
+                dropped += 1
+                continue
+        return {**data, "operations": cleaned, "_dropped_ops_count": dropped}
