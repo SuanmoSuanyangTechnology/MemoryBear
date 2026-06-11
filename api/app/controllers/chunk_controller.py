@@ -112,11 +112,11 @@ async def get_preview_chunks(
             lang="Chinese",
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
-    from app.core.rag.app.naive import chunk
+    from app.core.rag.app.naive import chunk_v2 as chunk
     parent_child_mode = db_document.is_parent_child_mode
     api_logger.debug(f"当前文档分块模式：{db_document.is_parent_child_mode}")
     if parent_child_mode:
-        from app.core.rag.app.naive import chunk_parent_child
+        from app.core.rag.app.naive import chunk_parent_child_v2 as chunk_parent_child
         child_res, parent_res, parent_id_map = chunk_parent_child(
             filename=db_file.file_name,
             binary=file_binary,
@@ -280,7 +280,7 @@ async def get_preview_chunks_hierarchy(
         lang="Chinese",
         base_url=db_knowledge.image2text.api_keys[0].api_base
     )
-    from app.core.rag.app.naive import chunk, chunk_parent_child
+    from app.core.rag.app.naive import chunk_v2 as chunk, chunk_parent_child_v2 as chunk_parent_child
 
     parser_config = dict(db_document.parser_config)
 

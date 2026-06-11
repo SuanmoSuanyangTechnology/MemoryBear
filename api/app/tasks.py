@@ -376,7 +376,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         # Prepare vision_model for parsing
         vision_model = _build_vision_model(file_name, db_knowledge)
 
-        from app.core.rag.app.naive import chunk
+        from app.core.rag.app.naive import chunk_v2 as chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
         # Early-exit check before chunking
@@ -387,7 +387,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         parent_child_mode = db_document.is_parent_child_mode
         if parent_child_mode:
-            from app.core.rag.app.naive import chunk_parent_child
+            from app.core.rag.app.naive import chunk_parent_child_v2 as chunk_parent_child
             child_res, parent_res, parent_id_map = chunk_parent_child(
                 filename=file_name,
                 binary=file_binary,
