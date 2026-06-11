@@ -8,7 +8,6 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +30,10 @@ from app.core.logging_config import get_logger
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.utils.chunk_write_order import (
+    pop_vectorized_bootstrap_batch,
+    prioritize_vectorized_chunks,
+)
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
@@ -424,8 +427,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if total_chunks == 0:
             progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
-            total_batches = ceil(total_chunks / EMBEDDING_BATCH_SIZE)
-            progress_per_batch = 0.2 / total_batches
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
             # 2.1 Delete document vector index
             vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
@@ -447,7 +448,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             all_batch_chunks: list[list[DocumentChunk]] = []
 
             if parent_child_mode:
-                # 父子分块模式：parent chunks + child chunks
+                # Parent-child mode writes child chunks first so ES mapping is created from vectorized chunks.
                 parent_chunks_list = []
                 parent_id_to_doc_id = {}
 
@@ -487,7 +488,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     child_chunks_list.append(
                         DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
 
-                all_chunks = parent_chunks_list + child_chunks_list
+                all_chunks = prioritize_vectorized_chunks(parent_chunks_list + child_chunks_list)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
                     batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
@@ -497,9 +498,9 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     f"{len(child_chunks_list)} child chunks prepared.")
 
             elif auto_questions_topn:
-                # QA 模式（FastGPT 方案）：
-                # 1. 原 chunk 标记为 source（保留供 GraphRAG 使用，不参与检索）
-                # 2. LLM 生成 QA 对，每个 QA 对独立存储为 qa chunk
+                # QA mode keeps source chunks but writes QA chunks first for vectorized index creation.
+                # 1. Original chunks are marked as source for full-text retrieval, provenance, and GraphRAG.
+                # 2. LLM-generated QA pairs are stored as independent qa chunks.
                 indexed_items = list(enumerate(res))
 
                 def _generate_qa(idx_item: tuple[int, dict]) -> tuple[int, list]:
@@ -560,7 +561,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     item = res[global_idx]
                     source_chunk_id = uuid.uuid4().hex
 
-                    # source chunk：保留原文，供 GraphRAG 使用，不参与向量检索
+                    # Source chunks keep the original text and are not vectorized.
                     source_meta = {
                         "doc_id": source_chunk_id,
                         "file_id": str(db_document.file_id),
@@ -597,8 +598,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             DocumentChunk(page_content=pair["question"], metadata=qa_meta))
                         qa_sort_id += 1
 
-                # 按 batch 分组（source + qa 一起）
-                all_chunks = source_chunks + qa_chunks
+                # Batch QA chunks before source chunks so vectorized writes create ES mapping first.
+                all_chunks = prioritize_vectorized_chunks(source_chunks + qa_chunks)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
                     batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
@@ -626,6 +627,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
                     all_batch_chunks.append(chunks)
 
+            total_batches = len(all_batch_chunks)
+
             # 并发提交 embedding + ES 写入，max_workers 控制模型 API 并发压力
             batch_errors: dict[int, Exception] = {}
 
@@ -639,6 +642,22 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     except Exception as retry_exc:
                         logger.error(f"[ParseDoc] batch {batch_idx} retry failed: {retry_exc}", exc_info=True)
                         batch_errors[batch_idx] = retry_exc
+
+            bootstrap_batch_idx, bootstrap_batch = pop_vectorized_bootstrap_batch(all_batch_chunks)
+            if bootstrap_batch is not None:
+                logger.info(
+                    "[ParseDoc] writing vectorized bootstrap batch before concurrent ES writes: "
+                    f"batch={bootstrap_batch_idx}, chunks={len(bootstrap_batch)}"
+                )
+                _embed_and_store(bootstrap_batch_idx, bootstrap_batch)
+                if bootstrap_batch_idx in batch_errors:
+                    failed_detail = "; ".join(
+                        f"batch {i}: {type(err).__name__}: {err}"
+                        for i, err in sorted(batch_errors.items())
+                    )
+                    raise RuntimeError(
+                        f"Embedding failed for {len(batch_errors)}/{total_batches} batch(es). {failed_detail}"
+                    )
 
             with ThreadPoolExecutor(max_workers=EMBEDDING_MAX_WORKERS) as executor:
                 futures = {
