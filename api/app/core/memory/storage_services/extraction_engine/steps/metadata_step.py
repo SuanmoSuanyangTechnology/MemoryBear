@@ -75,12 +75,23 @@ class MetadataExtractionStep(ExtractionStep[MetadataStepInput, MetadataStepOutpu
 
         仅识别新 schema 的 ``operations``。无效输出统一返回空结果，由
         上层日志告警，不再尝试任何旧 schema 的兼容回退。
+
+        ``dropped_ops_count`` 从 ``MetadataExtractionResponse`` 的 before-validator
+        传递到输出，使调用方可在日志/快照中追踪被丢弃的无效 op。
         """
         if raw_response is None:
             return self.get_default_output()
 
         operations = list(getattr(raw_response, "operations", []) or [])
-        return MetadataStepOutput(operations=operations)
+
+        # _dropped_ops_count 由 MetadataExtractionResponse._filter_operations 写入
+        # data dict；由于 extra="ignore" 不会成为实例属性，此处用 getattr 安全取值。
+        dropped_ops_count = getattr(raw_response, "_dropped_ops_count", 0) or 0
+
+        return MetadataStepOutput(
+            operations=operations,
+            dropped_ops_count=dropped_ops_count,
+        )
 
     def get_default_output(self) -> MetadataStepOutput:
         return MetadataStepOutput(operations=[])

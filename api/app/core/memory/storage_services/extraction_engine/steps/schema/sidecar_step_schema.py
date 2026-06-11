@@ -59,6 +59,10 @@ class MetadataStepOutput(BaseModel):
     """
 
     operations: List[MetadataOperation] = Field(default_factory=list)
+    dropped_ops_count: int = Field(
+        default=0,
+        description="被 LLM 响应校验阶段静默丢弃的无效 op 数量（格式错误/字段越界等）",
+    )
 
     def has_any(self) -> bool:
         return bool(self.operations)

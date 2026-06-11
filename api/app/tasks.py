@@ -2747,8 +2747,8 @@ def extract_metadata_batch_task(
                 try:
                     # ── 分布式锁：同一 entity_id 的 patch 操作串行化 ──
                     # 防止并发 patch 导致 Lost Update（Neo4j WITH-SET 非原子读改写）。
-                    # TTL 30s 足够覆盖一次 LLM 调用 + patch + PG 同步；
-                    # 锁超时后自动释放，不会永久阻塞。
+                    # TTL 与 soft_time_limit 对齐（90s），确保在 Celery 收回任务前锁
+                    # 不会意外过期；正常执行路径在 finally 块主动释放，不会占满 TTL。
                     # 锁竞争时本次跳过该实体：数据不丢失——下一轮 write_pipeline
                     # 仍会触发新的 metadata 任务，此时描述已在 Neo4j 中累积。
                     lock_key = f"metadata:patch:{entity_id}"
@@ -2759,7 +2759,7 @@ def extract_metadata_batch_task(
                         from app.aioRedis import get_thread_safe_redis
                         _lock_redis = get_thread_safe_redis()
                         lock_acquired = bool(
-                            _lock_redis.set(lock_key, lock_value, nx=True, ex=30)
+                            _lock_redis.set(lock_key, lock_value, nx=True, ex=90)
                         )
                     except Exception as lock_err:
                         # Redis 不可用时退化为无锁模式（打 warning 继续执行）
@@ -2810,6 +2810,7 @@ def extract_metadata_batch_task(
                                     "descriptions": descriptions,
                                     "operations": [],
                                     "skipped_ops": skipped_ops_count,
+                                    "dropped_ops_count": result.dropped_ops_count,
                                 }
                             continue
 
@@ -2823,7 +2824,8 @@ def extract_metadata_batch_task(
                         logger.info(
                             f"[Metadata] 实体 {entity_name}({entity_id}) patch 完成: "
                             f"add={counts['add']}, delete={counts['delete']}, "
-                            f"update={counts['update']}, skipped={skipped_ops_count}"
+                            f"update={counts['update']}, skipped={skipped_ops_count}, "
+                            f"dropped_by_validator={result.dropped_ops_count}"
                         )
                         extracted += 1
 
@@ -2845,6 +2847,7 @@ def extract_metadata_batch_task(
                             "entity_name": entity_name,
                             "descriptions": descriptions,
                             "operations": [op.model_dump() for op in result.operations],
+                            "dropped_ops_count": result.dropped_ops_count,
                         }
                         if post_state:
                             snap_entry["post_state"] = post_state
