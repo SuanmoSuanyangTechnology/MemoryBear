@@ -694,6 +694,7 @@ export const zh = {
       versionDescription: '版本描述',
       versionDescriptionTip: '建议说明本次发布的功能更新、错误修复和优化项',
       customTitle: '自定义标题',
+      noIcon: '未设置图标',
       customTitlePlaceholder: '请输入版本展示标题 (选填)',
       customTitleTip: '标题将展示在版本卡片与对外分享页面，不填则使用应用名称',
       customIcon: '自定义图标',
