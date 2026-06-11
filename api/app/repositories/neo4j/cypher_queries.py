@@ -2008,7 +2008,10 @@ RETURN e1.id AS a_id, e2.id AS b_id,
        e1.entity_type AS entity_type,
        e1.description AS a_desc, e2.description AS b_desc,
        e1.aliases AS a_aliases, e2.aliases AS b_aliases,
-       e1.name_embedding AS a_embed, e2.name_embedding AS b_embed
+       CASE
+         WHEN e1.name_embedding IS NULL OR e2.name_embedding IS NULL THEN 0.0
+         ELSE vector.similarity.cosine(e1.name_embedding, e2.name_embedding)
+       END AS emb_sim
 LIMIT $candidate_cap
 """
 
@@ -2135,7 +2138,8 @@ RETURN s.id AS statement_id,
        s.temporal_info AS temporal_info,
        s.speaker AS speaker,
        s.valid_at AS valid_at,
-       s.invalid_at AS invalid_at
+       s.invalid_at AS invalid_at,
+       s.run_id AS run_id
 ORDER BY s.created_at ASC
 LIMIT $batch_size
 """
@@ -2167,7 +2171,16 @@ ON CREATE SET
   e.aliases = [],
   e.connect_strength = "weak",
   e.source = "reflection_unresolved",
-  e.created_at = localdatetime()
+  e.run_id = $run_id,
+  e.type_id = $type_id,
+  e.type_description = $type_description,
+  e.importance_score = 0.5,
+  e.activation_value = null,
+  e.access_history = [],
+  e.access_count = 0,
+  e.last_access_time = null,
+  e.is_explicit_memory = $is_explicit_memory,
+  e.created_at = $created_at
 ON MATCH SET
   e.description = CASE
     WHEN e.description IS NULL OR e.description = "" THEN $description
@@ -2193,9 +2206,10 @@ CREATE (subj)-[r:EXTRACTED_RELATIONSHIP {
   valid_at: $valid_at,
   invalid_at: $invalid_at,
   end_user_id: $end_user_id,
+  run_id: $run_id,
   connect_strength: "weak",
   source: "reflection_unresolved",
-  created_at: datetime()
+  created_at: $created_at
 }]->(obj)
 RETURN r.predicate AS predicate
 """
@@ -2203,7 +2217,11 @@ RETURN r.predicate AS predicate
 UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE = """
 MATCH (s:Statement {id: $statement_id})
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $entity_name})
-MERGE (s)-[:REFERENCES_ENTITY]->(e)
+MERGE (s)-[r:REFERENCES_ENTITY]->(e)
+SET r.end_user_id = $end_user_id,
+    r.run_id = $run_id,
+    r.created_at = $created_at,
+    r.connect_strength = "weak"
 RETURN s.id AS statement_id
 """
 
