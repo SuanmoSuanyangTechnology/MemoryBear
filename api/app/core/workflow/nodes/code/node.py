@@ -63,10 +63,15 @@ class CodeNode(BaseNode):
     def _extract_extra_fields(self, business_result: Any) -> dict:
         return {"process": {"language": self._language, "code": self._executed_code}}
 
+    def _get_typed_config(self) -> CodeNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = CodeNodeConfig(**self.config)
+        return self.typed_config
+
     def _output_types(self) -> dict[str, VariableType]:
         output_dict = {}
-        for output in self.config.get("output_variables", []):
-            output_dict[output["name"]] = VariableType(output["type"])
+        for output in self._get_typed_config().output_variables:
+            output_dict[output.name] = output.type
         output_dict["branch_signal"] = VariableType.STRING
         return output_dict
 
@@ -112,7 +117,7 @@ class CodeNode(BaseNode):
             raise RuntimeError("The output of main must be a dictionary")
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
-        self.typed_config = CodeNodeConfig(**self.config)
+        self.typed_config = self._get_typed_config()
         input_variable_dict = {}
         for input_variable in self.typed_config.input_variables:
             input_variable_dict[input_variable.name] = self.get_variable(input_variable.variable, variable_pool)
