@@ -95,7 +95,7 @@ class ReflectionPipeline:
         # 构建 embedding_client（用于更名后重新生成 name_embedding）
         if not hasattr(self, '_embedding_client'):
             self._embedding_client = None
-            embedding_id = getattr(self.memory_config, 'embedding_id', None)
+            embedding_id = getattr(self.memory_config, 'embedding_model_id', None)
             if embedding_id:
                 try:
                     from app.core.memory.pipelines.base_pipeline import ModelClientMixin
