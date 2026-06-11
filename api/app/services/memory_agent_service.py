@@ -571,6 +571,9 @@ class MemoryAgentService:
         当 db=None 时（Celery 后台任务路径），每个文件单独开短暂 session，
         避免长时间持有 DB 连接等待 LLM 推理。
         """
+        # 当外层提供 db 时，复用同一个 service 实例，避免每个文件重复实例化
+        perceptual_service = MemoryPerceptualService(db) if db is not None else None
+
         for message in messages:
             if isinstance(message, dict):
                 message["file_content"] = []
@@ -579,11 +582,9 @@ class MemoryAgentService:
                 message.file_content = []
                 files = message.files or []
             for file in files:
-                # 每个文件独立开 session：查询/创建 Perceptual 记录 + LLM 推理 + commit
                 # 注意：generate_perceptual_memory 内部含 LLM 调用（10-60s），
                 # 此处复用外层 db（Controller 路径）或自行开 session（Celery 路径）
-                if db is not None:
-                    perceptual_service = MemoryPerceptualService(db)
+                if perceptual_service is not None:
                     file_object = await perceptual_service.generate_perceptual_memory(
                         end_user_id=end_user_id,
                         memory_config=memory_config,
@@ -592,8 +593,8 @@ class MemoryAgentService:
                     )
                 else:
                     with get_db_context() as _db:
-                        perceptual_service = MemoryPerceptualService(_db)
-                        file_object = await perceptual_service.generate_perceptual_memory(
+                        _perceptual_service = MemoryPerceptualService(_db)
+                        file_object = await _perceptual_service.generate_perceptual_memory(
                             end_user_id=end_user_id,
                             memory_config=memory_config,
                             file=FileInput(**file),
