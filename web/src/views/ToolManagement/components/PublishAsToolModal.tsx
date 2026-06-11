@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-28 13:41:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 18:05:15
+ * @Last Modified time: 2026-06-11 20:08:38
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, App } from 'antd';
@@ -177,7 +177,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
             {t('tool.inputParams')}
           </div>
           <Table<InputParameters>
-            dataSource={inputParameters}
+            initialData={inputParameters}
             columns={inputColumns}
             rowKey="name"
             pagination={false}
