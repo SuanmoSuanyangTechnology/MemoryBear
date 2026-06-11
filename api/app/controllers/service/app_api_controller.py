@@ -3,7 +3,7 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Body
+from fastapi import APIRouter, Depends, Request, Body, Query
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -21,6 +21,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
+from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import get_app_service, AppService
@@ -334,6 +335,60 @@ async def chat(
         )
     else:
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.get("/conversations")
+@require_api_key(scopes=["app"])
+async def list_v1_conversations(
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+        user_id: str = Query("", description="外部系统用户 ID"),
+        page: int = Query(1, description="页码，从 1 开始"),
+        page_size: int = Query(20, description="每页数量，最大 100"),
+):
+    """获取当前应用下指定外部用户的会话列表。"""
+    result = conversation_service.list_v1_conversations(
+        app_id=api_key_auth.resource_id,
+        workspace_id=api_key_auth.workspace_id,
+        external_user_id=user_id,
+        page=page,
+        page_size=page_size,
+    )
+    items = [
+        conversation_schema.V1ConversationListItem(**item)
+        for item in result["items"]
+    ]
+    page_meta = PageMeta(
+        page=result["page"],
+        pagesize=result["page_size"],
+        total=result["total"],
+        hasnext=result["hasnext"],
+    )
+    return success(data=PageData(page=page_meta, items=items).model_dump(mode="json"))
+
+
+@router.get("/conversations/{conversation_id}/messages")
+@require_api_key(scopes=["app"])
+async def list_v1_conversation_messages(
+        request: Request,
+        conversation_id: uuid.UUID,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+        user_id: str = Query("", description="外部系统用户 ID"),
+        limit: int = Query(20, description="返回消息数量，最大 200"),
+):
+    """获取当前应用下指定会话的历史消息。"""
+    result = conversation_service.list_v1_conversation_messages(
+        app_id=api_key_auth.resource_id,
+        workspace_id=api_key_auth.workspace_id,
+        external_user_id=user_id,
+        conversation_id=conversation_id,
+        limit=limit,
+    )
+    return success(data=conversation_schema.V1ConversationMessageListResponse(**result).model_dump(mode="json"))
 
 
 @router.post(
