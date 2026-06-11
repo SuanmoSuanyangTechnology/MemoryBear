@@ -28,7 +28,6 @@ const Share: FC = () => {
   const recallTestRef = useRef<RecallTestDrawerRef>(null);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>([]);
-  const [viewInfo,setViewInfo] = useState<boolean>(false);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail'
   });
@@ -39,11 +38,18 @@ const Share: FC = () => {
     
     if (knowledgeBaseId) {
       fetchKnowledgeBaseDetail(knowledgeBaseId);
-      // Open recall test component
-      setTimeout(() => {
-        console.log('Share.tsx - calling handleOpen with:', knowledgeBaseId);
-        recallTestRef.current?.handleOpen(knowledgeBaseId);
-      }, 100);
+      // Use callback ref to ensure recall test is ready before calling methods
+      const tryOpen = (retries = 5) => {
+        if (recallTestRef.current) {
+          recallTestRef.current.handleOpen(knowledgeBaseId);
+        } else if (retries > 0) {
+          // Retry with a short delay until the ref is ready
+          setTimeout(() => tryOpen(retries - 1), 50);
+        } else {
+          console.warn('Share.tsx - recallTestRef is still null after retries');
+        }
+      };
+      tryOpen();
     } else {
       console.warn('Share.tsx - knowledgeBaseId is undefined or empty');
     }
@@ -161,7 +167,7 @@ const Share: FC = () => {
           <span className='rb:text-gray-500 rb:text-sm rb:ml-2 rb:font-normal'>(ID: {knowledgeBase.id})</span></h1>
         
         {/* <p className="rb:text-gray-600 rb:mt-2">{knowledgeBase.description || t('knowledgeBase.noDescription')}</p> */}
-        <span className='rb:text-white rb:text-xs rb:bg-blue-500 rb:px-1 rb:py-[2px] rb:rounded'>{knowledgeBase.permission_id}</span>
+        <span className='rb:text-white rb:text-xs rb:bg-blue-500 rb:px-1 rb:py-0.5 rb:rounded'>{knowledgeBase.permission_id}</span>
         <Popover
           content={<InfoPanel title={t('knowledgeBase.knowledgeBaseInfo')} items={infoItems} />}
           trigger="hover"
@@ -169,7 +175,7 @@ const Share: FC = () => {
           arrow={false}
         >
           <span 
-            className='rb:border rb:border-[#171719] rb:px-1 rb:py-[2px] rb:rounded rb:text-gray-900 rb:text-xs rb:cursor-pointer'
+            className='rb:border rb:border-[#171719] rb:px-1 rb:py-0.5 rb:rounded rb:text-gray-900 rb:text-xs rb:cursor-pointer'
           >{t('knowledgeBase.viewBasicInfo')}</span>
         </Popover>
       </div>
@@ -181,7 +187,7 @@ const Share: FC = () => {
       </div>
       <div className="rb:flex rb:flex-1 rb:gap-4 rb:min-h-0">
         <div className="rb:flex-1 rb:p-4 rb:border rb:flex rb:flex-col rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:overflow-hidden">
-          <div className='rb:flex rb:flex-col rb:txt-left rb:mb-5 rb:gap-2 rb:flex-shrink-0'>
+          <div className='rb:flex rb:flex-col rb:txt-left rb:mb-5 rb:gap-2 rb:shrink-0'>
             <h1 className="rb:text-lg rb:font-bold">{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.recallTest')}</h1>
             <span className='rb:text-gray-500 rb:text-xs'>{t('knowledgeBase.recallTestDescription')}</span>
           </div>

@@ -84,7 +84,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format tab items for display
    */
   const formatTabItems = useMemo(() => {
-    const isHasAnnotations = application?.type !== 'multi_agent' && source !== 'sharing'
+    const isHasAnnotations = ['multi_agent', 'pure_workflow'].includes(application?.type as string) && source !== 'sharing'
     return (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
       label: key === 'log' && isHasAnnotations ? t('application.logAnnotations') : t(`application.${key}`),
