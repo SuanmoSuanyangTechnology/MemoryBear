@@ -69,6 +69,7 @@ class MetadataAutoFilterService:
         query: str,
         metadata_defs: dict[str, dict],
         llm: Any,
+        gen_conf: dict | None = None,
     ) -> list[EngineFilterGroup]:
         if not metadata_defs:
             return []
@@ -77,6 +78,7 @@ class MetadataAutoFilterService:
             query=query,
             metadata_defs=metadata_defs,
             llm=llm,
+            gen_conf=gen_conf or {"temperature": 0},
         )
         conditions = []
         for raw_condition in raw_conditions:
@@ -91,7 +93,7 @@ class MetadataAutoFilterService:
         )
         if not conditions:
             return []
-        return [EngineFilterGroup(conditions=conditions, logic="AND")]
+        return [EngineFilterGroup(conditions=conditions, logic="and")]
 
     @classmethod
     def _extract_metadata_conditions(
@@ -99,6 +101,7 @@ class MetadataAutoFilterService:
         query: str,
         metadata_defs: dict[str, dict],
         llm: Any,
+        gen_conf: dict | None = None,
     ) -> list[dict[str, Any]]:
         system_prompt = (
             "You are a text metadata extract engine. Extract only metadata filters that are clearly "
@@ -113,7 +116,7 @@ class MetadataAutoFilterService:
         response = llm.chat(
             system=system_prompt,
             history=history,
-            gen_conf={"temperature": 0},
+            gen_conf=gen_conf or {"temperature": 0},
         )
         content = response[0] if isinstance(response, tuple) else response
         if not content or str(content).startswith(ERROR_PREFIX):

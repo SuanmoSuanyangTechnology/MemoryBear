@@ -18,6 +18,7 @@ class FilterCondition(BaseModel):
     field: str = Field(..., description="元数据字段名")
     operator: str = Field(..., description="操作符")
     value: Any | None = Field(None, description="值")
+    value_type: str | None = Field("constant", description="值类型: constant (常量) | variable (工作流变量模板如 {{sys.message}})")
 
 
 class GroupLogic(StrEnum):
@@ -38,6 +39,7 @@ class FilterGroup(BaseModel):
 
 
 class MetadataFilterMode(StrEnum):
+    DISABLED = "disabled"
     MANUAL = "manual"
     AUTO = "auto"
 
