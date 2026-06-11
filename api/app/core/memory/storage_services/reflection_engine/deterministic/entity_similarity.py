@@ -45,6 +45,8 @@ class DedupCandidatePair(BaseModel):
     entity_type: str = ""
     a_desc: str = ""
     b_desc: str = ""
+    a_desc_summary: str = ""
+    b_desc_summary: str = ""
     a_aliases: List[str] = Field(default_factory=list)
     b_aliases: List[str] = Field(default_factory=list)
     sim_name: float = 0.0       # 路径A：名称相似度（0~1）
@@ -100,6 +102,8 @@ async def fetch_name_candidates(
                 entity_type=row["entity_type"],
                 a_desc=row.get("a_desc", ""),
                 b_desc=row.get("b_desc", ""),
+                a_desc_summary=row.get("a_desc_summary") or "",
+                b_desc_summary=row.get("b_desc_summary") or "",
                 a_aliases=row.get("a_aliases") or [],
                 b_aliases=row.get("b_aliases") or [],
                 sim_name=sim,
@@ -142,6 +146,8 @@ async def fetch_embed_candidates(
             entity_type=row["entity_type"],
             a_desc=row.get("a_desc", ""),
             b_desc=row.get("b_desc", ""),
+            a_desc_summary=row.get("a_desc_summary") or "",
+            b_desc_summary=row.get("b_desc_summary") or "",
             a_aliases=row.get("a_aliases") or [],
             b_aliases=row.get("b_aliases") or [],
             sim_embed=row["sim_embed"],

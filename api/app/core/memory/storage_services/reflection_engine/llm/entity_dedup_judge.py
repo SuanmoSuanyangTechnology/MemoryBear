@@ -1,5 +1,5 @@
 """子问题 3 · 方案A LLM层：单对去重判定
-复用已有模板 entity_dedup.jinja2，直接渲染 + call_structured。
+渲染 entity_dedup_reflection.jinja2 + call_structured。
 """
 import asyncio
 import json
@@ -23,15 +23,18 @@ class DedupLLMDecision(BaseModel):
     """LLM 去重判定结果"""
     same_entity: bool           # 是否同一实体
     confidence: float           # 置信度 0~1
-    winner_id: str = "a"        # 保留哪个: "a" | "b"
-    merged_name: str = ""       # 合并后名称
+    winner_id: str = "a"        # 保留哪个: "a" | "b"（canonical_idx 映射）
+    merged_name: str = ""       # 合并后主名（取自 LLM new_name）
+    new_aliases: List[str] = []  # LLM 给出的新别名
     reason: str = ""            # 判定理由
 
 
 class DedupJudgeOutput(BaseModel):
-    """LLM 结构化输出（对应 entity_dedup.jinja2 的 Output format）"""
+    """LLM 结构化输出（对应 entity_dedup_reflection.jinja2 的 Output format）"""
     same_entity: bool
     canonical_idx: int          # 0=A, 1=B
+    new_name: Optional[str] = None      # 合并后主名；same_entity=false 时为 None
+    new_aliases: List[str] = []         # 合并后新增/保留别名；same_entity=false 时为 []
     confidence: float
     reason: str
 
@@ -45,37 +48,28 @@ async def judge_pair_for_dedup(
 ) -> Optional[DedupLLMDecision]:
     """对单对候选调用 LLM 判定
 
-    直接渲染 entity_dedup.jinja2，把两路召回已计算好的分数传入。
-    entity_a/entity_b 只需有 name, entity_type, description, aliases, connect_strength 属性。
+    直接渲染 entity_dedup_reflection.jinja2，把两路召回已计算好的分数传入。
+    entity_a/entity_b 需有 name, entity_type, description, description_summary, aliases 属性。
     """
     try:
         from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
 
-        template = _prompt_env.get_template("entity_dedup.jinja2")
+        template = _prompt_env.get_template("entity_dedup_reflection.jinja2")
         rendered_prompt = template.render(
             entity_a={
                 "name": entity_a.name,
                 "entity_type": entity_a.entity_type,
+                "description_summary": getattr(entity_a, "description_summary", ""),
                 "description": getattr(entity_a, "description", ""),
                 "aliases": getattr(entity_a, "aliases", []),
-                "connect_strength": getattr(entity_a, "connect_strength", ""),
             },
             entity_b={
                 "name": entity_b.name,
                 "entity_type": entity_b.entity_type,
+                "description_summary": getattr(entity_b, "description_summary", ""),
                 "description": getattr(entity_b, "description", ""),
                 "aliases": getattr(entity_b, "aliases", []),
-                "connect_strength": getattr(entity_b, "connect_strength", ""),
             },
-            disambiguation_mode=False,
-            same_group=True,
-            type_ok=True,
-            type_similarity=1.0,
-            name_text_sim=scores.get("sim_name", 0.0),
-            name_embed_sim=scores.get("sim_embed", 0.0),
-            name_contains=False,
-            co_occurrence=False,
-            relation_statements=[],
             language=language,
             json_schema=json.dumps(DedupJudgeOutput.model_json_schema(), indent=2),
         )
@@ -84,11 +78,14 @@ async def judge_pair_for_dedup(
         response = await call_structured(llm_client, messages, DedupJudgeOutput)
 
         if isinstance(response, DedupJudgeOutput):
+            # new_name 为空时回退到 canonical_idx 对应实体名
+            fallback_name = entity_a.name if response.canonical_idx == 0 else entity_b.name
             return DedupLLMDecision(
                 same_entity=response.same_entity,
                 confidence=response.confidence,
                 winner_id="a" if response.canonical_idx == 0 else "b",
-                merged_name=entity_a.name if response.canonical_idx == 0 else entity_b.name,
+                merged_name=(response.new_name or fallback_name),
+                new_aliases=response.new_aliases or [],
                 reason=response.reason,
             )
         return None
@@ -116,13 +113,13 @@ async def judge_batch(
             # 直接从 pair 构造简单对象供模板渲染
             entity_a = type("E", (), {
                 "name": pair.a_name, "entity_type": pair.entity_type,
+                "description_summary": pair.a_desc_summary,
                 "description": pair.a_desc, "aliases": pair.a_aliases or [],
-                "connect_strength": "",
             })()
             entity_b = type("E", (), {
                 "name": pair.b_name, "entity_type": pair.entity_type,
+                "description_summary": pair.b_desc_summary,
                 "description": pair.b_desc, "aliases": pair.b_aliases or [],
-                "connect_strength": "",
             })()
             scores = {"sim_name": pair.sim_name, "sim_embed": pair.sim_embed}
             decision = await judge_pair_for_dedup(llm_client, entity_a, entity_b, scores, language)
