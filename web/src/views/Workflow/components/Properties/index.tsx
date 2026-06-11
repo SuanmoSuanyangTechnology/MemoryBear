@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:57:34
+ * @Last Modified time: 2026-06-11 15:36:04
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover, Tabs } from 'antd';
 
-import type { NodeConfig, NodeProperties, ChatVariable, EnvVariable } from '../../types'
+import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
 import Knowledge from '@/components/Knowledge';
@@ -53,6 +53,7 @@ import Trigger from './Trigger'
 import { getWorkflowNodeLastRunDetail } from '@/api/application'
 import HumanIntervention from './HumanIntervention'
 import ToolList from './ToolList'
+import MetadataFilter from './MetadataFilter'
 
 /**
  * Props for Properties component
@@ -183,17 +184,6 @@ const Properties: FC<PropertiesProps> = ({
     }
   }, [values, selectedNode, form])
 
-  /**
-   * Update node label in graph
-   * @param newLabel - New label text
-   */
-  const updateNodeLabel = (newLabel: string) => {
-    if (selectedNode && form) {
-      const nodeData = selectedNode.getData() as NodeProperties;
-      selectedNode.setAttrByPath('text/text', `${nodeData.icon} ${newLabel}`);
-      selectedNode.setData({ ...selectedNode.getData(), name: newLabel });
-    }
-  };
   /**
    * Get filtered variable list based on node type and config key
    * @param nodeType - Type of the node
@@ -890,6 +880,13 @@ const Properties: FC<PropertiesProps> = ({
                                   >
                                     <Knowledge variant="workflow" />
                                   </Form.Item>
+                                )
+                              }
+                              if (config.type === 'metadata') {
+                                return (
+                                  <MetadataFilter
+                                    options={variableList}
+                                  />
                                 )
                               }
 

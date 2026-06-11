@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 17:21:22
+ * @Last Modified time: 2026-06-11 17:00:20
  */
 /**
  * Model Configuration Modal
@@ -29,6 +29,7 @@ const FormItem = Form.Item;
  * Component props
  */
 interface ModelConfigModalProps {
+  name?: string;
   /** Callback to update model configuration */
   refresh: (values?: ModelConfigForm) => void;
   variableOptions: Suggestion[];
@@ -194,6 +195,7 @@ export const fieldConfigs: Record<string, any> = {
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,
   variableOptions,
+  name = 'model_id'
 }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -207,13 +209,13 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     setOptions(options)
   }
   useEffect(() => {
-    if (values?.model_id && options) {
-      const model = options.find(item => item.id === values.model_id)
+    if (values?.[name] && options) {
+      const model = options.find(item => item.id === values[name])
       form.setFieldValue('capability', model?.capability || [])
     } else {
       form.setFieldValue('capability', [])
     }
-  }, [values?.model_id, options])
+  }, [values?.[name], options])
 
   /** Close modal and reset form */
   const handleClose = () => {
@@ -236,12 +238,10 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         const thinkingBudget = values?.thinking?.budget
         const budgetValue = Number(thinkingBudget?.value)
         if (thinkingBudget?.enable && budgetValue && values?.max_tokens && budgetValue > values.max_tokens) {
-          form.setFields([
-            {
-              name: ['thinking', 'budget', 'value'],
-              errors: [t('application.thinking_budget_tokens_max_error', { max: values.max_tokens })]
-            }
-          ])
+          form.setFields([{
+            name: ['thinking', 'budget', 'value'] as any,
+            errors: [t('application.thinking_budget_tokens_max_error', { max: values.max_tokens })]
+          }])
           message.error(`${t('workflow.config.llm.thinking_budget')} ${t('application.thinking_budget_tokens_max_error', { max: values.max_tokens })}`)
           return
         }
@@ -277,7 +277,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   }));
 
   const handleNumChange = (field: string | string[], value?: InputNumberProps['value'], min?: number) => {
-    form.setFieldValue(field as keyof ModelConfigForm & Record<string, 'value'>, value === undefined || value === null ? min : value)
+    form.setFieldValue(field as any, value === undefined || value === null ? min : value)
   }
 
   return (
@@ -295,7 +295,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         size="middle"
       >
         <FormItem
-          name="model_id"
+          name={name}
           label={t('workflow.config.llm.model_id')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
