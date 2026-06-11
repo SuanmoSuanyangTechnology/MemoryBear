@@ -1718,7 +1718,10 @@ export const zh = {
       ExtractedEntity_aliases: '别名',
       ExtractedEntity_connect_strngth: '连接强度',
       ExtractedEntity_importance_score: '重要性评分',
-      ExtractedEntity_description_summary: '摘要',
+      ExtractedEntity_description_summary: '记忆提炼',
+      noDescriptionSummary: '暂无提炼，满 5 条记忆后触发反思生成',
+      memoryDetail: '记忆明细',
+      noDescription: '已提炼为记忆提炼，暂无新记忆明细进入',
 
       AssistantPruned_memory_type: '记忆类型',
 

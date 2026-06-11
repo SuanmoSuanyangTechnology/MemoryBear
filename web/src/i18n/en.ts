@@ -1754,6 +1754,9 @@ export const en = {
       ExtractedEntity_connect_strngth: 'Connection Strength',
       ExtractedEntity_importance_score: 'Importance Score',
       ExtractedEntity_description_summary: 'Description Summary',
+      noDescriptionSummary: 'No description summary available, please add 5 memories to trigger reflection generation',
+      memoryDetail: 'Memory Details',
+      noDescription: 'No new memory details available, please add more memories',
 
       AssistantPruned_memory_type: 'Memory Type',
 

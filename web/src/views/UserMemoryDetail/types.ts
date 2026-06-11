@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 11:17:20
+ * @Last Modified time: 2026-06-11 14:51:48
  */
 /**
  * User Memory Detail Types
@@ -87,7 +87,7 @@ export interface StatementNodeProperties {
  * Extracted entity node properties
  */
 export interface ExtractedEntityNodeProperties {
-  description: string;
+  description: string[];
   name: string;
   entity_type: string;
   created_at: number;
@@ -313,7 +313,7 @@ export interface ExtractedEntityTypeNode {
   properties: {
     name: string;
     end_user_id: string;
-    description: string;
+    description: string[];
     created_at: string;
     entity_type: CommunityEntityType;
     community_name: string;
