@@ -352,10 +352,28 @@ def publish_app(
         workspace_id=workspace_id,
         version_name=payload.version_name,
         release_notes=payload.release_notes,
-        custom_title=payload.custom_title,
-        custom_icon=payload.custom_icon,
+        name=payload.name,
+        icon=payload.icon,
     )
     return success(data=app_schema.AppRelease.model_validate(release))
+
+
+@router.get("/{app_id}/release/display_info", summary="获取发布展示信息")
+@cur_workspace_access_guard()
+def get_release_display_info(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """获取发布前展示信息默认值，有当前版本返回 release.name/icon，否则返回 app.name/icon"""
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+    release = app_service.get_current_release(db, app_id=app_id, workspace_id=workspace_id)
+    if release:
+        return success(data=app_schema.AppDisplayInfo(name=release.name, icon=release.icon))
+    return success(data=app_schema.AppDisplayInfo(name=app.name, icon=app.icon))
 
 
 @router.get("/{app_id}/release", summary="获取当前发布版本")

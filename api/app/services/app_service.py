@@ -1873,8 +1873,8 @@ class AppService:
             version_name: str,
             workspace_id: Optional[uuid.UUID] = None,
             release_notes: Optional[str] = None,
-            custom_title: Optional[str] = None,
-            custom_icon: Optional[str] = None,
+            name: Optional[str] = None,
+            icon: Optional[str] = None,
     ) -> AppRelease:
         """发布应用（创建不可变快照）
 
@@ -1883,6 +1883,8 @@ class AppService:
             publisher_id: 发布者用户ID
             workspace_id: 工作空间ID（用于权限验证）
             release_notes: 版本说明
+            name: 标题
+            icon: 图标
 
         Returns:
             AppRelease: 发布版本对象
@@ -2007,12 +2009,10 @@ class AppService:
             version=version,
             version_name=version_name,
             release_notes=release_notes,
-            name=app.name,
+            name=name or app.name,
             description=app.description,
-            icon=app.icon,
+            icon=icon or app.icon,
             icon_type=app.icon_type,
-            custom_title=custom_title,
-            custom_icon=custom_icon,
             type=app.type,
             visibility=app.visibility,
             config=config,
@@ -2668,13 +2668,13 @@ def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UU
 
 
 def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,
-            version_name: str, release_notes: Optional[str] = None, custom_title: Optional[str] = None,
-            custom_icon: Optional[str] = None) -> AppRelease:
+            version_name: str, release_notes: Optional[str] = None, name: Optional[str] = None,
+            icon: Optional[str] = None) -> AppRelease:
     """发布应用（向后兼容接口）"""
     service = AppService(db)
     return service.publish(app_id=app_id, publisher_id=publisher_id, version_name=version_name,
                            workspace_id=workspace_id, release_notes=release_notes,
-                           custom_title=custom_title, custom_icon=custom_icon)
+                           name=name, icon=icon)
 
 
 def get_current_release(

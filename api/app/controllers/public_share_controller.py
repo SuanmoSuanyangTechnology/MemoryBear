@@ -935,8 +935,8 @@ async def config_query(
     share_service = SharedChatService(db)
     share_token = share_data.share_token
     share, release = share_service.get_release_by_share_token(share_token, password)
-    app_name = release.custom_title or release.name
-    app_icon = release.custom_icon or release.icon
+    app_name = release.name
+    app_icon = release.icon
 
     if release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         workflow_service = WorkflowService(db)

@@ -27,8 +27,6 @@ class AppRelease(Base):
     description = Column(String, nullable=True)
     icon = Column(String, nullable=True)
     icon_type = Column(String, nullable=True)
-    custom_title = Column(String, nullable=True, comment="公开分享场景下的自定义标题")
-    custom_icon = Column(String, nullable=True, comment="公开分享场景下的自定义图标")
     type = Column(String, nullable=False)
     visibility = Column(String, default="private")
 
