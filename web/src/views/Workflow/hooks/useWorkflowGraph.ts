@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 14:34:53
+ * @Last Modified time: 2026-06-11 15:18:48
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -197,6 +197,7 @@ export const useWorkflowGraph = ({
       })
   }
 
+  console.log('workflowInitializedRef', workflowInitializedRef.current)
   useEffect(() => {
     if (!config || !graphRef.current) return
     if (workflowInitializedRef.current) return
