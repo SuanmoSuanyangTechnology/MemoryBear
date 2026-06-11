@@ -14,9 +14,12 @@ filtered out at runtime — alias merging is handled by the reflection-engine
 ``alias_merger`` pipeline and stays decoupled from this metadata patch flow.
 """
 
+import logging
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 # ── Fields managed by metadata patch ──
@@ -138,10 +141,22 @@ class MetadataExtractionResponse(BaseModel):
 
         cleaned: List[MetadataOperation] = []
         dropped = 0
+        dropped_details: List[str] = []
         for item in raw_ops:
             try:
                 cleaned.append(MetadataOperation.model_validate(item))
-            except Exception:
+            except Exception as e:
                 dropped += 1
+                dropped_details.append(
+                    f"item={item!r}, reason={e}"
+                )
                 continue
+
+        if dropped > 0:
+            logger.warning(
+                f"[Metadata] MetadataExtractionResponse 丢弃了 {dropped}/{len(raw_ops)} 条无效 op: "
+                + "; ".join(dropped_details[:5])
+                + ("..." if dropped > 5 else "")
+            )
+
         return {**data, "operations": cleaned, "_dropped_ops_count": dropped}
