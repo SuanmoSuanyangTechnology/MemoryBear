@@ -525,6 +525,38 @@ async def memory_space_entity_event_timeline(
     return success(data=result, msg="实体事件时间线")
 
 
+@router.get("/memory_space/entity_timeline", response_model=ApiResponse)
+async def memory_space_entity_timeline(
+        id: str,
+        type: str = Query("all", description="来源筛选：all/key_node/statement/memory_summary"),
+        page: int = Query(1, ge=1, description="页码，从1开始"),
+        pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+        current_user: User = Depends(get_current_user),
+):
+    """ExtractedEntity 合并记忆时间线（关键节点 / 情绪记忆 / 长期沉淀），分页 + 按来源筛选。
+
+    本接口仅服务 ExtractedEntity 节点（只有它才有「关键节点」来源）；
+    Statement / MemorySummary 节点仍走旧接口 timeline_memories。
+
+    Query 参数:
+        id: ExtractedEntity 节点的 Neo4j elementId
+        type: 来源筛选，all/key_node/statement/memory_summary，默认 all
+        page: 页码（从 1 开始）
+        pagesize: 每页条数（1~100）
+
+    total_count 与 type_stats 始终基于全量统计，不受 type 筛选影响。
+    """
+    allowed = {"all", "key_node", "statement", "memory_summary"}
+    if type not in allowed:
+        return fail(BizCode.INVALID_PARAMETER, "type 取值非法", f"type={type}")
+
+    memory_entity = MemoryEntityService(id, "ExtractedEntity")
+    result = await memory_entity.get_unified_timeline(
+        source_type=type, page=page, pagesize=pagesize
+    )
+    return success(data=result, msg="记忆时间线")
+
+
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
 async def memory_space_relationship_evolution(id: str, label: str,
                                               current_user: User = Depends(get_current_user),
