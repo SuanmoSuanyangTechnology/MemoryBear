@@ -1,13 +1,11 @@
 """会话服务"""
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Annotated
 from typing import Optional, List, Tuple, Dict, Any
 
 import json_repair
 from fastapi import Depends
-from jinja2 import Template
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
@@ -21,8 +19,8 @@ from app.models import Conversation, Message, User, ModelType
 from app.models.conversation_model import ConversationDetail
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.conversation_schema import ConversationOut
-from app.schemas.model_schema import ModelInfo
 from app.services import workspace_service
 from app.services.model_service import ModelConfigService
 from app.services.prompt import prompt_manager
@@ -41,6 +39,15 @@ class ConversationService:
         self.db = db
         self.conversation_repo = ConversationRepository(db)
         self.message_repo = MessageRepository(db)
+        self.end_user_repo = EndUserRepository(db)
+
+    _V1_MESSAGE_META_DATA_WHITELIST = {
+        "usage",
+        "citations",
+        "audio_url",
+        "audio_status",
+        "files",
+    }
 
     def create_conversation(
             self,
@@ -447,6 +454,187 @@ class ConversationService:
         )
 
         return messages
+
+    def _resolve_v1_internal_user_id(
+            self,
+            *,
+            workspace_id: uuid.UUID,
+            external_user_id: str,
+    ) -> str | None:
+        """将外部 user_id 解析为内部终端用户 ID，不存在时返回 None。"""
+        end_user = self.end_user_repo.get_end_user_by_other_id(
+            workspace_id=workspace_id,
+            other_id=external_user_id,
+        )
+        if not end_user:
+            return None
+        return str(end_user.id)
+
+    @classmethod
+    def _sanitize_v1_message_meta_data(cls, meta_data: Optional[dict]) -> dict:
+        """对外返回消息元数据时仅保留白名单字段。"""
+        if not isinstance(meta_data, dict):
+            return {}
+        return {
+            key: value
+            for key, value in meta_data.items()
+            if key in cls._V1_MESSAGE_META_DATA_WHITELIST
+        }
+
+    def list_v1_conversations(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            external_user_id: str,
+            page: int = 1,
+            page_size: int = 20,
+    ) -> dict:
+        """获取 v1 应用对外服务的会话列表。"""
+        if not external_user_id:
+            raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+        if page < 1:
+            raise BusinessException("page 必须大于等于 1", BizCode.INVALID_PARAMETER)
+        if page_size < 1:
+            raise BusinessException("page_size 必须大于等于 1", BizCode.INVALID_PARAMETER)
+        if page_size > 100:
+            raise BusinessException("page_size 超过最大限制", BizCode.INVALID_PARAMETER)
+
+        internal_user_id = self._resolve_v1_internal_user_id(
+            workspace_id=workspace_id,
+            external_user_id=external_user_id,
+        )
+        if internal_user_id is None:
+            return {
+                "items": [],
+                "page": page,
+                "page_size": page_size,
+                "total": 0,
+                "hasnext": False,
+            }
+
+        try:
+            conversations, total = self.conversation_repo.list_v1_conversations(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                internal_user_id=internal_user_id,
+                page=page,
+                page_size=page_size,
+            )
+        except BusinessException:
+            raise
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话列表失败",
+                extra={
+                    "app_id": str(app_id),
+                    "workspace_id": str(workspace_id),
+                    "external_user_id": external_user_id,
+                }
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        items = [
+            {
+                "conversation_id": conversation.id,
+                "title": conversation.title,
+                "summary": conversation.summary,
+                "message_count": conversation.message_count,
+                "created_at": conversation.created_at,
+                "updated_at": conversation.updated_at,
+            }
+            for conversation in conversations
+        ]
+
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "hasnext": (page * page_size) < total,
+        }
+
+    def list_v1_conversation_messages(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            external_user_id: str,
+            conversation_id: uuid.UUID,
+            limit: int = 50,
+    ) -> dict:
+        """获取 v1 应用对外服务的会话历史消息。"""
+        if not external_user_id:
+            raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+        if limit < 1:
+            raise BusinessException("limit 必须大于等于 1", BizCode.INVALID_PARAMETER)
+        if limit > 200:
+            raise BusinessException("limit 超过最大限制", BizCode.INVALID_PARAMETER)
+
+        internal_user_id = self._resolve_v1_internal_user_id(
+            workspace_id=workspace_id,
+            external_user_id=external_user_id,
+        )
+
+        try:
+            conversation = self.conversation_repo.get_conversation_by_conversation_id(conversation_id)
+        except ResourceNotFoundException as e:
+            raise BusinessException("会话不存在", BizCode.NOT_FOUND, cause=e) from e
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话详情失败",
+                extra={"conversation_id": str(conversation_id)}
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        if internal_user_id is None:
+            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+
+        if (
+            conversation.app_id != app_id
+            or conversation.workspace_id != workspace_id
+            or conversation.user_id != internal_user_id
+            or conversation.is_active is not True
+            or conversation.is_draft is not False
+        ):
+            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+
+        try:
+            messages = self.message_repo.get_message_by_conversation_id(
+                conversation_id,
+                limit=limit,
+                current_only=True,
+            )
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话消息失败",
+                extra={"conversation_id": str(conversation_id)}
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        items = []
+        for message in messages:
+            if message.role == "system":
+                continue
+            items.append(
+                {
+                    "message_id": message.id,
+                    "role": message.role,
+                    "content": message.content,
+                    "status": message.status,
+                    "meta_data": self._sanitize_v1_message_meta_data(message.meta_data),
+                    "created_at": message.created_at,
+                    "version": message.version or 1,
+                    "is_current": False if message.is_current is False else True,
+                    "parent_message_id": message.parent_message_id,
+                }
+            )
+
+        return {
+            "conversation_id": conversation.id,
+            "items": items,
+            "limit": limit,
+        }
 
     def get_conversation_with_messages(
             self,
