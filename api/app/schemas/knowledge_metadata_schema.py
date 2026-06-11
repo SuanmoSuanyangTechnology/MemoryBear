@@ -1,7 +1,7 @@
 import datetime
 import uuid
 from typing import Any
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, Field, field_serializer, field_validator, ConfigDict
 from enum import StrEnum
 from app.core.utils.datetime_utils import to_timestamp_ms
 
@@ -21,13 +21,20 @@ class FilterCondition(BaseModel):
 
 
 class GroupLogic(StrEnum):
-    AND = "AND"
-    OR = "OR"
+    AND = "and"
+    OR = "or"
 
 
 class FilterGroup(BaseModel):
     conditions: list[FilterCondition] = Field(..., description="条件列表")
-    logic: GroupLogic = Field(GroupLogic.AND, description="组内逻辑: AND | OR")
+    logic: GroupLogic = Field(GroupLogic.AND, description="组内逻辑: and | or")
+
+    @field_validator("logic", mode="before")
+    @classmethod
+    def normalize_logic(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
 
 class MetadataFilterMode(StrEnum):
