@@ -213,10 +213,11 @@ class EventStreamHandler:
                     }
         else:
             # Fallback: No active End node, but chunks are arriving.
-            # Find End nodes that depend on this node_id scope and emit chunks directly.
-            # This handles edge cases where End node activation timing differs.
+            # Only emit directly for End nodes that are already activated (no branch control).
+            # End nodes still waiting for branch routing must NOT receive chunks here.
             dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
-            if dependent_ends:
+            active_dependent_ends = [(eid, einfo) for eid, einfo in dependent_ends if einfo.activate]
+            if active_dependent_ends:
                 if done:
                     self.coordinator.mark_scope_streamed(node_id)
                 elif chunk:
