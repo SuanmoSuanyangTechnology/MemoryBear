@@ -25,7 +25,7 @@ class FilterGroup:
     """条件组"""
     def __init__(self, conditions: list[FilterCondition], logic: str = "AND"):
         self.conditions = conditions
-        logic_upper = logic.upper()
+        logic_upper = str(logic).strip().upper()
         if logic_upper not in ("AND", "OR"):
             raise BusinessException(
                 f"无效的组内逻辑: {logic}（仅支持 AND/OR）",
