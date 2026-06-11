@@ -1311,6 +1311,7 @@ export const en = {
       versionDescription: 'Version Description',
       versionDescriptionTip: 'Please describe the feature updates, bug fixes, and optimizations included in this release.',
       customTitle: 'Custom Title',
+      noIcon: 'No icon set',
       customTitlePlaceholder: 'Custom title (optional)',
       customTitleTip: 'Title will be displayed on the version card and shared page',
       customIcon: 'Custom Icon',
