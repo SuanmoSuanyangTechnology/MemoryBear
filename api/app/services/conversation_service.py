@@ -521,8 +521,6 @@ class ConversationService:
                 page=page,
                 page_size=page_size,
             )
-        except BusinessException:
-            raise
         except Exception as e:
             logger.exception(
                 "查询 v1 会话列表失败",
