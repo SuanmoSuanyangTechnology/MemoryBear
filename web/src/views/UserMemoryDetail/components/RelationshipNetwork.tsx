@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 10:00:50
+ * @Last Modified time: 2026-06-11 10:45:41
  */
 /**
  * Relationship Network Component
@@ -499,7 +499,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                   </>}
               </div>
 
-              {activeTab !== 'communityNetwork' && selectedNode.label === 'ExtractedEntity' &&
+              {activeTab !== 'communityNetwork' &&
                 <>
                   <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
                     {t('userMemory.completeMemory')}
