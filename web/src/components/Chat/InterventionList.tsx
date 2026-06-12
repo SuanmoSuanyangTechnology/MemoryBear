@@ -30,6 +30,8 @@ const InterventionItem: React.FC<InterventionItemProps> = ({
   editable
 }) => {
   const isEditable = !intervention?.resolved_action_id && editable
+  const isTimeout = intervention?.resolved_action_id === '__timeout__'
+
   // 不可编辑状态时默认收起，使用外部传入的展开状态
   const shouldExpand = isEditable || isExpanded
 
@@ -69,12 +71,16 @@ const InterventionItem: React.FC<InterventionItemProps> = ({
           <RenderedForm
             key={intervention.node_id || index}
             content={intervention.rendered_content || ''}
-            formFields={isEditable ? intervention.form_fields || [] : Object.entries(intervention.resolved_form_data || {}).map(([id, value]) => ({ id, default_value: value }))}
+            formFields={(isEditable || isTimeout)
+                ? intervention.form_fields || []
+                : Object.entries(intervention.resolved_form_data || {}).map(([id, value]) => ({ id, default_value: value }))
+            }
             actions={intervention.actions || []}
             resolved_action_id={intervention.resolved_action_id || ''}
             timeout_at={intervention.timeout_at}
             onActionClick={(actionId, fieldValues) => onActionClick(actionId, fieldValues, intervention.execution_id, intervention.node_id)}
             editable={isEditable}
+            isTimeout={isTimeout}
           />
         </div>
       }

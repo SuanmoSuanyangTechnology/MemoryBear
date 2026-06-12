@@ -20,7 +20,7 @@ export type SerializedVariableNode = Spread<
   SerializedLexicalNode
 >;
 
-const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
+export const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
   nodeKey,
   data,
 }) => {

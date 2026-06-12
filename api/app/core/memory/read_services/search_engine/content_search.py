@@ -465,10 +465,11 @@ class HistorySearchService:
     async def run(self) -> MemorySearchResult:
         conversation: Conversation | None = self.db.scalar(
             select(Conversation).where(
-                Conversation.user_id == self.ctx.end_user_id
+                Conversation.user_id == self.ctx.end_user_id,
+                Conversation.id != self.ctx.conversation_id
             ).order_by(
                 Conversation.updated_at.desc()
-            ).offset(1).limit(1)
+            ).limit(1)
         )
 
         if conversation is None:

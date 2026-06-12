@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button, App } from 'antd';
+import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button, App, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { KnowledgeBaseListItem, KnowledgeBaseFormData, CreateModalRef, CreateModalRefProps } from '@/views/KnowledgeBase/types';
 import { 
@@ -16,6 +16,7 @@ import {
 import RbModal from '@/components/RbModal'
 import SliderInput from '@/components/SliderInput'
 import { stringRegExp } from '@/utils/validator'
+import Tag from '@/components/Tag'
 const { TextArea } = Input;
 const { confirm } = Modal
 
@@ -176,7 +177,14 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     typesToFetch.forEach((tp) => {
       const targetType = tp === 'image2text' ? 'chat' : tp;
       const filteredModels = (models?.items || []).filter((m: any) => m.type === targetType);
-      next[tp] = filteredModels.map((m: any) => ({ label: m.name, value: m.id }));
+      next[tp] = filteredModels.map((m: any) => ({
+        label: <Flex gap={4} align="center">
+          <span className="rb:wrap-break-word rb:line-clamp-1">{m.name}</span>
+          {m.is_deprecated && <Tag color="default">{t('modelNew.deprecated')}</Tag>}
+        </Flex>,
+        value: m.id,
+        disabled: m.is_deprecated
+      }));
     });
     
     setModelOptionsByType(next);

@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover, Tabs } from 'antd';
 
-import type { NodeConfig, NodeProperties, ChatVariable, EnvVariable } from '../../types'
+import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
 import Knowledge from '@/components/Knowledge';
@@ -84,6 +84,8 @@ interface PropertiesProps {
   nodeClick: ({ node }: { node: Node }) => void;
   /** Application type */
   appType?: Application['type'];
+  /** Function to refresh cache */
+  refreshCache: () => void;
 }
 
 /**
@@ -102,6 +104,7 @@ const Properties: FC<PropertiesProps> = ({
   handleSave,
   nodeClick,
   appType,
+  refreshCache,
 }) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
@@ -182,18 +185,6 @@ const Properties: FC<PropertiesProps> = ({
       }, { deep: false })
     }
   }, [values, selectedNode, form])
-
-  /**
-   * Update node label in graph
-   * @param newLabel - New label text
-   */
-  const updateNodeLabel = (newLabel: string) => {
-    if (selectedNode && form) {
-      const nodeData = selectedNode.getData() as NodeProperties;
-      selectedNode.setAttrByPath('text/text', `${nodeData.icon} ${newLabel}`);
-      selectedNode.setData({ ...selectedNode.getData(), name: newLabel });
-    }
-  };
   /**
    * Get filtered variable list based on node type and config key
    * @param nodeType - Type of the node
@@ -1245,6 +1236,7 @@ const Properties: FC<PropertiesProps> = ({
           selectedNode={selectedNode}
           appId={appId || config?.app_id || ''}
           variableList={variableList}
+          refreshCache={refreshCache}
         />
       )}
     </div>

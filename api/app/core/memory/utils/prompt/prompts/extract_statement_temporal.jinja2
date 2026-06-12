@@ -41,23 +41,31 @@ Each output item should be a structured candidate memory statement.
 
 - chunk_id: chunk 唯一 ID
 - end_user_id: 终端用户 ID
-- dialog_at: 会话时间，必须是 ISO 8601 时间点
+- dialog_at: 会话时间，通常是 ISO 8601 时间点；输出时必须原样复制输入中的 dialog_at
 - target_content: 当前要处理的对话片段文本，也是唯一允许被抽取的目标文本
-- target_message_date: 目标文本对应的时间，可作为辅助时间背景；当与 dialog_at 同时存在时，优先使用 dialog_at 解析相对时间表达
+- target_message_date: 目标文本对应的时间，可作为辅助时间背景；输入中可能是 ISO 8601 或普通日期时间字符串；当与 dialog_at 同时存在时，只有对相对当前会话时间的表达才优先使用 dialog_at
 - supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
 - supporting_context.before_msgs: 发生在 target_content **之前**的上下文消息列表（按时间升序），可包含 User 和 Assistant
 - supporting_context.after_msgs: 发生在 target_content **之后**的上下文消息列表（按时间升序），可包含 User 和 Assistant
 - 注意：target_content 在结构上夹在 before_msgs 与 after_msgs 之间，但与两侧消息**不一定直接相邻**，中间可能存在被剪枝或省略的消息
+- supporting_context 可用于解析 target_content 中已经出现的指代、省略和槽位；例如 target_content 中的“他俩”“另一个人”“她/他”“这件事”等可引用同一对话链路里可唯一确定的人物或事件。
+- `supporting_context.before_msgs` 可以提供 target 之前已经确认的事实、人物、事件和时间锚点，用于理解 target_content。
+- `supporting_context.after_msgs` 只能用于指代消融：把 target_content 里已经存在的人物指代、集合指代、角色槽位或事件指代映射到具体对象；不能提供新的事实、人物属性、任务、动作、计划、日期或事件锚点，也不能反向覆盖 target_content / before_msgs 中已有的时间锚点。
+- supporting_context 只能用于补全 target_content 的指代与锚点，不能单独产生新 statement。
   {% else %}
 - chunk_id: unique chunk identifier
 - end_user_id: end-user identifier
-- dialog_at: session time, which must be an ISO 8601 timestamp
+- dialog_at: session time, usually an ISO 8601 timestamp; output must copy the input `dialog_at` verbatim
 - target_content: the current dialogue fragment to process, and the only text span that may be extracted from
-- target_message_date: the time associated with the target content and may serve as supporting temporal context; when both exist, prefer `dialog_at` for resolving relative expressions
+- target_message_date: the time associated with the target content and may serve as supporting temporal context; the input may be ISO 8601 or a plain datetime string; when both exist, prefer `dialog_at` only for expressions relative to the current conversation time
 - supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
 - supporting_context.before_msgs: ordered list of messages that occurred **before** target_content (chronological), may include User and Assistant
 - supporting_context.after_msgs: ordered list of messages that occurred **after** target_content (chronological), may include User and Assistant
 - Note: target_content sits structurally between before_msgs and after_msgs, but is **not necessarily directly adjacent** to either side — pruned or omitted messages may exist in between
+- supporting_context may be used to resolve references, ellipsis, and slots already present in target_content; for example, "the two of them," "the other person," "she/he," or "this matter" may refer to uniquely identifiable people or events in the same dialogue chain.
+- `supporting_context.before_msgs` may provide already-confirmed facts, people, events, and temporal anchors that existed before the target and can be used to understand target_content.
+- `supporting_context.after_msgs` is only for reference resolution: it may map person references, group references, role slots, or event references already present in target_content to concrete objects. It must not provide new facts, person attributes, tasks, actions, plans, dates, or event anchors, and it must not retroactively overwrite temporal anchors already available from target_content / before_msgs.
+- supporting_context may only fill references and anchors in target_content; it must not independently produce new statements.
   {% endif %}
 
 === Scope ===
@@ -68,6 +76,9 @@ Each output item should be a structured candidate memory statement.
 - 不要从 `before_msgs` 或 `after_msgs` 中单独提取任何陈述句。
 - 如果某条信息没有出现在 `target_content` 中，即使它出现在 `before_msgs` 或 `after_msgs` 中，也不能把它作为独立 statement 输出。
 - 如果 Assistant 在 `before_msgs` 或 `after_msgs` 中提供了总结、猜测、解释或改写，这些内容只能作为理解辅助，不能被当作事实直接提取。
+- 当 User 原始消息与 Assistant 总结、猜测或改写冲突时，优先相信 User 原始消息；Assistant 的错误总结不能覆盖 User 提供的人物、关系、职业、计划或时间信息。
+- 边界：`target_content` 必须提供 statement 的核心谓词、动作、关系或态度；supporting_context 只能补全其中被省略或指代的主语、宾语、人物、事件锚点和时间锚点，不能提供新的核心谓词。
+- 对 `after_msgs` 的额外限制：`after_msgs` 不能提供新的实体属性、职业、经历、能力、任务、动作、计划、日期或事件时间；它只能把 target_content 中已经存在的指代或槽位映射到具体对象。
 - 每条输出的 statement 都必须能够在 `target_content` 中找到直接对应的表达依据。
   {% else %}
 - Extract statements only from `target_content`.
@@ -75,6 +86,9 @@ Each output item should be a structured candidate memory statement.
 - Do not extract any standalone statement from `before_msgs` or `after_msgs`.
 - If a piece of information does not appear in `target_content`, it must not be output as an independent statement even if it appears in `before_msgs` or `after_msgs`.
 - If the Assistant in `before_msgs` or `after_msgs` provides a summary, guess, interpretation, or rephrasing, treat it only as interpretive support and never as a direct factual source for extraction.
+- When original User messages conflict with Assistant summaries, guesses, or rephrasings, prefer the original User messages. Incorrect Assistant summaries must not override people, relationships, occupations, plans, or temporal information provided by the User.
+- Boundary: `target_content` must provide the statement's core predicate, action, relationship, or attitude. supporting_context may only fill omitted or referenced subjects, objects, people, event anchors, and temporal anchors; it must not provide a new core predicate.
+- Additional restriction for `after_msgs`: it must not provide new entity attributes, occupations, experiences, abilities, tasks, actions, plans, dates, or event times. It may only map references or slots already present in target_content to concrete objects.
 - Every output statement must be directly grounded in wording from `target_content`.
   {% endif %}
 
@@ -96,14 +110,48 @@ Each output item should be a structured candidate memory statement.
 
 共指消解：
 
+- prompt 示例中的人物名、事件名、地点名和日期只用于说明规则，不是当前输入的候选事实或候选实体。除非某个实体名确实出现在当前 `input.target_content` 或当前 `input.supporting_context` 中，否则禁止把示例里的实体名写入 `statement_text`。
 - 先完成最终的 `statement_text` 改写，再判断 `has_unsolved_reference`。
 - `has_unsolved_reference` 必须基于最终输出的 `statement_text` 判断，而不是基于原始 `target_content` 里是否出现过代词来判断。
 - 如果最终 `statement_text` 已经把引用改写成具体实体名，例如“助理恭喜用户”“小李点了一杯美式咖啡”，则 `has_unsolved_reference` 必须是 `false`。
+- 如果最终 `statement_text` 已经把“他/她/他们/他俩/两位同事/另一位”等指代表达改写成当前输入中真实出现过的具体实体名，`has_unsolved_reference` 必须是 `false`；不能因为原句含有代词或集合表达而继续标为 `true`。
 - 如果可以解析到具体实体名，优先输出具体实体名，并将 `has_unsolved_reference` 设为 `false`。
 - 如果不能解析到具体实体名，但可以解析到最小必要描述，则输出该最小必要描述，并将 `has_unsolved_reference` 设为 `true`。
 - 如果既不能解析到具体实体名，也不能稳定解析到最小必要描述，则保留最小必要原始表达，并将 `has_unsolved_reference` 设为 `true`。
 - 但对任何命名表达（如“X 叫 Z / X 的名字是 Z / 大家叫 X 为 Z”），只允许为了解析 `X` 做必要改写；`Z` 是新出现的名字、称呼或别名，必须保留原文表面形式，不得被共指消解、翻译、转写或归一化成 `X`。
+- 只有当 `target_content` 明确表达命名关系时，才允许输出“用户叫 X / 用户的名字是 X / the user is named X”这类命名 statement。明确命名证据包括：“我叫 X”“我的名字是 X”“大家叫我 X”“你可以叫我 X”“I am X”“my name is X”“call me X”“people call me X”等。
+- 呼语、问候对象、感谢对象、邮件/消息开头称呼、@mention、句首称呼对象，都不是命名证据，不能被改写成用户的名字或别名。
 - 对涉及用户与其他人的共同活动，优先写成“用户和谁……”的形式，而不是保留“我们”“他们”这类未展开表达。
+
+人物、集合与排除式指代消解：
+
+- 对集合指代如“他俩”“她俩”“他们两个”“两位朋友”“那几个人”，如果 `supporting_context` 中可以唯一确定集合成员，应展开为具体姓名列表。
+- 对“另一个人”“另一个朋友”“剩下那位”等排除式指代，可以结合前文已确定的人物集合和已分配属性进行解析。
+- 如果上下文中已知两个成员是 `人物A` 和 `人物B`，且已知 `人物A` 已被分配某个身份或属性，那么“另一个人是某身份”应解析为 `人物B` 具有该身份。
+- 后续“她负责任务甲，他负责任务乙”可以根据性别代词、职业线索、前文属性和任务语义解析为“人物A负责任务甲，人物B负责任务乙”。实际输出时必须使用当前输入中真实出现过的姓名，不能输出这里的占位名。
+- 对 `target_content` 中已有的角色槽位或任务槽位，如“一个负责技术演示，另一个负责现场组织”，如果 `supporting_context.after_msgs` 后续唯一绑定了集合成员与这些槽位的对应关系，应允许用下文回填到当前 statement 中，直接输出“具体人物A负责技术演示，具体人物B负责现场组织”，并将 `has_unsolved_reference` 设为 `false`。
+- 槽位回填只允许把 `target_content` 中**已有**的槽位文字（如“技术演示”“现场组织”）替换为具体姓名，**不允许**把 after_msgs 里出现的更细任务名（如“演示环境”“会场和签到”）作为新槽位写入 statement，即使语义看起来近似或更精确。任何 after_msgs 中新出现的任务名、子任务、动作或时间表达都不能进入 statement_text。
+- 如果后文只唯一确定了集合成员，但没有唯一确定每个成员与任务槽位的对应关系，应至少展开集合成员；若 statement_text 仍保留“一位/另一位”等未绑定槽位，则 `has_unsolved_reference` 才可以为 `true`。
+- 如果 User 原始消息与 Assistant 总结冲突，优先相信 User 原始消息；例如 Assistant 错误地把“另一个人是厨师”总结成“用户是厨师”时，不能据此把厨师身份归给用户。
+
+事件与计划指代消解：
+
+- `这件事`、`这个安排`、`活动安排`、`提前一周`、`当天`、`到时候` 等表达可能指向上下文中的同一个计划事件。
+- 当 `target_content` 中的动作、分工或准备安排明显依附于上下文中的某个计划事件时，应把该事件的关键人物和时间锚点带入 `statement_text`。
+- 这条规则只在下面情况下生效：事件相对时间表达（"提前一周"、"当天"、"那天"、"到时候"等）以及新的核心动作（如"准备"、"负责"、"参加"、"提交"）必须本身出现在 `target_content` 中；如果它们只出现在 `supporting_context.before_msgs` 或 `supporting_context.after_msgs` 中，而 `target_content` 没有，则不允许把它们改写成独立 statement 输出，也不允许把它们补进现有 statement。
+- 即使 `target_content` 与某段 after_msgs 拼接起来在结构上与下面的示例非常相似，也不能反向从 after_msgs 抽取新动作、新分工、新任务名或新事件相对时间。after_msgs 只允许在 `target_content` 已经存在槽位、指代或时间锚点时，提供唯一的指代/槽位/已确认事件锚点映射。
+- 正确示例（方向一：target_content 自身就是分工与准备）：上下文中用户说"我打算在事件日期D举办活动E，邀请人物A和人物B帮忙"，target_content 是"我让他俩提前一周准备吧，她负责任务甲，他负责任务乙"，应改写为：
+  - `用户计划让人物A和人物B从事件日期D前一周开始为活动E做准备。`
+  - `人物A负责活动E的任务甲。`
+  - `人物B负责活动E的任务乙。`
+    不要把"提前一周"解析为当前对话时间 `dialog_at` 的前一周。
+- 反向反例（方向二：target_content 自身只是事件与邀请，分工与准备只出现在 after_msgs）：target_content 是"我打算在事件日期D举办活动E，邀请人物A和人物B帮忙，一个负责任务甲，一个负责任务乙"，after_msgs 中后续才有"我让他俩提前一周开始准备吧，他负责任务甲细节X，她负责任务乙细节Y"。这种情况下只能从 target_content 抽取核心 statement，例如：
+  - `用户计划在事件日期D举办活动E。`
+  - `用户邀请人物A和人物B协助活动E。`
+    以及（在 after_msgs 唯一指认两人姓名后）允许把 target_content 已有的"一个负责任务甲，一个负责任务乙"两个槽位回填为：
+  - `人物A负责活动E的任务甲。`
+  - `人物B负责活动E的任务乙。`
+    但禁止再输出诸如 `用户计划让人物A和人物B从事件日期D前一周开始为活动E做准备`、`人物A负责活动E的任务甲细节X`、`人物B负责活动E的任务乙细节Y`，因为"提前一周开始准备"、"任务甲细节X"、"任务乙细节Y"都是只在 after_msgs 中出现的新核心谓词或新任务名，必须丢弃。
 
 清晰指代与模糊指代：
 
@@ -116,6 +164,8 @@ Each output item should be a structured candidate memory statement.
 
 - 仅提取陈述句。
 - 不要提取问题、命令、问候语或对话填充词。
+- 完全过滤纯呼语或问候称呼，不输出 statement。例如：`Hey, Jack`、`Hi Caroline`、`Dear 李教授`、`Jack，早上好`。
+- 如果名字只是在句首或句尾作为称呼对象出现，也不要把它改写成命名 statement。例如：`Jack, can you help me?`、`Thanks, Caroline`、`@Jack 看一下这个` 都不能输出“用户叫 Jack/Caroline”。
 
 感知记忆文件摘要处理：
 
@@ -141,9 +191,26 @@ statement_type：
 
 时间规则：
 
-- 仅使用目标文本中明确陈述或可由 `dialog_at` / `target_message_date` 直接解析的时间信息；不要使用外部知识补时间。
-- 优先使用 `dialog_at` 作为“现在”来解释相对时间，例如“昨天”“上周五”“下个月”；只有在 `dialog_at` 缺失时才退回 `target_message_date`。
+- 仅使用目标文本中明确陈述、可由 `dialog_at` / `target_message_date` 直接解析，或可由 `target_content` 中的事件日期 / `supporting_context.before_msgs` 中已确认事件锚点解析的时间信息；不要使用外部知识补时间。
+- 解析时间表达前，先判断它的时间锚点类型，不要把所有相对时间都默认锚定到 `dialog_at`。
+- 对“昨天”“上周五”“下个月”“最近”“接下来”这类相对当前会话时间的表达，优先使用 `dialog_at` 作为“现在”；只有在 `dialog_at` 缺失时才退回 `target_message_date`。
+- 对“提前一周”“提前三天”“后一周”“当天”“那天”“到时候”“活动前”“考试后”“生日前一晚”这类事件相对时间表达，必须先寻找其所依附的事件锚点。
+- 如果事件锚点在 `target_content` 中明确出现，使用该事件的已解析日期作为锚点。
+- 如果事件锚点在 `target_content` 中被省略，优先从 `supporting_context.before_msgs` 中寻找当前 target 之前已经确认的事件锚点。
+- `supporting_context.after_msgs` 不能为当前 target 提供新的事件日期或时间锚点；即使 after_msgs 中后来出现了无条件日期，也只能用于后续 target，不能反向补当前 target 的时间。
+- `after_msgs` 中的条件改期、假设改期、备选日期、未确认方案或新日期，不能反向覆盖当前 target 的时间锚点。例如“如果/要是……就改到/换到/延期到 新日期”不是当前 target 的最新确认日期。
+- 如果同一计划事件在上下文中已经无条件确认改期、延期、提前或重新确认日期，后续 target 中的“提前N天/提前N周”“那天”“那周”“到时候”“活动前/会前”等事件相对时间才使用最新确认的事件日期作为锚点。
+- 如果相对时间表达出现在“如果/要是……那周都排不开，就改到/换到/延期到 新日期”这类条件分支中，且“那周”出现在“改到/换到/延期到”之前，则“那周”指向改期前上下文中的原计划相关周，而不是后文刚引入的新日期。
+- 对“那周/这一周/那一周”可稳定解析到某个参考日期时，应输出该参考日期所在的自然周日期范围；中文语境下默认按周一到周日表示。
+- 只有当找不到唯一稳定的事件锚点时，才退回使用 `dialog_at` 解析；如果退回会导致明显语义不自然，则保留最小可信时间表达，不要强行改成具体日期。
+- 例：`dialog_at` 为 `2026-06-08`，上下文已明确用户计划在 `2026年7月15日` 举办某个活动，`target_content` 说“我让他俩提前一周准备”，则“提前一周”应解析为 `2026年7月8日`，而不是 `2026年6月1日`。
+- 错误示例：输入 `dialog_at=2026-06-08`，上下文事件为 `2026年7月15日活动`，target_content 为“提前一周准备”。错误输出为 `2026年6月1日准备`；正确输出为 `2026年7月8日准备`。原因是“提前一周”锚定的是活动事件，不是当前会话时间。
+- 如果一个句子被拆成多条 statement，每条 statement 都必须独立解析自己的时间表达，不能默认继承前一条 statement 的时间范围。
+- 对局部时间词，例如“晚上”“当天”“第二天”“次日”“周末”，优先绑定当前分句自身的最近可解释时间锚点；如果当前分句没有更近的显式时间锚点，则优先绑定 `dialog_at` / `target_message_date` 所在时间，而不是默认继承前一分句中更大的时间区间，例如“这周”“上个月”“去年冬天”。
+- 只有当原文明确表示多个分句共享同一时间范围时，后续分句才允许继承前一分句的时间区间。
 - 如果相对时间可以稳定落到更具体的中文时间表达，就应直接改写进 `statement_text`，而不要保留原始模糊表达。
+- 如果某个相对时间已经被解析进 `valid_at` 或 `invalid_at`，则同一时间也必须写回 `statement_text`；不能出现字段里是具体日期、文本里仍保留“下个月”“那周”“提前一周”“提前两天”“到时候”等原始相对词的情况。
+- 不要同时保留原始相对时间和解析后的时间；例如不要写“提前一周，即某日期”，应只保留解析后的日期、日期区间或锚定表达。
 - 可稳定具体化的示例包括：
   - “昨天” -> “2026年4月29日”
   - “前天晚上” -> “2026年4月28日晚上”
@@ -166,12 +233,19 @@ statement_type：
 - 对节假日类表达，能稳定映射到具体日期或日期区间时应具体化；例如“五一”通常可改写为具体日期，“清明节”通常也可改写为具体日期或短区间；“春节前后”这类边界不稳的表达仍保留较粗粒度。
 - `valid_at` 表示陈述开始成立或生效的时间。
 - `invalid_at` 表示陈述结束或不再成立的时间；如果仍在持续，填 `"NULL"`。
+- 对“最近”“近来”“这段时间”这类开放过去区间，如果只能确定截至某个参考时间之前的一段时间，但无法确定开始边界，不要把参考时间误填为 `valid_at`；可以在 `statement_text` 中保留锚定后的开放区间，并将 `valid_at` 填 `"NULL"`。
 - `dialog_at` 表示当前会话时间，每条 statement 都必须原样复制输入中的 `dialog_at`。
 - 如果输入中缺少 `dialog_at`，则把 `target_message_date` 作为当前会话时间使用，并在每条 statement 的 `dialog_at` 字段中填入 `target_message_date` 的原值。
-- 时间格式优先使用 ISO 8601。
+- `valid_at` 和 `invalid_at` 输出必须使用 ISO 8601 UTC 日期时间并以 `Z` 结尾，或在无可用时间时填 `"NULL"`。
 - 对于只有日期没有时分秒的时间，默认使用整天边界，便于后续检索。
 - 如果没有明确时间，不要编造时间。
 - 对于点状事件（例如某天发生的一次考试、一次见面、一次提交），`valid_at` 和 `invalid_at` 都应填写为该事件的起止边界；不要只填 `valid_at`。
+- 对未来计划、任务、准备、彩排、会议、活动等 statement，如果 `statement_text` 已经包含具体执行日期、开始日期或日期区间，`valid_at` 必须优先对齐该执行/开始日期，而不是默认使用 `dialog_at`。
+- 如果 statement 表达“从某日开始”的持续准备或持续安排，`valid_at` 使用开始日期，`invalid_at` 在没有明确结束时间时填 `"NULL"`。
+- 如果 statement 表达某天发生的一次性任务、会议、彩排、活动或提交，`valid_at` 和 `invalid_at` 使用该日期的整天边界。
+- 如果 statement 表达“用户计划/安排/决定/让 某人在某日执行某任务”，且文本中有具体执行日期，则这是有执行日期的计划任务，`valid_at` / `invalid_at` 应对齐该执行日期；不要仅因句子包含“计划”就使用 `dialog_at`。
+- 如果 statement 的核心只是“用户希望/期望某人在某日前完成某事”，且执行时间不是确定事件日而是愿望或截止语义，可以使用 `dialog_at` 表示愿望提出时间。
+- 只有当 statement 只表达“用户当前提出/希望/计划了某事”，且无法可靠得到执行时间或开始时间时，才使用 `dialog_at` 作为 `valid_at`。
 
 情感状态判断：
 
@@ -180,6 +254,7 @@ statement_type：
 - 该字段不是情绪分类字段，不要求输出具体情绪类型。
 - 明确情绪表达例如“开心”“难过”“紧张”“有压力”通常应标为 `true`。
 - 即使没有明确情绪词，只要语义足以表明用户当前具有情感状态，也可以标为 `true`，例如“我很好”。
+- 普通评价、偏好、难易判断、能力判断或事实安排不自动代表用户当前情绪；例如“李教授讲课清晰透彻”“这个项目有点难”本身不应仅因是评价就标为 `true`。
 - 如果只是客观事实、动作描述或安排，且无法从当前上下文稳定判断用户情感状态，则输出 `false`。
 
 temporal_type：
@@ -193,6 +268,7 @@ temporal_type：
 
 - 允许为解决代词、省略和时间歧义做最小必要改写。
 - 不要引入原文未明确表达的新事实、额外推断或风格化概括。
+- 不要伪造无法从正确参考锚点可靠落地的时间精度；正确参考锚点可能是 `dialog_at`、`target_message_date`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点。
   {% else %}
   Splitting rules:
 - Extract statements at the level of one complete thought, usually one full sentence or one natural semantic unit.
@@ -215,17 +291,51 @@ User-subject normalization:
 
 Coreference resolution:
 
+- Names, events, places, and dates in prompt examples only illustrate rules. They are not candidate facts or candidate entities for the current input. Unless an entity name actually appears in the current `input.target_content` or current `input.supporting_context`, do not put that example entity into `statement_text`.
+- First produce the final rewritten `statement_text`, then decide `has_unsolved_reference`.
+- `has_unsolved_reference` must be judged from the final `statement_text`, not from whether the original `target_content` once contained a pronoun.
+- If the final `statement_text` already resolves the reference to a concrete named entity, such as “The assistant congratulates the user” or “Xiao Li ordered an Americano,” then `has_unsolved_reference` must be `false`.
+- If the final `statement_text` has rewritten expressions such as “he,” “she,” “they,” “the two of them,” “the two colleagues,” or “the other one” into concrete entity names that actually occur in the current input, `has_unsolved_reference` must be `false`; do not keep it `true` merely because the source text contained pronouns or group references.
 - If you can resolve to a concrete named entity, output that name and set `has_unsolved_reference` to `false`.
 - If you cannot resolve to a concrete named entity but can resolve to a minimal grounded description, output that description and set `has_unsolved_reference` to `true`.
 - If you cannot even resolve to a stable minimal grounded description, keep the minimal original expression and set `has_unsolved_reference` to `true`.
 - However, for any naming expression such as "X is called Z", "X's name is Z", or "people call X Z", only `X` may be minimally rewritten for reference resolution; `Z` is a newly introduced name, form of address, or alias and must keep its original surface form. Do not coreference-resolve, translate, transcribe, or normalize `Z` into `X`.
+- Output naming statements such as “the user is named X” only when `target_content` explicitly expresses a naming relation. Explicit naming evidence includes “I am X,” “my name is X,” “call me X,” “people call me X,” “我的名字是 X,” or “大家叫我 X.”
+- Vocatives, greeting addressees, thanked addressees, email/message salutations, @mentions, and names used as sentence-initial address terms are not naming evidence and must not be rewritten as the user's name or alias.
 - For shared activities involving the user and others, prefer forms like “the user and X...” rather than unresolved expressions like “we” or “they”.
+
+People, group, and exclusion-based reference resolution:
+
+- For group references such as “the two of them,” “both of them,” “the two friends,” or “those people,” if `supporting_context` can uniquely identify the members, expand them into the concrete name list.
+- For exclusion-based references such as “the other person,” “the other friend,” or “the remaining one,” use the already known person set and already assigned attributes to resolve the referent.
+- If the context establishes that two members are `Person A` and `Person B`, and `Person A` has already been assigned one identity or attribute, then “the other person has another identity” should be resolved as `Person B` having that identity.
+- A later sentence such as “she handles task X, and he handles task Y” may be resolved as “Person A handles task X, and Person B handles task Y” using gender pronouns, occupation clues, previous attributes, and task semantics. In actual output, use only names that really occur in the current input, not these placeholder names.
+- For role or task slots already present in `target_content`, such as “one handles the technical demo, and the other handles onsite organization,” if `supporting_context.after_msgs` later uniquely binds the group members to those slots, you may backfill the later binding into the current statement. Output “Concrete Person A handles the technical demo, and Concrete Person B handles onsite organization,” and set `has_unsolved_reference` to `false`.
+- Slot backfilling may only replace the slot wording **already present** in `target_content` (such as “the technical demo” or “onsite organization”) with concrete names. It must NOT introduce a more specific task name from after_msgs (such as “the demo environment” or “the venue and check-in”) as a new slot in the statement, even when the wording sounds semantically close or more precise. Any task name, sub-task, action, or temporal expression that appears only in after_msgs must not enter statement_text.
+- If later context uniquely identifies only the group members but not each member's slot assignment, at least expand the member list; only keep `has_unsolved_reference` as `true` when `statement_text` still contains unresolved slot expressions such as “one” or “the other.”
+- If original User messages conflict with Assistant summaries, prefer the User messages. For example, if the Assistant incorrectly summarizes “the other person is a chef” as “the user is a chef,” do not assign the chef identity to the user.
+
+Event and plan reference resolution:
+
+- Expressions such as “this matter,” “this arrangement,” “the activity plan,” “one week in advance,” “that day,” and “then” may refer to the same planned event in the context.
+- When actions, division of work, or preparation arrangements in `target_content` clearly depend on a planned event in the context, bring the event's key participants and temporal anchor into `statement_text`.
+- This rule applies only when the event-relative time expression (“one week in advance,” “that day,” “then,” etc.) and the new core action (“prepare,” “be responsible for,” “attend,” “submit,” etc.) themselves appear in `target_content`. If they appear only in `supporting_context.before_msgs` or `supporting_context.after_msgs` but not in `target_content`, they must not be turned into a standalone statement and must not be added into any other statement.
+- Even when `target_content` and a segment of after_msgs together happen to look very similar to the example below, you must not extract from after_msgs new actions, new divisions of work, new task names, or new event-relative times. after_msgs may only provide unique reference / slot / already-confirmed event anchor mappings for placeholders that already exist in `target_content`.
+- Correct example (direction one: target_content itself describes the division of work and preparation): if context says “I plan to hold event E on date D and invite Person A and Person B to help,” and target_content says “I'll ask the two of them to prepare one week in advance; she handles task X, and he handles task Y,” the output should rewrite to:
+  - `The user plans to ask Person A and Person B to start preparing for event E one week before date D.`
+  - `Person A is responsible for task X for event E.`
+  - `Person B is responsible for task Y for event E.`
+    Do not resolve “one week in advance” as one week before the current conversation `dialog_at`.
+- Mirror counterexample (direction two: target_content itself describes only the event and invitations; division of work and preparation appear only in after_msgs): if target_content says “I plan to hold event E on date D and invite Person A and Person B, one handles task X and the other handles task Y,” and after_msgs later says “I'll ask the two of them to start preparing one week in advance; he handles task X detail X1, and she handles task Y detail Y1,” you may extract only the core statements from target_content, such as:
+  - `The user plans to hold event E on date D.`
+  - `The user invites Person A and Person B to help with event E.`
+    And, after after_msgs uniquely identifies the two members, you may backfill the two slots already present in target_content (`one handles task X, the other handles task Y`) into:
+  - `Person A is responsible for task X for event E.`
+  - `Person B is responsible for task Y for event E.`
+    But do NOT output statements such as `The user plans to ask Person A and Person B to start preparing for event E one week before date D.`, `Person A is responsible for task X detail X1 of event E.`, or `Person B is responsible for task Y detail Y1 of event E.` Their core predicates (“start preparing one week in advance,” “task X detail X1,” “task Y detail Y1”) appear only in after_msgs and must be dropped.
 
 Clear vs unresolved reference:
 
-- First produce the final rewritten `statement_text`, then decide `has_unsolved_reference`.
-- `has_unsolved_reference` must be judged from the final `statement_text`, not from whether the original `target_content` once contained a pronoun.
-- If the final `statement_text` already resolves the reference to a concrete named entity, such as “The assistant congratulates the user” or “Xiao Li ordered an Americano,” then `has_unsolved_reference` must be `false`.
 - A reference is fully resolved only if the current `supporting_context` can map it to a concrete named entity.
 - `Zhang San`, `Old Zhang` when clearly resolved to Zhang San, `Professor Li`, and `Teacher Wang` are clear references.
 - `the user's friend`, `the user's coworker`, `a teacher`, and `an interviewer` are allowed outputs but still count as unresolved.
@@ -235,6 +345,8 @@ Filtering:
 
 - Extract only declarative statements.
 - Do not extract questions, commands, greetings, or conversational filler.
+- Completely filter pure vocatives and greeting addressees; output no statement for them. Examples: `Hey, Jack`, `Hi Caroline`, `Dear Professor Li`, `Good morning, Jack`.
+- If a name appears only as an address term at the beginning or end of a question, command, thanks, mention, or message salutation, do not rewrite it into a naming statement. Examples: `Jack, can you help me?`, `Thanks, Caroline`, and `@Jack please check this` must not produce “the user is named Jack/Caroline.”
 
 Perceptual memory file summary handling:
 
@@ -260,9 +372,26 @@ statement_type:
 
 Temporal rules:
 
-- Use only temporal information explicitly stated in the target text or directly resolvable from `dialog_at` / `target_message_date`; do not add dates from external knowledge.
-- Prefer `dialog_at` as “now” when interpreting relative expressions such as “yesterday,” “last Friday,” or “next month”; only fall back to `target_message_date` when `dialog_at` is unavailable.
+- Use only temporal information explicitly stated in the target text, directly resolvable from `dialog_at` / `target_message_date`, or resolvable from an event date in `target_content` / an already-confirmed event anchor in `supporting_context.before_msgs`; do not add dates from external knowledge.
+- Before resolving a temporal expression, first determine its temporal anchor type. Do not default every relative expression to `dialog_at`.
+- For expressions relative to the current conversation time, such as “yesterday,” “last Friday,” “next month,” “recently,” or “coming up,” prefer `dialog_at` as “now”; only fall back to `target_message_date` when `dialog_at` is unavailable.
+- For event-relative expressions such as “one week in advance,” “three days before,” “the following week,” “that day,” “then,” “before the event,” “after the exam,” or “the night before the birthday,” first identify the event anchor they depend on.
+- If the event anchor appears explicitly in `target_content`, use the resolved date of that event as the anchor.
+- If the event anchor is omitted from `target_content`, first look for an event anchor that was already confirmed in `supporting_context.before_msgs` before the current target.
+- `supporting_context.after_msgs` must not provide a new event date or temporal anchor for the current target. Even if a later message contains an unconditional date, it may only apply to later targets and must not retroactively fill the current target's time.
+- Conditional reschedules, hypothetical reschedules, alternative dates, unconfirmed proposals, or new dates in `after_msgs` must not retroactively overwrite the current target's temporal anchor. For example, “if ... then move/change/postpone it to NEW_DATE” is not a latest confirmed date for the current target.
+- If the same planned event has already been unconditionally rescheduled, postponed, moved earlier, or assigned a newly confirmed date in context, then later target messages should use that latest confirmed event date as the anchor for expressions such as “N days/weeks in advance,” “that day,” “that week,” “then,” or “before the event.”
+- In a conditional branch such as “if they are unavailable that week, move/change/postpone it to NEW_DATE,” when “that week” appears before the new date is introduced, “that week” refers to the existing pre-change contextual week, not the replacement date introduced later in the sentence.
+- When “that week” or similar expressions can be resolved to a reference date, output the natural calendar-week date range. In Chinese contexts, use Monday through Sunday as the default week range.
+- Only fall back to `dialog_at` when no unique stable event anchor can be found. If that fallback would produce an obviously unnatural interpretation, keep the smallest trustworthy temporal expression instead of forcing a concrete date.
+- Example: if `dialog_at` is `2026-06-08`, the context clearly says the user plans to hold an event on `July 15, 2026`, and `target_content` says “I'll ask the two of them to prepare one week in advance,” then “one week in advance” should resolve to `July 8, 2026`, not `June 1, 2026`.
+- Negative example: input `dialog_at=2026-06-08`, contextual event `event on July 15, 2026`, target_content “prepare one week in advance.” Incorrect output: `prepare on June 1, 2026`. Correct output: `prepare on July 8, 2026`. Reason: “one week in advance” is anchored to the event, not to the current conversation time.
+- If one sentence is split into multiple statements, each statement must resolve its own temporal expression independently and must not automatically inherit the previous statement's time range.
+- For local temporal words such as “that evening,” “the same day,” “the next day,” or “that weekend,” prefer the nearest interpretable temporal anchor inside the current clause itself. If the current clause has no nearer explicit anchor, prefer the time anchored by `dialog_at` / `target_message_date`, rather than automatically inheriting a larger time range from the previous clause such as “this week,” “last month,” or “last winter.”
+- Only let a later clause inherit the previous clause's time range when the source text clearly indicates that the clauses share the same temporal span.
 - If a relative time can be stably grounded to a more concrete time expression in the output language, rewrite it directly into `statement_text` rather than keeping the vague source phrase.
+- If a relative time has already been resolved into `valid_at` or `invalid_at`, the same time must also be written back into `statement_text`; do not output concrete date fields while leaving source phrases such as “next month,” “that week,” “one week in advance,” “two days before,” or “then” in the text.
+- Do not keep both the original relative expression and the resolved time. Output only the resolved date, date range, or anchored expression.
 - Examples of stable concretization:
   - “yesterday” -> “April 29, 2026”
   - “the night before last” -> “the evening of April 28, 2026”
@@ -285,12 +414,19 @@ Temporal rules:
 - For holiday expressions, concretize them when they can be stably mapped to specific dates or short date ranges; for example, Labor Day or Qingming Festival usually can be grounded, while expressions such as “around Spring Festival” should stay at a coarser granularity.
 - `valid_at` means when the statement became valid or started to hold.
 - `invalid_at` means when the statement ended or stopped being valid; use `"NULL"` if it is still ongoing.
+- For open past intervals such as “recently,” “lately,” or “these days,” if only the reference endpoint is known and the start boundary is unknown, do not incorrectly use the reference time as `valid_at`; keep the anchored open interval in `statement_text` and use `"NULL"` for `valid_at`.
 - `dialog_at` is the session timestamp, and every statement must copy the input `dialog_at` verbatim.
 - If `dialog_at` is missing from the input, use `target_message_date` as the session timestamp and copy the original `target_message_date` value into each statement's `dialog_at` field.
-- Prefer ISO 8601 for time values.
+- `valid_at` and `invalid_at` outputs must use ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - When only a date can be resolved, default to full-day boundaries for retrieval use.
 - If no explicit time is available, do not invent one.
 - For point-in-time events such as a single exam, a meeting, or a submission on one day, populate both `valid_at` and `invalid_at`; do not fill only `valid_at`.
+- For future plans, tasks, preparation, rehearsals, meetings, events, or submissions, if `statement_text` contains a concrete execution date, start date, or date range, `valid_at` must align to that execution/start date rather than defaulting to `dialog_at`.
+- If the statement describes an arrangement or preparation that starts on a specific date and may continue, use that start date for `valid_at` and use `"NULL"` for `invalid_at` unless an end time is explicitly known.
+- If the statement describes a point-in-time task, meeting, rehearsal, event, or submission on a specific date, use that date's full-day boundaries for `valid_at` and `invalid_at`.
+- If the statement says the user plans, arranges, decides, or asks someone to perform a task on a concrete date, treat it as a planned task with an execution date and align `valid_at` / `invalid_at` to that execution date; do not use `dialog_at` merely because the sentence contains “plans.”
+- If the statement's core is only that the user hopes or wants someone to finish something by/before a time, and the execution date is a wish or deadline rather than a confirmed event date, `dialog_at` may be used as the time when the wish was stated.
+- Use `dialog_at` as `valid_at` only when the statement merely says the user currently raised, hopes for, or plans something and no reliable execution/start time is available.
 
 Emotional-state detection:
 
@@ -299,6 +435,7 @@ Emotional-state detection:
 - This field is not an emotion category field. Do not infer or output a specific emotion label here.
 - Explicit emotion wording such as “happy”, “sad”, “nervous”, or “under pressure” should usually be marked `true`.
 - Statements without explicit emotion words may still be `true` if the user's emotional state is reasonably inferable, such as “I am fine.”
+- Ordinary evaluations, preferences, difficulty judgments, ability judgments, or factual arrangements do not automatically indicate the user's current emotional state; for example, “Professor Li explains things clearly” or “this project is difficult” should not be marked `true` merely because they are evaluations.
 - If the statement is only an objective fact or action description and the user's emotional state cannot be stably inferred from the current context, output `false`.
 
 temporal_type:
@@ -313,13 +450,18 @@ Rewrite boundary:
 - Minimal rewriting is allowed only to resolve reference, ellipsis, and temporal ambiguity.
 - For resolvable relative time expressions, rewrite them into grounded time expressions directly inside `statement_text`, using the output language.
 - Do not keep both the vague source phrase and the grounded phrase together; output only the rewritten concrete form.
-- Do not fake precision for time expressions that cannot be grounded reliably from `dialog_at`.
+- Do not fake precision for time expressions that cannot be grounded reliably from the correct reference anchor. The correct anchor may be `dialog_at`, `target_message_date`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`.
 - In English, you may use a slightly more natural anchored paraphrase for reflexive user-self expressions when a literal replacement would be awkward, as long as the rewritten form still keeps “the user” as the retrieval anchor and does not change the meaning.
 - Do not introduce unsupported facts, extra inference, or stylistic summarization.
   {% endif %}
 
 === Examples ===
 {% if language == "zh" %}
+边界示例 A：`Hey, Jack` 是纯呼语或问候称呼，不是命名陈述，输出 `{"statements": []}`。
+边界示例 B：`我的名字是 Jack。` 是明确命名陈述，可以输出“用户的名字是 Jack。”。
+边界示例 C：`dialog_at=2026-06-08`，上下文为“用户打算2026年7月15日举办活动E，邀请人物A和人物B。人物A擅长任务甲，另一个人擅长任务乙。”，target_content 为“我让他俩提前一周准备吧，她负责事项甲，他负责事项乙。”正确输出应解析为“人物A和人物B从2026年7月8日开始准备”“人物A负责事项甲”“人物B负责事项乙”。不能输出“2026年6月1日准备”，也不能把后文人物身份归给用户。实际输出时必须替换为当前 input/context 中真实出现过的实体名，禁止输出示例占位名或示例实体名。
+边界示例 D（与示例 C 方向相反，演示 after_msgs 边界）：`dialog_at=2026-06-09`，target_content 为“我下个月10号要在公司做一场活动E，想请两位同事一起帮忙，一个负责任务甲，一个负责任务乙。”，after_msgs 中后续依次出现“他们是人物A和人物B。人物A是后端工程师”“另一个人是行政负责人，控场能力很强”“我让他俩提前一周开始准备吧，他负责任务甲细节X，她负责任务乙细节Y”。正确做法是只从 target_content 抽取：`用户计划于2026年7月10日在公司举办活动E。`、`用户邀请人物A和人物B协助活动E。`，以及在 after_msgs 唯一指认人物后回填 target 已有的两个槽位：`人物A负责活动E的任务甲。`、`人物B负责活动E的任务乙。`。不允许输出 `用户计划让人物A和人物B从2026年7月3日开始为活动E做准备。`、`人物A负责活动E的任务甲细节X。`、`人物B负责活动E的任务乙细节Y。` 这些核心谓词只在 after_msgs 中出现，必须丢弃。
+
 示例 1:
 示例输入: {
   "chunk_id": "chunk_a1b2c3d4",
@@ -353,7 +495,7 @@ Rewrite boundary:
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
-      "valid_at": "2023-09-04T18:00:00",
+      "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     },
     {
@@ -377,7 +519,7 @@ Rewrite boundary:
       "has_emotional_state": true,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
-      "valid_at": "2023-09-04T18:00:00",
+      "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     }
   ]
@@ -388,13 +530,13 @@ Rewrite boundary:
   "chunk_id": "chunk_b2c3d4e5",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
-  "target_content": "我最近在学Python，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
+  "target_content": "我最近在学它，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
         "role": "User",
-        "msg": "我最近在学Python。"
+        "msg": "我准备把Python系统学一遍，先从基础语法和函数开始。"
       },
       {
         "role": "Assistant",
@@ -416,7 +558,7 @@ Rewrite boundary:
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
@@ -428,7 +570,7 @@ Rewrite boundary:
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
@@ -440,7 +582,7 @@ Rewrite boundary:
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
     }
   ]
@@ -451,13 +593,13 @@ Rewrite boundary:
   "chunk_id": "chunk_c3d4e5f6",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
-  "target_content": "去年冬天老师布置的那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。",
+  "target_content": "那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
         "role": "User",
-        "msg": "上次跟你说的那两个项目我还卡着。"
+        "msg": "上次跟你说的那两个项目，就是去年冬天老师布置的那两个项目，我还卡着。"
       },
       {
         "role": "Assistant",
@@ -481,10 +623,10 @@ Rewrite boundary:
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
       "speaker": "user",
-      "has_emotional_state": true,
+      "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
@@ -496,8 +638,8 @@ Rewrite boundary:
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-03-31T00:00:00",
-      "invalid_at": "2026-03-31T23:59:59"
+      "valid_at": "2026-03-31T00:00:00Z",
+      "invalid_at": "2026-03-31T23:59:59Z"
     },
     {
       "statement_id": "stmt_g3h4i5j6",
@@ -508,12 +650,17 @@ Rewrite boundary:
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
     }
   ]
 }
 {% else %}
+Boundary Example A: `Hey, Jack` is a pure vocative or greeting addressee, not a naming statement, so output `{"statements": []}`.
+Boundary Example B: `My name is Jack.` is explicit naming evidence, so it may output “The user's name is Jack.”
+Boundary Example C: if `dialog_at=2026-06-08`, the context says “the user plans to hold event E on July 15, 2026, and invites Person A and Person B. Person A is good at task X, and the other person is good at task Y,” and target_content says “I'll ask the two of them to prepare one week in advance; she handles item X, and he handles item Y,” the correct resolution is “Person A and Person B start preparing on July 8, 2026,” “Person A handles item X,” and “Person B handles item Y.” Do not output “prepare on June 1, 2026,” and do not assign a later person identity to the user. In actual output, replace placeholders with entity names that really appear in the current input/context; never output example placeholders or example entities.
+Boundary Example D (mirror of Example C, demonstrating the after_msgs boundary): if `dialog_at=2026-06-09`, target_content says “Next month on the 10th I'll hold event E at the company and want to invite two colleagues to help — one handles task X and the other handles task Y,” and after_msgs later says, in order, “They are Person A and Person B. Person A is a backend engineer,” “The other one is the head of administration with strong floor-control skills,” and “I'll ask the two of them to start preparing one week in advance; he handles task X detail X1, and she handles task Y detail Y1.” The correct behavior is to extract from target_content only: `The user plans to hold event E at the company on July 10, 2026.` and `The user invites Person A and Person B to help with event E.`, plus, after after_msgs uniquely identifies the two members, backfill the two slots already present in target_content into: `Person A is responsible for task X for event E.` and `Person B is responsible for task Y for event E.` Do NOT output `The user plans to ask Person A and Person B to start preparing for event E from July 3, 2026.`, `Person A is responsible for task X detail X1 of event E.`, or `Person B is responsible for task Y detail Y1 of event E.` These core predicates (“start preparing one week in advance,” “task X detail X1,” “task Y detail Y1”) appear only in after_msgs and must be dropped.
+
 Example 1:
 Example Input: {
   "chunk_id": "chunk_a1b2c3d4",
@@ -547,7 +694,7 @@ Example Output: {
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
-      "valid_at": "2023-09-04T18:00:00",
+      "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     },
     {
@@ -571,7 +718,7 @@ Example Output: {
       "has_emotional_state": true,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
-      "valid_at": "2023-09-04T18:00:00",
+      "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     }
   ]
@@ -582,13 +729,13 @@ Example Input: {
   "chunk_id": "chunk_b2c3d4e5",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
-  "target_content": "I've been learning Python recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
+  "target_content": "I've been learning it recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
         "role": "User",
-        "msg": "I've been learning Python recently."
+        "msg": "I plan to learn Python systematically, starting with basic syntax and functions."
       },
       {
         "role": "Assistant",
@@ -610,7 +757,7 @@ Example Output: {
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
@@ -622,7 +769,7 @@ Example Output: {
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
@@ -634,7 +781,7 @@ Example Output: {
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
     }
   ]
@@ -645,14 +792,18 @@ Example Input: {
   "chunk_id": "chunk_c3d4e5f6",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
-  "target_content": "The two projects the teacher assigned last winter seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA.",
+  "target_content": "Those two projects seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA.",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
         "role": "User",
-        "msg": "The two projects the teacher assigned last winter seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA."
+        "msg": "I'm still stuck on the two projects I mentioned last time, the two projects the teacher assigned last winter."
       },
+      {
+        "role": "Assistant",
+        "msg": "Right, the two projects the teacher assigned last winter."
+      }
     ],
     "after_msgs": [
       {
@@ -671,10 +822,10 @@ Example Output: {
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
       "speaker": "user",
-      "has_emotional_state": true,
+      "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
@@ -686,8 +837,8 @@ Example Output: {
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-03-31T00:00:00",
-      "invalid_at": "2026-03-31T23:59:59"
+      "valid_at": "2026-03-31T00:00:00Z",
+      "invalid_at": "2026-03-31T23:59:59Z"
     },
     {
       "statement_id": "stmt_g3h4i5j6",
@@ -698,7 +849,7 @@ Example Output: {
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00",
+      "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
     }
   ]
@@ -711,11 +862,24 @@ Example Output: {
 最终输出前检查：
 
 - 是否只保留 `target_content` 中可直接支持的陈述句
+- `statement_text` 中的人物名、事件名、地点名和日期是否都来自当前 input 或由当前 input 可解析，且没有混入 prompt 示例里的实体或占位名
 - 如果主语是用户，是否统一写“用户”
 - 非用户主体是否尽量写成具体名称；若无法做到，是否已正确标记 `has_unsolved_reference = true`
 - 如果最终 `statement_text` 已经落到具体实体名，`has_unsolved_reference` 是否已经改为 `false`
-- 如果 `statement_text` 中出现可由 `dialog_at` 稳定解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
-- 如果 `statement_text` 中出现“最近”“近来”“即将”“接下来”“很快”这类开放区间时间词，是否已经改写为带 `dialog_at` 锚点的开放区间表达
+- 是否已优先用 User 原始消息消解人物、职业、关系和计划，避免被 Assistant 错误总结带偏
+- 如果 `statement_text` 中出现可由 `dialog_at`、`target_message_date`、target_content 事件日期或 before_msgs 中已确认事件锚点解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
+- 如果 `statement_text` 中已经写出具体执行日期、开始日期或日期区间，`valid_at` 是否已经对齐该执行/开始时间，而不是误用 `dialog_at`
+- 如果上下文中同一事件已有无条件确认的新日期，后续“提前N天/提前N周”“那周”“到时候”等是否使用该新日期作为锚点
+- 如果新日期只出现在“如果/要是……就改到……”这类条件或备选方案中，是否没有反向覆盖当前 target 的时间锚点
+- 是否没有使用 `after_msgs` 中的新日期、新任务、新属性来补当前 target；after_msgs 只允许做指代/槽位映射
+- 是否每条 statement 的核心谓词（动作 / 责任 / 时间表达 / 任务名）都能在 `target_content` 中找到对应来源；只在 after_msgs 中出现的核心谓词、子任务名（如把"技术演示"细化为"演示环境"，把"现场组织"细化为"会场和签到"）、新动作（如"开始准备"）或新事件相对时间（如"提前一周"）必须全部丢弃
+- 槽位回填是否只把 target 已有槽位文字替换为具体姓名，没有把 after_msgs 里更细的任务名当作新槽位写入 statement_text
+- 如果“那周”出现在“如果那周排不开，就改到新日期”结构中，是否没有错误锚定到后文新日期
+- 如果 statement 表达“用户计划/安排/决定/让某人在某日执行某任务”，`valid_at` / `invalid_at` 是否对齐执行日
+- 如果一句话被拆成多条 statement，是否已经逐条独立检查时间归属，避免把前一分句的大时间范围错误继承到后一分句
+- 如果 `statement_text` 中出现“最近”“近来”“即将”“接下来”“很快”这类开放区间时间词，是否已经改写为带参考锚点的开放区间表达
+- 是否把呼语、问候称呼、感谢对象、@mention 或消息开头称呼错误改写成用户名字或别名；如果只是称呼对象，应完全过滤
+- 如果包含 `<input-file-summary>`，是否已改写成“用户上传/分享了...”而不是独立客观描述
 - statement_type 是否合法，且没有把一般事实机械标成 `OPINION`
 - `has_emotional_state` 是否仅用于判断是否存在情感状态，而没有被当作情绪分类字段
 - temporal_type 是否与 valid_at / invalid_at 一致
@@ -723,11 +887,24 @@ Example Output: {
   {% else %}
   Final checks before output:
 - Keep only statements directly supported by `target_content`
+- Ensure every person name, event name, place name, and date in `statement_text` comes from the current input or can be resolved from the current input; do not include entities or placeholders from prompt examples
 - If the subject is the user, render it as “the user”
 - Render non-user subjects as concrete names when possible; otherwise mark `has_unsolved_reference = true`
 - If the final `statement_text` already resolves the reference to a concrete named entity, ensure `has_unsolved_reference = false`
-- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, rewrite them into more concrete date, month, or date-range expressions
-- If `statement_text` contains open-interval temporal words such as `recently`, `lately`, `upcoming`, `coming up`, or `soon`, rewrite them into open interval expressions anchored on `dialog_at`
+- Prefer original User messages when resolving people, occupations, relationships, and plans; do not let incorrect Assistant summaries override them
+- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, `target_message_date`, an event date in target_content, or an already-confirmed event anchor in before_msgs, rewrite them into more concrete date, month, or date-range expressions
+- If `statement_text` contains a concrete execution date, start date, or date range, ensure `valid_at` aligns to that execution/start time rather than incorrectly using `dialog_at`
+- If context has an unconditionally confirmed latest date for the same event, ensure later expressions such as “N days/weeks in advance,” “that week,” or “then” use that latest date as the anchor
+- If a new date appears only inside a conditional or alternative plan such as “if ... then move it to ...,” ensure it does not retroactively overwrite the current target's temporal anchor
+- Ensure no new date, task, or attribute from `after_msgs` is used to fill the current target; after_msgs may only map references or slots
+- Verify that every statement's core predicate (action / responsibility / temporal expression / task name) can be sourced from `target_content`. Drop any core predicate, sub-task name (such as refining "the technical demo" into "the demo environment", or "onsite organization" into "the venue and check-in"), new action (such as "start preparing"), or new event-relative time (such as "one week in advance") that appears only in after_msgs.
+- Make sure slot backfilling only replaces wording already present in target_content with concrete names, and does not write any finer task name from after_msgs into statement_text as a new slot
+- If “that week” appears in a structure like “if that week is unavailable, move it to NEW_DATE,” make sure it is not incorrectly anchored to the later replacement date
+- If the statement says the user plans/arranges/decides/asks someone to perform a task on a concrete date, ensure `valid_at` / `invalid_at` align to the execution date
+- If one sentence is split into multiple statements, verify temporal grounding statement by statement and make sure a later clause does not wrongly inherit a larger time range from an earlier clause
+- If `statement_text` contains open-interval temporal words such as `recently`, `lately`, `upcoming`, `coming up`, or `soon`, rewrite them into open interval expressions anchored on the correct reference anchor
+- Make sure vocatives, greeting addressees, thanked addressees, @mentions, or message salutations were not wrongly rewritten as the user's name or alias; if the text is only an address term, filter it completely
+- If `<input-file-summary>` appears, rewrite it as "the user uploaded/shared..." rather than an independent objective description
 - Ensure statement_type is valid and do not mechanically label ordinary facts as `OPINION`
 - Ensure `has_emotional_state` is used only for emotional-state presence detection, not emotion classification
 - Ensure temporal_type is consistent with valid_at and invalid_at
@@ -747,22 +924,26 @@ Example Output: {
 {% if language == "zh" %}
 
 - `statement_text` 是最终记忆文本，必须在文本本身包含已解析后的时间表达，不能只依赖 `valid_at` / `invalid_at` 表示时间。
-- 如果相对时间或开放区间时间可以根据 `dialog_at` 或 `target_message_date` 解析，必须直接改写进 `statement_text`。
+- 如果相对时间或开放区间时间可以根据 `dialog_at`、`target_message_date`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点解析，必须直接改写进 `statement_text`。
 - 不要在 `statement_text` 中保留可解析的原始模糊时间表达。
 - 不要同时保留原始模糊时间表达和解析后的时间表达。
 - `statement_text` 中禁止残留未锚定、未解析的相对时间词，例如：`今天`、`昨天`、`前天`、`明天`、`后天`、`本周`、`这周`、`上周`、`下周`、`本月`、`这个月`、`上个月`、`下个月`、`去年`、`明年`、`最近`、`近来`、`这段时间`、`这些天`、`即将`、`接下来`、`很快`。
 - 如果开放区间词已经被明确锚定到参考时间，则允许保留在锚定表达中，例如 `截至2026年4月1日之前的最近一段时间`。
+- 如果 `statement_text` 已经包含具体执行日期、开始日期或日期区间，`valid_at` 必须对齐该执行/开始时间；不要在这种情况下回退到 `dialog_at`。
+- 如果 `valid_at` / `invalid_at` 已经体现了某个相对时间的解析结果，`statement_text` 也必须体现同一个解析结果，不能仍保留原始相对时间词。
 - 正确示例：`用户2026年3月28日和小李一起去了咖啡馆。`
 - 错误示例：`用户上周六和小李一起去了咖啡馆。`
 - 正确示例：`用户截至2026年4月1日之前的最近一段时间拿到了腾讯公司的offer。`
 - 错误示例：`用户最近拿到了腾讯公司的offer。`
   {% else %}
 - `statement_text` is the final memory text, so it must contain the resolved temporal expression itself, not only rely on `valid_at` / `invalid_at`.
-- If a relative or open-interval temporal expression can be resolved from `dialog_at` or `target_message_date`, rewrite it inside `statement_text`.
+- If a relative or open-interval temporal expression can be resolved from `dialog_at`, `target_message_date`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`, rewrite it inside `statement_text`.
 - Do not leave a resolvable source temporal phrase in `statement_text`.
 - Do not keep both the vague phrase and the resolved phrase together.
 - `statement_text` must not contain unanchored, unresolved relative temporal words such as: `today`, `yesterday`, `the day before yesterday`, `tomorrow`, `the day after tomorrow`, `this week`, `last week`, `next week`, `this month`, `last month`, `next month`, `last year`, `next year`, `recently`, `lately`, `these days`, `upcoming`, `coming up`, or `soon`.
 - Open-interval words are allowed only when explicitly anchored to the reference time, such as `recently before April 1, 2026`.
+- If `statement_text` contains a concrete execution date, start date, or date range, `valid_at` must align to that execution/start time; do not fall back to `dialog_at` in that case.
+- If `valid_at` / `invalid_at` already reflect the resolved result of a relative time, `statement_text` must reflect the same resolved result and must not retain the original relative phrase.
 - Correct example: `The user went to the cafe with Xiao Li on March 28, 2026.`
 - Wrong example: `The user went to the cafe with Xiao Li last Saturday.`
 - Correct example: `The user received Tencent's offer recently before April 1, 2026.`
@@ -777,10 +958,10 @@ Example Output: {
 **ISO 8601 HARD CONSTRAINT:**
 
 - `dialog_at` must be ISO 8601.
-- `target_message_date` must be ISO 8601.
-- `valid_at` and `invalid_at` must be ISO 8601, or `"NULL"` when no time is available.
+- Input `target_message_date` may be ISO 8601 or a plain datetime string. Use it as supporting context when needed, but do not reject the input only because this field is not ISO 8601.
+- `valid_at` and `invalid_at` must be ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
-- When only a date is known, still output an ISO 8601 datetime boundary.
+- When only a date is known, still output an ISO 8601 UTC datetime boundary ending with `Z`.
 
 **SCHEMA HARD CONSTRAINT:**
 
@@ -796,15 +977,15 @@ Example Output: {
 **LANGUAGE REQUIREMENT:**
 {% if language == "zh" %}
 
-- 输出语言应始终与输入语言匹配。
-- 如果输入是中文，则用中文提取陈述句。
-- 如果输入是英文，则用英文提取陈述句。
-- 保留原始语言，不要翻译。
+- 输出语言应以 `language` 参数为准。
+- 如果 `language == "zh"`，用中文提取陈述句。
+- 如果 `language` 参数缺失或无法判断，才跟随输入文本的主要语言。
+- 保留原始专有名词和代码片段，不要无必要翻译。
   {% else %}
-- The output language must always match the input language.
-- If the input is in Chinese, extract statements in Chinese.
-- If the input is in English, extract statements in English.
-- Preserve the original language and do not translate.
+- The output language should follow the `language` parameter.
+- If `language != "zh"`, extract statements in English.
+- Only follow the dominant language of the input text when the `language` parameter is missing or unclear.
+- Preserve original proper nouns and code snippets; do not translate them unnecessarily.
   {% endif %}
 
 现在处理下面这个输入：{{ render_input() }}
@@ -824,5 +1005,5 @@ Each item in `statements` must be a JSON object with exactly these fields and va
 - `has_emotional_state`: boolean, choose `true` or `false` according to the rules above
 - `has_unsolved_reference`: boolean, choose `true` or `false` according to the rules above
 - `dialog_at`: ISO 8601 datetime string
-- `valid_at`: ISO 8601 datetime string or `"NULL"`
-- `invalid_at`: ISO 8601 datetime string or `"NULL"`
+- `valid_at`: ISO 8601 UTC datetime string ending with `Z` or `"NULL"`
+- `invalid_at`: ISO 8601 UTC datetime string ending with `Z` or `"NULL"`

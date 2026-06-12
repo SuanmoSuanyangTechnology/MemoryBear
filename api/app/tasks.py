@@ -152,28 +152,50 @@ def _get_or_create_redis_pool() -> redis.ConnectionPool | None:
 
 def get_sync_redis_client() -> Optional[redis.StrictRedis]:
     """获取同步 Redis 客户端（使用连接池）
-    
-    使用连接池提供的客户端，支持自动重连和健康检查。
-    如果 Redis 不可用，返回 None，调用方应优雅降级。
-    
+
+    依赖连接池本身的 ``health_check_interval=30`` 做健康检查；
+    每次取客户端不再发 ``PING``，避免在热路径上多一次 RTT。
+    冷启动应通过 ``warmup_sync_redis_pool`` 预热，避免首次请求承担建池+握手成本。
+
     Returns:
-        redis.StrictRedis: Redis 客户端实例，如果连接失败则返回 None
+        redis.StrictRedis: Redis 客户端实例；当连接池创建失败时返回 None。
     """
     try:
         pool = _get_or_create_redis_pool()
         if pool is None:
             return None
-
-        client = redis.StrictRedis(connection_pool=pool)
-        # 验证连接可用性
-        client.ping()
-        return client
+        return redis.StrictRedis(connection_pool=pool)
     except RedisError as e:
         logger.error(f"Redis connection failed: {e}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"Unexpected error getting Redis client: {e}", exc_info=True)
         return None
+
+
+def warmup_sync_redis_pool() -> bool:
+    """应用启动时预热 Redis 连接池。
+
+    复用 ``get_sync_redis_client`` 构造客户端，再发一次 ``PING`` 完成 TCP 握手，
+    把"首次请求需要建池"的 50–200ms 冷启动开销前置到启动阶段。
+    任何失败都只记录日志，不影响进程启动。
+
+    Returns:
+        bool: 预热成功返回 True；失败或 Redis 不可用返回 False。
+    """
+    try:
+        client = get_sync_redis_client()
+        if client is None:
+            return False
+        client.ping()
+        logger.info("Sync Redis pool warmed up (PING ok)")
+        return True
+    except RedisError as e:
+        logger.warning(f"Sync Redis pool warmup failed: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error warming Sync Redis pool: {e}")
+        return False
 
 
 def set_asyncio_event_loop():
