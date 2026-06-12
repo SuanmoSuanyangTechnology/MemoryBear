@@ -260,7 +260,7 @@ class LLMNode(BaseNode):
             schema: dict[str, Any] = {"type": ["object", "null"] if effective_nullable else "object"}
             if field.children:
                 schema["properties"] = {
-                    child.name: LLMNode._json_schema_for_field(child)
+                    child.name: LLMNode._json_schema_for_field(child, nullable=False)
                     for child in field.children
                 }
                 schema["required"] = [child.name for child in field.children if child.required]
@@ -299,7 +299,7 @@ class LLMNode(BaseNode):
                 "schema": {
                     "type": "object",
                     "properties": {
-                        field.name: self._json_schema_for_field(field)
+                        field.name: self._json_schema_for_field(field, nullable=False)
                         for field in fields
                     },
                     "required": [field.name for field in fields if field.required],
