@@ -69,6 +69,7 @@ class MemoryService:
             user_rag_memory_id: str | None = None,
             conversation_id: str | None = None,
             language: str = "zh",
+            draft=False
     ):
         with get_db_read() as db:
             config_service = MemoryConfigService(db)
@@ -91,7 +92,8 @@ class MemoryService:
             storage_type=StorageType(storage_type),
             user_rag_memory_id=user_rag_memory_id,
             language=language,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            draft=draft
         )
 
     async def write(

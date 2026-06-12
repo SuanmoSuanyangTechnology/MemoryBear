@@ -313,6 +313,7 @@ async def read_server(
         service = MemoryService(
             memory_config["memory_config_id"],
             end_user_id=user_input.end_user_id,
+            draft=True
         )
         session_cache = ChatSessionCache(session_id)
         search_result = await service.read(

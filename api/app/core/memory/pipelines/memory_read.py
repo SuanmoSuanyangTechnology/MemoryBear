@@ -63,7 +63,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             case _:
                 raise RuntimeError("Unsupported search strategy")
 
-        if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL]:
+        if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
             self._save_short_term(query, search_switch, res)
 
         return res
