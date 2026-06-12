@@ -170,7 +170,7 @@ class VariablePool:
     def transform_selector(selector):
         variable_literal = VARIABLE_PATTERN.sub(r"\1", selector).strip()
         selector = VariableSelector.from_string(variable_literal).path
-        if len(selector) not in (2, 3):
+        if len(selector) < 2:
             raise ValueError(f"Selector not valid - {selector}")
         return selector
 
@@ -202,18 +202,46 @@ class VariablePool:
             return None
         return var_instance
 
-    @staticmethod
-    def _extract_field(struct: "VariableStruct", field: str | None) -> Any:
-        """If field is given, drill into a dict/object/array[file] variable's value."""
-        if field is None:
-            return struct.instance.get_value()
-        value = struct.instance.get_value()
-        # array[file]: extract the field from every element, return a list
+    @classmethod
+    def _extract_path(cls, value: Any, fields: list[str]) -> Any:
+        """Drill into dict/object/list values with an arbitrary-depth field path."""
+        if not fields:
+            return value
+
+        field = fields[0]
+        rest = fields[1:]
+
         if isinstance(value, list):
-            return [item.get(field) if isinstance(item, dict) else getattr(item, field, None) for item in value]
+            return [
+                cls._extract_path(
+                    item.get(field) if isinstance(item, dict) else getattr(item, field, None),
+                    rest,
+                )
+                for item in value
+            ]
         if not isinstance(value, dict):
             raise KeyError(f"Variable is not an object or array, cannot access field '{field}'")
-        return value.get(field)
+        return cls._extract_path(value.get(field), rest)
+
+    @classmethod
+    def _path_exists(cls, value: Any, fields: list[str]) -> bool:
+        if not fields:
+            return True
+
+        field = fields[0]
+        rest = fields[1:]
+
+        if isinstance(value, list):
+            return any(
+                cls._path_exists(
+                    item.get(field) if isinstance(item, dict) else getattr(item, field, None),
+                    rest,
+                )
+                for item in value
+            )
+        if isinstance(value, dict):
+            return field in value and cls._path_exists(value.get(field), rest)
+        return hasattr(value, field) and cls._path_exists(getattr(value, field), rest)
 
     def get_instance(
             self,
@@ -275,9 +303,10 @@ class VariablePool:
             if strict:
                 raise KeyError(f"{selector} not exist")
             return default
-        if len(path) == 3:
-            return self._extract_field(variable_struct, path[2])
-        return variable_struct.instance.get_value()
+        value = variable_struct.instance.get_value()
+        if len(path) > 2:
+            return self._extract_path(value, path[2:])
+        return value
 
     def get_literal(
             self,
@@ -309,8 +338,8 @@ class VariablePool:
             if strict:
                 raise KeyError(f"{selector} not exist")
             return default
-        if len(path) == 3:
-            value = self._extract_field(variable_struct, path[2])
+        if len(path) > 2:
+            value = self._extract_path(variable_struct.instance.get_value(), path[2:])
             return str(value) if value is not None else ""
         return variable_struct.instance.to_literal()
 
@@ -373,9 +402,8 @@ class VariablePool:
         struct = self._get_variable_struct(selector)
         if struct is None:
             return False
-        if len(path) == 3:
-            value = struct.instance.get_value()
-            return isinstance(value, dict) and path[2] in value
+        if len(path) > 2:
+            return self._path_exists(struct.instance.get_value(), path[2:])
         return True
 
     def lazy_namespace(self, namespace: str, literal: bool = False) -> LazyVariableDict:

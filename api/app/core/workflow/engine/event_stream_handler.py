@@ -200,7 +200,7 @@ class EventStreamHandler:
 
                 if done:
                     # Mark scope as streamed to prevent duplicate emission in emit_activate_chunk
-                    self.coordinator.mark_scope_streamed(node_id)
+                    self.coordinator.mark_scope_streamed(node_id, chunk_field)
                     end_info.cursor += 1
                     if end_info.cursor >= len(end_info.outputs):
                         self.coordinator.pop_current_activate_end()
@@ -218,8 +218,18 @@ class EventStreamHandler:
             dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
             active_dependent_ends = [(eid, einfo) for eid, einfo in dependent_ends if einfo.activate]
             if active_dependent_ends:
+                chunk_field = data.get("field", "output")
+                has_matching_segment = any(
+                    seg.is_variable
+                    and seg.depends_on_scope(node_id)
+                    and (seg.get_field() or "output") == chunk_field
+                    for _, end_info in active_dependent_ends
+                    for seg in end_info.outputs
+                )
+                if not has_matching_segment:
+                    return
                 if done:
-                    self.coordinator.mark_scope_streamed(node_id)
+                    self.coordinator.mark_scope_streamed(node_id, chunk_field)
                 elif chunk:
                     yield {
                         "event": "message",
