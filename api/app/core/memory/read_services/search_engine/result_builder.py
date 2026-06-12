@@ -99,9 +99,9 @@ class EntityBuilder(BaseBuilder):
             ("aliases-name", self.record.get("aliases", [])),
             (
                 "description",
-                self.record.get("description", "") or "" +
-                self.record.get("description_summary", "") or "" +
-                self.record.get("description_timeline", "") or ""
+                (self.record.get("description", "") or "") +
+                (self.record.get("description_summary", "") or "") +
+                (self.record.get("description_timeline", "") or "")
             ),
         ]
         for tag, value in fields:
