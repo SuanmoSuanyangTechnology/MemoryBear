@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 10:45:41
+ * @Last Modified time: 2026-06-11 15:14:40
  */
 /**
  * Relationship Network Component
@@ -352,23 +352,60 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                       </div>
                     }
                     <Flex vertical gap={24}>
-                      <div>
-                        <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
-                        <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
-                          {['Chunk', 'Dialogue', 'MemorySummary', 'AssistantOriginal'].includes(selectedNode.label) && 'content' in ((selectedNode as GraphNode).properties as { content: string })
-                            ? ((selectedNode as GraphNode).properties as { content: string }).content
-                            : selectedNode.label === 'ExtractedEntity' && 'description' in ((selectedNode as GraphNode).properties as { description: string })
-                              ? ((selectedNode as GraphNode).properties as { description: string }).description
-                              : selectedNode.label === 'Statement' && 'statement' in ((selectedNode as GraphNode).properties as { statement: string })
-                                ? ((selectedNode as GraphNode).properties as { statement: string }).statement
-                                : selectedNode.label === 'Perceptual' && 'summary' in ((selectedNode as GraphNode).properties as { summary: string })
-                                  ? ((selectedNode as GraphNode).properties as { summary: string }).summary
-                                  : ['AssistantOriginal', 'AssistantPruned'].includes(selectedNode.label ) && 'text' in ((selectedNode as GraphNode).properties as { text: string })
-                                    ? ((selectedNode as GraphNode).properties as { text: string }).text
-                                    : ''
+                      {selectedNode.label !== 'ExtractedEntity' &&
+                        <div>
+                          <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
+                          <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                            {['Chunk', 'Dialogue', 'MemorySummary', 'AssistantOriginal'].includes(selectedNode.label) && 'content' in ((selectedNode as GraphNode).properties as { content: string })
+                              ? ((selectedNode as GraphNode).properties as { content: string }).content
+                                : selectedNode.label === 'Statement' && 'statement' in ((selectedNode as GraphNode).properties as { statement: string })
+                                  ? ((selectedNode as GraphNode).properties as { statement: string }).statement
+                                  : selectedNode.label === 'Perceptual' && 'summary' in ((selectedNode as GraphNode).properties as { summary: string })
+                                    ? ((selectedNode as GraphNode).properties as { summary: string }).summary
+                                    : ['AssistantOriginal', 'AssistantPruned'].includes(selectedNode.label ) && 'text' in ((selectedNode as GraphNode).properties as { text: string })
+                                      ? ((selectedNode as GraphNode).properties as { text: string }).text
+                                      : ''
+                            }
+                          </div>
+                        </div>
+                      }
+                      {selectedNode.label === 'ExtractedEntity' && <>
+                        <div>
+                          <div className="rb:font-medium rb:leading-5">{t('userMemory.ExtractedEntity_description_summary')}</div>
+                          {((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description_summary
+                          ? <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
+                            {((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description_summary}
+                            </div>
+                            : <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-4 rb:mt-2 rb:text-center rb:text-[#5B6167]">{t('userMemory.noDescriptionSummary')}</div>
                           }
                         </div>
-                      </div>
+                        <div>
+                          <div className="rb:font-medium rb:leading-5 rb:mb-2">{t('userMemory.memoryDetail')}</div>
+                          {(() => {
+                            const description = ((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description || [];
+                            if (description.length === 0) {
+                              return <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-4 rb:mt-2 rb:text-center rb:text-[#5B6167]">{t('userMemory.noDescription')}</div>;
+                            }
+                            return (
+                              <Flex vertical gap={8} className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                                {description.map((item, index) => {
+                                  const match = item.match(/^\[([^\]]+)\]\s*(.*)$/);
+                                  if (match) {
+                                    const [, timestamp, content] = match;
+                                    return (
+                                      <div key={index} className={index === 0 ? '' : 'rb-border-t rb:pt-2'}>
+                                        <div>{timestamp}</div>
+                                        <div className="rb:ml-1">{content}</div>
+                                      </div>
+                                    );
+                                  }
+                                  return <div key={index}>{item}</div>;
+                                })}
+                              </Flex>
+                            )
+                          })()}
+                        </div>
+                      </>}
                       <div>
                         <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
                         <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
@@ -385,7 +422,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
 
 
                       {selectedNode.label === 'ExtractedEntity' && <>
-                        {(['description_summary', 'entity_type', 'aliases'] as const).map(key => {
+                        {(['entity_type', 'aliases'] as const).map(key => {
                           const p = (selectedNode as Node).properties as ExtractedEntityNodeProperties
                           if (p[key]) {
                             return (
