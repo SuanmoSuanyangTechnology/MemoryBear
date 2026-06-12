@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 from app.core.rag.crawler.web_crawler import WebCrawler
+from app.core.utils.datetime_utils import to_iso_z
 
 
 def setup_logging(verbose: bool = False):
@@ -49,7 +50,7 @@ def main(entry_url: str,
                 'title': doc.title,
                 'content': doc.content,
                 'content_length': doc.content_length,
-                'crawl_timestamp': doc.crawl_timestamp.isoformat(),
+                'crawl_timestamp': to_iso_z(doc.crawl_timestamp),
                 'http_status': doc.http_status,
                 'metadata': doc.metadata
             })

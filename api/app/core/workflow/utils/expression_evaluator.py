@@ -15,7 +15,7 @@ class ExpressionEvaluator:
     """Safe expression evaluator for workflow variables and node outputs."""
 
     # Reserved namespaces
-    RESERVED_NAMESPACES = {"var", "node", "sys", "nodes"}
+    RESERVED_NAMESPACES = {"var", "node", "sys", "nodes", "env", "conv"}
 
     @classmethod
     def normalize_template(cls, template: str) -> str:
@@ -30,7 +30,8 @@ class ExpressionEvaluator:
             expression: str,
             conv_vars: dict[str, Any],
             node_outputs: dict[str, Any],
-            system_vars: dict[str, Any] | None = None
+            system_vars: dict[str, Any] | None = None,
+            env_vars: dict[str, Any] | None = None,
     ) -> Any:
         """
         Safely evaluate an expression using workflow variables.
@@ -57,6 +58,7 @@ class ExpressionEvaluator:
             "conv": conv_vars,  # conversation variables
             "node": node_outputs,  # node outputs
             "sys": system_vars or {},  # system variables
+            "env": env_vars or {},  # environment variables
         }
 
         # context.update(conv_vars)
@@ -90,7 +92,8 @@ class ExpressionEvaluator:
             expression: str,
             conv_var: dict[str, Any],
             node_outputs: dict[str, Any],
-            system_vars: dict[str, Any] | None = None
+            system_vars: dict[str, Any] | None = None,
+            env_vars: dict[str, Any] | None = None,
     ) -> bool:
         """
         Evaluate a boolean expression (for conditions).
@@ -105,7 +108,7 @@ class ExpressionEvaluator:
             bool: Boolean result
         """
         result = ExpressionEvaluator.evaluate(
-            expression, conv_var, node_outputs, system_vars
+            expression, conv_var, node_outputs, system_vars, env_vars
         )
         return bool(result)
 
@@ -143,11 +146,12 @@ def evaluate_expression(
         expression: str,
         conv_var: dict[str, Any] | LazyVariableDict,
         node_outputs: dict[str, dict[str, Any] | LazyVariableDict],
-        system_vars: dict[str, Any] | LazyVariableDict
+        system_vars: dict[str, Any] | LazyVariableDict,
+        env_vars: dict[str, Any] | LazyVariableDict | None = None,
 ) -> Any:
     """Evaluate an expression (convenience function)."""
     return ExpressionEvaluator.evaluate(
-        expression, conv_var, node_outputs, system_vars
+        expression, conv_var, node_outputs, system_vars, env_vars
     )
 
 
@@ -155,9 +159,10 @@ def evaluate_condition(
         expression: str,
         conv_var: dict[str, Any] | LazyVariableDict,
         node_outputs: dict[str, dict[str, Any] | LazyVariableDict],
-        system_vars: dict[str, Any] | LazyVariableDict
+        system_vars: dict[str, Any] | LazyVariableDict,
+        env_vars: dict[str, Any] | LazyVariableDict | None = None,
 ) -> Any:
     """Evaluate a boolean condition expression (convenience function)."""
     return ExpressionEvaluator.evaluate_bool(
-        expression, conv_var, node_outputs, system_vars
+        expression, conv_var, node_outputs, system_vars, env_vars
     )

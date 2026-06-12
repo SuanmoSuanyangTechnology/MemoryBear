@@ -21,6 +21,8 @@ import type { Emotion } from '../pages/GraphDetail'
 interface EmotionLineProps {
   chartData: Emotion[];
   loading?: boolean;
+  className?: string;
+  headerClassName?: string;
 }
 
 const Colors = ['#369F21', '#155EEF', '#FF5D34']
@@ -30,7 +32,7 @@ const Colors = ['#369F21', '#155EEF', '#FF5D34']
  * Displays emotion intensity trends over time as a multi-line chart
  * Shows different emotion types with smooth lines and area fills
  */
-const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
+const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading, className, headerClassName }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);
 
@@ -64,8 +66,8 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
   }
 
   return (
-    <Flex vertical gap={16} className="rb-border rb:rounded-xl rb:p-4! rb:h-78">
-      <div className="rb:text-[#212332] rb:font-medium rb:leading-5">{t('userMemory.emotionLine')}</div>
+    <Flex vertical gap={16} className={`rb-border rb:rounded-xl rb:p-4! rb:h-78 ${className || ''}`}>
+      <div className={`rb:text-[#212332] rb:font-medium rb:leading-5 ${headerClassName || ''}`}>{t('userMemory.emotionLine')}</div>
       {loading
         ? <Loading size={249} />
         : !chartData || chartData.length === 0

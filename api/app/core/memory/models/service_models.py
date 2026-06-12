@@ -6,6 +6,18 @@ from app.core.memory.enums import Neo4jNodeType, StorageType
 from app.schemas.memory_config_schema import MemoryConfig
 
 
+class LongTermMemoryInput(BaseModel):
+    """长期记忆工具输入参数"""
+    question: str = Field(
+        description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
+    search_mode: str = Field(
+        description="检索模式。"
+                    "0=深度检索：拆解复杂问题并做关系(图)检索，返回汇总答案，适合复杂/关系类问题；"
+                    "1=普通检索：拆解问题做混合检索，返回汇总答案，适合一般性问题；"
+                    "2=快速检索：单次混合检索直接返回原始数据(不拆解/不汇总)，需自行据此推断，适合简单查询或需要原始证据。"
+    )
+
+
 class MemoryContext(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -13,6 +25,7 @@ class MemoryContext(BaseModel):
     memory_config: MemoryConfig | None = None
     storage_type: StorageType = StorageType.NEO4J
     user_rag_memory_id: str | None = None
+    conversation_id: str | None = None
     language: str = "zh"
 
 
@@ -88,7 +101,7 @@ class MemorySearchResult(BaseModel):
 
     def __add__(self, other: "MemorySearchResult") -> "MemorySearchResult":
         if not isinstance(other, MemorySearchResult):
-            raise TypeError("")
+            raise TypeError(f"unsupported operand type({type(other)}) for +")
 
         merged = MemorySearchResult(memories=list(self.memories))
 
@@ -107,4 +120,5 @@ class MemorySearchResult(BaseModel):
                 merged.relations.append(rel)
                 seen_rel_keys.add(key)
 
+        merged.content_str = other.content_str or self.content_str
         return merged

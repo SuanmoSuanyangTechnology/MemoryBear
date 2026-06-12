@@ -10,38 +10,36 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from langchain.agents import create_agent
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.memory.enums import SearchStrategy
-from app.core.memory.memory_service import MemoryService
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig, Message
-from app.models.models_model import ModelCapability, ModelType
 from app.models.agent_execution_model import AgentExecution
+from app.models.models_model import ModelCapability, ModelType
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.langchain_tool_server import Search
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
-from app.services.tool_service import ToolService
 from app.services.tool_orchestrator import ToolOrchestrator
-from app.services.annotation_service import AnnotationService
+from app.services.tool_service import ToolService
 
 logger = get_business_logger()
 
@@ -54,118 +52,6 @@ class KnowledgeRetrievalInput(BaseModel):
 class WebSearchInput(BaseModel):
     """网络搜索工具输入参数"""
     query: str = Field(description="需要搜索的问题或关键词")
-
-
-class LongTermMemoryInput(BaseModel):
-    """长期记忆工具输入参数"""
-    question: str = Field(
-        description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
-    search_mode: str = Field(
-        description="'0':深度检索适用于涉及到复杂问题的检索,关系检索 "
-                    "'1':普通问题检索链路 "
-                    "'2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断"
-    )
-
-
-def create_long_term_memory_tool(
-        memory_config: Dict[str, Any],
-        end_user_id: str,
-        storage_type: Optional[str] = None,
-        user_rag_memory_id: Optional[str] = None,
-        memory_name: Optional[str] = None
-):
-    """创建记忆工具,
-
-
-    Args:
-        memory_config: 记忆配置
-        end_user_id: 用户ID
-        storage_type: 存储类型（可选）
-        user_rag_memory_id: 用户RAG记忆ID（可选）
-
-    Returns:
-        长期记忆工具
-    """
-    # search_switch = memory_config.get("search_switch", "2")
-    # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
-    config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
-    logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
-
-    @tool(args_schema=LongTermMemoryInput)
-    def long_term_memory(question: str, search_mode: str) -> str:
-        """
-        从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
-
-        **何时使用此工具：**
-        - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
-        - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
-        - 需要基于历史上下文提供个性化建议
-        - 需要用户信息进行一些问题的推断
-
-        **何时不使用此工具：**
-        - 简单问候（如"你好"、"谢谢"、"再见"）
-        - 纯任务性请求（如"写代码"、"翻译文字"、"分析图片"）
-        - 用户已提供完整信息（如提供了文本、图片、文档等内容）
-        - 创作性任务（如"写诗"、"编故事"、"创作谜语"）
-
-        Args:
-            question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词，第三人称描述的偏好、行为通常指用户本人，比如（我，本人，在下，自己，咱，鄙人，吴，余）通指用户）
-            search_mode: '0':深度检索适用于涉及到复杂问题的检索,关系检索
-                        '1':普通问题检索链路
-                        '2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断
-
-        Returns:
-            检索到的历史记忆内容
-        """
-        logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
-        try:
-            with get_db_context() as db:
-                memory_service = MemoryService(db, config_id, end_user_id)
-                # TODO: Historical Messages -> Used to refer to coreference resolution
-                search_result = asyncio.run(memory_service.read(question, search_mode))
-
-            #     memory_content = asyncio.run(
-            #         MemoryAgentService().read_memory(
-            #             end_user_id=end_user_id,
-            #             message=question,
-            #             history=[],
-            #             search_switch="2",
-            #             config_id=config_id,
-            #             db=db,
-            #             storage_type=storage_type,
-            #             user_rag_memory_id=user_rag_memory_id
-            #         )
-            #     )
-            #     task = celery_app.send_task(
-            #         "app.core.memory.agent.read_message",
-            #         args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
-            #     )
-            #     result = task_service.get_task_memory_read_result(task.id)
-            #     status = result.get("status")
-            #     logger.info(f"读取任务状态：{status}")
-            #     if memory_content:
-            #         memory_content = memory_content['answer']
-            # logger.info(f'用户ID：Agent:{end_user_id}')
-            # logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
-            #
-            # logger.info(
-            #     "长期记忆检索成功",
-            #     extra={
-            #         "end_user_id": end_user_id,
-            #         "content_length": len(str(memory_content))
-            #     }
-            # )
-            return f"检索到以下历史记忆：\n\n{search_result.content}"
-        except Exception as e:
-            logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
-            return f"记忆检索失败: {str(e)}"
-
-    # 挂载工具元数据，供 Agent 执行记录使用
-    long_term_memory._tool_meta = {
-        "tool_type": "long_term_memory",
-        "sources": [{"id": config_id, "name": memory_name or config_id}],
-    }
-    return long_term_memory
 
 
 def create_web_search_tool(web_search_config: Dict[str, Any]):
@@ -519,40 +405,17 @@ class AgentRunService:
             user_rag_memory_id
     ) -> tuple[list, bool]:
         """加载长期记忆配置"""
-        if not memory_config:
-            return [], False
+        from app.core.memory.memory_service import create_long_term_memory_tool
 
-        tools = []
-        if memory_config.get("enabled"):
-            if user_id:
-                # 查询记忆配置名称
-                config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
-                memory_name = None
-                if config_id:
-                    try:
-                        from app.models import MemoryConfig
-                        mc = self.db.query(MemoryConfig.config_name).filter(
-                            MemoryConfig.config_id == config_id
-                        ).first()
-                        memory_name = mc.config_name if mc else None
-                    except Exception:
-                        pass
-
-                # 创建长期记忆工具
-                memory_tool = create_long_term_memory_tool(
-                    memory_config, user_id, storage_type, user_rag_memory_id,
-                    memory_name=memory_name
-                )
-                tools.append(memory_tool)
-
-                logger.debug(
-                    "已添加长期记忆工具",
-                    extra={
-                        "user_id": user_id,
-                        "tool_count": len(tools)
-                    }
-                )
-        return tools, bool(memory_config.get("enabled"))
+        enabled = bool(memory_config and memory_config.get("enabled"))
+        tool = create_long_term_memory_tool(
+            memory_config, user_id, storage_type, user_rag_memory_id,
+            db=self.db,
+        )
+        tools = [tool] if tool else []
+        if tools:
+            logger.debug("已添加长期记忆工具", extra={"user_id": user_id, "tool_count": len(tools)})
+        return tools, enabled
 
     @staticmethod
     def _validate_file_upload(
@@ -620,7 +483,7 @@ class AgentRunService:
         opening = features_config.get("opening_statement", {})
         if not (isinstance(opening, dict) and opening.get("enabled") and opening.get("statement")):
             return None, None
-        
+
         statement = opening["statement"]
         suggested_questions = opening["suggested_questions"]
 
@@ -629,7 +492,7 @@ class AgentRunService:
             for var_name, var_value in variables.items():
                 placeholder = f"{{{{{var_name}}}}}"
                 statement = statement.replace(placeholder, str(var_value))
-        
+
         return statement, suggested_questions
 
     @staticmethod
@@ -1387,11 +1250,16 @@ class AgentRunService:
                     yield self._format_sse_event("tool_end", {"step_id": chunk.get("step_id"), "name": chunk["name"], "output": chunk.get("output"), "meta": chunk.get("meta")})
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
                     yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
-                else:
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    yield self._format_sse_event("agent_log", chunk)
+                elif isinstance(chunk, str):
                     full_content += chunk
                     yield self._format_sse_event("message", {"content": chunk})
                     if tts_task is not None:
                         await text_queue.put(chunk)
+                elif isinstance(chunk, dict):
+                    event_type = str(chunk.get("type") or "unknown")
+                    yield self._format_sse_event(event_type, chunk)
 
             # 文本结束，通知 TTS
             if tts_task is not None:
@@ -1799,7 +1667,7 @@ class AgentRunService:
             "加载指定时间前的历史消息",
             extra={
                 "conversation_id": str(conversation_id),
-                "before_time": before_time.isoformat(),
+                "before_time": to_iso_z(before_time),
                 "max_history": max_history,
                 "loaded_count": len(filtered_history)
             }
@@ -1981,7 +1849,7 @@ class AgentRunService:
                     "provider": model_config.provider if model_config else None,
                     "type": model_config.type if model_config else None
                 } if model_config else None,
-                "snapshot_time": datetime.datetime.now().isoformat()
+                "snapshot_time": to_iso_z(utcnow_naive())
             }
 
             return snapshot

@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow_naive
 from app.core.logging_config import get_logger
 from app.core.memory.constants.graph_data_constants import (
     DEPTH_HARD_MAX,
@@ -351,11 +352,7 @@ class UserMemoryService:
     @staticmethod
     def _datetime_to_timestamp(dt: Optional[Any]) -> Optional[int]:
         """将 DateTime 对象转换为时间戳（毫秒）"""
-        if dt is None:
-            return None
-        if hasattr(dt, 'timestamp'):
-            return int(dt.timestamp() * 1000)
-        return None
+        return to_timestamp_ms(dt) if hasattr(dt, 'timestamp') else None
     
     @staticmethod
     def convert_profile_to_dict_with_timestamp(profile_data: Any) -> dict:
@@ -519,14 +516,14 @@ class UserMemoryService:
                     setattr(end_user_info_record, field, value)
             
             # 更新时间戳
-            end_user_info_record.updated_at = datetime.now()
+            end_user_info_record.updated_at = utcnow_naive()
             
             # 如果 other_name 被更新，同步更新 end_user 表
             if other_name_updated:
                 end_user_record = EndUserRepository(db).get_by_id(user_uuid)
                 if end_user_record:
                     end_user_record.other_name = update_data['other_name']
-                    end_user_record.updated_at = datetime.now()
+                    end_user_record.updated_at = utcnow_naive()
                     logger.info(f"同步更新 end_user 表的 other_name: end_user_id={end_user_id}, other_name={update_data['other_name']}")
                 else:
                     logger.warning(f"未找到对应的 end_user 记录: end_user_id={end_user_id}")
@@ -2264,20 +2261,17 @@ def _resolve_edge_caption(
 
 
 def _format_datetime_naive_iso(dt: datetime) -> str:
-    """将 ``datetime`` 序列化为不带时区后缀的 ISO 字符串。
+    """将 ``datetime`` 序列化为带 ``Z`` 后缀的 UTC ISO 字符串。
 
     Neo4j 节点写入端历史上既有用 naive ``datetime`` 的（``Statement`` / ``Chunk`` /
     ``MemorySummary`` 等），也有用 tz-aware ``datetime`` 的（``AssistantOriginal`` /
     ``AssistantPruned``）。直接 ``isoformat()`` 会让响应里两类节点的 ``created_at``
     一会儿带 ``+00:00`` 一会儿不带，前端体验不一致。
 
-    本函数对 tz-aware 的 ``datetime`` 先转换为 UTC，再剥掉 ``tzinfo``，最后调用
-    ``isoformat()``；naive 的 ``datetime`` 直接 ``isoformat()``。结果格式统一为
-    形如 ``"2026-05-28T06:35:16.910751"``。
+    本函数统一将 ``datetime`` 解释为 UTC，并输出显式带时区的 ISO 字符串，
+    形如 ``"2026-05-28T06:35:16.910751Z"``。
     """
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt.isoformat()
+    return to_iso_z(dt)
 
 
 def _clean_neo4j_value(value: Any) -> Any:

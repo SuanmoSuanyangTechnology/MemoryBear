@@ -27,9 +27,14 @@ class IfElseNode(BaseNode):
             "output": VariableType.STRING
         }
 
+    def _get_typed_config(self) -> IfElseNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = IfElseNodeConfig(**self.config)
+        return self.typed_config
+
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         result = []
-        for case in self.typed_config.cases:
+        for case in self._get_typed_config().cases:
             expressions = []
             for expression in case.expressions:
                 expressions.append({
@@ -96,7 +101,7 @@ class IfElseNode(BaseNode):
         """
         conditions = []
 
-        for case_branch in self.typed_config.cases:
+        for case_branch in self._get_typed_config().cases:
             branch_result = []
             for expression in case_branch.expressions:
                 pattern = r"\{\{\s*(.*?)\s*\}\}"
@@ -145,7 +150,7 @@ class IfElseNode(BaseNode):
         Returns:
             str: The matched branch identifier, e.g., 'CASE1', 'CASE2', ..., used for node transitions.
         """
-        self.typed_config = IfElseNodeConfig(**self.config)
+        self.typed_config = self._get_typed_config()
         expressions = self.evaluate_conditional_edge_expressions(variable_pool)
         self._condition_results = [
             {"case": f"CASE{i+1}", "result": v} for i, v in enumerate(expressions[:-1])

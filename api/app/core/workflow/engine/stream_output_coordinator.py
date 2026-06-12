@@ -273,6 +273,9 @@ class StreamOutputCoordinator:
         self.activate_end: str | None = None
         self.output_queue: deque[str] = deque()
         self.processed_outputs = []
+        # Track node scopes whose output was fully streamed via node_chunk events.
+        # Used to prevent duplicate emission in emit_activate_chunk().
+        self._streamed_scopes: set[str] = set()
 
     def initialize_end_outputs(
             self,
@@ -282,6 +285,7 @@ class StreamOutputCoordinator:
         self.processed_outputs = []
         self.activate_end = None
         self.output_queue = deque()
+        self._streamed_scopes = set()
 
     @property
     def current_activate_end_info(self):
@@ -290,6 +294,38 @@ class StreamOutputCoordinator:
     def pop_current_activate_end(self):
         self.end_outputs.pop(self.activate_end)
         self.activate_end = None
+
+    def mark_scope_streamed(self, scope: str):
+        """Mark a node scope as fully streamed via node_chunk events.
+
+        When a scope is marked as streamed, emit_activate_chunk() will skip
+        variable segments that depend on this scope, preventing duplicate
+        message events (since the chunks were already emitted directly via
+        handle_node_chunk_event()).
+
+        Args:
+            scope (str): The node ID whose output was fully streamed via chunks.
+        """
+        self._streamed_scopes.add(scope)
+        logger.debug(f"[STREAM] Marked scope '{scope}' as streamed via node_chunk events")
+
+    def find_ends_dependent_on_scope(self, scope: str) -> list[tuple[str, StreamOutputConfig]]:
+        """Find all End nodes that have variable segments depending on the given scope.
+
+        Args:
+            scope (str): The node ID to search for in End node variable segments.
+
+        Returns:
+            list[tuple[str, StreamOutputConfig]]: List of (end_node_id, end_info) tuples
+                for End nodes that have at least one variable segment depending on this scope.
+        """
+        result = []
+        for end_id, end_info in self.end_outputs.items():
+            for seg in end_info.outputs:
+                if seg.is_variable and seg.depends_on_scope(scope):
+                    result.append((end_id, end_info))
+                    break
+        return result
 
     def update_scope_activation(
             self,
@@ -355,20 +391,46 @@ class StreamOutputCoordinator:
             - This method only processes the currently active End node (`self.activate_end`).
             - Use `force=True` for final emission regardless of activation state.
         """
+        # No active End node → nothing to emit (e.g. downstream branch nodes not yet resolved)
+        if self.activate_end is None or self.activate_end not in self.end_outputs:
+            return
+
         end_info = self.end_outputs[self.activate_end]
 
         while end_info.cursor < len(end_info.outputs):
             final_chunk = ''
             current_segment = end_info.outputs[end_info.cursor]
 
+            # A segment is processable when:
+            # 1. Its own activate flag is True (variable scope resolved, or literal)
+            # 2. The End node is globally active AND it's a literal segment
+            #    (literals don't need scope activation, they just need the End node to be active)
+            # 3. Force mode (flush_remaining_chunk or End node completed)
             if not current_segment.activate and not force and not end_info.force:
-                # Stop processing until this segment becomes active
-                break
+                # Literal segments in an active End node should be emitted
+                # even if their individual activate=False (they don't depend on any scope)
+                if end_info.activate and not current_segment.is_variable:
+                    pass  # Allow processing literal segment when End node is globally active
+                else:
+                    # Stop processing until this variable segment's scope becomes active
+                    break
 
             # Literal segment
             if not current_segment.is_variable:
                 final_chunk += current_segment.literal
             else:
+                # Check if this variable's scope was already fully streamed via node_chunk events.
+                # If so, skip emission to prevent duplicate message events.
+                scope = current_segment.get_scope()
+                if scope and scope in self._streamed_scopes:
+                    logger.debug(
+                        f"[STREAM] Skipping already-streamed variable segment "
+                        f"'{current_segment.literal}' (scope={scope}) for End node '{self.activate_end}'"
+                    )
+                    # Advance cursor without emitting - content was already streamed via chunks
+                    end_info.cursor += 1
+                    continue
+
                 # Variable segment: evaluate and transform
                 try:
                     chunk = variable_pool.get_literal(current_segment.literal)
@@ -416,11 +478,14 @@ class StreamOutputCoordinator:
             dict: Streamed output events in the format:
                   {"event": "message", "data": {"chunk": ...}}
         """
-        # Keep only active End nodes
+        # Keep only active End nodes that still have un-emitted segments.
+        # Nodes whose cursor has reached the end of outputs have already
+        # been fully emitted by emit_activate_chunk and must not be
+        # re-emitted here (which would cause duplicate message events).
         self.end_outputs = {
             node_id: node_info
             for node_id, node_info in self.end_outputs.items()
-            if node_info.activate
+            if node_info.activate and node_info.cursor < len(node_info.outputs)
         }
 
         if self.end_outputs or self.activate_end:

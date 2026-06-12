@@ -1,6 +1,7 @@
 import logging
 from typing import List, Optional
 
+from app.core.utils.datetime_utils import to_iso_z
 from app.core.memory.models.graph_models import DialogueNode, StatementNode, ChunkNode, MemorySummaryNode
 from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE, \
     MEMORY_SUMMARY_NODE_SAVE
@@ -41,7 +42,7 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
                 "run_id": dialogue.run_id,
                 "ref_id": dialogue.ref_id,
                 "name": dialogue.name,
-                "created_at": dialogue.created_at.isoformat() if dialogue.created_at else None,
+                "created_at": to_iso_z(dialogue.created_at),
                 "content": dialogue.content,
                 "dialog_embedding": dialogue.dialog_embedding
             })
@@ -85,7 +86,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "run_id": statement.run_id,
                 "chunk_id": statement.chunk_id,
                 # "created_at": statement.created_at.isoformat(),
-                "created_at": statement.created_at.isoformat() if statement.created_at else None,
+                "created_at": to_iso_z(statement.created_at),
                 "stmt_type": statement.stmt_type,
                 "temporal_info": statement.temporal_info.value,
                 "statement": statement.statement,
@@ -93,8 +94,8 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "chunk_embedding": statement.chunk_embedding if statement.chunk_embedding else None,
                 # "temporal_validity_valid_at": statement.temporal_validity_valid_at.isoformat() if statement.temporal_validity_valid_at else None,
                 # "temporal_validity_invalid_at": statement.temporal_validity_invalid_at.isoformat() if statement.temporal_validity_invalid_at else None,
-                "valid_at": statement.valid_at.isoformat() if statement.valid_at else None,
-                "invalid_at": statement.invalid_at.isoformat() if statement.invalid_at else None,
+                "valid_at": to_iso_z(statement.valid_at),
+                "invalid_at": to_iso_z(statement.invalid_at),
                 # "triplet_extraction_info": json.dumps({
                 #     "triplets": [triplet.model_dump() for triplet in statement.triplet_extraction_info.triplets] if statement.triplet_extraction_info else [],
                 #     "entities": [entity.model_dump() for entity in statement.triplet_extraction_info.entities] if statement.triplet_extraction_info else []
@@ -158,7 +159,7 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
                 "name": chunk.name,
                 "end_user_id": chunk.end_user_id,
                 "run_id": chunk.run_id,
-                "created_at": chunk.created_at.isoformat() if chunk.created_at else None,
+                "created_at": to_iso_z(chunk.created_at),
                 "dialog_id": chunk.dialog_id,
                 "content": chunk.content,
                 "chunk_embedding": chunk.chunk_embedding if chunk.chunk_embedding else None,
@@ -209,7 +210,7 @@ async def add_memory_summary_nodes(
                 "name": s.name,
                 "end_user_id": s.end_user_id,
                 "run_id": s.run_id,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "created_at": to_iso_z(s.created_at),
                 "dialog_id": s.dialog_id,
                 "chunk_ids": s.chunk_ids,
                 "content": s.content,

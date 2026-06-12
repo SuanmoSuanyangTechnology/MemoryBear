@@ -4,6 +4,7 @@ from typing import List, Optional
 import uuid
 import datetime
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.memory_increment_model import MemoryIncrement
 
 from app.core.logging_config import get_db_logger
@@ -85,8 +86,8 @@ class MemoryIncrementRepository:
             memory_increment = MemoryIncrement(
                 workspace_id=workspace_id,
                 total_num=total_num,
-                created_at=datetime.datetime.now(),
-                updated_at=datetime.datetime.now()
+                created_at=utcnow_naive(),
+                updated_at=utcnow_naive()
             )
             self.db.add(memory_increment)
             self.db.commit()

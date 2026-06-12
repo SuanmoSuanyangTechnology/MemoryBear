@@ -1,5 +1,6 @@
 """App 服务接口 - 基于 API Key 认证"""
 import json
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Body
@@ -14,14 +15,17 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.models.app_model import AppType
 from app.models.app_release_model import AppRelease
+from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
+from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import get_app_service, AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
+from app.services.intervention_registry import submit_intervention
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 
@@ -330,3 +334,54 @@ async def chat(
         )
     else:
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.post(
+    "/workflow/interventions/{execution_id}/submit",
+    summary="提交人工介入响应（API Key 认证，通知 SSE 流继续执行）",
+)
+@require_api_key(scopes=["app"])
+async def submit_human_intervention_api(
+        request: Request,
+        execution_id: str,
+        node_id: str = Body(..., description="人工介入节点 ID"),
+        action_id: str = Body(..., description="用户触发的操作 ID"),
+        form_data: dict | None = Body(default=None, description="用户填写的表单数据"),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+):
+    app_id = api_key_auth.resource_id
+    # Query by execution_id (unique key) first, then validate app relationship.
+    # Using a combined filter (execution_id + app_id) can fail when the API Key's
+    # resource_id doesn't match the app_id stored in the execution record
+    # (e.g. API Key resource_id points to a release rather than the app directly).
+    execution = db.query(WorkflowExecution).filter(
+        WorkflowExecution.execution_id == execution_id,
+    ).first()
+
+    if not execution:
+        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+
+    # Validate that the execution belongs to the API Key's workspace
+    if execution.app.workspace_id != api_key_auth.workspace_id:
+        raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
+
+    if execution.status != "waiting_human":
+        raise BusinessException(
+            f"当前执行状态为 '{execution.status}'，不接受人工介入响应",
+            BizCode.BAD_REQUEST,
+        )
+
+    result = submit_intervention(execution_id, node_id, action_id, form_data)
+    if not result:
+        raise BusinessException(
+            "未找到等待中的干预请求，可能 SSE 连接已断开",
+            BizCode.BAD_REQUEST,
+        )
+
+    return success(data={
+        "execution_id": execution_id,
+        "node_id": node_id,
+        "action_id": action_id,
+        "form_data": form_data,
+    })

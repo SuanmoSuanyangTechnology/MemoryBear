@@ -249,7 +249,6 @@ SET o += {name: item.object, end_user_id: item.end_user_id, run_id: item.run_id}
 SET o.is_strong = true
 """
 
-
 DIALOGUE_STATEMENT_EDGE_SAVE = """
     UNWIND $dialogue_statement_edges AS edge
     // 支持按 uuid 或 ref_id 连接到 Dialogue，避免因来源 ID 不一致而断链
@@ -861,6 +860,16 @@ neo4j_query_all = """
                 other as entity2
                           """
 
+'''按 elementId 查询 ExtractedEntity 的事件时间线字段'''
+Memory_Timeline_Entity_Events = """
+MATCH (e:ExtractedEntity)
+WHERE elementId(e) = $id
+RETURN e.name AS entity_name,
+       e.entity_type AS entity_type,
+       e.description_summary AS description_summary,
+       e.event_timeline AS event_timeline
+"""
+
 '''针对当前节点下扩长的句子，实体和总结'''
 Memory_Timeline_ExtractedEntity = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
@@ -1032,6 +1041,7 @@ WHERE elementId(u) = $user_id
 RETURN DISTINCT
  x.statement as statement,x.created_at as created_at
 """
+
 
 # ============================================================
 # graph_data 接口的参数化 Cypher 查询（spec: graph-data-per-type-limit）
@@ -1521,44 +1531,56 @@ RETURN elementId(r) AS uuid
 # -------------------
 SEARCH_PERCEPTUAL_BY_USER_ID = """
 MATCH (p:Perceptual)
-WHERE p.end_user_id = $end_user_id
+WHERE p.end_user_id = $end_user_id AND p.id > $last_id
 RETURN p.id AS id,
        p.summary_embedding AS embedding
+ORDER BY p.id
+LIMIT $batch_size
 """
 
 SEARCH_STATEMENTS_BY_USER_ID = """
 MATCH (s:Statement)
-WHERE s.end_user_id = $end_user_id
+WHERE s.end_user_id = $end_user_id AND s.id > $last_id
 RETURN s.id AS id,
        s.statement_embedding AS embedding
+ORDER BY s.id
+LIMIT $batch_size
 """
 
 SEARCH_ENTITIES_BY_USER_ID = """
 MATCH (e:ExtractedEntity)
-WHERE e.end_user_id = $end_user_id
+WHERE e.end_user_id = $end_user_id AND e.id > $last_id
 RETURN e.id AS id,
        e.name_embedding AS embedding
+ORDER BY e.id
+LIMIT $batch_size
 """
 
 SEARCH_CHUNKS_BY_USER_ID = """
 MATCH (c:Chunk)
-WHERE c.end_user_id = $end_user_id
+WHERE c.end_user_id = $end_user_id AND c.id > $last_id
 RETURN c.id AS id,
        c.chunk_embedding AS embedding
+ORDER BY c.id
+LIMIT $batch_size
 """
 
 SEARCH_MEMORY_SUMMARIES_BY_USER_ID = """
 MATCH (s:MemorySummary)
-WHERE s.end_user_id = $end_user_id
+WHERE s.end_user_id = $end_user_id AND s.id > $last_id
 RETURN s.id AS id,
        s.summary_embedding AS embedding
+ORDER BY s.id
+LIMIT $batch_size
 """
 
 SEARCH_COMMUNITIES_BY_USER_ID = """
 MATCH (c:Community)
-WHERE c.end_user_id = $end_user_id
+WHERE c.end_user_id = $end_user_id AND c.community_id > $last_id
 RETURN c.community_id AS id,
        c.summary_embedding AS embedding
+ORDER BY c.community_id
+LIMIT $batch_size
 """
 
 # -------------------
@@ -1654,7 +1676,7 @@ RETURN c.id AS id,
 # -------------------
 # search by fulltext
 # -------------------
-SEARCH_PERCEPTUALS_BY_KEYWORD = """
+SEARCH_PERCEPTUALS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("perceptualFulltext", $query) YIELD node AS p, score
 WHERE p.end_user_id = $end_user_id
 RETURN p.id AS id,
@@ -1674,11 +1696,9 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
-SEARCH_STATEMENTS_BY_KEYWORD = """
+SEARCH_STATEMENTS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
-OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
-OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
 RETURN s.id AS id,
        s.statement AS statement,
        s.end_user_id AS end_user_id,
@@ -1687,8 +1707,6 @@ RETURN s.id AS id,
        s.expired_at AS expired_at,
        s.valid_at AS valid_at,
        properties(s)['invalid_at'] AS invalid_at,
-       c.id AS chunk_id_from_rel,
-       collect(DISTINCT e.id) AS entity_ids,
        COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
        COALESCE(s.importance_score, 0.5) AS importance_score,
        s.last_access_time AS last_access_time,
@@ -1698,74 +1716,32 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
-SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
+SEARCH_ENTITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
-WITH e, score
-With collect({entity: e, score: score}) AS fulltextResults
-
-OPTIONAL MATCH (ae:ExtractedEntity)
-WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
-  AND ae.aliases IS NOT NULL
-  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($query))
-WITH fulltextResults, collect(ae) AS aliasEntities
-
-UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
-     CASE 
-       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($query)) THEN 1.0
-       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($query)) THEN 0.9
-       ELSE 0.8
-     END
-}]) AS row
-WITH row.entity AS e, row.score AS score
-WITH DISTINCT e, MAX(score) AS score
-OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
-OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
 RETURN e.id AS id,
        e.name AS name,
-       e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
-       e.created_at AS created_at,
-       e.expired_at AS expired_at,
-       e.entity_idx AS entity_idx,
-       e.statement_id AS statement_id,
        e.description AS description,
-       e.aliases AS aliases,
-       e.name_embedding AS name_embedding,
-       e.connect_strength AS connect_strength,
-       collect(DISTINCT s.id) AS statement_ids,
-       collect(DISTINCT c.id) AS chunk_ids,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
-       COALESCE(e.importance_score, 0.5) AS importance_score,
-       e.last_access_time AS last_access_time,
-       COALESCE(e.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
 """
 
-SEARCH_CHUNKS_BY_CONTENT = """
+SEARCH_CHUNKS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
-OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
 RETURN c.id AS id,
-       c.end_user_id AS end_user_id,
        c.content AS content,
-       c.dialog_id AS dialog_id,
-       c.sequence_number AS sequence_number,
-       collect(DISTINCT s.id) AS statement_ids,
-       collect(DISTINCT e.id) AS entity_ids,
        COALESCE(c.activation_value, 0.5) AS activation_value,
-       c.last_access_time AS last_access_time,
-       COALESCE(c.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
 """
 
 # MemorySummary keyword search using fulltext index
-SEARCH_MEMORY_SUMMARIES_BY_KEYWORD = """
+SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
 WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
 OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
@@ -1786,7 +1762,7 @@ LIMIT $limit
 """
 
 # Community keyword search: matches name or summary via fulltext index
-SEARCH_COMMUNITIES_BY_KEYWORD = """
+SEARCH_COMMUNITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 RETURN c.community_id AS id,
@@ -1847,136 +1823,13 @@ RETURN n.description AS description,
        n.id AS id
 """
 
-# -------------------
-# cosine similarity search (vector.similarity.cosine in Cypher)
-# -------------------
-COSINE_STATEMENT_SEARCH = """
-MATCH (s:Statement)
-WHERE s.end_user_id = $end_user_id AND s.statement_embedding IS NOT NULL
-WITH s, vector.similarity.cosine(s.statement_embedding, $embedding) AS score
-WHERE score > 0
-RETURN s.id AS id,
-       s.statement AS statement,
-       s.end_user_id AS end_user_id,
-       s.chunk_id AS chunk_id,
-       s.created_at AS created_at,
-       s.valid_at AS valid_at,
-       properties(s)['invalid_at'] AS invalid_at,
-       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
-       COALESCE(s.importance_score, 0.5) AS importance_score,
-       s.last_access_time AS last_access_time,
-       COALESCE(s.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC LIMIT $limit
-"""
-
-COSINE_ENTITY_SEARCH = """
-MATCH (e:ExtractedEntity)
-WHERE e.end_user_id = $end_user_id AND e.name_embedding IS NOT NULL
-WITH e, vector.similarity.cosine(e.name_embedding, $embedding) AS score
-WHERE score > 0
-RETURN e.id AS id,
-       e.name AS name,
-       e.end_user_id AS end_user_id,
-       e.entity_type AS entity_type,
-       e.description AS description,
-       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
-       COALESCE(e.importance_score, 0.5) AS importance_score,
-       e.last_access_time AS last_access_time,
-       COALESCE(e.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC LIMIT $limit
-"""
-
-COSINE_CHUNK_SEARCH = """
-MATCH (c:Chunk)
-WHERE c.end_user_id = $end_user_id AND c.chunk_embedding IS NOT NULL
-WITH c, vector.similarity.cosine(c.chunk_embedding, $embedding) AS score
-WHERE score > 0
-RETURN c.id AS id,
-       c.end_user_id AS end_user_id,
-       c.content AS content,
-       c.dialog_id AS dialog_id,
-       COALESCE(c.activation_value, 0.5) AS activation_value,
-       c.last_access_time AS last_access_time,
-       COALESCE(c.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC LIMIT $limit
-"""
-
-COSINE_MEMORY_SUMMARY_SEARCH = """
-MATCH (m:MemorySummary)
-WHERE m.end_user_id = $end_user_id AND m.summary_embedding IS NOT NULL
-WITH m, vector.similarity.cosine(m.summary_embedding, $embedding) AS score
-WHERE score > 0
-RETURN m.id AS id,
-       m.name AS name,
-       m.end_user_id AS end_user_id,
-       m.dialog_id AS dialog_id,
-       m.chunk_ids AS chunk_ids,
-       m.content AS content,
-       m.created_at AS created_at,
-       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
-       COALESCE(m.importance_score, 0.5) AS importance_score,
-       m.last_access_time AS last_access_time,
-       COALESCE(m.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC LIMIT $limit
-"""
-
-COSINE_COMMUNITY_SEARCH = """
-MATCH (c:Community)
-WHERE c.end_user_id = $end_user_id AND c.summary_embedding IS NOT NULL
-WITH c, vector.similarity.cosine(c.summary_embedding, $embedding) AS score
-WHERE score > 0
-RETURN c.community_id AS id,
-       c.name AS name,
-       c.summary AS content,
-       c.core_entities AS core_entities,
-       c.member_count AS member_count,
-       c.end_user_id AS end_user_id,
-       c.updated_at AS updated_at,
-       score
-ORDER BY score DESC LIMIT $limit
-"""
-
-COSINE_PERCEPTUAL_SEARCH = """
-MATCH (p:Perceptual)
-WHERE p.end_user_id = $end_user_id AND p.summary_embedding IS NOT NULL
-WITH p, vector.similarity.cosine(p.summary_embedding, $embedding) AS score
-WHERE score > 0
-RETURN p.id AS id,
-       p.end_user_id AS end_user_id,
-       p.perceptual_type AS perceptual_type,
-       p.file_path AS file_path,
-       p.file_name AS file_name,
-       p.file_ext AS file_ext,
-       p.summary AS summary,
-       p.keywords AS keywords,
-       p.topic AS topic,
-       p.domain AS domain,
-       p.created_at AS created_at,
-       p.file_type AS file_type,
-       score
-ORDER BY score DESC LIMIT $limit
-"""
-
-COSINE_SEARCH_CYPHER_MAPPING = {
-    Neo4jNodeType.STATEMENT: COSINE_STATEMENT_SEARCH,
-    Neo4jNodeType.EXTRACTEDENTITY: COSINE_ENTITY_SEARCH,
-    Neo4jNodeType.CHUNK: COSINE_CHUNK_SEARCH,
-    Neo4jNodeType.MEMORYSUMMARY: COSINE_MEMORY_SUMMARY_SEARCH,
-    Neo4jNodeType.COMMUNITY: COSINE_COMMUNITY_SEARCH,
-    Neo4jNodeType.PERCEPTUAL: COSINE_PERCEPTUAL_SEARCH,
-}
-
 FULLTEXT_QUERY_CYPHER_MAPPING = {
-    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_KEYWORD,
-    Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
-    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_CONTENT,
-    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
-    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_KEYWORD,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_KEYWORD
+    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_FULLTEXT,
+    Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_FULLTEXT,
+    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_FULLTEXT,
+    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT,
+    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_FULLTEXT,
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_FULLTEXT
 }
 USER_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_USER_ID,
@@ -2132,7 +1985,7 @@ SET e.name_embedding = $name_embedding
 RETURN e.id
 """
 # --- Reflection Engine Layer 2: Entity Dedup ---
-#来源一：名称相似度
+# 来源一：名称相似度
 DEDUP_CANDIDATES_BY_NAME = """
 MATCH (e1:ExtractedEntity)
 WHERE e1.end_user_id = $end_user_id
@@ -2159,7 +2012,7 @@ RETURN e1.id AS a_id, e2.id AS b_id,
 LIMIT $candidate_cap
 """
 
-#路径B 通过name_embedding 相似度检索
+# 路径B 通过name_embedding 相似度检索
 DEDUP_CANDIDATES_BY_EMBED = """
 MATCH (e1:ExtractedEntity)
 WHERE e1.end_user_id = $end_user_id
@@ -2181,8 +2034,7 @@ RETURN e1.id AS a_id, e2.id AS b_id,
 LIMIT $candidate_cap
 """
 
-
-#去重两个实体合并
+# 去重两个实体合并
 DEDUP_MERGE_ENTITIES = """
 MATCH (keeper:ExtractedEntity {id: $keeper_id, end_user_id: $end_user_id})
 MATCH (loser:ExtractedEntity {id: $loser_id, end_user_id: $end_user_id})
@@ -2223,15 +2075,17 @@ FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
 )
 WITH keeper, loser
 OPTIONAL MATCH (loser)-[r:EXTRACTED_RELATIONSHIP]->(target)
-WHERE target <> keeper AND NOT (keeper)-[:EXTRACTED_RELATIONSHIP]->(target)
+WHERE target <> keeper
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
-  CREATE (keeper)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(target)
+  MERGE (keeper)-[nr:EXTRACTED_RELATIONSHIP {predicate: r.predicate}]->(target)
+  SET nr += properties(r)
 )
 WITH keeper, loser
 OPTIONAL MATCH (source)-[r:EXTRACTED_RELATIONSHIP]->(loser)
-WHERE source <> keeper AND NOT (source)-[:EXTRACTED_RELATIONSHIP]->(keeper)
+WHERE source <> keeper
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
-  CREATE (source)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(keeper)
+  MERGE (source)-[nr:EXTRACTED_RELATIONSHIP {predicate: r.predicate}]->(keeper)
+  SET nr += properties(r)
 )
 WITH keeper, loser
 DETACH DELETE loser
@@ -2266,7 +2120,6 @@ WHERE e.end_user_id = $end_user_id
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 RETURN DISTINCT e.entity_type AS entity_type, count(e) AS count
 """
-
 
 # --- Reflection Engine Layer 2: Unresolved Entity (子问题5) ---
 
@@ -2358,4 +2211,119 @@ UNRESOLVED_UPDATE_STATEMENT_FLAG = """
 MATCH (s:Statement {id: $statement_id})
 SET s.has_unsolved_reference = false
 RETURN s.id AS statement_id
+"""
+
+# ============================================================================
+# 反思阶段 · 别名归并（"别名属于" 关系处理）
+# 由 Layer2Inspector 确定性步骤调用，按 end_user_id 全量扫描 "别名属于" 边：
+#   1. MERGE_ALIAS_BELONGS_TO：将 source.name 并入 target.aliases，
+#      source.description 追加到 target.description
+#   2. REDIRECT_ALIAS_EDGES：将别名节点(source)上其它边重定向到 target
+#   3. DELETE_ALIAS_NODES：DETACH DELETE 别名节点（连同 "别名属于" 边）
+# ============================================================================
+
+# 别名归并：将 predicate="别名属于" 的 EXTRACTED_RELATIONSHIP 边的 source.name
+# 合并进 target.aliases（去重），并将 source.description 追加到 target.description（分号分隔）
+MERGE_ALIAS_BELONGS_TO = """
+// 先按 target 分组，将所有 source.name 和 source.description 聚合，
+// 再一次性 SET，避免多条 别名属于 边对同一 target 反复覆盖。
+MATCH (source:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(target:ExtractedEntity {end_user_id: $end_user_id})
+WHERE r.predicate = '别名属于'
+WITH target,
+     coalesce(target.aliases, []) AS existing_aliases,
+     coalesce(target.description, '') AS tgt_desc,
+     collect(DISTINCT source.name) AS source_names,
+     collect(DISTINCT coalesce(source.description, '')) AS source_descs
+
+// 1. 合并 aliases：将所有 source.name 追加到 target.aliases（去重，忽略空值）
+WITH target, tgt_desc, source_names, source_descs, existing_aliases,
+     existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT n IN existing_aliases] AS new_aliases
+
+// 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
+WITH target, new_aliases, existing_aliases, source_descs,
+     reduce(desc = tgt_desc, src IN source_descs |
+         CASE
+             WHEN src <> '' AND NOT desc CONTAINS src
+             THEN CASE WHEN desc = '' THEN src ELSE desc + '；' + src END
+             ELSE desc
+         END
+     ) AS new_description
+
+SET target.aliases = new_aliases,
+    target.description = new_description
+
+RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_aliases) - size(existing_aliases) AS added_count
+"""
+
+# 边重定向：将指向别名节点（"别名属于"关系的 source）的所有其他边，重定向到用户节点（target）。
+# 处理两类边：
+#   1. EXTRACTED_RELATIONSHIP：其他实体 → 别名节点 或 别名节点 → 其他实体
+#   2. STATEMENT_ENTITY：陈述句 → 别名节点
+# 对于每条需要重定向的边，创建一条指向用户节点的新边（复制所有属性），然后删除旧边。
+REDIRECT_ALIAS_EDGES = """
+// 找到所有 别名→用户 的映射
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
+WHERE ar.predicate = '别名属于'
+WITH collect({alias_id: elementId(alias), user_id: elementId(user), alias_eid: alias.id, user_eid: user.id}) AS mappings
+
+// 1. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 target 的情况
+UNWIND mappings AS m
+MATCH (other)-[r:EXTRACTED_RELATIONSHIP]->(alias:ExtractedEntity {end_user_id: $end_user_id})
+WHERE alias.id = m.alias_eid
+  AND r.predicate <> '别名属于'
+  AND other.id <> m.user_eid
+WITH m, other, r, alias
+MATCH (user:ExtractedEntity {id: m.user_eid, end_user_id: $end_user_id})
+CREATE (other)-[nr:EXTRACTED_RELATIONSHIP]->(user)
+SET nr = properties(r)
+DELETE r
+WITH count(*) AS redirected_incoming
+
+// 2. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 source 的情况
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar2:EXTRACTED_RELATIONSHIP]->(user2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE ar2.predicate = '别名属于'
+WITH alias, user2, redirected_incoming
+MATCH (alias)-[r:EXTRACTED_RELATIONSHIP]->(other)
+WHERE r.predicate <> '别名属于'
+  AND other.id <> user2.id
+WITH user2, other, r, redirected_incoming
+CREATE (user2)-[nr:EXTRACTED_RELATIONSHIP]->(other)
+SET nr = properties(r)
+DELETE r
+WITH redirected_incoming, count(*) AS redirected_outgoing
+
+// 3. 重定向 STATEMENT_ENTITY 边：陈述句 → 别名节点
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar3:EXTRACTED_RELATIONSHIP]->(user3:ExtractedEntity {end_user_id: $end_user_id})
+WHERE ar3.predicate = '别名属于'
+WITH alias, user3, redirected_incoming, redirected_outgoing
+MATCH (stmt)-[r:STATEMENT_ENTITY]->(alias)
+WITH user3, stmt, r, redirected_incoming, redirected_outgoing
+CREATE (stmt)-[nr:STATEMENT_ENTITY]->(user3)
+SET nr = properties(r)
+DELETE r
+
+RETURN redirected_incoming, redirected_outgoing, count(*) AS redirected_stmt
+"""
+
+# 删除别名节点：在别名归并和边重定向完成后，删除所有 predicate="别名属于" 关系的 source 节点。
+# 此时这些节点的其他边已被 REDIRECT_ALIAS_EDGES 重定向完毕，
+# 唯一剩余的边就是 (alias)-[:EXTRACTED_RELATIONSHIP {predicate:'别名属于'}]->(user)，
+# 使用 DETACH DELETE 一并删除节点和该关系。
+DELETE_ALIAS_NODES = """
+MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
+WHERE r.predicate = '别名属于'
+WITH alias, count(r) AS rel_count
+DETACH DELETE alias
+RETURN count(alias) AS deleted_count
+"""
+
+
+# 查询用户实体节点的最新 aliases：用于别名归并完成后，将归并结果同步回 PostgreSQL
+# end_user_info.aliases / other_name。判定用户实体的口径与 metadata_extractor.is_user_entity
+# 保持一致：name 命中常见用户称呼，或 entity_type 为 '用户'。
+GET_USER_ENTITY_ALIASES = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE toLower(e.name) IN ['用户', '我', 'user', 'i']
+   OR e.entity_type = '用户'
+RETURN e.id AS entity_id, e.name AS name, coalesce(e.aliases, []) AS aliases
 """

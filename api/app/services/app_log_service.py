@@ -1,11 +1,12 @@
 """应用日志服务层"""
 import uuid
 import datetime as dt
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive, to_timestamp_ms, parse_iso_to_utc_naive
 from app.core.logging_config import get_business_logger
 from app.models.app_model import AppType
 from app.models.conversation_model import Conversation, Message
@@ -15,6 +16,22 @@ from app.repositories.conversation_repository import ConversationRepository, Mes
 from app.schemas.app_log_schema import AppLogMessage, AppLogNodeExecution, LogFileInfo
 
 logger = get_business_logger()
+
+
+def _to_ms(iso_str: str | None) -> int | None:
+    """将 ISO 8601 时间字符串转换为毫秒时间戳，失败返回 None"""
+    if not iso_str:
+        return None
+    try:
+        return to_timestamp_ms(parse_iso_to_utc_naive(iso_str))
+    except (ValueError, TypeError):
+        return None
+
+
+def _public_resolved_kind(kind: str | None) -> str | None:
+    if kind == "pending":
+        return "interrupt"
+    return kind
 
 
 class AppLogService:
@@ -130,6 +147,89 @@ class AppLogService:
 
         return conversation, messages, node_executions_map
 
+    def build_pending_intervention_map(
+        self,
+        conversation_id: uuid.UUID,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        聚合某会话下所有 WorkflowExecution 的人工介入信息。
+
+        返回结构与 /public/share/conversations/{conversation_id} 接口的
+        pending_intervention 完全一致：
+          {
+            message_id: {
+              "execution_id": ...,
+              "status": ...,
+              "interventions": [ {node_id, node_name, rendered_content, ...}, ... ]
+            }
+          }
+        """
+        intervention_map: Dict[str, Dict[str, Any]] = {}
+        executions = list(
+            self.db.scalars(
+                select(WorkflowExecution)
+                .where(WorkflowExecution.conversation_id == conversation_id)
+                .order_by(WorkflowExecution.created_at.asc())
+            ).all()
+        )
+        for wf_exec in executions:
+            intr_ctx = (wf_exec.context or {}).get("human_intervention", {})
+            if not intr_ctx:
+                continue
+            message_id = intr_ctx.get("message_id")
+            if not message_id:
+                continue
+
+            resolved_list = intr_ctx.get("resolved_interventions") or []
+            pending_list = intr_ctx.get("interventions") or []
+
+            # Merge by node_id. Order: resolved first, then pending overlays
+            # non-resolved fields. Crucially, pending data must NOT clobber
+            # already-resolved action_id/form_data with null — the resolved
+            # data wins for those fields.
+            merged_by_node: Dict[str, Dict[str, Any]] = {
+                i["node_id"]: dict(i) for i in resolved_list if i.get("node_id")
+            }
+            for i in pending_list:
+                nid = i.get("node_id")
+                if not nid:
+                    continue
+                base = merged_by_node.get(nid, {})
+                merged = dict(base)
+                for k, v in i.items():
+                    if k in ("resolved_action_id", "resolved_form_data", "resolved_at", "resolved_kind"):
+                        if base.get(k) in (None, "", []):
+                            merged[k] = v
+                    else:
+                        merged[k] = v
+                merged_by_node[nid] = merged
+
+            def _sort_key(item: Dict[str, Any]):
+                return (
+                    item.get("resolved_at") or "9999-12-31T23:59:59",
+                    item.get("node_id") or "",
+                )
+
+            ordered = sorted(merged_by_node.values(), key=_sort_key)
+
+            intervention_map[message_id] = {
+                "execution_id": wf_exec.execution_id,
+                "status": wf_exec.status,
+                "interventions": [{
+                    "node_id": i["node_id"],
+                    "node_name": i.get("node_name", ""),
+                    "rendered_content": i.get("rendered_content", ""),
+                    "form_fields": i.get("form_fields", []),
+                    "actions": i.get("actions", []),
+                    "timeout_at": _to_ms(i.get("timeout_at")),
+                    "resolved_action_id": i.get("resolved_action_id"),
+                    "resolved_form_data": i.get("resolved_form_data"),
+                    "resolved_at": i.get("resolved_at"),
+                    "resolved_kind": _public_resolved_kind(i.get("resolved_kind")),
+                } for i in ordered],
+            }
+        return intervention_map
+
     def _get_workflow_messages_and_nodes(
         self,
         conversation_id: uuid.UUID,
@@ -149,7 +249,7 @@ class AppLogService:
             select(WorkflowExecution)
             .where(
                 WorkflowExecution.conversation_id == conversation_id,
-                WorkflowExecution.status.in_(["completed", "failed"])
+                WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"])
             )
             .order_by(WorkflowExecution.started_at.asc())
         )
@@ -171,6 +271,52 @@ class AppLogService:
             if isinstance(m.meta_data, dict) and "suggested_questions" in m.meta_data:
                 suggested_questions = m.meta_data.get("suggested_questions") or []
                 break
+
+        # 查该会话下所有 assistant 消息，用于把 WorkflowExecution 关联到真实的 Message.id
+        # 关联方式：
+        #   1) 优先按 meta_data.execution_id 精确匹配（waiting_human / 失败更新后的消息会带这个字段）
+        #   2) 否则按 Message.created_at 与 execution.completed_at 的时间接近度匹配
+        #   3) 兜底使用 uuid.uuid5(execution.id, "assistant")（保持向后兼容）
+        assistant_msgs_stmt = (
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.role == "assistant",
+            )
+            .order_by(Message.created_at.asc())
+        )
+        assistant_msgs = list(self.db.scalars(assistant_msgs_stmt).all())
+
+        exec_id_to_msg_id: dict[str, uuid.UUID] = {}
+        msgs_without_exec_id: list[Message] = []
+        for m in assistant_msgs:
+            mid = (m.meta_data or {}).get("execution_id") if isinstance(m.meta_data, dict) else None
+            if mid:
+                exec_id_to_msg_id.setdefault(str(mid), m.id)
+            else:
+                msgs_without_exec_id.append(m)
+
+        # 按时间正序排列，便于每个 execution 按顺序就近消费
+        msgs_without_exec_id.sort(key=lambda m: m.created_at)
+
+        def _resolve_assistant_msg_id(execution: WorkflowExecution) -> uuid.UUID:
+            """解析 execution 对应的真实 assistant Message.id，失败则返回合成 UUID。"""
+            if execution.execution_id in exec_id_to_msg_id:
+                return exec_id_to_msg_id[execution.execution_id]
+            target = execution.completed_at or execution.started_at
+            if target and msgs_without_exec_id:
+                best_idx = 0
+                best_diff = abs((msgs_without_exec_id[0].created_at - target).total_seconds())
+                for idx, m in enumerate(msgs_without_exec_id[1:], start=1):
+                    diff = abs((m.created_at - target).total_seconds())
+                    if diff < best_diff:
+                        best_diff = diff
+                        best_idx = idx
+                # 仅在 5 分钟以内认为匹配，避免错配到无关消息
+                if best_diff <= 300:
+                    matched = msgs_without_exec_id.pop(best_idx)
+                    return matched.id
+            return uuid.uuid5(execution.id, "assistant")
 
         messages: list[AppLogMessage] = []
         node_executions_map: dict[str, list[AppLogNodeExecution]] = {}
@@ -194,11 +340,13 @@ class AppLogService:
                 ))
 
         for execution in executions:
-            started_at = execution.started_at or dt.datetime.now()
+            started_at = execution.started_at or dt.utcnow_naive()
             completed_at = execution.completed_at or started_at
 
             # assistant message 的 id，同时作为 node_executions_map 的 key
-            assistant_msg_id = uuid.uuid5(execution.id, "assistant")
+            # 优先解析到真实的 Message.id，使前端可以通过 pending_intervention 的 key
+            # 在 messages[] 里定位到对应消息
+            assistant_msg_id = _resolve_assistant_msg_id(execution)
 
             # --- user message（输入）---
             input_data = execution.input_data or {}
@@ -238,6 +386,17 @@ class AppLogService:
                 else:
                     output_content = _extract_text(execution.output_data)
                 meta = {"usage": execution.token_usage or {}, "elapsed_time": execution.elapsed_time}
+            elif execution.status == "waiting_human":
+                output_content = _extract_text(execution.output_data) or ""
+                intervention_ctx = (execution.context or {}).get("human_intervention", {})
+                meta = {
+                    "waiting_human": True,
+                    "intervention": intervention_ctx,
+                    "elapsed_time": execution.elapsed_time,
+                }
+            elif execution.status == "timeout":
+                output_content = _extract_text(execution.output_data) or execution.error_message or ""
+                meta = {"timeout": True, "error_node_id": execution.error_node_id, "elapsed_time": execution.elapsed_time}
             else:
                 output_content = _extract_text(execution.output_data) or ""
                 meta = {"error": execution.error_message, "error_node_id": execution.error_node_id}
@@ -282,7 +441,7 @@ class AppLogService:
         # 查询该会话关联的所有工作流执行记录（按时间正序）
         stmt = select(WorkflowExecution).where(
             WorkflowExecution.conversation_id == conversation_id,
-            WorkflowExecution.status.in_(["completed", "failed"])
+            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"])
         ).order_by(WorkflowExecution.started_at.asc())
 
         executions = self.db.scalars(stmt).all()
@@ -316,6 +475,13 @@ class AppLogService:
             # 失败的执行没有 assistant message，直接用 execution id 作为 key
             if execution.status == "failed":
                 node_executions_map[f"execution_{str(execution.id)}"] = execution_nodes
+                continue
+
+            if execution.status == "waiting_human":
+                intervention_ctx = (execution.context or {}).get("human_intervention", {})
+                msg_id = intervention_ctx.get("message_id")
+                key = msg_id if msg_id else f"execution_{str(execution.id)}"
+                node_executions_map[key] = execution_nodes
                 continue
 
             # completed：通过时序匹配关联到对应的 assistant message
@@ -482,6 +648,7 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
         elapsed_time = output.pop("elapsed_time", None)
         token_usage = output.pop("token_usage", None)
         process = output.pop("process", None)
+        agent_log = output.pop("agent_log", None)
         # execution_order 仅用于排序，不返回给前端
         output.pop("execution_order", None)
         result.append(AppLogNodeExecution(
@@ -492,6 +659,7 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
             error=error,
             input=inp,
             process=process,
+            agent_log=agent_log,
             output=output if output else None,
             cycle_items=cycle_items,
             elapsed_time=elapsed_time,

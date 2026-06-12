@@ -2,15 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 16:21:49
+ * @Last Modified time: 2026-06-05 19:57:34
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover } from 'antd';
+import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover, Tabs } from 'antd';
 
-import type { NodeConfig, ChatVariable } from '../../types'
+import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
 import Knowledge from './Knowledge/Knowledge';
@@ -49,7 +49,10 @@ import Retry from './Retry'
 import NextStep from './NextStep'
 import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisplay'
 import type { Application } from '@/views/ApplicationManagement/types'
-import CronTriggerConfig from './CronTriggerConfig'
+import Trigger from './Trigger'
+import { getWorkflowNodeLastRunDetail } from '@/api/application'
+import HumanIntervention from './HumanIntervention'
+import ToolList from './ToolList'
 
 /**
  * Props for Properties component
@@ -73,12 +76,16 @@ interface PropertiesProps {
   appId?: string;
   /** Chat variables */
   chatVariables: ChatVariable[];
+  /** Environment variables */
+  envVariables: EnvVariable[];
   /** Function to save workflow configuration */
   handleSave: (flag?: boolean) => Promise<unknown>;
   /** Handler for node click */
   nodeClick: ({ node }: { node: Node }) => void;
   /** Application type */
   appType?: Application['type'];
+  /** Function to refresh cache */
+  refreshCache: () => void;
 }
 
 /**
@@ -90,19 +97,21 @@ const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
   chatVariables,
+  envVariables,
   blankClick,
   config,
   appId,
   handleSave,
   nodeClick,
   appType,
+  refreshCache,
 }) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
   const values = Form.useWatch([], form);
-  const variableList = useVariableList(selectedNode, graphRef, chatVariables, appType)
+  const variableList = useVariableList(selectedNode, graphRef, chatVariables, envVariables, appType)
   const data = selectedNode.getData() || {}
   console.log('data', data)
 
@@ -176,7 +185,6 @@ const Properties: FC<PropertiesProps> = ({
       }, { deep: false })
     }
   }, [values, selectedNode, form])
-
   /**
    * Get filtered variable list based on node type and config key
    * @param nodeType - Type of the node
@@ -371,6 +379,7 @@ const Properties: FC<PropertiesProps> = ({
 
     if ((nodeType === 'parameter-extractor' && key === 'prompt')
       || (nodeType === 'question-classifier' && key === 'user_supplement_prompt')
+      || nodeType === 'human-intervention'
     ) {
       const allList = addParentIterationVars(variableList);
       let filteredList: Suggestion[] = []
@@ -411,7 +420,7 @@ const Properties: FC<PropertiesProps> = ({
 
     if ((nodeType === 'iteration' && key === 'output')) {
       if (!selectedNode) return [];
-      let filteredList = variableList.filter(variable => variable.value.includes('sys.'))
+      let filteredList = variableList.filter(variable => variable.value.includes('sys.') || variable.nodeData?.type === 'var-aggregator')
       const childVariables = getChildNodeVariables(selectedNode, graphRef);
       const existingKeys = new Set(filteredList.map(v => v.key));
       childVariables.forEach(v => {
@@ -457,6 +466,13 @@ const Properties: FC<PropertiesProps> = ({
       })
 
       return filteredList
+    }
+
+    if (nodeType === 'var-aggregator' || nodeType === 'assigner' || nodeType === 'jinja-render') {
+      return variableList.filter(variable => variable.dataType !== 'secret');
+    }
+    if (nodeType === 'agent' && key === 'context') {
+      return variableList.filter(variable => variable.dataType === 'array[object]');
     }
 
     // For all other node types, add parent iteration variables if applicable
@@ -598,15 +614,33 @@ const Properties: FC<PropertiesProps> = ({
   const [nameHover, setNameHover] = useState(false)
   const [activeKey, setActiveKey] = useState('setting')
 
-  const [result, setResult] = useState<RunResult | null>(null)
+  const [result, setResult] = useState<RunResult>({} as RunResult)
   const [resultLoading, setResultLoading] = useState(false)
+
+  const getNodeLastRun = () => {
+    if (!appId || !data?.id) return
+    setResultLoading(true)
+    getWorkflowNodeLastRunDetail(appId, data?.id || '')
+      .then(res => {
+        setResult(res as RunResult)
+      })
+      .finally(() => {
+        setResultLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    if (!isRun) {
+      getNodeLastRun()
+    }
+  }, [isRun])
 
   useEffect(() => {
     if (activeKey === 'setting') {
-      setResult(null)
+      setResult({} as RunResult)
       setResultLoading(false)
     } else {
-      // Run result display
+      getNodeLastRun()
     }
   }, [activeKey])
   return (
@@ -655,9 +689,9 @@ const Properties: FC<PropertiesProps> = ({
           headerType="borderless"
           headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
           className="rb:h-full! rb:hover:shadow-none!"
-          bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
+          bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:p-0! rb:pb-3!')}
         >
-          {/* <Tabs
+          <Tabs
             items={[
               { key: 'setting', label: t('workflow.config.setting') },
               { key: 'lastRun', label: t('workflow.config.lastRun') },
@@ -666,16 +700,21 @@ const Properties: FC<PropertiesProps> = ({
             onChange={setActiveKey}
             size="small"
             className={styles.tabs}
-          /> */}
-          {/* <div className="rb:h-[calc(100%-52px)] rb:overflow-y-auto!"> */}
-          <div className="rb:h-full rb:overflow-y-auto!">
+          />
+          <div className="rb:h-[calc(100%-54px)] rb:overflow-y-auto!">
             {activeKey === 'setting' &&
               <>
                 <div className="rb:px-3!">
                   <Form.Item name="id" label="ID">
                     <Input disabled />
                   </Form.Item>
-                  {selectedNode?.data?.type === 'list-operator'
+                  {selectedNode?.data?.type === 'human-intervention'
+                    ? <HumanIntervention
+                        options={getFilteredVariableList(selectedNode?.data?.type)}
+                        selectedNode={selectedNode}
+                        graphRef={graphRef}
+                      />
+                    : selectedNode?.data?.type === 'list-operator'
                     ? <ListOperator
                       options={variableList}
                       selectedNode={selectedNode} 
@@ -701,7 +740,9 @@ const Properties: FC<PropertiesProps> = ({
                       <Button type="primary" size="small" className="rb:text-[12px]!" onClick={handleSureReplace}>{t('workflow.sureReplace')}</Button>
                     </>
                     : selectedNode?.data?.type === 'trigger'
-                      ? <CronTriggerConfig />
+                      ? <Trigger
+                        key={data.id || 'trigger'}
+                      />
                       : selectedNode?.data?.type === 'http-request'
                       ? <HttpRequest
                         options={variableList}
@@ -740,8 +781,16 @@ const Properties: FC<PropertiesProps> = ({
                                 )
                               }
 
-                              if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                                return <ModelConfig key={key} variableOptions={getFilteredVariableList(selectedNode?.data?.type)} />
+                              if ((key === 'model_id' && selectedNode?.data?.type === 'llm')
+                                || (key === 'model' && selectedNode?.data?.type === 'agent')
+                              ) {
+                                return (
+                                  <ModelConfig
+                                    key={key}
+                                    parentName={selectedNode?.data?.type === 'agent' ? key : undefined}
+                                    variableOptions={getFilteredVariableList(selectedNode?.data?.type)}
+                                  />
+                                )
                               }
                               if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                                 // 为llm节点且isArray=true时添加context变量支持
@@ -926,6 +975,7 @@ const Properties: FC<PropertiesProps> = ({
                                   >
                                     <MemoryConfig
                                       parentName={key}
+                                      needMsg={config.needMsg as boolean}
                                       options={getFilteredVariableList('llm')}
                                     />
                                   </Form.Item>
@@ -965,7 +1015,7 @@ const Properties: FC<PropertiesProps> = ({
                                   key={key}
                                   label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                                   name={key}
-                                  options={variableList}
+                                  options={getFilteredVariableList(selectedNode?.data?.type, key)}
                                   isNeedType={config.isNeedType as boolean}
                                 />
                               }
@@ -982,6 +1032,16 @@ const Properties: FC<PropertiesProps> = ({
 
                               if (key === 'vision_input' && !values?.vision) {
                                 return null
+                              }
+
+                              if (config.type === 'toolList') {
+                                return (
+                                  <Form.Item
+                                    key={key} name={key}
+                                  >
+                                    <ToolList />
+                                  </Form.Item>
+                                )
                               }
 
                               return (
@@ -1010,117 +1070,116 @@ const Properties: FC<PropertiesProps> = ({
                                   {config.type === 'input'
                                     ? <Input placeholder={t('common.pleaseEnter')} />
                                     : config.type === 'textarea'
-                                      ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
-                                      : config.type === 'select'
-                                        ? <Select
-                                          options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
-                                          placeholder={t('common.pleaseSelect')}
-                                        />
-                                        : config.type === 'inputNumber'
-                                          ? <InputNumber
-                                            placeholder={t('common.pleaseEnter')}
-                                            className="rb:w-full!"
-                                            onChange={(value) => form.setFieldValue(key, value)}
-                                          />
-                                          : config.type === 'slider'
-                                            ? <RbSlider
-                                              min={config.min}
-                                              max={config.max}
-                                              step={config.step || 0.01}
-                                              isInput={true}
-                                              size="small"
-                                            />
-                                            : config.type === 'modelSelect'
-                                              ? <ModelSelect
-                                                placeholder={t('common.pleaseSelect')}
-                                                params={config.params}
-                                                size="small"
-                                                className="rb:w-full!"
-                                                updateOptions={setModelOptions}
-                                                onChange={handleChangeModel}
-                                              />
-                                              : config.type === 'customSelect'
-                                                ? <CustomSelect
-                                                  placeholder={t('common.pleaseSelect')}
-                                                  url={config.url as string}
-                                                  params={config.params}
-                                                  hasAll={false}
-                                                  valueKey={config.valueKey}
-                                                  labelKey={config.labelKey}
-                                                  size="small"
-                                                />
-                                                : config.type === 'variableList'
-                                                  ? <VariableSelect
-                                                    placeholder={t(config.placeholder || 'common.pleaseSelect')}
-                                                    options={(() => {
-                                                      const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
-                                                      // Apply filtering if specified in config
-                                                      if (config.filterNodeTypes) {
-                                                        return baseVariableList.filter(variable => {
-                                                          const nodeTypeMatch = !config.filterNodeTypes ||
-                                                            (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
-                                                          return nodeTypeMatch;
-                                                        });
-                                                      }
-                                                      if (config.onFilterVariableType) {
-                                                        const types = config.onFilterVariableType as string[];
-                                                        let list: Suggestion[] = []
-                                                        baseVariableList.forEach((variable) => {
-                                                          if (variable.children?.length) {
-                                                            const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
-                                                            console.log('filteredChildren', filteredChildren)
-                                                            if (filteredChildren.length > 0) {
-                                                              list.push({ ...variable, children: filteredChildren });
-                                                            } else if (types.includes(variable.dataType)) {
-                                                              list.push({ ...variable, children: [] });
-                                                            }
-                                                          } else if (types.includes(variable.dataType)) {
-                                                            list.push(variable);
-                                                          }
-                                                        });
+                                    ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
+                                    : config.type === 'select'
+                                    ? <Select
+                                      options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
+                                      placeholder={t('common.pleaseSelect')}
+                                    />
+                                    : config.type === 'inputNumber'
+                                      ? <InputNumber
+                                        placeholder={t('common.pleaseEnter')}
+                                        className="rb:w-full!"
+                                        onChange={(value) => form.setFieldValue(key, value)}
+                                      />
+                                      : config.type === 'slider'
+                                      ? <RbSlider
+                                        min={config.min}
+                                        max={config.max}
+                                        step={config.step || 0.01}
+                                        isInput={true}
+                                        size="small"
+                                      />
+                                      : config.type === 'modelSelect'
+                                      ? <ModelSelect
+                                        placeholder={t('common.pleaseSelect')}
+                                        params={config.params}
+                                        size="small"
+                                        className="rb:w-full!"
+                                        updateOptions={setModelOptions}
+                                        onChange={handleChangeModel}
+                                      />
+                                      : config.type === 'customSelect'
+                                      ? <CustomSelect
+                                        placeholder={t('common.pleaseSelect')}
+                                        url={config.url as string}
+                                        params={config.params}
+                                        hasAll={false}
+                                        valueKey={config.valueKey}
+                                        labelKey={config.labelKey}
+                                        size="small"
+                                      />
+                                      : config.type === 'variableList'
+                                    ? <VariableSelect
+                                      placeholder={t(config.placeholder || 'common.pleaseSelect')}
+                                      options={(() => {
+                                        const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
+                                        // Apply filtering if specified in config
+                                        if (config.filterNodeTypes) {
+                                          return baseVariableList.filter(variable => {
+                                            const nodeTypeMatch = !config.filterNodeTypes ||
+                                              (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
+                                            return nodeTypeMatch;
+                                          });
+                                        }
+                                        if (config.onFilterVariableType) {
+                                          const types = config.onFilterVariableType as string[];
+                                          let list: Suggestion[] = []
+                                          baseVariableList.forEach((variable) => {
+                                            if (variable.children?.length) {
+                                              const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
+                                              if (filteredChildren.length > 0) {
+                                                list.push({ ...variable, children: filteredChildren });
+                                              } else if (types.includes(variable.dataType)) {
+                                                list.push({ ...variable, children: [] });
+                                              }
+                                            } else if (types.includes(variable.dataType)) {
+                                              list.push(variable);
+                                            }
+                                          });
 
-                                                        return list
-                                                      }
-                                                      // Filter child nodes for iteration output
-                                                      if (config.filterChildNodes && selectedNode) {
-                                                        const graph = graphRef.current;
-                                                        if (!graph) return [];
+                                          return list
+                                        }
+                                        // Filter child nodes for iteration output
+                                        if (config.filterChildNodes && selectedNode) {
+                                          const graph = graphRef.current;
+                                          if (!graph) return [];
 
-                                                        const nodes = graph.getNodes();
+                                          const nodes = graph.getNodes();
 
-                                                        // Find child nodes whose cycle field equals parent node's ID
-                                                        const childNodes = nodes.filter(node => {
-                                                          const nodeData = node.getData();
-                                                          return nodeData?.cycle === selectedNode.id;
-                                                        });
+                                          // Find child nodes whose cycle field equals parent node's ID
+                                          const childNodes = nodes.filter(node => {
+                                            const nodeData = node.getData();
+                                            return nodeData?.cycle === selectedNode.id;
+                                          });
 
-                                                        return baseVariableList.filter(variable =>
-                                                          childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
-                                                        );
-                                                      }
-                                                      return baseVariableList;
-                                                    })()}
-                                                    onChange={(value, option) => handleChangeVariableList(value as string, option, key)}
-                                                    size="small"
-                                                  />
-                                                  : config.type === 'switch'
-                                                    ? <Switch onChange={
-                                                      key === 'group'
-                                                        ? () => { form.setFieldValue('group_variables', []) }
-                                                        : key === 'vision'
-                                                          ? () => { form.setFieldValue('vision_input', undefined) }
-                                                          : undefined
-                                                    } />
-                                                    : config.type === 'categoryList'
-                                                      ? <CategoryList
-                                                        parentName={key}
-                                                        selectedNode={selectedNode}
-                                                        graphRef={graphRef}
-                                                        options={getFilteredVariableList(selectedNode?.data?.type, key)}
-                                                      />
-                                                      : config.type === 'editor'
-                                                        ? <Editor options={getFilteredVariableList(selectedNode?.data?.type, key)} variant="outlined" size="small" placeholder={config.placeholder || t('common.pleaseEnter')} />
-                                                        : null
+                                          return baseVariableList.filter(variable =>
+                                            childNodes.some(node => node.id === variable.nodeData?.id) || selectedNode?.data?.type === 'iteration' && key === 'output' && variable.value.includes('sys.')
+                                          );
+                                        }
+                                        return baseVariableList;
+                                      })()}
+                                      onChange={(value, option) => handleChangeVariableList(value as string, option, key)}
+                                      size="small"
+                                    />
+                                    : config.type === 'switch'
+                                    ? <Switch onChange={
+                                      key === 'group'
+                                        ? () => { form.setFieldValue('group_variables', []) }
+                                        : key === 'vision'
+                                          ? () => { form.setFieldValue('vision_input', undefined) }
+                                          : undefined
+                                    } />
+                                    : config.type === 'categoryList'
+                                    ? <CategoryList
+                                      parentName={key}
+                                      selectedNode={selectedNode}
+                                      graphRef={graphRef}
+                                      options={getFilteredVariableList(selectedNode?.data?.type, key)}
+                                    />
+                                    : config.type === 'editor'
+                                    ? <Editor options={getFilteredVariableList(selectedNode?.data?.type, key)} variant="outlined" size="small" placeholder={config.placeholder || t('common.pleaseEnter')} />
+                                    : null
                                   }
                                 </Form.Item>
                               )
@@ -1158,11 +1217,13 @@ const Properties: FC<PropertiesProps> = ({
               </>
             }
             {activeKey === 'lastRun' &&
-              <RunResultDisplay
-                result={result}
-                loading={resultLoading}
-                nodeData={data}
-              />
+              <div className="rb:px-3!">
+                <RunResultDisplay
+                  result={result}
+                  loading={resultLoading}
+                  nodeData={data}
+                />
+              </div>
             }
           </div>
         </RbCard>
@@ -1175,6 +1236,7 @@ const Properties: FC<PropertiesProps> = ({
           selectedNode={selectedNode}
           appId={appId || config?.app_id || ''}
           variableList={variableList}
+          refreshCache={refreshCache}
         />
       )}
     </div>

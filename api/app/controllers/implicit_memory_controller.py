@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
@@ -104,7 +105,7 @@ def validate_date_range(start_date: Optional[datetime], end_date: Optional[datet
     if start_date and end_date and start_date >= end_date:
         raise ValueError("start_date must be before end_date")
     
-    if start_date and start_date > datetime.now():
+    if start_date and start_date > utcnow_naive():
         raise ValueError("start_date cannot be in the future")
 
 

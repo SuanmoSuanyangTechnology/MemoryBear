@@ -2,16 +2,16 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 15:09:29
+ * @Last Modified time: 2026-06-05 19:56:28
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App } from 'antd'
+import { App, type ButtonProps } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
 import ChatIcon from '@/assets/images/application/chat.png'
-import { draftRun } from '@/api/application'
+import { draftRun, appInterventionsSubmit } from '@/api/application'
 
 import Empty from '@/components/Empty'
 import Chat from '@/components/Chat'
@@ -50,6 +50,7 @@ const formatParams = (message: string, conversation_id: string | null, files: an
 }
 
 interface NodeData {
+  execution_id?: string;
   content: string;
   conversation_id: string | null;
   cycle_id: string;
@@ -70,7 +71,19 @@ interface NodeData {
     file_name: string;
     knowledge_id: string;
     score: string;
+  }[];
+  rendered_content?: string;
+  form_fields?: {
+    id: string;
+    default_value?: string;
   }[]
+  actions?: {
+    id: string;
+    label: string;
+    variant: ButtonProps['type'];
+  }[];
+  timeout_at?: number;
+  agent_log?: any;
 }
 
 const TestChat: FC<TestChatProps> = ({
@@ -506,7 +519,14 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleWorkflowStreamMessage = (data: SSEMessage[]) => {
     data.forEach(item => {
-      const { content, conversation_id, citations } = item.data as NodeData;
+      const {
+        execution_id,
+        node_id,
+        node_name: name,
+        content, conversation_id, citations,
+        rendered_content, form_fields, actions, timeout_at,
+        agent_log,
+      } = item.data as NodeData;
       switch (item.event) {
       // Append streaming text chunks to assistant message
         case 'message':
@@ -517,6 +537,56 @@ const TestChat: FC<TestChatProps> = ({
               newList[lastIndex] = { ...newList[lastIndex], content: newList[lastIndex].content + content }
             }
             return newList
+          })
+          break
+        case 'intervention_required':
+          setChatList(prev => {
+            const newList = [...prev]
+            const lastIndex = newList.length - 1
+            if (lastIndex >= 0) {
+              newList[lastIndex] = {
+                ...newList[lastIndex],
+                  meta_data: {
+                    ...newList[lastIndex].meta_data,
+                    waiting_human: true
+                  },
+                  interventions: [
+                    ...(newList[lastIndex].interventions || []),
+                    {
+                      execution_id,
+                      node_id: node_id,
+                      node_name: name,
+                      rendered_content,
+                      form_fields: form_fields || [],
+                      actions: actions || [],
+                      timeout_at,
+                    }
+                  ]
+              }
+            }
+            return newList
+          })
+          break
+        case 'intervention_timeout':
+          setChatList(prev => {
+            const lastMsg = prev[prev.length - 1]
+            if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+              return prev
+            }
+
+            const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
+            lastMsg.interventions[filterIndex] = {
+              ...lastMsg.interventions[filterIndex],
+              resolved_action_id: '__timeout__',
+              resolved_kind: 'timeout'
+            }
+            
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...lastMsg,
+              }
+            ]
           })
           break
         // Track node execution start
@@ -531,6 +601,46 @@ const TestChat: FC<TestChatProps> = ({
         // Update node with subContent
         case 'cycle_item':
           updateWorkflowCycleMessage(item.data as NodeData)
+          break
+        case 'agent_log':
+          setChatList(prev => {
+            const newList = [...prev]
+            const lastIndex = newList.length - 1
+            if (lastIndex >= 0) {
+              const newSubContent = newList[lastIndex].subContent || []
+              const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
+              if (filterIndex > -1) {
+                const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                const lastIterations: {
+                  index: number;
+                  [key: string]: any;
+                }[] = lastAgentLog?.iterations || []
+                const newIterations: {
+                  index: number;
+                  [key: string]: any;
+                }[] = agent_log?.iterations || []
+
+                const indexMap = new Map<number, typeof lastIterations[0]>()
+                
+                lastIterations.forEach(item => {
+                  indexMap.set(item.index, item)
+                })
+                
+                newIterations.forEach(item => {
+                  indexMap.set(item.index, item)
+                })
+                
+                const mergedIterations = Array.from(indexMap.values()).sort((a, b) => a.index - b.index)
+
+                newSubContent[filterIndex].agent_log = {
+                  ...lastAgentLog,
+                  meta: agent_log?.meta || {},
+                  iterations: mergedIterations,
+                }
+              }
+            }
+            return newList
+          })
           break
         // Mark workflow as complete
         case 'workflow_end':
@@ -621,7 +731,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowCycleMessage = (data: NodeData) => {
-    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status } = data;
+    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, agent_log } = data;
     const { nodes } = config as WorkflowConfig
     const node = nodes.find(n => n.id === node_id);
     const { name, type } = node || {}
@@ -634,6 +744,7 @@ const TestChat: FC<TestChatProps> = ({
         const filterIndex = newSubContent.findIndex(vo => vo.id === cycle_id)
         if (filterIndex > -1) {
           const items = newSubContent[filterIndex].subContent || []
+          const lastAgentLog = newSubContent[filterIndex].agent_log || {}
           items.push({
             cycle_id,
             cycle_idx,
@@ -653,11 +764,19 @@ const TestChat: FC<TestChatProps> = ({
           })
           newSubContent[filterIndex] = {
             ...newSubContent[filterIndex],
-            subContent: [...items]
+            subContent: [...items],
+            agent_log: {
+              ...lastAgentLog,
+              meta: agent_log?.meta || {},
+              iterations: [
+                ...(lastAgentLog?.iterations || []),
+                ...agent_log?.iterations || []
+              ],
+            }
           }
           newList[lastIndex] = {
             ...newList[lastIndex],
-            subContent: newSubContent
+            subContent: newSubContent,
           }
         }
       }
@@ -685,6 +804,47 @@ const TestChat: FC<TestChatProps> = ({
       return newList
     })
   }
+  const handleInterventionActionClick = (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
+    if (!application?.id || !execution_id || !node_id) {
+      return
+    }
+    const data = {
+      node_id,
+      action_id: actionId,
+      form_data: fieldValues,
+    }
+    appInterventionsSubmit(application.id, execution_id, data)
+      .then(() => {
+        setChatList(prev => {
+          const lastMsg = prev[prev.length - 1]
+          if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
+            return prev
+          }
+          
+          // 找到最后一条 intervention 并更新其 form_fields 的 default_value
+          const updatedInterventions = [
+            ...lastMsg.interventions.slice(0, -1),
+            {
+              ...lastMsg.interventions[lastMsg.interventions.length - 1],
+              resolved_form_data: fieldValues,
+              resolved_action_id: actionId,
+            }
+          ]
+          
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...lastMsg,
+              interventions: updatedInterventions,
+              meta_data: {
+                ...lastMsg.meta_data,
+                waiting_human: false
+              }
+            }
+          ]
+        })
+      })
+  }
 
   useEffect(() => {
     const opening_statement = features?.opening_statement
@@ -704,7 +864,7 @@ const TestChat: FC<TestChatProps> = ({
     }
   }, [chatList.length, features?.opening_statement, variables])
 
-  console.log(chatList)
+  console.log('chatList', chatList)
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard
@@ -732,6 +892,7 @@ const TestChat: FC<TestChatProps> = ({
           labelFormat={(item) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
           // errorDesc={t('application.ReplyException')}
           renderRuntime={application?.type && ['workflow', 'agent'].includes(application?.type) ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
+          handleInterventionActionClick={handleInterventionActionClick}
         >
           <ChatToolbar
             ref={toolbarRef}

@@ -146,6 +146,8 @@ class VariablePool:
             user_id, conversation_id).
         - ``conv.*``:
             Conversation-level variables that persist across multiple turns.
+        - ``env.*``:
+            Workflow-level environment variables. Read-only at runtime.
         - ``<node_id>.*``:
             Variables produced by workflow nodes.
     """
@@ -161,7 +163,8 @@ class VariablePool:
                 Storage for all variables managed by the pool.
         """
         self.locks = defaultdict(Lock)
-        self.variables: dict[str, dict[str, VariableStruct[Any]]] = {"sys": {}, "conv": {}}
+        self.variables: dict[str, dict[str, VariableStruct[Any]]] = {"sys": {}, "conv": {}, "env": {}}
+        self.secret_values: set[str] = set()
 
     @staticmethod
     def transform_selector(selector):
@@ -382,7 +385,7 @@ class VariablePool:
         return {
             ns: LazyVariableDict(vars_dict, literal)
             for ns, vars_dict in self.variables.items()
-            if ns not in ("sys", "conv")
+            if ns not in ("sys", "conv", "env")
         }
 
     def get_all_system_vars(self, literal=False) -> dict[str, Any]:
@@ -407,6 +410,21 @@ class VariablePool:
             return {k: v.instance.to_literal() for k, v in conv_namespace.items()}
         return {k: v.instance.get_value() for k, v in conv_namespace.items()}
 
+    def get_all_environment_vars(self, literal=False) -> dict[str, Any]:
+        """获取所有环境变量"""
+        env_namespace = self.variables.get("env", {})
+        if literal:
+            return {k: v.instance.to_literal() for k, v in env_namespace.items()}
+        return {k: v.instance.get_value() for k, v in env_namespace.items()}
+
+    def register_secret_value(self, value: Any) -> None:
+        if value in (None, "", "__SECRET__"):
+            return
+        self.secret_values.add(str(value))
+
+    def get_secret_values(self) -> list[str]:
+        return list(self.secret_values)
+
     def get_all_node_outputs(self, literal=False) -> dict[str, Any]:
         """获取所有节点输出（运行时变量）
         
@@ -420,7 +438,7 @@ class VariablePool:
                     for k, v in vars_dict.items()
                 }
                 for namespace, vars_dict in self.variables.items()
-                if namespace not in ("sys", "conv")
+                if namespace not in ("sys", "conv", "env")
             }
         else:
             runtime_vars = {
@@ -429,7 +447,7 @@ class VariablePool:
                     for k, v in vars_dict.items()
                 }
                 for namespace, vars_dict in self.variables.items()
-                if namespace not in ("sys", "conv")
+                if namespace not in ("sys", "conv", "env")
             }
         return runtime_vars
 
@@ -474,6 +492,7 @@ class VariablePool:
         return {
             "system": self.get_all_system_vars(),
             "conversation": self.get_all_conversation_vars(),
+            "environment": self.get_all_environment_vars(),
             "nodes": self.get_all_node_outputs()  # 从 runtime_vars 读取
         }
 
@@ -502,6 +521,7 @@ class VariablePoolInitializer:
             execution_context: ExecutionContext
     ) -> None:
         await self._init_conversation_vars(variable_pool, input_data)
+        await self._init_environment_vars(variable_pool)
         await self._init_system_vars(variable_pool, input_data, execution_context)
 
     async def _init_conversation_vars(
@@ -545,6 +565,36 @@ class VariablePoolInitializer:
                     var_type=var_type,
                     mut=True
                 )
+
+    async def _init_environment_vars(
+            self,
+            variable_pool: VariablePool,
+    ):
+        init_env_vars: list[dict] = self.workflow_config.get("environment_variables") or []
+
+        for var_def in init_env_vars:
+            var_name = var_def.get("name")
+            value_type = var_def.get("value_type")
+            var_value = var_def.get("value")
+            required = bool(var_def.get("required"))
+            if not var_name:
+                continue
+
+            runtime_type = VariableType.NUMBER if value_type == "number" else VariableType.STRING
+            if var_value is None:
+                var_value = DEFAULT_VALUE(runtime_type)
+            if required and (var_value in ("", None) or (value_type == "secret" and var_value == "__SECRET__")):
+                raise ValueError(f"必填环境变量 '{var_name}' 尚未配置")
+            if value_type == "secret":
+                variable_pool.register_secret_value(var_value)
+
+            await variable_pool.new(
+                namespace="env",
+                key=var_name,
+                value=var_value,
+                var_type=runtime_type,
+                mut=False
+            )
 
     @staticmethod
     async def _resolve_file_default(file_def: dict) -> dict | None:

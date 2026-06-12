@@ -10,6 +10,7 @@ from jinja2 import Template
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
@@ -263,6 +264,103 @@ class ConversationService:
                 f"Error adding message, conversation_id={conversation_id}",
                 code=BizCode.DB_ERROR
             )
+
+    def update_message(
+            self,
+            message_id: uuid.UUID,
+            content: str | None = None,
+            meta_data: dict | None = None,
+    ) -> Message | None:
+        """Update an existing message's content and/or meta_data by ID.
+
+        Used for HITL resume: the same assistant message that carried
+        waiting_human=True is updated in-place with the final output
+        content and cleared waiting_human flag, instead of creating a
+        new message.
+
+        Args:
+            message_id: The message ID to update.
+            content: New content (None = keep existing).
+            meta_data: New meta_data dict (None = keep existing).
+
+        Returns:
+            The updated Message, or None if not found.
+        """
+        message = self.db.get(Message, message_id)
+        if not message:
+            logger.warning(f"update_message: message_id={message_id} not found")
+            return None
+        if content is not None:
+            message.content = content
+        if meta_data is not None:
+            message.meta_data = meta_data
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(message, "meta_data")
+        self.db.flush()
+        return message
+
+    def resolve_intervention_message(
+            self,
+            conversation_id: uuid.UUID,
+            execution_id: str,
+            content: str,
+            extra_meta: dict | None = None,
+    ) -> Message | None:
+        """Find the waiting_human assistant message and update it with
+        the final workflow output, clearing the waiting_human flag.
+
+        Instead of creating a NEW assistant message on resume, this
+        method finds the existing waiting_human message (created when
+        the workflow paused) and updates it in-place: content becomes
+        the final output, waiting_human becomes False.
+
+        Args:
+            conversation_id: The conversation to search.
+            execution_id: Execution ID in meta_data for precise targeting.
+            content: The final workflow output to set as message content.
+            extra_meta: Additional meta_data keys to merge (usage, citations).
+
+        Returns:
+            The updated Message, or None if no matching message found.
+        """
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        msg = (
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.role == "assistant",
+                Message.is_deleted == False,
+                cast(Message.meta_data, JSONB).contains(
+                    {"waiting_human": True, "execution_id": execution_id}
+                ),
+            )
+            .first()
+        )
+        if not msg:
+            logger.warning(
+                f"resolve_intervention_message: no waiting_human message found "
+                f"for conversation_id={conversation_id}, execution_id={execution_id}"
+            )
+            return None
+
+        msg.content = content
+        new_meta = dict(msg.meta_data or {})
+        new_meta["waiting_human"] = False
+        if extra_meta:
+            new_meta.update(extra_meta)
+        msg.meta_data = new_meta
+
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(msg, "meta_data")
+        self.db.flush()
+
+        logger.debug(
+            f"resolve_intervention_message: updated message_id={msg.id}, "
+            f"conversation_id={conversation_id}, content_length={len(content)}"
+        )
+        return msg
 
     @staticmethod
     def _dispatch_memory_sync(
@@ -673,7 +771,7 @@ class ConversationService:
                 "version": v.version,
                 "is_current": v.is_current,
                 "content": v.content,
-                "created_at": int(v.created_at.timestamp() * 1000),
+                "created_at": to_timestamp_ms(v.created_at),
             }
             for v in versions
         ]
@@ -783,7 +881,7 @@ class ConversationService:
             raise BusinessException("Conversation not found", BizCode.INVALID_CONVERSATION)
         is_stable = (
                 conversation.updated_at
-                and datetime.now() - conversation.updated_at > timedelta(days=1)
+                and utcnow_naive() - conversation.updated_at > timedelta(days=1)
         )
         if conversation_detail and is_stable:
             logger.info(f"Conversation detail found in repository for conversation_id={conversation_id}")

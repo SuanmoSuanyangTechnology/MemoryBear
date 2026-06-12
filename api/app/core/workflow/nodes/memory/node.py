@@ -9,7 +9,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.memory.config import MemoryReadNodeConfig, MemoryWriteNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
-from app.db import get_db_read
+from app.db import get_db_context
 from app.schemas import FileInput
 
 
@@ -30,7 +30,7 @@ class MemoryReadNode(BaseNode):
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryReadNodeConfig(**self.config)
-        with get_db_read() as db:
+        with get_db_context() as db:
             end_user_id = self.get_variable("sys.user_id", variable_pool)
 
             if not end_user_id:
@@ -42,6 +42,7 @@ class MemoryReadNode(BaseNode):
                 config_id=str(self.typed_config.config_id),
                 end_user_id=end_user_id,
                 user_rag_memory_id=state["user_rag_memory_id"],
+                conversation_id=variable_pool.get_value("sys.conversation_id"),
             )
             query = self._render_template(self.typed_config.message, variable_pool)
             self._process = {"query": query, "config_id": str(self.typed_config.config_id)}

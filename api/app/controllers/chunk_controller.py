@@ -1,6 +1,8 @@
+import json
 import os
 import csv
 import io
+import time
 from typing import Any, Optional
 import uuid
 
@@ -9,6 +11,8 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.rag.common.settings import kg_retriever
 from app.core.rag.llm.chat_model import Base
@@ -16,6 +20,8 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.rag.metadata.filter_engine import MetadataFilterEngine, FilterCondition, FilterGroup
+from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -28,6 +34,7 @@ from app.services import knowledge_service, document_service, file_service, know
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -139,7 +146,7 @@ async def get_preview_chunks(
                 "doc_id": pid,
                 "file_id": str(db_document.file_id),
                 "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "file_created_at": to_timestamp_ms(db_document.created_at),
                 "document_id": str(db_document.id),
                 "knowledge_id": str(db_document.kb_id),
                 "sort_id": idx,
@@ -153,7 +160,7 @@ async def get_preview_chunks(
                 "doc_id": uuid.uuid4().hex,
                 "file_id": str(db_document.file_id),
                 "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "file_created_at": to_timestamp_ms(db_document.created_at),
                 "document_id": str(db_document.id),
                 "knowledge_id": str(db_document.kb_id),
                 "sort_id": idx,
@@ -187,7 +194,7 @@ async def get_preview_chunks(
                 "doc_id": uuid.uuid4().hex,
                 "file_id": str(db_document.file_id),
                 "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "file_created_at": to_timestamp_ms(db_document.created_at),
                 "document_id": str(db_document.id),
                 "knowledge_id": str(db_document.kb_id),
                 "sort_id": idx,
@@ -222,21 +229,19 @@ async def get_preview_chunks_hierarchy(
         current_user: User = Depends(get_current_user)
 ):
     """
-    分页查询文档分块预览（嵌套结构）
-    - 支持普通分块、父子分块、QA 分块三种模式
-    - 返回嵌套的 DocumentChunk 结构，children 字段包含子块
-    - 分页按父块（顶层 chunk）层级切片
+    Paged query document chunk preview (nested structure)
+    - Supports three modes: normal chunk, parent-child chunk, and QA chunk
+    - Returns nested DocumentChunk structure, children field contains sub-chunks
+    - Pagination slices at the parent chunk (top-level chunk) level
     """
     api_logger.info(f"Paged query document chunk preview hierarchy: kb_id={kb_id}, document_id={document_id}, page={page}, pagesize={pagesize}")
 
-    # 1. 参数校验
     if page < 1 or pagesize < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
         )
 
-    # 2. 获取知识库信息
     db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
@@ -244,7 +249,6 @@ async def get_preview_chunks_hierarchy(
             detail="The knowledge base does not exist or access is denied"
         )
 
-    # 3. 检查文档
     db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
     if not db_document:
         raise HTTPException(
@@ -252,7 +256,6 @@ async def get_preview_chunks_hierarchy(
             detail="The document does not exist or you do not have permission to access it"
         )
 
-    # 4. 检查文件
     db_file = file_service.get_file_by_id(db, file_id=db_document.file_id)
     if not db_file:
         raise HTTPException(
@@ -260,7 +263,6 @@ async def get_preview_chunks_hierarchy(
             detail="The file does not exist or you do not have permission to access it"
         )
 
-    # 5. 获取文件内容
     if not db_file.file_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -278,7 +280,6 @@ async def get_preview_chunks_hierarchy(
             detail=f"File not found in storage: {e}"
         )
 
-    # 6. 文档解析 & 分块
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
 
@@ -292,7 +293,6 @@ async def get_preview_chunks_hierarchy(
 
     parser_config = dict(db_document.parser_config)
 
-    # 如果传入了覆盖参数，直接合并
     if parser_config_param and isinstance(parser_config_param, dict):
         # 兼容 {"parser_config": {...}} 和直接 {...} 两种传法
         actual_config = parser_config_param.get("parser_config", parser_config_param)
@@ -354,7 +354,6 @@ async def get_preview_chunks_hierarchy(
             detail=f"Document parsing failed: {str(e)}"
         )
 
-    # 7. 父块分页
     total = len(hierarchy)
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize
@@ -598,7 +597,7 @@ async def create_chunk(
         "doc_id": doc_id,
         "file_id": str(db_document.file_id),
         "file_name": db_document.file_name,
-        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+        "file_created_at": to_timestamp_ms(db_document.created_at),
         "document_id": str(document_id),
         "knowledge_id": str(kb_id),
         "sort_id": sort_id,
@@ -686,7 +685,7 @@ async def create_chunks_batch(
             "doc_id": doc_id,
             "file_id": str(db_document.file_id),
             "file_name": db_document.file_name,
-            "file_created_at": int(db_document.created_at.timestamp() * 1000),
+            "file_created_at": to_timestamp_ms(db_document.created_at),
             "document_id": str(document_id),
             "knowledge_id": str(kb_id),
             "sort_id": sort_id,
@@ -963,6 +962,7 @@ async def retrieve_chunks(
 
     filters = [
         knowledge_model.Knowledge.id.in_(kb_ids),
+        knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -976,6 +976,7 @@ async def retrieve_chunks(
     private_workspace_ids = [item[1] for item in private_items]
     filters = [
         knowledge_model.Knowledge.id.in_(kb_ids),
+        knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -987,7 +988,8 @@ async def retrieve_chunks(
     )
     if items:
         filters = [
-            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids)
+            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids),
+            knowledgeshare_model.KnowledgeShare.target_workspace_id == current_user.current_workspace_id,
         ]
         share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
             db=db,
@@ -1010,22 +1012,117 @@ async def retrieve_chunks(
             detail="The knowledge base does not exist or access is denied"
         )
 
+    # === 元数据过滤 ===
+    document_ids_filter = None
+    if retrieve_data.metadata_filters:
+        # 1) auto 模式拒绝
+        if retrieve_data.metadata_filter_mode.value != "manual":
+            raise BusinessException(
+                "metadata_filter_mode 暂仅支持 'manual'",
+                code=BizCode.INVALID_PARAMETER,
+            )
+
+        # 2) 收集所有库的字段定义
+        all_metadata_defs: dict[uuid.UUID, dict[str, dict]] = {}
+        for pk_kb_id in private_kb_ids:
+            all_metadata_defs[pk_kb_id] = KnowledgeMetadataService.get_metadata_defs_for_filtering(db, pk_kb_id)
+
+        # 3) 找出公共字段（所有库都有 + 类型一致）
+        # 先取所有字段名的交集
+        all_field_names = set()
+        for defs in all_metadata_defs.values():
+            all_field_names.update(defs.keys())
+
+        common_fields = set()
+        for field_name in all_field_names:
+            field_types = set()
+            all_have = True
+            for defs in all_metadata_defs.values():
+                if field_name not in defs:
+                    all_have = False
+                    break
+                field_types.add(defs[field_name]["type"])
+            if all_have and len(field_types) == 1:
+                common_fields.add(field_name)
+
+        # 4) 过滤条件中只保留公共字段，非公共字段忽略+打日志
+        filtered_groups = []
+        for group in retrieve_data.metadata_filters:
+            filtered_conditions = []
+            for cond in group.conditions:
+                if cond.field in common_fields:
+                    filtered_conditions.append(cond)
+                else:
+                    api_logger.warning(
+                        f"[MetadataFilter] 字段 '{cond.field}' 不是公共字段（不是所有知识库都有或类型不一致），已忽略"
+                    )
+            if filtered_conditions:
+                filtered_groups.append((group.logic, filtered_conditions))
+
+        if not filtered_groups:
+            api_logger.warning("[MetadataFilter] 过滤条件中无公共字段，跳过元数据过滤")
+        else:
+            all_document_ids = set()
+            for pk_kb_id in private_kb_ids:
+                metadata_defs = all_metadata_defs[pk_kb_id]
+
+                engine = MetadataFilterEngine(db)
+                filter_groups = [
+                    FilterGroup(
+                        conditions=[
+                            FilterCondition(field=c.field, operator=c.operator, value=c.value)
+                            for c in conditions
+                        ],
+                        logic=logic,
+                    )
+                    for logic, conditions in filtered_groups
+                ]
+
+                api_logger.info(
+                    f"[MetadataFilter] executing filter for kb_id={pk_kb_id}, "
+                    f"conditions={[{'field': c.field, 'op': c.operator, 'val': c.value} for g in filter_groups for c in g.conditions]}"
+                )
+                document_ids = engine.execute(
+                    knowledge_id=pk_kb_id,
+                    filter_groups=filter_groups,
+                    metadata_defs=metadata_defs,
+                )
+                api_logger.info(
+                    f"[MetadataFilter] kb_id={pk_kb_id}, "
+                    f"filtered_count={len(document_ids)}, "
+                    f"filtered_document_ids={sorted(str(d) for d in document_ids)}"
+                )
+                all_document_ids.update(document_ids)
+
+            document_ids_filter = [str(d) for d in all_document_ids]
+            api_logger.info(f"[MetadataFilter] final filter list: {document_ids_filter}")
+
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
-    # default value is topk
-    topn = retrieve_data.top_k
+    topn = retrieve_data.top_n or 20
+
+    # Helper: exclude documents in document_ids_filter (blacklist)
+    exclude_ids = set(document_ids_filter) if document_ids_filter else set()
+    def _exclude_filtered(docs):
+        if not exclude_ids:
+            return docs
+        filtered = [d for d in docs if d.metadata.get("document_id") not in exclude_ids]
+        api_logger.info(f"[MetadataFilter] post-filter: total={len(docs)}, excluded={len(docs) - len(filtered)}, remaining={len(filtered)}")
+        return filtered
 
     # 1 participle search, 2 semantic search, 3 hybrid search
     match retrieve_data.retrieve_type:
         case chunk_schema.RetrieveType.PARTICIPLE:
-            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
+            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case chunk_schema.RetrieveType.SEMANTIC:
-            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
+            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
-            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
-            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
+            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
             # Efficient deduplication
             seen_ids = set()
             unique_rs = []
@@ -1034,6 +1131,7 @@ async def retrieve_chunks(
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
             rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
+            api_logger.info(f"[HybridSearch] rerank: input={len(unique_rs)}, reranked output={len(rs)}")
             rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else (retrieve_data.vector_similarity_weight if retrieve_data.vector_similarity_weight is not None else 0.1)
             rs = [doc for doc in rs if doc.metadata.get("score", 0) > rerank_threshold]
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
@@ -1053,6 +1151,7 @@ async def retrieve_chunks(
                     base_url=emb_key.api_base
                 )
                 doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
-                if doc['page_content'].strip() != "":
+                if doc and doc['page_content'].strip() != '':
                     rs.insert(0, doc)
+            rs = _exclude_filtered(rs)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")

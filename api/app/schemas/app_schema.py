@@ -3,8 +3,9 @@ import uuid
 from typing import Optional, Any, List, Dict, Union
 from enum import Enum, StrEnum
 
-from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer, model_validator
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.schemas.workflow_schema import WorkflowConfigCreate
 
 
@@ -417,15 +418,15 @@ class App(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("shared_at", when_used="json")
     def _serialize_shared_at(self, dt: Optional[datetime.datetime]):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class AgentConfig(BaseModel):
@@ -504,11 +505,11 @@ class AgentConfig(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class PublishRequest(BaseModel):
@@ -554,15 +555,15 @@ class AppRelease(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("published_at", when_used="json")
     def _serialize_published_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # ---------- App Copy Schema ----------
@@ -622,11 +623,11 @@ class AppShare(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # ---------- Draft Run Schemas ----------
@@ -650,6 +651,7 @@ class DraftRunRequest(BaseModel):
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
+    trigger_payload: Optional[Dict[str, Any]] = Field(default=None, description="触发器 payload，webhook 试运行时传入")
 
 
 class SuggestedQuestion(BaseModel):
@@ -733,6 +735,64 @@ class NodeRunRequest(BaseModel):
         }]
     )
     stream: bool = Field(default=False, description="是否流式返回")
+
+
+class NodeCacheUpdateRequest(BaseModel):
+    """更新节点缓存内容"""
+    result_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="兼容旧模式：直接提交完整的缓存结果数据",
+    )
+    patches: List["NodeCacheVariablePatch"] = Field(
+        default_factory=list,
+        description="新模式：按变量 patch 缓存内容，只修改指定字段",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if self.result_data is None and not self.patches:
+            raise ValueError("result_data 和 patches 至少需要传一个")
+        if self.result_data is not None and self.patches:
+            raise ValueError("result_data 和 patches 不能同时传")
+        return self
+
+
+class NodeCacheVariablePatch(BaseModel):
+    """按变量 patch 节点缓存内容"""
+    scope: str = Field(
+        default="output",
+        description="修改范围，只支持 output/input/process",
+    )
+    path: Optional[str] = Field(
+        default=None,
+        description="变量路径，支持 dot notation，例如 output 或 metadata.answer",
+    )
+    name: Optional[str] = Field(
+        default=None,
+        description="变量名，等价于 path 的简写",
+    )
+    value: Any = Field(
+        ...,
+        description="变量新值",
+    )
+    type: Optional[str] = Field(
+        default=None,
+        description="变量类型，仅作为前端透传和调试信息，后端以 value 为准",
+    )
+
+    @model_validator(mode="after")
+    def validate_patch(self):
+        if self.scope not in {"output", "input", "process"}:
+            raise ValueError("scope 只支持 output、input、process")
+        if bool(self.path) == bool(self.name):
+            raise ValueError("path 和 name 必须二选一")
+        return self
+
+
+class NodeRerunRequest(BaseModel):
+    """基于最近一次单节点调试输入重跑"""
+    invalidate_cache: bool = Field(default=False, description="重跑前是否先失效当前缓存")
+    bypass_cache: bool = Field(default=False, description="重跑时是否跳过缓存直接真实执行")
 
 
 class DraftRunCompareRequest(BaseModel):

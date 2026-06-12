@@ -1,9 +1,10 @@
 from typing import Optional
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from app.aioRedis import aio_redis_set, aio_redis_get, aio_redis_delete
 from app.core.config import settings
+from app.core.utils.datetime_utils import to_iso_z, utcnow
 
 
 class SessionService:
@@ -32,14 +33,15 @@ class SessionService:
             return
             
         session_key = SessionService._get_user_session_key(username)
+        current_time = utcnow()
         session_data = {
             "token_id": token_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": expires_at.isoformat()
+            "created_at": to_iso_z(current_time),
+            "expires_at": to_iso_z(expires_at)
         }
         
         # 计算过期时间（秒）
-        expire_seconds = int((expires_at - datetime.now(timezone.utc)).total_seconds())
+        expire_seconds = int((expires_at - current_time).total_seconds())
         if expire_seconds > 0:
             await aio_redis_set(session_key, session_data, expire=expire_seconds)
     
@@ -139,7 +141,7 @@ class SessionService:
             user_id: 用户ID
         """
         invalidation_key = f"user_token_invalidation:{user_id}"
-        current_time = datetime.now(timezone.utc).isoformat()
+        current_time = to_iso_z(utcnow())
         
         # 设置失效时间戳，过期时间为 refresh token 的最大有效期
         expire_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60

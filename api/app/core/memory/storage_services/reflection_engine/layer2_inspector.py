@@ -161,6 +161,10 @@ class Layer2Inspector:
             end_user_id, baseline, language
         )
 
+        # 别名归并 — 处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+        # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点，
+        results["alias_merge"] = await self._run_alias_merge(end_user_id)
+
         # 子问题 3 — 复杂去重消歧（entity_dedup）
         results["entity_dedup"] = await self._run_entity_dedup(end_user_id, baseline)
 
@@ -172,6 +176,20 @@ class Layer2Inspector:
         # TODO: 子问题 4 — 本体 Metadata 校验（metadata_validation）
 
         return results
+
+    async def _run_alias_merge(self, end_user_id: str) -> Dict[str, Any]:
+        """别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+
+        将别名节点的 name/description 归并进规范实体，重定向其它边，
+        最后删除别名节点。逻辑迁移自原写入后处理任务。
+        """
+        from .deterministic.alias_merger import merge_alias_belongs_to
+
+        try:
+            return await merge_alias_belongs_to(self.connector, end_user_id)
+        except Exception as e:
+            logger.warning(f"[AliasMerge] 执行失败 end_user_id={end_user_id}: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _run_entity_dedup(self, end_user_id: str, baseline: str) -> Dict[str, Any]:
         """子问题 3 复杂去重 方案A：高频两路召回去重"""
@@ -660,6 +678,30 @@ class Layer2Inspector:
 
         # Step 5: 写反思日志（仅 resolved=true 时）
         if validated.resolved:
+            # 过滤掉"用户"实体（与 Step 4 写入逻辑一致：用户节点不是被消解出的新实体）
+            resolved_entities = [
+                e for e in validated.entities if e.name.strip() != "用户"
+            ]
+
+            # 列表页摘要：消解指代: <首个实体> 等 N 个实体
+            if resolved_entities:
+                summary_text = (
+                    f"消解指代: {resolved_entities[0].name} "
+                    f"等 {len(resolved_entities)} 个实体"
+                )
+            else:
+                summary_text = "消解指代: 无新增实体"
+
+            # 详情页变更项：按实体逐行展示，附带实体类型
+            changes = [
+                {
+                    "field": "识别实体",
+                    "old": "未识别",
+                    "new": f"{e.name}（{e.type}）",
+                }
+                for e in resolved_entities
+            ]
+
             log_repo = self.log_repo_factory()
             log_repo.create(
                 end_user_id=end_user_id,
@@ -669,22 +711,16 @@ class Layer2Inspector:
                 strategy="RESOLVE",
                 confidence=None,
                 status="resolved",
-                summary_text=f"消解为: {', '.join(e.name for e in validated.entities[:3])}",
+                summary_text=summary_text[:256],
                 entity_ids=created_entity_ids,
                 statement_ids=[stmt["statement_id"]],
                 trigger_detail={
                     "statement_id": stmt["statement_id"],
-                    "statement_text": stmt["statement_text"],
+                    "statement_text": f"未识别语句：{stmt['statement_text']}",
                 },
                 solution_detail={
                     "title": "RESOLVE — 指代消解成功",
-                    "changes": [
-                        {
-                            "field": "unresolved_reference",
-                            "old": "未识别",
-                            "new": ", ".join(e.name for e in validated.entities),
-                        }
-                    ],
+                    "changes": changes,
                 },
                 execution_detail=tracker.to_dict(),
             )
@@ -762,7 +798,7 @@ class Layer2Inspector:
 
         tracker.end_step(
             f"summary={len(result.description_summary)}字, "
-            f"events={len(result.new_events)}, "
+            f"events={len(result.events)}, "
             f"rename={result.should_rename_entity}"
         )
 
@@ -779,11 +815,16 @@ class Layer2Inspector:
 
         # Step 4: 过滤 events
         tracker.start_step("事件过滤", "decide")
-        valid_events = filter_events(result.new_events)
+        valid_events = filter_events(result.events)
 
         # 构建 event_timeline
+        # 单条格式：[valid_at|invalid_at] fact|title|category|category_id
+        # title / category / category_id 已在 filter_events 内兜底为合法值或 "NULL"
         if valid_events:
-            events_str = '；'.join(f'[{e.valid_at}|{e.invalid_at}] {e.fact}' for e in valid_events)
+            events_str = '；'.join(
+                f'[{e.valid_at}|{e.invalid_at}] {e.fact}|{e.title}|{e.category}|{e.category_id}'
+                for e in valid_events
+            )
             if existing_event_timeline:
                 event_timeline = existing_event_timeline + "；" + events_str
             else:
@@ -792,7 +833,7 @@ class Layer2Inspector:
             event_timeline = existing_event_timeline
 
         tracker.end_step(
-            f"有效事件 {len(valid_events)}/{len(result.new_events)}"
+            f"有效事件 {len(valid_events)}/{len(result.events)}"
         )
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）

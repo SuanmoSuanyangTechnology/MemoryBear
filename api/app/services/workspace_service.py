@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
 from app.core.config import settings
 from app.core.error_codes import BizCode
@@ -529,7 +530,7 @@ def create_workspace_invite(
             # 生成新的邀请链接（重新生成令牌）
             token, token_hash = _generate_invite_token()
             existing_invite.token_hash = token_hash
-            existing_invite.updated_at = datetime.datetime.now()
+            existing_invite.updated_at = utcnow_naive()
             db.commit()
             db.refresh(existing_invite)
             invite_token = token
@@ -610,7 +611,7 @@ def validate_invite_token(db: Session, token: str) -> InviteValidateResponse:
         raise BusinessException("邀请令牌无效", BizCode.WORKSPACE_INVITE_NOT_FOUND)
 
     # 检查邀请状态和过期时间
-    now = datetime.datetime.now()
+    now = utcnow_naive()
     is_expired = invite.expires_at < now or invite.status != InviteStatus.pending
     is_valid = not is_expired
 
@@ -657,7 +658,7 @@ def accept_workspace_invite(
             raise BusinessException(f"邀请已被{invite.status}", BizCode.WORKSPACE_INVITE_INVALID)
 
         # 检查过期时间
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         if invite.expires_at < now:
             business_logger.warning("邀请已过期")
             # 标记为过期

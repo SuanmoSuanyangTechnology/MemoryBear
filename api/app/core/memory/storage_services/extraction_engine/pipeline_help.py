@@ -22,6 +22,8 @@ import json
 from datetime import datetime
 from collections import defaultdict
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+
 
 def _parse_triplets_from_file(filepath):
     """解析三元组文件，返回三元组列表"""
@@ -302,7 +304,7 @@ def _write_extracted_result_summary(
     # 构建 JSON 结构（字段顺序按用户需求组织：先“实体去重的影响”，后“实体消歧的效果”）
     readable_path = os.path.join(pipeline_output_dir, "extracted_result_readable.txt")
     summary_json = {
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": to_iso_z(utcnow_naive()),
         "entities": {
             "extracted_count": extracted_entity_count,
         },
@@ -392,7 +394,7 @@ def _write_extracted_result_summary(
 
     # 额外生成可读版文本，模块顺序调整
     lines: list[str] = []
-    lines.append(f"结果汇总 - {datetime.now().isoformat()}")
+    lines.append(f"结果汇总 - {to_iso_z(utcnow_naive())}")
     lines.append("")
     # 提取实体数模块
     lines.append("提取实体数：")
@@ -494,7 +496,7 @@ def export_test_input_doc(
             d = m.model_dump()
             for k, v in list(d.items()):
                 if isinstance(v, datetime):
-                    d[k] = v.isoformat()
+                    d[k] = to_iso_z(v)
             return d
 
         def _entity_to_dict(e):
@@ -506,7 +508,7 @@ def export_test_input_doc(
             }
 
         with open(out_path, "w", encoding="utf-8") as f:
-            header_time = entity_nodes[0].created_at.isoformat()
+            header_time = to_iso_z(entity_nodes[0].created_at)
             f.write(
                 f"=== TEST EXTRACTED ENTITIES === (created_at: {header_time})\n"
             )

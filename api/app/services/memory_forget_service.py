@@ -16,6 +16,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
@@ -306,7 +307,7 @@ class MemoryForgetService:
             if last_access_dt:
                 if last_access_dt.tzinfo is None:
                     last_access_dt = last_access_dt.replace(tzinfo=timezone.utc)
-                last_access_timestamp = int(last_access_dt.timestamp() * 1000)
+                last_access_timestamp = to_timestamp_ms(last_access_dt)
             else:
                 last_access_timestamp = 0
 
@@ -365,7 +366,7 @@ class MemoryForgetService:
             min_days_since_access = config.get('min_days_since_access', 30)
         
         # 记录执行开始时间
-        execution_time = datetime.now()
+        execution_time = utcnow_naive()
         
         # 运行遗忘周期（LLM 客户端将在需要时由 forgetting_strategy 内部获取）
         report = await forgetting_scheduler.run_forgetting_cycle(
@@ -570,7 +571,7 @@ class MemoryForgetService:
                 'average_activation_value': round(result['average_activation'], 2) if result['average_activation'] is not None else None,
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
                 'forgetting_threshold': forgetting_threshold,
-                'timestamp': int(datetime.now().timestamp() * 1000)
+                'timestamp': to_timestamp_ms(utcnow_naive())
             }
         else:
             activation_metrics = {
@@ -580,7 +581,7 @@ class MemoryForgetService:
                 'average_activation_value': None,
                 'low_activation_nodes': 0,
                 'forgetting_threshold': forgetting_threshold,
-                'timestamp': int(datetime.now().timestamp() * 1000)
+                'timestamp': to_timestamp_ms(utcnow_naive())
             }
         
         # 收集节点类型分布
@@ -670,7 +671,7 @@ class MemoryForgetService:
                         'merged_count': record.merged_count,
                         'average_activation': round(record.average_activation_value, 2) if record.average_activation_value is not None else None,
                         'total_nodes': record.total_nodes,
-                        'execution_time': int(record.execution_time.timestamp() * 1000)
+                        'execution_time': to_timestamp_ms(record.execution_time)
                     })
                 
                 api_logger.info(f"成功获取最近 {len(recent_trends)} 个日期的历史趋势数据")
@@ -709,7 +710,7 @@ class MemoryForgetService:
             'activation_metrics': activation_metrics,
             'node_distribution': node_distribution,
             'recent_trends': recent_trends,
-            'timestamp': int(datetime.now().timestamp() * 1000)
+            'timestamp': to_timestamp_ms(utcnow_naive())
         }
 
         api_logger.info(
@@ -801,7 +802,7 @@ class MemoryForgetService:
         actr_calculator, _, _, config = await self._get_forgetting_components(db, config_id)
         
         # 生成遗忘曲线数据
-        initial_time = datetime.now()
+        initial_time = utcnow_naive()
         curve_data = actr_calculator.get_forgetting_curve(
             initial_time=initial_time,
             importance_score=importance_score,

@@ -1,8 +1,11 @@
 import datetime
 import uuid
 from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey, Float
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
+
 
 class Document(Base):
     __tablename__ = "documents"
@@ -15,6 +18,8 @@ class Document(Base):
     file_ext = Column(String, index=True, nullable=False, comment="file extension")
     file_size = Column(Integer, default=0, comment="file size(byte)")
     file_meta = Column(JSON, nullable=False, default={})
+    meta_data = Column("meta_data", JSONB, nullable=False, default={}, server_default='{}',
+                       comment="{field_name: value}")
     parser_id = Column(String, index=True, nullable=False, comment="default parser ID")
     parser_config = Column(JSON, nullable=False,
                            default={
@@ -28,29 +33,29 @@ class Document(Base):
                                "parent_chunk_token_num": 1024,
                                "parent_delimiter": "\n",
                                "graphrag": {
-                                    "use_graphrag": False,
-                                    "scene_name": "",
-                                    "entity_types": [
-                                        "organization",
-                                        "person",
-                                        "geo",
-                                        "event",
-                                        "category"
-                                    ],
-                                    "method": "general",
-                                    "resolution": True,
-                                    "community": True
-                                }
+                                   "use_graphrag": False,
+                                   "scene_name": "",
+                                   "entity_types": [
+                                       "organization",
+                                       "person",
+                                       "geo",
+                                       "event",
+                                       "category"
+                                   ],
+                                   "method": "general",
+                                   "resolution": True,
+                                   "community": True
+                               }
                            }, comment="default parser config")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     progress = Column(Float, default=0)
     progress_msg = Column(String, default="", comment="process message")
-    process_begin_at = Column(DateTime, default=datetime.datetime.now)
+    process_begin_at = Column(DateTime, default=utcnow_naive)
     process_duration = Column(Float, default=0)
     run = Column(Integer, default=0, comment="start to run processing or cancel.(1: run it; 2: cancel)")
     status = Column(Integer, default=1, comment="is it validate(0: wasted, 1: validate)")
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive)
 
     @property
     def is_parent_child_mode(self) -> bool:

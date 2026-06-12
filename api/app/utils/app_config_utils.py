@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, Union
 from datetime import datetime
 
 from app.db import get_db_read
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.models import AppRelease, WorkflowConfig
 from app.models.agent_app_config_model import AgentConfig
 from app.models.multi_agent_model import MultiAgentConfig
@@ -152,6 +153,7 @@ def workflow_config_4_app_release(release: AppRelease) -> WorkflowConfig:
         nodes=config_dict.get("nodes", []),
         edges=config_dict.get("edges", []),
         variables=config_dict.get("variables", []),
+        environment_variables=config_dict.get("environment_variables", []),
         execution_config=config_dict.get("execution_config", {}),
         triggers=config_dict.get("triggers", []),
         features=config_dict.get("features", {})
@@ -218,8 +220,8 @@ def dict_to_multi_agent_config(config_dict: Dict[str, Any], app_id: Optional[uui
         execution_config=config_dict.get("execution_config", {}),
         aggregation_strategy=config_dict.get("aggregation_strategy", "merge"),
         is_active=config_dict.get("is_active", True),
-        created_at=config_dict.get("created_at", datetime.now()),
-        updated_at=config_dict.get("updated_at", datetime.now())
+        created_at=config_dict.get("created_at", utcnow_naive()),
+        updated_at=config_dict.get("updated_at", utcnow_naive())
     )
 
     return multi_agent_config
@@ -279,11 +281,12 @@ def dict_to_workflow_config(config_dict: Dict[str, Any], app_id: Optional[uuid.U
         nodes=config_dict.get("nodes", []),
         edges=config_dict.get("edges", []),
         variables=config_dict.get("variables", []),
+        environment_variables=config_dict.get("environment_variables", []),
         execution_config=config_dict.get("execution_config", {}),
         triggers=config_dict.get("triggers", []),
         is_active=config_dict.get("is_active", True),
-        created_at=config_dict.get("created_at", datetime.now()),
-        updated_at=config_dict.get("updated_at", datetime.now())
+        created_at=config_dict.get("created_at", utcnow_naive()),
+        updated_at=config_dict.get("updated_at", utcnow_naive())
     )
 
     return workflow_config
@@ -314,8 +317,8 @@ def agent_config_to_dict(agent_config) -> Dict[str, Any]:
         "parent_agent_id": str(agent_config.parent_agent_id) if agent_config.parent_agent_id else None,
         "capabilities": agent_config.capabilities,
         "is_active": agent_config.is_active,
-        "created_at": agent_config.created_at.isoformat() if agent_config.created_at else None,
-        "updated_at": agent_config.updated_at.isoformat() if agent_config.updated_at else None
+        "created_at": to_iso_z(agent_config.created_at),
+        "updated_at": to_iso_z(agent_config.updated_at)
     }
 
 
@@ -339,8 +342,8 @@ def multi_agent_config_to_dict(multi_agent_config) -> Dict[str, Any]:
         "execution_config": multi_agent_config.execution_config,
         "aggregation_strategy": multi_agent_config.aggregation_strategy,
         "is_active": multi_agent_config.is_active,
-        "created_at": multi_agent_config.created_at.isoformat() if multi_agent_config.created_at else None,
-        "updated_at": multi_agent_config.updated_at.isoformat() if multi_agent_config.updated_at else None
+        "created_at": to_iso_z(multi_agent_config.created_at),
+        "updated_at": to_iso_z(multi_agent_config.updated_at)
     }
 
 
@@ -362,6 +365,6 @@ def workflow_config_to_dict(workflow_config) -> Dict[str, Any]:
         "execution_config": workflow_config.execution_config,
         "triggers": workflow_config.triggers,
         "is_active": workflow_config.is_active,
-        "created_at": workflow_config.created_at.isoformat() if workflow_config.created_at else None,
-        "updated_at": workflow_config.updated_at.isoformat() if workflow_config.updated_at else None
+        "created_at": to_iso_z(workflow_config.created_at),
+        "updated_at": to_iso_z(workflow_config.updated_at)
     }

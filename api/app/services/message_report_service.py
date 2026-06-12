@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -163,7 +164,7 @@ class ReportService:
         report.action_taken = action_taken
         report.reviewer_id = reviewer_id
         report.review_note = review_note
-        report.reviewed_at = datetime.now()
+        report.reviewed_at = utcnow_naive()
 
         # 根据处理措施执行相应操作
         if action_taken == "content_removed":

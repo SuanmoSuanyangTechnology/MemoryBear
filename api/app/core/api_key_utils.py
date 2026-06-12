@@ -1,8 +1,8 @@
 """API Key 工具函数"""
 import secrets
 import uuid as _uuid
-from typing import Optional, Union
 from datetime import datetime
+from typing import Optional, Union
 
 from sqlalchemy.orm import Session as _Session
 from app.core.error_codes import BizCode as _BizCode
@@ -11,6 +11,7 @@ from app.models.end_user_model import EndUser as _EndUser
 from app.repositories.end_user_repository import EndUserRepository as _EndUserRepository
 
 from app.models.api_key_model import ApiKeyType
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms
 from fastapi import Response
 from fastapi.responses import JSONResponse
 
@@ -57,22 +58,12 @@ def add_rate_limit_headers(response, headers: dict):
 
 def timestamp_to_datetime(timestamp: Optional[Union[int, float]]) -> Optional[datetime]:
     """将时间戳转换为datetime对象"""
-    if timestamp is None:
-        return None
-
-    # 处理毫秒级时间戳
-    if timestamp > 1e10:
-        timestamp = timestamp / 1000
-
-    return datetime.fromtimestamp(timestamp)
+    return parse_timestamp_to_utc_naive(timestamp)
 
 
 def datetime_to_timestamp(dt: Optional[datetime]) -> Optional[int]:
     """将datetime对象转换为时间戳（毫秒）"""
-    if dt is None:
-        return None
-
-    return int(dt.timestamp() * 1000)
+    return to_timestamp_ms(dt)
 
 
 def get_current_user_from_api_key(db: _Session, api_key_auth):

@@ -45,7 +45,7 @@ const RunResultDisplay: FC<RunResultDisplayProps> = ({ result, loading, nodeData
   if (!result) return null
 
   return (
-    <>
+    <Flex vertical gap={12}>
       <div className="rb:rounded-lg rb:border rb:border-[#E8E8E8] rb:p-3 rb:bg-[#F6FFF4]">
         <Flex justify="space-between" align="start">
           <Flex vertical align="start" gap={2}>
@@ -111,7 +111,7 @@ const RunResultDisplay: FC<RunResultDisplayProps> = ({ result, loading, nodeData
           </Flex>
         </RbAlert>
       )}
-    </>
+    </Flex>
   )
 }
 

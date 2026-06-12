@@ -183,6 +183,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
         const childOptions = vo.children?.filter(child => child.dataType === type || (type === 'integer' && child.dataType === 'number'))
 
         if (vo.dataType === type
+          || (vo.dataType === 'secret' && type === 'string')
           || (type === 'integer' && vo.dataType === 'number')
           || (type === 'array' && vo.dataType.includes(type))
           || (type === 'object' && vo.dataType === 'object')
@@ -199,6 +200,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
           })
         }
       } else if (vo.dataType === type
+        || (vo.dataType === 'secret' && type === 'string')
         || (type === 'integer' && vo.dataType === 'number')
         || (type === 'array' && vo.dataType.includes(type))
         || (type === 'object' && vo.dataType === 'object')) {

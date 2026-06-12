@@ -2,9 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:11:15
+ * @Last Modified time: 2026-06-05 20:01:24
  */
 import { type ReactNode } from 'react'
+import { type ButtonProps } from 'antd'
 
 /**
  * Chat message item interface
@@ -32,10 +33,13 @@ export interface ChatItem {
     citations?: CitationItem[];
     reasoning_content?: string;
     error?: string;
+    waiting_human?: boolean;
+    execution_id?: string;
   },
   version?: number;
   is_current?: boolean;
   is_hidden_refresh?: boolean;
+  interventions?: Intervention[]
 }
 
 export interface CitationItem {
@@ -45,49 +49,50 @@ export interface CitationItem {
   score: string;
   download_url?: string;
 }
+export interface Intervention {
+  execution_id?: string;
+  node_id?: string;
+  node_name?: string;
+  rendered_content?: string;
+  form_fields?: {
+    id: string;
+    variable_ref?: any;
+    default_value?: string;
+  }[];
+  actions?: {
+    id: string;
+    label: string;
+    variant: ButtonProps['type'];
+  }[];
+  timeout_at?: number;
 
+  resolved_action_id?: string;
+  resolved_form_data?: Record<string, string>;
+  
+  resolved_at?: string;
+  resolved_kind?: string;
+}
 /**
  * Chat component main props interface
  */
-export interface ChatProps {
-  /** Empty state display content */
-  empty?: ReactNode;
-  /** Chat data list */
-  data: Array<ChatItem | ChatItem[]>;
+export interface ChatProps extends Omit<ChatContentProps, 'onSend'> {
   /** Input content change callback */
   onChange: (message: string) => void;
   /** Send message callback */
   onSend: () => void;
-  /** Streaming loading state */
-  streamLoading?: boolean;
   /** Loading state */
   loading: boolean;
   /** Content area custom class name */
   contentClassName?: string;
   /** Child component content */
   children?: ReactNode;
-  /** Label format function */
-  labelFormat: (item: ChatItem) => any;
-  errorDesc?: string;
   /** Attachment list */
   fileList?: any[];
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
   className?: string;
-  renderRuntime?: (item: ChatItem, index: number) => ReactNode;
   conversationId?: string | null;
-
-  userIcon?: ReactNode;
-  assistantIcon?: ReactNode;
-  isSupportTools?: boolean;
-  handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
-
-  isEnded?: boolean;
   readOnly?: boolean;
-  deleteMsg?: (vo: ChatItem) => void;
-  reportMsg?: (vo: ChatItem) => void;
-  regenerateMessages?: (vo: ChatItem) => void;
-  handleVersionChange?: (page: number, item: ChatItem) => void;
 }
 
 /**
@@ -141,4 +146,5 @@ export interface ChatContentProps {
   reportMsg?: (vo: ChatItem) => void;
   regenerateMessages?: (vo: ChatItem) => void;
   handleVersionChange?: (page: number, item: ChatItem) => void;
+  handleInterventionActionClick?: (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => void;
 }

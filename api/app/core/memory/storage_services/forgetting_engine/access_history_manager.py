@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
     ACTRCalculator,
 )
@@ -95,9 +96,9 @@ class AccessHistoryManager:
             RuntimeError: 如果更新失败
         """
         if current_time is None:
-            current_time = datetime.now()
+            current_time = utcnow_naive()
         
-        current_time_iso = current_time.isoformat()
+        current_time_iso = to_iso_z(current_time)
         
         # 验证节点标签
         valid_labels = ["Statement", "ExtractedEntity", "MemorySummary"]
@@ -173,7 +174,7 @@ class AccessHistoryManager:
         batch_start = time.time()
         
         if current_time is None:
-            current_time = datetime.now()
+            current_time = utcnow_naive()
         
         # 合并同一节点的访问次数，避免对同一节点并发写入
         access_count_map: Dict[str, int] = {}
@@ -372,7 +373,7 @@ class AccessHistoryManager:
             repair_data['access_count'] = len(access_history)
             
             if access_history:
-                current_time = datetime.now()
+                current_time = utcnow_naive()
                 last_access_dt = datetime.fromisoformat(access_history[-1])
                 access_history_dt = [
                     datetime.fromisoformat(ts) for ts in access_history

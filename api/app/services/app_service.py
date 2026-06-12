@@ -13,10 +13,11 @@ import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, column, delete, exists, func, or_, select, update as sa_update
+from sqlalchemy import and_, column, exists, func, or_, select, update as sa_update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import (
     BusinessException,
@@ -418,6 +419,7 @@ class AppService:
             nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
             edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
             variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            environment_variables=[var.model_dump() for var in data.environment_variables] if getattr(data, "environment_variables", None) else [],
             execution_config=data.execution_config.model_dump() if data.execution_config else {},
             features=data.features if data.features else {},
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
@@ -429,6 +431,7 @@ class AppService:
             nodes=config_dict["nodes"],
             edges=config_dict["edges"],
             variables=config_dict["variables"],
+            environment_variables=config_dict["environment_variables"],
             execution_config=config_dict["execution_config"],
             features=config_dict["features"],
             triggers=config_dict["triggers"],
@@ -690,7 +693,7 @@ class AppService:
             raise BusinessException(message="已存在同名应用", code=BizCode.RESOURCE_ALREADY_EXISTS)
 
         try:
-            now = datetime.datetime.now()
+            now = utcnow_naive()
 
             app = App(
                 id=uuid.uuid4(),
@@ -769,7 +772,7 @@ class AppService:
                 changed = True
 
         if changed:
-            app.updated_at = datetime.datetime.now()
+            app.updated_at = utcnow_naive()
             self.db.commit()
             self.db.refresh(app)
             logger.info("应用更新成功", extra={"app_id": str(app_id)})
@@ -808,7 +811,7 @@ class AppService:
             AppShare.is_active.is_(True)
         ).values(
             is_active=False,
-            updated_at=datetime.datetime.now()
+            updated_at=utcnow_naive()
         )
         self.db.execute(stmt)
         
@@ -861,7 +864,7 @@ class AppService:
                 new_name = f"{source_app.name} - 副本"
             new_name = self._unique_app_name(new_name, target_workspace_id, source_app.type)
 
-            now = datetime.datetime.now()
+            now = utcnow_naive()
 
             # 创建新应用（复制基础信息）
             new_app = App(
@@ -956,6 +959,8 @@ class AppService:
                         nodes=copy.deepcopy(source_config.nodes) if source_config.nodes else [],
                         edges=copy.deepcopy(source_config.edges) if source_config.edges else [],
                         variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
+                        environment_variables=copy.deepcopy(source_config.environment_variables)
+                        if source_config.environment_variables else [],
                         execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
                         features=copy.deepcopy(source_config.features) if source_config.features else {},
                         triggers=copy.deepcopy(source_config.triggers) if source_config.triggers else [],
@@ -1338,7 +1343,7 @@ class AppService:
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
         agent_cfg: Optional[AgentConfig] = self.db.scalars(stmt).first()
-        now = datetime.datetime.now()
+        now = utcnow_naive()
 
         if not agent_cfg:
             agent_cfg = AgentConfig(
@@ -1383,7 +1388,7 @@ class AppService:
     def _agent_config_from_release(self, release: "AppRelease") -> "AgentConfig":
         """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
+        now = release.created_at or utcnow_naive()
         agent_cfg = AgentConfig(
             id=uuid.uuid4(),
             app_id=release.app_id,
@@ -1405,7 +1410,7 @@ class AppService:
     def _workflow_config_from_release(self, release: "AppRelease") -> "WorkflowConfig":
         """从发布版本快照重建 WorkflowConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
+        now = release.created_at or utcnow_naive()
         from app.models.workflow_model import WorkflowConfig as WorkflowConfigModel
         # 查出源应用真实的 WorkflowConfig id，供 workflow_executions 外键使用
         real_config = WorkflowConfigRepository(self.db).get_by_app_id(release.app_id)
@@ -1523,7 +1528,7 @@ class AppService:
         Returns:
             AgentConfig: 默认配置对象
         """
-        now = datetime.datetime.now()
+        now = utcnow_naive()
 
         # 创建一个临时的配置对象，不添加到数据库
         default_config = AgentConfig(
@@ -1642,7 +1647,7 @@ class AppService:
         # 获取现有配置
         repo = WorkflowConfigRepository(self.db)
         workflow_cfg = repo.get_by_app_id(app_id)
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         workflow_service = WorkflowService(self.db)
         features = data.features or {}
         workflow_type = self._normalize_workflow_type(
@@ -1656,6 +1661,7 @@ class AppService:
             nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
             edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
             variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            environment_variables=[var.model_dump() for var in data.environment_variables] if data.environment_variables else [],
             execution_config=data.execution_config.model_dump() if data.execution_config else {},
             features=features,
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
@@ -1676,6 +1682,7 @@ class AppService:
                 nodes=config_dict["nodes"],
                 edges=config_dict["edges"],
                 variables=config_dict["variables"],
+                environment_variables=config_dict["environment_variables"],
                 execution_config=config_dict["execution_config"],
                 triggers=config_dict["triggers"],
                 features=config_dict["features"],
@@ -1691,6 +1698,7 @@ class AppService:
             workflow_cfg.nodes = config_dict["nodes"]
             workflow_cfg.edges = config_dict["edges"]
             workflow_cfg.variables = config_dict["variables"]
+            workflow_cfg.environment_variables = config_dict["environment_variables"]
             workflow_cfg.execution_config = config_dict["execution_config"]
             workflow_cfg.triggers = config_dict["triggers"]
             workflow_cfg.features = config_dict["features"]
@@ -1716,7 +1724,7 @@ class AppService:
         """
         from app.core.workflow.template_loader import load_workflow_template
 
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         normalized_workflow_type = self._normalize_workflow_type(workflow_type)
 
         template_id = "pure_workflow_simple_qa" \
@@ -1740,6 +1748,7 @@ class AppService:
                         {"source": "start", "target": "output_node"}
                     ],
                     "variables": [],
+                    "environment_variables": [],
                     "execution_config": {
                         "max_execution_time": 300,
                         "max_iterations": 10,
@@ -1756,6 +1765,7 @@ class AppService:
                         {'source': 'start', 'target': 'end'}
                     ],
                     'variables': [],
+                    'environment_variables': [],
                     'execution_config': {
                         'max_execution_time': 300,
                         'max_iterations': 10
@@ -1770,6 +1780,7 @@ class AppService:
             nodes=template_data.get('nodes', []),
             edges=template_data.get('edges', []),
             variables=template_data.get('variables', []),
+            environment_variables=template_data.get('environment_variables', []),
             execution_config=template_data.get('execution_config', {}),
             triggers=template_data.get('triggers', []),
             workflow_type=normalized_workflow_type,
@@ -1985,7 +1996,7 @@ class AppService:
                 "应用发布配置准备完成"
             )
 
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         version = self._get_next_version(app_id)
 
         release = AppRelease(
@@ -2170,7 +2181,7 @@ class AppService:
             )
 
         app.current_release_id = release.id
-        app.updated_at = datetime.datetime.now()
+        app.updated_at = utcnow_naive()
 
         self.db.commit()
         self.db.refresh(release)
@@ -2243,7 +2254,7 @@ class AppService:
                 )
 
         # 3. 创建分享记录
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         shares = []
 
         for target_ws_id in target_workspace_ids:
@@ -2587,7 +2598,7 @@ class AppService:
             )
 
         share.permission = permission
-        share.updated_at = datetime.datetime.now()
+        share.updated_at = utcnow_naive()
         self.db.commit()
         self.db.refresh(share)
 

@@ -162,7 +162,8 @@ class SharedChatService:
         actual_config_id = None
         config_id = actual_config_id
         from app.core.agent.langchain_agent import LangChainAgent
-        from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
+        from app.services.draft_run_service import create_knowledge_retrieval_tool
+        from app.core.memory.memory_service import create_long_term_memory_tool
         from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 
         start_time = time.time()
@@ -240,12 +241,10 @@ class SharedChatService:
                 tools.append(kb_tool)
 
         # 添加长期记忆工具
-        memory_flag = False
         if memory:
             memory_config = config.get("memory", {})
-            if memory_config.get("enabled") and user_id:
-                memory_flag = True
-                memory_tool = create_long_term_memory_tool(memory_config, user_id)
+            memory_tool = create_long_term_memory_tool(memory_config, user_id)
+            if memory_tool:
                 tools.append(memory_tool)
 
         web_tools = config.get("tools")
@@ -363,7 +362,8 @@ class SharedChatService:
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
         from app.core.agent.langchain_agent import LangChainAgent
-        from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
+        from app.services.draft_run_service import create_knowledge_retrieval_tool
+        from app.core.memory.memory_service import create_long_term_memory_tool
         from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
         import json
 
@@ -446,12 +446,10 @@ class SharedChatService:
                     tools.append(kb_tool)
 
             # 添加长期记忆工具
-            memory_flag = False
             if memory:
                 memory_config = config.get("memory", {})
-                if memory_config.get("enabled") and user_id:
-                    memory_flag = True
-                    memory_tool = create_long_term_memory_tool(memory_config, user_id)
+                memory_tool = create_long_term_memory_tool(memory_config, user_id)
+                if memory_tool:
                     tools.append(memory_tool)
 
             web_tools = config.get("tools")
@@ -518,10 +516,15 @@ class SharedChatService:
                     total_tokens = chunk
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
                     yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
-                else:
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    yield f"event: agent_log\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, str):
                     full_content += chunk
                     # 发送消息块事件
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict):
+                    event_type = str(chunk.get("type") or "unknown")
+                    yield f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
             elapsed_time = time.time() - start_time
 

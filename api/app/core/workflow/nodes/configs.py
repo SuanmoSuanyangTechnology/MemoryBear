@@ -13,6 +13,11 @@ from app.core.workflow.nodes.code.config import CodeNodeConfig
 from app.core.workflow.nodes.cycle_graph.config import LoopNodeConfig, IterationNodeConfig
 from app.core.workflow.nodes.end.config import EndNodeConfig
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig
+from app.core.workflow.nodes.human_intervention.config import (
+    HumanInterventionNodeConfig,
+    ActionConfig,
+    TimeoutConfig,
+)
 from app.core.workflow.nodes.if_else.config import IfElseNodeConfig
 from app.core.workflow.nodes.jinja_render.config import JinjaRenderNodeConfig
 from app.core.workflow.nodes.knowledge.config import KnowledgeRetrievalNodeConfig
@@ -55,5 +60,8 @@ __all__ = [
     "NoteNodeConfig",
     "ListOperatorNodeConfig",
     "DocExtractorNodeConfig",
-    "OutputNodeConfig"
+    "OutputNodeConfig",
+    "HumanInterventionNodeConfig",
+    "ActionConfig",
+    "TimeoutConfig",
 ]

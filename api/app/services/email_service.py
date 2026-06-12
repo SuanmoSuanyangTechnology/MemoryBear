@@ -4,7 +4,7 @@ import asyncio
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import Header
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
 from concurrent.futures import ThreadPoolExecutor
 
 from app.core.config import settings
@@ -29,7 +29,12 @@ def _send_email_sync(to_email: str, subject: str, html_content: str, text_conten
     msg['Subject'] = Header(subject, "utf-8")
     from_name = "MemoryBear系统"
     msg['From'] = formataddr((Header(from_name, 'utf-8').encode(), smtp_user))
-    msg['To'] = Header(to_email, "utf-8")
+    msg['To'] = to_email
+    msg['Date'] = formatdate(localtime=True)
+    if "@" in smtp_user:
+        msg['Message-ID'] = make_msgid(domain=smtp_user.rsplit("@", 1)[1])
+    else:
+        msg['Message-ID'] = make_msgid()
 
     if not text_content:
         text_content = html_content.replace('<br>', '\n').replace('<p>', '\n').replace('</p>', '\n')

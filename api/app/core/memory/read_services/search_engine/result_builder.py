@@ -49,8 +49,8 @@ class ChunkBuilder(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</chunk>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</chunk>\n")
         return "".join(parts)
 
 
@@ -72,8 +72,8 @@ class StatementBuiler(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</statement>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</statement>\n")
         return "".join(parts)
 
 
@@ -97,8 +97,8 @@ class EntityBuilder(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</entity>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</entity>\n")
         return "".join(parts)
 
 
@@ -120,8 +120,8 @@ class SummaryBuilder(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</summary>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</summary>\n")
         return "".join(parts)
 
 
@@ -157,8 +157,8 @@ class PerceptualBuilder(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</history-file-input>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</history-file-input>\n")
         return "".join(parts)
 
 
@@ -180,8 +180,8 @@ class CommunityBuilder(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</community>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</community>\n")
         return "".join(parts)
 
 
@@ -207,10 +207,10 @@ class MetadataBuilder(BaseBuilder):
         parts = ["<user-info>"]
         fields = [
             # ("description", self.record.get("description", "")),
-            ("aliases_name", self.record.get("aliases", [])),
+            ("aliases-name", self.record.get("aliases", [])),
             ("anchors", self.record.get("anchors", [])),
-            ("beliefs_or_stances", self.record.get("beliefs_or_stances", [])),
-            ("core_facts", self.record.get("core_facts", [])),
+            ("beliefs-or-stances", self.record.get("beliefs_or_stances", [])),
+            ("core-facts", self.record.get("core_facts", [])),
             ("events", self.record.get("events", [])),
             ("goals", self.record.get("goals", [])),
             ("interests", self.record.get("interests", [])),
@@ -219,8 +219,8 @@ class MetadataBuilder(BaseBuilder):
         ]
         for tag, value in fields:
             if value:
-                parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</user-info>")
+                parts.append(f"<{tag}>{value}</{tag}>\n")
+        parts.append("</user-info>\n")
         return "".join(parts)
 
 
@@ -252,6 +252,6 @@ def build_relation_content(rel: RelationMemory) -> str:
     ]
     for tag, value in fields:
         if value:
-            parts.append(f"<{tag}>{value}</{tag}>")
-    parts.append("</relationship>")
+            parts.append(f"<{tag}>{value}</{tag}>\n")
+    parts.append("</relationship>\n")
     return "".join(parts)

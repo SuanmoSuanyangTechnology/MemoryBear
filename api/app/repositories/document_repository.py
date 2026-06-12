@@ -1,12 +1,16 @@
 import uuid
-import datetime
 from sqlalchemy.orm import Session
+from app.core.utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from app.models.document_model import Document
 from app.schemas import document_schema
 from app.core.logging_config import get_db_logger
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
+
+
+def _pending_progress_msg() -> str:
+    return f"{to_iso_z(utcnow())} Pending."
 
 
 def get_documents_paginated(
@@ -105,10 +109,10 @@ def reset_documents_progress_by_kb_id(db: Session, kb_id: uuid.UUID) -> int:
         update_data = {
             Document.chunk_num: 0,
             Document.progress: 0,
-            Document.progress_msg: "Pending",
+            Document.progress_msg: _pending_progress_msg(),
             Document.process_duration: 0,
             Document.run: 0,  # Reset run status
-            Document.updated_at: datetime.datetime.now()
+            Document.updated_at: utcnow_naive()
         }
 
         # Perform batch update

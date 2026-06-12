@@ -9,6 +9,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict
 
+from app.core.utils.datetime_utils import utcnow_naive
+from app.core.memory.models.graph_models import (
+    EntityEntityEdge,
+    ExtractedEntityNode,
+    StatementEntityEdge,
+)
 from app.core.memory.models.graph_models import ExtractedEntityNode
 from app.core.memory.utils.data.ontology import get_type_id
 
@@ -22,7 +28,8 @@ def _parse_dt(val: Any) -> datetime:
             return datetime.fromisoformat(val)
         except Exception:
             pass
-    return datetime.now()
+    # Fallback: now; upstream should provide real times
+    return utcnow_naive()
 
 
 def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:

@@ -212,21 +212,29 @@ class NewExtractionOrchestrator:
         Priority:
             1. If ``dialog.metadata["supporting_context"]`` exists (injected by
                the sliding-window write path via ``get_chunked_dialogs``), use
-               the structured ``List[MessageItem]`` directly.
+               the structured ``{"before_msgs": [...], "after_msgs": [...]}``
+               payload directly.
             2. Otherwise fall back to wrapping ``dialog.content`` as a single
-               ``MessageItem(role="context", ...)`` for backward compatibility
-               with non-sliding-window call paths.
+               ``MessageItem(role="context", ...)`` placed in ``before_msgs``
+               for backward compatibility with non-sliding-window call paths.
+               (Using ``before_msgs`` is semantically accurate: the legacy
+               full-dialogue string represents content that has already
+               occurred relative to any chunk being processed.)
         """
         # Prefer structured context injected by the sliding-window write path
         if dialog.metadata and "supporting_context" in dialog.metadata:
-            return SupportingContext(msgs=dialog.metadata["supporting_context"])
+            payload = dialog.metadata["supporting_context"]
+            return SupportingContext(
+                before_msgs=payload.get("before_msgs", []),
+                after_msgs=payload.get("after_msgs", []),
+            )
 
         # Fallback: legacy string-concatenation path
-        msgs: List[MessageItem] = []
+        before_msgs: List[MessageItem] = []
         if hasattr(dialog, "content") and dialog.content:
             # dialog.content is the raw conversation string; wrap as single msg
-            msgs.append(MessageItem(role="context", msg=dialog.content))
-        return SupportingContext(msgs=msgs)
+            before_msgs.append(MessageItem(role="context", msg=dialog.content))
+        return SupportingContext(before_msgs=before_msgs, after_msgs=[])
     
     @staticmethod
     def _convert_to_triplet_input(

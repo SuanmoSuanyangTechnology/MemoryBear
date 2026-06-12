@@ -17,6 +17,8 @@ R(t, S) = offset + (1 - offset) * exp(-λ_time * t / (λ_mem * S))
 import math
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.models.variate_config import ForgettingEngineConfig
 
 
@@ -245,7 +247,7 @@ class ForgettingEngine:
             经过的天数（浮点数）
         """
         if current_time is None:
-            current_time = datetime.now()
+            current_time = utcnow_naive()
 
         time_diff = current_time - created_at
         return time_diff.total_seconds() / (24 * 3600)
@@ -265,7 +267,7 @@ class ForgettingEngine:
             经过的小时数（浮点数）
         """
         if current_time is None:
-            current_time = datetime.now()
+            current_time = utcnow_naive()
 
         time_diff = current_time - created_at
         return time_diff.total_seconds() / 3600

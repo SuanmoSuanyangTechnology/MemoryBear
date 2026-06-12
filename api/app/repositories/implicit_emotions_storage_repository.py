@@ -12,6 +12,7 @@ import redis
 from sqlalchemy import exists, not_, select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.end_user_model import EndUser
 from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
 
@@ -46,8 +47,8 @@ class ImplicitEmotionsStorageRepository:
         """创建新的存储记录（事务由调用方提交）"""
         storage = ImplicitEmotionsStorage(
             end_user_id=end_user_id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=utcnow_naive(),
+            updated_at=utcnow_naive()
         )
         self.db.add(storage)
         self.db.flush()
@@ -66,8 +67,8 @@ class ImplicitEmotionsStorageRepository:
             storage = self.create(end_user_id)
 
         storage.implicit_profile = profile_data
-        storage.implicit_generated_at = datetime.utcnow()
-        storage.updated_at = datetime.utcnow()
+        storage.implicit_generated_at = utcnow_naive()
+        storage.updated_at = utcnow_naive()
 
         self.db.flush()
         self.db.refresh(storage)
@@ -85,8 +86,8 @@ class ImplicitEmotionsStorageRepository:
             storage = self.create(end_user_id)
 
         storage.emotion_suggestions = suggestions_data
-        storage.emotion_generated_at = datetime.utcnow()
-        storage.updated_at = datetime.utcnow()
+        storage.emotion_generated_at = utcnow_naive()
+        storage.updated_at = utcnow_naive()
 
         self.db.flush()
         self.db.refresh(storage)
@@ -216,7 +217,7 @@ class ImplicitEmotionsStorageRepository:
         """
         from sqlalchemy import String as SAString
         from sqlalchemy import cast
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = utcnow_naive().replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow_start = today_start + timedelta(days=1)
         offset = 0
         while True:

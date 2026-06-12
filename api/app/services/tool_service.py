@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.tools.mcp import MCPToolManager, SimpleMCPClient
@@ -1102,7 +1103,7 @@ class ToolService:
                         available_tools_display.append(str(tool_item))
 
                 config_data.update({
-                    "last_health_check": int(mcp_config.last_health_check.timestamp() * 1000) if mcp_config.last_health_check else None,
+                    "last_health_check": to_timestamp_ms(mcp_config.last_health_check),
                     "health_status": mcp_config.health_status,
                     "available_tools": available_tools_display,
                     "source_channel": mcp_config.source_channel,
@@ -1431,7 +1432,7 @@ class ToolService:
                 tool_config_id=uuid.UUID(tool_id),
                 status=ExecutionStatus.RUNNING.value,
                 input_data=parameters,
-                started_at=datetime.now(),
+                started_at=utcnow_naive(),
                 user_id=user_id,
                 workspace_id=workspace_id
             )
@@ -1451,7 +1452,7 @@ class ToolService:
                 execution.status = ExecutionStatus.COMPLETED.value if result.success else ExecutionStatus.FAILED.value
                 execution.output_data = result.data if result.success else None
                 execution.error_message = result.error if not result.success else None
-                execution.completed_at = datetime.now()
+                execution.completed_at = utcnow_naive()
                 execution.execution_time = result.execution_time
                 execution.token_usage = result.token_usage
                 self.db.commit()
@@ -1527,7 +1528,7 @@ class ToolService:
 
                     # 更新数据库
                     mcp_config.available_tools = tool_list
-                    mcp_config.last_health_check = datetime.now()
+                    mcp_config.last_health_check = utcnow_naive()
                     mcp_config.health_status = "healthy"
                     mcp_config.error_message = None
                     config.status = ToolStatus.AVAILABLE.value
@@ -1547,7 +1548,7 @@ class ToolService:
                     return {"success": False, "message": f"同步工具失败: {error}"}
             else:
                 # 更新错误状态
-                mcp_config.last_health_check = datetime.now()
+                mcp_config.last_health_check = utcnow_naive()
                 mcp_config.health_status = "error"
                 mcp_config.error_message = test_result.get("error", "连接失败")
                 config.status = ToolStatus.ERROR.value
@@ -1633,7 +1634,7 @@ class ToolService:
 
                 # 更新数据库
                 mcp_config.available_tools = tool_list
-                mcp_config.last_health_check = datetime.now()
+                mcp_config.last_health_check = utcnow_naive()
                 mcp_config.health_status = "healthy"
                 mcp_config.error_message = None
 
@@ -1654,7 +1655,7 @@ class ToolService:
             try:
                 mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
                 if mcp_config:
-                    mcp_config.last_health_check = datetime.now()
+                    mcp_config.last_health_check = utcnow_naive()
                     mcp_config.health_status = "error"
                     mcp_config.error_message = str(e)
                     config.status = ToolStatus.ERROR.value

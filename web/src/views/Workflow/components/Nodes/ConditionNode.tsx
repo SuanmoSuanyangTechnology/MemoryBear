@@ -28,7 +28,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   const data = node?.getData() || {};
   const { t } = useTranslation()
   const graphRef = useRef(node?.model?.graph)
-  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [], data.appType ?? '')
+  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [], data.envVariables ?? [], data.appType ?? '')
 
   const getLocaleField = (field: string, filedType: string) => {
     const key = filedType === 'boolean'
@@ -166,6 +166,18 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
           <Flex justify="end" className="rb:text-[#212332] rb:font-medium rb:text-[12px]">
             ELSE
           </Flex>
+        </Flex>
+      }
+      {data.type === 'human-intervention' &&
+        <Flex vertical gap={4} className="rb:mt-3!">
+          {data.config?.actions?.defaultValue.map((_item: any, index: number) => (
+            <div key={index} className="rb:text-right rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+              ACTION_{index + 1}
+            </div>
+          ))}
+          <div className="rb:text-right rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+            TIMEOUT
+          </div>
         </Flex>
       }
     </div>

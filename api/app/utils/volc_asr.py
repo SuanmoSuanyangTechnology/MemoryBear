@@ -3,8 +3,8 @@ import json
 import uuid
 import os
 import time
-from datetime import datetime
 from app.core.config import settings
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 # 火山的ASR
@@ -78,7 +78,7 @@ def main():
     try:
         # 提交任务
         print("提交语音识别任务...")
-        task_id, status_code = asr_client.submit_task(audio_url)
+        task_id, _status_code = asr_client.submit_task(audio_url)
         if not task_id:
             raise Exception("提交任务失败，未获取到任务ID")
 
@@ -89,7 +89,7 @@ def main():
         result = asr_client.query_result(task_id)
 
         # 保存结果
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         output_file = os.path.join(output_dir, f"result_{timestamp}.json")
 
         with open(output_file, "w", encoding="utf-8") as f:

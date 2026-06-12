@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 from app.models.app_model import App
 from app.models.end_user_model import EndUser
@@ -274,7 +275,7 @@ class EndUserRepository:
                         EndUser.behavior_pattern: behavior_pattern,
                         EndUser.key_findings: key_findings,
                         EndUser.growth_trajectory: growth_trajectory,
-                        EndUser.memory_insight_updated_at: datetime.datetime.now()
+                        EndUser.memory_insight_updated_at: utcnow_naive()
                     },
                     synchronize_session=False
                 )
@@ -324,7 +325,7 @@ class EndUserRepository:
                         EndUser.personality_traits: personality,
                         EndUser.core_values: core_values,
                         EndUser.one_sentence_summary: one_sentence,
-                        EndUser.user_summary_updated_at: datetime.datetime.now()
+                        EndUser.user_summary_updated_at: utcnow_naive()
                     },
                     synchronize_session=False
                 )
@@ -371,7 +372,7 @@ class EndUserRepository:
                         EndUser.user_summary: user_summary,
                         EndUser.rag_tags: rag_tags,
                         EndUser.rag_personas: rag_personas,
-                        EndUser.rag_summary_updated_at: datetime.datetime.now(),
+                        EndUser.rag_summary_updated_at: utcnow_naive(),
                     },
                     synchronize_session=False
                 )
@@ -409,7 +410,7 @@ class EndUserRepository:
                 .update(
                     {
                         EndUser.memory_insight: memory_insight,
-                        EndUser.memory_insight_updated_at: datetime.datetime.now(),
+                        EndUser.memory_insight_updated_at: utcnow_naive(),
                     },
                     synchronize_session=False
                 )
@@ -446,6 +447,56 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
+            raise
+
+    def get_filtered_by_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        end_user_id: Optional[uuid.UUID] = None,
+        other_id: Optional[str] = None,
+        other_name: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> tuple[List[EndUser], int]:
+        """获取工作空间下按条件过滤的终端用户（分页）
+
+        所有过滤条件均为可选，多个条件之间为 AND 关系。
+
+        Args:
+            workspace_id: 工作空间ID（必填）
+            end_user_id: 终端用户ID（可选）
+            other_id: 第三方ID（可选）
+            other_name: 用户名称（可选，模糊匹配）
+            limit: 每页条数（None 表示不分页）
+            offset: 偏移量
+
+        Returns:
+            tuple[List[EndUser], int]: (匹配的终端用户列表, 总数量)
+        """
+        try:
+            base_query = self.db.query(EndUser).filter(EndUser.workspace_id == workspace_id)
+
+            if end_user_id is not None:
+                base_query = base_query.filter(EndUser.id == end_user_id)
+            if other_id is not None:
+                base_query = base_query.filter(EndUser.other_id == other_id)
+            if other_name is not None:
+                base_query = base_query.filter(EndUser.other_name.ilike(f"%{other_name}%"))
+
+            total = base_query.count()
+
+            if limit is not None:
+                end_users = base_query.order_by(EndUser.created_at.desc()).offset(offset).limit(limit).all()
+            else:
+                end_users = base_query.all()
+
+            db_logger.info(
+                f"成功按条件查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户（共 {total} 个）"
+            )
+            return end_users, total
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"按条件查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
             raise
 
     def get_all_active_workspaces(self) -> List[uuid.UUID]:

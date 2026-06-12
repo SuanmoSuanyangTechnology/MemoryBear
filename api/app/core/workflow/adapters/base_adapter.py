@@ -14,6 +14,7 @@ from app.schemas.workflow_schema import (
     EdgeDefinition,
     NodeDefinition,
     VariableDefinition,
+    EnvironmentVariableDefinition,
     ExecutionConfig,
     TriggerConfig
 )
@@ -41,6 +42,7 @@ class WorkflowParserResult(BaseModel):
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
+    environment_variables: list[EnvironmentVariableDefinition] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     warnings: list[ExceptionDefinition] = Field(default_factory=list)
     errors: list[ExceptionDefinition] = Field(default_factory=list)
@@ -54,6 +56,7 @@ class WorkflowImportResult(BaseModel):
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
+    environment_variables: list[EnvironmentVariableDefinition] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     warnings: list[ExceptionDefinition] = Field(default_factory=list)
     errors: list[ExceptionDefinition] = Field(default_factory=list)
@@ -65,6 +68,7 @@ class BasePlatformAdapter(ABC):
         self.nodes: list[NodeDefinition] = []
         self.edges: list[EdgeDefinition] = []
         self.conv_variables: list[VariableDefinition] = []
+        self.env_variables: list[EnvironmentVariableDefinition] = []
 
         self.errors = []
         self.warnings = []

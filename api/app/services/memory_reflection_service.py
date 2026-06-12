@@ -9,6 +9,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine import ReflectionConfig, ReflectionEngine
@@ -71,8 +72,8 @@ class WorkspaceAppService:
             "type": app.type,
             "status": app.status,
             "visibility": app.visibility,
-            "created_at": app.created_at.isoformat() if app.created_at else None,
-            "updated_at": app.updated_at.isoformat() if app.updated_at else None,
+            "created_at": to_iso_z(app.created_at),
+            "updated_at": to_iso_z(app.updated_at),
             "releases": [],
             "memory_configs": [],
             "end_users": []
@@ -223,7 +224,7 @@ class WorkspaceAppService:
 
             end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
             if end_user:
-                end_user.reflection_time = datetime.now()
+                end_user.reflection_time = utcnow_naive()
                 self.db.commit()
                 api_logger.info(f"成功更新用户反思时间，end_user_id: {end_user_id}")
                 return True
@@ -334,7 +335,7 @@ class MemoryReflectionService:
                         else:
                             reflection_time = current_reflection_time
 
-                        current_time = datetime.now()
+                        current_time = utcnow_naive()
                         time_diff = current_time - reflection_time
                         hours_diff = int(time_diff.total_seconds() / 3600)
 

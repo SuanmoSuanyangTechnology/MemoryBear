@@ -18,9 +18,11 @@ from . import (
     file_controller,
     file_storage_controller,
     home_page_controller,
+    human_intervention_controller,
     i18n_controller,
     implicit_memory_controller,
     knowledge_controller,
+    knowledge_metadata_controller,
     knowledgeshare_controller,
     mcp_market_controller,
     mcp_market_config_controller,
@@ -68,6 +70,7 @@ manager_router.include_router(model_controller.router)
 manager_router.include_router(file_controller.router)
 manager_router.include_router(document_controller.router)
 manager_router.include_router(knowledge_controller.router)
+manager_router.include_router(knowledge_metadata_controller.router)
 manager_router.include_router(mcp_market_controller.router)
 manager_router.include_router(mcp_market_config_controller.router)
 manager_router.include_router(chunk_controller.router)
@@ -107,5 +110,6 @@ manager_router.include_router(tenant_subscription_controller.router)
 manager_router.include_router(tenant_subscription_controller.public_router)
 manager_router.include_router(message_interaction_controller.router)  # 消息交互功能
 manager_router.include_router(workflow_trigger_controller.router)
+manager_router.include_router(human_intervention_controller.router)  # 人工介入功能
 
 __all__ = ["manager_router"]

@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.agent_execution_model import AgentExecution
 
 
@@ -33,12 +34,10 @@ class AgentExecutionRepository:
         message_id: Optional[uuid.UUID] = None,
     ) -> None:
         """更新执行记录为完成状态"""
-        import datetime as dt
-
         updates = {
             "steps": steps,
             "status": status,
-            "completed_at": completed_at or dt.datetime.now(),
+            "completed_at": completed_at or utcnow_naive(),
         }
         if elapsed_time is not None:
             updates["elapsed_time"] = elapsed_time

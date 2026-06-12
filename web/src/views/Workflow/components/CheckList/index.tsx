@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 19:46:06
+ * @Last Modified time: 2026-06-02 16:12:54
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -89,6 +89,9 @@ const specialValidators: Record<string, (val: any) => boolean> = {
   'code.output_variables': (val: any[]) => !Array.isArray(val) || !val.length,
   // jinja-render.mapping: if non-empty, every item must have a name
   'jinja-render.mapping': (val: any[]) => Array.isArray(val) && val.length > 0 && val.some(v => !v?.name || !v?.value),
+  'agent.model': (val: any) => !val?.model_id,
+  'human-intervention.actions': (val: any[]) => !Array.isArray(val) || !val.length || val.some(v => !v?.id || !v?.label),
+  'human-intervention.delivery_method': (val: Record<string, { enabled: boolean; }>) => Object.values(val).every(v => !v.enabled),
 }
 
 function isEmpty(val: any): boolean {
@@ -99,10 +102,25 @@ function isEmpty(val: any): boolean {
 
 function validateNode(type: string, config: Record<string, any>): CheckError[] {
   const errors: CheckError[] = []
+  console.log('config', config)
+  
   const nodeConfig = nodeConfigMap[type]
+
   if (!nodeConfig) return errors
 
-  const get = (key: string) => config[key]?.defaultValue
+  // Support both old structure (config[key].defaultValue) and new structure (config[key])
+  const get = (key: string) => {
+    const value = config[key]
+    if (value === null || value === undefined) {
+      return undefined
+    }
+    // If value is an object with defaultValue, use it (old structure)
+    if (typeof value === 'object' && 'defaultValue' in value) {
+      return value.defaultValue
+    }
+    // Otherwise, use the value directly (new structure)
+    return value
+  }
 
   Object.entries(nodeConfig).forEach(([field, fieldConfig]) => {
     if (!fieldConfig?.required) return
@@ -130,6 +148,22 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
     const body = get('body')
     if (body?.content_type === 'binary' && !body?.data) {
       errors.push({ key: 'http-request.body.data', message: '' })
+    }
+  }
+
+  // trigger: trigger_type required when enabled = true
+  if (type === 'trigger') {
+    const enabled = get('enabled')
+    if (enabled === true || enabled === 'true') {
+      const triggerType = get('trigger_type')
+      if (isEmpty(triggerType)) {
+        errors.push({ key: 'trigger.trigger_type', message: '' })
+      } else if (triggerType === 'schedule') {
+        const cron = get('cron')
+        if (isEmpty(typeof cron === 'object' ? cron.defaultValue : cron)) {
+          errors.push({ key: 'trigger.cron', message: '' })
+        }
+      }
     }
   }
 

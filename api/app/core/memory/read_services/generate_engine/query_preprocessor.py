@@ -1,7 +1,7 @@
 import logging
 import re
-from datetime import datetime
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.prompt import prompt_manager
 from app.core.memory.utils.llm.llm_utils import StructResponse
 from app.core.models import RedBearLLM
@@ -17,14 +17,14 @@ class QueryPreprocessor:
         if not text:
             return text
 
-        text = re.sub(rf"{"|".join(AgentMemoryDataset.PRONOUN)}", AgentMemoryDataset.NAME, text)
+        text = re.sub(rf'{"|".join(AgentMemoryDataset.PRONOUN)}', AgentMemoryDataset.NAME, text)
         return text
 
     @staticmethod
     async def split(query: str, history: list, llm_client: RedBearLLM):
         system_prompt = prompt_manager.render(
             name="problem_split",
-            datetime=datetime.now().strftime("%Y-%m-%d"),
+            datetime=utcnow_naive().strftime("%Y-%m-%d"),
         )
         messages = [
             {"role": "system", "content": system_prompt},

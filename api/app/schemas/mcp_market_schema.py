@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
 import datetime
 import uuid
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 
 class McpMarketBase(BaseModel):
@@ -34,4 +35,4 @@ class McpMarket(McpMarketBase):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)

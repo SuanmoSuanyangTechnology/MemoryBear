@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 17:54:08
+ * @Last Modified time: 2026-06-05 18:11:51
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -117,6 +117,31 @@ export const feedbackMessage = (shareToken: string, message_id: string, data: { 
     }
   })
 }
+// Experience session - Human intervention trigger
+export const interventionsSubmit = (share_token: string, execution_id: string, data: { node_id: string; action_id: string; }) => {
+  return request.post(`/public/share/workflow/interventions/${execution_id}/submit`, data, {
+    headers: {
+      'Authorization': `Bearer ${share_token}`
+    }
+  })
+}
+// Restore SSE stream + Submit action
+export const interventionsResumeSubmit = (share_token: string, execution_id: string, data: { node_id: string; action_id: string; }, onMessage?: (data: SSEMessage[]) => void) => {
+  return handleSSE(`/public/share/workflow/interventions/${execution_id}/resume-submit`, data, onMessage, {
+    headers: {
+      'Authorization': `Bearer ${share_token}`
+    }
+  })
+}
+// Experience session - Human intervention trigger
+export const appInterventionsSubmit = (app_id: string, execution_id: string, data: {
+  node_id: string;
+  action_id: string;
+  form_data: Record<string, string>
+}) => {
+  return request.post(`/apps/${app_id}/workflow/interventions/${execution_id}/submit`, data)
+}
+
 // Get share token
 export const getShareToken = (share_token: string, user_id: string) => {
   return request.post(`/public/share/${share_token}/token`, { user_id })
@@ -247,6 +272,10 @@ export const resetAppModelConfig = (app_id: string) => {
 export const nodeRun = (app_id: string, node_id: string, values: Record<string, unknown>) => {
   return request.post(`/apps/${app_id}/workflow/nodes/${node_id}/run`, values)
 }
+// Rerun based on the latest single node debug input
+export const nodeRunWithCache = (app_id: string, node_id: string, values: Record<string, unknown>) => {
+  return request.post(`/apps/${app_id}/workflow/nodes/${node_id}/rerun`, values)
+}
 // Configure annotation settings
 export const updateAnnotationsSettings = (app_id: string, data: AnnotationSettingForm) => {
   return request.put(`/apps/${app_id}/annotations/settings`, data)
@@ -298,7 +327,19 @@ export const previewWorkflowToolParams = (app_id: string) => {
 export const workflowPublishAsTool = (app_id: string, data: WorkflowToolForm) => {
   return request.post(`/apps/${app_id}/publish_tool`, data)
 }
-// Get workflow execution details and variable snapshot
-export const getWorkflowExecutionDetail = (app_id: string, execution_id: string) => {
-  return request.get(`/apps/${app_id}/workflow/executions/${execution_id}`)
+// 查看缓存
+export const getWorkflowDebugState = (app_id: string) => {
+  return request.get(`/apps/${app_id}/workflow/debug/state`)
+}
+// Get workflow node last run details
+export const getWorkflowNodeLastRunDetail = (app_id: string, node_id: string) => {
+  return request.get(`/apps/${app_id}/workflow/nodes/${node_id}/last_run`)
+}
+// Update node cache
+export const updateWorkflowNodeCache = (app_id: string, node_id: string, data: Record<string, unknown>) => {
+  return request.put(`/apps/${app_id}/workflow/nodes/${node_id}/cache`, data)
+}
+// Clear cache
+export const clearWorkflowCache = (app_id: string) => {
+  return request.post(`/apps/${app_id}/workflow/cache/reset`)
 }

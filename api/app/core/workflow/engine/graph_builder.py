@@ -16,12 +16,25 @@ from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Send
 
 from app.core.workflow.engine.state_manager import WorkflowState
+
+_checkpointer_cache: dict[str, InMemorySaver] = {}
+
+
+def get_or_create_checkpointer(thread_id: str) -> InMemorySaver:
+    if thread_id not in _checkpointer_cache:
+        _checkpointer_cache[thread_id] = InMemorySaver()
+    return _checkpointer_cache[thread_id]
+
+
+def remove_checkpointer(thread_id: str):
+    _checkpointer_cache.pop(thread_id, None)
 from app.core.workflow.engine.stream_output_coordinator import OutputContent, StreamOutputConfig
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
 from app.core.workflow.nodes.llm import LLMNodeConfig
 from app.core.workflow.nodes.code import CodeNodeConfig
+from app.core.workflow.nodes.agent import AgentNodeConfig
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
 from app.core.workflow.variable.base_variable import VariableType
@@ -155,6 +168,11 @@ class GraphBuilder:
                 HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
             ]:
                 non_branch_nodes.append(node_info["id"])
+            elif node_type == NodeType.AGENT and \
+                    AgentNodeConfig(**node_config).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
             elif node_type in BRANCH_NODES:
                 if node_info.get("branch") is not None:
                     branch_nodes.append(
@@ -253,12 +271,13 @@ class GraphBuilder:
                         [
                             OutputContent(
                                 literal=output_string,
-                                # Literal text can be activated immediately unless blocked by branch
-                                activate=activate,
-                                # Variable segments are marked explicitly
-                                is_variable=not activate
+                                # Literal segments are always active (can be emitted immediately).
+                                # Variable segments start inactive (wait for scope activation).
+                                activate=is_literal,
+                                # is_variable based on actual content type, not End node's overall activate
+                                is_variable=not is_literal
                             )
-                            for output_string, activate in zip(output_template, output_flag)
+                            for output_string, is_literal in zip(output_template, output_flag)
                         ]
                     ),
                     # Cursor for streaming output (initially 0)
@@ -331,8 +350,14 @@ class GraphBuilder:
                     # Generate a condition expression for each edge
                     # Used later to determine which branch to take based on the node's output
                     # For LLM nodes, use branch_signal field for routing (output is dynamic text)
+                    # For human-intervention nodes, use __route field (not visible in node output)
                     # For other branch nodes (e.g. HTTP), use output field
-                    route_field = "branch_signal" if node_type in (NodeType.LLM, NodeType.CODE) else "output"
+                    if node_type in (NodeType.LLM, NodeType.CODE, NodeType.AGENT):
+                        route_field = "branch_signal"
+                    elif node_type == NodeType.HUMAN_INTERVENTION:
+                        route_field = "__route"
+                    else:
+                        route_field = "output"
                     related_edge[idx]['condition'] = (
                         f"node['{node_id}']['{route_field}'] == '{related_edge[idx].get('label') or 'SUCCESS'}'"
                     )
@@ -468,9 +493,10 @@ class GraphBuilder:
                     for label, branch in unique_branch.items():
                         if node_output and evaluate_condition(
                                 branch["condition"],
-                                {},
-                                {src: node_output},
-                                {}
+                                variable_pool.lazy_namespace("conv"),
+                                {**variable_pool.lazy_all_node_outputs(), src: node_output},
+                                variable_pool.lazy_namespace("sys"),
+                                variable_pool.lazy_namespace("env"),
                         ):
                             logger.debug(f"Conditional routing {src}: selected branch {label}")
                             new_state["activate"][branch["node"]["name"]] = True
@@ -515,7 +541,7 @@ class GraphBuilder:
                 self.graph.add_edge(node, END)
         return
 
-    def build(self) -> CompiledStateGraph:
+    def build(self, checkpointer: InMemorySaver = None) -> CompiledStateGraph:
         nodes = self.workflow_config.get("nodes", [])
         edges = self.workflow_config.get("edges", [])
 
@@ -557,5 +583,5 @@ class GraphBuilder:
         self.add_edges()
 
         self._analyze_end_node_output()
-        checkpointer = InMemorySaver()
-        return self.graph.compile(checkpointer=checkpointer)
+        _cp = checkpointer or InMemorySaver()
+        return self.graph.compile(checkpointer=_cp)

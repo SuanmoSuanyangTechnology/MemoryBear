@@ -70,11 +70,25 @@ async def lifespan(app: FastAPI):
         logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")
+
+    # 预热同步 Redis 连接池，避免首次请求承担建池 + PING 的冷启动开销
+    try:
+        from app.tasks import warmup_sync_redis_pool
+        warmup_sync_redis_pool()
+    except Exception as e:
+        logger.warning(f"Sync Redis pool warmup skipped: {e}")
+
+    # Start background intervention timeout scanner
+    from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
+    start_timeout_scanner()
+
     logger.info("应用程序启动完成")
 
     async with mcp_app.lifespan(app):
         yield
     # 应用关闭事件
+    from app.services.intervention_timeout_scheduler import stop as stop_timeout_scanner
+    stop_timeout_scanner()
     logger.info("应用程序正在关闭")
 
 

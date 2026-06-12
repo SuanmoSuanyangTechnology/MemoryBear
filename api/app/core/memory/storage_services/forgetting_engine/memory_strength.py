@@ -19,6 +19,7 @@ import math
 from typing import List, Optional
 from datetime import datetime, timedelta
 
+from app.core.utils.datetime_utils import utcnow_naive
 
 class MemoryStrengthCalculator:
     """
@@ -66,7 +67,7 @@ class MemoryStrengthCalculator:
             raise ValueError("access_times cannot be empty")
 
         if current_time is None:
-            current_time = datetime.now()
+            current_time = utcnow_naive()
 
         # Calculate time differences in specified units
         time_diffs = []
@@ -180,7 +181,7 @@ class MemoryStrengthCalculator:
             tuple: (should_retain: bool, retention_probability: float, activation: float)
         """
         if current_time is None:
-            current_time = datetime.now()
+            current_time = utcnow_naive()
 
         activation = self.calculate_activation(access_times, current_time)
 
@@ -241,7 +242,7 @@ def calculate_retention(
     activation = calculator.calculate_activation(access_times, current_time)
 
     if current_time is None:
-        current_time = datetime.now()
+        current_time = utcnow_naive()
 
     last_access = max(access_times)
     time_since_last = (current_time - last_access).total_seconds()

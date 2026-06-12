@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 from uuid import uuid4
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_memory_logger
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.base_response import RobustLLMResponse
@@ -216,7 +217,7 @@ async def _process_chunk_summary(
             user_id=dialog.end_user_id,
             apply_id=dialog.end_user_id,
             run_id=dialog.run_id,  # 使用 dialog 的 run_id
-            created_at=datetime.now(),
+            created_at=utcnow_naive(),
             dialog_id=dialog.id,
             chunk_ids=[chunk.id],
             content=summary_text,

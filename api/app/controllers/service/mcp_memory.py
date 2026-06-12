@@ -97,7 +97,7 @@ async def write_memory(
 @mcp.tool
 async def read_memory(
         message: str,
-        search_switch: str = "0",
+        search_switch: str = "2",
 ) -> dict:
     """检索与当前上下文相关的历史记忆。
 
@@ -111,8 +111,8 @@ async def read_memory(
     Args:
         message: 检索查询，用自然语言描述想查找什么。越具体效果越好。
                  例如："用户对咖啡有什么偏好"、"上次讨论的旅行计划"。
-        search_switch: 检索深度。"0"=深度检索+交叉验证（默认，适合复杂问题），
-                       "1"=深度检索（适合一般回忆），"2"=快速检索（适合简单查询）。
+        search_switch: 检索深度。"0"=深度检索+交叉验证（适合复杂问题），
+                       "1"=深度检索（适合一般回忆），"2"=快速检索（默认，适合简单查询）。
     """
     try:
         workspace_id, end_user_id, config_id, storage_type = _resolve_context()

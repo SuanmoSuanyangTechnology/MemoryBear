@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 import datetime
 import uuid
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
 from app.core.logging_config import get_business_logger
 
@@ -80,6 +81,14 @@ class ModelConfig(ModelConfigBase):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     api_keys: List["ModelApiKey"] = []
+    is_deprecated: bool = False
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        instance = super().model_validate(obj, **kwargs)
+        if hasattr(obj, "model_base") and obj.model_base is not None:
+            instance.is_deprecated = bool(obj.model_base.is_deprecated)
+        return instance
 
     @staticmethod
     def mask_api_key(key: str, prefix: int = 4, suffix: int = 4) -> str:
@@ -94,7 +103,7 @@ class ModelConfig(ModelConfigBase):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime | None):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("api_keys", when_used="json")
     def _serialize_api_keys(self, api_keys: List["ModelApiKey"]):
@@ -107,7 +116,7 @@ class ModelConfig(ModelConfigBase):
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # ModelApiKey Schemas
@@ -210,15 +219,15 @@ class ModelApiKey(ModelApiKeyBase):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("last_used_at", when_used="json")
     def _serialize_last_used_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class ModelConfigQuery(BaseModel):

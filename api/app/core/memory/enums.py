@@ -17,6 +17,9 @@ class SearchStrategy(StrEnum):
     NORMAL = "1"
     QUICK = "2"
 
+    CONV = "3"
+    META = "4"
+
 
 class Neo4jNodeType(StrEnum):
     CHUNK = "Chunk"
@@ -28,6 +31,7 @@ class Neo4jNodeType(StrEnum):
     STATEMENT = "Statement"
 
     RAG = "Rag"
+    HISTORY = "HISTORY"
 
 
 class TripletPredicate(Enum):

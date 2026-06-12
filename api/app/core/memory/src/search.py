@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
 
 from app.core.logging_config import get_memory_logger
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.config_models import TemporalSearchParams
 from app.core.memory.models.variate_config import ForgettingEngineConfig
@@ -237,7 +238,7 @@ def rerank_with_activation(
     engine = None
     if forgetting_config:
         engine = ForgettingEngine(forgetting_config)
-    now_dt = now or datetime.now()
+    now_dt = now or utcnow_naive()
 
     reranked: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -728,7 +729,7 @@ async def run_hybrid_search(
                 "total_embedding_results": 0,
                 "total_reranked_results": 0,
                 "search_query": "",
-                "search_timestamp": datetime.now().isoformat(),
+                "search_timestamp": to_iso_z(utcnow_naive()),
                 "error": "Empty query"
             }
         }
@@ -827,7 +828,7 @@ async def run_hybrid_search(
                 "total_embedding_results": sum(
                     len(v) if isinstance(v, list) else 0 for v in embedding_results.values()),
                 "search_query": query_text,
-                "search_timestamp": datetime.now().isoformat()
+                "search_timestamp": to_iso_z(utcnow_naive())
             }
 
             # Apply two-stage reranking with ACTR activation calculation
@@ -885,7 +886,7 @@ async def run_hybrid_search(
                     len(v) if isinstance(v, list) else 0 for v in embedding_results.values()),
                 "total_reranked_results": sum(len(v) if isinstance(v, list) else 0 for v in reranked_results.values()),
                 "search_query": query_text,
-                "search_timestamp": datetime.now().isoformat(),
+                "search_timestamp": to_iso_z(utcnow_naive()),
                 "reranking_alpha": rerank_alpha,
                 "activation_boost_factor": activation_boost_factor,
                 "forgetting_rerank": use_forgetting_rerank,

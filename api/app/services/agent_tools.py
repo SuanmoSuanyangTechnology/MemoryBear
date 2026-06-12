@@ -7,6 +7,7 @@ from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models import AgentConfig, ModelConfig, AgentInvocation
 from app.services.agent_registry import AgentRegistry
 from app.core.exceptions import BusinessException, ResourceNotFoundException
@@ -243,7 +244,7 @@ def create_agent_invocation_tool(
                 input_message=message,
                 context=context,
                 status="running",
-                started_at=datetime.datetime.now()
+                started_at=utcnow_naive()
             )
             db.add(invocation)
             db.commit()
@@ -281,7 +282,7 @@ def create_agent_invocation_tool(
                 # 10. 更新调用记录
                 invocation.status = "completed"
                 invocation.output_message = result["message"]
-                invocation.completed_at = datetime.datetime.now()
+                invocation.completed_at = utcnow_naive()
                 invocation.elapsed_time = elapsed_time
                 invocation.token_usage = result.get("usage", {})
                 db.commit()
@@ -302,7 +303,7 @@ def create_agent_invocation_tool(
                 # 更新调用记录为失败
                 invocation.status = "failed"
                 invocation.error_message = str(e)
-                invocation.completed_at = datetime.datetime.now()
+                invocation.completed_at = utcnow_naive()
                 invocation.elapsed_time = time.time() - start_time
                 db.commit()
                 

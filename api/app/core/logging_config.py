@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.core.config import settings
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.sensitive_filter import SensitiveDataFilter
 
 
@@ -274,8 +275,7 @@ def get_prompt_logger() -> logging.Logger:
     logger.propagate = False  # Don't propagate to root logger (no console output)
     
     # Create timestamped log file
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = utcnow_naive().strftime("%Y%m%d-%H%M%S")
     log_file = Path("logs/prompts/") / f"prompt_logs-{timestamp}.log"
     
     # Ensure log directory exists
@@ -514,10 +514,8 @@ def log_time(step_name: str, duration: float, log_file: str = "logs/time.log") -
         >>> log_time("Database Query", 0.15, "logs/custom_time.log")
         # Logs to custom file and console
     """
-    from datetime import datetime
-    
     # Format timestamp
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = utcnow_naive().strftime("%Y-%m-%d %H:%M:%S")
     
     # Format timing entry for file
     log_entry = f"[{timestamp}] {step_name}: {duration:.2f} seconds\n"

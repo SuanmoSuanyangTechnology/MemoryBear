@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class EndUserInfo(Base):
@@ -17,8 +18,8 @@ class EndUserInfo(Base):
     other_name = Column(String, nullable=False, comment="关联的用户名称")
     aliases = Column(ARRAY(String), nullable=True, comment="用户别名列表（字符串数组）")
     meta_data = Column(JSONB, nullable=True, comment="用户相关的扩展信息（JSON格式）")
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 
     # 与 EndUser 的关系
     end_user = relationship("EndUser", back_populates="info")

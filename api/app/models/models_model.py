@@ -8,14 +8,15 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class BaseModel(Base):
     """基础模型（抽象类，提取公共字段）"""
     __abstract__ = True  # 标记为抽象类，不生成表
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
     is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
 
 
@@ -73,7 +74,7 @@ model_config_api_key_association = Table(
     Base.metadata,
     Column('model_config_id', UUID(as_uuid=True), ForeignKey('model_configs.id'), primary_key=True),
     Column('api_key_id', UUID(as_uuid=True), ForeignKey('model_api_keys.id'), primary_key=True),
-    Column('created_at', DateTime, default=datetime.datetime.now)
+    Column('created_at', DateTime, default=utcnow_naive)
 )
 
 
@@ -175,7 +176,7 @@ class ModelBase(Base):
     is_official = Column(Boolean, default=True, comment="是否供应商官方模型（区分自定义）")
     tags = Column(ARRAY(String), default=list, nullable=False, comment="模型标签（如['聊天', '创作']）")
     add_count = Column(Integer, default=0, nullable=False, comment="模型被用户添加的次数")
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间", server_default=func.now())
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间", )
     capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
                         comment="模型能力列表（如['vision', 'audio', 'video']）")
     is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")

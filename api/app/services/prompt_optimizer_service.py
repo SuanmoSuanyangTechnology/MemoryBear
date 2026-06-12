@@ -5,6 +5,7 @@ import langid
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -451,7 +452,7 @@ class PromptOptimizerService:
             "session_id": prompt_obj.session_id,
             "title": prompt_obj.title,
             "prompt": prompt_obj.prompt,
-            "created_at": int(prompt_obj.created_at.timestamp() * 1000)
+            "created_at": to_timestamp_ms(prompt_obj.created_at)
         }
 
     def delete_prompt(
@@ -535,7 +536,7 @@ class PromptOptimizerService:
                 "id": release.id,
                 "title": release.title,
                 "prompt": release.prompt,
-                "created_at": int(release.created_at.timestamp() * 1000),
+                "created_at": to_timestamp_ms(release.created_at),
                 "first_message": first_message
             })
 

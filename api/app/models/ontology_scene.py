@@ -13,6 +13,7 @@ from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, Uniq
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class OntologyScene(Base):
@@ -36,8 +37,8 @@ class OntologyScene(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True, comment="所属工作空间ID")
 
     # 时间戳
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, nullable=False, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False, comment="更新时间")
 
     # 关系：一个场景可以有多个类型
     classes = relationship("OntologyClass", back_populates="scene", cascade="all, delete-orphan")

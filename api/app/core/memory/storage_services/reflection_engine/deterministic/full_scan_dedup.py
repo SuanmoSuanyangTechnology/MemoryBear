@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.aioRedis import get_redis_connection
+from app.core.utils.datetime_utils import to_iso_z, utcnow
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ async def get_last_scan_time(end_user_id: str, entity_type: str) -> Optional[str
 async def update_scan_time(end_user_id: str, entity_type: str) -> None:
     """更新扫描时间为当前时间（永久保留，不设TTL）"""
     redis = await get_redis_connection()
-    now = datetime.now(timezone.utc).isoformat()
+    now = to_iso_z(utcnow())
     await redis.set(_scan_time_key(end_user_id, entity_type), now)
 
 

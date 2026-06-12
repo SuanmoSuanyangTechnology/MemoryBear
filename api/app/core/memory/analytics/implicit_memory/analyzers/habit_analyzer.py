@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.analytics.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from app.core.memory.llm_tools.llm_client import LLMClientException
 from app.schemas.implicit_memory_schema import (
@@ -292,7 +293,7 @@ class HabitAnalyzer:
             Consolidated list of habits
         """
         consolidated = existing_habits.copy()
-        current_time = datetime.now()
+        current_time = utcnow_naive()
         
         for new_habit in new_habits:
             # Find similar existing habit
@@ -448,7 +449,7 @@ class HabitAnalyzer:
             confidence_score = habit.confidence_level
             
             # Recency score (more recent = higher score)
-            days_since_last = (datetime.now() - habit.last_observed).days
+            days_since_last = (utcnow_naive() - habit.last_observed).days
             recency_score = max(0, 365 - days_since_last)  # Max 365 days
             
             # Current habit bonus

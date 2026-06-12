@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 class LogFileInfo(BaseModel):
     """日志中用户上传的文件信息"""
@@ -30,7 +31,7 @@ class AppLogMessage(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("meta_data", when_used="json")
     def _serialize_meta_data(self, data: Optional[Dict[str, Any]]):
@@ -52,11 +53,11 @@ class AppLogConversation(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class AppLogNodeExecution(BaseModel):
@@ -68,6 +69,7 @@ class AppLogNodeExecution(BaseModel):
     error: Optional[str] = None
     input: Optional[Any] = None
     process: Optional[Any] = None
+    agent_log: Optional[Any] = None
     output: Optional[Any] = None
     cycle_items: Optional[List[Any]] = None
     elapsed_time: Optional[float] = None
@@ -79,3 +81,8 @@ class AppLogConversationDetail(AppLogConversation):
     """会话详情（包含消息列表）"""
     messages: List[AppLogMessage] = Field(default_factory=list)
     node_executions_map: Dict[str, List[AppLogNodeExecution]] = Field(default_factory=dict, description="按消息ID分组的节点执行记录")
+    pending_intervention: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="人工介入信息：key=message_id，value={execution_id, status, interventions: [...]}，"
+                    "结构与 /public/share/conversations/{conversation_id} 接口的 pending_intervention 一致",
+    )

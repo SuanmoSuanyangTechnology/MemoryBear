@@ -21,9 +21,18 @@ class MessageItem(BaseModel):
 
 
 class SupportingContext(BaseModel):
-    """Dialogue context window (used for pronoun resolution, etc.)."""
+    """Dialogue context window split by direction relative to the target.
 
-    msgs: List[MessageItem] = Field(default_factory=list)
+    ``before_msgs`` are messages that occurred before the target chunk;
+    ``after_msgs`` are messages that occurred after it. The target content
+    itself is **never** placed in either list — it is carried separately in
+    ``StatementStepInput.target_content`` / ``TripletStepInput.statement_text``.
+    Modeling direction at the schema level lets the LLM see the temporal
+    relationship structurally instead of relying on an inline separator hint.
+    """
+
+    before_msgs: List[MessageItem] = Field(default_factory=list)
+    after_msgs: List[MessageItem] = Field(default_factory=list)
 
 
 # ── Statement extraction ──

@@ -2,23 +2,25 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 11:39:38
+ * @Last Modified time: 2026-06-05 18:44:16
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, Flex, Form, Input, InputNumber, Select, Checkbox } from 'antd'
+import { Button, Flex, Form, Input, InputNumber, Select, Checkbox, App } from 'antd'
 import { Node } from '@antv/x6'
 import clsx from 'clsx'
 
-import { nodeRun } from '@/api/application'
+import { nodeRun, nodeRunWithCache } from '@/api/application'
 import RbCard from '@/components/RbCard/Card'
 import styles from '../Properties/properties.module.css'
 import ContextList from './ContextList'
 import FileVarInput from './FileVarInput'
 import RunResultDisplay from './RunResultDisplay'
+import RenderedForm from '@/components/Chat/RenderedForm'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import type { Variable } from '../Properties/VariableList/types'
 import CodeMirrorEditor from '@/components/CodeMirrorEditor';
+import { triggerParams } from '../Properties/hooks/useVariableList'
 
 interface RunResult {
   status: 'completed' | 'failed' | 'running';
@@ -42,15 +44,20 @@ interface SingleNodeRunProps {
   selectedNode: Node
   appId: string
   variableList: Suggestion[]
+  refreshCache: () => void;
 }
 
-const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, appId, variableList }) => {
+const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, appId, variableList, refreshCache }) => {
   const { t } = useTranslation()
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<RunResult | null>(null)
 
   const [isAutoRun, setIsAutoRun] = useState(false)
+  const { message } = App.useApp()
+
+  const [step, setStep] = useState(0)
+  const [renderedContent, setRenderedContent] = useState('')
 
   const nodeData = selectedNode?.getData() || {}
   const nodeName = nodeData.name || t(`workflow.${nodeData.type}`)
@@ -79,7 +86,18 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
   const varRefs = extractVarRefs(nodeData)
   const visionInputRef = isLlm ? nodeData.config.vision_input?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
   const contextInputRef = isLlm ? nodeData.config.context?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
-  const inputVars: Suggestion[] = nodeData?.type === 'start'
+  const inputVars: Suggestion[] = nodeData?.type === 'trigger' && nodeData.config?.trigger_type?.defaultValue === 'webhook'
+    ? Object.keys(triggerParams).map(key => {
+      const params = nodeData.config?.[key]?.defaultValue || []
+      return params.map((item: Variable) => ({
+        label: item.name,
+        value: `trigger_payload.${triggerParams[key]}.${item.name}`,
+        dataType: item.type || 'string',
+        nodeData,
+        required: item.required,
+      }))
+    }).flat()
+    : nodeData?.type === 'start'
     ? (nodeData.config?.variables?.defaultValue || []).map((item: Variable) => ({
       label: item.description,
       value: item.name,
@@ -91,17 +109,16 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
     }))
     : variableList.filter(v => varRefs.has(v.value) && v.value !== visionInputRef && v.value !== contextInputRef)
 
-
+  
   const handleRun = () => {
     form.validateFields()
       .then((values) => {
         const { inputs = {} } = values
-        console.log('values', values)
         const params: Record<string, any> = {};
         Object.keys(inputs).forEach(key => {
           const value = inputs[key]
 
-          if (typeof value === 'object') {
+          if (Array.isArray(value)) {
             params[key] = value.map((file: any) => {
               if (file.url) {
                 return file
@@ -130,6 +147,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
         nodeRun(appId, nodeData.id, { inputs: params, stream: false })
           .then(res => {
             setResult(res as RunResult)
+            refreshCache()
           })
           .catch(err => {
             setResult({ status: 'failed', error: err.message })
@@ -138,11 +156,73 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
           .finally(() => setLoading(false))
       })
   }
+  const handleRunWithCache = () => {
+    setLoading(true)
+    setResult({ status: 'running' })
+    nodeRunWithCache(appId, nodeData.id, {
+      invalidate_cache: false,
+      bypass_cache: false
+    })
+      .then(res => {
+        setResult(res as RunResult)
+        refreshCache()
+      })
+      .catch(err => {
+        setResult({ status: 'failed', error: err.message })
+        setLoading(false)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  const [inputs, setInputs] = useState<Record<string, any>>({})
+  const handleGenerate = () => {
+    form.validateFields()
+      .then((values) => {
+        // 将渲染后的内容保存到状态中
+        setRenderedContent(nodeData?.config?.content?.defaultValue)
+        
+        // 切换到下一步显示渲染结果
+        setStep(1)
+        setInputs(values.inputs || {})
+      })
+      .catch(err => {
+        message.error(err.message)
+      })
+  }
+  // 处理表单提交，获取 form_field 的值
+  const handleActionClick = (actionId: string, fieldValues: Record<string, string>) => {
+    setLoading(true)
+    setResult({ status: 'running' })
+
+    nodeRun(appId, nodeData.id, {
+      inputs: {
+        ...inputs,
+        __action_id: actionId,
+        __form_data: {
+          ...fieldValues,
+        }
+      }
+    })
+      .then(res => {
+        setResult(res as RunResult)
+        refreshCache()
+      })
+      .catch(err => {
+        setResult({ status: 'failed', error: err.message })
+        setLoading(false)
+      })
+      .finally(() => setLoading(false))
+  }
 
   useEffect(() => {
     if (open) {
       if (nodeData?.type === 'iteration' || inputVars.length < 1 && !hasContext && !(isLlm && nodeData?.config?.vision?.defaultValue)) {
-        setIsAutoRun(true)
+        if (nodeData?.type === 'human-intervention') {
+          setStep(1)
+          setRenderedContent(nodeData?.config?.content?.defaultValue)
+        } else {
+          setIsAutoRun(true)
+        }
       }
     }
   }, [open, inputVars, isLlm, hasContext, nodeData?.type, nodeData?.config?.vision?.defaultValue])
@@ -180,113 +260,157 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
         >
           <Form form={form} layout="vertical" size="small" className="rb:mb-0!">
             <Flex vertical gap={12}>
-              {/* Variables */}
-              {nodeData?.type !== 'iteration' && inputVars.length > 0 && (
-                <Flex vertical gap={8}>
-                  <div className="rb:text-[12px] rb:font-medium rb:text-[#5B6167]">{t('workflow.variables')}</div>
-                  {inputVars.map((v: Suggestion) => (
-                    <Form.Item
-                      key={v.value}
-                      name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
-                      label={v.dataType.includes('boolean')
-                        ? null
-                        : <Flex gap={4} align="center" className="rb:text-[12px]">
-                          {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
-                          <span className="rb:font-medium">{v.nodeData?.name}</span>
-                          <span className="rb:text-[#5B6167]">/</span>
-                          <span className="rb:text-[#1677ff]">{v.label}</span>
-                        </Flex>
-                      }
-                      rules={['start'].includes(nodeData.type) && v.ui_type !== 'checkbox' ? [{
-                        required: v.required,
-                        message: v.ui_type === 'select' && Array.isArray(v.options) && v.options.length > 0
-                          ? t('common.selectPlaceholder', { title: v.label })
-                          : t('common.inputPlaceholder', { title: v.label })
-                      }] : undefined}
-                      valuePropName={v.dataType.includes('boolean') ? 'checked' : 'value'}
-                      initialValue={v.dataType.includes('boolean') ? v.default || false : undefined}
-                      className="rb:mb-0!"
-                    >
-                      {v.dataType === 'object'
-                        ? <CodeMirrorEditor
-                            language="json"
-                            variant="outlined"
-                          />
-                        : v.ui_type && ['select'].includes(v.ui_type) && Array.isArray(v.options) && v.options.length > 0
+              {step === 0 && <>
+                {/* Variables */}
+                {nodeData?.type !== 'iteration' && inputVars.length > 0 && (
+                  <Flex vertical gap={8}>
+                    <div className="rb:text-[12px] rb:font-medium rb:text-[#5B6167]">{t('workflow.variables')}</div>
+                    {inputVars.map((v: Suggestion) => {
+                    const names = v.nodeData.type === 'trigger' ? [...v.value.split('.')] : [v.value.replace('{{', '').replace('}}', '')]
+                      return (
+                        <Form.Item
+                          key={v.value}
+                          name={['inputs', ...names]}
+                          label={v.dataType.includes('boolean')
+                            ? null
+                            : <Flex gap={4} align="center" className="rb:text-[12px]">
+                              {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
+                              <span className="rb:font-medium">{v.nodeData?.name}</span>
+                              <span className="rb:text-[#5B6167]">/</span>
+                              <span className="rb:text-[#1677ff]">{v.label}</span>
+                            </Flex>
+                          }
+                          rules={['start', 'trigger'].includes(nodeData.type) && v.ui_type !== 'checkbox'
+                            ? [{
+                              required: v.required,
+                              message: v.ui_type === 'select' && Array.isArray(v.options) && v.options.length > 0
+                                ? t('common.selectPlaceholder', { title: v.label })
+                                : t('common.inputPlaceholder', { title: v.label })
+                            }]
+                            : [{
+                              required: nodeData.type === 'human-intervention',
+                              message: t('common.inputPlaceholder', { title: v.label })
+                            }]
+                          }
+                          valuePropName={v.dataType.includes('boolean') ? 'checked' : 'value'}
+                          initialValue={v.dataType.includes('boolean') ? v.default || false : undefined}
+                          className="rb:mb-0!"
+                        >
+                          {v.dataType === 'object'
+                          ? <CodeMirrorEditor
+                              language="json"
+                              variant="outlined"
+                            />
+                          : v.ui_type && ['select'].includes(v.ui_type) && Array.isArray(v.options) && v.options.length > 0
                           ? <Select
                             placeholder={t('common.pleaseSelect')}
                             options={v.options.map((item: string) => ({ label: item, value: item }))}
                           />
-                        : ['array[string]', 'array[number]'].includes(v.dataType) && Array.isArray(v.default) && v.default.length > 0
+                          : ['array[string]', 'array[number]'].includes(v.dataType) && Array.isArray(v.default) && v.default.length > 0
                           ? <Select
                             placeholder={t('common.pleaseSelect')}
                             options={v.default.map((item: string) => ({ label: item, value: item }))}
                           />
-                        : v.dataType.includes('string') && nodeData.type === 'knowledge-retrieval'
-                          ? <Input.TextArea
-                            placeholder={t('common.pleaseEnter')}
-                            size="small"
-                          />
-                        : v.dataType.includes('string')
-                          ? <Input
-                            placeholder={t('common.pleaseEnter')}
-                            size="small"
-                          />
-                        : v.dataType.includes('number')
-                          ? <InputNumber
-                            size="small"
-                            placeholder={t('common.pleaseEnter')}
-                            className="rb:w-full!"
-                            onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
-                          />
-                        : v.dataType.includes('file')
-                          ? <FileVarInput
-                            name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
-                            dataType={v.dataType}
-                            form={form}
-                          />
-                        : v.dataType.includes('boolean')
-                          ? <Checkbox>
-                            <Flex gap={4} align="center" className="rb:text-[12px]">
-                            {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
-                            <span className="rb:font-medium">{v.nodeData?.name}</span>
-                            <span className="rb:text-[#5B6167]">/</span>
-                            <span className="rb:text-[#1677ff]">{v.label}</span>
-                          </Flex>
-                          </Checkbox>
-                          : null
-                      }
+                          : v.dataType.includes('string') && nodeData.type === 'knowledge-retrieval'
+                            ? <Input.TextArea
+                              placeholder={t('common.pleaseEnter')}
+                              size="small"
+                            />
+                          : v.dataType.includes('string')
+                            ? <Input
+                              placeholder={t('common.pleaseEnter')}
+                              size="small"
+                            />
+                          : v.dataType.includes('number')
+                            ? <InputNumber
+                              size="small"
+                              placeholder={t('common.pleaseEnter')}
+                              className="rb:w-full!"
+                              onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
+                            />
+                          : v.dataType.includes('file')
+                            ? <FileVarInput
+                              name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
+                              dataType={v.dataType}
+                              form={form}
+                            />
+                          : v.dataType.includes('boolean')
+                            ? <Checkbox>
+                              <Flex gap={4} align="center" className="rb:text-[12px]">
+                              {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
+                              <span className="rb:font-medium">{v.nodeData?.name}</span>
+                              <span className="rb:text-[#5B6167]">/</span>
+                              <span className="rb:text-[#1677ff]">{v.label}</span>
+                            </Flex>
+                            </Checkbox>
+                            : null
+                          }
+                        </Form.Item>
+                      )
+                    })}
+                  </Flex>
+                )}
+                {/* Context */}
+                {hasContext && <ContextList />}
+
+                {isLlm && nodeData?.config?.vision?.defaultValue && (() => {
+                  const ref = nodeData.config.vision_input?.defaultValue
+                  const visionVar = ref ? variableList.find(v => v.value === ref) : undefined
+                  const dataType = visionVar?.dataType ?? 'array[file]'
+
+                  return (
+                    <Form.Item
+                      name={['inputs', ref.replace('{{', '').replace('}}', '')]}
+                      label={t('workflow.config.llm.vision')}
+                      className="rb:mb-0!"
+                    >
+                      <FileVarInput name={['inputs', ref.replace('{{', '').replace('}}', '')]} dataType={dataType} form={form} />
                     </Form.Item>
-                  ))}
+                  )
+                })()}
+              </>}
+              {nodeData.type === 'human-intervention' && step === 1 && <>
+                <Flex justify="start">
+                  {inputVars.length > 0 &&
+                    <Button type="link" onClick={() => setStep(0)}>{t('workflow.goBack')}</Button>
+                  }
                 </Flex>
-              )}
-              {/* Context */}
-              {hasContext && <ContextList />}
+                {/* 渲染后的内容展示 */}
+                {renderedContent && (
+                  <div className="rb:mt-4">
+                    <RenderedForm
+                      content={renderedContent}
+                      formFields={nodeData?.config?.form_fields?.defaultValue || []}
+                      actions={nodeData?.config?.actions?.defaultValue || []}
+                      variables={inputs}
+                      onActionClick={handleActionClick}
+                    />
+                  </div>
+                )}
+              </>}
 
-              {isLlm && nodeData?.config?.vision?.defaultValue && (() => {
-                const ref = nodeData.config.vision_input?.defaultValue
-                const visionVar = ref ? variableList.find(v => v.value === ref) : undefined
-                const dataType = visionVar?.dataType ?? 'array[file]'
-
-                return (
-                  <Form.Item
-                    name={['inputs', ref.replace('{{', '').replace('}}', '')]}
-                    label={t('workflow.config.llm.vision')}
-                    className="rb:mb-0!"
-                  >
-                    <FileVarInput name={['inputs', ref.replace('{{', '').replace('}}', '')]} dataType={dataType} form={form} />
-                  </Form.Item>
-                )
-              })()}
-
-              {/* Run button */}
-              {(!isAutoRun || result?.status) &&
-                <Button type="primary" block onClick={handleRun} loading={!result?.status && loading} disabled={loading}>
-                  {result?.status ? t('workflow.reStartRun') : t('workflow.startRun')}
+              {nodeData.type === 'human-intervention' && inputVars.length > 0 && step === 0
+                ? <Button type="primary" block onClick={handleGenerate} loading={!result?.status && loading} disabled={loading}>
+                  {t('workflow.generateContent')}
                 </Button>
+                : (!isAutoRun || result?.status) && nodeData.type !== 'human-intervention'
+                ? <Flex gap={12}>
+                  <Button type="primary" block onClick={handleRun} loading={!result?.status && loading} disabled={loading}>
+                    {result?.status ? t('workflow.reStartRun') : t('workflow.startRun')}
+                  </Button>
+                  <Button type="primary" block onClick={handleRunWithCache} loading={!result?.status && loading} disabled={loading}>
+                    {t('workflow.runWithCache')}
+                  </Button>
+                </Flex>
+                : null
               }
-
-              <RunResultDisplay result={result} loading={loading} nodeData={nodeData} />
+              {!(step === 0 && nodeData.type === 'human-intervention') &&
+                <RunResultDisplay
+                  result={result}
+                  loading={loading}
+                  nodeData={nodeData}
+                />
+              }
             </Flex>
           </Form>
         </RbCard>

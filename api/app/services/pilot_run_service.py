@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.config import settings
 from app.core.logging_config import get_memory_logger, log_time
 from app.core.memory.models.message_models import (
@@ -91,7 +92,7 @@ async def run_pilot_extraction(
     """
     log_file = "logs/time.log"
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = utcnow_naive().strftime("%Y-%m-%d %H:%M:%S")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"\n=== Pilot Run Started: {timestamp} ===\n")
 
@@ -274,5 +275,5 @@ async def run_pilot_extraction(
     total_time = time.time() - pipeline_start
     log_time("TOTAL PILOT RUN TIME", total_time, log_file)
     with open(log_file, "a", encoding="utf-8") as f:
-        f.write(f"=== Pilot Run Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
+        f.write(f"=== Pilot Run Completed: {utcnow_naive().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
     logger.info(f"Pilot run complete. Total time: {total_time:.2f}s")

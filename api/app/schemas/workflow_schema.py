@@ -4,9 +4,10 @@
 
 import datetime
 import uuid
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 # ==================== 节点和边定义 ====================
 
@@ -56,6 +57,19 @@ class VariableDefinition(BaseModel):
     max_file_size_mb: float | None = Field(default=None, description="单文件最大大小(MB)，仅 file/file-list-upload 时有效")
 
 
+class EnvironmentVariableDefinition(BaseModel):
+    """环境变量定义"""
+
+    name: str = Field(..., description="环境变量名称，运行时通过 env.NAME 访问")
+    value_type: Literal["string", "number", "secret"] = Field(
+        ...,
+        description="环境变量类型: string, number, secret"
+    )
+    required: bool = Field(default=False, description="是否必填")
+    value: str | int | float | None = Field(default=None, description="变量值")
+    description: str | None = Field(default=None, description="变量描述")
+
+
 class ExecutionConfig(BaseModel):
     """执行配置"""
     max_iterations: int = Field(default=100, ge=1, le=1000, description="最大迭代次数")
@@ -92,6 +106,7 @@ class WorkflowConfigCreate(BaseModel):
     nodes: list[NodeDefinition] = Field(default_factory=list, description="节点列表")
     edges: list[EdgeDefinition] = Field(default_factory=list, description="边列表")
     variables: list[VariableDefinition] = Field(default_factory=list, description="变量列表")
+    environment_variables: list[EnvironmentVariableDefinition] = Field(default_factory=list, description="环境变量列表")
     execution_config: ExecutionConfig = Field(default_factory=ExecutionConfig, description="执行配置")
     triggers: list[TriggerConfig] = Field(default_factory=list, description="触发器列表")
     features: dict = Field(default_factory=dict, description="功能特性配置")
@@ -103,6 +118,7 @@ class WorkflowConfigUpdate(BaseModel):
     nodes: list[NodeDefinition] | None = None
     edges: list[EdgeDefinition] | None = None
     variables: list[VariableDefinition] | None = None
+    environment_variables: list[EnvironmentVariableDefinition] | None = None
     features: dict | None = None
     execution_config: ExecutionConfig | None = None
     triggers: list[TriggerConfig] | None = None
@@ -118,6 +134,7 @@ class WorkflowConfig(BaseModel):
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
     variables: list[dict[str, Any]]
+    environment_variables: list[dict[str, Any]]
     execution_config: dict[str, Any]
     triggers: list[dict[str, Any]]
     features: dict | None
@@ -128,11 +145,11 @@ class WorkflowConfig(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("features", when_used="json")
     def _serialize_features(self, features: dict | None):
@@ -194,15 +211,15 @@ class WorkflowExecution(BaseModel):
 
     @field_serializer("started_at", when_used="json")
     def _serialize_started_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("completed_at", when_used="json")
     def _serialize_completed_at(self, dt: datetime.datetime | None):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class WorkflowNodeExecution(BaseModel):
@@ -231,15 +248,46 @@ class WorkflowNodeExecution(BaseModel):
 
     @field_serializer("started_at", when_used="json")
     def _serialize_started_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("completed_at", when_used="json")
     def _serialize_completed_at(self, dt: datetime.datetime | None):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
+
+
+class NodeLastRunResponse(BaseModel):
+    """节点最近一次运行结果"""
+    node_id: str
+    node_type: str
+    node_name: str | None = None
+    status: str
+    source: str
+    execution_id: str
+    run_id: str | None = None
+    workflow_execution_id: str | None = None
+    inputs: dict[str, Any] | None = None
+    outputs: dict[str, Any] | None = None
+    process: dict[str, Any] | None = None
+    error_message: str | None = None
+    elapsed_time: float | None = None
+    token_usage: dict[str, Any] | None = None
+    retry_count: int = 0
+    cache_hit: bool = False
+    cache_key: str | None = None
+    started_at: datetime.datetime
+    completed_at: datetime.datetime | None = None
+
+    @field_serializer("started_at", when_used="json")
+    def _serialize_started_at(self, dt: datetime.datetime):
+        return to_timestamp_ms(dt)
+
+    @field_serializer("completed_at", when_used="json")
+    def _serialize_completed_at(self, dt: datetime.datetime | None):
+        return to_timestamp_ms(dt)
 
 
 # ==================== 验证响应 ====================

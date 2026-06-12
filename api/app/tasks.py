@@ -17,6 +17,14 @@ from redis.exceptions import RedisError
 from fastapi.encoders import jsonable_encoder
 
 # Import a unified Celery instance
+from app.core.utils.datetime_utils import (
+    as_utc_aware,
+    parse_iso_to_utc_naive,
+    to_iso_z,
+    to_timestamp_ms,
+    utcnow,
+    utcnow_naive,
+)
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -33,7 +41,7 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
 from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.prompts.generator import question_proposal, qa_proposal
+from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
@@ -86,6 +94,29 @@ def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
 _PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 _PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 
+
+def _progress_ts() -> str:
+    return to_iso_z(utcnow())
+
+
+def _download_storage_file(file_key: str) -> bytes:
+    from app.services.file_storage_service import FileStorageService
+
+    storage_service = FileStorageService()
+
+    async def _download():
+        return await storage_service.download_file(file_key)
+
+    try:
+        return asyncio.run(_download())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_download())
+        finally:
+            loop.close()
+
+
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
 # 使用连接池而非单例客户端，提供更好的并发性能和自动重连
@@ -118,28 +149,50 @@ def _get_or_create_redis_pool() -> redis.ConnectionPool | None:
 
 def get_sync_redis_client() -> Optional[redis.StrictRedis]:
     """获取同步 Redis 客户端（使用连接池）
-    
-    使用连接池提供的客户端，支持自动重连和健康检查。
-    如果 Redis 不可用，返回 None，调用方应优雅降级。
-    
+
+    依赖连接池本身的 ``health_check_interval=30`` 做健康检查；
+    每次取客户端不再发 ``PING``，避免在热路径上多一次 RTT。
+    冷启动应通过 ``warmup_sync_redis_pool`` 预热，避免首次请求承担建池+握手成本。
+
     Returns:
-        redis.StrictRedis: Redis 客户端实例，如果连接失败则返回 None
+        redis.StrictRedis: Redis 客户端实例；当连接池创建失败时返回 None。
     """
     try:
         pool = _get_or_create_redis_pool()
         if pool is None:
             return None
-
-        client = redis.StrictRedis(connection_pool=pool)
-        # 验证连接可用性
-        client.ping()
-        return client
+        return redis.StrictRedis(connection_pool=pool)
     except RedisError as e:
         logger.error(f"Redis connection failed: {e}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"Unexpected error getting Redis client: {e}", exc_info=True)
         return None
+
+
+def warmup_sync_redis_pool() -> bool:
+    """应用启动时预热 Redis 连接池。
+
+    复用 ``get_sync_redis_client`` 构造客户端，再发一次 ``PING`` 完成 TCP 握手，
+    把"首次请求需要建池"的 50–200ms 冷启动开销前置到启动阶段。
+    任何失败都只记录日志，不影响进程启动。
+
+    Returns:
+        bool: 预热成功返回 True；失败或 Redis 不可用返回 False。
+    """
+    try:
+        client = get_sync_redis_client()
+        if client is None:
+            return False
+        client.ping()
+        logger.info("Sync Redis pool warmed up (PING ok)")
+        return True
+    except RedisError as e:
+        logger.warning(f"Sync Redis pool warmup failed: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error warming Sync Redis pool: {e}")
+        return False
 
 
 def set_asyncio_event_loop():
@@ -161,27 +214,22 @@ def set_asyncio_event_loop():
 
 
 def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
-    """Gracefully shutdown pending async generators and tasks on the event loop.
+    """Cancel pending tasks and finalize async generators, but keep the loop open for reuse.
 
-    This prevents 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
-    by giving pending aclose() coroutines a chance to run before the loop is discarded.
-
-    Note: This only tears down the given loop. Callers that need a fresh event
-    loop afterwards should use ``set_asyncio_event_loop()`` explicitly.
+    Not closing the loop avoids 'Event loop is closed' from httpx AsyncClient.__del__ during GC.
     """
     try:
-        # Cancel and collect all remaining tasks
+        # Cancel remaining tasks to prevent leaks between Celery tasks
         all_tasks = asyncio.all_tasks(loop)
         if all_tasks:
             for task in all_tasks:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*all_tasks, return_exceptions=True))
-        # Shutdown async generators (triggers __aclose__ on httpx clients etc.)
+        # Finalize async generators so network/client resources are properly cleaned up.
+        # This does NOT close the loop.
         loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
-    finally:
-        loop.close()
 
 
 @celery_app.task(name="tasks.process_item")
@@ -245,7 +293,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     """
 
     db_document = None
-    progress_lines: list[str] = [f"{datetime.now().strftime('%H:%M:%S')} Task has been received."]
+    progress_lines: list[str] = [f"{_progress_ts()} Task has been received."]
 
     def _progress_msg() -> str:
         return "\n".join(progress_lines) + "\n"
@@ -289,11 +337,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             file_name = db_document.file_name
 
         # 1. Download file from storage backend
-        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Start to parse.")
+        progress_lines.append(f"{_progress_ts()} Start to parse.")
         start_time = time.time()
         db_document.progress = 0.0
         db_document.progress_msg = _progress_msg()
-        db_document.process_begin_at = datetime.now(tz=timezone.utc)
+        db_document.process_begin_at = utcnow_naive()
         db_document.process_duration = 0.0
         db_document.run = 1
         db.commit()
@@ -330,10 +378,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
         if estimated_pages is None:
             logger.info(f"[ParseDoc] document={document_id} not obtain page number, parse failed.")
-            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: not obtain page number")
+            progress_lines.append(_progress_ts() + f" parse document '{file_name or document_id}' failed: not obtain page number")
         elif estimated_pages > MAX_DOCUMENT_PAGES:
             logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
-            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: page limit exceeded")
+            progress_lines.append(_progress_ts() + f" parse document '{file_name or document_id}' failed: page limit exceeded")
             db_document.progress = -1.0
             db_document.run = 0
             db_document.progress_msg = _progress_msg()
@@ -342,7 +390,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             return f"parse document '{file_name or document_id}' failed: page limit exceeded"
 
         def progress_callback(prog=None, msg=None):
-            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.")
+            progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
         # Prepare vision_model for parsing
         vision_model = _build_vision_model(file_name, db_knowledge)
@@ -379,7 +427,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         parser_config=db_document.parser_config,
                         is_root=False)
 
-        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.")
+        progress_lines.append(f"{_progress_ts()} Finish parsing.")
         db_document.progress = 0.8
         db_document.progress_msg = _progress_msg()
         db.commit()
@@ -393,10 +441,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
-        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
+        progress_lines.append(f"{_progress_ts()} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
-            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} No chunks generated, skipping vectorization.")
+            progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
             total_batches = ceil(total_chunks / EMBEDDING_BATCH_SIZE)
             progress_per_batch = 0.2 / total_batches
@@ -432,7 +480,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "doc_id": parent_doc_id,
                         "file_id": str(db_document.file_id),
                         "file_name": db_document.file_name,
-                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "file_created_at": to_timestamp_ms(db_document.created_at),
                         "document_id": str(db_document.id),
                         "knowledge_id": str(db_document.kb_id),
                         "sort_id": idx,
@@ -450,7 +498,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "doc_id": uuid.uuid4().hex,
                         "file_id": str(db_document.file_id),
                         "file_name": db_document.file_name,
-                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "file_created_at": to_timestamp_ms(db_document.created_at),
                         "document_id": str(db_document.id),
                         "knowledge_id": str(db_document.kb_id),
                         "sort_id": idx,
@@ -467,7 +515,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
 
                 progress_lines.append(
-                    f"{datetime.now().strftime('%H:%M:%S')} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
+                    f"{_progress_ts()} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
                     f"{len(child_chunks_list)} child chunks prepared.")
 
             elif auto_questions_topn:
@@ -522,7 +570,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         qa_map[global_idx] = pairs
 
                 progress_lines.append(
-                    f"{datetime.now().strftime('%H:%M:%S')} QA pairs generated for {total_chunks} chunks "
+                    f"{_progress_ts()} QA pairs generated for {total_chunks} chunks "
                     f"(workers={AUTO_QUESTIONS_MAX_WORKERS}).")
 
                 # 组装 chunks：source chunks + qa chunks
@@ -539,7 +587,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "doc_id": source_chunk_id,
                         "file_id": str(db_document.file_id),
                         "file_name": db_document.file_name,
-                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "file_created_at": to_timestamp_ms(db_document.created_at),
                         "document_id": str(db_document.id),
                         "knowledge_id": str(db_document.kb_id),
                         "sort_id": global_idx,
@@ -556,7 +604,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             "doc_id": uuid.uuid4().hex,
                             "file_id": str(db_document.file_id),
                             "file_name": db_document.file_name,
-                            "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                            "file_created_at": to_timestamp_ms(db_document.created_at),
                             "document_id": str(db_document.id),
                             "knowledge_id": str(db_document.kb_id),
                             "sort_id": qa_sort_id,
@@ -578,7 +626,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
 
                 progress_lines.append(
-                    f"{datetime.now().strftime('%H:%M:%S')} QA mode: {len(source_chunks)} source chunks + "
+                    f"{_progress_ts()} QA mode: {len(source_chunks)} source chunks + "
                     f"{len(qa_chunks)} QA chunks prepared.")
             else:
                 # 无 auto_questions：直接构建 chunks
@@ -591,7 +639,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             "doc_id": uuid.uuid4().hex,
                             "file_id": str(db_document.file_id),
                             "file_name": db_document.file_name,
-                            "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                            "file_created_at": to_timestamp_ms(db_document.created_at),
                             "document_id": str(db_document.id),
                             "knowledge_id": str(db_document.kb_id),
                             "sort_id": global_idx,
@@ -632,7 +680,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
             # 所有 batch 完成后一次性更新进度
             db_document.progress = 0.8 + 0.2  # 直接到 1.0 前的状态
-            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
+            progress_lines.append(f"{_progress_ts()} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
             db_document.progress_msg = _progress_msg()
             db_document.process_duration = time.time() - start_time
             db_document.run = 0
@@ -640,20 +688,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             db.refresh(db_document)
 
         # Vectorization and data entry completed
-        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
-
-        # Early-exit check after data write: if doc deleted, remove written data
-        if _should_abort(document_id):
-            logger.info(f"[ParseDoc] document={document_id} deleted after data write -- rolling back vectors")
-            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
-            _clear_redis_state(document_id)
-            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped and es data deleted")
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-
+        progress_lines.append(f"{_progress_ts()} Indexing done.")
         db_document.chunk_num = total_chunks
         db_document.progress = 1.0
         db_document.process_duration = time.time() - start_time
-        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Task done ({db_document.process_duration}s).")
+        progress_lines.append(f"{_progress_ts()} Task done ({db_document.process_duration}s).")
         db_document.progress_msg = _progress_msg()
         db_document.run = 0
         db.commit()
@@ -665,7 +704,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 _clear_redis_state(document_id)
                 logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
                 return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
+            progress_lines.append(f"{_progress_ts()} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
             db.commit()
             build_graphrag_for_document.delay(str(document_id), str(db_knowledge.id))
@@ -680,7 +719,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if db_document is not None:
             try:
                 db_document.progress = -1.0
-                db_document.progress_msg = _progress_msg() + f"Failed to vectorize and import the parsed document:{str(e)}\n"
+                progress_lines.append(f"{_progress_ts()} Failed to vectorize and import the parsed document:{str(e)}")
+                db_document.progress_msg = _progress_msg()
                 db_document.run = 0
                 db.commit()
             except Exception:
@@ -848,7 +888,7 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
 
             # 更新文档进度信息
             db_document.progress_msg = (db_document.progress_msg or "") + \
-                f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({duration:.1f}s)\n"
+                f"{_progress_ts()} Knowledge Graph done ({duration:.1f}s)\n"
             db.commit()
 
             return f"build_graphrag_for_document '{document_id}' processed successfully."
@@ -858,7 +898,14 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
-def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: bytes):
+def import_qa_chunks(
+    kb_id: str,
+    document_id: str,
+    filename: str,
+    contents: bytes | None = None,
+    file_key: str | None = None,
+    clear_parse_task: bool = False,
+):
     """
     异步导入 QA 问答对（CSV/Excel）
     
@@ -868,14 +915,35 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
     import io
 
     db = None
+    start_time = time.time()
+    progress_lines: list[str] = [f"{_progress_ts()} QA import task has been received."]
+
+    def _qa_progress_msg() -> str:
+        return "\n".join(progress_lines) + "\n"
+
     try:
-        from app.db import get_db_context
         with get_db_context() as db:
             db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
             if not db_document or not db_knowledge:
                 logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
                 return {"error": "document or knowledge not found", "imported": 0}
+
+            progress_lines.append(f"{_progress_ts()} Start to import QA.")
+            db_document.progress = 0.0
+            db_document.progress_msg = _qa_progress_msg()
+            db_document.process_begin_at = utcnow_naive()
+            db_document.process_duration = 0.0
+            db_document.run = 1
+            db.commit()
+
+            if contents is None:
+                if not file_key:
+                    raise ValueError("contents or file_key is required for QA import")
+                contents = _download_storage_file(file_key)
+                if not contents:
+                    raise IOError(f"Downloaded empty QA file from storage: {file_key}")
+                logger.info(f"[ImportQA] Downloaded {len(contents)} bytes from storage key: {file_key}")
 
             # 1. 解析文件
             qa_pairs = []
@@ -921,21 +989,26 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                     wb.close()
                 except Exception as e:
                     logger.error(f"[ImportQA] Excel parse failed: {e}")
-                    return {"error": f"Excel parse failed: {e}", "imported": 0}
+                    raise RuntimeError(f"Excel parse failed: {e}") from e
 
             if not qa_pairs:
                 logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
-                return {"error": "No valid QA pairs found", "imported": 0}
+                raise ValueError("No valid QA pairs found")
 
             logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+            progress_lines.append(f"{_progress_ts()} Parsed {len(qa_pairs)} QA pairs.")
 
             # 2. 写入 ES
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             sort_id = 0
-            total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
-            if items:
-                sort_id = items[0].metadata["sort_id"]
+            if clear_parse_task:
+                vector_service.delete_by_metadata_field(key="document_id", value=document_id)
+                db_document.chunk_num = 0
+            else:
+                total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
+                if items:
+                    sort_id = items[0].metadata["sort_id"]
 
             chunks = []
             for pair in qa_pairs:
@@ -945,7 +1018,7 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                     "doc_id": doc_id,
                     "file_id": str(db_document.file_id),
                     "file_name": db_document.file_name,
-                    "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                    "file_created_at": to_timestamp_ms(db_document.created_at),
                     "document_id": document_id,
                     "knowledge_id": kb_id,
                     "sort_id": sort_id,
@@ -964,7 +1037,10 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
             # 3. 更新 chunk_num 和 progress
             db_document.chunk_num += len(chunks)
             db_document.progress = 1.0
-            db_document.progress_msg = f"QA 导入完成: {len(chunks)} 条"
+            db_document.process_duration = time.time() - start_time
+            db_document.run = 0
+            progress_lines.append(f"{_progress_ts()} QA import done: {len(chunks)} chunks.")
+            db_document.progress_msg = _qa_progress_msg()
             db.commit()
 
             result = {"imported": len(chunks), "failed_rows": failed_rows}
@@ -973,18 +1049,25 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
 
     except Exception as e:
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
-        # 尝试更新文档状态为失败
         try:
-            from app.db import get_db_context
             with get_db_context() as err_db:
                 doc = err_db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
                 if doc:
+                    progress_lines.append(f"{_progress_ts()} QA import failed: {str(e)[:200]}")
                     doc.progress = -1.0
-                    doc.progress_msg = f"QA 导入失败: {str(e)[:200]}"
+                    doc.progress_msg = _qa_progress_msg()
+                    doc.process_duration = time.time() - start_time
+                    doc.run = 0
                     err_db.commit()
         except Exception:
             pass
         return {"error": str(e), "imported": 0}
+    finally:
+        if clear_parse_task:
+            try:
+                REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
+            except Exception:
+                logger.warning(f"[ImportQA] failed to clear Redis state for {document_id}", exc_info=True)
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
@@ -1059,7 +1142,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         db_document.file_name = db_file.file_name
                                         db_document.file_ext = db_file.file_ext
                                         db_document.file_size = db_file.file_size
-                                        db_document.updated_at = datetime.now()
+                                        db_document.updated_at = utcnow_naive()
                                         db.commit()
                                         db.refresh(db_document)
                                         # 3. Document parsing, vectorization, and storage
@@ -1216,7 +1299,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         db_document.file_ext = db_file.file_ext
                                         db_document.file_size = db_file.file_size
                                         db_document.created_at = db_file.created_at
-                                        db_document.updated_at = datetime.now()
+                                        db_document.updated_at = utcnow_naive()
                                         db.commit()
                                         db.refresh(db_document)
                                         # 3. Document parsing, vectorization, and storage
@@ -1396,7 +1479,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         db_document.file_ext = db_file.file_ext
                                         db_document.file_size = db_file.file_size
                                         db_document.created_at = db_file.created_at
-                                        db_document.updated_at = datetime.now()
+                                        db_document.updated_at = utcnow_naive()
                                         db.commit()
                                         db.refresh(db_document)
                                         # 3. Document parsing, vectorization, and storage
@@ -1713,8 +1796,7 @@ def write_message_task(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
                 f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
 
-            from datetime import datetime, timezone
-            _default_dialog_at = datetime.now(timezone.utc).isoformat()
+            _default_dialog_at = to_iso_z(utcnow_naive())
             for msg in message:
                 if isinstance(msg, dict) and not msg.get("dialog_at"):
                     msg["dialog_at"] = _default_dialog_at
@@ -1776,7 +1858,7 @@ def write_message_task(
             _r = redis_client
             if _r is not None:
                 from datetime import timezone as _tz
-                _now_utc = datetime.now(_tz.utc).isoformat()
+                _now_utc = to_iso_z(datetime.now(_tz.utc))
                 _r.set(
                     f"write_message:last_done:{end_user_id}",
                     _now_utc,
@@ -2788,7 +2870,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                         "total_num": 0,
                         "end_user_count": 0,
                         "memory_increment_id": str(memory_increment.id),
-                        "created_at": memory_increment.created_at.isoformat(),
+                        "created_at": to_iso_z(memory_increment.created_at),
                     }
 
                 # 2. 查询所有app下的end_user_id（去重）
@@ -2821,7 +2903,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     "end_user_count": len(end_users),
                     "end_user_details": end_user_details,
                     "memory_increment_id": str(memory_increment.id),
-                    "created_at": memory_increment.created_at.isoformat(),
+                    "created_at": to_iso_z(memory_increment.created_at),
                 }
             except Exception as e:
                 raise e
@@ -2915,7 +2997,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                                 "total_num": 0,
                                 "end_user_count": 0,
                                 "memory_increment_id": str(memory_increment.id),
-                                "created_at": memory_increment.created_at.isoformat(),
+                                "created_at": to_iso_z(memory_increment.created_at),
                             })
                             logger.info(f"工作空间 {workspace.name} 没有应用，记录总量为0")
                             continue
@@ -2951,7 +3033,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             "end_user_count": len(end_users),
                             "end_user_details": end_user_details,
                             "memory_increment_id": str(memory_increment.id),
-                            "created_at": memory_increment.created_at.isoformat(),
+                            "created_at": to_iso_z(memory_increment.created_at),
                         })
 
                         logger.info(
@@ -4569,7 +4651,7 @@ def scan_workflow_schedule_triggers():
     """扫描并派发已发布工作流中的定时触发器。"""
     from app.services.workflow_service import WorkflowService
 
-    now = datetime.now(timezone.utc)
+    now = utcnow()
     triggered = 0
 
     with get_db_context() as db:
@@ -4585,15 +4667,15 @@ def scan_workflow_schedule_triggers():
                         "app_id": str(app.id),
                         "release_id": str(release.id),
                         "trigger_id": trigger_id,
-                        "scheduled_at": now.isoformat(),
+                        "scheduled_at": to_iso_z(now),
                     },
                     queue="workflow_trigger_tasks",
                 )
                 runtime = {
                     **(trigger.get("runtime") or {}),
                     "dispatch_status": "queued",
-                    "last_dispatched_at": now.isoformat(),
-                    "last_scheduled_at": now.isoformat(),
+                    "last_dispatched_at": to_iso_z(now),
+                    "last_scheduled_at": to_iso_z(now),
                     "last_error": None,
                 }
                 service.update_release_trigger_runtime_state(release.id, trigger_id, runtime)
@@ -4608,7 +4690,7 @@ def scan_workflow_schedule_triggers():
                     exc_info=True,
                 )
 
-    return {"triggered": triggered, "scanned_at": now.isoformat()}
+    return {"triggered": triggered, "scanned_at": to_iso_z(now)}
 
 
 @celery_app.task(name="app.tasks.run_workflow_schedule_trigger", queue="workflow_trigger_tasks")
@@ -4616,7 +4698,7 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
     """执行单个已发布的 schedule trigger。"""
     from app.services.workflow_service import WorkflowService
 
-    run_at = datetime.fromisoformat(scheduled_at) if scheduled_at else datetime.now(timezone.utc)
+    run_at = as_utc_aware(parse_iso_to_utc_naive(scheduled_at)) if scheduled_at else utcnow()
     with get_db_context() as db:
         service = WorkflowService(db)
         app = db.get(App, uuid.UUID(app_id))
@@ -4648,8 +4730,8 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
         running_runtime = {
             **runtime,
             "dispatch_status": "running",
-            "last_started_at": datetime.now(timezone.utc).isoformat(),
-            "last_scheduled_at": run_at.isoformat(),
+            "last_started_at": to_iso_z(utcnow()),
+            "last_scheduled_at": to_iso_z(run_at),
             "last_error": None,
         }
         service.update_release_trigger_runtime_state(release.id, trigger_id, running_runtime)
@@ -4668,18 +4750,18 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
             completed_runtime = {
                 **running_runtime,
                 "dispatch_status": "completed",
-                "last_triggered_at": run_at.isoformat(),
-                "last_completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_triggered_at": to_iso_z(run_at),
+                "last_completed_at": to_iso_z(utcnow()),
                 "last_error": None,
             }
             service.update_release_trigger_runtime_state(release.id, trigger_id, completed_runtime)
             service.update_trigger_runtime_state(app.id, trigger_id, completed_runtime)
-            return {"status": "completed", "trigger_id": trigger_id, "scheduled_at": run_at.isoformat()}
+            return {"status": "completed", "trigger_id": trigger_id, "scheduled_at": to_iso_z(run_at)}
         except Exception as exc:
             failed_runtime = {
                 **running_runtime,
                 "dispatch_status": "failed",
-                "last_failed_at": datetime.now(timezone.utc).isoformat(),
+                "last_failed_at": to_iso_z(utcnow()),
                 "last_error": str(exc),
             }
             service.update_release_trigger_runtime_state(release.id, trigger_id, failed_runtime)

@@ -51,10 +51,20 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
     # ── Lifecycle ──
 
     async def render_prompt(self, input_data: TripletStepInput) -> str:
-        # Build chunk_content from supporting_context for pronoun resolution
-        chunk_content = "\n".join(
-            f"{m.role}: {m.msg}" for m in input_data.supporting_context.msgs
-        ) if input_data.supporting_context.msgs else ""
+        ctx = input_data.supporting_context
+        # Build chunk_content from supporting_context for pronoun resolution.
+        # Preserve before → after ordering so the LLM sees the natural temporal
+        # flow with the statement_text sitting logically between the two halves.
+        chunk_parts: list[str] = []
+        if ctx.before_msgs:
+            chunk_parts.append(
+                "\n".join(f"{m.role}: {m.msg}" for m in ctx.before_msgs)
+            )
+        if ctx.after_msgs:
+            chunk_parts.append(
+                "\n".join(f"{m.role}: {m.msg}" for m in ctx.after_msgs)
+            )
+        chunk_content = "\n---\n".join(chunk_parts)
 
         input_json = {
             "statement_id": input_data.statement_id,
@@ -62,10 +72,12 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
             "statement_type": input_data.statement_type,
             "temporal_type": input_data.temporal_type,
             "supporting_context": {
-                "msgs": [
-                    {"role": m.role, "msg": m.msg}
-                    for m in input_data.supporting_context.msgs
-                ]
+                "before_msgs": [
+                    {"role": m.role, "msg": m.msg} for m in ctx.before_msgs
+                ],
+                "after_msgs": [
+                    {"role": m.role, "msg": m.msg} for m in ctx.after_msgs
+                ],
             },
             "speaker": input_data.speaker,
             "dialog_at": input_data.dialog_at or "",

@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ToolType(StrEnum):
@@ -116,8 +117,8 @@ class ToolConfig(Base):
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")
 
     # 时间戳
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False)
     
     # 关联关系
     tenant = relationship("Tenants", back_populates="tool_configs")
@@ -257,7 +258,7 @@ class ToolExecution(Base):
 #     version_constraint = Column(String(100))  # 版本约束，如 ">=1.0.0"
 #
 #     # 时间戳
-#     created_at = Column(DateTime, default=datetime.now, nullable=False)
+#     created_at = Column(DateTime, default=utcnow_naive, nullable=False)
 #
 #     # 关联关系
 #     tool = relationship("ToolConfig", foreign_keys=[tool_id])

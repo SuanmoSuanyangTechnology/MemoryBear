@@ -10,6 +10,7 @@ from sqlalchemy.orm import relationship
 
 from app.base.type import PydanticType
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 from app.schemas.app_schema import ModelParameters
 
 
@@ -102,8 +103,8 @@ class MultiAgentConfig(Base):
 
     # 状态
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     # 关系
     app = relationship("App")
@@ -164,7 +165,7 @@ class AgentInvocation(Base):
     error_message = Column(Text, comment="错误信息")
 
     # 性能指标
-    started_at = Column(DateTime, nullable=False, default=datetime.datetime.now, index=True)
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive, index=True)
     completed_at = Column(DateTime)
     elapsed_time = Column(Float, comment="耗时（秒）")
     token_usage = Column(JSON, comment="Token 使用情况")
@@ -172,7 +173,7 @@ class AgentInvocation(Base):
     # 元数据
     meta_data = Column(JSON, comment="额外元数据")
 
-    created_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
 
     # 关系
     caller = relationship("AgentConfig", foreign_keys=[caller_agent_id])

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 13:39:06
+ * @Last Modified time: 2026-06-01 14:11:36
  */
 /**
  * End User Profile Component
@@ -94,22 +94,30 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
             <div className="rb:text-[#7B8085]">{t('userMemory.other_name')}</div>
             <div className="rb:mt-0.5">{data?.other_name || '-'}</div>
           </div>
-          <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.goals')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.goals?.join(' | ') || '-')}</div>
-          </div>
-          <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.traits')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.traits?.join(' | ') || '-')}</div>
-          </div>
-          <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.core_facts')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.core_facts?.join(' | ') || '-')}</div>
-          </div>
-          <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.interests?.join(' | ') || '-')}</div>
-          </div>
+          {data?.meta_data?.goals && data?.meta_data?.goals.length > 0 &&
+            <div>
+              <div className="rb:text-[#7B8085]">{t('userMemory.goals')}</div>
+              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.goals?.join(' | ') || '-')}</div>
+            </div>
+          }
+          {data?.meta_data?.traits && data?.meta_data?.traits.length > 0 &&
+            <div>
+              <div className="rb:text-[#7B8085]">{t('userMemory.traits')}</div>
+              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.traits?.join(' | ') || '-')}</div>
+            </div>
+          }
+          {data?.meta_data?.core_facts && data?.meta_data?.core_facts.length > 0 &&
+            <div>
+              <div className="rb:text-[#7B8085]">{t('userMemory.core_facts')}</div>
+              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.core_facts?.join(' | ') || '-')}</div>
+            </div>
+          }
+          {data?.meta_data?.interests && data?.meta_data?.interests.length > 0 &&
+            <div>
+              <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
+              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.interests?.join(' | ') || '-')}</div>
+            </div>
+          }
 
           <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
             {t('userMemory.updated_at')}: {data?.updated_at ? dayjs(data?.updated_at).format('YYYY/MM/DD HH:mm:ss') : ''}

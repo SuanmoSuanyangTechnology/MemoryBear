@@ -17,8 +17,8 @@ Classes:
 import logging
 from typing import Dict, Any, Optional
 from uuid import UUID
-from datetime import datetime
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
 from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -105,8 +105,8 @@ class ForgettingScheduler:
             raise RuntimeError("遗忘周期已在运行中，请等待当前周期完成")
         
         self.is_running = True
-        start_time = datetime.now()
-        start_time_iso = start_time.isoformat()
+        start_time = utcnow_naive()
+        start_time_iso = to_iso_z(start_time)
         
         logger.info(
             f"开始遗忘周期: end_user_id={end_user_id}, "
@@ -130,7 +130,7 @@ class ForgettingScheduler:
             
             if total_forgettable == 0:
                 logger.info("没有可遗忘的节点对，遗忘周期结束")
-                end_time = datetime.now()
+                end_time = utcnow_naive()
                 duration = (end_time - start_time).total_seconds()
                 
                 report = {
@@ -140,7 +140,7 @@ class ForgettingScheduler:
                     'reduction_rate': 0.0,
                     'duration_seconds': duration,
                     'start_time': start_time_iso,
-                    'end_time': end_time.isoformat(),
+                    'end_time': to_iso_z(end_time),
                     'failed_count': 0,
                     'success_rate': 1.0
                 }
@@ -283,7 +283,7 @@ class ForgettingScheduler:
             logger.info(f"遗忘后节点总数: {nodes_after}")
             
             # 步骤7：生成遗忘报告
-            end_time = datetime.now()
+            end_time = utcnow_naive()
             duration = (end_time - start_time).total_seconds()
             
             # 计算节点减少率
@@ -305,7 +305,7 @@ class ForgettingScheduler:
                 'reduction_rate': reduction_rate,
                 'duration_seconds': duration,
                 'start_time': start_time_iso,
-                'end_time': end_time.isoformat(),
+                'end_time': to_iso_z(end_time),
                 'failed_count': failed_count,
                 'success_rate': success_rate
             }

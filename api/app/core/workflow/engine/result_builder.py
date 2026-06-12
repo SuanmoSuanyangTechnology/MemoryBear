@@ -54,26 +54,31 @@ class WorkflowResultBuilder:
         token_usage = self.aggregate_token_usage(node_outputs)
         conversation_vars = {}
         sys_vars = {}
+        env_vars = {}
         snapshot = {
             "system": {},
             "conversation": {},
+            "environment": {},
             "nodes": {},
         }
 
         if variable_pool:
             conversation_vars = variable_pool.get_all_conversation_vars()
             sys_vars = variable_pool.get_all_system_vars()
+            env_vars = variable_pool.get_all_environment_vars()
             snapshot = variable_pool.to_dict()
 
         # 汇总所有 knowledge 节点的 citations
         citations = self.aggregate_citations(node_outputs)
 
-        return {
+        payload = {
             "status": "completed" if success else "failed",
+            "execution_id": execution_context.execution_id,
             "output": final_output,
             "variables": {
                 "conv": conversation_vars,
-                "sys": sys_vars
+                "sys": sys_vars,
+                "env": env_vars,
             },
             "node_outputs": node_outputs,
             "messages": result.get("messages", []),
@@ -84,6 +89,7 @@ class WorkflowResultBuilder:
             "snapshot": snapshot,
             "error": result.get("error"),
         }
+        return payload
 
     @staticmethod
     def aggregate_citations(node_outputs: dict) -> list:

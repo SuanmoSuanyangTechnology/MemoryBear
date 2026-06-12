@@ -14,7 +14,13 @@ from app.core.workflow.adapters.base_adapter import (
 from app.core.workflow.adapters.errors import ExceptionDefinition, ExceptionType, UnsupportedNodeType
 from app.core.workflow.adapters.memory_bear.memory_bear_converter import MemoryBearConverter
 from app.core.workflow.nodes.enums import NodeType
-from app.schemas.workflow_schema import ExecutionConfig, NodeDefinition, EdgeDefinition, VariableDefinition
+from app.schemas.workflow_schema import (
+    ExecutionConfig,
+    NodeDefinition,
+    EdgeDefinition,
+    VariableDefinition,
+    EnvironmentVariableDefinition,
+)
 
 logger = get_logger()
 
@@ -39,6 +45,10 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
     @property
     def origin_variables(self):
         return self.config.get("workflow").get("variables") or []
+
+    @property
+    def origin_environment_variables(self):
+        return self.config.get("workflow").get("environment_variables") or []
 
     def get_metadata(self) -> PlatformMetadata:
         return PlatformMetadata(
@@ -123,6 +133,18 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
             logger.debug(f"MemoryBear convert variable error - {e}", exc_info=True)
             return None
 
+    def _convert_environment_variable(self, variable: dict[str, Any]) -> EnvironmentVariableDefinition | None:
+        try:
+            return EnvironmentVariableDefinition(**variable)
+        except Exception as e:
+            self.warnings.append(ExceptionDefinition(
+                type=ExceptionType.VARIABLE,
+                name=variable.get("name"),
+                detail=f"convert environment variable error - {e}"
+            ))
+            logger.debug(f"MemoryBear convert environment variable error - {e}", exc_info=True)
+            return None
+
     def parse_workflow(self) -> WorkflowParserResult:
         for node in self.origin_nodes:
             converted = self._convert_node(node)
@@ -141,6 +163,11 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
             if converted:
                 self.conv_variables.append(converted)
 
+        for variable in self.origin_environment_variables:
+            converted = self._convert_environment_variable(variable)
+            if converted:
+                self.env_variables.append(converted)
+
         return WorkflowParserResult(
             success=not self.errors and not self.warnings,
             platform=self.get_metadata(),
@@ -150,6 +177,7 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
             edges=self.edges,
             nodes=self.nodes,
             variables=self.conv_variables,
+            environment_variables=self.env_variables,
             warnings=self.warnings,
             errors=self.errors,
         )

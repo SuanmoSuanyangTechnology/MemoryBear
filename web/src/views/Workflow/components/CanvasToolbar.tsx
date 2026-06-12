@@ -1,4 +1,4 @@
-import { useState, forwardRef, useImperativeHandle } from 'react';
+import { useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import { Select, Divider, Tooltip } from 'antd';
 import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
@@ -6,7 +6,7 @@ import { Node } from '@antv/x6';
 import { useTranslation } from 'react-i18next'
 
 import type { GraphRef, WorkflowConfig } from '../types'
-import VariableInspector from './VariableInspector'
+import VariableInspector, { type VariableInspectorRef } from './VariableInspector'
 
 interface CanvasToolbarProps {
   selectedNode: Node | null;
@@ -20,12 +20,13 @@ interface CanvasToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  lastExecuteId: string;
   config: WorkflowConfig | null;
   collapsed: boolean;
+  runOpen: boolean;
 }
 export interface CanvasToolbarRef {
   setIsVariableInspectorVisible: (visible: boolean) => void;
+  refreshCache: () => void;
 }
 
 const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
@@ -40,21 +41,26 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
   addNotes,
   isHandMode,
   setIsHandMode,
-  lastExecuteId,
   config,
   collapsed,
+  runOpen,
 }, ref) => {
   const { t } = useTranslation()
   const [isVariableInspectorVisible, setIsVariableInspectorVisible] = useState(false)
+  const variableInspectorRef = useRef<VariableInspectorRef>(null)
 
+  const refreshCache = () => {
+    variableInspectorRef.current?.refresh()
+  }
   useImperativeHandle(ref, () => ({
     setIsVariableInspectorVisible,
+    refreshCache,
   }))
 
   return (
     <>
       <div
-        className={clsx("rb:cursor-pointer rb:absolute rb:bottom-5 rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:text-[12px]", {
+        className={clsx("rb:cursor-pointer rb:z-9999  rb:absolute rb:bottom-5 rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:text-[12px]", {
           'rb:bottom-5': !isVariableInspectorVisible,
           'rb:bottom-88': isVariableInspectorVisible,
           'rb:left-73': !collapsed,
@@ -73,6 +79,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
             'rb:bottom-98': isVariableInspectorVisible,
             'rb:right-8': !selectedNode,
             'rb:right-95.5': selectedNode,
+            'rb:right-156': runOpen,
           })}
         ></div>
         {/* 缩放控制按钮 */}
@@ -81,6 +88,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
           'rb:right-95.5': selectedNode,
           'rb:bottom-5': !isVariableInspectorVisible,
           'rb:bottom-88': isVariableInspectorVisible,
+          'rb:right-156': runOpen,
         })}>
           <Tooltip title={t('workflow.pointerMode')}>
             <div
@@ -154,11 +162,12 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
       {/* 变量检查面板 */}
       {isVariableInspectorVisible &&
         <VariableInspector 
-          selectedNode={selectedNode} 
-          lastExecuteId={lastExecuteId}
+          ref={variableInspectorRef}
+          selectedNode={selectedNode}
           config={config}
           onClose={() => setIsVariableInspectorVisible(false)}
           collapsed={collapsed}
+          runOpen={runOpen}
         />
       }
     </>

@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 class File(Base):
     __tablename__ = "files"
@@ -16,4 +17,4 @@ class File(Base):
     file_size = Column(Integer, default=0, comment="file size(byte)")
     file_url = Column(String, index=True, nullable=True, comment="file comes from a website url")
     file_key = Column(String(512), nullable=True, index=True, comment="storage file key for FileStorageService")
-    created_at = Column(DateTime, default=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)

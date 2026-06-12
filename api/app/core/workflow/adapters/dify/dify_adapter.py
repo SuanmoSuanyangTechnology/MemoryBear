@@ -18,6 +18,7 @@ from app.schemas.workflow_schema import (
     NodeDefinition,
     EdgeDefinition,
     VariableDefinition,
+    EnvironmentVariableDefinition,
     TriggerConfig,
     ExecutionConfig
 )
@@ -47,8 +48,10 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "question-classifier": NodeType.QUESTION_CLASSIFIER,
         "variable-aggregator": NodeType.VAR_AGGREGATOR,
         "tool": NodeType.TOOL,
+        "agent": NodeType.AGENT,
         "list-operator": NodeType.LIST_OPERATOR,
         "document-extractor": NodeType.DOCUMENT_EXTRACTOR,
+        "human-input": NodeType.HUMAN_INTERVENTION,
         "": NodeType.NOTES
     }
 
@@ -120,6 +123,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             target_workflow_type = mode
         
         conv_variables = self.config.get("workflow").get("conversation_variables") or []
+        environment_variables = self.config.get("workflow").get("environment_variables") or []
         # 纯工作流没有会话变量
         if target_workflow_type == "pure_workflow":
             conv_variables = []
@@ -130,6 +134,17 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
 
         # 开始节点的文件变量合并到会话变量
         self.conv_variables.extend(self._file_vars_to_conv)
+
+        for variable in environment_variables:
+            try:
+                env_var: EnvironmentVariableDefinition = self.convert_environment_variable(variable)
+                self.env_variables.append(env_var)
+            except Exception as e:
+                self.warnings.append(ExceptionDefinition(
+                    type=ExceptionType.VARIABLE,
+                    name=variable.get("name") or variable.get("variable"),
+                    detail=f"convert environment variable error - {e}"
+                ))
 
         features = self.convert_features(
             self.config.get("workflow", {}).get("features", {})
@@ -148,6 +163,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             edges=self.edges,
             nodes=self.nodes,
             variables=self.conv_variables,
+            environment_variables=self.env_variables,
             features=features,
             warnings=self.warnings,
             errors=self.errors
@@ -156,6 +172,8 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
     def _init_node_output_map(self):
         for node in self.origin_nodes:
             if self.map_node_type(node["data"]["type"]) == NodeType.LLM:
+                self.node_output_map[f"{node['id']}.text"] = f"{node['id']}.output"
+            elif self.map_node_type(node["data"]["type"]) == NodeType.AGENT:
                 self.node_output_map[f"{node['id']}.text"] = f"{node['id']}.output"
             elif self.map_node_type(node["data"]["type"]) == NodeType.KNOWLEDGE_RETRIEVAL:
                 self.node_output_map[f"{node['id']}.result"] = f"{node['id']}.output"

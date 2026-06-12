@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 18:50:18
+ * @Last Modified time: 2026-06-11 15:18:48
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -20,8 +20,8 @@ import dayjs from 'dayjs';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
-import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode } from '../constant';
-import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
+import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode, hasErrorHandleNodes } from '../constant';
+import type { ChatVariable, EnvVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
 import type { Application } from '@/views/ApplicationManagement/types'
@@ -40,6 +40,7 @@ export interface UseWorkflowGraphProps {
   onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
   /** Application type */
   appType?: Application['type'];
+  setRunOpen: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
@@ -89,6 +90,9 @@ export interface UseWorkflowGraphReturn {
   /** Function to update chat variables */
   setChatVariables: Dispatch<SetStateAction<ChatVariable[]>>;
 
+  envVariables: EnvVariable[];
+  setEnvVariables: Dispatch<SetStateAction<EnvVariable[]>>;
+
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
   features?: FeaturesConfigForm;
@@ -99,7 +103,6 @@ export interface UseWorkflowGraphReturn {
   historyRecords: HistoryRecord[];
   /** Clear history records */
   clearHistoryRecords: () => void;
-  lastExecuteId: string;
 }
 
 /**
@@ -113,6 +116,7 @@ export const useWorkflowGraph = ({
   miniMapRef,
   onFeaturesLoad,
   appType,
+  setRunOpen,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
   // Hooks
   const { id } = useParams();
@@ -122,7 +126,6 @@ export const useWorkflowGraph = ({
   const { chatHistoryMap } = useWorkflowStore()
   const lastExecuteId = Object.keys(chatHistoryMap).at(-1) ?? ''
   const chatHistory = chatHistoryMap[lastExecuteId] ?? []
-  console.log('chatHistoryMap', chatHistoryMap, 'lastExecuteId', lastExecuteId)
 
   // Refs
   const graphRef = useRef<Graph>();
@@ -134,6 +137,7 @@ export const useWorkflowGraph = ({
   const isHandModeRef = useRef(true)
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
+  const [envVariables, setEnvVariables] = useState<EnvVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
@@ -141,15 +145,23 @@ export const useWorkflowGraph = ({
   const lastHistoryRef = useRef<{ cellIds: string[]; timestamp: number; type: string } | null>(null)
   const syncChildRelationshipsRef = useRef<() => void>(() => { })
   const isSyncingRef = useRef(false)
+  /**
+   * Tracks whether `initWorkflow` has been invoked for the initial
+   * config load. Subsequent `setConfig` calls (e.g. after saving
+   * the workflow) must NOT trigger a re-initialization, otherwise
+   * the graph would be torn down and rebuilt, losing any local
+   * edits and duplicating edges.
+   */
+  const workflowInitializedRef = useRef(false)
   useEffect(() => {
     if (!graphRef.current) return
     graphRef.current.getNodes().forEach(node => {
       const data = node.getData()
-      if (data?.type === 'if-else' || data?.type === 'question-classifier') {
-        node.setData({ ...data, chatVariables })
+      if (['if-else', 'question-classifier', 'human-intervention'].includes(data?.type)) {
+        node.setData({ ...data, chatVariables, envVariables })
       }
     })
-  }, [chatVariables, graphRef.current])
+  }, [chatVariables, envVariables, graphRef.current])
 
   useEffect(() => {
     if (!appType || !graphRef.current) return
@@ -169,7 +181,7 @@ export const useWorkflowGraph = ({
     if (!id) return
     getWorkflowConfig(id)
       .then(res => {
-        const { variables, ...rest } = res as WorkflowConfig
+        const { variables, environment_variables, ...rest } = res as WorkflowConfig
         const initChatVariables = variables.map(v => {
           const { default: _, ...cleanV } = v
           return {
@@ -178,13 +190,18 @@ export const useWorkflowGraph = ({
           }
         })
         setChatVariables(initChatVariables)
-        setConfig({ ...rest, variables: initChatVariables })
+        setEnvVariables(environment_variables ?? [])
+        setConfig({ ...rest, variables: initChatVariables, environment_variables: environment_variables ?? [] })
         featuresRef.current = rest.features
         onFeaturesLoad?.(rest.features)
       })
   }
 
+  console.log('workflowInitializedRef', workflowInitializedRef.current)
   useEffect(() => {
+    if (!config || !graphRef.current) return
+    if (workflowInitializedRef.current) return
+    workflowInitializedRef.current = true
     initWorkflow()
   }, [config, graphRef.current])
 
@@ -281,7 +298,7 @@ export const useWorkflowGraph = ({
           id,
           type,
           name,
-          data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables } : {}) },
+          data: { ...node, ...nodeLibraryConfig, ...((['if-else', 'question-classifier', 'human-intervention'].includes(type)) ? { chatVariables, envVariables } : {}) },
           ...position,
         }
 
@@ -354,7 +371,7 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         // Check error_handle.method config for http-request node
-        if (['code', 'http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
+        if (hasErrorHandleNodes.includes(type) && (config as any)?.error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
@@ -373,6 +390,42 @@ export const useWorkflowGraph = ({
               }
             ]
           };
+        }
+        // Generate ports dynamically for human-intervention node based on actions
+        if (type === 'human-intervention' && config.actions && Array.isArray(config.actions)) {
+          const actionCount = config.actions.length;
+          const newHeight = conditionNodeHeight + (actionCount - 1) * conditionNodeItemHeight;
+
+          const portItems: PortMetadata[] = [
+            defaultPortItems[0]
+          ];
+
+          // Add action ports
+          config.actions.forEach((_action: any, index: number) => {
+            portItems.push({
+              group: 'right',
+              id: `CASE${index + 1}`,
+              args: {
+                x: nodeWidth,
+                y: portItemArgsY * index + conditionNodePortItemArgsY,
+              },
+            });
+          });
+          portItems.push({
+            group: 'right',
+            id: `TIMEOUT`,
+            args: {
+              x: nodeWidth,
+              y: portItemArgsY * actionCount + conditionNodePortItemArgsY,
+            },
+          });
+
+          nodeConfig.ports = {
+            groups: defaultAbsolutePortGroups,
+            items: portItems
+          };
+
+          nodeConfig.height = newHeight;
         }
 
         return nodeConfig
@@ -444,7 +497,7 @@ export const useWorkflowGraph = ({
         return arr.findIndex(e => {
           const sourceCell = graphRef.current?.getCellById(e.source);
           const sourceType = sourceCell?.getData()?.type;
-          const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+          const isMultiPortNode = ['question-classifier', 'if-else', 'human-intervention'].includes(sourceType);
 
           if (isMultiPortNode) {
             // Multi-port nodes need to compare source, target and label
@@ -483,9 +536,17 @@ export const useWorkflowGraph = ({
               sourcePort = label;
             }
           }
+          // If human-intervention node has label, match corresponding port by label
+          if (sourceCell.getData()?.type === 'human-intervention' && label) {
+            // Find matching port ID
+            const matchingPort = sourcePorts.find((port: any) => port.id === label);
+            if (matchingPort) {
+              sourcePort = label;
+            }
+          }
 
           // If http-request node has label, match corresponding port by label
-          if (['code', 'http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
+          if (hasErrorHandleNodes.includes(sourceCell.getData()?.type) && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -673,6 +734,30 @@ export const useWorkflowGraph = ({
           const tgt = graph.getCellById(e.getTargetCellId())
           tgt?.toFront()
         })
+      } else if (nodeData.type === 'human-intervention') {
+        const rightPorts = node.getPorts().filter(p => p.group === 'right')
+        const caseCount = rightPorts.length - 1 // last port is ELSE
+        const currentActions: any[] = nodeData.config?.actions?.defaultValue ?? []
+        const newActions = caseCount !== currentActions.length
+          ? Array.from({ length: caseCount }, (_, i) => currentActions[i] ?? { logical_operator: 'and', expressions: [] })
+          : currentActions
+        if (caseCount !== currentActions.length) {
+          node.setData({
+            ...nodeData,
+            config: { ...nodeData.config, actions: { ...nodeData.config.actions, defaultValue: newActions } }
+          }, { deep: false, silent: true })
+        }
+        // Sync node height and port Y positions
+        node.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(newActions) })
+        newActions.forEach((_c: any, i: number) => {
+          node.portProp(`CASE${i + 1}`, 'args/y', getConditionNodeCasePortY(newActions, i))
+        })
+        node.portProp(`CASE${newActions.length + 1}`, 'args/y', getConditionNodeCasePortY(newActions, newActions.length))
+        node.toFront()
+        graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
+          const tgt = graph.getCellById(e.getTargetCellId())
+          tgt?.toFront()
+        })
       }
 
       if (children?.length) {
@@ -816,6 +901,7 @@ export const useWorkflowGraph = ({
    * @param node - Clicked node
    */
   const nodeClick = ({ node }: { node: Node }) => {
+    setRunOpen(false)
     // add-node type: dispatch port:click to open node selection popover
     // Must handle before blankClick() to avoid blank:click closing the popover immediately
     const nodeData = node.getData()
@@ -1668,6 +1754,7 @@ export const useWorkflowGraph = ({
             default: defaultValue ?? ''
           }
         }),
+        environment_variables: envVariables,
         nodes: nodes.map((node: Node) => {
           const data = node.getData();
           const position = node.getPosition();
@@ -1675,7 +1762,14 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.type === 'trigger' && key === 'time' && data.config[key] && 'defaultValue' in data.config[key]) {
+              if (key === 'tools' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const tools = data.config[key].defaultValue || []
+                itemConfig[key] = tools?.map((item: any) => ({
+                    tool_id: item.tool_id,
+                    operation: item.operation,
+                    enabled: item.enabled || false
+                  }))
+              } else if (data.type === 'trigger' && key === 'time' && data.config[key] && 'defaultValue' in data.config[key]) {
                 itemConfig[key] = dayjs(data.config[key].defaultValue, 'h:mm A').format('h:mm A')
               } else if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const code = data.config[key].defaultValue || ''
@@ -1688,7 +1782,7 @@ export const useWorkflowGraph = ({
                 let memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
                 itemConfig = {
                   ...itemConfig,
-                  messages: rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
+                  messages: data.type === 'llm' && rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
                   memory: { ...rest },
                 }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
@@ -1783,9 +1877,17 @@ export const useWorkflowGraph = ({
               label: sourcePortId,
             };
           }
+          // If human-intervention node right port connection, add label
+          if (sourceCell?.getData()?.type === 'human-intervention' && (sourcePortId?.startsWith('CASE') || sourcePortId === 'TIMEOUT')) {
+            return {
+              source: sourceCell.getData().id,
+              target: targetCell?.getData().id,
+              label: sourcePortId,
+            };
+          }
 
           // If http-request node right port connection, add label
-          if (['code', 'http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
+          if (hasErrorHandleNodes.includes(sourceCell?.getData()?.type)) {
             if (sourcePortId === 'ERROR') {
               return {
                 source: sourceCell.getData().id,
@@ -1813,7 +1915,7 @@ export const useWorkflowGraph = ({
               if (!e || !edge) return false;
               const sourceCell = graphRef.current?.getCellById(e.source);
               const sourceType = sourceCell?.getData()?.type;
-              const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+              const isMultiPortNode = ['question-classifier', 'if-else', 'human-intervention'].includes(sourceType);
 
               if (isMultiPortNode) {
                 // Multi-port nodes need to compare source, target and label
@@ -1830,6 +1932,17 @@ export const useWorkflowGraph = ({
           if (flag) {
             message.success({ content: t('common.saveSuccess'), duration: 1 })
           }
+          const { variables, environment_variables, ...rest } = res as WorkflowConfig
+          const initChatVariables = variables.map(v => {
+            const { default: _, ...cleanV } = v
+            return {
+              ...cleanV,
+              defaultValue: v.default ?? ''
+            }
+          })
+          setChatVariables(initChatVariables)
+          setEnvVariables(environment_variables ?? [])
+          setConfig({ ...rest, variables: initChatVariables, environment_variables: environment_variables ?? [] })
           resolve(res)
         }).catch(error => {
           reject(error)
@@ -2022,6 +2135,8 @@ export const useWorkflowGraph = ({
     handleSave,
     chatVariables,
     setChatVariables,
+    envVariables,
+    setEnvVariables,
     handleAddNotes,
     handleSaveFeaturesConfig,
     features: featuresRef.current,
@@ -2032,6 +2147,5 @@ export const useWorkflowGraph = ({
     redo,
     historyRecords,
     clearHistoryRecords,
-    lastExecuteId,
   };
 };

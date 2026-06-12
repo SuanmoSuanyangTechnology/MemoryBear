@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 from app.models.memory_perceptual_model import MemoryPerceptualModel, PerceptualType, FileStorageService
 from app.schemas.memory_perceptual_schema import PerceptualQuerySchema
@@ -47,7 +48,7 @@ class MemoryPerceptualRepository:
                 file_ext=file_ext,
                 summary=summary,
                 meta_data=meta_data,
-                created_time=datetime.now()
+                created_time=utcnow_naive()
             )
 
             self.db.add(perceptual_memory)

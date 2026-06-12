@@ -9,9 +9,10 @@ import { useWorkflowGraph } from './hooks/useWorkflowGraph';
 import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import Chat from './components/Chat/Chat';
-import type { ChatRef, AddChatVariableRef } from './types'
+import type { ChatRef, AddChatVariableRef, AddEnvVariableRef } from './types'
 import AddChatVariable from './components/AddChatVariable';
 import FeaturesConfigModal from '@/views/ApplicationConfig/components/FeaturesConfig/FeaturesConfigModal'
+import AddEnvVariable from './components/AddEnvVariable';
 
 interface WorkflowProps {
   appType?: Application['type'];
@@ -21,9 +22,12 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
   const containerRef = useRef<HTMLDivElement>(null);
   const miniMapRef = useRef<HTMLDivElement>(null);
   const addChatVariableRef = useRef<AddChatVariableRef>(null)
+  const addEnvVariableRef = useRef<AddEnvVariableRef>(null)
+  const canvasToolbarRef = useRef<CanvasToolbarRef>(null)
+
   const chatRef = useRef<ChatRef>(null)
   const [collapsed, setCollapsed] = useState(false)
-  const canvasToolbarRef = useRef<CanvasToolbarRef>(null)
+  const [runOpen, setRunOpen] = useState(false)
   // 使用自定义Hook初始化工作流图
   const {
     config,
@@ -41,6 +45,8 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     handleSave,
     chatVariables,
     setChatVariables,
+    envVariables,
+    setEnvVariables,
     handleAddNotes,
     handleSaveFeaturesConfig,
     features,
@@ -49,21 +55,27 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     canRedo,
     undo,
     redo,
-    lastExecuteId,
-  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
+  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad, setRunOpen });
+
 
   const onDragOver = (event: React.DragEvent) => {
     event.preventDefault();
   };
   const handleRun = () => {
-    canvasToolbarRef.current?.setIsVariableInspectorVisible(false)
-    chatRef.current?.handleOpen()
+    blankClick()
+    setRunOpen(true)
   }
   const handleToggle = () => {
     setCollapsed(prev => !prev)
   }
   const addVariable = () => {
     addChatVariableRef.current?.handleOpen()
+  }
+  const addEnvVariable = () => {
+    addEnvVariableRef.current?.handleOpen()
+  }
+  const refreshCache = () => {
+    canvasToolbarRef.current?.refreshCache()
   }
 
   // Ref used to imperatively open the config modal
@@ -81,6 +93,8 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     graphRef,
     addVariable,
     chatVariables,
+    addEnvVariable,
+    envVariables,
     config,
     features: features,
     handleFeaturesConfig,
@@ -117,9 +131,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
           canRedo={canRedo}
           onUndo={undo}
           onRedo={redo}
-          lastExecuteId={lastExecuteId}
           config={config}
           collapsed={collapsed}
+          runOpen={runOpen}
         />
       </div>
       
@@ -134,10 +148,12 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
           parseEvent={parseEvent}
           config={config}
           chatVariables={chatVariables}
+          envVariables={envVariables}
           appId={config?.app_id}
           handleSave={handleSave}
           nodeClick={nodeClick}
           appType={appType}
+          refreshCache={refreshCache}
         />
       }
       <Chat
@@ -147,6 +163,10 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         graphRef={graphRef}
         appId={config?.app_id as string}
         appType={appType}
+        open={runOpen}
+        onOpenChange={setRunOpen}
+        handleSave={handleSave}
+        refreshCache={refreshCache}
       />
       <PortClickHandler
         graph={graphRef.current}
@@ -158,6 +178,11 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         ref={addChatVariableRef}
         variables={chatVariables}
         onChange={setChatVariables}
+      />
+      <AddEnvVariable
+        ref={addEnvVariableRef}
+        variables={envVariables}
+        onChange={setEnvVariables}
       />
       {/* Modal for editing feature settings; calls refresh on save */}
       <FeaturesConfigModal

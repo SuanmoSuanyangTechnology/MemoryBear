@@ -10,7 +10,7 @@ import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
-import { Button, Spin, message, Switch, App } from 'antd';
+import { Button, Spin, message, Switch, App, Divider } from 'antd';
 import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
@@ -19,6 +19,7 @@ import RecallTestResult from '../components/RecallTestResult';
 import SearchInput from '@/components/SearchInput';
 import DocumentPreview from '@/components/DocumentPreview';
 import InsertModal, { type InsertModalRef } from '../components/InsertModal';
+import DocumentMetadata from '../components/DocumentMetadata';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import copy from 'copy-to-clipboard'
 const DocumentDetails: FC = () => {
@@ -381,7 +382,7 @@ const DocumentDetails: FC = () => {
   }
   const handleDownload = () => {
     if (!document) return;
-    downloadFile(document.file_id || '', document.file_name)
+    downloadFile(document.file_id || '', document.file_name, document.parser_id === 'qa')
   };
   const onChange = (checked: boolean) => {
       updateDocument(documentId, {
@@ -457,8 +458,13 @@ const DocumentDetails: FC = () => {
         {/* Left: Document info */}
         <div className='rb:w-80 rb:h-full rb:flex rb:flex-col rb:gap-4 rb:overflow-hidden'>
           <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4 rb:overflow-y-auto'>
+            <DocumentMetadata 
+              documentId={documentId} 
+              knowledgeBaseId={knowledgeBaseId || ''}
+            />
+            <Divider />
             <InfoPanel 
-              title={t('knowledgeBase.documentInfo') || '文档信息'} 
+              title={t('knowledgeBase.documentInfo')} 
               items={infoItems}
             />
             <Button type='primary' onClick={handleDownload} className="rb:mt-4 rb:w-full">
