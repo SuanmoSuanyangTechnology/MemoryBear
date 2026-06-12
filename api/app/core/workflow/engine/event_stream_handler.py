@@ -216,13 +216,14 @@ class EventStreamHandler:
             # Only emit directly for End nodes that are already activated (no branch control).
             # End nodes still waiting for branch routing must NOT receive chunks here.
             dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
-            if dependent_ends:
+            active_dependent_ends = [(eid, einfo) for eid, einfo in dependent_ends if einfo.activate]
+            if active_dependent_ends:
                 chunk_field = data.get("field", "output")
                 has_matching_segment = any(
                     seg.is_variable
                     and seg.depends_on_scope(node_id)
                     and (seg.get_field() or "output") == chunk_field
-                    for _, end_info in dependent_ends
+                    for _, end_info in active_dependent_ends
                     for seg in end_info.outputs
                 )
                 if not has_matching_segment:
