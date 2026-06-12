@@ -2646,7 +2646,7 @@ export const zh = {
           'array[object]': 'Array[Object]',
           'object': 'Object',
           addParams: '添加提取变量',
-          promptPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
+          promptPlaceholder: '在此处编写提示，输入“/”插入变量',
           advanced_settings: '高级设置',
           inference_mode: '推理模式',
           inference_mode_tip: '你可以根据模型对于 Function calling 或 Prompt 的指令响应能力选择合适的推理模式',

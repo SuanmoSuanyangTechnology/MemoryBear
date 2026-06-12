@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 10:24:55
+ * @Last Modified time: 2026-06-12 11:48:13
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { createPortal } from 'react-dom';
@@ -39,8 +39,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0, anchorBottom: 0 });
-  const [expandedParent, setExpandedParent] = useState<Suggestion | null>(null);
-  const [childPanelPos, setChildPanelPos] = useState({ top: 0, right: 0 });
+  const [expandedPath, setExpandedPath] = useState<Suggestion[]>([]);
+  const [childPanelPos, setChildPanelPos] = useState({ top: 0, horizontal: 0, useRight: true });
+  const [panelPositions, setPanelPositions] = useState<Map<string, { top: number; horizontal: number; useRight: boolean }>>(new Map());
   const [activePanel, setActivePanel] = useState<'main' | 'child'>('main');
   const [childActiveIndex, setChildActiveIndex] = useState(-1);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -79,21 +80,55 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   }, [showSuggestions, popupPosition.anchorBottom]);
 
   const CHILD_PANEL_HEIGHT = 280;
+  const CHILD_PANEL_WIDTH = 280;
+  const MARGIN = 8;
 
-  const calcChildPanelPos = (key: string) => {
-    const el = itemRefs.current.get(key);
-    if (!el || !popupRef.current) return;
-    const elRect = el.getBoundingClientRect();
-    const popupRect = popupRef.current.getBoundingClientRect();
-    const actualChildHeight = Math.min(CHILD_PANEL_HEIGHT, popupRect.height);
-    const top = Math.max(10, popupRect.bottom - actualChildHeight);
-    setChildPanelPos({ top, right: window.innerWidth - elRect.left + 8 });
+  const expandedParent = expandedPath.length > 0 ? expandedPath[expandedPath.length - 1] : null;
+
+  /**
+   * Compute panel position that avoids screen edges.
+   * @param fromMainPanel true → anchor on a main-panel item; false → anchor on a child-panel item
+   */
+  const calcChildPanelPos = (key: string, fromMainPanel: boolean = false) => {
+    const calculateSmartPos = (rect: DOMRect) => {
+      const spaceRight = window.innerWidth - rect.left;
+      const useRight = spaceRight >= CHILD_PANEL_WIDTH + MARGIN;
+      const horizontal = useRight
+        ? window.innerWidth - rect.left + MARGIN
+        : rect.right + MARGIN;
+
+      // Align panel top with the main popup's top so all levels share the same vertical edge
+      let top: number;
+      if (popupRef.current) {
+        top = popupRef.current.getBoundingClientRect().top;
+      } else {
+        const calculatedTop = rect.bottom - CHILD_PANEL_HEIGHT;
+        top = Math.max(MARGIN, calculatedTop);
+      }
+
+      return { top, horizontal, useRight };
+    };
+
+    if (fromMainPanel) {
+      const el = itemRefs.current.get(key);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const { top, horizontal, useRight } = calculateSmartPos(rect);
+      setChildPanelPos({ top, horizontal, useRight });
+    } else {
+      const el = childItemRefs.current.get(key);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const { top, horizontal, useRight } = calculateSmartPos(rect);
+      setPanelPositions(prev => new Map(prev).set(key, { top, horizontal, useRight }));
+    }
   };
 
   const resetState = () => {
     setShowSuggestions(false);
-    setExpandedParent(null);
-    setChildPanelPos({ top: 0, right: 0 });
+    setExpandedPath([]);
+    setChildPanelPos({ top: 0, horizontal: 0, useRight: true });
+    setPanelPositions(new Map());
     setActivePanel('main');
     setChildActiveIndex(-1);
   };
@@ -119,8 +154,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
         setShowSuggestions(shouldShow);
         if (!shouldShow) {
           setSelectedIndex(0);
-          setExpandedParent(null);
-          setChildPanelPos({ top: 0, right: 0 });
+          setExpandedPath([]);
+          setChildPanelPos({ top: 0, horizontal: 0, useRight: true });
+          setPanelPositions(new Map());
           setActivePanel('main');
           setChildActiveIndex(-1);
         }
@@ -184,10 +220,14 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
     if (selectedIndex < 0 || selectedIndex >= flatOptions.length) return;
     const s = flatOptions[selectedIndex];
     if (s.children?.length) {
-      calcChildPanelPos(s.key);
-      setExpandedParent(s);
+      // Defer until the ref is attached
+      const timer = setTimeout(() => {
+        calcChildPanelPos(s.key, true);
+        setExpandedPath([s]);
+      }, 0);
+      return () => clearTimeout(timer);
     } else {
-      setExpandedParent(null);
+      setExpandedPath([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
@@ -238,7 +278,21 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
         if (!showSuggestions) return false;
         event?.preventDefault();
         if (activePanel === 'child' && expandedParent?.children) {
-          setChildActiveIndex(i => Math.min(i + 1, expandedParent.children!.length - 1));
+          setChildActiveIndex(i => {
+            const newIndex = Math.min(i + 1, expandedParent.children!.length - 1);
+            // Auto-expand next level when landing on a child with children
+            const nextChild = expandedParent.children![newIndex];
+            if (nextChild?.children?.length) {
+              setTimeout(() => {
+                calcChildPanelPos(nextChild.key);
+                setExpandedPath(prev => [...prev, nextChild]);
+              }, 0);
+            } else if (expandedPath.length > 1) {
+              // Otherwise collapse deeper levels
+              setExpandedPath(prev => prev.slice(0, -1));
+            }
+            return newIndex;
+          });
         } else {
           setSelectedIndex(prev => {
             let next = prev + 1;
@@ -260,7 +314,19 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
         if (!showSuggestions) return false;
         event?.preventDefault();
         if (activePanel === 'child' && expandedParent?.children) {
-          setChildActiveIndex(i => Math.max(i - 1, 0));
+          setChildActiveIndex(i => {
+            const newIndex = Math.max(i - 1, 0);
+            const nextChild = expandedParent.children![newIndex];
+            if (nextChild?.children?.length) {
+              setTimeout(() => {
+                calcChildPanelPos(nextChild.key);
+                setExpandedPath(prev => [...prev, nextChild]);
+              }, 0);
+            } else if (expandedPath.length > 1) {
+              setExpandedPath(prev => prev.slice(0, -1));
+            }
+            return newIndex;
+          });
         } else {
           setSelectedIndex(prev => {
             let prevIdx = prev - 1;
@@ -294,30 +360,52 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       unregisterArrowUp();
       unregisterEscape();
     };
-  }, [showSuggestions, selectedIndex, flatOptions, editor, activePanel, childActiveIndex, expandedParent]);
+  }, [showSuggestions, selectedIndex, flatOptions, editor, activePanel, childActiveIndex, expandedParent, expandedPath]);
 
-  // Handle ArrowLeft/Right for panel switching via native keydown (lexical doesn't expose these commands)
+  // Handle ArrowLeft/Right for multi-level panel switching via native keydown (lexical doesn't expose these commands)
   useEffect(() => {
     if (!showSuggestions) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') {
-        const current = flatOptions[selectedIndex];
-        if (activePanel === 'main' && current?.children?.length) {
-          e.preventDefault();
-          setActivePanel('child');
-          setChildActiveIndex(0);
+        if (activePanel === 'main') {
+          // Enter deepest child panel
+          const current = flatOptions[selectedIndex];
+          if (current?.children?.length) {
+            e.preventDefault();
+            setActivePanel('child');
+            setChildActiveIndex(0);
+          }
+        } else {
+          // Drill one level deeper
+          const deepest = expandedPath[expandedPath.length - 1];
+          const currentChild = deepest?.children?.[childActiveIndex];
+          if (currentChild?.children?.length) {
+            e.preventDefault();
+            setTimeout(() => {
+              calcChildPanelPos(currentChild.key);
+              setExpandedPath(prev => [...prev, currentChild]);
+              setChildActiveIndex(0);
+            }, 0);
+          }
         }
       } else if (e.key === 'ArrowRight') {
         if (activePanel === 'child') {
-          e.preventDefault();
-          setActivePanel('main');
-          setChildActiveIndex(-1);
+          // Collapse deepest level; return to main when nothing more to collapse
+          if (expandedPath.length > 1) {
+            e.preventDefault();
+            setExpandedPath(prev => prev.slice(0, -1));
+            setChildActiveIndex(0);
+          } else {
+            e.preventDefault();
+            setActivePanel('main');
+            setChildActiveIndex(-1);
+          }
         }
       }
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, [showSuggestions, activePanel, selectedIndex, flatOptions]);
+  }, [showSuggestions, activePanel, selectedIndex, flatOptions, expandedPath, childActiveIndex]);
 
   if (!showSuggestions) return null;
   if (Object.entries(groupedSuggestions).length === 0) return null;
@@ -334,7 +422,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
           left: popupPosition.left,
         }}
       >
-        <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
+        <div className="rb:w-70 rb:h-57.5 rb:overflow-y-auto">
           <Flex vertical gap={12}>
             {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
               const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
@@ -366,8 +454,8 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                           if (option.disabled && !hasChildren) return;
                           if (!option.disabled) insertMention(option);
                           if (hasChildren) {
-                            calcChildPanelPos(option.key);
-                            setExpandedParent(option);
+                            calcChildPanelPos(option.key, true);
+                            setExpandedPath([option]);
                           }
                         }}
                         onMouseEnter={() => {
@@ -375,10 +463,10 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                           setActivePanel('main');
                           setChildActiveIndex(-1);
                           if (hasChildren) {
-                            calcChildPanelPos(option.key);
-                            setExpandedParent(option);
+                            calcChildPanelPos(option.key, true);
+                            setExpandedPath([option]);
                           } else {
-                            setExpandedParent(null);
+                            setExpandedPath([]);
                           }
                         }}
                       >
@@ -402,51 +490,90 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
         </div>
       </div>
 
-      {/* Child variables panel - fixed positioned via portal to avoid clipping */}
-      {expandedParent?.children?.length && createPortal(
-        <div
-          onMouseDown={(e) => e.preventDefault()}
-          className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
-          style={{ top: childPanelPos.top, right: childPanelPos.right }}
-          onMouseEnter={() => setActivePanel('child')}
-          onMouseLeave={() => { setActivePanel('main'); setChildActiveIndex(-1); }}
-        >
-          <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
-            <Flex justify="space-between" align="center" gap={8}>
-              <span>{expandedParent.nodeData.name}.{expandedParent.label}</span>
-              <span>{expandedParent.dataType}</span>
-            </Flex>
-          </div>
-          {expandedParent.children.map((child, ci) => {
-            const isChildActive = activePanel === 'child' && ci === childActiveIndex;
-            return (
-              <Flex
-                key={child.key}
-                ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
-                className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
-                  'rb:bg-[#F6F6F6]': isChildActive,
-                  'rb:cursor-not-allowed rb:opacity-65': child.disabled,
-                  'rb:cursor-pointer': !child.disabled,
-                })}
-                align="center"
-                justify="space-between"
-                onClick={() => !child.disabled && insertMention(child)}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  !child.disabled && insertMention(child)
-                }}
-                onMouseEnter={() => { setActivePanel('child'); setChildActiveIndex(ci); }}
-              >
-                <span className="rb:font-medium">
-                  <span className="rb:text-[#155EEF]">{`{x}`}</span> {child.label}
+      {/* Child variables panels - one per level in expandedPath, fixed positioned via portal to avoid clipping */}
+      {expandedPath.length > 0 && expandedPath.map((parent, index) => {
+        const position = index === 0 ? childPanelPos : panelPositions.get(parent.key);
+        if (!position) return null;
+        return createPortal(
+          <div
+            key={parent.key}
+            id={`autocomplete-child-panel-${parent.key}`}
+            onMouseDown={(e) => e.preventDefault()}
+            className="rb:w-70 rb:h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+            style={{
+              top: position.top,
+              ...(position.useRight
+                ? { right: position.horizontal }
+                : { left: position.horizontal })
+            }}
+            onMouseEnter={() => {
+              setActivePanel('child');
+              if (childActiveIndex < 0) setChildActiveIndex(0);
+            }}
+          >
+            <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
+              <Flex justify="space-between" align="center" gap={8}>
+                <span>
+                  {expandedPath.slice(0, index + 1).map((item, idx) => (
+                    <span key={item.key}>
+                      {idx > 0 && '.'}
+                      {item.label}
+                    </span>
+                  ))}
                 </span>
-                {child.dataType && <span>{child.dataType}</span>}
+                <span>{parent.dataType}</span>
               </Flex>
-            );
-          })}
-        </div>,
-        document.body
-      )}
+            </div>
+            {parent.children?.map((child, ci) => {
+              const hasChildren = !!child.children?.length;
+              const isChildActive = activePanel === 'child' && expandedPath.length - 1 === index && ci === childActiveIndex;
+              return (
+                <Flex
+                  key={child.key}
+                  ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
+                  className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
+                    'rb:bg-[#F6F6F6]': isChildActive,
+                    'rb:cursor-not-allowed rb:opacity-65': child.disabled,
+                    'rb:cursor-pointer': !child.disabled,
+                  })}
+                  align="center"
+                  justify="space-between"
+                  onClick={() => !child.disabled && insertMention(child)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    if (!child.disabled) insertMention(child);
+                  }}
+                  onMouseEnter={() => {
+                    if (child.disabled) return;
+                    setActivePanel('child');
+                    setChildActiveIndex(ci);
+                    if (hasChildren) {
+                      // Defer until the ref is attached
+                      const timer = setTimeout(() => {
+                        calcChildPanelPos(child.key);
+                        setExpandedPath(prev => [...prev.slice(0, index + 1), child]);
+                      }, 0);
+                      return () => clearTimeout(timer);
+                    } else {
+                      // No children: collapse any deeper level panels
+                      setExpandedPath(prev => prev.slice(0, index + 1));
+                    }
+                  }}
+                >
+                  <span className="rb:font-medium">
+                    <span className="rb:text-[#155EEF]">{`{x}`}</span> {child.label}
+                  </span>
+                  <Space size={2}>
+                    {child.dataType && <span>{child.dataType}</span>}
+                    {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
+                  </Space>
+                </Flex>
+              );
+            })}
+          </div>,
+          document.body
+        );
+      })}
     </>
   );
 }
