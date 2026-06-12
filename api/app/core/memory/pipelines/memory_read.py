@@ -92,14 +92,14 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
     ) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
         memory_l0 = await self._user_meta()
-        questions, answer = await QueryPreprocessor.split(
+        questions, memory_evidence = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
-        if answer:
-            memory_l0.content_str = answer
+        if memory_evidence:
+            memory_l0.content_str = memory_evidence
             return memory_l0
         all_tasks = []
         for question in questions:
@@ -135,14 +135,16 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         search_service = self._get_search_service(includes)
 
         memory_l0 = await self._user_meta()
-        questions, answer = await QueryPreprocessor.split(
+        questions, memory_evidence = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
-        if answer:
-            memory_l0.content_str = answer
+        if memory_evidence:
+            memory_l0.content_str = memory_evidence
+            if memory_l0.memories:
+                memory_l0.memories[0].query = query
             return memory_l0
         all_results = list(await asyncio.gather(*(
             _run_with_semaphore(search_service.hybrid_search(question, limit)) for question in questions

@@ -37,9 +37,9 @@ class QueryPreprocessor:
                 "callbacks": []
             }) | StructResponse(mode='json')
             queries = sub_queries["questions"]
-            answer = sub_queries.get("answer") or ""
+            memory_evidence = sub_queries.get("memory_evidence") or ""
         except Exception as e:
             logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")
             queries = [query]
-            answer = ""
-        return queries, answer
+            memory_evidence = ""
+        return queries, memory_evidence

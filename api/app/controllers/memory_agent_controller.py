@@ -1,3 +1,4 @@
+import html
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -375,7 +376,7 @@ async def read_server(
         )
         for _ in intermediate_outputs:
             if _["type"] == "search_result":
-                _["result"] = '```xml\n' + _["result"] + '\n```'
+                _["result"] = html.escape(_["result"])
         result = {
             'answer': answer,
             "intermediate_outputs": intermediate_outputs,
