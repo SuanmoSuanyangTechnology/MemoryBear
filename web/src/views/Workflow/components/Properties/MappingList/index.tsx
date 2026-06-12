@@ -48,7 +48,7 @@ const MappingList: FC<MappingListProps> = ({ label, name: listName, options, ext
                     <Input 
                       placeholder={t('common.pleaseEnter')} 
                       size="small"
-                      className="rb:w-27!"
+                      className="rb:w-27! rb:shrink-0!"
                     />
                   </Form.Item>
                   <Form.Item
@@ -69,7 +69,7 @@ const MappingList: FC<MappingListProps> = ({ label, name: listName, options, ext
                   </Form.Item>
                   {isNeedType && <Form.Item name={[name, 'type']} hidden />}
                   <div
-                    className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                    className="rb:shrink-0! rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                     onClick={() => remove(name)}
                   ></div>
                 </Flex>

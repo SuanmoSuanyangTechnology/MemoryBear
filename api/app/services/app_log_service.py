@@ -353,7 +353,7 @@ class AppLogService:
             input_content = input_data.get("message") or _extract_text(input_data)
 
             # 跳过没有用户输入的 execution（如开场白触发的记录）
-            if not input_content or not input_content.strip():
+            if not input_content:
                 continue
 
             files = input_data.get("files") or []

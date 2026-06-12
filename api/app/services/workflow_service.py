@@ -4005,7 +4005,11 @@ class WorkflowService:
                 self.update_execution_status(
                     execution.execution_id,
                     "failed",
-                    error_message=result.get("error")
+                    # 失败时同样持久化完整结果（含 node_outputs），
+                    # 否则应用日志无法展示失败调用的各节点执行明细。
+                    output_data=result,
+                    error_message=result.get("error"),
+                    error_node_id=result.get("error_node"),
                 )
                 execution = self.get_execution(execution.execution_id)
                 self._persist_workflow_node_executions(execution, config, result)
@@ -4043,7 +4047,20 @@ class WorkflowService:
                     remove_checkpointer(cp_thread_id)
                 from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
                 InterventionRegistry.cleanup(execution.execution_id)
-                self.update_execution_status(execution.execution_id, "failed", error_message="非流式执行不支持人工介入节点")
+                self.update_execution_status(
+                    execution.execution_id,
+                    "failed",
+                    output_data=result,
+                    error_message="非流式执行不支持人工介入节点",
+                    error_node_id=result.get("error_node"),
+                )
+                try:
+                    execution = self.get_execution(execution.execution_id)
+                    if execution and execution.output_data:
+                        self._persist_workflow_node_executions(execution, config, execution.output_data)
+                        self._refresh_workflow_debug_state_from_execution(execution)
+                except Exception as persist_err:
+                    logger.warning(f"Failed to persist node executions on waiting_human: {persist_err}")
                 raise BusinessException(
                     code=BizCode.BAD_REQUEST,
                     message="当前工作流包含人工介入节点，非流式执行不支持，请使用流式接口"
@@ -4056,6 +4073,13 @@ class WorkflowService:
         except Exception as e:
             logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
             self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            try:
+                execution = self.get_execution(execution.execution_id)
+                if execution and execution.output_data:
+                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                    self._refresh_workflow_debug_state_from_execution(execution)
+            except Exception as persist_err:
+                logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
             self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
@@ -4506,6 +4530,13 @@ class WorkflowService:
                         end_event = self._emit(public, end_internal_event)
                         if end_event:
                             yield end_event
+                        try:
+                            execution = self.get_execution(execution.execution_id)
+                            if execution and execution.output_data:
+                                self._persist_workflow_node_executions(execution, config, execution.output_data)
+                                self._refresh_workflow_debug_state_from_execution(execution)
+                        except Exception as persist_err:
+                            logger.warning(f"Failed to persist node executions on moderation: {persist_err}")
                         break
 
                 if event_type == "message":
@@ -4599,8 +4630,18 @@ class WorkflowService:
                             conversation_id_uuid, message_id, human_message, human_meta, error_msg
                         )
                         self.update_execution_status(
-                            execution.execution_id, "failed", output_data=event.get("data")
+                            execution.execution_id,
+                            "failed",
+                            output_data=event.get("data"),
+                            error_node_id=(event.get("data") or {}).get("error_node"),
                         )
+                        try:
+                            execution = self.get_execution(execution.execution_id)
+                            if execution and execution.output_data:
+                                self._persist_workflow_node_executions(execution, config, execution.output_data)
+                                self._refresh_workflow_debug_state_from_execution(execution)
+                        except Exception as persist_err:
+                            logger.warning(f"Failed to persist node executions on stream failed: {persist_err}")
                     elif status == "waiting_human":
                         from app.services.intervention_registry import register_intervention, register_pending
 
@@ -5026,6 +5067,12 @@ class WorkflowService:
                                 # only flushes; it relies on the caller to commit.
                                 self.db.commit()
 
+                                try:
+                                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                                    self._refresh_workflow_debug_state_from_execution(execution)
+                                except Exception as persist_err:
+                                    logger.warning(f"Failed to persist node executions on intervention resolved: {persist_err}")
+
                                 from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
                                 _IR.cleanup(execution.execution_id)
 
@@ -5108,6 +5155,12 @@ class WorkflowService:
                                 # only flushes; it relies on the caller to commit.
                                 self.db.commit()
 
+                                try:
+                                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                                    self._refresh_workflow_debug_state_from_execution(execution)
+                                except Exception as persist_err:
+                                    logger.warning(f"Failed to persist node executions on intervention complete: {persist_err}")
+
                                 logger.info(
                                     f"[RUN] workflow completed via intervention loop, "
                                     f"accumulated_output_length={len(accumulated_content)}, "
@@ -5177,6 +5230,13 @@ class WorkflowService:
                 exc_info=True
             )
             self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            try:
+                execution = self.get_execution(execution.execution_id)
+                if execution and execution.output_data:
+                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                    self._refresh_workflow_debug_state_from_execution(execution)
+            except Exception as persist_err:
+                logger.warning(f"Failed to persist node executions on stream error: {persist_err}")
             # Clean up registry on failure to avoid leaks.
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(execution.execution_id)
@@ -5538,6 +5598,12 @@ class WorkflowService:
                         self._touch_conversation(conversation_id_uuid)
                         self.db.commit()
 
+                        try:
+                            self._persist_workflow_node_executions(execution, config, execution.output_data)
+                            self._refresh_workflow_debug_state_from_execution(execution)
+                        except Exception as persist_err:
+                            logger.warning(f"Failed to persist node executions on resume resolved: {persist_err}")
+
                         _IR.cleanup(execution_id)
                         intervention_ctx2 = (execution.context or {}).get("human_intervention", {})
                         cp_thread_id = intervention_ctx2.get("checkpoint_thread_id", "")
@@ -5623,6 +5689,12 @@ class WorkflowService:
                         # durable across requests.
                         self._touch_conversation(conversation_id_uuid)
                         self.db.commit()
+
+                        try:
+                            self._persist_workflow_node_executions(execution, config, execution.output_data)
+                            self._refresh_workflow_debug_state_from_execution(execution)
+                        except Exception as persist_err:
+                            logger.warning(f"Failed to persist node executions on resume complete: {persist_err}")
                     emitted = self._emit(public, resume_event)
                     if emitted:
                         if resume_event.get("event") == "workflow_end" and \
@@ -6747,6 +6819,12 @@ class WorkflowService:
                     execution.token_usage = formatted_output["token_usage"]
                 self.db.commit()
 
+                try:
+                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                    self._refresh_workflow_debug_state_from_execution(execution)
+                except Exception as persist_err:
+                    logger.warning(f"Failed to persist node executions on resume completed: {persist_err}")
+
                 # Workflow fully completed — safe to clean up the registry now.
                 from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
                 InterventionRegistry.cleanup(execution_id)
@@ -6767,10 +6845,30 @@ class WorkflowService:
                 f"Resume workflow failed: execution_id={execution_id}, error={e}",
                 exc_info=True,
             )
+            try:
+                recovered_state = await graph.aget_state(execution_context.checkpoint_config)
+                recovered_outputs = (recovered_state.values or {}).get("node_outputs", {})
+                if recovered_outputs:
+                    import copy as _copy
+                    new_output_data = _copy.deepcopy(execution.output_data or {})
+                    merged = new_output_data.setdefault("node_outputs", {})
+                    merged.update(recovered_outputs)
+                    execution.output_data = new_output_data
+            except Exception as recover_err:
+                logger.warning(f"Failed to recover state on resume error: {recover_err}")
+
             execution.status = "failed"
             execution.error_message = str(e)
             execution.completed_at = utcnow_naive()
             self.db.commit()
+
+            try:
+                execution = self.get_execution(execution_id)
+                if execution and execution.output_data:
+                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                    self._refresh_workflow_debug_state_from_execution(execution)
+            except Exception as persist_err:
+                logger.warning(f"Failed to persist node executions on resume error: {persist_err}")
 
             # Workflow failed — clean up registry to avoid leaks.
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry

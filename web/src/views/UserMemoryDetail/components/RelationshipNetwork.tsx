@@ -422,7 +422,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
 
 
                       {selectedNode.label === 'ExtractedEntity' && <>
-                        {(['entity_type', 'aliases'] as const).map(key => {
+                        {(['description_summary', 'entity_type', 'aliases'] as const).map(key => {
                           const p = (selectedNode as Node).properties as ExtractedEntityNodeProperties
                           if (p[key]) {
                             return (
