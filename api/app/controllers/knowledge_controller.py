@@ -1,6 +1,8 @@
+import csv as csv_module
 import datetime
+import io
 import json
-from typing import Optional
+from typing import Any, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -26,7 +28,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorIndexOps,
 )
 from app.core.response_utils import success, fail
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.dependencies import get_current_user
 from app.models import knowledge_model
 from app.models import file_model
@@ -38,7 +40,7 @@ from app.schemas.response_schema import ApiResponse
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
 from app.services import file_service
-from app.services.file_service import _is_qa_doc, _build_qa_export
+from app.services.file_service import _is_qa_doc
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelConfigService
 from app.core.quota_stub import check_knowledge_capacity_quota
@@ -62,6 +64,43 @@ router = APIRouter(
     tags=["knowledges"],
     dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
 )
+
+
+def _build_qa_export_content(vector_service: Any, document_id: uuid.UUID | str, file_ext: str | None) -> bytes | None:
+    _, items = vector_service.search_by_segment(
+        document_id=str(document_id), pagesize=10000, page=1, asc=True
+    )
+    qa_pairs = []
+    for item in items:
+        if (item.metadata or {}).get("chunk_type") == "qa":
+            qa_pairs.append({
+                "question": (item.metadata or {}).get("question", ""),
+                "answer": (item.metadata or {}).get("answer", ""),
+            })
+
+    if not qa_pairs:
+        return None
+
+    file_ext_lower = file_ext.lower() if file_ext else ".csv"
+    if file_ext_lower in (".xlsx", ".xls"):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["question", "answer"])
+        for pair in qa_pairs:
+            ws.append([pair["question"], pair["answer"]])
+        output = io.BytesIO()
+        wb.save(output)
+        wb.close()
+        return output.getvalue()
+
+    text_output = io.StringIO()
+    writer = csv_module.writer(text_output)
+    writer.writerow(["question", "answer"])
+    for pair in qa_pairs:
+        writer.writerow([pair["question"], pair["answer"]])
+    return text_output.getvalue().encode("utf-8-sig")
 
 
 def _dispatch_reparse_tasks_for_knowledge(db: Session, knowledge_id: uuid.UUID) -> dict[str, int]:
@@ -432,7 +471,6 @@ async def update_knowledge(
 @router.post("/{kb_id}/batch-download")
 async def kb_batch_download(
         kb_id: uuid.UUID,
-        db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
         storage_service: FileStorageService = Depends(get_file_storage_service),
         request_body: file_schema.KBBatchDownloadRequest = file_schema.KBBatchDownloadRequest(),
@@ -440,32 +478,42 @@ async def kb_batch_download(
     """知识库文件一键下载 — 将该知识库下所有文件打包为 ZIP 流式下载"""
     api_logger.info(f"KB batch download: kb_id={kb_id}, username={current_user.username}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(
-        db, knowledge_id=kb_id, current_user=current_user
-    )
-    if not db_knowledge:
-        raise BusinessException("知识库不存在或无权访问", BizCode.NOT_FOUND)
+    with get_db_context() as db:
+        db_knowledge = knowledge_service.get_knowledge_by_id(
+            db, knowledge_id=kb_id, current_user=current_user
+        )
+        if not db_knowledge:
+            raise BusinessException("知识库不存在或无权访问", BizCode.NOT_FOUND)
 
-    files = db.query(file_model.File).filter(
-        file_model.File.kb_id == kb_id,
-        file_model.File.file_key.isnot(None),
-        file_model.File.file_key != "",
-    ).all()
+        files = db.query(file_model.File).filter(
+            file_model.File.kb_id == kb_id,
+            file_model.File.file_key.isnot(None),
+            file_model.File.file_key != "",
+        ).all()
 
-    if not files:
-        raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
+        if not files:
+            raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
 
-    # 预取 QA 文档内容
+        qa_export_specs = []
+        qa_vector_service = None
+        for f in files:
+            if _is_qa_doc(db, f.id):
+                doc = db.query(Document).filter(Document.file_id == f.id).first()
+                if doc:
+                    if qa_vector_service is None:
+                        qa_vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+                    qa_export_specs.append((f.file_key, f.file_ext, doc.id, qa_vector_service))
+
+        entries = file_service.build_zip_arcnames(files)
+        zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
+        total_files = len(files)
+
+    # Prefetch QA document content before streaming so the generator does not hold a DB session.
     pre_fetched: dict[str, bytes] = {}
-    for f in files:
-        if _is_qa_doc(db, f.id):
-            result = _build_qa_export(db, f.id, f.kb_id)
-            if result:
-                content, _, _ = result
-                pre_fetched[f.file_key] = content
-
-    entries = file_service.build_zip_arcnames(files)
-    zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
+    for file_key, file_ext, document_id, vector_service in qa_export_specs:
+        content = _build_qa_export_content(vector_service, document_id, file_ext)
+        if content:
+            pre_fetched[file_key] = content
 
     from urllib.parse import quote
     return StreamingResponse(
@@ -473,7 +521,7 @@ async def kb_batch_download(
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
-            "X-Total-Files": str(len(files)),
+            "X-Total-Files": str(total_files),
         },
     )
 
