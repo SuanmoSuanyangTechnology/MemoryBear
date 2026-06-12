@@ -2008,7 +2008,11 @@ RETURN e1.id AS a_id, e2.id AS b_id,
        e1.entity_type AS entity_type,
        e1.description AS a_desc, e2.description AS b_desc,
        e1.aliases AS a_aliases, e2.aliases AS b_aliases,
-       e1.name_embedding AS a_embed, e2.name_embedding AS b_embed
+       e1.description_summary AS a_desc_summary, e2.description_summary AS b_desc_summary,
+       CASE
+         WHEN e1.name_embedding IS NULL OR e2.name_embedding IS NULL THEN 0.0
+         ELSE vector.similarity.cosine(e1.name_embedding, e2.name_embedding)
+       END AS emb_sim
 LIMIT $candidate_cap
 """
 
@@ -2030,8 +2034,23 @@ RETURN e1.id AS a_id, e2.id AS b_id,
        e1.entity_type AS entity_type,
        e1.description AS a_desc, e2.description AS b_desc,
        e1.aliases AS a_aliases, e2.aliases AS b_aliases,
+       e1.description_summary AS a_desc_summary, e2.description_summary AS b_desc_summary,
        score AS sim_embed
 LIMIT $candidate_cap
+"""
+
+# 查两个实体各自度数（用于超级节点保护）
+ENTITY_DEGREE_COUNT = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.id IN [$id_a, $id_b]
+RETURN e.id AS id, COUNT{ (e)--() } AS degree
+"""
+
+# 批量查多个实体度数（方案B 桶内同名直合用）
+ENTITY_DEGREES_BY_IDS = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.id IN $ids
+RETURN e.id AS id, COUNT{ (e)--() } AS degree
 """
 
 # 去重两个实体合并
@@ -2099,7 +2118,8 @@ WHERE e.end_user_id = $end_user_id
   AND e.entity_type = $entity_type
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 RETURN e.id AS entity_id, e.name AS name, e.entity_type AS entity_type,
-       e.description AS description, e.aliases AS aliases, e.created_at AS created_at
+       e.description AS description, e.description_summary AS description_summary,
+       e.aliases AS aliases, e.created_at AS created_at
 ORDER BY e.created_at
 """
 
@@ -2135,7 +2155,8 @@ RETURN s.id AS statement_id,
        s.temporal_info AS temporal_info,
        s.speaker AS speaker,
        s.valid_at AS valid_at,
-       s.invalid_at AS invalid_at
+       s.invalid_at AS invalid_at,
+       s.run_id AS run_id
 ORDER BY s.created_at ASC
 LIMIT $batch_size
 """
@@ -2167,7 +2188,17 @@ ON CREATE SET
   e.aliases = [],
   e.connect_strength = "weak",
   e.source = "reflection_unresolved",
-  e.created_at = localdatetime()
+  e.run_id = $run_id,
+  e.type_id = $type_id,
+  e.type_description = $type_description,
+  e.entity_idx = $entity_idx,
+  e.importance_score = 0.5,
+  e.activation_value = null,
+  e.access_history = [],
+  e.access_count = 0,
+  e.last_access_time = null,
+  e.is_explicit_memory = $is_explicit_memory,
+  e.created_at = $created_at
 ON MATCH SET
   e.description = CASE
     WHEN e.description IS NULL OR e.description = "" THEN $description
@@ -2182,6 +2213,19 @@ SET e.name_embedding = $name_embedding
 RETURN e.id
 """
 
+# 反思未解析消解中：把 LLM 输出的"用户"实体的 description 追加到全局用户节点。
+# 用 entity_type='用户' 定位（而非 name='用户'）：兼容用户节点 name 是 "我"/"User" 等
+# 历史变体的情况；end_user_id 唯一约束保证只命中一个全局用户节点。
+UNRESOLVED_APPEND_USER_INFO = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id, entity_type: '用户'})
+SET e.description = CASE
+    WHEN $description IS NULL OR $description = '' THEN e.description
+    WHEN e.description IS NULL OR e.description = '' THEN $description
+    ELSE e.description + '；' + $description
+END
+RETURN e.id AS entity_id
+"""
+
 UNRESOLVED_CREATE_RELATIONSHIP = """
 MATCH (subj:ExtractedEntity {end_user_id: $end_user_id, name: $subject_name})
 MATCH (obj:ExtractedEntity {end_user_id: $end_user_id, name: $object_name})
@@ -2189,13 +2233,15 @@ CREATE (subj)-[r:EXTRACTED_RELATIONSHIP {
   predicate: $predicate,
   predicate_id: $predicate_id,
   predicate_surface: $predicate_surface,
+  predicate_description: $predicate_description,
   statement_id: $statement_id,
   valid_at: $valid_at,
   invalid_at: $invalid_at,
   end_user_id: $end_user_id,
+  run_id: $run_id,
   connect_strength: "weak",
   source: "reflection_unresolved",
-  created_at: datetime()
+  created_at: $created_at
 }]->(obj)
 RETURN r.predicate AS predicate
 """
@@ -2203,7 +2249,11 @@ RETURN r.predicate AS predicate
 UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE = """
 MATCH (s:Statement {id: $statement_id})
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $entity_name})
-MERGE (s)-[:REFERENCES_ENTITY]->(e)
+MERGE (s)-[r:REFERENCES_ENTITY]->(e)
+SET r.end_user_id = $end_user_id,
+    r.run_id = $run_id,
+    r.created_at = $created_at,
+    r.connect_strength = "weak"
 RETURN s.id AS statement_id
 """
 

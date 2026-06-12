@@ -2,10 +2,12 @@
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.storage_services.reflection_engine.deterministic.description_checker import (
     scan_merge_candidates,
 )
@@ -31,6 +33,7 @@ from app.repositories.neo4j.cypher_queries import (
     REFLECTION_UPDATE_NAME_EMBEDDING,
     UNRESOLVED_CREATE_ENTITY,
     UNRESOLVED_UPDATE_NAME_EMBEDDING,
+    UNRESOLVED_APPEND_USER_INFO,
     UNRESOLVED_CREATE_RELATIONSHIP,
     UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE,
     UNRESOLVED_UPDATE_STATEMENT_FLAG,
@@ -59,6 +62,7 @@ class EntityDedupConfig(BaseModel):
     llm_merge_threshold: float = 0.85   # LLM确认后合并阈值
     max_merges_per_run: int = 20        # 单次最多合并数
     merge_concurrency: int = 5          # LLM并发数
+    merge_max_degree: int = 1000        # loser 度数 ≤ 此值原子合并；> 则跳过（超级节点保护，需压测校准）
 
     # === 方案B：低频分组 LLM ===
     min_entities_for_scan: int = 3      # 少于此数不扫描
@@ -219,6 +223,56 @@ class Layer2Inspector:
 
         # 3. 过滤丢弃缓存
         candidates = await filter_discarded(end_user_id, candidates)
+        # 记录候选总数（用于返回值；直合池剥离前的总和）
+        total_candidates = len(candidates)
+
+        # 3.5 同名同类型直合池：name 完全相同（归一化后）→ 不进 LLM，确定性合并
+        # entity_type 在候选对里两侧本就相同（召回 Cypher 已约束），故只需判 name。
+        merged_count = 0
+        direct_merged_count = 0
+        removed_ids: set = set()  # 直合中被删除的 loser id，用于过滤后续 LLM 池
+        # id -> {description, aliases}：直合过程中 keeper 的累积态。
+        # 同一 keeper 出现在多对里时，前次合并已经把 loser 的描述/别名累加进 DB，
+        # 但本对 pair 里仍是召回快照值。用这里的覆盖确保下一对日志 old 用累积态、
+        # 同时 build_merged_aliases 也能按累积态去重并入。
+        keeper_state_overrides: Dict[str, Dict[str, Any]] = {}
+
+        def _norm(s: str) -> str:
+            return (s or "").strip().lower()
+
+        direct_pairs, rest = [], []
+        for c in candidates:
+            if c.a_name and _norm(c.a_name) == _norm(c.b_name):
+                direct_pairs.append(c)
+            else:
+                rest.append(c)
+
+        for c in direct_pairs:
+            if merged_count >= config.max_merges_per_run:
+                break
+            ok, removed_id, keeper_id, keeper_desc, keeper_aliases = (
+                await self._apply_direct_merge(c, end_user_id, baseline,
+                                               keeper_state_overrides)
+            )
+            if ok:
+                merged_count += 1
+                direct_merged_count += 1
+                if removed_id:
+                    removed_ids.add(removed_id)
+                # 把 keeper 的累积态(合并后真实状态)写回 overrides,
+                # 让下一对涉及同一 keeper 的合并能看到真实累积,日志 old/new 才能正确反映本次增量
+                if keeper_id is not None:
+                    keeper_state_overrides[keeper_id] = {
+                        "description": keeper_desc or "",
+                        "aliases": list(keeper_aliases or []),
+                    }
+
+        # 过滤掉涉及已被直合删除的实体的候选对（避免后续 LLM 调用浪费 + 合并失败）
+        candidates = [
+            c for c in rest
+            if c.a_id not in removed_ids and c.b_id not in removed_ids
+        ]
+
         # 4. 两档分流（去掉自动合并，全部走 LLM）
         llm_pool, discard_pool = partition_by_probability(
             candidates, config.theta_low)
@@ -241,7 +295,7 @@ class Layer2Inspector:
         }
 
         # 6. 合并执行（全部经 LLM 确认后才合并）
-        merged_count = 0
+        # merged_count 已在 3.5 直合池处初始化，与直合共享上限
         recorded_count = 0
         rejected_pairs = []
         for pair, decision in llm_results:
@@ -290,10 +344,11 @@ class Layer2Inspector:
 
         return {
             "status": "success",
-            "candidate_count": len(candidates),
+            "candidate_count": total_candidates,
             "llm_pool": len(llm_pool),
             "discard_pool": len(discard_pool),
             "merged_count": merged_count,
+            "direct_merged_count": direct_merged_count,
             "recorded_count": recorded_count,
         }
 
@@ -309,10 +364,14 @@ class Layer2Inspector:
             fetch_entities_by_type, update_scan_time,
         )
         from .llm.entity_dedup_batch_judge import judge_batch_dedup
-        from .deterministic.cypher_merger import execute_merge, build_merged_aliases
+        from .deterministic.cypher_merger import (
+            choose_keeper, execute_merge, build_merged_aliases,
+            # fetch_degrees,  # 暂时关闭度数优先,下版打开
+        )
 
         config = self.dedup_config
         total_merged = 0
+        total_direct_merged = 0
         scanned_types = 0
 
         entity_types = await get_entity_types(self.connector, end_user_id)
@@ -334,6 +393,16 @@ class Layer2Inspector:
             scanned_types += 1
             entities = await fetch_entities_by_type(self.connector, end_user_id, entity_type)
 
+            # 同名同类型直合（确定性快路）：分组内 name 完全相同 → 直接合并不进 LLM
+            # 受 max_pairs_per_run 限制；被合并的实体从 entities 剔除，避免送 LLM 浪费
+            direct_merged_count, removed_ids = await self._direct_merge_in_group(
+                entities, entity_type, end_user_id, baseline,
+                max_merges=config.max_pairs_per_run,
+            )
+            total_merged += direct_merged_count
+            total_direct_merged += direct_merged_count
+            if removed_ids:
+                entities = [e for e in entities if e["entity_id"] not in removed_ids]
             # LLM 分组判定 — 计时
             t0 = time.perf_counter()
             pairs = await judge_batch_dedup(self.llm_client, entities, entity_type)
@@ -341,8 +410,9 @@ class Layer2Inspector:
             llm_ms_per_pair = llm_ms // max(len(pairs), 1)
 
             merged_count = 0
-            for idx_a, idx_b, conf, reason in pairs:
-                if merged_count >= config.max_pairs_per_run:
+            for idx_a, idx_b, conf, reason, new_name, new_aliases in pairs:
+                # 单类型 LLM 合并数 + 直合数共享 max_pairs_per_run 上限
+                if (merged_count + direct_merged_count) >= config.max_pairs_per_run:
                     break
                 if idx_a == idx_b:
                     continue  # 跳过无效对（同一实体）
@@ -354,20 +424,30 @@ class Layer2Inspector:
                 # confidence 阈值检查（和方案A一致）
                 if conf < config.llm_merge_threshold:
                     continue
-                keeper, loser = ea, eb
-                merged_name = keeper["name"]
-                merged_aliases = build_merged_aliases(keeper, loser, merged_name)
+
+                degree_a, degree_b = 0, 0
+                # === 度数优先（暂时关闭，下版打开）===
+                # degree_a, degree_b = await fetch_degrees(
+                #     self.connector, end_user_id, ea["entity_id"], eb["entity_id"])
+                # =====================================
+                keeper, loser = choose_keeper(ea, eb, None, degree_a, degree_b)
+                loser_degree = degree_b if loser is eb else degree_a
+                merged_name = new_name or keeper["name"]
+                merged_aliases = build_merged_aliases(keeper, loser, merged_name, new_aliases)
 
                 t1 = time.perf_counter()
-                success = await execute_merge(
+                merge_status = await execute_merge(
                     self.connector, end_user_id,
                     keeper["entity_id"], loser["entity_id"],
                     merged_name, merged_aliases,
+                    loser_degree=loser_degree,
+                    merge_max_degree=config.merge_max_degree,
                 )
                 write_ms = int((time.perf_counter() - t1) * 1000)
 
-                if success:
+                if merge_status == "success":
                     merged_count += 1
+                    await self._reembed_if_name_changed(keeper, merged_name)
                     # 写 ReflectionLog
                     self._write_dedup_log(
                         end_user_id=end_user_id,
@@ -394,16 +474,38 @@ class Layer2Inspector:
             total_merged += merged_count
             await update_scan_time(end_user_id, entity_type)
 
-        return {"scanned_types": scanned_types, "merged_count": total_merged}
-
+        return {
+            "scanned_types": scanned_types,
+            "merged_count": total_merged,
+            "direct_merged_count": total_direct_merged,
+        }
+    @staticmethod
+    def _merged_description(keeper_desc: str, loser_desc: str) -> str:
+        """与 Cypher DEDUP_MERGE_ENTITIES 一致的 description 拼接策略：
+        任一为空取另一边，两边都有用 '；' 拼。日志和本地回填共用。
+        """
+        kd = keeper_desc or ""
+        ld = loser_desc or ""
+        if not kd:
+            return ld
+        if not ld:
+            return kd
+        return f"{kd}；{ld}"
 
     def _write_dedup_log(self, end_user_id: str, keeper: Dict, loser: Dict,
                          entity_type: str, merged_name: str, merged_aliases: List,
                          confidence: float, execution_detail: Dict, reason: str = "",
                          status: str = "resolved", strategy: str = "MERGE",
-                         baseline: str = "HYBRID"):
-        """写去重 ReflectionLog（方案A和B共用，支持 resolved/recorded）"""
+                         baseline: str = "HYBRID", source: str = "llm"):
+        """写去重 ReflectionLog（方案A和B共用，支持 resolved/recorded）
+
+        Args:
+            source: 合并来源；"llm"=LLM 确认合并，"deterministic"=同名同类型确定性合并。
+                title 显示按此区分，不依赖 reason 字符串硬编码。
+        """
         if status == "resolved":
+            merged_desc = self._merged_description(
+                keeper.get("description", ""), loser.get("description", ""))
             changes = [c for c in [
                 {"field": "name", "old": keeper["name"], "new": merged_name},
                 {"field": "aliases",
@@ -411,10 +513,13 @@ class Layer2Inspector:
                  "new": ", ".join(sorted(merged_aliases))},
                 {"field": "description",
                  "old": keeper.get("description", ""),
-                 "new": f"{keeper.get('description', '')}；{loser.get('description', '')}"},
+                 "new": merged_desc},
             ] if c["old"] != c["new"]]
             summary = f'"{keeper["name"]}" ≈ "{loser["name"]}" → 合并'
-            title = f"MERGE — LLM确认（confidence={confidence:.2f}）" if confidence else "MERGE"
+            if source == "deterministic":
+                title = "MERGE — 同名同类型确定性合并"
+            else:
+                title = f"MERGE — LLM确认（confidence={confidence:.2f}）" if confidence else "MERGE"
         else:
             changes = []
             summary = f'"{keeper["name"]}" ≈ "{loser["name"]}" → 未合并'
@@ -453,7 +558,10 @@ class Layer2Inspector:
     async def _apply_dedup_merge(self, pair, end_user_id: str, baseline: str,
                                 llm_decision=None, step_timing=None) -> bool:
         """执行单对合并 + 写 ReflectionLog"""
-        from .deterministic.cypher_merger import choose_keeper, execute_merge, build_merged_aliases
+        from .deterministic.cypher_merger import (
+            choose_keeper, execute_merge, build_merged_aliases,
+            # fetch_degrees,  # 暂时关闭度数优先,下版打开
+        )
 
         tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
         timing = step_timing or {}
@@ -484,22 +592,41 @@ class Layer2Inspector:
         entity_b = {"entity_id": pair.b_id, "name": pair.b_name, "entity_type": pair.entity_type,
                     "description": pair.b_desc, "aliases": pair.b_aliases}
         winner = llm_decision.winner_id if llm_decision else None
-        keeper, loser = choose_keeper(entity_a, entity_b, winner)
+
+        # 度数查询：用于 keeper 选择 + 超级节点保护
+        degree_a, degree_b = 0, 0
+        # === 度数优先（暂时关闭，下版打开）===
+        # degree_a, degree_b = await fetch_degrees(
+        #     self.connector, end_user_id, pair.a_id, pair.b_id)
+        # =====================================
+        keeper, loser = choose_keeper(entity_a, entity_b, winner, degree_a, degree_b)
+        loser_degree = degree_b if loser is entity_b else degree_a
+
         merged_name = llm_decision.merged_name if llm_decision and llm_decision.merged_name else keeper["name"]
-        merged_aliases = build_merged_aliases(keeper, loser, merged_name)
+        new_aliases = llm_decision.new_aliases if llm_decision else None
+        merged_aliases = build_merged_aliases(keeper, loser, merged_name, new_aliases)
         tracker.end_step(f"keeper={keeper['name']}")
 
         # Step 5: 写入
         tracker.start_step("写入", "write")
-        success = await execute_merge(
+        merge_status = await execute_merge(
             self.connector, end_user_id,
             keeper["entity_id"], loser["entity_id"],
             merged_name, merged_aliases,
+            loser_degree=loser_degree,
+            merge_max_degree=self.dedup_config.merge_max_degree,
         )
-        if not success:
+        if merge_status == "skipped_super_node":
+            # 当前版本超级节点保护已关闭，理论上不会进此分支；保留兜底。
+            tracker.end_step("跳过超级节点", success=False)
+            return False
+        if merge_status != "success":
             tracker.end_step("合并失败", success=False)
             return False
         tracker.end_step("合并完成")
+
+        # Step 5.5: name 变更则重算 name_embedding
+        await self._reembed_if_name_changed(keeper, merged_name)
 
         # Step 6: 写 ReflectionLog
         self._write_dedup_log(
@@ -514,6 +641,237 @@ class Layer2Inspector:
             baseline=baseline,
         )
         return True
+
+    async def _reembed_if_name_changed(self, keeper: Dict, merged_name: str) -> None:
+        """合并后若 name 变化，重算 name_embedding（与更名流程一致；失败只告警不回滚）"""
+        old_name = keeper.get("name") or ""
+        if not merged_name or merged_name == old_name:
+            return
+        if not self.embedding_client:
+            return
+        try:
+            emb = self.embedding_client.embed_query(merged_name)
+            if emb:
+                await self.connector.execute_query(
+                    REFLECTION_UPDATE_NAME_EMBEDDING,
+                    entity_id=keeper.get("entity_id") or keeper.get("id"),
+                    name_embedding=emb,
+                )
+        except Exception as e:
+            logger.warning(f"合并后重算 name_embedding 失败 name={merged_name}: {e}")
+
+    async def _apply_direct_merge(
+        self, pair, end_user_id: str, baseline: str,
+        keeper_state_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Tuple[bool, Optional[str], Optional[str], Optional[str], Optional[List[str]]]:
+        """同名同类型确定性合并（不经 LLM），写 ReflectionLog
+
+        Args:
+            keeper_state_overrides: 可选 {entity_id: {description, aliases}}，
+                同一直合循环内若 keeper 已经被前次合并累积过，从这里取覆盖值，
+                而非 pair 上的召回快照值。这样日志 old/new 与 build_merged_aliases
+                都能基于真实累积态。
+
+        Returns:
+            (是否合并成功, 被删除的 loser_id,
+             keeper_id, keeper 合并后的 description, keeper 合并后的 aliases)。
+            失败时返回 (False, None, None, None, None)。
+            调用方据 loser_id 过滤后续 LLM 池中涉及该实体的候选对，避免无效调用。
+            keeper_id/desc/aliases 用于回填 overrides，让下一对涉及同 keeper 的合并
+            能拿到累积态。
+        """
+        from .deterministic.cypher_merger import (
+            choose_keeper, execute_merge, build_merged_aliases,
+            # fetch_degrees,  # 暂时关闭度数优先,下版打开
+        )
+
+        entity_a = {"entity_id": pair.a_id, "name": pair.a_name, "entity_type": pair.entity_type,
+                    "description": pair.a_desc, "aliases": pair.a_aliases}
+        entity_b = {"entity_id": pair.b_id, "name": pair.b_name, "entity_type": pair.entity_type,
+                    "description": pair.b_desc, "aliases": pair.b_aliases}
+
+        # 若该 entity 在本次直合循环里已是某次合并的 keeper，用累积态覆盖召回快照值，
+        # 让日志 old 和 build_merged_aliases 都基于真实累积。
+        if keeper_state_overrides:
+            for ent in (entity_a, entity_b):
+                ov = keeper_state_overrides.get(ent["entity_id"])
+                if ov:
+                    ent["description"] = ov.get("description", ent.get("description", ""))
+                    ent["aliases"] = list(ov.get("aliases", ent.get("aliases", []) or []))
+
+        degree_a, degree_b = 0, 0
+        # === 度数优先（暂时关闭，下版打开）===
+        # degree_a, degree_b = await fetch_degrees(
+        #     self.connector, end_user_id, pair.a_id, pair.b_id)
+        # =====================================
+        keeper, loser = choose_keeper(entity_a, entity_b, None, degree_a, degree_b)
+        loser_degree = degree_b if loser is entity_b else degree_a
+        merged_name = keeper["name"]
+        merged_aliases = build_merged_aliases(keeper, loser, merged_name)  # 不传 new_aliases
+
+        merge_status = await execute_merge(
+            self.connector, end_user_id,
+            keeper["entity_id"], loser["entity_id"],
+            merged_name, merged_aliases,
+            loser_degree=loser_degree,
+            merge_max_degree=self.dedup_config.merge_max_degree,
+        )
+        if merge_status != "success":
+            return False, None, None, None, None
+
+        # name 同名不变，无需重算 embedding
+        self._write_dedup_log(
+            end_user_id=end_user_id,
+            keeper=keeper, loser=loser,
+            entity_type=pair.entity_type,
+            merged_name=merged_name,
+            merged_aliases=merged_aliases,
+            confidence=1.0,
+            execution_detail={
+                "steps": [
+                    {"name": "同名同类型匹配", "type": "decide", "duration_ms": 0,
+                     "output": f'name="{merged_name}" type={pair.entity_type}', "success": True},
+                    {"name": "写入", "type": "write", "duration_ms": 0,
+                     "output": "合并完成", "success": True},
+                ],
+                "total_ms": 0,
+                "model": "",
+            },
+            reason="同名同类型确定性合并",
+            baseline=baseline,
+            strategy="MERGE",
+            status="resolved",
+            source="deterministic",
+        )
+        # 返回 keeper 合并后的累积态(与 Cypher DEDUP_MERGE_ENTITIES 一致)，
+        # 供调用方写入 overrides，让下一对涉及同 keeper 的合并能用上。
+        merged_desc = self._merged_description(
+            keeper.get("description", ""), loser.get("description", ""))
+        return (True, loser["entity_id"], keeper["entity_id"],
+                merged_desc, merged_aliases)
+
+    async def _direct_merge_in_group(
+        self,
+        entities: List[Dict],
+        entity_type: str,
+        end_user_id: str,
+        baseline: str,
+        max_merges: int,
+    ) -> Tuple[int, set]:
+        """方案B 桶内同名同类型确定性合并：分组内 name 完全相同（归一化后）的实体直接合并。
+
+        策略：
+          - 按 (归一化 name) 分桶；
+          - 桶内 ≥2 个 → 度数最大的当 keeper，其余依次合到 keeper；
+          - 受 max_merges 限制（与 LLM 合并共享单类型上限）；
+          - 失败的子合并不影响其他子合并继续。
+
+        Returns:
+            (合并次数, 被删除的 loser entity_id 集合)
+        """
+        from .deterministic.cypher_merger import (
+            execute_merge, build_merged_aliases,
+            # fetch_degrees_batch,  # 暂时关闭度数优先,下版打开
+        )
+
+        if not entities or max_merges <= 0:
+            return 0, set()
+
+        # 1) 按 (归一化 name, entity_type) 分桶
+        # entity_type 实际由调用方保证一致（按类型分组扫描），加进 key 让代码自说明。
+        buckets: Dict[Tuple[str, str], List[Dict]] = {}
+        for e in entities:
+            name_key = (e.get("name") or "").strip().lower()
+            if not name_key:
+                continue
+            type_key = e.get("entity_type") or ""
+            buckets.setdefault((name_key, type_key), []).append(e)
+
+        # 度数关闭后所有实体按 0 处理,keeper 退化为桶内首个
+        degrees: Dict[str, int] = {}
+        # === 桶内度数批量查询（暂时关闭，下版打开）===
+        # ids_for_degree: List[str] = []
+        # for bucket in buckets.values():
+        #     if len(bucket) >= 2:
+        #         ids_for_degree.extend(e["entity_id"] for e in bucket)
+        # degrees = await fetch_degrees_batch(
+        #     self.connector, end_user_id, ids_for_degree)
+        # ===========================================
+
+        merged = 0
+        removed_ids: set = set()
+        for bucket in buckets.values():
+            if len(bucket) < 2:
+                continue
+
+            # 2) 桶内挑度数最大者为 keeper（与方案A 度数绝对优先一致）
+            # 度数优先关闭时所有度数都是 0，max 会取桶内首个（Python max 稳定退化），
+            # 同名同类型反正都会合到一起，keeper 选谁不影响结果。
+            keeper = max(bucket, key=lambda e: degrees.get(e["entity_id"], 0))
+            keeper_id = keeper["entity_id"]
+            merged_name = keeper["name"]
+
+            # 3) 桶内非 keeper 实体逐个合到 keeper
+            for loser in bucket:
+                if loser["entity_id"] == keeper_id:
+                    continue
+                if merged >= max_merges:
+                    break
+
+                merged_aliases = build_merged_aliases(keeper, loser, merged_name)
+                loser_degree = degrees.get(loser["entity_id"], 0)
+
+                merge_status = await execute_merge(
+                    self.connector, end_user_id,
+                    keeper_id, loser["entity_id"],
+                    merged_name, merged_aliases,
+                    loser_degree=loser_degree,
+                    merge_max_degree=self.dedup_config.merge_max_degree,
+                )
+                if merge_status != "success":
+                    continue
+
+                merged += 1
+                removed_ids.add(loser["entity_id"])
+
+                # 写 ReflectionLog（与方案A 直合一致：source="deterministic"）
+                #   注意：必须先写日志再回填本地 keeper（aliases / description），
+                #   这样日志里 old=合并前快照 / new=合并后累积，能正确反映本次增量。
+                self._write_dedup_log(
+                    end_user_id=end_user_id,
+                    keeper=keeper, loser=loser,
+                    entity_type=entity_type,
+                    merged_name=merged_name,
+                    merged_aliases=merged_aliases,
+                    confidence=1.0,
+                    execution_detail={
+                        "steps": [
+                            {"name": "同名同类型匹配", "type": "decide", "duration_ms": 0,
+                             "output": f'name="{merged_name}" type={entity_type}', "success": True},
+                            {"name": "写入", "type": "write", "duration_ms": 0,
+                             "output": "合并完成", "success": True},
+                        ],
+                        "total_ms": 0,
+                        "model": "",
+                    },
+                    reason="同名同类型确定性合并",
+                    baseline=baseline,
+                    strategy="MERGE",
+                    status="resolved",
+                    source="deterministic",
+                )
+
+                # 同步本地 keeper 为最新累积态（与 Cypher DEDUP_MERGE_ENTITIES 一致）：
+                #   - aliases：避免桶内 ≥3 个实体多次合并时丢失中间并入
+                #   - description：让下一次循环的日志快照正确反映 DB 真实累积
+                keeper["aliases"] = merged_aliases
+                keeper["description"] = self._merged_description(
+                    keeper.get("description", ""), loser.get("description", ""))
+
+            if merged >= max_merges:
+                break
+
+        return merged, removed_ids
 
     #子问题6：实体描述合并
     async def _run_unresolved_resolver(self, end_user_id: str, baseline: str,
@@ -610,11 +968,27 @@ class Layer2Inspector:
         # Step 4: 写入 Neo4j
         tracker.start_step("写入Neo4j", "write")
         created_entity_ids = []
+        # 同 statement 内所有派生实体/边共用一个 run_id：优先复用来源 statement 的 run_id，
+        # 老数据为空时一次性兜底，避免实体和关系边拿到不同的随机 run_id。
+        fallback_run_id = stmt.get("run_id") or uuid.uuid4().hex
 
         # 4.1 创建实体
         for entity in validated.entities:
-            # 跳过"用户"实体（用户节点已存在，不需要重复创建）
+            # "用户"实体不重新创建（全局用户节点已存在），改为把本次 LLM 输出的
+            # description 累加到全局用户节点，避免反思补救出来的语义被丢弃。
+            # description 用 '；' 拼接，与 DEDUP_MERGE_ENTITIES 的语义保持一致。
             if entity.name.strip() == "用户":
+                if entity.description:
+                    try:
+                        await self.connector.execute_query(
+                            UNRESOLVED_APPEND_USER_INFO,
+                            end_user_id=end_user_id,
+                            description=entity.description,
+                        )
+                    except Exception as user_err:
+                        logger.warning(
+                            f"追加用户实体描述失败 end_user={end_user_id}: {user_err}"
+                        )
                 continue
             entity_result = await self.connector.execute_query(
                 UNRESOLVED_CREATE_ENTITY,
@@ -622,6 +996,12 @@ class Layer2Inspector:
                 name=entity.name,
                 entity_type=entity.type,
                 description=entity.description,
+                run_id=fallback_run_id,
+                type_id=entity.type_id,
+                type_description=entity.type_description,
+                entity_idx=entity.entity_idx,
+                is_explicit_memory=entity.is_explicit_memory,
+                created_at=utcnow_naive(),
             )
             if entity_result:
                 entity_id = entity_result[0].get("entity_id", "")
@@ -650,9 +1030,12 @@ class Layer2Inspector:
                     predicate=triplet.predicate,
                     predicate_id=triplet.predicate_id,
                     predicate_surface=triplet.predicate_surface,
+                    predicate_description=triplet.predicate_description,
                     statement_id=stmt["statement_id"],
                     valid_at=triplet.valid_at,
                     invalid_at=triplet.invalid_at,
+                    run_id=fallback_run_id,
+                    created_at=utcnow_naive(),
                 )
             except Exception as rel_err:
                 logger.warning(f"创建关系边失败: {rel_err}")
@@ -664,6 +1047,8 @@ class Layer2Inspector:
                 statement_id=stmt["statement_id"],
                 end_user_id=end_user_id,
                 entity_name=entity.name,
+                run_id=fallback_run_id,
+                created_at=utcnow_naive(),
             )
 
         # 4.4 更新 Statement 标记

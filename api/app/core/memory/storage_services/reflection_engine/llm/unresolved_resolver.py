@@ -27,6 +27,7 @@ class EntityOutput(BaseModel):
     description: str = ""
     type_description: str = ""
     is_explicit_memory: bool = False
+    entity_idx: int = 0
 
 
 class TripletOutput(BaseModel):
@@ -34,6 +35,7 @@ class TripletOutput(BaseModel):
     predicate: str
     predicate_id: int
     predicate_surface: str = ""
+    predicate_description: str = ""
     object_name: str
     valid_at: str = "NULL"
     invalid_at: str = "NULL"
