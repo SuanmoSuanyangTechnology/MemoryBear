@@ -2,16 +2,16 @@
 import { useEffect, useState, useRef, useCallback, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Switch, Button, Dropdown, Space, Radio, Tooltip, App } from 'antd';
+import { Switch, Button, Dropdown, Space, Radio, Tooltip, App, Flex, Divider } from 'antd';
 import type { MenuProps } from 'antd';
 import SearchInput from '@/components/SearchInput'
 import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
-import { MoreOutlined, DeploymentUnitOutlined, BarsOutlined } from '@ant-design/icons';
+import { MoreOutlined } from '@ant-design/icons';
 import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import textIcon from '@/assets/images/knowledgeBase/text.png';
-import editIcon from '@/assets/images/knowledgeBase/edit.png';
+
 // import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
 // import imageIcon from '@/assets/images/knowledgeBase/image.png'
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb } from '@/api/knowledgeBase';
@@ -33,6 +33,7 @@ import CreateFolderModal from '../components/CreateFolderModal';
 import CreateContentModal from '../components/CreateContentModal';
 import CreateModal from '../components/CreateModal';
 import ShareModal from '../components/ShareModal';
+import IconButtonGroup from '@/components/IconButton/IconButtonGroup';
 import CreateDatasetModal from '../components/CreateDatasetModal';
 import CreateImageDataset from '../components/CreateImageDataset';
 import MetadataDrawer from '../components/MetadataDrawer';
@@ -825,48 +826,75 @@ const Private: FC = () => {
         </div>
       )}
       <div className='rb:flex-1 rb:min-w-0 rb:p-4'>
-        <div className="rb:flex rb:items-center rb:justify-between rb:mb-4">
-          
-          <div className="rb:flex-col">
-            <div className="rb:flex rb:items-center rb:gap-3">
-                <h1 className="rb:text-xl rb:font-medium rb:text-gray-800">{knowledgeBase.name}</h1>
-                <div className="rb:flex rb:items-center rb:border rb:border-[rgba(33, 35, 50, 0.17)] rb:text-gray-500 rb:cursor-pointer rb:px-1 rb:py-0.5 rb:rounded"
-                  onClick={handleEditFolder}
-                >
-                  <img src={editIcon} alt="edit" className="rb:w-3.5 rb:h-[14px" />
-                  <span className='rb:text-[12px]'>{t('knowledgeBase.edit')} {t('knowledgeBase.name')}</span>
-                </div>
-            </div>
-              <div className='rb:flex rb:items-center rb:gap-6 rb:text-gray-500 rb:mt-2 rb:text-xs'>
-                <Tag variant="borderless" color="default" className="rb:cursor-pointer" onClick={() => handleCopy(knowledgeBase.id)}>
-                  ID: {knowledgeBase.id}
-                  <span className="rb:-mb-0.5 rb:ml-1 rb:inline-block rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
-                </Tag>
-                <span className='rb:text-[12px]'>{t('knowledgeBase.created')} {t('knowledgeBase.time')}: {formatDateTime(knowledgeBase.created_at) || '-'}</span>
-                <span className='rb:text-[12px]'>{t('knowledgeBase.updated')} {t('knowledgeBase.time')}: {formatDateTime(knowledgeBase.updated_at) || '-'}</span>
+        <Flex justify="space-between" className="rb:mb-6!">
+          <div>
+            <Flex align="center" gap={6} onClick={handleEditFolder}>
+              <h1 className="rb:text-[16px] rb:font-medium rb:text-[#171719]">{knowledgeBase.name}</h1>
+              <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />
+            </Flex>
+            <Flex align="center" className=' rb:text-gray-500 rb:mt-2.25!'>
+              <Flex gap={4} align="center" className="rb:cursor-pointer" onClick={() => handleCopy(knowledgeBase.id)}>
+                ID: {knowledgeBase.id}
+                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy.svg')]"></div>
+              </Flex>
+              <Divider type="vertical" className="rb:mx-4!" />
+              <span>{t('knowledgeBase.created')} {t('knowledgeBase.time')}: {formatDateTime(knowledgeBase.created_at) || '-'}</span>
+              <Divider type="vertical" className="rb:mx-4!" />
+              <span>{t('knowledgeBase.updated')} {t('knowledgeBase.time')}: {formatDateTime(knowledgeBase.updated_at) || '-'}</span>
                 
-            </div>
+            </Flex>
           </div>
-          {/* <div className='rb:flex'> */}
-            <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} defaultChecked={knowledgeBase.status === 1} onChange={onChange}/>
-          {/* </div> */}
-        </div>
-        <div className='rb:flex rb:items-center rb:justify-between rb:mb-4'>
+          <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} defaultChecked={knowledgeBase.status === 1} onChange={onChange}/>
+        </Flex>
+        <Flex align="center" justify="space-between" className='rb:mb-4!'>
           <SearchInput placeholder={t('knowledgeBase.search')} variant="outlined" onSearch={handleSearch} />
-          <div className='rb:flex-1 rb:flex rb:items-center rb:justify-end rb:gap-2.5'>
+          <Flex align="center" justify="flex-end" gap={12} className='rb:flex-1'>
             <Radio.Group value={isGraph} onChange={(e) => setIsGraph(e.target.value)}>
-              <Radio.Button value={false} >
-                  <BarsOutlined />
+              <Radio.Button value={false} className="rb:px-2!">
+                <Flex align="center" className="rb:h-full! rb:w-full!">
+                  <Tooltip title={t('knowledgeBase.list')}>
+                    <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/list.svg')]" />
+                  </Tooltip>
+                </Flex>
               </Radio.Button>
-              <Radio.Button value={true} >
-                  <DeploymentUnitOutlined />
+              <Radio.Button value={true} className="rb:px-2!">
+                <Flex align="center" className="rb:h-full! rb:w-full!">
+                  <Tooltip title={t('knowledgeBase.graph')}>
+                    <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/graph.svg')]" />
+                  </Tooltip>
+                </Flex>
               </Radio.Button>
             </Radio.Group>
-            <Button onClick={handleShare}>{t('knowledgeBase.share')}</Button>
-            <Button onClick={handleRecallTest}>{t('knowledgeBase.recallTest')}</Button>
-            <Button onClick={handleMetadata}>{t('knowledgeBase.metadata.label')}</Button>
-            <Button onClick={handleSetting}>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</Button>
-            <Button onClick={handleBatchDownload}>{t('knowledgeBase.batchDownload')}</Button>
+
+            <IconButtonGroup
+              items={[
+                {
+                  title: t('knowledgeBase.share'),
+                  icon: "rb:bg-[url('@/assets/images/knowledgeBase/share.svg')]",
+                  onClick: handleShare,
+                },
+                {
+                  title: t('knowledgeBase.recallTest'),
+                  icon: "rb:bg-[url('@/assets/images/knowledgeBase/recallTest.svg')]",
+                  onClick: handleRecallTest,
+                },
+                {
+                  title: t('knowledgeBase.metadata.label'),
+                  icon: "rb:bg-[url('@/assets/images/knowledgeBase/metadata.svg')]",
+                  onClick: handleMetadata,
+                },
+                {
+                  title: <>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</>,
+                  icon: "rb:bg-[url('@/assets/images/knowledgeBase/setting.svg')]",
+                  onClick: handleSetting,
+                },
+                {
+                  title: t('knowledgeBase.batchDownload'),
+                  icon: "rb:bg-[url('@/assets/images/knowledgeBase/export.svg')]",
+                  onClick: handleBatchDownload,
+                },
+              ]}
+            />
             {(knowledgeBase?.type === 'Web' || knowledgeBase?.type === 'Third-party') && (
               <Button 
                 type="primary" 
@@ -882,8 +910,8 @@ const Private: FC = () => {
               </Dropdown>
             )}
             
-          </div>
-        </div>
+          </Flex>
+        </Flex>
         <div className="rb:rounded rb:max-h-[calc(100%-100px)] rb:overflow-y-auto">
           {isGraph ? (
             <KnowledgeGraphCard 

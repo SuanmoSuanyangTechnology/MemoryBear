@@ -396,6 +396,7 @@ export const zh = {
       replaceWhitespace: '替换掉连续的空格、换行符和制表符',
       removeEmails: '删除所有 URL 和电子邮件地址',
       // 知识图谱相关
+      list: '列表',
       graph: '图谱',
       knowledgeGraph: '知识图谱',
       basicConfig: '基础配置',
