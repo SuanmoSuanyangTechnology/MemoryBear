@@ -35,6 +35,10 @@ class MetadataAutoModelCompletionParams(BaseModel):
     extra_headers: LLMExtraHeadersConfig = Field(default_factory=LLMExtraHeadersConfig)
     stop: LLMStopConfig = Field(default_factory=LLMStopConfig)
     json_output: bool = Field(default=True, description="Force JSON output for structured extraction")
+    structured_output: bool = Field(
+        default=False,
+        description="Whether to expose parsed JSON as structured_output and request JSON Schema output",
+    )
 
 
 class MetadataAutoModelConfig(BaseModel):
