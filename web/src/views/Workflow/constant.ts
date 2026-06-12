@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-12 11:17:40
+ * @Last Modified time: 2026-06-12 11:40:46
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -455,7 +455,25 @@ export const nodeLibrary: NodeLibrary[] = [
           knowledge_retrieval: {
             type: 'knowledge',
             required: true,
-          }
+          },
+          metadata_filter_mode: {
+            type: 'metadata',
+            defaultValue: 'disabled'
+          },
+          // metadata_model: {
+          //   type: 'define',
+          //   defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
+          //     acc[key] = value.defaultValue;
+          //     return acc;
+          //   }, {} as Record<string, any>),
+          // },
+          metadata_filters: {
+            type: 'define',
+            defaultValue: {
+              conditions: [],
+              logic: 'and'
+            }
+          },
         }
       },
       { type: "parameter-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/parameter_extraction.svg")]',

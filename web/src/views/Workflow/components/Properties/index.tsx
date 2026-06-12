@@ -54,6 +54,7 @@ import Trigger from './Trigger'
 import { getWorkflowNodeLastRunDetail } from '@/api/application'
 import HumanIntervention from './HumanIntervention'
 import ToolList from './ToolList'
+import MetadataFilter from './MetadataFilter'
 import { openHelpCenter } from '@/utils/help';
 
 /**
@@ -887,6 +888,13 @@ const Properties: FC<PropertiesProps> = ({
                                   >
                                     <Knowledge variant="workflow" />
                                   </Form.Item>
+                                )
+                              }
+                              if (config.type === 'metadata') {
+                                return (
+                                  <MetadataFilter
+                                    options={variableList}
+                                  />
                                 )
                               }
 
