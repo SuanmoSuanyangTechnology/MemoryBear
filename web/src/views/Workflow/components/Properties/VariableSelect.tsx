@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 18:52:25
+ * @Last Modified time: 2026-06-12 10:29:21
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -41,11 +41,13 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedParentKey, setExpandedParentKey] = useState<string | null>(null);
+  const [expandedPath, setExpandedPath] = useState<Suggestion[]>([]);
+  const [panelPositions, setPanelPositions] = useState<Map<string, { top: number; horizontal: number; useRight: boolean }>>(new Map());
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [activePanel, setActivePanel] = useState<'main' | 'child'>('main');
   const [childActiveIndex, setChildActiveIndex] = useState<number>(-1);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
-  const [childPanelPos, setChildPanelPos] = useState({ top: 0, right: 0 });
+  const [childPanelPos, setChildPanelPos] = useState({ top: 0, horizontal: 0, useRight: true });
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -53,19 +55,53 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const activeKeyRef = useRef<string | null>(null);
 
   const CHILD_PANEL_HEIGHT = 280; // max-h-60 (240) + header (~40)
+  const CHILD_PANEL_WIDTH = 280; // min-w-70 (280px)
+  const MARGIN = 8;
 
-  const calcChildPos = (key: string) => {
-    const el = itemRefs.current.get(key);
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const dropdownEl = dropdownRef.current;
-    if (!dropdownEl) return;
-    const dropdownRect = dropdownEl.getBoundingClientRect();
-    const dropdownBottom = dropdownRect.bottom;
-    const actualChildHeight = Math.min(CHILD_PANEL_HEIGHT, dropdownRect.height);
-    // Bottom-align child panel with main panel
-    const top = Math.max(10, dropdownBottom - actualChildHeight);
-    setChildPanelPos({ top, right: window.innerWidth - rect.left + 8 });
+  const calcChildPos = (key: string, fromMainPanel: boolean = false) => {
+    // Calculate position that avoids screen edges
+    const calculateSmartPos = (rect: DOMRect) => {
+      const spaceRight = window.innerWidth - rect.left;
+
+      // Determine horizontal position: prefer right, fallback to left
+      const useRight = spaceRight >= CHILD_PANEL_WIDTH + MARGIN;
+      const horizontal = useRight
+        ? window.innerWidth - rect.left + MARGIN
+        : rect.right + MARGIN;
+
+      // Determine vertical position: align panel top with main dropdown top
+      // Panel has a fixed height and shares the same vertical edges as the parent dropdown
+      let top: number;
+      if (dropdownRef.current) {
+        const parentRect = dropdownRef.current.getBoundingClientRect();
+        top = parentRect.top;
+      } else {
+        // Fallback: align panel bottom with parent variable bottom
+        const calculatedTop = rect.bottom - CHILD_PANEL_HEIGHT;
+        top = Math.max(MARGIN, calculatedTop);
+      }
+
+      return { top, horizontal, useRight };
+    };
+
+    // For panels opened from main panel
+    if (fromMainPanel) {
+      const el = itemRefs.current.get(key);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      
+      const { top, horizontal, useRight } = calculateSmartPos(rect);
+      setChildPanelPos({ top, horizontal, useRight });
+    } else {
+      // For panels opened from child panels - position relative to the parent variable
+      const el = childItemRefs.current.get(key);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      
+      const { top, horizontal, useRight } = calculateSmartPos(rect);
+      const newPos = { top, horizontal, useRight };
+      setPanelPositions(prev => new Map(prev).set(key, newPos));
+    }
   };
 
   // Calculate dropdown position (runs synchronously after DOM paint to avoid flicker)
@@ -96,17 +132,29 @@ const VariableSelect: FC<VariableSelectProps> = ({
     ? options.filter(o => o.dataType !== 'boolean')
     : options;
 
-  const allSuggestions = filteredOptions.flatMap(o => o.children ? [o, ...o.children] : [o]);
-  const suggestionMap = new Map(allSuggestions.map(s => [`{{${s.value}}}`, s]));
-
+  // Build flat map including all nested levels + parent map for breadcrumb lookup
+  const { suggestionMap, suggestionParentMap } = filteredOptions.reduce<{
+    suggestionMap: Map<string, Suggestion>;
+    suggestionParentMap: Map<string, Suggestion>;
+  }>((acc, o) => {
+    const walk = (s: Suggestion, parent: Suggestion | null) => {
+      const key = `{{${s.value}}}`;
+      acc.suggestionMap.set(key, s);
+      if (parent) acc.suggestionParentMap.set(key, parent);
+      s.children?.forEach(c => walk(c, s));
+    };
+    walk(o, null);
+    return acc;
+  }, { suggestionMap: new Map(), suggestionParentMap: new Map() });
+  console.log('selectedValues value', value)
   const selectedValues = multiple ? (Array.isArray(value) ? value : []) : [];
   const selectedSuggestion = !multiple && value ? suggestionMap.get(value as string) : undefined;
   const parentOfSelected = !multiple && value
     ? filteredOptions.find(o => o.children?.some(c => `{{${c.value}}}` === value))
     : undefined;
 
-  const expandedParent = expandedParentKey
-    ? filteredOptions.find(o => o.key === expandedParentKey) ?? null
+  const expandedParent = expandedPath.length > 0
+    ? expandedPath[expandedPath.length - 1]
     : null;
 
   const groupedSuggestions = filteredOptions.reduce((groups: Record<string, Suggestion[]>, s) => {
@@ -162,16 +210,19 @@ const VariableSelect: FC<VariableSelectProps> = ({
     if (!open) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      const childPanel = document.getElementById('variable-select-child-panel');
+      const inChildPanel = Array.from(document.querySelectorAll('[id^="variable-select-child-panel-"]'))
+        .some(panel => panel.contains(target));
       if (
         !containerRef.current?.contains(target) &&
         !dropdownRef.current?.contains(target) &&
-        !childPanel?.contains(target)
+        !inChildPanel
       ) {
         setOpen(false);
         setSearch('');
         setExpandedParentKey(null);
-        setChildPanelPos({ top: 0, right: 0 });
+        setExpandedPath([]);
+        setPanelPositions(new Map());
+        setChildPanelPos({ top: 0, horizontal: 0, useRight: true });
       }
     };
     document.addEventListener('mousedown', handler);
@@ -190,16 +241,25 @@ const VariableSelect: FC<VariableSelectProps> = ({
   useEffect(() => {
     if (activeIndex < 0 || activeIndex >= flatItems.length) {
       setExpandedParentKey(null);
+      setExpandedPath([]);
       return;
     }
     const s = flatItems[activeIndex];
     activeKeyRef.current = s.key;
     itemRefs.current.get(s.key)?.scrollIntoView({ block: 'nearest' });
+    
     if (s.children?.length) {
-      calcChildPos(s.key);
-      setExpandedParentKey(s.key);
+      // Delay position calculation to ensure DOM ref is set
+      const timer = setTimeout(() => {
+        calcChildPos(s.key, true);
+        setExpandedParentKey(s.key);
+        setExpandedPath([s]);
+      }, 0);
+      return () => clearTimeout(timer);
     } else {
       setExpandedParentKey(null);
+      setExpandedPath([]);
+      return;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex]);
@@ -217,14 +277,52 @@ const VariableSelect: FC<VariableSelectProps> = ({
       if (activePanel === 'child') {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          setChildActiveIndex(i => Math.min(i + 1, children.length - 1));
+          const newIndex = Math.min(childActiveIndex + 1, children.length - 1);
+          setChildActiveIndex(newIndex);
+          const child = children[newIndex];
+          if (child?.children?.length) {
+            // 展开下一级子面板
+            const timer = setTimeout(() => {
+              calcChildPos(child.key);
+              setExpandedPath(prev => [...prev, child]);
+            }, 0);
+          } else if (expandedPath.length > 1) {
+            // 无子项时收起当前面板
+            setExpandedPath(prev => prev.slice(0, -1));
+          }
         } else if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setChildActiveIndex(i => Math.max(i - 1, 0));
+          const newIndex = Math.max(childActiveIndex - 1, 0);
+          setChildActiveIndex(newIndex);
+          const child = children[newIndex];
+          if (child?.children?.length) {
+            const timer = setTimeout(() => {
+              calcChildPos(child.key);
+              setExpandedPath(prev => [...prev, child]);
+            }, 0);
+          } else if (expandedPath.length > 1) {
+            setExpandedPath(prev => prev.slice(0, -1));
+          }
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          // 进入下一级子面板
+          const currentChild = children[childActiveIndex];
+          if (currentChild?.children?.length) {
+            const timer = setTimeout(() => {
+              calcChildPos(currentChild.key);
+              setExpandedPath(prev => [...prev, currentChild]);
+              setChildActiveIndex(0);
+            }, 0);
+          }
         } else if (e.key === 'ArrowRight') {
           e.preventDefault();
-          setActivePanel('main');
-          setChildActiveIndex(-1);
+          // 返回上一级（收起当前面板）
+          if (expandedPath.length > 1) {
+            setExpandedPath(prev => prev.slice(0, -1));
+            setChildActiveIndex(0);
+          } else {
+            setActivePanel('main');
+          }
         } else if (e.key === 'Enter' && childActiveIndex >= 0 && childActiveIndex < children.length) {
           e.preventDefault();
           const child = children[childActiveIndex];
@@ -244,6 +342,25 @@ const VariableSelect: FC<VariableSelectProps> = ({
           if (expandedParent?.children?.length) {
             setActivePanel('child');
             setChildActiveIndex(0);
+          }
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          const currentChild = children[childActiveIndex];
+          if (currentChild?.children?.length) {
+            const timer = setTimeout(() => {
+              calcChildPos(currentChild.key);
+              setExpandedPath(prev => [...prev, currentChild]);
+              setActivePanel('child');
+              setChildActiveIndex(0);
+            }, 0);
+          } else {
+            if (expandedPath.length > 1) {
+              setExpandedPath(prev => prev.slice(0, -1));
+              setChildActiveIndex(0);
+            } else {
+              setActivePanel('main');
+              setChildActiveIndex(-1);
+            }
           }
         } else if (e.key === 'Enter' && activeIndex >= 0 && activeIndex < flatItems.length) {
           e.preventDefault();
@@ -272,6 +389,8 @@ const VariableSelect: FC<VariableSelectProps> = ({
       setOpen(false);
       setSearch('');
       setExpandedParentKey(null);
+      setExpandedPath([]);
+      setPanelPositions(new Map());
     }
   };
 
@@ -289,6 +408,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
     || (selectedSuggestion ? filteredOptions.some(o => o.group === 'CONVERSATION' && o.children?.some(c => `{{${c.value}}}` === value)) : false);
   const nodeData = (parentOfSelected ?? selectedSuggestion)?.nodeData;
 
+  console.log('selectedValues', selectedValues)
   return (
     <div ref={containerRef} className={`rb:relative rb:w-full ${className}`}>
       {/* Trigger */}
@@ -321,10 +441,22 @@ const VariableSelect: FC<VariableSelectProps> = ({
               {selectedValues.map(v => {
                 const s = suggestionMap.get(v);
                 if (!s) return null;
-                const parent = filteredOptions.find(o => o.children?.some(c => `{{${c.value}}}` === v));
-                const nd = s.nodeData;
-                const isConv = (parent ?? s)?.group === 'CONVERSATION' ||
-                  filteredOptions.some(o => o.group === 'CONVERSATION' && o.children?.some(c => `{{${c.value}}}` === v));
+                // Walk up the parent chain to find the root (top-level option)
+                let root: Suggestion = s;
+                let cursor: Suggestion | undefined = suggestionParentMap.get(v);
+                while (cursor) {
+                  root = cursor;
+                  cursor = suggestionParentMap.get(`{{${cursor.value}}}`);
+                }
+                // Build breadcrumb path from root to current selection
+                const path: Suggestion[] = [];
+                let cur: Suggestion | undefined = s;
+                while (cur) {
+                  path.unshift(cur);
+                  cur = suggestionParentMap.get(`{{${cur.value}}}`);
+                }
+                const nd = root.nodeData;
+                const isConv = root.group === 'CONVERSATION' || root.group === 'SYSTEM' || root.group === 'ENV';
                 return (
                   <span
                     key={v}
@@ -333,7 +465,12 @@ const VariableSelect: FC<VariableSelectProps> = ({
                     {!isConv && nd?.icon && <div className={`rb:size-3 rb:bg-cover ${nd.icon}`} />}
                     {!isConv && nd?.name && <span className="rb:text-[#5B6167]">{nd.name}{sep}</span>}
                     <span>
-                      {parent ? <>{parent.label}{sep}{s.label}</> : s.label}
+                      {path.map((p, idx) => (
+                        <span key={p.key}>
+                          {idx > 0 && sep}
+                          {p.label}
+                        </span>
+                      ))}
                     </span>
                     <span
                       className="rb:cursor-pointer rb:text-[#bfbfbf] hover:rb:text-[#999] rb:leading-none rb:ml-0.5"
@@ -385,7 +522,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
           className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
           style={{ top: dropdownPos.top, left: dropdownPos.left, minWidth: dropdownPos.width }}
         >
-          <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
+          <div className="rb:w-70 rb:h-57.5 rb:overflow-y-auto">
             {Object.entries(filteredGroups).map(([nodeId, suggestions], index) => {
               const nd = suggestions[0].nodeData;
               return (
@@ -415,16 +552,19 @@ const VariableSelect: FC<VariableSelectProps> = ({
                         onClick={() => {
                           if (s.disabled) return;
                           if (hasChildren) {
-                            calcChildPos(s.key);
-                            setExpandedParentKey(prev => prev === s.key ? null : s.key);
+                            calcChildPos(s.key, true);
+                            setExpandedPath([s]);
+                            setExpandedParentKey(s.key);
                           }
                           handleSelect(s);
                         }}
                         onMouseEnter={() => {
                           if (hasChildren) {
-                            calcChildPos(s.key);
+                            calcChildPos(s.key, true);
+                            setExpandedPath([s]);
                             setExpandedParentKey(s.key);
                           } else {
+                            setExpandedPath([]);
                             setExpandedParentKey(null);
                           }
                         }}
@@ -456,53 +596,90 @@ const VariableSelect: FC<VariableSelectProps> = ({
         document.body
       )}
 
-      {/* Child panel via portal — escapes overflow clipping */}
-      {open && expandedParent?.children?.length && createPortal(
-        <div
-          id="variable-select-child-panel"
-          className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
-          style={{ top: childPanelPos.top, right: childPanelPos.right }}
-          onMouseEnter={() => setExpandedParentKey(expandedParentKey)}
-        >
-          <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
-            <Flex justify="space-between" align="center" gap={8}>
-              <span>{expandedParent.nodeData.name}.{expandedParent.label}</span>
-              <span>{expandedParent.dataType}</span>
-            </Flex>
-          </div>
-          {expandedParent.children.map((child, ci) => {
-            const isSelected = multiple
-              ? selectedValues.includes(`{{${child.value}}}`)
-              : `{{${child.value}}}` === value;
-            const isChildActive = activePanel === 'child' && ci === childActiveIndex;
-            return (
-              <Flex
-                key={child.key}
-                ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
-                className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
-                  'rb:bg-[#F6F6F6]': isSelected || isChildActive,
-                  'rb:cursor-not-allowed rb:opacity-65': child.disabled,
-                  'rb:cursor-pointer': !child.disabled,
-                })}
-                align="center"
-                justify="space-between"
-                onClick={() => !child.disabled && handleSelect(child)}
-              >
-                <Flex align="center" gap={8}>
-                  {multiple && (
-                    <Checkbox checked={isSelected} />
-                  )}
-                  <span className="rb:font-medium">{child.label}</span>
+      {/* Child panels via portal — supports infinite nesting with separate overlay panels */}
+      {open && expandedPath.length > 0 && expandedPath.map((parent, index) => {
+        const panelKey = parent.key;
+        const position = index === 0 ? childPanelPos : panelPositions.get(panelKey);
+        if (!position) return null;
+        
+        return createPortal(
+          <div
+            key={panelKey}
+            id={`variable-select-child-panel-${panelKey}`}
+            className="rb:w-70 rb:h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+            style={{ 
+              top: position.top, 
+              [position.useRight ? 'right' : 'left']: position.useRight ? position.horizontal : position.horizontal 
+            }}
+            onMouseEnter={() => setExpandedParentKey(panelKey)}
+          >
+            {/* Breadcrumb header */}
+            <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
+              <Flex justify="space-between" align="center" gap={8}>
+                <Flex align="center" gap={2}>
+                  <span>
+                    {expandedPath.slice(0, index + 1).map((item, idx) => (
+                      <span key={item.key}>
+                        {idx > 0 && '.'}
+                        {item.label}
+                      </span>
+                    ))}
+                  </span>
                 </Flex>
-                <Space size={2}>
-                  {child.dataType && <span>{child.dataType}</span>}
-                </Space>
+                <span>{parent.dataType}</span>
               </Flex>
-            );
-          })}
-        </div>,
-        document.body
-      )}
+            </div>
+            {parent.children?.map((child, ci) => {
+              const isSelected = multiple
+                ? selectedValues.includes(`{{${child.value}}}`)
+                : `{{${child.value}}}` === value;
+              const isChildActive = activePanel === 'child' && ci === childActiveIndex;
+              const hasChildren = !!child.children?.length;
+              return (
+                <Flex
+                  key={child.key}
+                  ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
+                  className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
+                    'rb:bg-[#F6F6F6]': isSelected || isChildActive,
+                    'rb:cursor-not-allowed rb:opacity-65': child.disabled,
+                    'rb:cursor-pointer': !child.disabled,
+                  })}
+                  align="center"
+                  justify="space-between"
+                  onClick={() => {
+                    if (child.disabled) return;
+                    handleSelect(child);
+                  }}
+                  onMouseEnter={() => {
+                    if (child.disabled) return;
+                    if (hasChildren) {
+                      calcChildPos(child.key);
+                      setExpandedPath([...expandedPath.slice(0, index + 1), child]);
+                      setExpandedParentKey(child.key);
+                    } else {
+                      // No children: close any deeper level panels
+                      setExpandedPath(expandedPath.slice(0, index + 1));
+                      setExpandedParentKey(parent.key);
+                    }
+                  }}
+                >
+                  <Flex align="center" gap={8}>
+                    {multiple && (
+                      <Checkbox checked={isSelected} />
+                    )}
+                    <span className="rb:font-medium">{child.label}</span>
+                  </Flex>
+                  <Space size={2}>
+                    {child.dataType && <span>{child.dataType}</span>}
+                    {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
+                  </Space>
+                </Flex>
+              );
+            })}
+          </div>,
+          document.body
+        );
+      })}
     </div>
   );
 };

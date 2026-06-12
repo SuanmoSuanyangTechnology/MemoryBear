@@ -4,7 +4,6 @@
 # @Time : 2026/2/10 13:33
 from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.variable_pool import VariablePool
-from app.core.workflow.utils.secret_masker import mask_secrets
 
 
 class WorkflowResultBuilder:
@@ -90,8 +89,7 @@ class WorkflowResultBuilder:
             "snapshot": snapshot,
             "error": result.get("error"),
         }
-        secret_values = variable_pool.get_secret_values() if variable_pool else []
-        return mask_secrets(payload, secret_values)
+        return payload
 
     @staticmethod
     def aggregate_citations(node_outputs: dict) -> list:

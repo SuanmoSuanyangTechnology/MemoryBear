@@ -1,4 +1,4 @@
-import { useState, forwardRef, useImperativeHandle } from 'react';
+import { useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import { Select, Divider, Tooltip } from 'antd';
 import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
@@ -6,7 +6,7 @@ import { Node } from '@antv/x6';
 import { useTranslation } from 'react-i18next'
 
 import type { GraphRef, WorkflowConfig } from '../types'
-import VariableInspector from './VariableInspector'
+import VariableInspector, { type VariableInspectorRef } from './VariableInspector'
 
 interface CanvasToolbarProps {
   selectedNode: Node | null;
@@ -26,6 +26,7 @@ interface CanvasToolbarProps {
 }
 export interface CanvasToolbarRef {
   setIsVariableInspectorVisible: (visible: boolean) => void;
+  refreshCache: () => void;
 }
 
 const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
@@ -46,9 +47,14 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
 }, ref) => {
   const { t } = useTranslation()
   const [isVariableInspectorVisible, setIsVariableInspectorVisible] = useState(false)
+  const variableInspectorRef = useRef<VariableInspectorRef>(null)
 
+  const refreshCache = () => {
+    variableInspectorRef.current?.refresh()
+  }
   useImperativeHandle(ref, () => ({
     setIsVariableInspectorVisible,
+    refreshCache,
   }))
 
   return (
@@ -156,6 +162,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
       {/* 变量检查面板 */}
       {isVariableInspectorVisible &&
         <VariableInspector 
+          ref={variableInspectorRef}
           selectedNode={selectedNode}
           config={config}
           onClose={() => setIsVariableInspectorVisible(false)}

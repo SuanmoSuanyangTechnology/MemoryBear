@@ -25,6 +25,10 @@ from app.core.rag.models.chunk import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
+VECTOR_SEARCH_MODE_ENV = "ELASTICSEARCH_VECTOR_SEARCH_MODE"
+VECTOR_SEARCH_MODE_KNN = "knn"
+VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
+
 
 class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
@@ -467,39 +471,21 @@ class ElasticSearchVector(BaseVector):
         # print(f"Update successful, number of affected documents: {result['updated']}")
         return result['updated']
 
-    def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
-        """Search the nearest neighbors to a vector."""
-        if self.is_multimodal_embedding:
-            # 火山引擎多模态 Embedding
-            query_vector = self.embeddings.embed_text(query)
-        else:
-            query_vector = self.embeddings.embed_query(query)
-        top_k = kwargs.get("top_k", 1024)
-        score_threshold = float(kwargs.get("score_threshold") or 0.3)
-        indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
-        file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
+    @staticmethod
+    def _normalize_vector(vector: Any) -> list[float]:
+        if hasattr(vector, "tolist"):
+            return vector.tolist()
+        return list(vector)
 
-        query_str: dict[str, Any] = {
-                "bool": {
-                    "must": {
-                        "script_score": {
-                            "query": {
-                                "match_all": {}
-                            },
-                            "script": {
-                                "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
-                                # The script_score query calculates the cosine similarity between the embedding field of each document and the query vector. The addition of +1.0 is to ensure that the scores returned by the script are non-negative, as the range of cosine similarity is [-1, 1]
-                                "params": {"query_vector": query_vector}
-                            }
-                        }
-                    },
-                    "filter": [
-                        {"term": {"metadata.status": 1}},
-                        {"exists": {"field": Field.VECTOR.value}},
-                    ]
-                }
-            }
-        # If file_names_filter is passed in, merge the filtering conditions
+    @staticmethod
+    def _build_vector_filter_clauses(
+        file_names_filter: list[str] | None,
+        document_ids_filter: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        filters: list[dict[str, Any]] = [
+            {"term": {"metadata.status": 1}},
+            {"exists": {"field": Field.VECTOR.value}},
+        ]
         if file_names_filter:
             query_str = {
                 "bool": {
@@ -533,29 +519,113 @@ class ElasticSearchVector(BaseVector):
         else:
             logger.info("[ES search_by_vector] no document_ids_include")
 
-        logger.debug(f"[ES search_by_vector] query DSL: {query_str}")
+    @staticmethod
+    def _resolve_knn_num_candidates(top_k: int, configured: Any = None) -> int:
+        raw_value = configured if configured is not None else os.getenv("ELASTICSEARCH_KNN_NUM_CANDIDATES")
+        if raw_value is not None:
+            try:
+                return max(int(raw_value), top_k)
+            except (TypeError, ValueError):
+                logger.warning(f"Invalid ELASTICSEARCH_KNN_NUM_CANDIDATES value: {raw_value}")
+        return max(top_k * 10, 100)
 
-        result = self._client.search(
+    @staticmethod
+    def _resolve_vector_search_mode() -> str:
+        raw_value = os.getenv(VECTOR_SEARCH_MODE_ENV, VECTOR_SEARCH_MODE_SCRIPT_SCORE)
+        mode = raw_value.strip().lower()
+        if mode == VECTOR_SEARCH_MODE_KNN:
+            return VECTOR_SEARCH_MODE_KNN
+        if mode in ("", VECTOR_SEARCH_MODE_SCRIPT_SCORE):
+            return VECTOR_SEARCH_MODE_SCRIPT_SCORE
+
+        logger.warning(f"Invalid {VECTOR_SEARCH_MODE_ENV} value: {raw_value}, using script_score")
+        return VECTOR_SEARCH_MODE_SCRIPT_SCORE
+
+    @staticmethod
+    def _build_vector_script_query(
+        query_vector: list[float],
+        filters: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "bool": {
+                "must": {
+                    "script_score": {
+                        "query": {"match_all": {}},
+                        "script": {
+                            "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
+                            "params": {"query_vector": query_vector},
+                        },
+                    }
+                },
+                "filter": filters,
+            }
+        }
+
+    def _search_by_knn(
+        self,
+        indices: str,
+        query_vector: list[float],
+        top_k: int,
+        filters: list[dict[str, Any]],
+        knn_num_candidates: Any = None,
+    ):
+        num_candidates = self._resolve_knn_num_candidates(top_k, knn_num_candidates)
+        knn_query = {
+            "field": Field.VECTOR.value,
+            "query_vector": query_vector,
+            "k": top_k,
+            "num_candidates": num_candidates,
+            "filter": filters,
+        }
+        logger.debug(
+            f"[ES search_by_vector] mode=knn indices={indices} top_k={top_k} "
+            f"num_candidates={num_candidates} vector_dims={len(query_vector)} filter_count={len(filters)}"
+        )
+        return self._client.search(
+            index=indices,
+            size=top_k,
+            knn=knn_query,
+        )
+
+    def _search_by_vector_script(
+        self,
+        indices: str,
+        query_vector: list[float],
+        top_k: int,
+        filters: list[dict[str, Any]],
+    ):
+        query_str = self._build_vector_script_query(query_vector, filters)
+        logger.debug(
+            f"[ES search_by_vector] mode=script_score indices={indices} top_k={top_k} "
+            f"vector_dims={len(query_vector)} filter_count={len(filters)}"
+        )
+        return self._client.search(
             index=indices,
             from_=0,
             size=top_k,
-            query=query_str
+            query=query_str,
         )
-        # logger.info(result)
 
+    def _vector_search_result_to_chunks(
+        self,
+        result,
+        score_threshold: float,
+        *,
+        normalize_script_score: bool,
+        resolve_parents: bool,
+    ) -> list[DocumentChunk]:
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
 
-        docs_and_scores = []
+        docs: list[DocumentChunk] = []
         for res in result["hits"]["hits"]:
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
-            metadata = source.get(Field.METADATA_KEY.value, {})
+            metadata = source.get(Field.METADATA_KEY.value) or {}
             chunk_type = source.get(Field.CHUNK_TYPE.value)
-            score = res["_score"]
-            score = score / 2  # Normalized [0-1]
+            score = res["_score"] / 2 if normalize_script_score else res["_score"]
 
-            # QA chunk: 返回 Q+A 拼接作为上下文
+            # QA chunk returns question and answer together as retrieval context.
             if chunk_type == "qa":
                 question = source.get(Field.QUESTION.value, "")
                 answer = source.get(Field.ANSWER.value, "")
@@ -564,18 +634,73 @@ class ElasticSearchVector(BaseVector):
                 metadata["question"] = question
                 metadata["answer"] = answer
 
-            docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), score))
-
-        # docs = [doc for doc, score in docs_and_scores]
-        docs = []
-        for doc, score in docs_and_scores:
-            # check score threshold
             if score > score_threshold:
-                if doc.metadata is not None:
-                    doc.metadata["score"] = score
-                    docs.append(doc)
+                metadata["score"] = score
+                docs.append(DocumentChunk(page_content=page_content, metadata=metadata))
 
         return self.resolve_parent_chunks(docs) if resolve_parents else docs
+
+    def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
+        """Search the nearest neighbors to a vector."""
+        if self.is_multimodal_embedding:
+            # 火山引擎多模态 Embedding
+            query_vector = self.embeddings.embed_text(query)
+        else:
+            query_vector = self.embeddings.embed_query(query)
+        query_vector = self._normalize_vector(query_vector)
+
+        top_k = int(kwargs.get("top_k") or 1024)
+        score_threshold = float(kwargs.get("score_threshold") or 0.3)
+        indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
+        file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
+        document_ids_filter = kwargs.get("document_ids_filter")
+        filters = self._build_vector_filter_clauses(file_names_filter, document_ids_filter)
+
+        logger.info(
+            f"[ES search_by_vector] filter_summary file_name_count={len(file_names_filter or [])} "
+            f"excluded_document_id_count={len(document_ids_filter or [])}"
+        )
+
+        if self._resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
+            try:
+                result = self._search_by_knn(
+                    indices=indices,
+                    query_vector=query_vector,
+                    top_k=top_k,
+                    filters=filters,
+                    knn_num_candidates=kwargs.get("knn_num_candidates"),
+                )
+                docs = self._vector_search_result_to_chunks(
+                    result,
+                    score_threshold,
+                    normalize_script_score=False,
+                    resolve_parents=resolve_parents,
+                )
+                logger.debug(
+                    f"[ES search_by_vector] mode=knn hits={len(result.get('hits', {}).get('hits', []))} "
+                    f"returned_docs={len(docs)} score_threshold={score_threshold}"
+                )
+                return docs
+            except Exception as exc:
+                logger.warning(f"[ES search_by_vector] KNN search failed, falling back to script_score: {exc}")
+
+        result = self._search_by_vector_script(
+            indices=indices,
+            query_vector=query_vector,
+            top_k=top_k,
+            filters=filters,
+        )
+        docs = self._vector_search_result_to_chunks(
+            result,
+            score_threshold,
+            normalize_script_score=True,
+            resolve_parents=resolve_parents,
+        )
+        logger.debug(
+            f"[ES search_by_vector] mode=script_score hits={len(result.get('hits', {}).get('hits', []))} "
+            f"returned_docs={len(docs)} score_threshold={score_threshold}"
+        )
+        return docs
 
     def search_by_full_text(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Return docs using BM25F.
@@ -781,7 +906,7 @@ class ElasticSearchVector(BaseVector):
                 for doc in docs
             ]
 
-            reranked_docs = list(self.reranker.compress_documents(documents, query))
+            reranked_docs = list(self.reranker.compress_documents(documents, query, top_n=top_k))
             logger.debug(f"[rerank] returned {len(reranked_docs)} docs")
 
             reranked_docs.sort(
@@ -794,6 +919,7 @@ class ElasticSearchVector(BaseVector):
                     if doc.metadata["doc_id"] == item.metadata['doc_id']:
                         doc.metadata["score"] = item.metadata["relevance_score"]
                         result.append(doc)
+                        break
             return result
         except Exception as e:
             logger.warning(f"Rerank failed, falling back to original results: {str(e)}")

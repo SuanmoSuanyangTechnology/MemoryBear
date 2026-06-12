@@ -385,3 +385,7 @@ export const updateDocumentMetadata = (document_id: string, data: {metadata: Rec
 export const deleteDocumentMetadata = (document_id: string, data: { field_names: string[] }) => {
   return request.post(`/documents/${document_id}/metadata`, data);
 }
+// 获取公共元数据字段列表接口
+export const getPublicMetadataFields = (data: { kb_ids: string[] }) => {
+  return request.post(`/knowledges/metadata/fields`,data);
+}

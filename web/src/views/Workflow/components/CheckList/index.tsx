@@ -89,6 +89,9 @@ const specialValidators: Record<string, (val: any) => boolean> = {
   'code.output_variables': (val: any[]) => !Array.isArray(val) || !val.length,
   // jinja-render.mapping: if non-empty, every item must have a name
   'jinja-render.mapping': (val: any[]) => Array.isArray(val) && val.length > 0 && val.some(v => !v?.name || !v?.value),
+  'agent.model': (val: any) => !val?.model_id,
+  'human-intervention.actions': (val: any[]) => !Array.isArray(val) || !val.length || val.some(v => !v?.id || !v?.label),
+  'human-intervention.delivery_method': (val: Record<string, { enabled: boolean; }>) => Object.values(val).every(v => !v.enabled),
 }
 
 function isEmpty(val: any): boolean {

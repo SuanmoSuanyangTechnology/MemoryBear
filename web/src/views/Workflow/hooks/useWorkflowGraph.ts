@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:57:59
+ * @Last Modified time: 2026-06-11 15:18:48
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   Scroller,
@@ -145,6 +145,14 @@ export const useWorkflowGraph = ({
   const lastHistoryRef = useRef<{ cellIds: string[]; timestamp: number; type: string } | null>(null)
   const syncChildRelationshipsRef = useRef<() => void>(() => { })
   const isSyncingRef = useRef(false)
+  /**
+   * Tracks whether `initWorkflow` has been invoked for the initial
+   * config load. Subsequent `setConfig` calls (e.g. after saving
+   * the workflow) must NOT trigger a re-initialization, otherwise
+   * the graph would be torn down and rebuilt, losing any local
+   * edits and duplicating edges.
+   */
+  const workflowInitializedRef = useRef(false)
   useEffect(() => {
     if (!graphRef.current) return
     graphRef.current.getNodes().forEach(node => {
@@ -189,7 +197,11 @@ export const useWorkflowGraph = ({
       })
   }
 
+  console.log('workflowInitializedRef', workflowInitializedRef.current)
   useEffect(() => {
+    if (!config || !graphRef.current) return
+    if (workflowInitializedRef.current) return
+    workflowInitializedRef.current = true
     initWorkflow()
   }, [config, graphRef.current])
 
@@ -381,29 +393,39 @@ export const useWorkflowGraph = ({
         }
         // Generate ports dynamically for human-intervention node based on actions
         if (type === 'human-intervention' && config.actions && Array.isArray(config.actions)) {
-          const totalPorts = config.actions.length + 1; // IF/ELIF + ELSE
+          const actionCount = config.actions.length;
+          const newHeight = conditionNodeHeight + (actionCount - 1) * conditionNodeItemHeight;
 
           const portItems: PortMetadata[] = [
-            defaultPortItems[0],
+            defaultPortItems[0]
           ];
+
           // Add action ports
-          for (let i = 0; i < totalPorts; i++) {
+          config.actions.forEach((_action: any, index: number) => {
             portItems.push({
               group: 'right',
-              id: `CASE${i + 1}`,
+              id: `CASE${index + 1}`,
               args: {
                 x: nodeWidth,
-                y: getConditionNodeCasePortY(config.actions, i),
+                y: portItemArgsY * index + conditionNodePortItemArgsY,
               },
             });
-          }
+          });
+          portItems.push({
+            group: 'right',
+            id: `TIMEOUT`,
+            args: {
+              x: nodeWidth,
+              y: portItemArgsY * actionCount + conditionNodePortItemArgsY,
+            },
+          });
 
           nodeConfig.ports = {
             groups: defaultAbsolutePortGroups,
             items: portItems
           };
 
-          nodeConfig.height = calcConditionNodeTotalHeight(config.actions);
+          nodeConfig.height = newHeight;
         }
 
         return nodeConfig
@@ -1855,12 +1877,8 @@ export const useWorkflowGraph = ({
               label: sourcePortId,
             };
           }
-
-          if (sourceCell?.getData()?.type === 'human-intervention') {
-            console.log('sourcePortId', sourcePortId)
-          }
           // If human-intervention node right port connection, add label
-          if (sourceCell?.getData()?.type === 'human-intervention' && sourcePortId?.startsWith('CASE')) {
+          if (sourceCell?.getData()?.type === 'human-intervention' && (sourcePortId?.startsWith('CASE') || sourcePortId === 'TIMEOUT')) {
             return {
               source: sourceCell.getData().id,
               target: targetCell?.getData().id,
@@ -1914,6 +1932,17 @@ export const useWorkflowGraph = ({
           if (flag) {
             message.success({ content: t('common.saveSuccess'), duration: 1 })
           }
+          const { variables, environment_variables, ...rest } = res as WorkflowConfig
+          const initChatVariables = variables.map(v => {
+            const { default: _, ...cleanV } = v
+            return {
+              ...cleanV,
+              defaultValue: v.default ?? ''
+            }
+          })
+          setChatVariables(initChatVariables)
+          setEnvVariables(environment_variables ?? [])
+          setConfig({ ...rest, variables: initChatVariables, environment_variables: environment_variables ?? [] })
           resolve(res)
         }).catch(error => {
           reject(error)

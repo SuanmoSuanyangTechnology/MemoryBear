@@ -268,6 +268,47 @@ class ConversationRepository:
         )
         return conversations, total
 
+    def list_v1_conversations(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            internal_user_id: str,
+            page: int,
+            page_size: int,
+    ) -> tuple[list[Conversation], int]:
+        """查询 v1 对外服务某个终端用户的发布态会话列表。"""
+        stmt = select(Conversation).where(
+            Conversation.app_id == app_id,
+            Conversation.workspace_id == workspace_id,
+            Conversation.user_id == internal_user_id,
+            Conversation.is_active.is_(True),
+            Conversation.is_draft.is_(False),
+        )
+
+        total = int(
+            self.db.execute(
+                select(func.count()).select_from(stmt.subquery())
+            ).scalar_one()
+        )
+
+        stmt = stmt.order_by(desc(Conversation.updated_at))
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+
+        conversations = list(self.db.scalars(stmt).all())
+
+        logger.info(
+            "Listed v1 conversations successfully",
+            extra={
+                "app_id": str(app_id),
+                "workspace_id": str(workspace_id),
+                "internal_user_id": internal_user_id,
+                "returned": len(conversations),
+                "total": total,
+            }
+        )
+        return conversations, total
+
     def get_conversation_for_app_log(
             self,
             conversation_id: uuid.UUID,

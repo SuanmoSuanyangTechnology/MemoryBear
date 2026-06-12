@@ -117,6 +117,52 @@ class ChatResponse(BaseModel):
         return data
 
 
+class V1ConversationListItem(BaseModel):
+    """v1 应用对外服务的会话列表项"""
+    conversation_id: uuid.UUID
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    message_count: int = 0
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at_ms(self, dt: datetime.datetime):
+        return to_timestamp_ms(dt)
+
+    @field_serializer("updated_at", when_used="json")
+    def _serialize_updated_at_ms(self, dt: datetime.datetime):
+        return to_timestamp_ms(dt)
+
+
+class V1ConversationMessageItem(BaseModel):
+    """v1 应用对外服务的历史消息项"""
+    message_id: uuid.UUID
+    role: str
+    content: str
+    status: str
+    meta_data: Optional[Dict[str, Any]] = None
+    created_at: datetime.datetime
+    version: int = 1
+    is_current: bool = True
+    parent_message_id: Optional[uuid.UUID] = None
+
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at_ms(self, dt: datetime.datetime):
+        return to_timestamp_ms(dt)
+
+    @field_serializer("meta_data", when_used="json")
+    def _serialize_meta_data(self, data: Optional[Dict[str, Any]]):
+        return data or {}
+
+
+class V1ConversationMessageListResponse(BaseModel):
+    """v1 应用对外服务的历史消息列表响应"""
+    conversation_id: uuid.UUID
+    items: List[V1ConversationMessageItem]
+    limit: int
+
+
 # ---------- Conversation Summary Schemas ----------
 class ConversationOut(BaseModel):
     theme: str

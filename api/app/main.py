@@ -71,6 +71,13 @@ async def lifespan(app: FastAPI):
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")
 
+    # 预热同步 Redis 连接池，避免首次请求承担建池 + PING 的冷启动开销
+    try:
+        from app.tasks import warmup_sync_redis_pool
+        warmup_sync_redis_pool()
+    except Exception as e:
+        logger.warning(f"Sync Redis pool warmup skipped: {e}")
+
     # Start background intervention timeout scanner
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
     start_timeout_scanner()

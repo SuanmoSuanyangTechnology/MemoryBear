@@ -198,6 +198,7 @@ export interface NodeStatisticsItem {
  * End user profile
  */
 export interface EndUser {
+  id?: string;
   end_user_info_id: string;
   end_user_id: string;
   other_name: string;

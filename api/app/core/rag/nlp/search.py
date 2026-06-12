@@ -329,7 +329,7 @@ def rerank(db: Session, reranker_id: uuid, query: str, docs: list[DocumentChunk]
         ]
 
         # Perform reordering (compress_documents will automatically handle relevance scores and indexing)
-        reranked_docs = list(reranker.compress_documents(documents, query))
+        reranked_docs = list(reranker.compress_documents(documents, query, top_n=top_k))
         print(reranked_docs)
 
         # Sort in descending order based on relevance score

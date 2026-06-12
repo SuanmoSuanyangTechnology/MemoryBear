@@ -415,7 +415,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
 
                       {(selectedNode as Node).properties.associative_memory > 0 && <div>
                         <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
-                        <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                        <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4">
                           <span className="rb:text-[#155EEF] rb:font-medium">{(selectedNode as Node).properties.associative_memory}</span> {t('userMemory.unix')}{t('userMemory.associative_memory')}
                         </div>
                       </div>}
@@ -535,9 +535,13 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                   </>}
               </div>
 
-              {activeTab !== 'communityNetwork' && <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
-                {t('userMemory.completeMemory')}
-              </Flex>}
+              {activeTab !== 'communityNetwork' &&
+                <>
+                  <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
+                    {t('userMemory.completeMemory')}
+                  </Flex>
+                </>
+              }
             </>
           }
         </RbCard>

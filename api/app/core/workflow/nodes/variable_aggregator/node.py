@@ -16,8 +16,13 @@ class VariableAggregatorNode(BaseNode):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: VariableAggregatorNodeConfig | None = None
 
+    def _get_typed_config(self) -> VariableAggregatorNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = VariableAggregatorNodeConfig(**self.config)
+        return self.typed_config
+
     def _output_types(self) -> dict[str, VariableType]:
-        config = VariableAggregatorNodeConfig(**self.config)
+        config = self._get_typed_config()
         output = {}
         if not config.group_type:
             for group_name in config.group_variables.keys():
@@ -50,7 +55,7 @@ class VariableAggregatorNode(BaseNode):
             - str: In non-group mode, returns the first non-None variable value.
             - dict: In group mode, returns a mapping of group_name -> first non-None variable value.
         """
-        self.typed_config = VariableAggregatorNodeConfig(**self.config)
+        self.typed_config = self._get_typed_config()
         if not self.typed_config.group:
             # --------------------------
             # Non-group mode

@@ -14,7 +14,7 @@ import { type FC, useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, App, Tooltip, Space, Spin } from 'antd'
+import { Flex, Skeleton, App, Tooltip, Space, Spin , type ButtonProps} from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -532,7 +532,7 @@ const Conversation: FC = () => {
           actions?: {
             id: string;
             label: string;
-            variant: string;
+            variant: ButtonProps['type'];
           }[];
           timeout_at?: number;
         }
@@ -780,6 +780,7 @@ const Conversation: FC = () => {
                   const filterIndex = lastAssistantMsg.interventions.findIndex(item => item.node_id === node_id)
                   lastAssistantMsg.interventions[filterIndex] = {
                     ...lastAssistantMsg.interventions[filterIndex],
+                    resolved_form_data: fieldValues,
                     resolved_action_id: actionId,
                   }
               
@@ -844,7 +845,7 @@ const Conversation: FC = () => {
             actions?: {
               id: string;
               label: string;
-              variant: string;
+              variant: ButtonProps['type'];
             }[];
             timeout_at?: number;
           }

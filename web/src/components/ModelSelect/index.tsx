@@ -50,6 +50,7 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
       <Flex align="center" gap={8}>
         {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt={logo} />}
         <div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${fontClassName}`}>{item.name}</div>
+        {item.is_deprecated && <Tag color="default">{t('modelNew.deprecated')}</Tag>}
       </Flex>
     );
   };
@@ -61,7 +62,7 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
   return (
     <Select
       placeholder={placeholder ?? t('common.pleaseSelect')}
-      options={[...options, ...initialData]}
+      options={[...options, ...initialData].map(item => ({ ...item, disabled: item.is_deprecated }))}
       fieldNames={{ label: 'name', value: 'id' }}
       allowClear
       // popupMatchSelectWidth={false}
@@ -75,6 +76,7 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
             <Flex align="center" gap={8}>
               {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt={logo} />}
               <span className="rb:wrap-break-word rb:line-clamp-1">{data.name as string}</span>
+              {data.is_deprecated && <Tag color="default">{t('modelNew.deprecated')}</Tag>}
             </Flex>
             {data.capability?.length > 0 && (
               <Flex gap={4} wrap>
