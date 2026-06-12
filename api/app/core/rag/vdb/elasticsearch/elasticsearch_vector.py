@@ -508,16 +508,15 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        document_ids_include = kwargs.get("document_ids_include")
-        if document_ids_include is None:
-            document_ids_include = kwargs.get("document_ids_filter")
+        document_ids_include = document_ids_filter
         if document_ids_include:
-            query_str["bool"]["filter"].append({
+            filters.append({
                 "terms": {Field.DOCUMENT_ID.value: document_ids_include}
             })
             logger.info(f"[ES search_by_vector] including document_ids: {document_ids_include}")
         else:
             logger.info("[ES search_by_vector] no document_ids_include")
+        return filters
 
     @staticmethod
     def _resolve_knn_num_candidates(top_k: int, configured: Any = None) -> int:
