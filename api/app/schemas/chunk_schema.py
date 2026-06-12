@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import uuid
 from enum import StrEnum
 from app.core.rag.models.chunk import QAChunk
@@ -95,13 +95,21 @@ class ChunkRetrieve(BaseModel):
     file_names_filter: list[str] | None = Field(None)
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
-    top_k: int | None = Field(100, ge=1, le=100)
+    top_k: int | None = Field(20, ge=1, le=100)
+    top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
+    metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
+    metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="filter mode")
 
-    # === 新增：元数据过滤 ===
-    metadata_filters: list[FilterGroup] | None = Field(None, description="元数据过滤条件")
-    metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="过滤模式")
+    @model_validator(mode="after")
+    def resolve_top_n(self):
+        top_k = self.top_k or 20
+        if self.top_n is None or "top_n" not in self.model_fields_set:
+            self.top_n = max(top_k, 20)
+        elif self.top_n < top_k:
+            raise ValueError("top_n must be greater than or equal to top_k")
+        return self
 
 
 class ChunkBatchCreate(BaseModel):

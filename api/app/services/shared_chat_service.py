@@ -516,10 +516,15 @@ class SharedChatService:
                     total_tokens = chunk
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
                     yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
-                else:
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    yield f"event: agent_log\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, str):
                     full_content += chunk
                     # 发送消息块事件
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict):
+                    event_type = str(chunk.get("type") or "unknown")
+                    yield f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
             elapsed_time = time.time() - start_time
 

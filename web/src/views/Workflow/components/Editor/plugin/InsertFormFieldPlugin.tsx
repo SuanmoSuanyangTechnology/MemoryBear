@@ -87,6 +87,7 @@ const InsertFormFieldPlugin = ({ formFields = [], updateFormFields, options = []
       }
     });
 
+    console.log('fieldData', fieldData)
     if (!filteredField) {
       updateFormFields([...formFields, fieldData]);
     }

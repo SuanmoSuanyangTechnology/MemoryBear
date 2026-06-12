@@ -87,7 +87,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
       .finally(() => setLoading(false))
   }
   const getTimelineMemoriesData = (vo: Node) => {
-    if (!vo.id || !vo.label || vo.label === 'ExtractedEntity') return
+    if (!vo.id || !vo.label) return
     setTimelineLoading(true)
     getTimelineMemories({ id: vo.id as string, label: vo.label })
       .then(res => {
@@ -107,7 +107,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   return (
     <>
       <PageHeader
-        title={vo?.label === 'ExtractedEntity' ? undefined : vo?.name}
+        title={vo?.label === 'ExtractedEntity' || !vo ? undefined : <>{t(`userMemory.${vo?.label}`)}: {vo?.id}</>}
         extra={
           <Space size={12}>
             <Button
@@ -122,7 +122,8 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
       />
       {vo?.label === 'ExtractedEntity'
         ? <ExtractedEntityGraphDetail />
-        : <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
+        :
+        <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
           <Col flex="480px" className="rb:h-full!">
             <RbCard
               title={t('userMemory.relationshipEvolution')}

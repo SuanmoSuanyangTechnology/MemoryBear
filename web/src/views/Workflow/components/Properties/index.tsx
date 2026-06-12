@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:57:34
+ * @Last Modified time: 2026-06-12 11:33:27
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -13,7 +13,7 @@ import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type M
 import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
 import MessageEditor from './MessageEditor'
-import Knowledge from './Knowledge/Knowledge';
+import Knowledge from '@/components/Knowledge';
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import VariableSelect from './VariableSelect';
 import ParamsList from './ParamsList';
@@ -27,6 +27,7 @@ import AssignmentList from './AssignmentList'
 import ToolConfig from './ToolConfig'
 import MemoryConfig from './MemoryConfig'
 import VariableList from './VariableList'
+import OutputVariables from './OutputVariables'
 import { useVariableList, getCurrentNodeVariables, getChildNodeVariables } from './hooks/useVariableList'
 import { useWorkflowStore } from '@/store/workflow'
 import styles from './properties.module.css'
@@ -53,6 +54,8 @@ import Trigger from './Trigger'
 import { getWorkflowNodeLastRunDetail } from '@/api/application'
 import HumanIntervention from './HumanIntervention'
 import ToolList from './ToolList'
+import MetadataFilter from './MetadataFilter'
+import { openHelpCenter } from '@/utils/help';
 
 /**
  * Props for Properties component
@@ -106,7 +109,7 @@ const Properties: FC<PropertiesProps> = ({
   appType,
   refreshCache,
 }) => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
@@ -117,7 +120,6 @@ const Properties: FC<PropertiesProps> = ({
 
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
-      setOutputCollapsed(true)
       setAdvancedSettingsCollapsed(false)
       setActiveKey('setting');
     }
@@ -492,14 +494,6 @@ const Properties: FC<PropertiesProps> = ({
     return getCurrentNodeVariables(selectedNode?.getData(), values, variableList)
   }, [selectedNode?.getData(), values])
 
-  const [outputCollapsed, setOutputCollapsed] = useState(true)
-  /**
-   * Toggle output section collapsed state
-   */
-  const handleToggle = () => {
-    setOutputCollapsed((prev: boolean) => !prev)
-  }
-
   /**
    * Handle variable list change and update output type for iteration nodes
    * @param _value - Selected value
@@ -629,6 +623,11 @@ const Properties: FC<PropertiesProps> = ({
       })
   }
 
+  const gotoHelpCenter = () => {
+    const currentLang = i18n.language;
+    const lang = currentLang === 'zh' ? 'zh' : 'en';
+    openHelpCenter(lang, data.type);
+  };
   useEffect(() => {
     if (!isRun) {
       getNodeLastRun()
@@ -665,7 +664,19 @@ const Properties: FC<PropertiesProps> = ({
               </Form.Item>
             </Flex>
           )}
+          headerType="borderless"
+          headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
+          className="rb:h-full! rb:hover:shadow-none!"
+          bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:p-0! rb:pb-3!')}
           extra={<Space>
+            {['memory-read', 'memory-write'].includes(data?.type) &&
+              <Popover content={t('quickActions.helpCenter')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+                <div
+                  className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"
+                  onClick={gotoHelpCenter}
+                ></div>
+              </Popover>
+            }
             {!cannotRunNodes.includes(selectedNode?.data?.type) && <Popover content={t('workflow.singleRun')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/workflow/run.svg')]"
@@ -686,10 +697,6 @@ const Properties: FC<PropertiesProps> = ({
             </Dropdown>
             <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={blankClick}></div>
           </Space>}
-          headerType="borderless"
-          headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
-          className="rb:h-full! rb:hover:shadow-none!"
-          bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:p-0! rb:pb-3!')}
         >
           <Tabs
             items={[
@@ -879,8 +886,15 @@ const Properties: FC<PropertiesProps> = ({
                                     key={key}
                                     name={key}
                                   >
-                                    <Knowledge />
+                                    <Knowledge variant="workflow" />
                                   </Form.Item>
+                                )
+                              }
+                              if (config.type === 'metadata') {
+                                return (
+                                  <MetadataFilter
+                                    options={variableList}
+                                  />
                                 )
                               }
 
@@ -1187,24 +1201,7 @@ const Properties: FC<PropertiesProps> = ({
                   }
 
                 {currentNodeVariables.length > 0 && !(!values?.group && selectedNode.getData().type === 'var-aggregator') &&
-                  <div className="rb:text-[12px] rb:leading-4.5">
-                    <Flex gap={8} vertical>
-                      <Flex align="center" className="rb:font-medium rb:cursor-pointer" onClick={handleToggle}>
-                        {t('workflow.config.outputVariable')}
-                        <div
-                          className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/caret_right_outlined.svg')]", {
-                            'rb:rotate-90': !outputCollapsed
-                          })}
-                        ></div>
-                      </Flex>
-                      {!outputCollapsed && currentNodeVariables.map(vo => (
-                        <Flex key={vo.value} gap={4}>
-                          <span className="rb:font-medium">{vo.label}</span>
-                          <span className="rb:text-[#212332]">{vo.dataType}</span>
-                        </Flex>
-                      ))}
-                    </Flex>
-                  </div>
+                  <OutputVariables variables={currentNodeVariables} />
                 }
                 </div>
                 <NextStep

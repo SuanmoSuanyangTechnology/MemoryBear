@@ -82,6 +82,14 @@ class EventCategory(Enum):
                 return member.label
         return None
 
+    @classmethod
+    def id_by_name(cls, name: Optional[str]) -> Optional[str]:
+        """根据中文分类名查 category_id；不存在返回 None"""
+        for member in cls:
+            if member.label == name:
+                return member.category_id
+        return None
+
 
 # 有序中文分类名（用于补全 / 排序兜底）
 EVENT_CATEGORY_NAMES: List[str] = EventCategory.names()
@@ -91,3 +99,6 @@ EVENT_CATEGORY_NAME_SET = frozenset(EVENT_CATEGORY_NAMES)
 
 # 有序 category_id
 EVENT_CATEGORY_IDS: List[str] = EventCategory.ids()
+
+# 中文分类名 → category_id（用于对外输出英文枚举）
+EVENT_CATEGORY_NAME_TO_ID = {member.label: member.category_id for member in EventCategory}

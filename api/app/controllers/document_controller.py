@@ -14,7 +14,10 @@ from app.controllers import file_controller
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.utils.redis_conn import REDIS_CONN
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
+    ElasticSearchVectorFactory,
+    ElasticSearchVectorIndexOps,
+)
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.response_utils import success
@@ -232,8 +235,10 @@ async def update_document(
     if "status" in update_dict:
         new_status = update_dict["status"]
         if new_status != db_document.status:
-            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-            vector_service.change_status_by_document_id(document_id=str(document_id), status=new_status)
+            ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).change_document_status(
+                document_id=str(document_id),
+                status=new_status,
+            )
 
     # 3.2 Update fields (only update non-null fields)
     api_logger.debug(f"Start updating the document fields: {document_id}")
@@ -312,8 +317,10 @@ async def delete_document(
 
         # 3. Delete vector index (non-404 failures raise, caught by except below)
         db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-        vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+        ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field(
+            key="document_id",
+            value=str(document_id),
+        )
 
         # 4. Delete file (storage errors are swallowed internally)
         await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)

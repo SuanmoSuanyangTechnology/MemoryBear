@@ -40,6 +40,9 @@ from .conversation_schema import (
     MessageCreate,
     ChatRequest,
     ChatResponse,
+    V1ConversationListItem,
+    V1ConversationMessageItem,
+    V1ConversationMessageListResponse,
 )
 from .multi_agent_schema import (
     SubAgentConfig,
@@ -115,6 +118,9 @@ __all__ = [
     "MessageCreate",
     "ChatRequest",
     "ChatResponse",
+    "V1ConversationListItem",
+    "V1ConversationMessageItem",
+    "V1ConversationMessageListResponse",
     # Multi-Agent Schemas
     "SubAgentConfig",
     "RoutingRule",

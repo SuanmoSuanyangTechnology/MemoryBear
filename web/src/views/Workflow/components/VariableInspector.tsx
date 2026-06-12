@@ -61,13 +61,20 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
   const [selectedVariable, setSelectedVariable] = useState<VariableData | null>(null);
   const formValues = Form.useWatch([], form);
 
+  console.log('VariableInspector config', config)
+
   const handleUpdateCache = useCallback((values: Record<string, any>) => {
     if (!id || !selectedVariable || !selectedVariable?.nodeKey || !values || !Object.keys(values).length) return;
 
-    const lastValue = selectedVariable?.value;
-    const currentValue = values[selectedVariable.nodeKey][selectedVariable.name];
+    const { type } = selectedVariable;
+    const lastValue = !type?.includes('file') && typeof selectedVariable?.value === 'object'
+      ? JSON.stringify(selectedVariable?.value, null, 2)
+      : selectedVariable?.value;
+    const currentValue = !type?.includes('file') && typeof selectedVariable?.value === 'object'
+      ? JSON.parse(values[selectedVariable.nodeKey][selectedVariable.name])
+      : values[selectedVariable.nodeKey][selectedVariable.name]
 
-    if (lastValue === currentValue) return;
+    if (lastValue === values[selectedVariable.nodeKey][selectedVariable.name]) return;
     setSelectedVariable(prev => {
       if (prev?.value && prev.value !== currentValue) {
         return {
@@ -139,7 +146,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
                  v.nodeKey === selectedVariable.nodeKey
           );
           if (updatedVariable) {
-            form.setFieldValue([updatedVariable.nodeKey, updatedVariable.name], updatedVariable.value);
+            form.setFieldValue([updatedVariable.nodeKey, updatedVariable.name], !updatedVariable.type?.includes('file') && typeof updatedVariable.value === 'object' ? JSON.stringify(updatedVariable.value, null, 2) : updatedVariable.value);
             setSelectedVariable(updatedVariable);
           }
         }
@@ -184,6 +191,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
           />
           : dataType === 'object' || typeof value === 'object'
           ? <CodeMirrorEditor
+            key={fieldName as string}
             language="json"
             variant="borderless"
           />
@@ -219,9 +227,9 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
     setSelectedVariable(variable);
 
     setTimeout(() => {
-      const { value, name, nodeKey } = variable;
+      const { value, name, nodeKey, type } = variable;
       const fieldName = nodeKey ? [nodeKey, name] : name;
-      form.setFieldValue(fieldName, value);
+      form.setFieldValue(fieldName, !type?.includes('file') && typeof value === 'object' ? JSON.stringify(value, null, 2) : value);
     }, 0);
   };
 
@@ -278,13 +286,13 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
     if (!Object.keys(items).length) return null;
     const nodeInfo = getNodeIcon(nodeKey);
 
-    if (!nodeInfo) return null;
+    if (!nodeInfo && !['conversation'].includes(nodeKey)) return null;
     return (
       <Collapse.Panel
         header={
           <div className="rb:flex rb:items-center rb:gap-2">
-            {nodeInfo.icon && <div className={clsx("rb:size-5 rb:bg-cover", nodeInfo.icon)} />}
-            <span className="rb:text-sm rb:text-[#1D2129]">{nodeInfo.name}</span>
+            {nodeInfo?.icon !== 'conversation' && nodeInfo?.icon && <div className={clsx("rb:size-5 rb:bg-cover", nodeInfo.icon)} />}
+            <span className="rb:text-sm rb:text-[#1D2129]">{nodeInfo?.name || nodeKey.toUpperCase()}</span>
           </div>
         }
         key={nodeKey}

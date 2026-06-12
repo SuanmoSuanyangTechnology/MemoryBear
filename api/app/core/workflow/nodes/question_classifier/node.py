@@ -31,11 +31,16 @@ class QuestionClassifierNode(BaseNode):
         self._last_messages: list = []
         self._classification_result: str = ""
 
+    def _get_typed_config(self) -> QuestionClassifierNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = QuestionClassifierNodeConfig(**self.config)
+        return self.typed_config
+
     def _extract_extra_fields(self, business_result: Any) -> dict:
         return {"process": {
             "messages": self._last_messages,
             "classification_result": self._classification_result,
-            "model_id": str(self.typed_config.model_id) if self.typed_config else None,
+            "model_id": str(self._get_typed_config().model_id),
         }}
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
@@ -153,7 +158,7 @@ class QuestionClassifierNode(BaseNode):
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict:
         """执行问题分类"""
-        self.typed_config = QuestionClassifierNodeConfig(**self.config)
+        self.typed_config = self._get_typed_config()
         self.category_to_case_map = self._build_category_case_map()
         question = self.typed_config.input_variable
         supplement_prompt = self.typed_config.user_supplement_prompt or ""
