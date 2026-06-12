@@ -1,9 +1,10 @@
 from uuid import UUID
 
 from pydantic import Field, BaseModel
-
 from app.core.workflow.nodes.base_config import BaseNodeConfig
+
 from app.schemas.chunk_schema import RetrieveType
+from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -54,6 +55,17 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
         description="Knowledge base top k"
     )
 
+    metadata_filter_mode: MetadataFilterMode = Field(
+        default=MetadataFilterMode.DISABLED,
+        description="Node-level metadata filter mode (disabled / manual / auto), "
+                    "applies to all knowledge bases in this node"
+    )
+
+    metadata_filters: FilterGroup | None = Field(
+        default=None,
+        description="Single filter condition group used in manual mode; ignored in auto/disabled mode"
+    )
+
     class Config:
         json_schema_extra = {
             "examples": [
@@ -66,6 +78,8 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
                         "top_k": 4,
                         "retrieve_type": "hybrid"
                     }],
+                    "metadata_filter_mode": "disabled",
+                    "metadata_filters": None,
                     "reranker_top_k": 1,
                     "reranker_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                 }
