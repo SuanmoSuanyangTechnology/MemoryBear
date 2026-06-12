@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.documents import Document
 from sqlalchemy.orm import Session
@@ -99,13 +99,17 @@ class KnowledgeRetrievalService:
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         indices = ",".join(f"Vector_index_{knowledge_id}_Node".lower() for knowledge_id in knowledge_ids)
 
-        if request.retrieve_type == RetrieveType.PARTICIPLE:
-            return cls._search_full_text(vector_service, request, indices, document_ids_include)
-        if request.retrieve_type == RetrieveType.SEMANTIC:
-            return cls._search_vector(vector_service, request, indices, document_ids_include)
+        top_n = request.top_k
 
-        vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_include)
-        full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_include)
+        if request.retrieve_type == RetrieveType.PARTICIPLE:
+            return cls._search_full_text(vector_service, request, indices, document_ids_include, topk=top_n)
+        if request.retrieve_type == RetrieveType.SEMANTIC:
+            return cls._search_vector(vector_service, request, indices, document_ids_include, topk=top_n)
+
+        top_n = request.top_n
+
+        vector_chunks = cls._search_vector(vector_service, request, indices, document_ids_include, topk=top_n)
+        full_text_chunks = cls._search_full_text(vector_service, request, indices, document_ids_include, topk=top_n)
         unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
         logger.debug(f"Retrieved {len(unique_chunks)} chunks")
         if not unique_chunks:
@@ -132,10 +136,11 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             indices: str,
             document_ids_include: list[str] | None,
+            topk: Optional[int] = -1,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_vector(
             query=request.query,
-            top_k=request.top_k,
+            top_k=topk,
             indices=indices,
             score_threshold=request.vector_similarity_weight,
             document_ids_include=document_ids_include,
@@ -149,10 +154,11 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             indices: str,
             document_ids_include: list[str] | None,
+            topk: Optional[int] = -1,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_full_text(
             query=request.query,
-            top_k=request.top_k,
+            top_k=topk,
             indices=indices,
             score_threshold=request.similarity_threshold,
             document_ids_include=document_ids_include,
@@ -187,11 +193,12 @@ class KnowledgeRetrievalService:
 
         rerank_score_threshold = request.rerank_score_threshold or request.vector_similarity_weight or 0.1
 
-        return [
+        filtered_chunks = [
             chunk
             for chunk in reranked_chunks
             if (chunk.metadata or {}).get("score", 0) > rerank_score_threshold
         ]
+        return filtered_chunks[:request.top_k]
 
     @staticmethod
     def _retrieve_graph(

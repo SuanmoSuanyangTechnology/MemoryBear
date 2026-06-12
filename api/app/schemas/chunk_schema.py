@@ -14,6 +14,12 @@ class RetrieveType(StrEnum):
     Graph = "graph"
 
 
+class KnowledgeRetrievalCaller(StrEnum):
+    GENERAL = "general"
+    AGENT = "agent"
+    WORKFLOW = "workflow"
+
+
 class ChunkType(StrEnum):
     """Chunk type enumeration"""
     CHUNK = "chunk"
@@ -97,6 +103,7 @@ class ChunkRetrieve(BaseModel):
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
+    caller: KnowledgeRetrievalCaller = Field(KnowledgeRetrievalCaller.GENERAL)
     retrieve_type: RetrieveType | None = Field(None)
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
