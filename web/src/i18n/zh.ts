@@ -1682,10 +1682,14 @@ export const zh = {
       created_at: '创建时间',
       updated_at: '最后更新时间',
       fullScreen: '全屏',
+      alias: '别名',
+      relations: '关系',
       goals: '目标',
-      traits: '性格特点',
-      interests: '兴趣爱好',
       core_facts: '核心事实',
+      interests: '兴趣爱好',
+      traits: '性格特点',
+      beliefs_or_stances: '价值观',
+      anchors: '锚点',
 
       memoryWindow: "{{name}} 的记忆之窗",
       memory_insight: '总体概述',
@@ -1707,6 +1711,7 @@ export const zh = {
       ExtractedEntity_aliases: '别名',
       ExtractedEntity_connect_strngth: '连接强度',
       ExtractedEntity_importance_score: '重要性评分',
+      ExtractedEntity_description_summary: '摘要',
 
       AssistantPruned_memory_type: '记忆类型',
 
@@ -1816,7 +1821,7 @@ export const zh = {
       manual: '手动',
       solution_detail_noChanges: '无变更',
       resetView: '重置视图',
-      relationshipType: '关系类型',
+      predicate: '关系父类',
       sourceNode: '源节点',
       targetNode: '目标节点',
       totalCategoryStats: '总事件数',
