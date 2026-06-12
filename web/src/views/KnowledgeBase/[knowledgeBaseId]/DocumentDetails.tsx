@@ -113,10 +113,10 @@ const DocumentDetails: FC = () => {
   const formatDocumentInfo = (doc: KnowledgeBaseDocumentData): InfoItem[] => {
     return [
       {
-        key: 'file_id',
+        key: 'id',
         label: 'ID',
-        value: <span onClick={() => handleCopy(doc.file_id)}>
-          {doc.file_id}
+        value: <span onClick={() => handleCopy(doc.id)}>
+          {doc.id}
           <span
             className="rb:cursor-pointer rb:-mb-0.5 rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
           ></span>

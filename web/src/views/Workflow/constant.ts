@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:56:42
+ * @Last Modified time: 2026-06-12 11:17:40
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -120,6 +120,13 @@ const modelConfig: Record<string, any> = {
   json_output: {
     type: 'define',
     defaultValue: false
+  },
+  structured_output: {
+    type: 'define',
+    defaultValue: false
+  },
+  json_output_fields: {
+    type: 'define',
   },
   // Top P 采样参数
   top_p: {

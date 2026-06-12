@@ -64,7 +64,7 @@ const ModelConfig: FC<{ parentName?: string; variableOptions: Suggestion[] }> = 
             />
           </Form.Item>
           <div
-            className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"
+            className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"
             onClick={handleSetConfig}
           ></div>
         </Flex>
