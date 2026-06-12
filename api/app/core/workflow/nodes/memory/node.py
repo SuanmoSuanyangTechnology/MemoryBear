@@ -42,6 +42,7 @@ class MemoryReadNode(BaseNode):
                 config_id=str(self.typed_config.config_id),
                 end_user_id=end_user_id,
                 user_rag_memory_id=state["user_rag_memory_id"],
+                conversation_id=variable_pool.get_value("sys.conversation_id"),
             )
             query = self._render_template(self.typed_config.message, variable_pool)
             self._process = {"query": query, "config_id": str(self.typed_config.config_id)}

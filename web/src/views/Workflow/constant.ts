@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:56:42
+ * @Last Modified time: 2026-06-12 11:40:46
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -120,6 +120,13 @@ const modelConfig: Record<string, any> = {
   json_output: {
     type: 'define',
     defaultValue: false
+  },
+  structured_output: {
+    type: 'define',
+    defaultValue: false
+  },
+  json_output_fields: {
+    type: 'define',
   },
   // Top P 采样参数
   top_p: {
@@ -379,8 +386,10 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'select',
             options: [
               { label: 'ReAct', value: 'react' },
+              { label: 'FunctionCalling', value: 'function_calling' },
             ],
             defaultValue: 'react',
+            required: true,
           },
           model: {
             type: 'define',
@@ -388,6 +397,7 @@ export const nodeLibrary: NodeLibrary[] = [
               acc[key] = value.defaultValue;
               return acc;
             }, {} as Record<string, any>),
+            required: true,
           },
           tools: {
             type: 'toolList',
@@ -397,7 +407,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
+            required: true,
           },
 
           context: {
@@ -408,7 +419,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
+            placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
+            required: true,
           },
           max_iterations: {
             type: 'slider',
@@ -443,7 +455,25 @@ export const nodeLibrary: NodeLibrary[] = [
           knowledge_retrieval: {
             type: 'knowledge',
             required: true,
-          }
+          },
+          metadata_filter_mode: {
+            type: 'metadata',
+            defaultValue: 'disabled'
+          },
+          // metadata_model: {
+          //   type: 'define',
+          //   defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
+          //     acc[key] = value.defaultValue;
+          //     return acc;
+          //   }, {} as Record<string, any>),
+          // },
+          metadata_filters: {
+            type: 'define',
+            defaultValue: {
+              conditions: [],
+              logic: 'and'
+            }
+          },
         }
       },
       { type: "parameter-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/parameter_extraction.svg")]',
@@ -593,17 +623,19 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           delivery_method: {
             type: 'define',
-            defaultValue: []
+            defaultValue: [],
+            required: true,
           },
           content: {
             type: 'messageEditor',
             isArray: false,
             titleVariant: 'borderless',
-            placeholder: 'common.pleaseEnter'
+            placeholder: 'common.pleaseEnter',
           },
           actions: {
             type: 'define',
-            defaultValue: []
+            defaultValue: [],
+            required: true,
           },
           timeout: {
             type: 'timeout',
@@ -1105,7 +1137,7 @@ export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 /**
  * Port position arguments
  */
-export const portItemArgsY = 27.5;
+export const portItemArgsY = 26;
 export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {
@@ -1259,9 +1291,9 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       groups: defaultAbsolutePortGroups,
       items: [
         defaultPortItems[0],
-        ...(['TIMEOUT'].map((_text, index) => ({
+        ...(['TIMEOUT'].map((text, index) => ({
           group: 'right',
-          id: `CASE${index + 1}`,
+          id: text,
           args: {
             ...portArgs,
             y: portItemArgsY * index + conditionNodePortItemArgsY,

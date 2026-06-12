@@ -20,6 +20,11 @@ class KnowledgeRetrievalNode(BaseNode):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: KnowledgeRetrievalNodeConfig | None = None
 
+    def _get_typed_config(self) -> KnowledgeRetrievalNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
+        return self.typed_config
+
     def _output_types(self) -> dict[str, VariableType]:
         return {
             "output": VariableType.ARRAY_STRING
@@ -56,15 +61,14 @@ class KnowledgeRetrievalNode(BaseNode):
         return {"citations": citations, "process": process}
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
-        if self.typed_config is None:
-            self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
+        cfg = self._get_typed_config()
         return {
-            "query": self._render_template(self.typed_config.query, variable_pool),
-            "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in self.typed_config.knowledge_bases],
-            "metadata_filter_mode": self.typed_config.metadata_filter_mode.value,
-            "metadata_filters": self.typed_config.metadata_filters and {
-                "logic": self.typed_config.metadata_filters.logic.value,
-                "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in self.typed_config.metadata_filters.conditions],
+            "query": self._render_template(cfg.query, variable_pool),
+            "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
+            "metadata_filter_mode": cfg.metadata_filter_mode.value,
+            "metadata_filters": cfg.metadata_filters and {
+                "logic": cfg.metadata_filters.logic.value,
+                "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in cfg.metadata_filters.conditions],
             },
         }
 
@@ -130,7 +134,7 @@ class KnowledgeRetrievalNode(BaseNode):
         Returns:
             dict: {chunks, citations, _metadata_filter_result}
         """
-        self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
+        self.typed_config = self._get_typed_config()
         if not self.typed_config.knowledge_bases:
             return {
                 "chunks": [],

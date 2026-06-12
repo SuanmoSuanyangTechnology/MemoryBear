@@ -23,7 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App, Flex, Button } from 'antd'
+import { App, Flex, Button, type ButtonProps } from 'antd'
 import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
@@ -59,9 +59,10 @@ interface ChatProps {
   onOpenChange: (open: boolean) => void;
   /** Function to save workflow configuration */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  refreshCache: () => void;
 }
 const Chat = forwardRef<ChatRef, ChatProps>(({
-  appId, graphRef, features, appType, open, onOpenChange, handleSave
+  appId, graphRef, features, appType, open, onOpenChange, handleSave, refreshCache
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
@@ -100,6 +101,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     } else {
       handleClose(false)
     }
+    getVariables()
   }, [open])
 
   useEffect(() => {
@@ -163,6 +165,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
     }
+    console.log('startNodes', allVariables)
     setVariables([...allVariables])
     toolbarRef.current?.setVariables([...allVariables])
   }
@@ -299,7 +302,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           actions?: {
             id: string;
             label: string;
-            variant: string;
+            variant: ButtonProps['type'];
           }[];
           timeout_at?: number;
           agent_log?: Record<string, any>;
@@ -533,13 +536,31 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                 const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
                 if (filterIndex > -1) {
                   const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                  const lastIterations: {
+                    index: number;
+                    [key: string]: any;
+                  }[] = lastAgentLog?.iterations || []
+                  const newIterations: {
+                    index: number;
+                    [key: string]: any;
+                  }[] = agent_log?.iterations || []
+
+                  const indexMap = new Map<number, typeof lastIterations[0]>()
+                  
+                  lastIterations.forEach(item => {
+                    indexMap.set(item.index, item)
+                  })
+                  
+                  newIterations.forEach(item => {
+                    indexMap.set(item.index, item)
+                  })
+                  
+                  const mergedIterations = Array.from(indexMap.values()).sort((a, b) => a.index - b.index)
+
                   newSubContent[filterIndex].agent_log = {
                     ...lastAgentLog,
                     meta: agent_log?.meta || {},
-                    iterations: [
-                      ...(lastAgentLog?.iterations || []),
-                      ...agent_log?.iterations || []
-                    ],
+                    iterations: mergedIterations,
                   }
                 }
               }
@@ -651,6 +672,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
       }).finally(() => {
         setLoading(false)
         setStreamLoading(false)
+        refreshCache()
       })
   }
 
@@ -744,7 +766,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         extra={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={() => handleClose()}></div>}
         headerType="borderless"
         headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
-        className="rb:h-full! rb:hover:shadow-none!"
+        className="rb:h-full!"
         bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
     >
       <ChatContent

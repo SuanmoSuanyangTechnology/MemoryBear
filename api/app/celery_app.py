@@ -247,12 +247,19 @@ beat_schedule_config = {
 celery_app.conf.beat_schedule = beat_schedule_config
 
 # 企业版订阅任务调度配置（_HAS_SUBSCRIPTION_TASKS 在上方路由注册处探测完成）
+# 可通过环境变量调整频率（默认保持原行为）：
+#   SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES=N   → 状态变更主循环周期（默认 10；测试时可改成 1）
+#   SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES=N   → 邮件提醒周期（默认 60；测试时可改成 1）
+_SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES = int(os.getenv("SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES", "10"))
+_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES = int(os.getenv("SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES", "60"))
+
+# 状态变更任务（默认每 10 分钟一次 + 每天 2 点兜底）
 if _HAS_SUBSCRIPTION_TASKS:
     celery_app.conf.beat_schedule.update({
-        # 主处理：每10分钟扫一次过期订阅（支持10万租户，concurrency=4可并行处理）
+        # 主处理：每 N 分钟扫一次过期订阅（支持10万租户，concurrency=4可并行处理）
         "process-expired-subscriptions": {
             "task": "subscription.process_expired_subscriptions",
-            "schedule": crontab(minute="*/10"),
+            "schedule": crontab(minute=f"*/{_SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES}"),
             "options": {"queue": "subscription_state_tasks"},
         },
         # 兜底修复：每天北京凌晨 2:00（= UTC 18:00）再全量扫一次，
@@ -262,10 +269,15 @@ if _HAS_SUBSCRIPTION_TASKS:
             "schedule": crontab(hour=18, minute=0),  # UTC 18:00 = CST 02:00
             "options": {"queue": "subscription_state_tasks"},
         },
-        # 到期提醒：每小时整点投递；旧扫描任务超过 1 小时未被消费则过期丢弃
+    })
+
+# 邮件提醒任务（默认每小时一次）
+if _HAS_SUBSCRIPTION_TASKS:
+    celery_app.conf.beat_schedule.update({
+        # 到期提醒：每 N 分钟投递一次；旧扫描任务超过 1 小时未被消费则过期丢弃
         "subscription-expiration-reminder": {
             "task": "subscription.expiration_reminder",
-            "schedule": crontab(minute=0),
+            "schedule": timedelta(minutes=_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES),
             "options": {"queue": "subscription_email_tasks", "expires": 3600},
         },
     })

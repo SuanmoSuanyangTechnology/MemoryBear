@@ -30,6 +30,11 @@ class ModelConfigService:
         model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        if model.model_base and model.model_base.is_deprecated:
+            raise BusinessException(
+                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
+                BizCode.MODEL_DEPRECATED,
+            )
         return model
 
     @staticmethod

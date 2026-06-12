@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { App, Divider } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import { Divider, Button, Flex, type ButtonProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 import Markdown from '@/components/Markdown'
@@ -13,7 +13,7 @@ interface FormField {
 interface Action {
   id: string
   label?: string
-  variant?: string
+  variant?: ButtonProps['type']
   status?: string
 }
 
@@ -26,15 +26,16 @@ interface RenderedFormProps {
   editable?: boolean;
   resolved_action_id?: string;
   timeout_at?: number;
+  isTimeout?: boolean;
 }
 
 // 渲染内容方法：处理 content、form_fields、actions 并替换变量
 export const renderContent = (
   content: string,
   formFields: FormField[] = [],
-  actions: Action[] = [],
   variables?: Record<string, any>,
   editable: boolean = true,
+  isTimeout: boolean = false
 ): string => {
 
   let renderedContent = content
@@ -51,27 +52,22 @@ export const renderContent = (
       if (editable && field) {
         // 可编辑状态：渲染表单元素
         return `<textarea id="${fieldId}" name="${fieldId}" default_value="${field.default_value || ''}" rows="4" class="rb:w-full rb:border rb:border-gray-200 rb:rounded-lg rb:p-2 rb:text-sm"></textarea>`
+      } else if (isTimeout) {
+        return `<textarea id="${fieldId}" name="${fieldId}" disabled default_value="${field?.default_value || ''}" rows="4" class="rb:w-full rb:border rb:border-gray-200 rb:rounded-lg rb:p-2 rb:text-sm"></textarea>`
       } else if (field) {
-        // 不可编辑状态：替换为 default_value
-        return field.default_value || ''
+        return field.default_value
       }
       return match
     }
     
     // 尝试从 variables 中获取对应的值
     
+    if (trimmedVarName.split('.').length === 3) {
+      const [namespace, type, ...keys] = trimmedVarName.split('.')
+      return variables?.[namespace]?.[type]?.[keys.join('.')] || match
+    }
     return variables?.[trimmedVarName] || match
   })
-  
-  // 在结尾拼接 actions 按钮（使用 form 包裹）
-  if (editable && actions.length > 0) {
-    const actionButtons = actions.map((action, index: number) => {
-      return `<button data-variant="${action.variant}" data-action-id="${action.id}" class="rb:mt-2 rb:px-4 rb:py-2 rb:bg-blue-500 rb:text-white rb:rounded-lg rb:text-sm rb:cursor-pointer rb:hover:bg-blue-600">${action.label || `Action ${index + 1}`}</button>`
-    }).join('&nbsp;&nbsp;')
-    renderedContent = `<form id="rendered-form" class="rb:space-y-4">${renderedContent}\n\n<div class="rb:mt-2">${actionButtons}</div></form>`
-  } else if (editable) {
-    renderedContent = `<form id="rendered-form" class="rb:space-y-4">${renderedContent}</form>`
-  }
   
   return renderedContent
 }
@@ -84,77 +80,31 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
   variables = {},
   editable = true,
   resolved_action_id,
-  timeout_at
+  timeout_at,
+  isTimeout = false
 }) => {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const [renderedContent, setRenderedContent] = useState<string | undefined>(undefined)
+  const formRef = useRef<HTMLFormElement>(null)
 
   useEffect(() => {
-    const newRenderedContent = renderContent(content, formFields, actions, variables, editable)
+    const newRenderedContent = renderContent(content, formFields, variables, editable, isTimeout)
     setRenderedContent(newRenderedContent)
-  }, [content, formFields, actions, variables, editable])
+  }, [content, formFields, actions, variables, editable, isTimeout])
 
-  // 可编辑状态下添加表单提交事件监听
-  useEffect(() => {
-    if (!editable) {
-      return
-    }
-    
-    let clickedActionId: string | null = null
-    
-    // 监听按钮点击事件
-    const handleButtonClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      const button = target.closest('button[data-action-id]')
-      if (button) {
-        clickedActionId = button.getAttribute('data-action-id')
-        // 提交表单
-        const form = document.getElementById('rendered-form') as HTMLFormElement
-        if (form) {
-          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-        }
-      }
-    }
-    
-    // 处理表单提交
-    const handleFormSubmit = (e: Event) => {
-      e.preventDefault()
-      const target = e.target as HTMLFormElement
-      const formData = new FormData(target)
-      const actionId = clickedActionId || formData.get('action') || null
+  const handleButtonClick = (actionId: string) => {
+    console.log('form', formRef.current)
+    if (formRef.current && onActionClick) {
+      const formData = new FormData(formRef.current)
       const fieldValues: Record<string, string> = {}
       
-      // 获取所有 form_field 的值
       formData.forEach((value, key) => {
         fieldValues[key] = String(value)
       })
-
-      // 调用回调函数
-      if (onActionClick && actionId) {
-        onActionClick(String(actionId), fieldValues)
-      }
       
-      // 重置 clickedActionId
-      clickedActionId = null
+      onActionClick(actionId, fieldValues)
     }
-    let form: HTMLFormElement | null = null;
-    setTimeout(() => {
-      // 添加事件监听
-      document.addEventListener('click', handleButtonClick)
-      form = document.getElementById('rendered-form') as HTMLFormElement
-      if (form) {
-        form.addEventListener('submit', handleFormSubmit)
-      }
-    }, 0)
-    
-    return () => {
-      document.removeEventListener('click', handleButtonClick)
-      if (form) {
-        form.removeEventListener('submit', handleFormSubmit)
-      }
-    }
-  }, [content, formFields, actions, onActionClick, message, editable])
+  }
 
   if (!renderedContent) {
     return null
@@ -172,7 +122,22 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
   }
   
   return <>
-    <Markdown content={renderedContent} />
+    <form ref={formRef}>
+      <Markdown content={renderedContent} />
+      {editable && actions.length > 0 && (
+        <Flex wrap gap={12} className="rb:mt-2!">
+          {actions.map((action, index: number) => (
+            <Button
+              key={action.id || index}
+              type={action.variant || 'primary'}
+              onClick={() => handleButtonClick(action.id)}
+            >
+              {action.label || `Action ${index + 1}`}
+            </Button>
+          ))}
+        </Flex>
+      )}
+    </form>
     {!resolved_action_id && timeout_at && <>
       <Divider />
       {t('memoryConversation.timeout_at', { timeout_at: formatDateTime(timeout_at) })}
