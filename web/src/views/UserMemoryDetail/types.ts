@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 11:17:20
+ * @Last Modified time: 2026-06-11 10:48:00
  */
 /**
  * User Memory Detail Types
@@ -198,6 +198,7 @@ export interface NodeStatisticsItem {
  * End user profile
  */
 export interface EndUser {
+  id?: string;
   end_user_info_id: string;
   end_user_id: string;
   other_name: string;

@@ -11,7 +11,7 @@ import EmotionLine from '../components/EmotionLine'
 import { formatDateTime } from '@/utils/format'
 import Tag, { type TagProps } from '@/components/Tag'
 import Empty from '@/components/Empty'
-// import BtnTabs from '@/components/BtnTabs'
+import BtnTabs from '@/components/BtnTabs'
 
 
 interface PaginationConfig { pagesize?: number; page?: number; }
@@ -22,36 +22,38 @@ export interface Emotion {
   created_at: string | number;
 }
 interface ExtractedEntityMemory {
+  type: string;
+  category: string;
   title: string;
-  fact: string;
-  category: string;
-  valid_at: string | number;
+  text: string;
+  created_at: string | number;
 }
-interface CategoryStats {
-  category: string;
+interface TypeStats {
+  type: string;
   count: number;
 }
 
 const PAGE_SIZE = 10
 
 const tagColors: Record<string, TagProps['color']> = {
-  '教育学习': 'processing',
-  '职业工作': 'success',
-  '项目里程碑': 'warning',
+  'education_learning': 'processing',
+  'career_work': 'success',
+  'project_milestone': 'warning',
 
-  '居住迁移': 'success',
-  '关系家庭': 'success',
-  '宠物照护': 'success',
-  '健康医疗': 'success',
-  '旅行到访': 'success',
+  'residence_relocation': 'success',
+  'relationship_family': 'success',
+  'pet_care': 'success',
+  'health_medical': 'success',
+  'travel_visit': 'success',
 
-  "购买资产": 'warning',
-  "创作发布": 'warning',
-  "成就荣誉": 'warning',
-  "财务法务行政": 'warning',
+  'purchase_asset': 'warning',
+  'creation_publication': 'warning',
+  'achievement_award': 'warning',
+  'finance_legal_admin': 'warning',
 
-  '其他生活事件': 'purple'
+  'other_life_event': 'purple'
 }
+const tabs = ['all', 'key_node', 'statement', 'memory_summary']
 
 const ExtractedEntityGraphDetail: FC = () => {
   const { t } = useTranslation()
@@ -61,8 +63,8 @@ const ExtractedEntityGraphDetail: FC = () => {
   const [emotionData, setEmotionData] = useState<Emotion[]>([])
   const [timelineLoading, setTimelineLoading] = useState(false)
   const [timelineMemories, setTimelineMemories] = useState<ExtractedEntityMemory[]>([])
-  const [categoryStats, setCategoryStats] = useState<CategoryStats[]>([])
-
+  const [typeStats, setTypeStats] = useState<TypeStats[]>([])
+  const [activeTab, setActiveTab] = useState('all')
   const [currentPagination, setCurrentPagination] = useState<PaginationConfig>({
     page: 1,
     pagesize: PAGE_SIZE,
@@ -73,7 +75,6 @@ const ExtractedEntityGraphDetail: FC = () => {
   const nodeName = searchParams.get('nodeName')
 
   useEffect(() => {
-    
     if (nodeId && nodeLabel) {
       const nodeFromUrl = {
         id: nodeId,
@@ -82,9 +83,15 @@ const ExtractedEntityGraphDetail: FC = () => {
       } as Node
       setVo(nodeFromUrl)
       getRelationshipEvolutionData(nodeFromUrl)
-      getTimelineMemoriesData(nodeFromUrl)
     }
   }, [searchParams])
+
+  useEffect(() => {
+    getTimelineMemoriesData(vo, {
+      page: 1,
+      pagesize: currentPagination.pagesize,
+    })
+  }, [vo, activeTab])
 
   const getRelationshipEvolutionData = (vo: Node) => {
     if (!vo.id || !vo.label) return
@@ -96,8 +103,8 @@ const ExtractedEntityGraphDetail: FC = () => {
       })
       .finally(() => setLoading(false))
   }
-  const getTimelineMemoriesData = (vo: Node, pagination?: PaginationConfig) => {
-    if (!vo.id || !vo.label) return
+  const getTimelineMemoriesData = (vo: Node | null, pagination?: PaginationConfig) => {
+    if (!vo || !vo?.id || !vo?.label) return
     setTimelineLoading(true)
     if (pagination) {
       setCurrentPagination({
@@ -106,20 +113,20 @@ const ExtractedEntityGraphDetail: FC = () => {
       })
     }
     getEntityEventTimeline({
+      type: activeTab === 'all' ? undefined : activeTab,
       id: vo.id as string,
-      label: vo.label,
-        ...currentPagination,
-        ...(pagination || {}),
+      ...currentPagination,
+      ...(pagination || {}),
     })
       .then(res => {
         const response = res as {
-          total: number;
+          total_count: number;
           items: ExtractedEntityMemory[];
-          category_stats: CategoryStats[]
+          type_stats: TypeStats[]
           page: { hasnext: boolean; pagesize: number; total: number; }
         }
-        setCategoryStats(response.category_stats || [])
-        setTotal(response.page.total)
+        setTypeStats(response.type_stats || [])
+        setTotal(response.total_count)
         setTimelineMemories(response.items)
       })
       .finally(() => setTimelineLoading(false))
@@ -158,29 +165,31 @@ const ExtractedEntityGraphDetail: FC = () => {
                   </div>
                 </div>
                 <div className="rb:grid rb:grid-cols-2 rb:gap-3">
-                  {(isHasMore ? categoryStats.slice(0, 6) : categoryStats).map((item, index) => (
+                  {(isHasMore ? typeStats.slice(0, 6) : typeStats).map((item, index) => (
                     <div key={index} className="rb:px-4 rb:pt-2.5 rb:pb-2 rb-border rb:rounded-xl rb:text-[#5B6167] rb:text-[12px]">
-                      {item.category}
+                      {t(`userMemory.${item.type}`)}
                       <div className="rb:mt-1 rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:text-[#171719] rb:leading-5.5">{item.count || 0}</div>
                     </div>
                   ))}
                 </div>
               </div>
-              <Flex align="center" justify="center" className="rb:mt-3!">
-                <Flex
-                  align="center"
-                  justify="center"
-                  gap={4}
-                  className="rb:cursor-pointer rb:text-[12px] rb:text-[#5B6167]"
-                  onClick={() => setIsHasMore(prev => !prev)}
-                >
-                  {isHasMore ? t('userMemory.more') : t('common.foldUp')}
-                  <div className={clsx("rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
-                    'rb:rotate-180': isHasMore,
-                    'rb:rotate-0': !isHasMore,
-                  })}></div>
+              {typeStats.length > 6 &&
+                <Flex align="center" justify="center" className="rb:mt-3!">
+                  <Flex
+                    align="center"
+                    justify="center"
+                    gap={4}
+                    className="rb:cursor-pointer rb:text-[12px] rb:text-[#5B6167]"
+                    onClick={() => setIsHasMore(prev => !prev)}
+                  >
+                    {isHasMore ? t('userMemory.more') : t('common.foldUp')}
+                    <div className={clsx("rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+                      'rb:rotate-180': isHasMore,
+                      'rb:rotate-0': !isHasMore,
+                    })}></div>
+                  </Flex>
                 </Flex>
-              </Flex>
+              }
             </RbCard>
             <EmotionLine
               chartData={emotionData}
@@ -198,33 +207,47 @@ const ExtractedEntityGraphDetail: FC = () => {
             bodyClassName="rb:px-4! rb:py-0! rb:h-[calc(100%-53px)]!"
             className="rb:w-full! rb:h-full!"
           >
-            <div className="rb:h-full rb:overflow-y-auto">
+            <BtnTabs
+              className="rb:mb-4!"
+              activeKey={activeTab}
+              items={tabs.map(key => ({
+                label: t(`userMemory.${key}`),
+                key
+              }))}
+              onChange={(key: string) => setActiveTab(key)}
+            />
+            <div className="rb:h-[calc(100%-42px)] rb:overflow-y-auto">
               {timelineLoading
                 ? <Skeleton active />
                 : !timelineMemories || timelineMemories.length === 0
                   ? <Empty size={120} className="rb:h-full!" />
                   : <>
-                    <Flex vertical gap={16} className={clsx(" rb:overflow-y-auto", {
-                      'rb:h-[calc(100%-54px)]!': total > PAGE_SIZE,
-                      'rb:h-full!': total <= PAGE_SIZE
-                    })}>
+                    <Flex vertical gap={16} className="rb:overflow-y-auto rb:h-[calc(100%-54px)]!">
                       {timelineMemories.map((vo, index) => (
                         <Row key={index} wrap={false} className="rb:flex rb:gap-5">
                           <Col flex="74px" className="rb:leading-4.5">
                             <Flex vertical gap={8} align="end"  className="rb:h-full! rb:text-[12px]">
-                              <span className="rb:text-center rb:text-[#5B6167]">{formatDateTime(vo.valid_at, 'YYYY-MM-DD')}</span>
+                              <span className="rb:text-center rb:text-[#5B6167]">{formatDateTime(vo.created_at, 'YYYY-MM-DD')}</span>
                               <div className={clsx("rb:flex-1 rb:w-px", {
                                 'rb:bg-[#A8A9AA]!': index !== timelineMemories.length - 1
                               })} />
                             </Flex>
                           </Col>
                           <Col flex="1" className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-3! rb:px-4!">
-                            <div>
-                              <span className="rb:font-medium rb:leading-5">{vo.title} </span>
-                              <Tag circle={true} color={tagColors[vo.category]} className="rb:ml-2! rb:py-px!">{vo.category}</Tag>
-                            </div>
-                            
-                            <div className="rb:leading-5 rb:mt-2">{vo.fact}</div>
+                            <Flex vertical gap={8}>
+                              {(vo.title || vo.category) &&
+                                <div>
+                                  {vo.title && <span className="rb:font-medium rb:leading-5">{vo.title} </span>}
+                                  {vo.category &&
+                                    <Tag circle={true} color={tagColors[vo.category]} className="rb:ml-2! rb:py-px!">
+                                      {t(`userMemory.${vo.category}`)}
+                                    </Tag>
+                                  }
+                                </div>
+                              }
+                              
+                              <div className="rb:leading-5">{vo.text}</div>
+                            </Flex>
                           </Col>
                         </Row>
                       ))}
