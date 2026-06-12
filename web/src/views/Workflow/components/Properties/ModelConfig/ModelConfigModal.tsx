@@ -34,6 +34,8 @@ interface ModelConfigModalProps {
   /** Callback to update model configuration */
   refresh: (values?: ModelConfigForm) => void;
   variableOptions: Suggestion[];
+  /** Whether to show structured_output and json_output_fields configuration */
+  hideStructuredOutputConfig?: boolean;
 }
 
 export const fieldConfigs: Record<string, any> = {
@@ -65,6 +67,7 @@ export const fieldConfigs: Record<string, any> = {
   },
   json_output_fields: {
     type: 'editor',
+    dependence: 'capability',
   },
   top_p: {
     enable: {
@@ -205,7 +208,8 @@ export const fieldConfigs: Record<string, any> = {
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,
   variableOptions,
-  name = 'model_id'
+  name = 'model_id',
+  hideStructuredOutputConfig = false
 }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -339,7 +343,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
               const dependence = firstFieldConfigs.dependence as keyof ModelConfigForm
               const dependenceValue = (values as any)?.[dependence] as string[] | undefined
               const isHidden = field === 'structured_output'
-                ? !dependenceValue?.includes('json_output')
+                ? !dependenceValue?.includes('json_output') || hideStructuredOutputConfig
                 : dependence && !dependenceValue?.includes(field)
               const isThinkingOnly = values?.capability?.includes('thinking_only')
 
