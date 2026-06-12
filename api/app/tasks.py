@@ -96,6 +96,7 @@ def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
 # Redis keys for document parse task tracking
 _PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 _PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
+_PARSE_TASK_TTL = 7200
 
 
 def _progress_ts() -> str:
@@ -118,6 +119,67 @@ def _download_storage_file(file_key: str) -> bytes:
             return loop.run_until_complete(_download())
         finally:
             loop.close()
+
+
+def _upload_kb_file_content_sync(kb_id: uuid.UUID, file_id: uuid.UUID, file_ext: str, content: bytes) -> str:
+    from app.services.file_storage_service import FileStorageService, generate_kb_file_key
+
+    file_key = generate_kb_file_key(kb_id=kb_id, file_id=file_id, file_ext=file_ext)
+    storage_service = FileStorageService()
+
+    async def _upload():
+        await storage_service.storage.upload(
+            file_key=file_key,
+            content=content,
+            content_type="application/octet-stream",
+        )
+
+    try:
+        asyncio.run(_upload())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_upload())
+        finally:
+            loop.close()
+    return file_key
+
+
+def _dispatch_parse_document(file_key: str | None, document_id: uuid.UUID, file_name: str) -> str | None:
+    if not file_key:
+        logger.warning(f"[ParseDoc] skip dispatch because file_key is empty: document={document_id}")
+        return None
+
+    task_key = _PARSE_TASK_KEY.format(doc_id=document_id)
+    claimed = False
+    try:
+        claimed = bool(REDIS_CONN.REDIS.set(task_key, "CLAIMED", ex=_PARSE_TASK_TTL, nx=True))
+    except Exception:
+        logger.warning(f"[ParseDoc] failed to claim parse task: document={document_id}", exc_info=True)
+        return None
+
+    if not claimed:
+        existing_task_id = REDIS_CONN.get(task_key)
+        logger.info(f"[ParseDoc] parse already running: document={document_id}, task_id={existing_task_id}")
+        return existing_task_id
+
+    try:
+        task = celery_app.send_task(
+            "app.core.rag.tasks.parse_document",
+            args=[file_key, str(document_id), file_name],
+        )
+    except Exception:
+        try:
+            REDIS_CONN.delete(task_key)
+        except Exception:
+            logger.warning(f"[ParseDoc] failed to rollback parse claim: document={document_id}", exc_info=True)
+        raise
+
+    try:
+        REDIS_CONN.set(task_key, task.id, exp=_PARSE_TASK_TTL)
+    except Exception:
+        logger.warning(f"[ParseDoc] failed to record parse task id: document={document_id}", exc_info=True)
+    return task.id
 
 
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
@@ -288,126 +350,138 @@ def _build_vision_model(file_path: str, db_knowledge):
 def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     """
     Document parsing, vectorization, and storage.
-    
-    Args:
-        file_key: Storage key for FileStorageService (e.g. "kb/{kb_id}/{file_id}.docx")
-        document_id: Document UUID
-        file_name: Original file name (used for extension detection in chunk())
-    """
 
-    db_document = None
+    This task intentionally keeps DB sessions short. File download, parsing,
+    QA generation, embedding, and ES writes run after the initial DB context
+    has been closed.
+    """
     progress_lines: list[str] = [f"{_progress_ts()} Task has been received."]
+    start_time = time.time()
+    document_label = file_name or str(document_id)
 
     def _progress_msg() -> str:
         return "\n".join(progress_lines) + "\n"
 
-    def _should_abort(doc_id: uuid.UUID) -> bool:
-        """Check if the document has been deleted or marked for cancellation via Redis."""
-        cancel = REDIS_CONN.get(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
-        if cancel:
-            logger.info(f"[ParseDoc] document={doc_id} cancelled via Redis -- aborting")
-            return True
-        # Fallback to DB check only when Redis is unavailable
-        if not REDIS_CONN.is_alive():
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc is None:
-                logger.info(f"[ParseDoc] document={doc_id} deleted -- aborting")
-                return True
-        return False
-
     def _clear_redis_state(doc_id: uuid.UUID):
-        """Clean up Redis tracking keys."""
         try:
             REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=doc_id))
             REDIS_CONN.delete(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
         except Exception:
             logger.warning(f"[ParseDoc] failed to clear Redis state for {doc_id}", exc_info=True)
 
-    with get_db_context() as db:
-      try:
+    def _should_abort(doc_id: uuid.UUID) -> bool:
+        cancel = REDIS_CONN.get(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
+        if cancel:
+            logger.info(f"[ParseDoc] document={doc_id} cancelled via Redis -- aborting")
+            return True
+        if not REDIS_CONN.is_alive():
+            with get_db_context() as check_db:
+                doc = check_db.query(Document).filter(Document.id == doc_id).first()
+                if doc is None:
+                    logger.info(f"[ParseDoc] document={doc_id} deleted -- aborting")
+                    return True
+        return False
+
+    def _update_document(doc_id: uuid.UUID, updater):
+        with get_db_context() as update_db:
+            doc = update_db.query(Document).filter(Document.id == doc_id).first()
+            if doc is None:
+                logger.warning(f"[ParseDoc] document={doc_id} not found when updating parse state")
+                return None
+            updater(doc)
+            update_db.commit()
+            return doc
+
+    try:
         if not isinstance(document_id, uuid.UUID):
             document_id = uuid.UUID(str(document_id))
 
-        db_document = db.query(Document).filter(Document.id == document_id).first()
-        if db_document is None:
-            raise ValueError(f"Document {document_id} not found")
-        db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
-        if db_knowledge is None:
-            raise ValueError(f"Knowledge {db_document.kb_id} not found")
+        with get_db_context() as db:
+            db_document = db.query(Document).filter(Document.id == document_id).first()
+            if db_document is None:
+                raise ValueError(f"Document {document_id} not found")
 
-        # Use file_name from argument or fall back to document record
-        if not file_name:
-            file_name = db_document.file_name
+            db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
+            if db_knowledge is None:
+                raise ValueError(f"Knowledge {db_document.kb_id} not found")
 
-        # 1. Download file from storage backend
-        progress_lines.append(f"{_progress_ts()} Start to parse.")
-        start_time = time.time()
-        db_document.progress = 0.0
-        db_document.progress_msg = _progress_msg()
-        db_document.process_begin_at = utcnow_naive()
-        db_document.process_duration = 0.0
-        db_document.run = 1
-        db.commit()
-        db.refresh(db_document)
+            if not file_name:
+                file_name = db_document.file_name
+            document_label = file_name or str(document_id)
 
-        # Read file content from storage backend (no NFS dependency)
-        from app.services.file_storage_service import FileStorageService
-        import asyncio
-        storage_service = FileStorageService()
+            parser_config = db_document.parser_config or {}
+            knowledge_parser_config = db_knowledge.parser_config or {}
+            auto_questions_topn = parser_config.get("auto_questions", 0)
+            document_info = {
+                "id": str(db_document.id),
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": to_timestamp_ms(db_document.created_at),
+                "knowledge_id": str(db_document.kb_id),
+                "parent_child_mode": bool(db_document.is_parent_child_mode),
+            }
+            llm_config = None
+            if auto_questions_topn:
+                llm_config = {
+                    "key": db_knowledge.llm.api_keys[0].api_key,
+                    "model_name": db_knowledge.llm.api_keys[0].model_name,
+                    "base_url": db_knowledge.llm.api_keys[0].api_base,
+                }
+            knowledge_id = str(db_knowledge.id)
+            use_graphrag = bool(
+                knowledge_parser_config.get("graphrag", {}).get("use_graphrag", False)
+            )
+            vision_model = _build_vision_model(file_name, db_knowledge)
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
-        async def _download():
-            return await storage_service.download_file(file_key)
+            progress_lines.append(f"{_progress_ts()} Start to parse.")
+            db_document.progress = 0.0
+            db_document.progress_msg = _progress_msg()
+            db_document.process_begin_at = utcnow_naive()
+            db_document.process_duration = 0.0
+            db_document.run = 1
+            db.commit()
 
-        try:
-            # Early-exit check after download
-            if _should_abort(document_id):
-                _clear_redis_state(document_id)
-                logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
-                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-            file_binary = asyncio.run(_download())
-        except RuntimeError:
-            # If there's already a running loop (e.g. in some worker configurations)
-            loop = asyncio.new_event_loop()
-            try:
-                file_binary = loop.run_until_complete(_download())
-            finally:
-                loop.close()
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
+            return f"parse document '{document_label}' aborted (deleted or cancelled)."
+
+        file_binary = _download_storage_file(file_key)
         if not file_binary:
             raise IOError(f"Downloaded empty file from storage: {file_key}")
         logger.info(f"[ParseDoc] Downloaded {len(file_binary)} bytes from storage key: {file_key}")
 
-        # 防线1：页数限制
         estimated_pages = _get_estimated_pages(file_name, file_binary)
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
         if estimated_pages is None:
-            logger.info(f"[ParseDoc] document={document_id} not obtain page number, parse failed.")
-            progress_lines.append(_progress_ts() + f" parse document '{file_name or document_id}' failed: not obtain page number")
+            logger.info(f"[ParseDoc] document={document_id} page number unavailable, continue parsing.")
+            progress_lines.append(_progress_ts() + f" parse document '{document_label}' page number unavailable.")
         elif estimated_pages > MAX_DOCUMENT_PAGES:
             logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
-            progress_lines.append(_progress_ts() + f" parse document '{file_name or document_id}' failed: page limit exceeded")
-            db_document.progress = -1.0
-            db_document.run = 0
-            db_document.progress_msg = _progress_msg()
-            db.commit()
+            progress_lines.append(_progress_ts() + f" parse document '{document_label}' failed: page limit exceeded")
+
+            def _mark_page_limit_failed(doc):
+                doc.progress = -1.0
+                doc.run = 0
+                doc.progress_msg = _progress_msg()
+
+            _update_document(document_id, _mark_page_limit_failed)
             _clear_redis_state(document_id)
-            return f"parse document '{file_name or document_id}' failed: page limit exceeded"
+            return f"parse document '{document_label}' failed: page limit exceeded"
 
         def progress_callback(prog=None, msg=None):
             progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
-        # Prepare vision_model for parsing
-        vision_model = _build_vision_model(file_name, db_knowledge)
-
         from app.core.rag.app.naive import chunk_v2 as chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
-        # Early-exit check before chunking
         if _should_abort(document_id):
             _clear_redis_state(document_id)
             logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+            return f"parse document '{document_label}' aborted (deleted or cancelled)."
 
-        parent_child_mode = db_document.is_parent_child_mode
+        parent_child_mode = document_info["parent_child_mode"]
         if parent_child_mode:
             from app.core.rag.app.naive import chunk_parent_child_v2 as chunk_parent_child
             child_res, parent_res, parent_id_map = chunk_parent_child(
@@ -417,60 +491,58 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 to_page=DEFAULT_PARSE_TO_PAGE,
                 callback=progress_callback,
                 vision_model=vision_model,
-                parser_config=db_document.parser_config,
+                parser_config=parser_config,
                 is_root=False,
             )
         else:
-            res = chunk(filename=file_name,
-                        binary=file_binary,
-                        from_page=0,
-                        to_page=DEFAULT_PARSE_TO_PAGE,
-                        callback=progress_callback,
-                        vision_model=vision_model,
-                        parser_config=db_document.parser_config,
-                        is_root=False)
+            res = chunk(
+                filename=file_name,
+                binary=file_binary,
+                from_page=0,
+                to_page=DEFAULT_PARSE_TO_PAGE,
+                callback=progress_callback,
+                vision_model=vision_model,
+                parser_config=parser_config,
+                is_root=False,
+            )
 
         progress_lines.append(f"{_progress_ts()} Finish parsing.")
-        db_document.progress = 0.8
-        db_document.progress_msg = _progress_msg()
-        db.commit()
-        db.refresh(db_document)
 
-        # Early-exit check before vectorization
+        def _mark_parsed(doc):
+            doc.progress = 0.8
+            doc.progress_msg = _progress_msg()
+
+        _update_document(document_id, _mark_parsed)
+
         if _should_abort(document_id):
             _clear_redis_state(document_id)
             logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+            return f"parse document '{document_label}' aborted (deleted or cancelled)."
 
-        # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
         progress_lines.append(f"{_progress_ts()} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
             progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
-            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-            # 2.1 Delete document vector index
             vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
-            # 2.2 Vectorize and import batch documents
-            auto_questions_topn = db_document.parser_config.get("auto_questions", 0)
-            qa_prompt = db_document.parser_config.get("qa_prompt", None)
+            qa_prompt = parser_config.get("qa_prompt", None)
             chat_model = None
             if auto_questions_topn:
+                if llm_config is None:
+                    raise RuntimeError("auto_questions is enabled but LLM config is unavailable")
                 chat_model = Base(
-                    key=db_knowledge.llm.api_keys[0].api_key,
-                    model_name=db_knowledge.llm.api_keys[0].model_name,
-                    base_url=db_knowledge.llm.api_keys[0].api_base,
+                    key=llm_config["key"],
+                    model_name=llm_config["model_name"],
+                    base_url=llm_config["base_url"],
                 )
-                logger.info(f"[QA] LLM model: {db_knowledge.llm.api_keys[0].model_name}, base_url: {db_knowledge.llm.api_keys[0].api_base}")
+                logger.info(f"[QA] LLM model: {llm_config['model_name']}, base_url: {llm_config['base_url']}")
                 if qa_prompt:
                     logger.info(f"[QA] Using custom prompt ({len(qa_prompt)} chars)")
 
-            # 预先构建所有 batch 的 chunks，保证 sort_id 全局有序
             all_batch_chunks: list[list[DocumentChunk]] = []
 
             if parent_child_mode:
-                # Parent-child mode writes child chunks first so ES mapping is created from vectorized chunks.
                 parent_chunks_list = []
                 parent_id_to_doc_id = {}
 
@@ -479,17 +551,16 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     parent_id_to_doc_id[idx] = parent_doc_id
                     meta = {
                         "doc_id": parent_doc_id,
-                        "file_id": str(db_document.file_id),
-                        "file_name": db_document.file_name,
-                        "file_created_at": to_timestamp_ms(db_document.created_at),
-                        "document_id": str(db_document.id),
-                        "knowledge_id": str(db_document.kb_id),
+                        "file_id": document_info["file_id"],
+                        "file_name": document_info["file_name"],
+                        "file_created_at": document_info["file_created_at"],
+                        "document_id": document_info["id"],
+                        "knowledge_id": document_info["knowledge_id"],
                         "sort_id": idx,
                         "status": 1,
                         "chunk_type": "parent",
                     }
-                    parent_chunks_list.append(
-                        DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+                    parent_chunks_list.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
 
                 child_chunks_list = []
                 for idx, item in enumerate(child_res):
@@ -497,18 +568,17 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     parent_doc_id = parent_id_to_doc_id.get(parent_idx, "")
                     meta = {
                         "doc_id": uuid.uuid4().hex,
-                        "file_id": str(db_document.file_id),
-                        "file_name": db_document.file_name,
-                        "file_created_at": to_timestamp_ms(db_document.created_at),
-                        "document_id": str(db_document.id),
-                        "knowledge_id": str(db_document.kb_id),
+                        "file_id": document_info["file_id"],
+                        "file_name": document_info["file_name"],
+                        "file_created_at": document_info["file_created_at"],
+                        "document_id": document_info["id"],
+                        "knowledge_id": document_info["knowledge_id"],
                         "sort_id": idx,
                         "status": 1,
                         "chunk_type": "child",
                         "parent_id": parent_doc_id,
                     }
-                    child_chunks_list.append(
-                        DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+                    child_chunks_list.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
 
                 all_chunks = prioritize_vectorized_chunks(parent_chunks_list + child_chunks_list)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
@@ -517,16 +587,13 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
                 progress_lines.append(
                     f"{_progress_ts()} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
-                    f"{len(child_chunks_list)} child chunks prepared.")
+                    f"{len(child_chunks_list)} child chunks prepared."
+                )
 
             elif auto_questions_topn:
-                # QA mode keeps source chunks but writes QA chunks first for vectorized index creation.
-                # 1. Original chunks are marked as source for full-text retrieval, provenance, and GraphRAG.
-                # 2. LLM-generated QA pairs are stored as independent qa chunks.
                 indexed_items = list(enumerate(res))
 
                 def _generate_qa(idx_item: tuple[int, dict]) -> tuple[int, list]:
-                    """为单个 chunk 生成 QA 对（带缓存），返回 (global_idx, qa_pairs)"""
                     global_idx, item = idx_item
                     content = item["content_with_weight"]
                     cache_params = {"topn": auto_questions_topn}
@@ -542,12 +609,15 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             logger.error(f"[QA] LLM call failed: model={chat_model.model_name}, base_url={getattr(chat_model, 'base_url', 'N/A')}, error={e}")
                             return global_idx, []
                         logger.info(f"[QA] Chunk {global_idx} generated {len(pairs)} QA pairs")
-                        # 缓存存 JSON 字符串
-                        set_llm_cache(chat_model.model_name, content, json.dumps(pairs, ensure_ascii=False), "qa",
-                                      cache_params)
+                        set_llm_cache(
+                            chat_model.model_name,
+                            content,
+                            json.dumps(pairs, ensure_ascii=False),
+                            "qa",
+                            cache_params,
+                        )
                         return global_idx, pairs
                     logger.info(f"[QA] Cache hit for chunk {global_idx}, cache_params={cache_params}, cached_type={type(cached).__name__}")
-                    # 从缓存读取：可能是 JSON 字符串或旧格式纯文本
                     if isinstance(cached, str):
                         try:
                             parsed = json.loads(cached)
@@ -556,25 +626,22 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                                 return global_idx, parsed
                         except (json.JSONDecodeError, TypeError):
                             pass
-                        # 旧缓存格式（纯文本问题），尝试解析
                         from app.core.rag.prompts.generator import parse_qa_pairs
                         return global_idx, parse_qa_pairs(cached) if cached else []
                     return global_idx, cached if isinstance(cached, list) else []
 
-                # 并发调用 LLM 生成 QA 对
                 qa_map: dict[int, list] = {}
                 with ThreadPoolExecutor(max_workers=AUTO_QUESTIONS_MAX_WORKERS) as q_executor:
-                    futures = {q_executor.submit(_generate_qa, item): item[0]
-                               for item in indexed_items}
+                    futures = {q_executor.submit(_generate_qa, item): item[0] for item in indexed_items}
                     for future in futures:
                         global_idx, pairs = future.result()
                         qa_map[global_idx] = pairs
 
                 progress_lines.append(
                     f"{_progress_ts()} QA pairs generated for {total_chunks} chunks "
-                    f"(workers={AUTO_QUESTIONS_MAX_WORKERS}).")
+                    f"(workers={AUTO_QUESTIONS_MAX_WORKERS})."
+                )
 
-                # 组装 chunks：source chunks + qa chunks
                 source_chunks = []
                 qa_chunks = []
                 qa_sort_id = 0
@@ -582,32 +649,28 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 for global_idx in range(total_chunks):
                     item = res[global_idx]
                     source_chunk_id = uuid.uuid4().hex
-
-                    # Source chunks keep the original text and are not vectorized.
                     source_meta = {
                         "doc_id": source_chunk_id,
-                        "file_id": str(db_document.file_id),
-                        "file_name": db_document.file_name,
-                        "file_created_at": to_timestamp_ms(db_document.created_at),
-                        "document_id": str(db_document.id),
-                        "knowledge_id": str(db_document.kb_id),
+                        "file_id": document_info["file_id"],
+                        "file_name": document_info["file_name"],
+                        "file_created_at": document_info["file_created_at"],
+                        "document_id": document_info["id"],
+                        "knowledge_id": document_info["knowledge_id"],
                         "sort_id": global_idx,
                         "status": 1,
                         "chunk_type": "source",
                     }
-                    source_chunks.append(
-                        DocumentChunk(page_content=item["content_with_weight"], metadata=source_meta))
+                    source_chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=source_meta))
 
-                    # qa chunks：每个 QA 对独立存储
                     pairs = qa_map.get(global_idx, [])
                     for pair in pairs:
                         qa_meta = {
                             "doc_id": uuid.uuid4().hex,
-                            "file_id": str(db_document.file_id),
-                            "file_name": db_document.file_name,
-                            "file_created_at": to_timestamp_ms(db_document.created_at),
-                            "document_id": str(db_document.id),
-                            "knowledge_id": str(db_document.kb_id),
+                            "file_id": document_info["file_id"],
+                            "file_name": document_info["file_name"],
+                            "file_created_at": document_info["file_created_at"],
+                            "document_id": document_info["id"],
+                            "knowledge_id": document_info["knowledge_id"],
                             "sort_id": qa_sort_id,
                             "status": 1,
                             "chunk_type": "qa",
@@ -615,12 +678,9 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             "answer": pair["answer"],
                             "source_chunk_id": source_chunk_id,
                         }
-                        # page_content 存 question，用于向量索引
-                        qa_chunks.append(
-                            DocumentChunk(page_content=pair["question"], metadata=qa_meta))
+                        qa_chunks.append(DocumentChunk(page_content=pair["question"], metadata=qa_meta))
                         qa_sort_id += 1
 
-                # Batch QA chunks before source chunks so vectorized writes create ES mapping first.
                 all_chunks = prioritize_vectorized_chunks(source_chunks + qa_chunks)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
                     batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
@@ -628,9 +688,9 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
                 progress_lines.append(
                     f"{_progress_ts()} QA mode: {len(source_chunks)} source chunks + "
-                    f"{len(qa_chunks)} QA chunks prepared.")
+                    f"{len(qa_chunks)} QA chunks prepared."
+                )
             else:
-                # 无 auto_questions：直接构建 chunks
                 for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
                     batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, total_chunks)
                     chunks = []
@@ -638,11 +698,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         item = res[global_idx]
                         metadata = {
                             "doc_id": uuid.uuid4().hex,
-                            "file_id": str(db_document.file_id),
-                            "file_name": db_document.file_name,
-                            "file_created_at": to_timestamp_ms(db_document.created_at),
-                            "document_id": str(db_document.id),
-                            "knowledge_id": str(db_document.kb_id),
+                            "file_id": document_info["file_id"],
+                            "file_name": document_info["file_name"],
+                            "file_created_at": document_info["file_created_at"],
+                            "document_id": document_info["id"],
+                            "knowledge_id": document_info["knowledge_id"],
                             "sort_id": global_idx,
                             "status": 1,
                         }
@@ -650,8 +710,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     all_batch_chunks.append(chunks)
 
             total_batches = len(all_batch_chunks)
-
-            # 并发提交 embedding + ES 写入，max_workers 控制模型 API 并发压力
             batch_errors: dict[int, Exception] = {}
 
             def _embed_and_store(batch_idx: int, batch_chunks: list[DocumentChunk]):
@@ -689,7 +747,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 for future in futures:
                     future.result()
 
-            # 如果有 batch 失败，汇总抛出
             if batch_errors:
                 failed_detail = "; ".join(
                     f"batch {i}: {type(err).__name__}: {err}"
@@ -697,56 +754,65 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 )
                 raise RuntimeError(f"Embedding failed for {len(batch_errors)}/{total_batches} batch(es). {failed_detail}")
 
-            # 所有 batch 完成后一次性更新进度
-            db_document.progress = 0.8 + 0.2  # 直接到 1.0 前的状态
             progress_lines.append(f"{_progress_ts()} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
-            db_document.progress_msg = _progress_msg()
-            db_document.process_duration = time.time() - start_time
-            db_document.run = 0
-            db.commit()
-            db.refresh(db_document)
 
-        # Vectorization and data entry completed
+            def _mark_vectorized(doc):
+                doc.progress = 1.0
+                doc.progress_msg = _progress_msg()
+                doc.process_duration = time.time() - start_time
+                doc.run = 0
+
+            _update_document(document_id, _mark_vectorized)
+
         progress_lines.append(f"{_progress_ts()} Indexing done.")
-        db_document.chunk_num = total_chunks
-        db_document.progress = 1.0
-        db_document.process_duration = time.time() - start_time
-        progress_lines.append(f"{_progress_ts()} Task done ({db_document.process_duration}s).")
-        db_document.progress_msg = _progress_msg()
-        db_document.run = 0
-        db.commit()
+        process_duration = time.time() - start_time
+        progress_lines.append(f"{_progress_ts()} Task done ({process_duration}s).")
 
-        # GraphRAG: 异步派发到独立队列，不阻塞文档解析流程
-        if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
-            # Early-exit check before dispatching GraphRAG
+        def _mark_done(doc):
+            doc.chunk_num = total_chunks
+            doc.progress = 1.0
+            doc.process_duration = process_duration
+            doc.progress_msg = _progress_msg()
+            doc.run = 0
+
+        _update_document(document_id, _mark_done)
+
+        if use_graphrag:
             if _should_abort(document_id):
                 _clear_redis_state(document_id)
                 logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
-                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+                return f"parse document '{document_label}' aborted (deleted or cancelled)."
             progress_lines.append(f"{_progress_ts()} GraphRAG enabled, dispatching async task.")
-            db_document.progress_msg = _progress_msg()
-            db.commit()
-            build_graphrag_for_document.delay(str(document_id), str(db_knowledge.id))
+
+            def _mark_graphrag_dispatched(doc):
+                doc.progress_msg = _progress_msg()
+
+            _update_document(document_id, _mark_graphrag_dispatched)
+            build_graphrag_for_document.delay(str(document_id), knowledge_id)
 
         _clear_redis_state(document_id)
-        result = f"parse document '{db_document.file_name}' processed successfully."
-        logger.info(f"[ParseDoc] document={document_id} file='{db_document.file_name}' done in {db_document.process_duration:.1f}s, chunks={total_chunks}")
+        result = f"parse document '{document_info['file_name']}' processed successfully."
+        logger.info(
+            f"[ParseDoc] document={document_id} file='{document_info['file_name']}' "
+            f"done in {process_duration:.1f}s, chunks={total_chunks}"
+        )
         return result
-      except Exception as e:
+    except Exception as e:
         logger.error(f"[ParseDoc] document={document_id} failed: {e}", exc_info=True)
         _clear_redis_state(document_id)
-        if db_document is not None:
-            try:
-                db_document.progress = -1.0
-                progress_lines.append(f"{_progress_ts()} Failed to vectorize and import the parsed document:{str(e)}")
-                db_document.progress_msg = _progress_msg()
-                db_document.run = 0
-                db.commit()
-            except Exception:
-                logger.warning(f"[ParseDoc] document={document_id} failed to update error status in DB", exc_info=True)
-        # db_document 可能处于 detached/expired 状态，用之前缓存的值或 document_id 兜底
-        file_name = getattr(db_document, 'file_name', None) if db_document else None
-        return f"parse document '{file_name or document_id}' failed."
+        try:
+            progress_lines.append(f"{_progress_ts()} Failed to vectorize and import the parsed document:{str(e)}")
+
+            def _mark_failed(doc):
+                doc.progress = -1.0
+                doc.progress_msg = _progress_msg()
+                doc.run = 0
+
+            if isinstance(document_id, uuid.UUID):
+                _update_document(document_id, _mark_failed)
+        except Exception:
+            logger.warning(f"[ParseDoc] document={document_id} failed to update error status in DB", exc_info=True)
+        return f"parse document '{document_label}' failed."
 
 
 @celery_app.task(name="app.core.rag.tasks.build_graphrag_for_kb")
@@ -759,19 +825,21 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
     import trio
     importlib.reload(trio)
 
-    with get_db_context() as db:
-        try:
-            if not isinstance(kb_id, uuid.UUID):
-                kb_id = uuid.UUID(str(kb_id))
+    try:
+        if not isinstance(kb_id, uuid.UUID):
+            kb_id = uuid.UUID(str(kb_id))
 
+        with get_db_context() as db:
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
             if db_knowledge is None:
                 logger.error(f"[GraphRAG-KB] knowledge={kb_id} not found")
                 return "build knowledge graph failed: knowledge not found"
 
-            if not (db_knowledge.parser_config and
-                    db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False)):
-                return f"build knowledge graph '{db_knowledge.name}' skipped: graphrag not enabled"
+            kb_name = db_knowledge.name
+            parser_config = db_knowledge.parser_config or {}
+            graphrag_conf = parser_config.get("graphrag", {})
+            if not graphrag_conf.get("use_graphrag", False):
+                return f"build knowledge graph '{kb_name}' skipped: graphrag not enabled"
 
             db_documents = db.query(Document).filter(Document.kb_id == kb_id).all()
             document_ids = [str(doc.id) for doc in db_documents]
@@ -788,7 +856,6 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             )
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
-            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
@@ -796,42 +863,42 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                 "id": str(db_knowledge.id),
                 "workspace_id": str(db_knowledge.workspace_id),
                 "kb_id": str(db_knowledge.id),
-                "parser_config": db_knowledge.parser_config,
+                "parser_config": parser_config,
             }
 
-            # init_graphrag
-            vts, _ = embedding_model.encode(["ok"])
-            vector_size = len(vts[0])
-            init_graphrag(task, vector_size)
+        # init_graphrag
+        vts, _ = embedding_model.encode(["ok"])
+        vector_size = len(vts[0])
+        init_graphrag(task, vector_size)
 
-            def callback(*args, msg=None, **kwargs):
-                message = msg or (args[0] if args else "No message")
-                logger.info(f"[GraphRAG-KB] kb={kb_id} msg: {message}")
+        def callback(*args, msg=None, **kwargs):
+            message = msg or (args[0] if args else "No message")
+            logger.info(f"[GraphRAG-KB] kb={kb_id} msg: {message}")
 
-            start_time = time.time()
+        start_time = time.time()
 
-            async def _run() -> dict:
-                return await run_graphrag_for_kb(
-                    row=task,
-                    document_ids=document_ids,
-                    language=DEFAULT_PARSE_LANGUAGE,
-                    parser_config=db_knowledge.parser_config,
-                    vector_service=vector_service,
-                    chat_model=chat_model,
-                    embedding_model=embedding_model,
-                    callback=callback,
-                    with_resolution=with_resolution,
-                    with_community=with_community,
-                )
+        async def _run() -> dict:
+            return await run_graphrag_for_kb(
+                row=task,
+                document_ids=document_ids,
+                language=DEFAULT_PARSE_LANGUAGE,
+                parser_config=parser_config,
+                vector_service=vector_service,
+                chat_model=chat_model,
+                embedding_model=embedding_model,
+                callback=callback,
+                with_resolution=with_resolution,
+                with_community=with_community,
+            )
 
-            result = trio.run(_run)
-            duration = time.time() - start_time
-            logger.info(f"[GraphRAG-KB] kb={kb_id} done in {duration:.1f}s, result: {result}")
+        result = trio.run(_run)
+        duration = time.time() - start_time
+        logger.info(f"[GraphRAG-KB] kb={kb_id} done in {duration:.1f}s, result: {result}")
 
-            return f"build knowledge graph '{db_knowledge.name}' processed successfully."
-        except Exception as e:
-            logger.error(f"[GraphRAG-KB] kb={kb_id} failed: {e}", exc_info=True)
-            return f"build knowledge graph failed: {e}"
+        return f"build knowledge graph '{kb_name}' processed successfully."
+    except Exception as e:
+        logger.error(f"[GraphRAG-KB] kb={kb_id} failed: {e}", exc_info=True)
+        return f"build knowledge graph failed: {e}"
 
 
 @celery_app.task(name="app.core.rag.tasks.build_graphrag_for_document")
@@ -844,15 +911,16 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
     import trio
     importlib.reload(trio)
 
-    with get_db_context() as db:
-        try:
+    try:
+        with get_db_context() as db:
             db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(knowledge_id)).first()
             if db_document is None or db_knowledge is None:
                 logger.error(f"[GraphRAG] document={document_id} or knowledge={knowledge_id} not found")
                 return "build_graphrag_for_document failed: record not found"
 
-            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
+            parser_config = db_knowledge.parser_config or {}
+            graphrag_conf = parser_config.get("graphrag", {})
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
@@ -872,48 +940,53 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
                 "id": document_id,
                 "workspace_id": str(db_knowledge.workspace_id),
                 "kb_id": str(db_knowledge.id),
-                "parser_config": db_knowledge.parser_config,
+                "parser_config": parser_config,
             }
 
-            # init_graphrag
-            vts, _ = embedding_model.encode(["ok"])
-            vector_size = len(vts[0])
-            init_graphrag(task, vector_size)
+        # init_graphrag
+        vts, _ = embedding_model.encode(["ok"])
+        vector_size = len(vts[0])
+        init_graphrag(task, vector_size)
 
-            def callback(*args, msg=None, **kwargs):
-                message = msg or (args[0] if args else "No message")
-                logger.info(f"[GraphRAG] doc={document_id} msg: {message}")
+        def callback(*args, msg=None, **kwargs):
+            message = msg or (args[0] if args else "No message")
+            logger.info(f"[GraphRAG] doc={document_id} msg: {message}")
 
-            start_time = time.time()
+        start_time = time.time()
 
-            async def _run() -> dict:
-                await trio.sleep(5)
-                return await run_graphrag_for_kb(
-                    row=task,
-                    document_ids=[document_id],
-                    language=DEFAULT_PARSE_LANGUAGE,
-                    parser_config=db_knowledge.parser_config,
-                    vector_service=vector_service,
-                    chat_model=chat_model,
-                    embedding_model=embedding_model,
-                    callback=callback,
-                    with_resolution=with_resolution,
-                    with_community=with_community,
-                )
+        async def _run() -> dict:
+            await trio.sleep(5)
+            return await run_graphrag_for_kb(
+                row=task,
+                document_ids=[document_id],
+                language=DEFAULT_PARSE_LANGUAGE,
+                parser_config=parser_config,
+                vector_service=vector_service,
+                chat_model=chat_model,
+                embedding_model=embedding_model,
+                callback=callback,
+                with_resolution=with_resolution,
+                with_community=with_community,
+            )
 
-            result = trio.run(_run)
-            duration = time.time() - start_time
-            logger.info(f"[GraphRAG] doc={document_id} done in {duration:.1f}s")
+        result = trio.run(_run)
+        duration = time.time() - start_time
+        logger.info(f"[GraphRAG] doc={document_id} done in {duration:.1f}s")
 
+        with get_db_context() as db:
+            db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+            if db_document is None:
+                logger.warning(f"[GraphRAG] document={document_id} not found when updating progress")
+                return f"build_graphrag_for_document '{document_id}' processed successfully."
             # 更新文档进度信息
             db_document.progress_msg = (db_document.progress_msg or "") + \
                 f"{_progress_ts()} Knowledge Graph done ({duration:.1f}s)\n"
             db.commit()
 
-            return f"build_graphrag_for_document '{document_id}' processed successfully."
-        except Exception as e:
-            logger.error(f"[GraphRAG] doc={document_id} failed: {e}", exc_info=True)
-            return f"build_graphrag_for_document '{document_id}' failed: {e}"
+        return f"build_graphrag_for_document '{document_id}' processed successfully."
+    except Exception as e:
+        logger.error(f"[GraphRAG] doc={document_id} failed: {e}", exc_info=True)
+        return f"build_graphrag_for_document '{document_id}' failed: {e}"
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
@@ -948,6 +1021,13 @@ def import_qa_chunks(
                 logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
                 return {"error": "document or knowledge not found", "imported": 0}
 
+            document_info = {
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": to_timestamp_ms(db_document.created_at),
+            }
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+
             progress_lines.append(f"{_progress_ts()} Start to import QA.")
             db_document.progress = 0.0
             db_document.progress_msg = _qa_progress_msg()
@@ -956,103 +1036,107 @@ def import_qa_chunks(
             db_document.run = 1
             db.commit()
 
-            if contents is None:
-                if not file_key:
-                    raise ValueError("contents or file_key is required for QA import")
-                contents = _download_storage_file(file_key)
-                if not contents:
-                    raise IOError(f"Downloaded empty QA file from storage: {file_key}")
-                logger.info(f"[ImportQA] Downloaded {len(contents)} bytes from storage key: {file_key}")
+        if contents is None:
+            if not file_key:
+                raise ValueError("contents or file_key is required for QA import")
+            contents = _download_storage_file(file_key)
+            if not contents:
+                raise IOError(f"Downloaded empty QA file from storage: {file_key}")
+            logger.info(f"[ImportQA] Downloaded {len(contents)} bytes from storage key: {file_key}")
 
-            # 1. 解析文件
-            qa_pairs = []
-            failed_rows = []
+        # 1. 解析文件
+        qa_pairs = []
+        failed_rows = []
 
-            if filename.endswith(".csv"):
-                try:
-                    text = contents.decode("utf-8-sig")
-                except UnicodeDecodeError:
-                    text = contents.decode("gbk", errors="ignore")
+        if filename.endswith(".csv"):
+            try:
+                text = contents.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                text = contents.decode("gbk", errors="ignore")
 
-                sniffer = csv_module.Sniffer()
-                try:
-                    dialect = sniffer.sniff(text[:2048])
-                    delimiter = dialect.delimiter
-                except csv_module.Error:
-                    delimiter = "," if "," in text[:500] else "\t"
+            sniffer = csv_module.Sniffer()
+            try:
+                dialect = sniffer.sniff(text[:2048])
+                delimiter = dialect.delimiter
+            except csv_module.Error:
+                delimiter = "," if "," in text[:500] else "\t"
 
-                reader = csv_module.reader(io.StringIO(text), delimiter=delimiter)
-                for i, row in enumerate(reader):
-                    if i == 0:
-                        continue
-                    if len(row) >= 2 and row[0].strip():
-                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip() if row[1].strip() else ""})
-                    elif len(row) >= 1 and row[0].strip():
-                        failed_rows.append(i + 1)
+            reader = csv_module.reader(io.StringIO(text), delimiter=delimiter)
+            for i, row in enumerate(reader):
+                if i == 0:
+                    continue
+                if len(row) >= 2 and row[0].strip():
+                    qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip() if row[1].strip() else ""})
+                elif len(row) >= 1 and row[0].strip():
+                    failed_rows.append(i + 1)
 
-            elif filename.endswith(".xlsx") or filename.endswith(".xls"):
-                try:
-                    import openpyxl
-                    wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True)
-                    for sheet in wb.worksheets:
-                        for i, row in enumerate(sheet.iter_rows(values_only=True)):
-                            if i == 0:
-                                continue
-                            if len(row) >= 2 and row[0]:
-                                q = str(row[0]).strip()
-                                a = str(row[1]).strip() if row[1] else ""
-                                if q:
-                                    qa_pairs.append({"question": q, "answer": a})
-                            elif len(row) >= 1 and row[0]:
-                                failed_rows.append(i + 1)
-                    wb.close()
-                except Exception as e:
-                    logger.error(f"[ImportQA] Excel parse failed: {e}")
-                    raise RuntimeError(f"Excel parse failed: {e}") from e
+        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True)
+                for sheet in wb.worksheets:
+                    for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                        if i == 0:
+                            continue
+                        if len(row) >= 2 and row[0]:
+                            q = str(row[0]).strip()
+                            a = str(row[1]).strip() if row[1] else ""
+                            if q:
+                                qa_pairs.append({"question": q, "answer": a})
+                        elif len(row) >= 1 and row[0]:
+                            failed_rows.append(i + 1)
+                wb.close()
+            except Exception as e:
+                logger.error(f"[ImportQA] Excel parse failed: {e}")
+                raise RuntimeError(f"Excel parse failed: {e}") from e
 
-            if not qa_pairs:
-                logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
-                raise ValueError("No valid QA pairs found")
+        if not qa_pairs:
+            logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
+            raise ValueError("No valid QA pairs found")
 
-            logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
-            progress_lines.append(f"{_progress_ts()} Parsed {len(qa_pairs)} QA pairs.")
+        logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+        progress_lines.append(f"{_progress_ts()} Parsed {len(qa_pairs)} QA pairs.")
 
-            # 2. 写入 ES
-            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+        # 2. 写入 ES
+        sort_id = 0
+        if clear_parse_task:
+            vector_service.delete_by_metadata_field(key="document_id", value=document_id)
+        else:
+            total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
+            if items:
+                sort_id = items[0].metadata["sort_id"]
 
-            sort_id = 0
+        chunks = []
+        for pair in qa_pairs:
+            sort_id += 1
+            doc_id = uuid.uuid4().hex
+            metadata = {
+                "doc_id": doc_id,
+                "file_id": document_info["file_id"],
+                "file_name": document_info["file_name"],
+                "file_created_at": document_info["file_created_at"],
+                "document_id": document_id,
+                "knowledge_id": kb_id,
+                "sort_id": sort_id,
+                "status": 1,
+                "chunk_type": "qa",
+                "question": pair["question"],
+                "answer": pair["answer"],
+            }
+            chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
+
+        batch_size = 50
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            vector_service.add_chunks(batch)
+
+        with get_db_context() as db:
+            db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+            if not db_document:
+                logger.warning(f"[ImportQA] document={document_id} not found when updating completion state")
+                return {"error": "document not found", "imported": 0}
             if clear_parse_task:
-                vector_service.delete_by_metadata_field(key="document_id", value=document_id)
                 db_document.chunk_num = 0
-            else:
-                total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
-                if items:
-                    sort_id = items[0].metadata["sort_id"]
-
-            chunks = []
-            for pair in qa_pairs:
-                sort_id += 1
-                doc_id = uuid.uuid4().hex
-                metadata = {
-                    "doc_id": doc_id,
-                    "file_id": str(db_document.file_id),
-                    "file_name": db_document.file_name,
-                    "file_created_at": to_timestamp_ms(db_document.created_at),
-                    "document_id": document_id,
-                    "knowledge_id": kb_id,
-                    "sort_id": sort_id,
-                    "status": 1,
-                    "chunk_type": "qa",
-                    "question": pair["question"],
-                    "answer": pair["answer"],
-                }
-                chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
-
-            batch_size = 50
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
-                vector_service.add_chunks(batch)
-
             # 3. 更新 chunk_num 和 progress
             db_document.chunk_num += len(chunks)
             db_document.progress = 1.0
@@ -1062,9 +1146,9 @@ def import_qa_chunks(
             db_document.progress_msg = _qa_progress_msg()
             db.commit()
 
-            result = {"imported": len(chunks), "failed_rows": failed_rows}
-            logger.info(f"[ImportQA] Done: imported={len(chunks)}, failed={len(failed_rows)}")
-            return result
+        result = {"imported": len(chunks), "failed_rows": failed_rows}
+        logger.info(f"[ImportQA] Done: imported={len(chunks)}, failed={len(failed_rows)}")
+        return result
 
     except Exception as e:
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
@@ -1094,164 +1178,294 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
     """
     sync knowledge document and Document parsing, vectorization, and storage
     """
-    with get_db_context() as db:
-      try:
+    default_parser_config = {
+        "layout_recognize": "DeepDOC",
+        "chunk_token_num": 130,
+        "delimiter": "\n",
+        "auto_keywords": 0,
+        "auto_questions": 0,
+        "html4excel": "false",
+    }
+
+    def _snapshot_file(db_file: File) -> dict:
+        return {
+            "id": db_file.id,
+            "kb_id": db_file.kb_id,
+            "created_by": db_file.created_by,
+            "parent_id": db_file.parent_id,
+            "file_name": db_file.file_name,
+            "file_ext": db_file.file_ext,
+            "file_size": db_file.file_size,
+            "file_url": db_file.file_url,
+            "file_key": db_file.file_key,
+            "created_at": db_file.created_at,
+        }
+
+    def _snapshot_document(db_document: Document | None) -> dict | None:
+        if db_document is None:
+            return None
+        return {
+            "id": db_document.id,
+            "file_id": db_document.file_id,
+            "file_name": db_document.file_name,
+        }
+
+    def _load_knowledge_state(kb_uuid: uuid.UUID) -> tuple[dict, Any]:
+        with get_db_context() as db:
+            db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_uuid).first()
+            if db_knowledge is None:
+                raise ValueError("knowledge not found")
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+            return {
+                "id": db_knowledge.id,
+                "name": db_knowledge.name,
+                "type": db_knowledge.type,
+                "parser_config": db_knowledge.parser_config or {},
+                "created_by": db_knowledge.created_by,
+            }, vector_service
+
+    def _get_existing_files(kb_uuid: uuid.UUID) -> list[dict]:
+        with get_db_context() as db:
+            return [_snapshot_file(db_file) for db_file in db.query(File).filter(File.kb_id == kb_uuid).all()]
+
+    def _get_file_by_url(kb_uuid: uuid.UUID, file_url: str) -> dict | None:
+        with get_db_context() as db:
+            db_file = db.query(File).filter(File.kb_id == kb_uuid, File.file_url == file_url).first()
+            return _snapshot_file(db_file) if db_file else None
+
+    def _create_file_record(
+        knowledge_state: dict,
+        *,
+        file_name: str,
+        file_ext: str,
+        file_size: int,
+        file_url: str,
+        created_at: datetime | None = None,
+    ) -> dict:
+        with get_db_context() as db:
+            upload_file = file_schema.FileCreate(
+                kb_id=knowledge_state["id"],
+                created_by=knowledge_state["created_by"],
+                parent_id=knowledge_state["id"],
+                file_name=file_name,
+                file_ext=file_ext,
+                file_size=file_size,
+                file_url=file_url,
+                created_at=created_at,
+            )
+            db_file = File(**upload_file.model_dump())
+            db.add(db_file)
+            db.commit()
+            db.refresh(db_file)
+            return _snapshot_file(db_file)
+
+    def _update_file_record(
+        kb_uuid: uuid.UUID,
+        file_id: uuid.UUID,
+        *,
+        file_name: str,
+        file_ext: str,
+        file_size: int,
+        file_key: str,
+        created_at: datetime | None = None,
+        sync_document_created_at: bool = False,
+    ) -> tuple[dict | None, dict | None]:
+        with get_db_context() as db:
+            db_file = db.query(File).filter(File.id == file_id).first()
+            if db_file is None:
+                logger.warning(f"[SyncKB] file={file_id} not found when updating synced file")
+                return None, None
+
+            db_file.file_name = file_name
+            db_file.file_ext = file_ext
+            db_file.file_size = file_size
+            db_file.file_key = file_key
+            if created_at is not None:
+                db_file.created_at = created_at
+            db.commit()
+            db.refresh(db_file)
+
+            db_document = db.query(Document).filter(Document.kb_id == kb_uuid, Document.file_id == db_file.id).first()
+            if db_document:
+                db_document.file_name = db_file.file_name
+                db_document.file_ext = db_file.file_ext
+                db_document.file_size = db_file.file_size
+                if sync_document_created_at:
+                    db_document.created_at = db_file.created_at
+                db_document.updated_at = utcnow_naive()
+                db.commit()
+                db.refresh(db_document)
+            return _snapshot_file(db_file), _snapshot_document(db_document)
+
+    def _create_document_record(knowledge_state: dict, file_state: dict) -> dict:
+        with get_db_context() as db:
+            create_document_data = document_schema.DocumentCreate(
+                kb_id=knowledge_state["id"],
+                created_by=knowledge_state["created_by"],
+                file_id=file_state["id"],
+                file_name=file_state["file_name"],
+                file_ext=file_state["file_ext"],
+                file_size=file_state["file_size"],
+                file_meta={},
+                parser_id="naive",
+                parser_config=default_parser_config,
+            )
+            db_document = Document(**create_document_data.model_dump())
+            db.add(db_document)
+            db.commit()
+            db.refresh(db_document)
+            return _snapshot_document(db_document)
+
+    def _legacy_file_path(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str) -> Path:
+        return Path(settings.FILE_PATH, str(kb_uuid), str(parent_id), f"{file_id}{file_ext}")
+
+    def _write_legacy_file(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str, content: bytes) -> Path:
+        file_path = _legacy_file_path(kb_uuid, parent_id, file_id, file_ext)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        if file_path.exists():
+            file_path.unlink()
+        file_path.write_bytes(content)
+        return file_path
+
+    def _copy_legacy_file(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str, source_path: str) -> Path:
+        file_path = _legacy_file_path(kb_uuid, parent_id, file_id, file_ext)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        if file_path.exists():
+            file_path.unlink()
+        shutil.copyfile(source_path, file_path)
+        return file_path
+
+    def _dispatch_if_document(file_state: dict | None, document_state: dict | None):
+        if file_state and document_state:
+            _dispatch_parse_document(file_state["file_key"], document_state["id"], file_state["file_name"])
+        elif file_state and not document_state:
+            logger.warning(f"[SyncKB] skip parse because document is missing: file={file_state['id']}")
+
+    def _delete_stale_files(kb_uuid: uuid.UUID, file_urls: set, vector_service):
+        with get_db_context() as db:
+            stale_files = []
+            db_files = db.query(File).filter(File.kb_id == kb_uuid, File.file_url.notin_(file_urls)).all()
+            for db_file in db_files:
+                db_document = db.query(Document).filter(Document.kb_id == kb_uuid, Document.file_id == db_file.id).first()
+                file_state = _snapshot_file(db_file)
+                file_state["document_id"] = db_document.id if db_document else None
+                stale_files.append(file_state)
+
+        for file_state in stale_files:
+            document_id = file_state.get("document_id")
+            if document_id:
+                vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+            if file_state.get("file_key"):
+                from app.services.file_storage_service import FileStorageService
+
+                storage_service = FileStorageService()
+                try:
+                    asyncio.run(storage_service.delete_file(file_state["file_key"]))
+                except Exception:
+                    logger.warning(f"[SyncKB] failed to delete storage file: file_key={file_state['file_key']}", exc_info=True)
+            legacy_path = _legacy_file_path(
+                file_state["kb_id"],
+                file_state["parent_id"],
+                file_state["id"],
+                file_state["file_ext"],
+            )
+            if legacy_path.exists():
+                legacy_path.unlink()
+
+        with get_db_context() as db:
+            for file_state in stale_files:
+                db_document = db.query(Document).filter(Document.kb_id == kb_uuid, Document.file_id == file_state["id"]).first()
+                if db_document:
+                    db.delete(db_document)
+                db_file = db.query(File).filter(File.id == file_state["id"]).first()
+                if db_file:
+                    db.delete(db_file)
+            db.commit()
+
+    try:
         if not isinstance(kb_id, uuid.UUID):
             kb_id = uuid.UUID(str(kb_id))
 
-        db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
-        if db_knowledge is None:
+        try:
+            knowledge_state, vector_service = _load_knowledge_state(kb_id)
+        except ValueError:
             logger.error(f"[SyncKB] knowledge={kb_id} not found")
             return "sync knowledge failed: knowledge not found"
 
-        # 1. get vector_service
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-
-        # 2. sync data
-        match db_knowledge.type:
+        match knowledge_state["type"]:
             case "Web":  # Crawl webpages in batches through a web crawler
-                entry_url = db_knowledge.parser_config.get("entry_url", "")
-                max_pages = db_knowledge.parser_config.get("max_pages", 20)
-                delay_seconds = db_knowledge.parser_config.get("delay_seconds", 1.0)
-                timeout_seconds = db_knowledge.parser_config.get("timeout_seconds", 10)
-                user_agent = db_knowledge.parser_config.get("user_agent", "KnowledgeBaseCrawler/1.0")
-                # Create crawler
+                parser_config = knowledge_state["parser_config"]
                 crawler = WebCrawler(
-                    entry_url=entry_url,
-                    max_pages=max_pages,
-                    delay_seconds=delay_seconds,
-                    timeout_seconds=timeout_seconds,
-                    user_agent=user_agent
+                    entry_url=parser_config.get("entry_url", ""),
+                    max_pages=parser_config.get("max_pages", 20),
+                    delay_seconds=parser_config.get("delay_seconds", 1.0),
+                    timeout_seconds=parser_config.get("timeout_seconds", 10),
+                    user_agent=parser_config.get("user_agent", "KnowledgeBaseCrawler/1.0"),
                 )
                 try:
-                    # 初始化存储已爬取 URLs 的集合
                     file_urls = set()
-                    # crawl entry_url by yield
                     for crawled_document in crawler.crawl():
                         file_urls.add(crawled_document.url)
-                        db_file = db.query(File).filter(File.kb_id == db_knowledge.id,
-                                                        File.file_url == crawled_document.url).first()
-                        if db_file:
-                            if db_file.file_size == crawled_document.content_length:  # same
-                                continue
-                            else:  # --update
-                                if crawled_document.content_length:
-                                    # 1. update file
-                                    db_file.file_name = f"{crawled_document.title}.txt"
-                                    db_file.file_ext = ".txt"
-                                    db_file.file_size = crawled_document.content_length
-                                    db.commit()
-                                    db.refresh(db_file)
-                                    # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                    save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.id))
-                                    Path(save_dir).mkdir(parents=True,
-                                                         exist_ok=True)  # Ensure that the directory exists
-                                    save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                    # update file
-                                    if os.path.exists(save_path):
-                                        os.remove(save_path)  # Delete a single file
-                                    content_bytes = crawled_document.content.encode('utf-8')
-                                    with open(save_path, "wb") as f:
-                                        f.write(content_bytes)
-                                    # 2. update a document
-                                    db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
-                                                                            Document.file_id == db_file.id).first()
-                                    if db_document:
-                                        db_document.file_name = db_file.file_name
-                                        db_document.file_ext = db_file.file_ext
-                                        db_document.file_size = db_file.file_size
-                                        db_document.updated_at = utcnow_naive()
-                                        db.commit()
-                                        db.refresh(db_document)
-                                        # 3. Document parsing, vectorization, and storage
-                                        parse_document(file_path=save_path, document_id=db_document.id)
-                        else:  # --add
-                            if crawled_document.content_length:
-                                # 1. upload file
-                                upload_file = file_schema.FileCreate(
-                                    kb_id=db_knowledge.id,
-                                    created_by=db_knowledge.created_by,
-                                    parent_id=db_knowledge.id,
-                                    file_name=f"{crawled_document.title}.txt",
-                                    file_ext=".txt",
-                                    file_size=crawled_document.content_length,
-                                    file_url=crawled_document.url,
-                                )
-                                db_file = File(**upload_file.model_dump())
-                                db.add(db_file)
-                                db.commit()
-                                # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id), str(db_knowledge.id))
-                                Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
-                                save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                # Save file
-                                content_bytes = crawled_document.content.encode('utf-8')
-                                with open(save_path, "wb") as f:
-                                    f.write(content_bytes)
-                                # 2. Create a document
-                                create_document_data = document_schema.DocumentCreate(
-                                    kb_id=db_knowledge.id,
-                                    created_by=db_knowledge.created_by,
-                                    file_id=db_file.id,
-                                    file_name=db_file.file_name,
-                                    file_ext=db_file.file_ext,
-                                    file_size=db_file.file_size,
-                                    file_meta={},
-                                    parser_id="naive",
-                                    parser_config={
-                                        "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 130,
-                                        "delimiter": "\n",
-                                        "auto_keywords": 0,
-                                        "auto_questions": 0,
-                                        "html4excel": "false"
-                                    }
-                                )
-                                db_document = Document(**create_document_data.model_dump())
-                                db.add(db_document)
-                                db.commit()
-                                # 3. Document parsing, vectorization, and storage
-                                parse_document(file_path=save_path, document_id=db_document.id)
-                    db_files = db.query(File).filter(File.kb_id == db_knowledge.id,
-                                                     File.file_url.notin_(file_urls)).all()
-                    if db_files:  # --delete
-                        for db_file in db_files:
-                            db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
-                                                                    Document.file_id == db_file.id).first()
-                            if db_document:
-                                # 1. Delete vector index
-                                vector_service.delete_by_metadata_field(key="document_id", value=str(db_document.id))
-                                # 2. Delete document
-                                db.delete(db_document)
-                            # 3. Delete file
-                            file_path = Path(
-                                settings.FILE_PATH,
-                                str(db_file.kb_id),
-                                str(db_file.parent_id),
-                                f"{db_file.id}{db_file.file_ext}"
+                        if not crawled_document.content_length:
+                            continue
+
+                        file_state = _get_file_by_url(knowledge_state["id"], crawled_document.url)
+                        if file_state and file_state["file_size"] == crawled_document.content_length:
+                            continue
+
+                        content_bytes = crawled_document.content.encode("utf-8")
+                        is_new_file = file_state is None
+                        if is_new_file:
+                            file_state = _create_file_record(
+                                knowledge_state,
+                                file_name=f"{crawled_document.title}.txt",
+                                file_ext=".txt",
+                                file_size=crawled_document.content_length,
+                                file_url=crawled_document.url,
                             )
-                            if file_path.exists():
-                                file_path.unlink()  # Delete a single file
-                            db.delete(db_file)
-                        # commit transaction
-                        db.commit()
+
+                        _write_legacy_file(
+                            knowledge_state["id"],
+                            knowledge_state["id"],
+                            file_state["id"],
+                            ".txt",
+                            content_bytes,
+                        )
+                        file_key = _upload_kb_file_content_sync(
+                            knowledge_state["id"],
+                            file_state["id"],
+                            ".txt",
+                            content_bytes,
+                        )
+                        file_state, existing_document_state = _update_file_record(
+                            knowledge_state["id"],
+                            file_state["id"],
+                            file_name=f"{crawled_document.title}.txt",
+                            file_ext=".txt",
+                            file_size=crawled_document.content_length,
+                            file_key=file_key,
+                        )
+                        if file_state is None:
+                            continue
+                        document_state = _create_document_record(knowledge_state, file_state) if is_new_file else existing_document_state
+                        _dispatch_if_document(file_state, document_state)
+
+                    _delete_stale_files(knowledge_state["id"], file_urls, vector_service)
 
                 except Exception as e:
                     logger.error(f"[SyncKB] Error during crawl: {e}", exc_info=True)
             case "Third-party":  # Integration of knowledge bases from three parties
-                yuque_user_id = db_knowledge.parser_config.get("yuque_user_id", "")
-                feishu_app_id = db_knowledge.parser_config.get("feishu_app_id", "")
+                parser_config = knowledge_state["parser_config"]
+                yuque_user_id = parser_config.get("yuque_user_id", "")
+                feishu_app_id = parser_config.get("feishu_app_id", "")
 
-                # Determine source by existing files; skip unrelated source to avoid auth errors
-                existing_files = db.query(File).filter(File.kb_id == db_knowledge.id).all()
-                has_yuque = any(f.file_url and "yuque.com" in f.file_url for f in existing_files)
-                has_feishu = any(f.file_url and "feishu.cn" in f.file_url for f in existing_files)
+                existing_files = _get_existing_files(knowledge_state["id"])
+                has_yuque = any(f["file_url"] and "yuque.com" in f["file_url"] for f in existing_files)
+                has_feishu = any(f["file_url"] and "feishu.cn" in f["file_url"] for f in existing_files)
 
                 if yuque_user_id and yuque_user_id not in ("User ID", "", None) \
                         and (not existing_files or has_yuque):  # Yuque Knowledge Base
-                    yuque_token = db_knowledge.parser_config.get("yuque_token", "")
-                    # Create yuqueAPIClient
+                    yuque_token = parser_config.get("yuque_token", "")
                     api_client = YuqueAPIClient(
                         user_id=yuque_user_id,
                         token=yuque_token
@@ -1273,150 +1487,69 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                         files = asyncio.run(async_get_files(api_client))
                         for doc in files:
                             file_urls.add(doc.slug)
-                            db_file = db.query(File).filter(File.kb_id == db_knowledge.id,
-                                                            File.file_url == doc.slug).first()
-                            if db_file:
-                                if db_file.created_at == doc.updated_at:  # same
-                                    continue
-                                else:  # --update
-                                    # 1. update file
-                                    # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                    save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.id))
-                                    Path(save_dir).mkdir(parents=True,
-                                                         exist_ok=True)  # Ensure that the directory exists
+                            file_state = _get_file_by_url(knowledge_state["id"], doc.slug)
+                            if file_state and file_state["created_at"] == doc.updated_at:
+                                continue
 
-                                    # download document from Feishu FileInfo
-                                    async def async_download_document(api_client: YuqueAPIClient, doc: YuqueDocInfo,
-                                                                      save_dir: str):
-                                        async with api_client as client:
-                                            file_path = await client.download_document(doc, save_dir)
-                                            return file_path
+                            save_dir = os.path.join(settings.FILE_PATH, str(knowledge_state["id"]), str(knowledge_state["id"]))
 
-                                    file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
+                            async def async_download_document(api_client: YuqueAPIClient, doc: YuqueDocInfo, save_dir: str):
+                                async with api_client as client:
+                                    return await client.download_document(doc, save_dir)
 
-                                    save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                    # update file
-                                    if os.path.exists(save_path):
-                                        os.remove(save_path)  # Delete a single file
-                                    shutil.copyfile(file_path, save_path)
-                                    # update db_file
-                                    file_name = os.path.basename(file_path)
-                                    _, file_extension = os.path.splitext(file_name)
-                                    file_size = os.path.getsize(file_path)
-                                    db_file.file_name = file_name
-                                    db_file.file_ext = file_extension.lower()
-                                    db_file.file_size = file_size
-                                    db_file.created_at = doc.updated_at
-                                    db.commit()
-                                    db.refresh(db_file)
-                                    # 2. update a document
-                                    db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
-                                                                            Document.file_id == db_file.id).first()
-                                    if db_document:
-                                        db_document.file_name = db_file.file_name
-                                        db_document.file_ext = db_file.file_ext
-                                        db_document.file_size = db_file.file_size
-                                        db_document.created_at = db_file.created_at
-                                        db_document.updated_at = utcnow_naive()
-                                        db.commit()
-                                        db.refresh(db_document)
-                                        # 3. Document parsing, vectorization, and storage
-                                        parse_document(file_path=save_path, document_id=db_document.id)
-                            else:  # --add
-                                # 1. update file
-                                # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                        str(db_knowledge.id))
-                                Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
-
-                                # download document from Feishu FileInfo
-                                async def async_download_document(api_client: YuqueAPIClient, doc: YuqueDocInfo,
-                                                                  save_dir: str):
-                                    async with api_client as client:
-                                        file_path = await client.download_document(doc, save_dir)
-                                        return file_path
-
-                                file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
-                                # add db_file
-                                file_name = os.path.basename(file_path)
-                                _, file_extension = os.path.splitext(file_name)
-                                file_size = os.path.getsize(file_path)
-                                upload_file = file_schema.FileCreate(
-                                    kb_id=db_knowledge.id,
-                                    created_by=db_knowledge.created_by,
-                                    parent_id=db_knowledge.id,
+                            file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
+                            file_name = os.path.basename(file_path)
+                            _, file_extension = os.path.splitext(file_name)
+                            file_ext = file_extension.lower()
+                            file_size = os.path.getsize(file_path)
+                            is_new_file = file_state is None
+                            if is_new_file:
+                                file_state = _create_file_record(
+                                    knowledge_state,
                                     file_name=file_name,
-                                    file_ext=file_extension.lower(),
+                                    file_ext=file_ext,
                                     file_size=file_size,
                                     file_url=doc.slug,
-                                    created_at=doc.updated_at
+                                    created_at=doc.updated_at,
                                 )
-                                db_file = File(**upload_file.model_dump())
-                                db.add(db_file)
-                                db.commit()
-                                # Save file
-                                save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                # update file
-                                if os.path.exists(save_path):
-                                    os.remove(save_path)  # Delete a single file
-                                shutil.copyfile(file_path, save_path)
-                                # 2. Create a document
-                                create_document_data = document_schema.DocumentCreate(
-                                    kb_id=db_knowledge.id,
-                                    created_by=db_knowledge.created_by,
-                                    file_id=db_file.id,
-                                    file_name=db_file.file_name,
-                                    file_ext=db_file.file_ext,
-                                    file_size=db_file.file_size,
-                                    file_meta={},
-                                    parser_id="naive",
-                                    parser_config={
-                                        "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 130,
-                                        "delimiter": "\n",
-                                        "auto_keywords": 0,
-                                        "auto_questions": 0,
-                                        "html4excel": "false"
-                                    }
-                                )
-                                db_document = Document(**create_document_data.model_dump())
-                                db.add(db_document)
-                                db.commit()
-                                # 3. Document parsing, vectorization, and storage
-                                parse_document(file_path=save_path, document_id=db_document.id)
-                        db_files = db.query(File).filter(File.kb_id == db_knowledge.id,
-                                                         File.file_url.notin_(file_urls)).all()
-                        if db_files:  # --delete
-                            for db_file in db_files:
-                                db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
-                                                                        Document.file_id == db_file.id).first()
-                                if db_document:
-                                    # 1. Delete vector index
-                                    vector_service.delete_by_metadata_field(key="document_id",
-                                                                            value=str(db_document.id))
-                                    # 2. Delete document
-                                    db.delete(db_document)
-                                # 3. Delete file
-                                file_path = Path(
-                                    settings.FILE_PATH,
-                                    str(db_file.kb_id),
-                                    str(db_file.parent_id),
-                                    f"{db_file.id}{db_file.file_ext}"
-                                )
-                                if file_path.exists():
-                                    file_path.unlink()  # Delete a single file
-                                db.delete(db_file)
-                            # commit transaction
-                            db.commit()
+
+                            save_path = _copy_legacy_file(
+                                knowledge_state["id"],
+                                knowledge_state["id"],
+                                file_state["id"],
+                                file_ext,
+                                file_path,
+                            )
+                            content = save_path.read_bytes()
+                            file_key = _upload_kb_file_content_sync(
+                                knowledge_state["id"],
+                                file_state["id"],
+                                file_ext,
+                                content,
+                            )
+                            file_state, existing_document_state = _update_file_record(
+                                knowledge_state["id"],
+                                file_state["id"],
+                                file_name=file_name,
+                                file_ext=file_ext,
+                                file_size=file_size,
+                                file_key=file_key,
+                                created_at=doc.updated_at,
+                                sync_document_created_at=True,
+                            )
+                            if file_state is None:
+                                continue
+                            document_state = _create_document_record(knowledge_state, file_state) if is_new_file else existing_document_state
+                            _dispatch_if_document(file_state, document_state)
+
+                        _delete_stale_files(knowledge_state["id"], file_urls, vector_service)
 
                     except Exception as e:
                         logger.error(f"[SyncKB] Error during fetch yuque: {e}", exc_info=True)
                 if feishu_app_id and feishu_app_id not in ("App ID", "", None) \
                         and (not existing_files or has_feishu):  # Feishu Knowledge Base
-                    feishu_app_secret = db_knowledge.parser_config.get("feishu_app_secret", "")
-                    feishu_folder_token = db_knowledge.parser_config.get("feishu_folder_token", "")
-                    # Create feishuAPIClient
+                    feishu_app_secret = parser_config.get("feishu_app_secret", "")
+                    feishu_folder_token = parser_config.get("feishu_folder_token", "")
                     api_client = FeishuAPIClient(
                         app_id=feishu_app_id,
                         app_secret=feishu_app_secret
@@ -1436,198 +1569,73 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                         documents = [f for f in files if f.type in ["doc", "docx", "sheet", "bitable", "file"]]
                         for doc in documents:
                             file_urls.add(doc.url)
-                            db_file = db.query(File).filter(File.kb_id == db_knowledge.id,
-                                                            File.file_url == doc.url).first()
-                            if db_file:
-                                if db_file.created_at == doc.modified_time:  # same
-                                    continue
-                                else:  # --update
-                                    # 1. update file
-                                    # Use temp dir for download, will upload to storage backend later
-                                    save_dir = tempfile.mkdtemp()
+                            file_state = _get_file_by_url(knowledge_state["id"], doc.url)
+                            if file_state and file_state["created_at"] == doc.modified_time:
+                                continue
 
-                                    # download document from Feishu FileInfo
-                                    async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
-                                                                      save_dir: str):
-                                        async with api_client as client:
-                                            file_path = await client.download_document(document=doc, save_dir=save_dir)
-                                            return file_path
+                            save_dir = tempfile.mkdtemp()
 
-                                    file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
+                            async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo, save_dir: str):
+                                async with api_client as client:
+                                    return await client.download_document(document=doc, save_dir=save_dir)
 
-                                    # Upload to storage backend
-                                    from app.services.file_storage_service import generate_kb_file_key, FileStorageService
-                                    _file_key = generate_kb_file_key(
-                                        kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
-                                    )
-                                    _storage_service = FileStorageService()
-                                    with open(file_path, "rb") as _f:
-                                        _content = _f.read()
-
-                                    async def _do_upload():
-                                        await _storage_service.storage.upload(
-                                            file_key=_file_key, content=_content, content_type="application/octet-stream"
-                                        )
-
-                                    asyncio.run(_do_upload())
-
-                                    # update db_file
-                                    file_name = os.path.basename(file_path)
-                                    _, file_extension = os.path.splitext(file_name)
-                                    file_size = os.path.getsize(file_path)
-                                    db_file.file_name = file_name
-                                    db_file.file_ext = file_extension.lower()
-                                    db_file.file_size = file_size
-                                    db_file.created_at = doc.modified_time
-                                    db_file.file_key = _file_key
-                                    db.commit()
-                                    db.refresh(db_file)
-
-                                    # Clean up local temp file
-                                    try:
-                                        if os.path.exists(file_path):
-                                            os.remove(file_path)
-                                    except Exception:
-                                        pass
-
-                                    # 2. update a document
-                                    db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
-                                                                            Document.file_id == db_file.id).first()
-                                    if db_document:
-                                        db_document.file_name = db_file.file_name
-                                        db_document.file_ext = db_file.file_ext
-                                        db_document.file_size = db_file.file_size
-                                        db_document.created_at = db_file.created_at
-                                        db_document.updated_at = utcnow_naive()
-                                        db.commit()
-                                        db.refresh(db_document)
-                                        # 3. Document parsing, vectorization, and storage
-                                        parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
-                            else:  # --add
-                                # 1. update file
-                                # Use temp dir for download, will upload to storage backend later
-                                save_dir = tempfile.mkdtemp()
-
-                                # download document from Feishu FileInfo
-                                async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
-                                                                  save_dir: str):
-                                    async with api_client as client:
-                                        file_path = await client.download_document(document=doc, save_dir=save_dir)
-                                        return file_path
-
-                                file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
-                                # add db_file
-                                file_name = os.path.basename(file_path)
-                                _, file_extension = os.path.splitext(file_name)
-                                file_size = os.path.getsize(file_path)
-                                upload_file = file_schema.FileCreate(
-                                    kb_id=db_knowledge.id,
-                                    created_by=db_knowledge.created_by,
-                                    parent_id=db_knowledge.id,
+                            file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
+                            file_name = os.path.basename(file_path)
+                            _, file_extension = os.path.splitext(file_name)
+                            file_ext = file_extension.lower()
+                            file_size = os.path.getsize(file_path)
+                            is_new_file = file_state is None
+                            if is_new_file:
+                                file_state = _create_file_record(
+                                    knowledge_state,
                                     file_name=file_name,
-                                    file_ext=file_extension.lower(),
+                                    file_ext=file_ext,
                                     file_size=file_size,
                                     file_url=doc.url,
-                                    created_at=doc.modified_time
+                                    created_at=doc.modified_time,
                                 )
-                                db_file = File(**upload_file.model_dump())
-                                db.add(db_file)
-                                db.commit()
-                                # Upload to storage backend
-                                from app.services.file_storage_service import generate_kb_file_key, FileStorageService
-                                _file_key = generate_kb_file_key(
-                                    kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
-                                )
-                                _storage_service = FileStorageService()
-                                with open(file_path, "rb") as _f:
-                                    _content = _f.read()
 
-                                async def _do_upload2():
-                                    await _storage_service.storage.upload(
-                                        file_key=_file_key, content=_content, content_type="application/octet-stream"
-                                    )
+                            with open(file_path, "rb") as _f:
+                                content = _f.read()
+                            file_key = _upload_kb_file_content_sync(
+                                knowledge_state["id"],
+                                file_state["id"],
+                                file_ext,
+                                content,
+                            )
+                            try:
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                            except Exception:
+                                pass
 
-                                asyncio.run(_do_upload2())
+                            file_state, existing_document_state = _update_file_record(
+                                knowledge_state["id"],
+                                file_state["id"],
+                                file_name=file_name,
+                                file_ext=file_ext,
+                                file_size=file_size,
+                                file_key=file_key,
+                                created_at=doc.modified_time,
+                                sync_document_created_at=True,
+                            )
+                            if file_state is None:
+                                continue
+                            document_state = _create_document_record(knowledge_state, file_state) if is_new_file else existing_document_state
+                            _dispatch_if_document(file_state, document_state)
 
-                                # Save file_key
-                                db_file.file_key = _file_key
-                                db.commit()
-                                db.refresh(db_file)
-
-                                # Clean up local temp file
-                                try:
-                                    if os.path.exists(file_path):
-                                        os.remove(file_path)
-                                except Exception:
-                                    pass
-
-                                # 2. Create a document
-                                create_document_data = document_schema.DocumentCreate(
-                                    kb_id=db_knowledge.id,
-                                    created_by=db_knowledge.created_by,
-                                    file_id=db_file.id,
-                                    file_name=db_file.file_name,
-                                    file_ext=db_file.file_ext,
-                                    file_size=db_file.file_size,
-                                    file_meta={},
-                                    parser_id="naive",
-                                    parser_config={
-                                        "layout_recognize": "DeepDOC",
-                                        "chunk_token_num": 130,
-                                        "delimiter": "\n",
-                                        "auto_keywords": 0,
-                                        "auto_questions": 0,
-                                        "html4excel": "false"
-                                    }
-                                )
-                                db_document = Document(**create_document_data.model_dump())
-                                db.add(db_document)
-                                db.commit()
-                                # 3. Document parsing, vectorization, and storage
-                                parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
-                        db_files = db.query(File).filter(File.kb_id == db_knowledge.id,
-                                                         File.file_url.notin_(file_urls)).all()
-                        if db_files:  # --delete
-                            for db_file in db_files:
-                                db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
-                                                                        Document.file_id == db_file.id).first()
-                                if db_document:
-                                    # 1. Delete vector index
-                                    vector_service.delete_by_metadata_field(key="document_id",
-                                                                            value=str(db_document.id))
-                                    # 2. Delete document
-                                    db.delete(db_document)
-                                # 3. Delete file from storage backend
-                                if db_file.file_key:
-                                    from app.services.file_storage_service import FileStorageService
-                                    storage_service = FileStorageService()
-                                    try:
-                                        asyncio.run(storage_service.delete_file(db_file.file_key))
-                                    except Exception:
-                                        pass
-                                # 3.5 Delete local temp file (legacy)
-                                _legacy_path = Path(
-                                    settings.FILE_PATH,
-                                    str(db_file.kb_id),
-                                    str(db_file.parent_id),
-                                    f"{db_file.id}{db_file.file_ext}"
-                                )
-                                if _legacy_path.exists():
-                                    _legacy_path.unlink()
-                                db.delete(db_file)
-                            # commit transaction
-                            db.commit()
+                        _delete_stale_files(knowledge_state["id"], file_urls, vector_service)
 
                     except Exception as e:
                         logger.error(f"[SyncKB] Error during fetch feishu: {e}", exc_info=True)
             case _:  # General
-                logger.info(f"[SyncKB] kb={kb_id} type={db_knowledge.type}: no synchronization needed")
+                logger.info(f"[SyncKB] kb={kb_id} type={knowledge_state['type']}: no synchronization needed")
 
-        result = f"sync knowledge '{db_knowledge.name}' processed successfully."
+        result = f"sync knowledge '{knowledge_state['name']}' processed successfully."
         return result
-      except Exception as e:
+    except Exception as e:
         logger.error(f"[SyncKB] kb={kb_id} failed: {e}", exc_info=True)
-        kb_name = db_knowledge.name if db_knowledge else kb_id
+        kb_name = locals().get("knowledge_state", {}).get("name", kb_id)
         return f"sync knowledge '{kb_name}' failed: {e}"
 
 
