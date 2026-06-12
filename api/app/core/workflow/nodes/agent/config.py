@@ -85,6 +85,10 @@ class AgentModelCompletionParamsConfig(BaseModel):
     extra_headers: LLMExtraHeadersConfig = Field(default_factory=LLMExtraHeadersConfig, description="Extra request headers config")
     stop: LLMStopConfig = Field(default_factory=LLMStopConfig, description="Stop sequence config")
     json_output: bool = Field(default=False, description="Force JSON output")
+    structured_output: bool = Field(
+        default=False,
+        description="Whether to expose parsed JSON as structured_output and request JSON Schema output",
+    )
 
     @field_validator("response_format", mode="before")
     @classmethod

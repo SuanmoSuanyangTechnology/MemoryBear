@@ -68,6 +68,7 @@ class RedBearModelConfig(BaseModel):
 
         has_thinking = ModelCapability.THINKING in self.capability
         has_thinking_only = ModelCapability.THINKING_ONLY in self.capability
+        supports_json_output = ModelCapability.JSON_OUTPUT in self.capability
 
         if self.deep_thinking and not has_thinking and not has_thinking_only:
             logger.warning(
@@ -95,7 +96,7 @@ class RedBearModelConfig(BaseModel):
             )
             self.json_output = False
 
-        if self.json_output and ModelCapability.JSON_OUTPUT not in self.capability:
+        if self.json_output and not supports_json_output:
             logger.warning(
                 f"模型 {self.model_name} 不支持 JSON 输出（capability 中无 'json_output'），已自动关闭 json_output"
             )
@@ -112,6 +113,17 @@ def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> Optional[st
         return "medium"
     else:
         return "high"
+
+
+def _json_response_format(config: RedBearModelConfig) -> dict[str, Any]:
+    response_format = config.extra_params.get("response_format")
+    if isinstance(response_format, dict):
+        return response_format
+    return {"type": "json_object"}
+
+
+def _should_send_response_format(config: RedBearModelConfig) -> bool:
+    return config.json_output or isinstance(config.extra_params.get("response_format"), dict)
 
 
 class RedBearModelFactory:
@@ -212,10 +224,10 @@ class RedBearModelFactory:
                         params[key] = provider_specific[key]
             # JSON 输出模式
             # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
-            if config.json_output:
+            if _should_send_response_format(config):
                 if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
                     model_kwargs = params.setdefault("model_kwargs", {})
-                    model_kwargs["response_format"] = {"type": "json_object"}
+                    model_kwargs["response_format"] = _json_response_format(config)
             return params
 
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA, ModelProvider.VOLCANO]:
@@ -282,14 +294,13 @@ class RedBearModelFactory:
                     else:
                         extra_body["enable_thinking"] = False
             # JSON 输出模式
-            if config.json_output:
+            if _should_send_response_format(config):
                 model_kwargs = params.setdefault("model_kwargs", {})
-                # VOLCANO 模型不支持 response_format，JSON 输出由 system prompt 注入实现
-                # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
-                if provider != ModelProvider.VOLCANO and not (
+                # thinking（A类）模型启用深度思考时,response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
+                if not (
                     ModelCapability.THINKING in config.capability and config.deep_thinking
                 ):
-                    model_kwargs["response_format"] = {"type": "json_object"}
+                    model_kwargs["response_format"] = _json_response_format(config)
             return params
         elif provider == ModelProvider.DASHSCOPE:
             params = {
@@ -321,10 +332,10 @@ class RedBearModelFactory:
                     model_kwargs["enable_thinking"] = False
             # JSON 输出模式
             # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
-            if config.json_output:
+            if _should_send_response_format(config):
                 if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
                     model_kwargs = params.setdefault("model_kwargs", {})
-                    model_kwargs["response_format"] = {"type": "json_object"}
+                    model_kwargs["response_format"] = _json_response_format(config)
             return params
         elif provider == ModelProvider.BEDROCK:
             # Bedrock 使用 AWS 凭证
@@ -386,10 +397,10 @@ class RedBearModelFactory:
                 }
             # JSON 输出模式
             # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
-            if config.json_output:
+            if _should_send_response_format(config):
                 if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
                     model_kwargs = params.setdefault("model_kwargs", {})
-                    model_kwargs["response_format"] = {"type": "json_object"}
+                    model_kwargs["response_format"] = _json_response_format(config)
             return params
         else:
             raise BusinessException(f"不支持的提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)

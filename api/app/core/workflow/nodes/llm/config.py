@@ -1,9 +1,10 @@
 """LLM 节点配置"""
 
 from typing import Any
+import re
 import uuid
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
 from app.core.workflow.nodes.enums import HttpErrorHandle
@@ -143,6 +144,111 @@ class LLMStopConfig(BaseModel):
     value: list[str] | None = Field(default=None, description="停止序列（最多4个）")
 
 
+_JSON_OUTPUT_FIELD_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_JSON_OUTPUT_FIELD_TYPES = {
+    VariableType.STRING,
+    VariableType.NUMBER,
+    VariableType.BOOLEAN,
+    VariableType.OBJECT,
+    VariableType.ARRAY_STRING,
+    VariableType.ARRAY_NUMBER,
+    VariableType.ARRAY_OBJECT,
+}
+
+_JSON_OUTPUT_OBJECT_FIELD_TYPES = {
+    VariableType.OBJECT,
+    VariableType.ARRAY_OBJECT,
+}
+
+
+class JsonOutputFieldConfig(BaseModel):
+    """Configured top-level field in an LLM JSON response."""
+
+    name: str = Field(..., description="JSON output field name")
+    type: VariableType = Field(default=VariableType.STRING, description="JSON output field type")
+    description: str = Field(
+        default="",
+        description="字段描述，注入提示词约束模型输出，并写入 JSON Schema description",
+    )
+    required: bool = Field(
+        default=True,
+        description="是否为必填字段，影响 JSON Schema required 列表及提示词约束",
+    )
+    children: list["JsonOutputFieldConfig"] = Field(
+        default_factory=list,
+        description="Nested fields for object and array[object] output fields",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        field_name = v.strip() if isinstance(v, str) else ""
+        if not field_name:
+            raise ValueError("JSON output field name cannot be empty")
+        if not _JSON_OUTPUT_FIELD_PATTERN.match(field_name):
+            raise ValueError(
+                "JSON output field names must start with a letter or underscore "
+                "and contain only letters, numbers, and underscores"
+            )
+        return field_name
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def validate_type(cls, v):
+        field_type = VariableType(v or VariableType.STRING)
+        if field_type not in _JSON_OUTPUT_FIELD_TYPES:
+            raise ValueError(f"Unsupported JSON output field type: {field_type}")
+        return field_type
+
+    @model_validator(mode="after")
+    def validate_children(self):
+        if self.type not in _JSON_OUTPUT_OBJECT_FIELD_TYPES:
+            self.children = []
+        return self
+
+
+def _coerce_json_output_field(item: Any) -> JsonOutputFieldConfig | None:
+    if isinstance(item, JsonOutputFieldConfig):
+        return item
+    if isinstance(item, str):
+        return JsonOutputFieldConfig(name=item, type=VariableType.STRING)
+    if isinstance(item, dict):
+        field_name = item.get("name") or item.get("field") or item.get("value")
+        field_type = item.get("type") or item.get("dataType") or item.get("value_type") or VariableType.STRING
+        field_description = item.get("description") or item.get("desc") or item.get("comment") or ""
+        field_required = item.get("required", True)
+        children = item.get("children") or item.get("fields") or item.get("properties") or []
+        return JsonOutputFieldConfig(name=field_name, type=field_type, description=field_description, required=field_required, children=children)
+    return None
+
+
+def normalize_json_output_fields(fields: Any) -> list[JsonOutputFieldConfig]:
+    """Normalize configured JSON output fields.
+
+    The old list[str] format is accepted and converted to type=any.
+    """
+    if isinstance(fields, dict) and "defaultValue" in fields:
+        fields = fields.get("defaultValue")
+    if fields is None:
+        return []
+    if isinstance(fields, str):
+        fields = [fields]
+    if not isinstance(fields, list):
+        return []
+
+    normalized: list[JsonOutputFieldConfig] = []
+    seen: set[str] = set()
+    for item in fields:
+        field = _coerce_json_output_field(item)
+        if field is None:
+            continue
+        if field.name in seen:
+            continue
+        seen.add(field.name)
+        normalized.append(field)
+    return normalized
+
+
 
 
 
@@ -225,6 +331,16 @@ class LLMNodeConfig(BaseNodeConfig):
         description="是否以 JSON 格式输出"
     )
 
+    structured_output: bool = Field(
+        default=False,
+        description="Whether to expose parsed JSON as structured_output and request JSON Schema output"
+    )
+
+    json_output_fields: list[JsonOutputFieldConfig] = Field(
+        default_factory=list,
+        description="JSON 输出时要求模型返回的顶层字段名称和类型"
+    )
+
     enable_reasoning_content_extraction: bool = Field(
         default=False,
         description="是否启用推理标签分离（从 think 标签提取内容到 reasoning_content 字段）"
@@ -274,6 +390,11 @@ class LLMNodeConfig(BaseNodeConfig):
             return LLMResponseFormatConfig(enable=True, value=v)
         return v
 
+    @field_validator("json_output_fields", mode="before")
+    @classmethod
+    def coerce_json_output_fields(cls, v):
+        return normalize_json_output_fields(v)
+
     @field_validator("messages", "prompt")
     @classmethod
     def validate_input_mode(cls, v):
@@ -313,6 +434,7 @@ _PARAM_CAPABILITY_REQUIREMENTS: dict[str, list[ModelCapability]] = {
     "thinking": [ModelCapability.THINKING, ModelCapability.THINKING_ONLY],
     "thinking_budget": [ModelCapability.THINKING],
     "json_output": [ModelCapability.JSON_OUTPUT],
+    "structured_output": [ModelCapability.JSON_OUTPUT],
     "response_format_json": [ModelCapability.JSON_OUTPUT],
 }
 
@@ -321,6 +443,7 @@ _PARAM_CAPABILITY_WARNINGS: dict[str, str] = {
     "thinking_budget": "thinking_only 类型模型不支持思考长度限制，该参数不会生效",
     "thinking_budget_no_thinking": "模型不具备思考能力，思考长度限制参数不会生效",
     "json_output": "模型不支持 JSON 输出能力，JSON 输出参数不会生效",
+    "structured_output": "模型不支持结构化输出能力，将以 JSON prompt 方式引导输出（不保证严格 Schema 校验）",
     "response_format_json": "模型不支持 JSON 输出能力，回复格式(JSON)参数不会生效",
 }
 
@@ -476,6 +599,11 @@ def validate_llm_param_constraints(
         required = _PARAM_CAPABILITY_REQUIREMENTS["json_output"]
         if not any(c in capability_set for c in required):
             warnings.append(_PARAM_CAPABILITY_WARNINGS["json_output"])
+
+    if config.structured_output:
+        required = _PARAM_CAPABILITY_REQUIREMENTS["structured_output"]
+        if not any(c in capability_set for c in required):
+            warnings.append(_PARAM_CAPABILITY_WARNINGS["structured_output"])
 
     if config.response_format.enable and config.response_format.value == "json_object":
         required = _PARAM_CAPABILITY_REQUIREMENTS["response_format_json"]
