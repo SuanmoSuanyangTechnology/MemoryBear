@@ -6,7 +6,7 @@
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Tabs, Dropdown, Flex, Popover } from 'antd';
+import { Tabs, Dropdown, Flex } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -18,7 +18,6 @@ import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigFor
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
 import PageHeader from '@/components/Layout/PageHeader'
-import CheckList from '@/views/Workflow/components/CheckList'
 import UploadModal from '@/views/ApplicationManagement/components/UploadModal'
 import SystemVariableModal, { type SystemVariableModalRef } from '@/views/Workflow/components/SystemVariableModal'
 
@@ -55,8 +54,6 @@ interface ConfigHeaderProps {
   handleChangeTab: (key: string) => void;
   /** Refresh application data */
   refresh: () => void;
-  /** Workflow component ref */
-  workflowRef: React.RefObject<WorkflowRef>
   /** App component ref (Agent/Cluster/Workflow) */
   appRef?: React.RefObject<AgentRef | ClusterRef | WorkflowRef>
   /** Features config from parent state */
@@ -69,7 +66,6 @@ interface ConfigHeaderProps {
  */
 const ConfigHeader: FC<ConfigHeaderProps> = ({
   application, activeTab, handleChangeTab, refresh,
-  workflowRef,
   appRef,
 }) => {
   const { t } = useTranslation();
@@ -141,39 +137,6 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     navigate('/application', { replace: true })
   }
   /**
-   * Save workflow configuration
-   */
-  const save = () => {
-    workflowRef.current?.handleSave()
-  }
-  /**
-   * Run workflow
-   */
-  const run = () => {
-    workflowRef.current?.handleSave(false)
-      .then(() => {
-        workflowRef.current?.handleRun()
-      })
-  }
-  /**
-   * Clear workflow canvas
-   */
-  const clear = () => {
-    workflowRef?.current?.graphRef?.current?.clearCells()
-  }
-  /**
-   * Add variable to workflow
-   */
-  const addVariable = () => {
-    workflowRef?.current?.addVariable()
-  }
-  /**
-   * Add environment variable to workflow
-   */
-  const addEnvVariable = () => {
-    workflowRef?.current?.addEnvVariable()
-  }
-  /**
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
@@ -185,10 +148,6 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     }))
     return items
   }, [t, handleClick, application])
-
-  const handleFeaturesConfig = () => {
-    workflowRef.current?.handleFeaturesConfig?.()
-  }
 
   return (
     <>
@@ -218,61 +177,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
           />
         </Flex>}
         extra={application?.type.includes('workflow') && source !== 'sharing' && activeTab === 'arrangement'
-          ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
-            <CheckList workflowRef={workflowRef} appId={application?.id ?? ''} />
-            {application?.type === 'workflow' &&
-              <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-                <div
-                  className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                  onClick={handleFeaturesConfig}
-                ></div>
-              </Popover>
-            }
-            <Popover content={t('workflow.clear')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/clear.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={clear}
-              ></div>
-            </Popover>
-            {application?.type === 'workflow' &&
-              <Popover content={t('workflow.addVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-                <div
-                  className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                  onClick={addVariable}
-                ></div>
-              </Popover>
-            }
-            <Popover content={t('workflow.systemVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/system.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={() => systemVariableModalRef.current?.handleOpen()}
-              ></div>
-            </Popover>
-            <Popover content={t('workflow.addEnvVariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/env.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={addEnvVariable}
-              ></div>
-            </Popover>
-            <Popover content={t('workflow.run')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/run.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={run}
-              ></div>
-            </Popover>
-            <Popover content={t('workflow.save')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/save.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={save}
-              ></div>
-            </Popover>
-            <Popover content={t('common.return')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-              <div
-                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/return.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                onClick={goToApplication}
-              ></div>
-            </Popover>
-          </Flex>
+          ? null
           : <Flex justify="flex-end">
             <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
               <div

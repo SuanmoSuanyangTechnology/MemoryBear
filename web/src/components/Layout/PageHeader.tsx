@@ -43,7 +43,7 @@ const PageHeader: FC<ConfigHeaderProps> = ({
 }) => {
   return (
     // Main header container: full width, 64px height, flex layout with space between
-    <Header className={`rb:w-full rb:h-16! rb:grid rb:grid-cols-${extra && centerContent ? '3' : ((extra && !centerContent) || (!extra && centerContent)) ? '2': 1} rb:gap-6 rb:px-4! rb:bg-white!`}>
+    <Header className={`rb:w-full rb:h-16! rb:grid rb:grid-cols-${((extra && centerContent) || (!extra && centerContent)) ? '3' : (extra && !centerContent) ? '2': 1} rb:gap-6 rb:px-4! rb:bg-white!`}>
       <Flex align="center" gap={8}>
         {avatarUrl
           ? <img src={avatarUrl} alt={avatarUrl} className="rb:size-8 rb:rounded-lg rb:mr-2" />

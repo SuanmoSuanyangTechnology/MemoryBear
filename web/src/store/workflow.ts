@@ -10,8 +10,8 @@ import type { ChatItem } from '@/components/Chat/types'
 
 interface WorkflowState {
   checkResults: Record<string, NodeCheckResult[]>
-  setCheckResults: (appId: string, results: NodeCheckResult[]) => void
-  getCheckResults: (appId: string) => NodeCheckResult[]
+  setCheckResults: (results: NodeCheckResult[], appId?: string) => void
+  getCheckResults: (appId?: string) => NodeCheckResult[]
   chatHistoryMap: Record<string, ChatItem[]>
   setChatHistory: (conversationId: string, history: ChatItem[]) => void
   getChatHistory: (conversationId: string) => ChatItem[]
@@ -19,9 +19,14 @@ interface WorkflowState {
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   checkResults: {},
-  setCheckResults: (appId, results) =>
-    set(state => ({ checkResults: { ...state.checkResults, [appId]: results } })),
-  getCheckResults: (appId) => get().checkResults[appId] ?? [],
+  setCheckResults: (results, appId) =>{
+    if (!appId) return
+    return set(state => ({ checkResults: { ...state.checkResults, [appId]: results } }))
+  },
+  getCheckResults: (appId) => {
+    if (!appId) return []
+    return get().checkResults[appId] ?? []
+  },
   chatHistoryMap: {},
   setChatHistory: (conversationId, history) =>
     set(state => ({ chatHistoryMap: { ...state.chatHistoryMap, [conversationId]: history } })),

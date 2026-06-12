@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-12 11:33:27
+ * @Last Modified time: 2026-06-12 13:59:20
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -643,7 +643,7 @@ const Properties: FC<PropertiesProps> = ({
     }
   }, [activeKey])
   return (
-    <div className={clsx("rb:h-[calc(100vh-88px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5 rb:z-1000", styles.properties)}>
+    <div className={clsx("rb:h-[calc(100vh-132px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-30 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical" className="rb:h-full!">
         <RbCard
           title={() => (

@@ -36,8 +36,6 @@ export interface UseWorkflowGraphProps {
   containerRef: RefObject<HTMLDivElement>;
   /** Reference to the minimap container element */
   miniMapRef: RefObject<HTMLDivElement>;
-  /** Callback when features config is loaded */
-  onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
   /** Application type */
   appType?: Application['type'];
   setRunOpen: Dispatch<SetStateAction<boolean>>;
@@ -114,7 +112,6 @@ export interface UseWorkflowGraphReturn {
 export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
-  onFeaturesLoad,
   appType,
   setRunOpen,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
@@ -193,7 +190,6 @@ export const useWorkflowGraph = ({
         setEnvVariables(environment_variables ?? [])
         setConfig({ ...rest, variables: initChatVariables, environment_variables: environment_variables ?? [] })
         featuresRef.current = rest.features
-        onFeaturesLoad?.(rest.features)
       })
   }
 
@@ -2062,7 +2058,6 @@ export const useWorkflowGraph = ({
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
     const { statement = '' } = value?.opening_statement || {}
     featuresRef.current = value
-    onFeaturesLoad?.(value)
 
     const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
     const startVars = getStartNodeVariables()
