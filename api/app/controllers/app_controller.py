@@ -13,7 +13,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success, fail
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User
 from app.models.annotation_model import HitLogSource
@@ -668,21 +668,23 @@ async def draft_run(
         if payload.stream:
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
             async def event_generator():
-
-                async for event in draft_service.run_stream(
-                        agent_config=agent_cfg,
-                        model_config=model_config,
-                        message=payload.message,
-                        workspace_id=workspace_id,
-                        conversation_id=payload.conversation_id,
-                        user_id=payload.user_id or str(current_user.id),
-                        variables=payload.variables,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        files=payload.files,  # 传递多模态文件
-                        source=source
-                ):
-                    yield event
+                with get_db_context() as stream_db:
+                    from app.services.draft_run_service import AgentRunService as _AgentRunService
+                    _draft_service = _AgentRunService(stream_db)
+                    async for event in _draft_service.run_stream(
+                            agent_config=agent_cfg,
+                            model_config=model_config,
+                            message=payload.message,
+                            workspace_id=workspace_id,
+                            conversation_id=payload.conversation_id,
+                            user_id=payload.user_id or str(current_user.id),
+                            variables=payload.variables,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            files=payload.files,
+                            source=source
+                    ):
+                        yield event
 
             return StreamingResponse(
                 event_generator(),
@@ -774,17 +776,19 @@ async def draft_run(
 
             async def event_generator():
                 """多智能体流式事件生成器"""
-                multiservice = MultiAgentService(db)
+                with get_db_context() as stream_db:
+                    from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
+                    multiservice = _MultiAgentService(stream_db)
 
-                # 调用多智能体服务的流式方法
-                async for event in multiservice.run_stream(
-                        app_id=app_id,
-                        request=multi_agent_request,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
+                    # 调用多智能体服务的流式方法
+                    async for event in multiservice.run_stream(
+                            app_id=app_id,
+                            request=multi_agent_request,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id
 
-                ):
-                    yield event
+                    ):
+                        yield event
 
             return StreamingResponse(
                 event_generator(),
@@ -853,23 +857,22 @@ async def draft_run(
                 data: <json_data>
                 """
                 import json
-
-                # 调用工作流服务的流式方法
-                async for event in workflow_service.run_stream(
-                        app_id=app_id,
-                        payload=payload,
-                        config=config,
-                        workspace_id=current_user.current_workspace_id,
-                        source=source,
-                        trigger_payload=payload.trigger_payload
-                ):
-                    # 提取事件类型和数据
-                    event_type = event.get("event", "message")
-                    event_data = event.get("data", {})
-
-                    # 转换为标准 SSE 格式（字符串）
-                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                    yield sse_message
+                with get_db_context() as stream_db:
+                    from app.services.workflow_service import WorkflowService as _WorkflowService
+                    _wf_service = _WorkflowService(stream_db)
+                    # 调用工作流服务的流式方法
+                    async for event in _wf_service.run_stream(
+                            app_id=app_id,
+                            payload=payload,
+                            config=config,
+                            workspace_id=current_user.current_workspace_id,
+                            source=source,
+                            trigger_payload=payload.trigger_payload
+                    ):
+                        event_type = event.get("event", "message")
+                        event_data = event.get("data", {})
+                        sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                        yield sse_message
 
             return StreamingResponse(
                 event_generator(),
