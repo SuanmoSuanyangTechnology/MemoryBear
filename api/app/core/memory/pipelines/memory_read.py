@@ -12,6 +12,9 @@ from app.core.memory.read_services.search_engine.content_search import (
     HistorySearchService,
     MetaSearchService
 )
+from app.repositories.memory_short_repository import (
+    ShortTermMemoryRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,9 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             case _:
                 raise RuntimeError("Unsupported search strategy")
 
+        if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
+            self._save_short_term(query, search_switch, res)
+
         return res
 
     def _get_search_service(self, includes=None):
@@ -85,13 +91,16 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             includes=None,
     ) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
-        meta_task = asyncio.ensure_future(self._user_meta())
-        questions = await QueryPreprocessor.split(
+        memory_l0 = await self._user_meta()
+        questions, memory_evidence = await QueryPreprocessor.split(
             query,
             history,
+            memory_l0.content,
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
-        memory_l0 = await meta_task
+        if memory_evidence:
+            memory_l0.content_str = memory_evidence
+            return memory_l0
         all_tasks = []
         for question in questions:
             all_tasks.append(_run_with_semaphore(search_service.hybrid_search(question, limit)))
@@ -125,13 +134,18 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
     ) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
 
-        meta_task = asyncio.ensure_future(self._user_meta())
-        questions = await QueryPreprocessor.split(
+        memory_l0 = await self._user_meta()
+        questions, memory_evidence = await QueryPreprocessor.split(
             query,
             history,
+            memory_l0.content,
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
-        memory_l0 = await meta_task
+        if memory_evidence:
+            memory_l0.content_str = memory_evidence
+            if memory_l0.memories:
+                memory_l0.memories[0].query = query
+            return memory_l0
         all_results = list(await asyncio.gather(*(
             _run_with_semaphore(search_service.hybrid_search(question, limit)) for question in questions
         ), return_exceptions=True))
@@ -161,3 +175,63 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         service = MetaSearchService(self.ctx, self.db)
         user_meta = await service.run()
         return user_meta
+
+    def _save_short_term(
+        self,
+        query: str,
+        search_switch: SearchStrategy,
+        result: MemorySearchResult,
+    ) -> None:
+        """将本次检索结果写入 memory_short_term 表。
+
+        仅保存有效的检索结果（summary 不为空且非"信息不足"），
+        失败不中断主流程。
+
+        Args:
+            query: 用户原始问题
+            search_switch: 检索策略
+            result: 检索结果（含 memories 和 content_str）
+        """
+        try:
+            aimessages = result.content
+            if not aimessages or "信息不足" in aimessages:
+                logger.debug(
+                    f"[ReadPipeLine] 跳过 short_term 写入: "
+                    f"summary 为空或信息不足, end_user_id={self.ctx.end_user_id}"
+                )
+                return
+
+            # 按 query 分组 memories → retrieved_content
+            query_groups: dict[str, list[str]] = {}
+            for memory in result.memories:
+                if memory.content:
+                    mem_query = memory.query or query
+                    if mem_query not in query_groups:
+                        query_groups[mem_query] = []
+                    if memory.content not in query_groups[mem_query]:
+                        query_groups[mem_query].append(memory.content)
+
+            retrieved_content = [
+                {q: contents} for q, contents in query_groups.items()
+            ]
+
+            repo = ShortTermMemoryRepository(self.db)
+            repo.upsert(
+                end_user_id=self.ctx.end_user_id,
+                messages=query,
+                aimessages=aimessages,
+                retrieved_content=retrieved_content,
+                search_switch=search_switch.value,
+            )
+            logger.info(
+                f"[ReadPipeLine] short_term 写入成功: "
+                f"end_user_id={self.ctx.end_user_id}, "
+                f"queries={len(retrieved_content)}, "
+                f"memories={len(result.memories)}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[ReadPipeLine] short_term 写入失败（不影响主流程）: {e}",
+                exc_info=True,
+            )
+

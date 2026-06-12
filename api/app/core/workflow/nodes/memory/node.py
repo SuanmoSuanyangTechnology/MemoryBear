@@ -37,7 +37,6 @@ class MemoryReadNode(BaseNode):
                 raise RuntimeError("End user id is required")
 
             memory_service = MemoryService(
-                db=db,
                 storage_type=state["memory_storage_type"],
                 config_id=str(self.typed_config.config_id),
                 end_user_id=end_user_id,

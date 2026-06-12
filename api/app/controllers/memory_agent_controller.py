@@ -1,3 +1,4 @@
+import html
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -311,9 +312,9 @@ async def read_server(
     try:
         memory_config = get_config(user_input.end_user_id, db)
         service = MemoryService(
-            db,
             memory_config["memory_config_id"],
             end_user_id=user_input.end_user_id,
+            draft=True
         )
         session_cache = ChatSessionCache(session_id)
         search_result = await service.read(
@@ -345,12 +346,13 @@ async def read_server(
             if memory.source == Neo4jNodeType.PERCEPTUAL
         ]
 
-        intermediate_outputs.append({
-            "type": "perceptual_retrieve",
-            "title": "感知记忆检索",
-            "data": perceptual_data,
-            "total": len(perceptual_data),
-        })
+        if len(perceptual_data):
+            intermediate_outputs.append({
+                "type": "perceptual_retrieve",
+                "title": "感知记忆检索",
+                "data": perceptual_data,
+                "total": len(perceptual_data),
+            })
         intermediate_outputs.append({
             "type": "search_result",
             "title": f"合并检索结果 (共{len(sub_queries)}个查询,{len(search_result.memories)}条结果)",
@@ -372,6 +374,9 @@ async def read_server(
                 {"role": "assistant", "content": answer}
             ]
         )
+        for _ in intermediate_outputs:
+            if _["type"] == "search_result":
+                _["result"] = html.escape(_["result"])
         result = {
             'answer': answer,
             "intermediate_outputs": intermediate_outputs,
@@ -475,7 +480,8 @@ async def read_server_async(
         session_cache = ChatSessionCache(session_id)
         task = celery_app.send_task(
             "app.core.memory.agent.read_message",
-            args=[user_input.end_user_id, user_input.message, await session_cache.get_history(), user_input.search_switch,
+            args=[user_input.end_user_id, user_input.message, await session_cache.get_history(),
+                  user_input.search_switch,
                   config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Read task queued: {task.id}")

@@ -116,7 +116,9 @@ class ConversationRepository:
 
         stmt = select(Conversation).where(
             Conversation.user_id == str(user_id),
-            Conversation.is_active.is_(is_activate)
+            Conversation.is_active.is_(is_activate),
+            # FIXME: Hacky workaround to filter out Memory API write requests.
+            Conversation.app_id != "00000000-0000-0000-0000-000000000001"
         )
 
         if workspace_id:

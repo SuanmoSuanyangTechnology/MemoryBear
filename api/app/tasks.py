@@ -2273,7 +2273,6 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                                     try:
                                         memory_service = MemoryService(
-                                            db=db,
                                             config_id=config_id,
                                             end_user_id=str(user['id']),
                                             workspace_id=str(workspace.id),
@@ -2466,7 +2465,6 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
 
                                 try:
                                     memory_service = MemoryService(
-                                        db=db,
                                         config_id=config_id,
                                         end_user_id=str(user['id']),
                                         workspace_id=str(workspace.id),
