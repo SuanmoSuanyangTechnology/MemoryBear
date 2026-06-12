@@ -70,7 +70,7 @@ const HumanIntervention: FC<HumanInterventionProps> = ({
         args: { x: nodeWidth, y: portItemArgsY * i + conditionNodePortItemArgsY },
       })),
       {
-        id: `CASE${operationCount + 1}`,
+        id: `TIMEOUT`,
         group: 'right',
         args: {
           x: nodeWidth,
@@ -199,6 +199,7 @@ const HumanIntervention: FC<HumanInterventionProps> = ({
       <Form.Item
         name="content"
         label={t('workflow.config.human-intervention.content')}
+        extra={t('workflow.config.human-intervention.contentExtra')}
       >
         <Editor 
           key="url"
@@ -314,8 +315,10 @@ const HumanIntervention: FC<HumanInterventionProps> = ({
             max={100}
             step={1}
             defaultValue={3}
-            onBlur={(value) => {
-              form.setFieldValue(['timeout', 'value'], value || 1)
+            onBlur={(e) => {
+              const val = e.target.value.trim();
+              const num = val ? parseFloat(val) : NaN;
+              form.setFieldValue(['timeout', 'value'], isNaN(num) ? 1 : num)
             }}
             className="rb:flex-1!"
           />

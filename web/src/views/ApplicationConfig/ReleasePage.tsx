@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 16:19:04
+ * @Last Modified time: 2026-06-11 12:08:16
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
-import { Space, Input, Form, App, Flex, Dropdown } from 'antd';
+import { Space, Input, Form, App, Flex, Dropdown, Image } from 'antd';
 import copy from 'copy-to-clipboard';
 
 import Tag, { type TagProps } from './components/Tag'
@@ -208,6 +208,19 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   </Form.Item>
                   <Form.Item label={t('application.editor')} className="rb:mb-0!">
                     <Input value={selectedVersion.publisher_name} disabled />
+                  </Form.Item>
+                  <Form.Item label={t('application.customTitle')} className="rb:mb-0!">
+                    <Input value={selectedVersion.name || '-'} disabled />
+                  </Form.Item>
+                  <Form.Item label={t('application.customIcon')} className="rb:mb-0!">
+                    {selectedVersion.icon
+                      ? <Image
+                        src={selectedVersion.icon}
+                        alt={selectedVersion.name || '-'}
+                        height={32}
+                      />
+                      : <Input value={t('application.noIcon')} disabled />
+                    }
                   </Form.Item>
                 </div>
               </RbCard>

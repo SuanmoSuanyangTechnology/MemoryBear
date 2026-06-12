@@ -31,6 +31,8 @@ class RedBearRerank(BaseDocumentCompressor):
             documents: Sequence[Document],
             query: str,
             callbacks: Optional[Callbacks] = None,
+            *,
+            top_n: Optional[int] = -1,
     ) -> Sequence[Document]:
         """
         Compress documents using Jina's Rerank API.
@@ -39,12 +41,13 @@ class RedBearRerank(BaseDocumentCompressor):
             documents: A sequence of documents to compress.
             query: The query to use for compressing the documents.
             callbacks: Callbacks to run during the compression process.
+            top_n: Number of top documents to return after reranking.
 
         Returns:
             A sequence of compressed documents.
         """
         compressed = []
-        for res in self.rerank(documents, query):
+        for res in self.rerank(documents, query, top_n=top_n):
             doc = documents[res["index"]]
             doc_copy = Document(doc.page_content, metadata=deepcopy(doc.metadata))
             doc_copy.metadata["relevance_score"] = res["relevance_score"]

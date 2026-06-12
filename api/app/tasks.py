@@ -8,7 +8,6 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +30,10 @@ from app.core.logging_config import get_logger
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.utils.chunk_write_order import (
+    pop_vectorized_bootstrap_batch,
+    prioritize_vectorized_chunks,
+)
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
@@ -149,28 +152,50 @@ def _get_or_create_redis_pool() -> redis.ConnectionPool | None:
 
 def get_sync_redis_client() -> Optional[redis.StrictRedis]:
     """获取同步 Redis 客户端（使用连接池）
-    
-    使用连接池提供的客户端，支持自动重连和健康检查。
-    如果 Redis 不可用，返回 None，调用方应优雅降级。
-    
+
+    依赖连接池本身的 ``health_check_interval=30`` 做健康检查；
+    每次取客户端不再发 ``PING``，避免在热路径上多一次 RTT。
+    冷启动应通过 ``warmup_sync_redis_pool`` 预热，避免首次请求承担建池+握手成本。
+
     Returns:
-        redis.StrictRedis: Redis 客户端实例，如果连接失败则返回 None
+        redis.StrictRedis: Redis 客户端实例；当连接池创建失败时返回 None。
     """
     try:
         pool = _get_or_create_redis_pool()
         if pool is None:
             return None
-
-        client = redis.StrictRedis(connection_pool=pool)
-        # 验证连接可用性
-        client.ping()
-        return client
+        return redis.StrictRedis(connection_pool=pool)
     except RedisError as e:
         logger.error(f"Redis connection failed: {e}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"Unexpected error getting Redis client: {e}", exc_info=True)
         return None
+
+
+def warmup_sync_redis_pool() -> bool:
+    """应用启动时预热 Redis 连接池。
+
+    复用 ``get_sync_redis_client`` 构造客户端，再发一次 ``PING`` 完成 TCP 握手，
+    把"首次请求需要建池"的 50–200ms 冷启动开销前置到启动阶段。
+    任何失败都只记录日志，不影响进程启动。
+
+    Returns:
+        bool: 预热成功返回 True；失败或 Redis 不可用返回 False。
+    """
+    try:
+        client = get_sync_redis_client()
+        if client is None:
+            return False
+        client.ping()
+        logger.info("Sync Redis pool warmed up (PING ok)")
+        return True
+    except RedisError as e:
+        logger.warning(f"Sync Redis pool warmup failed: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error warming Sync Redis pool: {e}")
+        return False
 
 
 def set_asyncio_event_loop():
@@ -424,8 +449,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if total_chunks == 0:
             progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
-            total_batches = ceil(total_chunks / EMBEDDING_BATCH_SIZE)
-            progress_per_batch = 0.2 / total_batches
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
             # 2.1 Delete document vector index
             vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
@@ -447,7 +470,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             all_batch_chunks: list[list[DocumentChunk]] = []
 
             if parent_child_mode:
-                # 父子分块模式：parent chunks + child chunks
+                # Parent-child mode writes child chunks first so ES mapping is created from vectorized chunks.
                 parent_chunks_list = []
                 parent_id_to_doc_id = {}
 
@@ -487,7 +510,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     child_chunks_list.append(
                         DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
 
-                all_chunks = parent_chunks_list + child_chunks_list
+                all_chunks = prioritize_vectorized_chunks(parent_chunks_list + child_chunks_list)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
                     batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
@@ -497,9 +520,9 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     f"{len(child_chunks_list)} child chunks prepared.")
 
             elif auto_questions_topn:
-                # QA 模式（FastGPT 方案）：
-                # 1. 原 chunk 标记为 source（保留供 GraphRAG 使用，不参与检索）
-                # 2. LLM 生成 QA 对，每个 QA 对独立存储为 qa chunk
+                # QA mode keeps source chunks but writes QA chunks first for vectorized index creation.
+                # 1. Original chunks are marked as source for full-text retrieval, provenance, and GraphRAG.
+                # 2. LLM-generated QA pairs are stored as independent qa chunks.
                 indexed_items = list(enumerate(res))
 
                 def _generate_qa(idx_item: tuple[int, dict]) -> tuple[int, list]:
@@ -560,7 +583,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     item = res[global_idx]
                     source_chunk_id = uuid.uuid4().hex
 
-                    # source chunk：保留原文，供 GraphRAG 使用，不参与向量检索
+                    # Source chunks keep the original text and are not vectorized.
                     source_meta = {
                         "doc_id": source_chunk_id,
                         "file_id": str(db_document.file_id),
@@ -597,8 +620,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             DocumentChunk(page_content=pair["question"], metadata=qa_meta))
                         qa_sort_id += 1
 
-                # 按 batch 分组（source + qa 一起）
-                all_chunks = source_chunks + qa_chunks
+                # Batch QA chunks before source chunks so vectorized writes create ES mapping first.
+                all_chunks = prioritize_vectorized_chunks(source_chunks + qa_chunks)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
                     batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
                     all_batch_chunks.append(all_chunks[batch_start:batch_end])
@@ -626,6 +649,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
                     all_batch_chunks.append(chunks)
 
+            total_batches = len(all_batch_chunks)
+
             # 并发提交 embedding + ES 写入，max_workers 控制模型 API 并发压力
             batch_errors: dict[int, Exception] = {}
 
@@ -639,6 +664,22 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     except Exception as retry_exc:
                         logger.error(f"[ParseDoc] batch {batch_idx} retry failed: {retry_exc}", exc_info=True)
                         batch_errors[batch_idx] = retry_exc
+
+            bootstrap_batch_idx, bootstrap_batch = pop_vectorized_bootstrap_batch(all_batch_chunks)
+            if bootstrap_batch is not None:
+                logger.info(
+                    "[ParseDoc] writing vectorized bootstrap batch before concurrent ES writes: "
+                    f"batch={bootstrap_batch_idx}, chunks={len(bootstrap_batch)}"
+                )
+                _embed_and_store(bootstrap_batch_idx, bootstrap_batch)
+                if bootstrap_batch_idx in batch_errors:
+                    failed_detail = "; ".join(
+                        f"batch {i}: {type(err).__name__}: {err}"
+                        for i, err in sorted(batch_errors.items())
+                    )
+                    raise RuntimeError(
+                        f"Embedding failed for {len(batch_errors)}/{total_batches} batch(es). {failed_detail}"
+                    )
 
             with ThreadPoolExecutor(max_workers=EMBEDDING_MAX_WORKERS) as executor:
                 futures = {
@@ -1769,31 +1810,30 @@ def write_message_task(
             return {"status": "success", "processed": processed}
 
         # 完整写入模式（API write 路径，带 messages）
-        with get_db_context() as db:
-            logger.info(
-                f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
-                f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+        logger.info(
+            f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
+            f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
 
-            _default_dialog_at = to_iso_z(utcnow_naive())
-            for msg in message:
-                if isinstance(msg, dict) and not msg.get("dialog_at"):
-                    msg["dialog_at"] = _default_dialog_at
+        _default_dialog_at = to_iso_z(utcnow_naive())
+        for msg in message:
+            if isinstance(msg, dict) and not msg.get("dialog_at"):
+                msg["dialog_at"] = _default_dialog_at
 
-            service = MemoryAgentService()
-            result = await service.write_memory(
-                WriteMemoryRequest(
-                    end_user_id=end_user_id,
-                    messages=message,
-                    config_id=actual_config_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    language=language,
-                    conversation_id=conversation_id,
-                ),
-                db,
-            )
-            logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
-            return result
+        service = MemoryAgentService()
+        result = await service.write_memory(
+            WriteMemoryRequest(
+                end_user_id=end_user_id,
+                messages=message,
+                config_id=actual_config_id,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                language=language,
+                conversation_id=conversation_id,
+            ),
+            db=None,
+        )
+        logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
+        return result
 
     redis_client = get_sync_redis_client()
     lock = None
@@ -3964,6 +4004,105 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         }
 
 
+@celery_app.task(
+    name="app.tasks.refresh_hot_memory_tags_cache",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
+    """定时任务：为所有活跃 workspace 预热热门记忆标签缓存（limit=10）。
+
+    执行时间由 settings.HOT_MEMORY_TAGS_REFRESH_HOUR（UTC 小时）决定，
+    默认 19（= 北京时间 03:00）。缓存过期 28h，使白天请求全程命中缓存。
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        import json as _json
+
+        from app.aioRedis import aio_redis_get, aio_redis_set
+        from app.models.workspace_model import Workspace
+        from app.services.memory_storage_service import (
+            HOT_MEMORY_TAGS_CACHE_EXPIRE,
+            HOT_MEMORY_TAGS_CACHE_PREFIX,
+            compute_hot_memory_tags,
+        )
+
+        limit = 10  # 前端首页固定 limit
+
+        # 1. 取全量启用（is_active=True）的 workspace id（短事务，取完即出）
+        #    与 write_all_workspaces_memory_task 一致，仅排除已停用/软删除的 workspace
+        with get_db_context() as db:
+            workspace_ids = [
+                str(wid) for (wid,) in db.query(Workspace.id).filter(
+                    Workspace.is_active.is_(True)
+                ).all()
+            ]
+
+        if not workspace_ids:
+            return {"status": "SUCCESS", "message": "无活跃工作空间", "total": 0}
+
+        logger.info(f"[HotTagsRefresh] 开始预热 {len(workspace_ids)} 个 workspace 的热门标签缓存")
+
+        refreshed = 0
+        empty = 0
+        failed = 0
+
+        # 2. 逐个 workspace 计算并写缓存（串行，避免 LLM 并发压力）
+        for workspace_id in workspace_ids:
+            try:
+                result = await compute_hot_memory_tags(workspace_id, limit)
+                if not result:
+                    empty += 1
+                cache_key = f"{HOT_MEMORY_TAGS_CACHE_PREFIX}:{workspace_id}:{limit}"
+                cache_data = _json.dumps(result, ensure_ascii=False)
+                await aio_redis_set(cache_key, cache_data, expire=HOT_MEMORY_TAGS_CACHE_EXPIRE)
+
+                # aio_redis_set 内部吞异常（写失败仅记日志、不抛），这里写后读回校验，
+                # 确保 refreshed 计数真实反映「缓存确实写入」，而非虚报成功
+                verify = await aio_redis_get(cache_key)
+                if verify is None:
+                    failed += 1
+                    logger.error(f"[HotTagsRefresh] 缓存写入校验失败（读回为空） key={cache_key}")
+                    continue
+
+                refreshed += 1
+                logger.info(
+                    f"[HotTagsRefresh] 缓存写入成功 key={cache_key} "
+                    f"tags={len(result)} expire={HOT_MEMORY_TAGS_CACHE_EXPIRE}s"
+                )
+            except Exception as e:
+                failed += 1
+                logger.error(f"[HotTagsRefresh] workspace={workspace_id} 预热失败: {e}", exc_info=True)
+
+        logger.info(f"[HotTagsRefresh] 预热完成: refreshed={refreshed}, empty={empty}, failed={failed}")
+        return {
+            "status": "SUCCESS",
+            "total": len(workspace_ids),
+            "refreshed": refreshed,
+            "empty": empty,
+            "failed": failed,
+        }
+
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    except Exception as e:
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": time.time() - start_time,
+            "task_id": self.request.id,
+        }
+
+
 # =============================================================================
 # 社区聚类补全任务（触发型）
 # =============================================================================
@@ -4624,7 +4763,7 @@ def scan_idle_conversations_task() -> None:
     )
 
 
-@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks")
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks", time_limit=50, soft_time_limit=45)
 def scan_workflow_schedule_triggers():
     """扫描并派发已发布工作流中的定时触发器。"""
     from app.services.workflow_service import WorkflowService

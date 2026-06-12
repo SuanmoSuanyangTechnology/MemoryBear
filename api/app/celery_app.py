@@ -139,6 +139,7 @@ celery_app.conf.update(
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
+        'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
         'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
@@ -184,6 +185,7 @@ implicit_emotions_update_schedule = crontab(
 )
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
+hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 # 构建定时任务配置
 beat_schedule_config = {
     # "run-workspace-reflection": {
@@ -223,6 +225,11 @@ beat_schedule_config = {
         "schedule": layer2_dedup_full_scan_schedule,
         "args": (),
     },
+    "refresh-hot-memory-tags-cache": {
+        "task": "app.tasks.refresh_hot_memory_tags_cache",
+        "schedule": hot_memory_tags_refresh_schedule,
+        "args": (),
+    },
     # "scan-idle-conversations": {
     #     "task": "app.tasks.scan_idle_conversations",
     #     "schedule": 3600.0,
@@ -240,12 +247,19 @@ beat_schedule_config = {
 celery_app.conf.beat_schedule = beat_schedule_config
 
 # 企业版订阅任务调度配置（_HAS_SUBSCRIPTION_TASKS 在上方路由注册处探测完成）
+# 可通过环境变量调整频率（默认保持原行为）：
+#   SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES=N   → 状态变更主循环周期（默认 10；测试时可改成 1）
+#   SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES=N   → 邮件提醒周期（默认 60；测试时可改成 1）
+_SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES = int(os.getenv("SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES", "10"))
+_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES = int(os.getenv("SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES", "60"))
+
+# 状态变更任务（默认每 10 分钟一次 + 每天 2 点兜底）
 if _HAS_SUBSCRIPTION_TASKS:
     celery_app.conf.beat_schedule.update({
-        # 主处理：每10分钟扫一次过期订阅（支持10万租户，concurrency=4可并行处理）
+        # 主处理：每 N 分钟扫一次过期订阅（支持10万租户，concurrency=4可并行处理）
         "process-expired-subscriptions": {
             "task": "subscription.process_expired_subscriptions",
-            "schedule": crontab(minute="*/10"),
+            "schedule": crontab(minute=f"*/{_SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES}"),
             "options": {"queue": "subscription_state_tasks"},
         },
         # 兜底修复：每天北京凌晨 2:00（= UTC 18:00）再全量扫一次，
@@ -255,10 +269,15 @@ if _HAS_SUBSCRIPTION_TASKS:
             "schedule": crontab(hour=18, minute=0),  # UTC 18:00 = CST 02:00
             "options": {"queue": "subscription_state_tasks"},
         },
-        # 到期提醒：每小时整点投递；旧扫描任务超过 1 小时未被消费则过期丢弃
+    })
+
+# 邮件提醒任务（默认每小时一次）
+if _HAS_SUBSCRIPTION_TASKS:
+    celery_app.conf.beat_schedule.update({
+        # 到期提醒：每 N 分钟投递一次；旧扫描任务超过 1 小时未被消费则过期丢弃
         "subscription-expiration-reminder": {
             "task": "subscription.expiration_reminder",
-            "schedule": crontab(minute=0),
+            "schedule": timedelta(minutes=_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES),
             "options": {"queue": "subscription_email_tasks", "expires": 3600},
         },
     })

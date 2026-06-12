@@ -2316,3 +2316,14 @@ WITH alias, count(r) AS rel_count
 DETACH DELETE alias
 RETURN count(alias) AS deleted_count
 """
+
+
+# 查询用户实体节点的最新 aliases：用于别名归并完成后，将归并结果同步回 PostgreSQL
+# end_user_info.aliases / other_name。判定用户实体的口径与 metadata_extractor.is_user_entity
+# 保持一致：name 命中常见用户称呼，或 entity_type 为 '用户'。
+GET_USER_ENTITY_ALIASES = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE toLower(e.name) IN ['用户', '我', 'user', 'i']
+   OR e.entity_type = '用户'
+RETURN e.id AS entity_id, e.name AS name, coalesce(e.aliases, []) AS aliases
+"""

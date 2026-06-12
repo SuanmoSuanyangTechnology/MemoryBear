@@ -24,7 +24,7 @@ import redis
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.cache import InterestMemoryCache
 from app.core.config import settings
@@ -289,14 +289,14 @@ class MemoryAgentService:
     async def write_memory(
             self,
             request: WriteMemoryRequest,
-            db: Session,
+            db: Optional[Session] = None,
     ) -> str:
         """
         长期记忆写入
 
         Args:
             request: 写入请求参数（end_user_id、messages、config_id、storage_type、language 等）
-            db: SQLAlchemy database session
+            db: SQLAlchemy database session（可选，传 None 时内部自行管理短暂 session）
 
         Returns:
             Write operation result status
@@ -405,7 +405,7 @@ class MemoryAgentService:
             user_rag_memory_id,
             language,
             conversation_id,
-            db: Session,
+            db: Optional[Session],
             start_time: float,
     ) -> str:
         """write_memory 的核心实现（已持有 per-end_user 锁）。"""
@@ -495,13 +495,21 @@ class MemoryAgentService:
             self,
             end_user_id: str,
             config_id: Optional[uuid.UUID] | int,
-            db: Session,
+            db: Optional[Session],
             start_time: float,
     ):
-        """解析 end_user 关联配置并从数据库加载完整 memory_config。"""
+        """解析 end_user 关联配置并从数据库加载完整 memory_config。
+
+        当 db=None 时（Celery 后台任务路径），内部自行开短暂 session 完成查询。
+        """
         workspace_id = None
         try:
-            connected_config = get_end_user_connected_config(end_user_id, db)
+            # 短暂 session：仅用于查询 end_user 关联配置
+            if db is not None:
+                connected_config = get_end_user_connected_config(end_user_id, db)
+            else:
+                with get_db_context() as _db:
+                    connected_config = get_end_user_connected_config(end_user_id, _db)
             # get_end_user_connected_config 返回字符串，需转为 UUID
             workspace_id_raw = connected_config.get("workspace_id")
             if workspace_id_raw and workspace_id_raw != "None":
@@ -556,10 +564,16 @@ class MemoryAgentService:
             messages: list[MessageItem] | list[dict],
             end_user_id: str,
             memory_config,
-            db: Session,
+            db: Optional[Session],
     ) -> list[dict]:
-        """处理消息中附带的文件，生成感知记忆对象并挂载到 message['file_content']。"""
-        perceptual_service = MemoryPerceptualService(db)
+        """处理消息中附带的文件，生成感知记忆对象并挂载到 message['file_content']。
+
+        当 db=None 时（Celery 后台任务路径），每个文件单独开短暂 session，
+        避免长时间持有 DB 连接等待 LLM 推理。
+        """
+        # 当外层提供 db 时，复用同一个 service 实例，避免每个文件重复实例化
+        perceptual_service = MemoryPerceptualService(db) if db is not None else None
+
         for message in messages:
             if isinstance(message, dict):
                 message["file_content"] = []
@@ -568,12 +582,24 @@ class MemoryAgentService:
                 message.file_content = []
                 files = message.files or []
             for file in files:
-                file_object = await perceptual_service.generate_perceptual_memory(
-                    end_user_id=end_user_id,
-                    memory_config=memory_config,
-                    file=FileInput(**file),
-                    content=message.content if isinstance(message, MessageItem) else message["content"],
-                )
+                # 注意：generate_perceptual_memory 内部含 LLM 调用（10-60s），
+                # 此处复用外层 db（Controller 路径）或自行开 session（Celery 路径）
+                if perceptual_service is not None:
+                    file_object = await perceptual_service.generate_perceptual_memory(
+                        end_user_id=end_user_id,
+                        memory_config=memory_config,
+                        file=FileInput(**file),
+                        content=message.content if isinstance(message, MessageItem) else message["content"],
+                    )
+                else:
+                    with get_db_context() as _db:
+                        _perceptual_service = MemoryPerceptualService(_db)
+                        file_object = await _perceptual_service.generate_perceptual_memory(
+                            end_user_id=end_user_id,
+                            memory_config=memory_config,
+                            file=FileInput(**file),
+                            content=message.content if isinstance(message, MessageItem) else message["content"],
+                        )
                 if file_object is None:
                     continue
                 if isinstance(message, dict):
@@ -1536,6 +1562,13 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     1. 优先使用 end_user.memory_config_id
     2. 如果没有，回退到工作空间默认配置
 
+    实现说明：
+    - 之前是 4 次串行查询（end_users → apps → 直接配置 → 工作空间默认配置），
+      冷链路上的 RT 累计成本较高；
+    - 现在合并为最多 2 次：
+        a) 一次 JOIN：EndUser LEFT JOIN App，一次性拿到 app_id / memory_config_id / workspace_id
+        b) 一次 MemoryConfig 查询：用 OR 同时取"直接绑定的配置"和"工作空间默认配置"。
+
     Args:
         end_user_ids: 终端用户ID列表
         db: 数据库会话
@@ -1543,7 +1576,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     Returns:
         字典，key 为 end_user_id，value 为包含 memory_config_id 和 memory_config_name 的字典
     """
-    from sqlalchemy.orm import load_only
+    from sqlalchemy import and_, or_
 
     from app.models.app_model import App
     from app.models.end_user_model import EndUser
@@ -1556,92 +1589,100 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     if not end_user_ids:
         return result
 
-    # 1. 批量查询所有 end_user，只加载需要的列
-    end_users = (
-        db.query(EndUser)
-        .options(load_only(EndUser.id, EndUser.app_id, EndUser.memory_config_id))
+    # 1) 一次 JOIN 拿齐 (end_user_id, app_id, memory_config_id, workspace_id)
+    rows = (
+        db.query(
+            EndUser.id.label("end_user_id"),
+            EndUser.memory_config_id.label("memory_config_id"),
+            EndUser.workspace_id.label("end_user_workspace_id"),
+            App.workspace_id.label("app_workspace_id"),
+        )
+        .outerjoin(App, App.id == EndUser.app_id)
         .filter(EndUser.id.in_(end_user_ids))
         .all()
     )
 
-    user_data = {str(eu.id): {"app_id": eu.app_id, "memory_config_id": eu.memory_config_id} for eu in end_users}
+    # found_ids 用于补齐"未找到的用户"
+    found_ids = set()
+    direct_config_ids: set = set()
+    workspace_ids: set = set()
 
-    # 记录未找到的用户
-    missing_user_ids = set(end_user_ids) - set(user_data.keys())
-    for user_id in missing_user_ids:
-        result[user_id] = {"memory_config_id": None, "memory_config_name": None}
+    # row_index: end_user_id -> (memory_config_id, workspace_id)
+    # workspace_id 取 App.workspace_id，回退到 EndUser.workspace_id（兼容历史数据）
+    row_index: Dict[str, Dict[str, Any]] = {}
 
-    # 2. 批量获取所有相关应用的 workspace_id
-    app_ids = list(set(data["app_id"] for data in user_data.values() if data["app_id"]))
-    if not app_ids:
-        for user_id in user_data:
-            result[user_id] = {"memory_config_id": None, "memory_config_name": None}
-        return result
+    for row in rows:
+        end_user_id = str(row.end_user_id)
+        found_ids.add(end_user_id)
 
-    apps = (
-        db.query(App)
-        .options(load_only(App.id, App.workspace_id))
-        .filter(App.id.in_(app_ids))
-        .all()
-    )
-    app_to_workspace = {app.id: app.workspace_id for app in apps}
+        workspace_id = row.app_workspace_id or row.end_user_workspace_id
+        memory_config_id = row.memory_config_id
 
-    # 3. 分类：有直接配置的 vs 需要回退到工作空间默认的
-    direct_config_ids = []
-    workspace_fallback_users = []  # [(end_user_id, workspace_id), ...]
+        row_index[end_user_id] = {
+            "memory_config_id": memory_config_id,
+            "workspace_id": workspace_id,
+        }
 
-    for end_user_id, data in user_data.items():
-        if data["memory_config_id"]:
-            direct_config_ids.append(data["memory_config_id"])
-        else:
-            workspace_id = app_to_workspace.get(data["app_id"])
-            if workspace_id:
-                workspace_fallback_users.append((end_user_id, workspace_id))
+        if memory_config_id:
+            direct_config_ids.add(memory_config_id)
+        elif workspace_id:
+            workspace_ids.add(workspace_id)
 
-    # 4. 批量查询直接分配的配置
-    config_id_to_config = {}
-    if direct_config_ids:
+    # 未找到的用户直接补空结果
+    for missing_id in set(end_user_ids) - found_ids:
+        result[missing_id] = {"memory_config_id": None, "memory_config_name": None}
+
+    # 2) 一次 MemoryConfig 查询：OR(直接配置, 工作空间默认配置)
+    config_id_to_config: Dict[Any, Any] = {}
+    workspace_default_configs: Dict[Any, Any] = {}
+
+    if direct_config_ids or workspace_ids:
+        filters = []
+        if direct_config_ids:
+            filters.append(MemoryConfig.config_id.in_(direct_config_ids))
+        if workspace_ids:
+            filters.append(
+                and_(
+                    MemoryConfig.workspace_id.in_(workspace_ids),
+                    MemoryConfig.is_default.is_(True),
+                    MemoryConfig.state.is_(True),
+                )
+            )
+
         configs = (
             db.query(MemoryConfig)
-            .options(load_only(MemoryConfig.config_id, MemoryConfig.config_name))
-            .filter(MemoryConfig.config_id.in_(direct_config_ids))
+            .options(load_only(
+                MemoryConfig.config_id,
+                MemoryConfig.config_name,
+                MemoryConfig.workspace_id,
+                MemoryConfig.is_default,
+                MemoryConfig.state,
+            ))
+            .filter(or_(*filters) if len(filters) > 1 else filters[0])
             .all()
         )
-        config_id_to_config = {mc.config_id: mc for mc in configs}
 
-    # 5. 批量获取工作空间默认配置
-    workspace_default_configs: Dict[Any, Any] = {}
-    unique_workspace_ids = list(set(ws_id for _, ws_id in workspace_fallback_users))
+        for cfg in configs:
+            # 直接配置查询命中
+            if cfg.config_id in direct_config_ids:
+                config_id_to_config[cfg.config_id] = cfg
+            # 工作空间默认配置命中（同一个 workspace 可能有多个 is_default=True，最后一个胜出，
+            # 行为与原实现一致）
+            if cfg.is_default and cfg.state and cfg.workspace_id in workspace_ids:
+                workspace_default_configs[cfg.workspace_id] = cfg
 
-    if unique_workspace_ids:
-        default_configs = (
-            db.query(MemoryConfig)
-            .options(load_only(MemoryConfig.config_id, MemoryConfig.config_name, MemoryConfig.workspace_id))
-            .filter(
-                MemoryConfig.workspace_id.in_(unique_workspace_ids),
-                MemoryConfig.is_default.is_(True),
-                MemoryConfig.state.is_(True),
-            )
-            .all()
-        )
-        workspace_default_configs = {mc.workspace_id: mc for mc in default_configs}
-
-    # 6. 构建最终结果
-    for end_user_id, data in user_data.items():
+    # 3) 拼装最终结果
+    for end_user_id, data in row_index.items():
         memory_config = None
-
         if data["memory_config_id"]:
             memory_config = config_id_to_config.get(data["memory_config_id"])
-
-        if not memory_config:
-            workspace_id = app_to_workspace.get(data["app_id"])
-            if workspace_id:
-                memory_config = workspace_default_configs.get(workspace_id)
+        if not memory_config and data["workspace_id"]:
+            memory_config = workspace_default_configs.get(data["workspace_id"])
 
         if memory_config:
             result[end_user_id] = {
                 "memory_config_id": str(memory_config.config_id),
-                "memory_config_name": memory_config.config_name
+                "memory_config_name": memory_config.config_name,
             }
         else:
             result[end_user_id] = {"memory_config_id": None, "memory_config_name": None}

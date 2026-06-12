@@ -25,6 +25,10 @@ from app.core.rag.models.chunk import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
+VECTOR_SEARCH_MODE_ENV = "ELASTICSEARCH_VECTOR_SEARCH_MODE"
+VECTOR_SEARCH_MODE_KNN = "knn"
+VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
+
 
 class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
@@ -54,7 +58,7 @@ class ElasticSearchVector(BaseVector):
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
         # 仅在写入时检查并补充字段映射，避免每次检索都做冗余检查
-        # ElasticSearchVectorFactory._ensure_parent_id_mapping(self._client, self._collection_name)
+        # ElasticSearchVectorIndexOps.ensure_parent_id_mapping(self._client, self._collection_name)
 
         # QA chunks: embedding 只对 question 字段做；source/parent chunks: 不做 embedding
         texts_for_embedding = []
@@ -467,39 +471,21 @@ class ElasticSearchVector(BaseVector):
         # print(f"Update successful, number of affected documents: {result['updated']}")
         return result['updated']
 
-    def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
-        """Search the nearest neighbors to a vector."""
-        if self.is_multimodal_embedding:
-            # 火山引擎多模态 Embedding
-            query_vector = self.embeddings.embed_text(query)
-        else:
-            query_vector = self.embeddings.embed_query(query)
-        top_k = kwargs.get("top_k", 1024)
-        score_threshold = float(kwargs.get("score_threshold") or 0.3)
-        indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
-        file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
+    @staticmethod
+    def _normalize_vector(vector: Any) -> list[float]:
+        if hasattr(vector, "tolist"):
+            return vector.tolist()
+        return list(vector)
 
-        query_str: dict[str, Any] = {
-                "bool": {
-                    "must": {
-                        "script_score": {
-                            "query": {
-                                "match_all": {}
-                            },
-                            "script": {
-                                "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
-                                # The script_score query calculates the cosine similarity between the embedding field of each document and the query vector. The addition of +1.0 is to ensure that the scores returned by the script are non-negative, as the range of cosine similarity is [-1, 1]
-                                "params": {"query_vector": query_vector}
-                            }
-                        }
-                    },
-                    "filter": [
-                        {"term": {"metadata.status": 1}},
-                        {"exists": {"field": Field.VECTOR.value}},
-                    ]
-                }
-            }
-        # If file_names_filter is passed in, merge the filtering conditions
+    @staticmethod
+    def _build_vector_filter_clauses(
+        file_names_filter: list[str] | None,
+        document_ids_filter: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        filters: list[dict[str, Any]] = [
+            {"term": {"metadata.status": 1}},
+            {"exists": {"field": Field.VECTOR.value}},
+        ]
         if file_names_filter:
             query_str = {
                 "bool": {
@@ -522,39 +508,124 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        # If document_ids_filter is passed in, append to filter (blacklist: exclude these IDs)
-        document_ids_filter = kwargs.get("document_ids_filter")
-        if document_ids_filter:
+        document_ids_include = kwargs.get("document_ids_include")
+        if document_ids_include is None:
+            document_ids_include = kwargs.get("document_ids_filter")
+        if document_ids_include:
             query_str["bool"]["filter"].append({
-                "bool": {"must_not": {"terms": {"metadata.document_id": document_ids_filter}}}
+                "terms": {Field.DOCUMENT_ID.value: document_ids_include}
             })
-            logger.info(f"[ES search_by_vector] excluding document_ids: {document_ids_filter}")
+            logger.info(f"[ES search_by_vector] including document_ids: {document_ids_include}")
         else:
-            logger.info("[ES search_by_vector] no document_ids_filter")
+            logger.info("[ES search_by_vector] no document_ids_include")
 
-        logger.debug(f"[ES search_by_vector] query DSL: {query_str}")
+    @staticmethod
+    def _resolve_knn_num_candidates(top_k: int, configured: Any = None) -> int:
+        raw_value = configured if configured is not None else os.getenv("ELASTICSEARCH_KNN_NUM_CANDIDATES")
+        if raw_value is not None:
+            try:
+                return max(int(raw_value), top_k)
+            except (TypeError, ValueError):
+                logger.warning(f"Invalid ELASTICSEARCH_KNN_NUM_CANDIDATES value: {raw_value}")
+        return max(top_k * 10, 100)
 
-        result = self._client.search(
+    @staticmethod
+    def _resolve_vector_search_mode() -> str:
+        raw_value = os.getenv(VECTOR_SEARCH_MODE_ENV, VECTOR_SEARCH_MODE_SCRIPT_SCORE)
+        mode = raw_value.strip().lower()
+        if mode == VECTOR_SEARCH_MODE_KNN:
+            return VECTOR_SEARCH_MODE_KNN
+        if mode in ("", VECTOR_SEARCH_MODE_SCRIPT_SCORE):
+            return VECTOR_SEARCH_MODE_SCRIPT_SCORE
+
+        logger.warning(f"Invalid {VECTOR_SEARCH_MODE_ENV} value: {raw_value}, using script_score")
+        return VECTOR_SEARCH_MODE_SCRIPT_SCORE
+
+    @staticmethod
+    def _build_vector_script_query(
+        query_vector: list[float],
+        filters: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "bool": {
+                "must": {
+                    "script_score": {
+                        "query": {"match_all": {}},
+                        "script": {
+                            "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
+                            "params": {"query_vector": query_vector},
+                        },
+                    }
+                },
+                "filter": filters,
+            }
+        }
+
+    def _search_by_knn(
+        self,
+        indices: str,
+        query_vector: list[float],
+        top_k: int,
+        filters: list[dict[str, Any]],
+        knn_num_candidates: Any = None,
+    ):
+        num_candidates = self._resolve_knn_num_candidates(top_k, knn_num_candidates)
+        knn_query = {
+            "field": Field.VECTOR.value,
+            "query_vector": query_vector,
+            "k": top_k,
+            "num_candidates": num_candidates,
+            "filter": filters,
+        }
+        logger.debug(
+            f"[ES search_by_vector] mode=knn indices={indices} top_k={top_k} "
+            f"num_candidates={num_candidates} vector_dims={len(query_vector)} filter_count={len(filters)}"
+        )
+        return self._client.search(
+            index=indices,
+            size=top_k,
+            knn=knn_query,
+        )
+
+    def _search_by_vector_script(
+        self,
+        indices: str,
+        query_vector: list[float],
+        top_k: int,
+        filters: list[dict[str, Any]],
+    ):
+        query_str = self._build_vector_script_query(query_vector, filters)
+        logger.debug(
+            f"[ES search_by_vector] mode=script_score indices={indices} top_k={top_k} "
+            f"vector_dims={len(query_vector)} filter_count={len(filters)}"
+        )
+        return self._client.search(
             index=indices,
             from_=0,
             size=top_k,
-            query=query_str
+            query=query_str,
         )
-        # logger.info(result)
 
+    def _vector_search_result_to_chunks(
+        self,
+        result,
+        score_threshold: float,
+        *,
+        normalize_script_score: bool,
+        resolve_parents: bool,
+    ) -> list[DocumentChunk]:
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
 
-        docs_and_scores = []
+        docs: list[DocumentChunk] = []
         for res in result["hits"]["hits"]:
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
-            metadata = source.get(Field.METADATA_KEY.value, {})
+            metadata = source.get(Field.METADATA_KEY.value) or {}
             chunk_type = source.get(Field.CHUNK_TYPE.value)
-            score = res["_score"]
-            score = score / 2  # Normalized [0-1]
+            score = res["_score"] / 2 if normalize_script_score else res["_score"]
 
-            # QA chunk: 返回 Q+A 拼接作为上下文
+            # QA chunk returns question and answer together as retrieval context.
             if chunk_type == "qa":
                 question = source.get(Field.QUESTION.value, "")
                 answer = source.get(Field.ANSWER.value, "")
@@ -563,18 +634,73 @@ class ElasticSearchVector(BaseVector):
                 metadata["question"] = question
                 metadata["answer"] = answer
 
-            docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), score))
-
-        # docs = [doc for doc, score in docs_and_scores]
-        docs = []
-        for doc, score in docs_and_scores:
-            # check score threshold
             if score > score_threshold:
-                if doc.metadata is not None:
-                    doc.metadata["score"] = score
-                    docs.append(doc)
+                metadata["score"] = score
+                docs.append(DocumentChunk(page_content=page_content, metadata=metadata))
 
         return self.resolve_parent_chunks(docs) if resolve_parents else docs
+
+    def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
+        """Search the nearest neighbors to a vector."""
+        if self.is_multimodal_embedding:
+            # 火山引擎多模态 Embedding
+            query_vector = self.embeddings.embed_text(query)
+        else:
+            query_vector = self.embeddings.embed_query(query)
+        query_vector = self._normalize_vector(query_vector)
+
+        top_k = int(kwargs.get("top_k") or 1024)
+        score_threshold = float(kwargs.get("score_threshold") or 0.3)
+        indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
+        file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
+        document_ids_filter = kwargs.get("document_ids_filter")
+        filters = self._build_vector_filter_clauses(file_names_filter, document_ids_filter)
+
+        logger.info(
+            f"[ES search_by_vector] filter_summary file_name_count={len(file_names_filter or [])} "
+            f"excluded_document_id_count={len(document_ids_filter or [])}"
+        )
+
+        if self._resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
+            try:
+                result = self._search_by_knn(
+                    indices=indices,
+                    query_vector=query_vector,
+                    top_k=top_k,
+                    filters=filters,
+                    knn_num_candidates=kwargs.get("knn_num_candidates"),
+                )
+                docs = self._vector_search_result_to_chunks(
+                    result,
+                    score_threshold,
+                    normalize_script_score=False,
+                    resolve_parents=resolve_parents,
+                )
+                logger.debug(
+                    f"[ES search_by_vector] mode=knn hits={len(result.get('hits', {}).get('hits', []))} "
+                    f"returned_docs={len(docs)} score_threshold={score_threshold}"
+                )
+                return docs
+            except Exception as exc:
+                logger.warning(f"[ES search_by_vector] KNN search failed, falling back to script_score: {exc}")
+
+        result = self._search_by_vector_script(
+            indices=indices,
+            query_vector=query_vector,
+            top_k=top_k,
+            filters=filters,
+        )
+        docs = self._vector_search_result_to_chunks(
+            result,
+            score_threshold,
+            normalize_script_score=True,
+            resolve_parents=resolve_parents,
+        )
+        logger.debug(
+            f"[ES search_by_vector] mode=script_score hits={len(result.get('hits', {}).get('hits', []))} "
+            f"returned_docs={len(docs)} score_threshold={score_threshold}"
+        )
+        return docs
 
     def search_by_full_text(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Return docs using BM25F.
@@ -627,15 +753,16 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
-        # If document_ids_filter is passed in, append to filter (blacklist: exclude these IDs)
-        document_ids_filter = kwargs.get("document_ids_filter")
-        if document_ids_filter:
+        document_ids_include = kwargs.get("document_ids_include")
+        if document_ids_include is None:
+            document_ids_include = kwargs.get("document_ids_filter")
+        if document_ids_include:
             query_str["bool"]["filter"].append({
-                "bool": {"must_not": {"terms": {"metadata.document_id": document_ids_filter}}}
+                "terms": {Field.DOCUMENT_ID.value: document_ids_include}
             })
-            logger.info(f"[ES search_by_full_text] excluding document_ids: {document_ids_filter}")
+            logger.info(f"[ES search_by_full_text] including document_ids: {document_ids_include}")
         else:
-            logger.info("[ES search_by_full_text] no document_ids_filter")
+            logger.info("[ES search_by_full_text] no document_ids_include")
 
         logger.debug(f"[ES search_by_full_text] query DSL: {query_str}")
 
@@ -779,7 +906,7 @@ class ElasticSearchVector(BaseVector):
                 for doc in docs
             ]
 
-            reranked_docs = list(self.reranker.compress_documents(documents, query))
+            reranked_docs = list(self.reranker.compress_documents(documents, query, top_n=top_k))
             logger.debug(f"[rerank] returned {len(reranked_docs)} docs")
 
             reranked_docs.sort(
@@ -792,6 +919,7 @@ class ElasticSearchVector(BaseVector):
                     if doc.metadata["doc_id"] == item.metadata['doc_id']:
                         doc.metadata["score"] = item.metadata["relevance_score"]
                         result.append(doc)
+                        break
             return result
         except Exception as e:
             logger.warning(f"Rerank failed, falling back to original results: {str(e)}")
@@ -877,16 +1005,15 @@ class ElasticSearchVector(BaseVector):
             self._client.indices.create(index=self._collection_name, body=index_mapping)
 
 
-class ElasticSearchVectorFactory:
-    """ES 向量服务工厂 - 单例共享连接"""
-
+class ElasticSearchVectorClientProvider:
+    """Shared Elasticsearch client provider."""
     _client: Elasticsearch | None = None
     _lock = threading.Lock()
     _version_checked = False
 
     @classmethod
-    def _get_shared_client(cls) -> Elasticsearch:
-        """获取共享的 ES 客户端（线程安全的懒加载单例）"""
+    def get_shared_client(cls) -> Elasticsearch:
+        """Get a thread-safe shared Elasticsearch client."""
         if cls._client is not None:
             return cls._client
 
@@ -945,33 +1072,96 @@ class ElasticSearchVectorFactory:
 
         return cls._client
 
+
+class ElasticSearchVectorIndexOps:
+    """Lightweight Elasticsearch index operations that do not initialize model clients."""
+
+    def __init__(self, collection_name: str, client: Elasticsearch):
+        self._collection_name = collection_name
+        self._client = client
+
+    @staticmethod
+    def collection_name_for_knowledge(knowledge_id: Any) -> str:
+        return f"Vector_index_{knowledge_id}_Node".lower()
+
     @classmethod
-    def init_vector(cls, knowledge: Knowledge) -> ElasticSearchVector:
-        """创建向量服务实例（共享 ES 连接）"""
-        client = cls._get_shared_client()
-        collection_name = f"Vector_index_{knowledge.id}_Node"
+    def _get_shared_client(cls) -> Elasticsearch:
+        return ElasticSearchVectorClientProvider.get_shared_client()
 
-        if knowledge.embedding is None:
-            raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
-        if knowledge.reranker is None:
-            raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
-        embedding_config = knowledge.embedding.api_keys[0] if knowledge.embedding.api_keys else None
-        if not knowledge.embedding.api_keys:
-            logger.warning(f"No embedding api key found for knowledge {knowledge.id}")
-        reranker_config = knowledge.reranker.api_keys[0] if knowledge.reranker.api_keys else None
-        if not knowledge.reranker.api_keys:
-            logger.warning(f"No reranker api key found for knowledge {knowledge.id}")
-
-        return ElasticSearchVector(
-            index_name=collection_name,
-            client=client,
-            embedding_config=embedding_config,
-            reranker_config=reranker_config,
+    @classmethod
+    def for_knowledge(cls, knowledge_id: Any) -> "ElasticSearchVectorIndexOps":
+        return cls(
+            collection_name=cls.collection_name_for_knowledge(knowledge_id),
+            client=cls._get_shared_client(),
         )
 
+    def delete_index(self) -> None:
+        if self._client.indices.exists(index=self._collection_name):
+            self._client.indices.delete(index=self._collection_name, ignore=[400, 404])
+
+    def _get_ids_by_metadata_field(self, key: str, value: str) -> list[str] | None:
+        query = {"query": {"term": {f"{Field.METADATA_KEY.value}.{key}": value}}}
+        response = self._client.search(index=self._collection_name, body=query, size=10000)
+        if response["hits"]["hits"]:
+            return [hit["_id"] for hit in response["hits"]["hits"]]
+        return None
+
+    def delete_by_metadata_field(
+            self,
+            key: str,
+            value: str,
+            *,
+            refresh: bool = False,
+    ) -> bool:
+        if not self._client.indices.exists(index=self._collection_name):
+            return False
+
+        actual_ids = self._get_ids_by_metadata_field(key, value)
+        if not actual_ids:
+            return True
+
+        actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
+        try:
+            helpers.bulk(self._client, actions)
+            if refresh:
+                self._client.indices.refresh(index=self._collection_name)
+        except BulkIndexError as e:
+            for error in e.errors:
+                delete_error = error.get("delete", {})
+                status = delete_error.get("status")
+                doc_id = delete_error.get("_id")
+
+                if status == 404:
+                    logger.warning(f"Document not found for deletion: {doc_id}")
+                else:
+                    logger.error(f"Error deleting document: {error}")
+                    raise
+
+        return True
+
+    def change_document_status(self, document_id: str, status: int) -> int:
+        body = {
+            "script": {
+                "source": "ctx._source.metadata.status = params.new_status",
+                "params": {
+                    "new_status": status
+                }
+            },
+            "query": {
+                "term": {
+                    Field.DOCUMENT_ID.value: document_id
+                }
+            }
+        }
+        result = self._client.update_by_query(
+            index=self._collection_name,
+            body=body,
+        )
+        return result["updated"]
+
     @classmethod
-    def _ensure_parent_id_mapping(cls, client: Elasticsearch, index_name: str):
-        """为已有索引补充缺失的字段映射（仅追加，非破坏性）"""
+    def ensure_parent_id_mapping(cls, client: Elasticsearch, index_name: str):
+        """Add missing parent/QA mapping fields to an existing index."""
         if not client.indices.exists(index=index_name):
             return
         try:
@@ -981,21 +1171,17 @@ class ElasticSearchVectorFactory:
 
             update_body: dict[str, Any] = {"properties": {}}
 
-            # metadata.parent_id
             if metadata_props.get("parent_id", {}).get("type") != "keyword":
                 update_body["properties"]["metadata"] = {
                     "properties": {"parent_id": {"type": "keyword"}}
                 }
 
-            # top-level parent_id
             if props.get(Field.PARENT_ID.value, {}).get("type") != "keyword":
                 update_body["properties"][Field.PARENT_ID.value] = {"type": "keyword"}
 
-            # top-level chunk_type
             if Field.CHUNK_TYPE.value not in props:
                 update_body["properties"][Field.CHUNK_TYPE.value] = {"type": "keyword"}
 
-            # source_chunk_id
             if Field.SOURCE_CHUNK_ID.value not in props:
                 update_body["properties"][Field.SOURCE_CHUNK_ID.value] = {"type": "keyword"}
 
@@ -1005,4 +1191,29 @@ class ElasticSearchVectorFactory:
         except Exception as e:
             logger.warning(f"Failed to update mapping for {index_name}: {e}")
 
+class ElasticSearchVectorFactory:
+    """Create full vector services that require configured model clients."""
 
+    @classmethod
+    def init_vector(cls, knowledge: Knowledge) -> ElasticSearchVector:
+        """Create a full vector service with configured model clients."""
+        client = ElasticSearchVectorClientProvider.get_shared_client()
+        collection_name = ElasticSearchVectorIndexOps.collection_name_for_knowledge(knowledge.id)
+
+        if knowledge.embedding is None:
+            raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
+        if knowledge.reranker is None:
+            raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        if not knowledge.embedding.api_keys:
+            raise ValueError(f"No embedding api key found for knowledge {knowledge.id}")
+        if not knowledge.reranker.api_keys:
+            raise ValueError(f"No reranker api key found for knowledge {knowledge.id}")
+        embedding_config = knowledge.embedding.api_keys[0]
+        reranker_config = knowledge.reranker.api_keys[0]
+
+        return ElasticSearchVector(
+            index_name=collection_name,
+            client=client,
+            embedding_config=embedding_config,
+            reranker_config=reranker_config,
+        )

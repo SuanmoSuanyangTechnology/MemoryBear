@@ -61,6 +61,16 @@ class WorkflowToolPublishService:
         return release
 
     @staticmethod
+    def _validate_no_human_intervention(workflow_source: Any) -> None:
+        """校验工作流中不包含人工介入节点（人工介入节点不支持发布为工具）"""
+        for node in WorkflowToolPublishService._get_nodes(workflow_source):
+            if node.get("type") == "human-intervention":
+                raise BusinessException(
+                    "包含人工介入节点的工作流不支持发布为工具",
+                    BizCode.INVALID_PARAMETER
+                )
+
+    @staticmethod
     def _get_nodes(workflow_source: Any) -> List[Dict[str, Any]]:
         if isinstance(workflow_source, dict):
             nodes = workflow_source.get("nodes", [])
@@ -140,6 +150,7 @@ class WorkflowToolPublishService:
         app = self._validate_workflow_app(workflow_app_id, workspace_id)
         release = self._get_release(app, release_id)
         release_config = release.config or {}
+        self._validate_no_human_intervention(release_config)
 
         return WorkflowToolPublishPreviewSchema(
             app_id=str(workflow_app_id),
@@ -166,6 +177,7 @@ class WorkflowToolPublishService:
         release = self._get_release(app, release_id)
         workflow_config = self._get_workflow_config(workflow_app_id)
         release_config = release.config or {}
+        self._validate_no_human_intervention(release_config)
 
         input_parameters = self._extract_input_parameters(release_config)
         output_schema = self._extract_output_schema(release_config)

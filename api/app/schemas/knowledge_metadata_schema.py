@@ -1,7 +1,7 @@
 import datetime
 import uuid
 from typing import Any
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, Field, field_serializer, field_validator, ConfigDict
 from enum import StrEnum
 from app.core.utils.datetime_utils import to_timestamp_ms
 
@@ -21,13 +21,20 @@ class FilterCondition(BaseModel):
 
 
 class GroupLogic(StrEnum):
-    AND = "AND"
-    OR = "OR"
+    AND = "and"
+    OR = "or"
 
 
 class FilterGroup(BaseModel):
     conditions: list[FilterCondition] = Field(..., description="条件列表")
-    logic: GroupLogic = Field(GroupLogic.AND, description="组内逻辑: AND | OR")
+    logic: GroupLogic = Field(GroupLogic.AND, description="组内逻辑: and | or")
+
+    @field_validator("logic", mode="before")
+    @classmethod
+    def normalize_logic(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
 
 class MetadataFilterMode(StrEnum):
@@ -53,6 +60,7 @@ class KnowledgeMetadataResponse(BaseModel):
     type: str = Field(..., description="字段类型")
     name: str = Field(..., description="字段名")
     is_builtin: bool = Field(False, description="是否内置字段")
+    count: int | None = Field(None, description="字段被有效文档使用的数量（仅自定义字段）")
     created_at: datetime.datetime | int | None = Field(None, description="创建时间戳(ms)")
     updated_at: datetime.datetime | int | None = Field(None, description="更新时间戳(ms)")
 
@@ -80,6 +88,10 @@ class BuiltinMetadataEnableRequest(BaseModel):
 class BuiltinMetadataListResponse(BaseModel):
     enabled: bool = Field(..., description="开关状态")
     fields: list[KnowledgeMetadataResponse] = Field(..., description="内置字段列表")
+
+
+class KnowledgeMetadataFieldsRequest(BaseModel):
+    kb_ids: list[uuid.UUID] = Field(..., min_length=1, description="知识库ID列表")
 
 
 # === Batch Update Document Metadata Schemas ===

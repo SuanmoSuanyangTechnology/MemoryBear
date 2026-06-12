@@ -1,9 +1,11 @@
 
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from typing import Optional
+
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.response_utils import success
 from app.db import get_db
@@ -18,6 +20,52 @@ from app.core.logging_config import get_api_logger
 
 # 获取API专用日志器
 api_logger = get_api_logger()
+
+
+def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[str]) -> None:
+    """异步派发 dashboard 相关的 Celery 任务（Redis 节流 + send_task）。
+
+    用 FastAPI BackgroundTasks 在响应返回之后调用，避免阻塞接口主链路。
+    冷启动场景下 Redis 连接池初始化 + 3 次 broker publish 可能消耗几百毫秒，
+    放到响应后执行可显著降低首响时间。
+
+    所有异常都吞掉，避免污染请求/响应生命周期。
+    """
+    if not end_user_ids:
+        return
+
+    try:
+        from app.celery_app import celery_app as _celery_app
+        from app.tasks import get_sync_redis_client
+
+        _redis = get_sync_redis_client()
+        if _redis is None:
+            return
+
+        # 按需初始化任务（节流 60s）
+        _throttle_key = f"dashboard:init_tasks:throttle:{workspace_id}"
+        if _redis.set(_throttle_key, "1", nx=True, ex=60):
+            _celery_app.send_task(
+                "app.tasks.init_implicit_emotions_for_users",
+                kwargs={"end_user_ids": end_user_ids},
+            )
+            _celery_app.send_task(
+                "app.tasks.init_interest_distribution_for_users",
+                kwargs={"end_user_ids": end_user_ids},
+            )
+
+        # 社区聚类补全任务（节流 60s）
+        _cluster_key = f"dashboard:cluster_task:throttle:{workspace_id}"
+        if _redis.set(_cluster_key, "1", nx=True, ex=60):
+            _celery_app.send_task(
+                "app.tasks.init_community_clustering_for_users",
+                kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
+            )
+    except Exception as _e:
+        api_logger.warning(
+            f"后台任务派发失败（不影响已返回响应）: {_e}",
+            exc_info=True,
+        )
 
 router = APIRouter(
     prefix="/dashboard",
@@ -50,6 +98,7 @@ def get_workspace_total_end_users(
 
 @router.get("/end_users", response_model=ApiResponse)
 def get_workspace_end_users(
+    background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
     page: int = Query(1, ge=1, description="页码，从1开始"),
@@ -171,34 +220,8 @@ def get_workspace_end_users(
         }
     }
 
-    # Redis 节流 + Celery 任务派发（同步内联，操作极轻量，无需开线程）
-    try:
-        from app.tasks import get_sync_redis_client
-        from app.celery_app import celery_app as _celery_app
-
-        _redis = get_sync_redis_client()
-        if _redis is not None:
-            # 按需初始化任务（节流 60s）
-            _throttle_key = f"dashboard:init_tasks:throttle:{workspace_id}"
-            if _redis.set(_throttle_key, "1", nx=True, ex=60):
-                _celery_app.send_task(
-                    "app.tasks.init_implicit_emotions_for_users",
-                    kwargs={"end_user_ids": end_user_ids},
-                )
-                _celery_app.send_task(
-                    "app.tasks.init_interest_distribution_for_users",
-                    kwargs={"end_user_ids": end_user_ids},
-                )
-
-            # 社区聚类补全任务（节流 60s）
-            _cluster_key = f"dashboard:cluster_task:throttle:{workspace_id}"
-            if _redis.set(_cluster_key, "1", nx=True, ex=60):
-                _celery_app.send_task(
-                    "app.tasks.init_community_clustering_for_users",
-                    kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
-                )
-    except Exception as _e:
-        api_logger.warning(f"后台任务派发失败（不影响已返回响应）: {_e}")
+    # Redis 节流 + Celery 任务派发：放到响应返回之后执行，避免阻塞接口
+    background_tasks.add_task(_dispatch_dashboard_async_jobs, workspace_id, end_user_ids)
 
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
     return success(data=result, msg="宿主列表获取成功")
