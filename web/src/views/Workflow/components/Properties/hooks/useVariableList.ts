@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:57:49
+ * @Last Modified time: 2026-06-11 18:12:02
  */
 /**
  * useVariableList Hook
@@ -128,8 +128,8 @@ export const triggerParams: Record<string, string> = {
  * @param {any} nodeData - Node data associated with the variable
  * @param {Partial<Suggestion>} [extra] - Additional suggestion properties
  */
-const buildFileChildren = (key: string, value: string, nodeData: any, parentLabel: string): Suggestion[] =>
-  fileSubVariable.map(sub => ({
+const buildFileChildren = (key: string, value: string, nodeData: any, parentLabel: string): Suggestion[] =>{
+  return fileSubVariable.map(sub => ({
     key: `${key}_${sub.filed}`,
     label: sub.label,
     type: 'variable',
@@ -137,7 +137,8 @@ const buildFileChildren = (key: string, value: string, nodeData: any, parentLabe
     value: `${value}.${sub.filed}`,
     nodeData,
     parentLabel,
-  }));
+  }))
+};
 
 const addVariable = (
   list: Suggestion[],
@@ -277,6 +278,45 @@ const processNodeVariables = (
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
+    case 'llm':
+      // Add structured output variables when structured_output is enabled
+      const structuredOutput = config.structured_output?.defaultValue ?? config.structured_output;
+      if (structuredOutput) {
+        const jsonOutputFields = config.json_output_fields?.defaultValue ?? config.json_output_fields ?? [];
+        
+        // Build children variables recursively, recursing all the way down
+        // for any field that has nested children
+        const buildChildren = (fields: any[], parentPath: string = ''): Suggestion[] => {
+          const children: Suggestion[] = [];
+          fields.forEach((field: any) => {
+            if (!field.name) return;
+            const fieldPath = parentPath ? `${parentPath}.${field.name}` : field.name;
+            const fieldKey = `${dataNodeId}_structured_output_${fieldPath.replace(/\./g, '_')}`;
+            const child: Suggestion = {
+              key: fieldKey,
+              label: field.name,
+              type: 'variable',
+              dataType: field.type,
+              value: `${dataNodeId}.structured_output.${fieldPath}`,
+              nodeData,
+            };
+            // Recursively build children for any field with nested children,
+            // recursing all the way down until no more children exist
+            if (field.children?.length) {
+              child.children = buildChildren(field.children, fieldPath);
+            }
+            children.push(child);
+          });
+          return children;
+        };
+        
+        const children = buildChildren(jsonOutputFields);
+        
+        // Add parent structured_output variable with children
+        addVariable(variableList, addedKeys, `${dataNodeId}_structured_output`, 'structured_output', 'object', `${dataNodeId}.structured_output`, nodeData, { children });
+      }
+      break;
+
     case 'trigger':
       // Add webhook trigger variables
       const triggerType = config.trigger_type?.defaultValue ?? config.trigger_type;
