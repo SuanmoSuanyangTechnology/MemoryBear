@@ -225,7 +225,7 @@ def _coerce_json_output_field(item: Any) -> JsonOutputFieldConfig | None:
 def normalize_json_output_fields(fields: Any) -> list[JsonOutputFieldConfig]:
     """Normalize configured JSON output fields.
 
-    The old list[str] format is accepted and converted to type=any.
+    The old list[str] format is accepted and converted to type=string.
     """
     if isinstance(fields, dict) and "defaultValue" in fields:
         fields = fields.get("defaultValue")
