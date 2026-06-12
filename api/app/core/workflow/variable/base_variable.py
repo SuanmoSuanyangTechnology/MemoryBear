@@ -106,7 +106,7 @@ def DEFAULT_VALUE(var_type: VariableType) -> Any:
         case VariableType.OBJECT:
             return {}
         case VariableType.FILE:
-            return {}
+            return None
         case VariableType.ARRAY_STRING:
             return []
         case VariableType.ARRAY_NUMBER:
