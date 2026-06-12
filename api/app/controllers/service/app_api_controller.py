@@ -12,7 +12,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.models.app_model import AppType
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
@@ -184,20 +184,23 @@ async def chat(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.agent_chat_stream(
-                        message=payload.message,
-                        conversation_id=conversation.id if conversation else None,
-                        user_id=end_user_id,  # 转换为字符串
-                        variables=payload.variables,
-                        web_search=web_search,
-                        config=agent_config,
-                        memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        workspace_id=workspace_id,
-                        files=payload.files  # 传递多模态文件
-                ):
-                    yield event
+                with get_db_context() as stream_db:
+                    from app.services.app_chat_service import AppChatService as _AppChatService
+                    _chat_service = _AppChatService(stream_db)
+                    async for event in _chat_service.agent_chat_stream(
+                            message=payload.message,
+                            conversation_id=conversation.id if conversation else None,
+                            user_id=end_user_id,
+                            variables=payload.variables,
+                            web_search=web_search,
+                            config=agent_config,
+                            memory=memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            workspace_id=workspace_id,
+                            files=payload.files
+                    ):
+                        yield event
 
             return StreamingResponse(
                 event_generator(),
@@ -229,19 +232,21 @@ async def chat(
         config = multi_agent_config_4_app_release(active_release)
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.multi_agent_chat_stream(
-
-                        message=payload.message,
-                        conversation_id=conversation.id,  # 使用已创建的会话 ID
-                        user_id=end_user_id,  # 转换为字符串
-                        variables=payload.variables,
-                        config=config,
-                        web_search=web_search,
-                        memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-                ):
-                    yield event
+                with get_db_context() as stream_db:
+                    from app.services.app_chat_service import AppChatService as _AppChatService
+                    _chat_service = _AppChatService(stream_db)
+                    async for event in _chat_service.multi_agent_chat_stream(
+                            message=payload.message,
+                            conversation_id=conversation.id,
+                            user_id=end_user_id,
+                            variables=payload.variables,
+                            config=config,
+                            web_search=web_search,
+                            memory=memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id
+                    ):
+                        yield event
 
             return StreamingResponse(
                 event_generator(),
@@ -272,28 +277,29 @@ async def chat(
         config = workflow_config_4_app_release(active_release)
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.workflow_chat_stream(
-                        message=payload.message,
-                        conversation_id=conversation.id,  # 使用已创建的会话 ID
-                        user_id=end_user_id,  # 转换为字符串
-                        variables=payload.variables,
-                        files=payload.files,
-                        config=config,
-                        web_search=web_search,
-                        memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        app_id=app.id,
-                        workspace_id=workspace_id,
-                        release_id=active_release.id,
-                        public=True
-                ):
-                    event_type = event.get("event", "message")
-                    event_data = event.get("data", {})
-
-                    # 转换为标准 SSE 格式（字符串）
-                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                    yield sse_message
+                with get_db_context() as stream_db:
+                    from app.services.app_chat_service import AppChatService as _AppChatService
+                    _chat_service = _AppChatService(stream_db)
+                    async for event in _chat_service.workflow_chat_stream(
+                            message=payload.message,
+                            conversation_id=conversation.id,
+                            user_id=end_user_id,
+                            variables=payload.variables,
+                            files=payload.files,
+                            config=config,
+                            web_search=web_search,
+                            memory=memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            app_id=app.id,
+                            workspace_id=workspace_id,
+                            release_id=active_release.id,
+                            public=True
+                    ):
+                        event_type = event.get("event", "message")
+                        event_data = event.get("data", {})
+                        sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                        yield sse_message
 
             return StreamingResponse(
                 event_generator(),

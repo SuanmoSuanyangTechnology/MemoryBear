@@ -1788,31 +1788,30 @@ def write_message_task(
             return {"status": "success", "processed": processed}
 
         # 完整写入模式（API write 路径，带 messages）
-        with get_db_context() as db:
-            logger.info(
-                f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
-                f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+        logger.info(
+            f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
+            f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
 
-            _default_dialog_at = to_iso_z(utcnow_naive())
-            for msg in message:
-                if isinstance(msg, dict) and not msg.get("dialog_at"):
-                    msg["dialog_at"] = _default_dialog_at
+        _default_dialog_at = to_iso_z(utcnow_naive())
+        for msg in message:
+            if isinstance(msg, dict) and not msg.get("dialog_at"):
+                msg["dialog_at"] = _default_dialog_at
 
-            service = MemoryAgentService()
-            result = await service.write_memory(
-                WriteMemoryRequest(
-                    end_user_id=end_user_id,
-                    messages=message,
-                    config_id=actual_config_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    language=language,
-                    conversation_id=conversation_id,
-                ),
-                db,
-            )
-            logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
-            return result
+        service = MemoryAgentService()
+        result = await service.write_memory(
+            WriteMemoryRequest(
+                end_user_id=end_user_id,
+                messages=message,
+                config_id=actual_config_id,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                language=language,
+                conversation_id=conversation_id,
+            ),
+            db=None,
+        )
+        logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
+        return result
 
     redis_client = get_sync_redis_client()
     lock = None
