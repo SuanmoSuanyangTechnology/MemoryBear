@@ -796,6 +796,7 @@ const Properties: FC<PropertiesProps> = ({
                                     key={key}
                                     parentName={selectedNode?.data?.type === 'agent' ? key : undefined}
                                     variableOptions={getFilteredVariableList(selectedNode?.data?.type)}
+                                    hideStructuredOutputConfig={!(key === 'model_id' && selectedNode?.data?.type === 'llm')}
                                   />
                                 )
                               }
