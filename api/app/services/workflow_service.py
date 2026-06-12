@@ -1413,16 +1413,15 @@ class WorkflowService:
             name = item.get("name")
             if not name:
                 continue
-            if item.get("default") is not None:
-                result[name] = self._build_typed_variable(
-                    item.get("default"),
-                    item.get("type"),
-                )
+            var_type = item.get("type")
+            default = item.get("default")
+            if var_type == VariableType.FILE.value:
+                value = default if isinstance(default, dict) and default.get("is_file") else None
+            elif var_type == VariableType.ARRAY_FILE.value:
+                value = [v for v in (default or []) if isinstance(v, dict) and v.get("is_file")] if default else []
             else:
-                result[name] = self._build_typed_variable(
-                    None,
-                    item.get("type"),
-                )
+                value = default
+            result[name] = self._build_typed_variable(value, var_type)
         return result
 
     def _build_default_debug_state_snapshot(
@@ -1882,9 +1881,15 @@ class WorkflowService:
                 self._unwrap_typed_variable(typed_value),
             )
             resolved_value = self._unwrap_typed_variable(typed_value)
-            if resolved_value is None:
-                if resolved_type == VariableType.FILE:
-                    continue
+            if resolved_type == VariableType.FILE:
+                if not isinstance(resolved_value, dict) or not resolved_value.get("is_file"):
+                    resolved_value = None
+            elif resolved_type == VariableType.ARRAY_FILE:
+                if not isinstance(resolved_value, list):
+                    resolved_value = []
+                else:
+                    resolved_value = [v for v in resolved_value if isinstance(v, dict) and v.get("is_file")]
+            elif resolved_value is None:
                 if resolved_type != VariableType.ANY:
                     resolved_value = DEFAULT_VALUE(resolved_type)
             await variable_pool.new(
