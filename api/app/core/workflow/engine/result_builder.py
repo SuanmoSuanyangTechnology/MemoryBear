@@ -88,6 +88,7 @@ class WorkflowResultBuilder:
             "citations": citations,
             "snapshot": snapshot,
             "error": result.get("error"),
+            "error_node": result.get("error_node"),
         }
         return payload
 
