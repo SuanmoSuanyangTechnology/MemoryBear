@@ -43,7 +43,7 @@ class ChunkBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<chunk>"]
+        parts = ["<chunk>\n"]
         fields = [
             ("content", self.record.get("content", "")),
         ]
@@ -66,7 +66,7 @@ class StatementBuiler(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<statement>"]
+        parts = ["<statement>\n"]
         fields = [
             ("content", self.record.get("statement", "")),
         ]
@@ -83,17 +83,26 @@ class EntityBuilder(BaseBuilder):
         return {
             "id": self.record.get("id"),
             "name": self.record.get("name"),
+            "aliases_name": self.record.get("aliases", []),
             "description": self.record.get("description"),
+            "description_summary": self.record.get("description_summary"),
+            "description_timeline": self.record.get("description_timeline"),
             "kw_score": self.record.get("kw_score", 0.0),
             "emb_score": self.record.get("embedding_score", 0.0)
         }
 
     @property
     def content(self) -> str:
-        parts = ["<entity>"]
+        parts = ["<entity>\n"]
         fields = [
             ("name", self.record.get("name", "")),
-            ("description", self.record.get("description", "")),
+            ("aliases-name", self.record.get("aliases", [])),
+            (
+                "description",
+                self.record.get("description", "") or "" +
+                self.record.get("description_summary", "") or "" +
+                self.record.get("description_timeline", "") or ""
+            ),
         ]
         for tag, value in fields:
             if value:
@@ -114,7 +123,7 @@ class SummaryBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<summary>"]
+        parts = ["<summary>\n"]
         fields = [
             ("content", self.record.get("content", "")),
         ]
@@ -145,7 +154,7 @@ class PerceptualBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<history-file-input>"]
+        parts = ["<history-file-input>\n"]
         fields = [
             ("file-name", self.record.get("file_name", "")),
             ("file-path", self.record.get("file_path", "")),
@@ -161,6 +170,10 @@ class PerceptualBuilder(BaseBuilder):
         parts.append("</history-file-input>\n")
         return "".join(parts)
 
+    @property
+    def score(self) -> float:
+        return min(super().score * 1.1, 1)
+
 
 class CommunityBuilder(BaseBuilder):
     @property
@@ -174,7 +187,7 @@ class CommunityBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<community>"]
+        parts = ["<community>\n"]
         fields = [
             ("content", self.record.get("content", "")),
         ]
@@ -204,7 +217,7 @@ class MetadataBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<user-info>"]
+        parts = ["<user-info>\n"]
         fields = [
             # ("description", self.record.get("description", "")),
             ("aliases-name", self.record.get("aliases", [])),
@@ -243,7 +256,7 @@ def data_builder_factory(node_type, data: dict) -> T:
 
 
 def build_relation_content(rel: RelationMemory) -> str:
-    parts = ["<relationship>"]
+    parts = ["<relationship>\n"]
     fields = [
         ("source", rel.source),
         ("relation", rel.relation),

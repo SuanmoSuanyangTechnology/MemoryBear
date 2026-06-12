@@ -45,13 +45,6 @@ def _resolve_context() -> tuple[uuid.UUID, str, str, str]:
     return ws_id, eu_id, cfg_id, st
 
 
-_SEARCH_MAP = {
-    "0": SearchStrategy.DEEP,
-    "1": SearchStrategy.NORMAL,
-    "2": SearchStrategy.QUICK,
-}
-
-
 @mcp.tool
 async def write_memory(
         message: str,
@@ -97,7 +90,7 @@ async def write_memory(
 @mcp.tool
 async def read_memory(
         message: str,
-        search_switch: str = "2",
+        search_switch: str = "quick",
 ) -> dict:
     """检索与当前上下文相关的历史记忆。
 
@@ -111,38 +104,37 @@ async def read_memory(
     Args:
         message: 检索查询，用自然语言描述想查找什么。越具体效果越好。
                  例如："用户对咖啡有什么偏好"、"上次讨论的旅行计划"。
-        search_switch: 检索深度。"0"=深度检索+交叉验证（适合复杂问题），
-                       "1"=深度检索（适合一般回忆），"2"=快速检索（默认，适合简单查询）。
+        search_switch: - "deep"=深度检索+交叉验证（适合复杂问题）
+                       - "normal"=深度检索（适合一般回忆）
+                       - "quick"=快速检索（默认，适合简单查询）
     """
     try:
         workspace_id, end_user_id, config_id, storage_type = _resolve_context()
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
 
-    strategy = _SEARCH_MAP.get(search_switch, SearchStrategy.DEEP)
+    strategy = SearchStrategy(search_switch)
 
-    with get_db_context() as db:
-        try:
-            service = MemoryService(
-                db=db,
-                config_id=config_id,
-                end_user_id=end_user_id,
-                workspace_id=str(workspace_id),
-                storage_type=storage_type,
-            )
-            result = await service.read(
-                query=message,
-                search_switch=strategy,
-            )
-            logger.info(f"MCP read_memory succeeded for end_user={end_user_id}")
-            return {
-                "success": True,
-                "content": result.content,
-                "count": result.count,
-            }
-        except Exception as e:
-            logger.error(f"MCP read_memory failed for end_user={end_user_id}: {e}")
-            return {"success": False, "error": str(e)}
+    try:
+        service = MemoryService(
+            config_id=config_id,
+            end_user_id=end_user_id,
+            workspace_id=str(workspace_id),
+            storage_type=storage_type,
+        )
+        result = await service.read(
+            query=message,
+            search_switch=strategy,
+        )
+        logger.info(f"MCP read_memory succeeded for end_user={end_user_id}")
+        return {
+            "success": True,
+            "content": result.content,
+            "count": result.count,
+        }
+    except Exception as e:
+        logger.error(f"MCP read_memory failed for end_user={end_user_id}: {e}")
+        return {"success": False, "error": str(e)}
 
 
 mcp_app = mcp.http_app(path="/memory", transport="streamable-http", stateless_http=True)

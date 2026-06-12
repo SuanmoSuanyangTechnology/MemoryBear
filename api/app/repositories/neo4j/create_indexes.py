@@ -1,291 +1,375 @@
+import hashlib
+import json
+import logging
+from typing import Any, Dict, List, Tuple
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+logger = logging.getLogger(__name__)
+
+# Fulltext 索引: (name, label, properties, analyzer)
+FULLTEXT_DEFS: List[Tuple[str, str, List[str], str]] = [
+    ("statementsFulltext", "Statement", ["statement"], "cjk"),
+    ("entitiesFulltext", "ExtractedEntity",
+     ["name", "description", "aliases", "description_summary", "description_timeline"], "cjk"),
+    ("chunksFulltext", "Chunk", ["content"], "cjk"),
+    ("summariesFulltext", "MemorySummary", ["content"], "cjk"),
+    ("communitiesFulltext", "Community", ["name", "summary"], "cjk"),
+    ("perceptualFulltext", "Perceptual", ["summary", "topic", "domain", "keywords"], "cjk"),
+    ("assistantPrunedFulltext", "AssistantPruned", ["text"], "cjk"),
+]
+
+# Vector 索引: (name, label, property, dimensions)
+VECTOR_DEFS: List[Tuple[str, str, str, int]] = [
+    ("statement_embedding_index", "Statement", "statement_embedding", 1024),
+    ("chunk_embedding_index", "Chunk", "chunk_embedding", 1024),
+    ("entity_embedding_index", "ExtractedEntity", "name_embedding", 1024),
+    ("summary_embedding_index", "MemorySummary", "summary_embedding", 1024),
+    ("community_summary_embedding_index", "Community", "summary_embedding", 1024),
+    ("dialogue_embedding_index", "Dialogue", "dialog_embedding", 1024),
+    ("perceptual_summary_embedding_index", "Perceptual", "summary_embedding", 1024),
+    ("assistant_pruned_embedding_index", "AssistantPruned", "text_embedding", 1024),
+]
+
+# Range 索引 (end_user_id): (name, label) — property 固定为 end_user_id
+RANGE_DEFS: List[Tuple[str, str]] = [
+    ("user_dialogue", "Dialogue"),
+    ("user_chunk", "Chunk"),
+    ("user_statement", "Statement"),
+    ("user_extracted_entity", "ExtractedEntity"),
+    ("user_memory_summary", "MemorySummary"),
+    ("user_perceptual", "Perceptual"),
+    ("user_assistant_original", "AssistantOriginal"),
+    ("user_assistant_pruned", "AssistantPruned"),
+    ("user_conversation", "Conversation"),
+]
+
+# Uniqueness 约束: (name, label, property)
+CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
+    ("dialog_id_unique", "Dialogue", "id"),
+    ("statement_id_unique", "Statement", "id"),
+    ("chunk_id_unique", "Chunk", "id"),
+    ("assistant_original_id_unique", "AssistantOriginal", "id"),
+    ("assistant_pruned_id_unique", "AssistantPruned", "id"),
+    ("conversation_id_unique", "Conversation", "id"),
+    ("entity_id_unique", "ExtractedEntity", "id"),
+    ("memory_summary_id_unique", "MemorySummary", "id"),
+    ("perceptual_id_unique", "Perceptual", "id"),
+    # Community 存在重复数据，暂不建唯一约束
+]
+
+
+def _fingerprint(data: Any) -> str:
+    """对任意可序列化对象生成短哈希指纹，用于快速比较。"""
+    raw = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+# 每个 category 的比较字段；用于 fingerprint + def_key 构建
+_DIFF_KEYS = {
+    "fulltext index": ("label", "properties", "analyzer"),
+    "vector index": ("label", "property", "dimensions", "similarity_function"),
+    "range index": ("label", "property"),
+    "constraint": ("label", "property"),
+}
+
+
+def _make_def_key(d: Dict[str, Any], diff_keys: Tuple[str, ...]) -> str:
+    """由比较字段构建结构键（用于按定义匹配，而非按名称）。
+
+    def_key 格式需与各 show_query 中 Cypher 侧拼接保持一致。
+    list 保持原始顺序，因为 Neo4j SHOW 返回的 properties 顺序与
+    CREATE 语句中 ON EACH [...] 的声明顺序一致。
+    """
+    parts = []
+    for k in diff_keys:
+        v = d.get(k)
+        if isinstance(v, list):
+            parts.append("[" + ",".join(v) + "]")
+        else:
+            parts.append(str(v))
+    return "|".join(parts)
+
+
+async def _smart_upsert(
+        connector: Neo4jConnector,
+        *,
+        desired: List[Dict[str, Any]],
+        show_query: str,
+        category: str,
+) -> Dict[str, int]:
+    """
+    通用 Smart Upsert：查询已有定义 → diff → 仅重建变化项。
+
+    匹配策略（def_key 优先，name 兜底）：
+
+      def_key 命中 ─┬─ name 相同 ─┬─ fp 相同 → 跳过
+                    │             └─ fp 不同 → DROP + CREATE（定义变化）
+                    └─ name 不同 ────────────→ DROP 旧名 + CREATE 新名（重命名）
+
+      def_key 未命中 ─┬─ name 命中 ──────────→ DROP 旧（同名不同定义） + CREATE
+                      └─ name 未命中 ────────→ CREATE（全新）
+
+    show_query 需 RETURN: name, def_key, + 各 category 的 diff 字段。
+    def_key 由 Cypher 侧拼接，格式需与 _make_def_key 一致。
+
+    Args:
+        connector: Neo4j 连接器
+        desired: 期望定义列表，每项含 name / drop_query / create_query + 比较字段
+        show_query: 查询已有索引/约束的 Cypher
+        category: 日志分类名
+    """
+    diff_keys = _DIFF_KEYS.get(category, ())
+
+    # 1. 查询已有定义
+    try:
+        existing_rows = await connector.execute_query(show_query)
+    except Exception as e:
+        logger.warning(f"[Index] 查询已有 {category} 失败: {e}，跳过")
+        return {"created": 0, "rebuilt": 0, "skipped": 0}
+
+    # 2. 建立双重映射：def_key → info  +  name → info
+    existing_by_def: Dict[str, Dict[str, str]] = {}
+    existing_by_name: Dict[str, Dict[str, str]] = {}
+    for row in (existing_rows or []):
+        row_def_key = row.get("def_key", "")
+        row_name = row.get("name", "")
+        if not row_def_key or not row_name:
+            continue
+        info = {
+            "name": row_name,
+            "def_key": row_def_key,
+            "fingerprint": _fingerprint({k: row.get(k) for k in diff_keys}),
+        }
+        existing_by_def[row_def_key] = info
+        existing_by_name[row_name] = info
+
+    # 3. Diff & 执行
+    created = rebuilt = skipped = 0
+
+    for d in desired:
+        name = d["name"]
+        def_key = _make_def_key(d, diff_keys)
+        desired_fp = _fingerprint({k: d[k] for k in diff_keys})
+        existing = existing_by_def.get(def_key)
+        same_name = existing_by_name.get(name)
+
+        if existing is not None:
+            # ── def_key 命中 ──
+            if existing["name"] != name:
+                # 结构相同、名称不同 → 重命名
+                try:
+                    drop_old = d["drop_query"].replace(name, existing["name"])
+                    await connector.execute_query(drop_old)
+                    await connector.execute_query(d["create_query"])
+                    logger.info(
+                        f"[Index] 重命名 {category}: {existing['name']} → {name}"
+                    )
+                    rebuilt += 1
+                except Exception as e:
+                    logger.error(f"[Index] 重命名 {category} 失败 {existing['name']} → {name}: {e}")
+            elif existing["fingerprint"] != desired_fp:
+                # 结构相同、名称相同、定义变化 → 重建
+                try:
+                    await connector.execute_query(d["drop_query"])
+                    await connector.execute_query(d["create_query"])
+                    logger.info(
+                        f"[Index] 重建 {category}: {name} "
+                        f"(fp: {existing['fingerprint'][:8]} → {desired_fp[:8]})"
+                    )
+                    rebuilt += 1
+                except Exception as e:
+                    logger.error(f"[Index] 重建 {category} 失败 {name}: {e}")
+            else:
+                skipped += 1
+        elif same_name is not None:
+            # ── def_key 未命中，但 name 命中 → 同名不同定义，删旧建新 ──
+            try:
+                drop_old = d["drop_query"].replace(name, same_name["name"])
+                await connector.execute_query(drop_old)
+                await connector.execute_query(d["create_query"])
+                logger.info(
+                    f"[Index] 重建 {category}（同名不同定义）: {name} "
+                    f"(def: {same_name['def_key'][:40]}... → {def_key[:40]}...)"
+                )
+                rebuilt += 1
+            except Exception as e:
+                logger.error(f"[Index] 重建 {category} 失败 {name}: {e}")
+        else:
+            # ── def_key 和 name 都未命中 → 全新创建 ──
+            try:
+                await connector.execute_query(d["create_query"])
+                logger.info(f"[Index] 创建 {category}: {name}")
+                created += 1
+            except Exception as e:
+                logger.error(f"[Index] 创建 {category} 失败 {name}: {e}")
+
+    logger.info(
+        f"[Index] {category} 完成: created={created}, rebuilt={rebuilt}, skipped={skipped}"
+    )
+    return {"created": created, "rebuilt": rebuilt, "skipped": skipped}
 
 
 async def create_fulltext_indexes():
-    """Create full-text indexes for keyword search with BM25 scoring."""
+    """Smart Upsert fulltext indexes."""
     connector = Neo4jConnector()
     try:
+        desired: List[Dict[str, Any]] = []
+        for name, label, props, analyzer in FULLTEXT_DEFS:
+            props_cypher = ", ".join(f"n.{p}" for p in props)
+            desired.append({
+                "name": name,
+                "label": label,
+                "properties": props,  # 原始顺序，与 SHOW 返回顺序一致
+                "analyzer": analyzer,
+                "drop_query": f"DROP INDEX {name}",
+                "create_query": (
+                    f"CREATE FULLTEXT INDEX {name} "
+                    f"FOR (n:{label}) ON EACH [{props_cypher}] "
+                    f"OPTIONS {{ indexConfig: {{ `fulltext.analyzer`: '{analyzer}' }} }}"
+                ),
+            })
 
-        # 创建 Statements 索引
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX statementsFulltext IF NOT EXISTS FOR (s:Statement) ON EACH [s.statement]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-
-        # # 创建 Dialogues 索引
-        # await connector.execute_query("""
-        #     CREATE FULLTEXT INDEX dialoguesFulltext IF NOT EXISTS FOR (d:Dialogue) ON EACH [d.content]
-        #     OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        # """)
-        # 创建 Entities 索引 (name + description + aliases)
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX entitiesFulltext IF NOT EXISTS FOR (e:ExtractedEntity) ON EACH [e.name, e.description, e.aliases]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-
-        # 创建 Chunks 索引
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX chunksFulltext IF NOT EXISTS FOR (c:Chunk) ON EACH [c.content]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-
-        # 创建 MemorySummary 索引
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX summariesFulltext IF NOT EXISTS FOR (m:MemorySummary) ON EACH [m.content]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-        # 创建 Community 索引
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX communitiesFulltext IF NOT EXISTS FOR (c:Community) ON EACH [c.name, c.summary]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-
-        # 创建 Perceptual 感知记忆索引
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX perceptualFulltext IF NOT EXISTS FOR (p:Perceptual) ON EACH [p.summary, p.topic, p.domain]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-
-        # 创建 AssistantPruned 剪枝文本全文索引
-        await connector.execute_query("""
-            CREATE FULLTEXT INDEX assistantPrunedFulltext IF NOT EXISTS FOR (p:AssistantPruned) ON EACH [p.text]
-            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
-        """)
-
+        await _smart_upsert(
+            connector,
+            desired=desired,
+            show_query="""
+                SHOW FULLTEXT INDEXES
+                YIELD name, labelsOrTypes, properties, options
+                RETURN name,
+                       labelsOrTypes[0] AS label,
+                       properties,
+                       coalesce(options.indexConfig.`fulltext.analyzer`, '')
+                         AS analyzer,
+                       labelsOrTypes[0] + '|[' +
+                         reduce(s='', p IN properties | s + CASE WHEN s='' THEN '' ELSE ',' END + p) +
+                         ']|' +
+                         coalesce(options.indexConfig.`fulltext.analyzer`, '')
+                         AS def_key
+            """,
+            category="fulltext index",
+        )
     finally:
         await connector.close()
 
 
 async def create_vector_indexes():
-    """Create vector indexes for fast embedding similarity search.
-    
-    Vector indexes provide 10-100x faster similarity search compared to manual cosine calculation.
-    This is critical for performance - reduces embedding search from ~1.4s to ~0.05-0.2s!
-    """
+    """Smart Upsert vector indexes."""
     connector = Neo4jConnector()
     try:
+        desired: List[Dict[str, Any]] = []
+        for name, label, prop, dims in VECTOR_DEFS:
+            desired.append({
+                "name": name,
+                "label": label,
+                "property": prop,
+                "dimensions": dims,
+                "similarity_function": "cosine",
+                "drop_query": f"DROP INDEX {name}",
+                "create_query": (
+                    f"CREATE VECTOR INDEX {name} "
+                    f"FOR (n:{label}) ON n.{prop} "
+                    f"OPTIONS {{indexConfig: {{"
+                    f"  `vector.dimensions`: {dims},"
+                    f"  `vector.similarity_function`: 'cosine'"
+                    f"}}}}"
+                ),
+            })
 
-        # Statement embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX statement_embedding_index IF NOT EXISTS
-            FOR (s:Statement)
-            ON s.statement_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # Chunk embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX chunk_embedding_index IF NOT EXISTS
-            FOR (c:Chunk)
-            ON c.chunk_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # Entity name embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX entity_embedding_index IF NOT EXISTS
-            FOR (e:ExtractedEntity)
-            ON e.name_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # Memory summary embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX summary_embedding_index IF NOT EXISTS
-            FOR (m:MemorySummary)
-            ON m.summary_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # Community summary embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX community_summary_embedding_index IF NOT EXISTS
-            FOR (c:Community)
-            ON c.summary_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # Dialogue embedding index (optional)
-        await connector.execute_query("""
-            CREATE VECTOR INDEX dialogue_embedding_index IF NOT EXISTS
-            FOR (d:Dialogue)
-            ON d.dialog_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # Perceptual summary embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX perceptual_summary_embedding_index IF NOT EXISTS
-            FOR (p:Perceptual)
-            ON p.summary_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-
-        # AssistantPruned text embedding index (optional, for semantic search on pruned hints)
-        await connector.execute_query("""
-            CREATE VECTOR INDEX assistant_pruned_embedding_index IF NOT EXISTS
-            FOR (p:AssistantPruned)
-            ON p.text_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
+        await _smart_upsert(
+            connector,
+            desired=desired,
+            show_query="""
+                SHOW VECTOR INDEXES
+                YIELD name, labelsOrTypes, properties, options
+                RETURN name,
+                       labelsOrTypes[0] AS label,
+                       properties[0] AS property,
+                       options.indexConfig.`vector.dimensions` AS dimensions,
+                       toLower(options.indexConfig.`vector.similarity_function`)
+                         AS similarity_function,
+                       labelsOrTypes[0] + '|' + properties[0] + '|' +
+                         toString(options.indexConfig.`vector.dimensions`) + '|' +
+                         toLower(options.indexConfig.`vector.similarity_function`)
+                         AS def_key
+            """,
+            category="vector index",
+        )
     finally:
         await connector.close()
 
 
 async def create_end_user_id_indexes():
-    """为受 graph_data 接口查询的 8 类节点建立 ``end_user_id`` 范围索引。
-
-    所有 graph_data 系列查询（Q1 / Q4）都按 ``n.end_user_id = $end_user_id AND
-    labels(n)[0] = $label`` 过滤；如果不建索引，对每个类型都要全表扫描，
-    在大库下会成为性能瓶颈。
-
-    本函数对全部 8 类受支持节点统一建立单字段范围索引（``IF NOT EXISTS``
-    保证幂等）；首次创建时 Neo4j 会异步在后台填充索引，不阻塞在线查询。
-    """
+    """Smart Upsert range indexes on end_user_id."""
     connector = Neo4jConnector()
     try:
-        for label, idx_name in [
-            ("Dialogue",          "user_dialogue"),
-            ("Chunk",             "user_chunk"),
-            ("Statement",         "user_statement"),
-            ("ExtractedEntity",   "user_extracted_entity"),
-            ("MemorySummary",     "user_memory_summary"),
-            ("Perceptual",        "user_perceptual"),
-            ("AssistantOriginal", "user_assistant_original"),
-            ("AssistantPruned",   "user_assistant_pruned"),
-            ("Conversation",      "user_conversation"),
-        ]:
-            await connector.execute_query(
-                f"""
-                CREATE INDEX {idx_name} IF NOT EXISTS
-                FOR (n:{label}) ON (n.end_user_id);
-                """
-            )
+        desired: List[Dict[str, Any]] = []
+        for name, label in RANGE_DEFS:
+            desired.append({
+                "name": name,
+                "label": label,
+                "property": "end_user_id",
+                "drop_query": f"DROP INDEX {name}",
+                "create_query": (
+                    f"CREATE INDEX {name} FOR (n:{label}) ON (n.end_user_id)"
+                ),
+            })
+
+        await _smart_upsert(
+            connector,
+            desired=desired,
+            show_query="""
+                SHOW INDEXES
+                YIELD name, labelsOrTypes, properties, type
+                WHERE type = 'RANGE'
+                  AND any(prop IN properties WHERE prop = 'end_user_id')
+                RETURN name,
+                       labelsOrTypes[0] AS label,
+                       properties[0] AS property,
+                       labelsOrTypes[0] + '|' + properties[0] AS def_key
+            """,
+            category="range index",
+        )
     finally:
         await connector.close()
 
 
 async def create_user_indexes():
-    """Deprecated: 历史保留入口；新代码请直接调用 :func:`create_end_user_id_indexes`。
-
-    早期版本只建了 ``Perceptual.end_user_id`` 一条；本函数现已并入到
-    :func:`create_end_user_id_indexes`，统一覆盖 8 类受支持节点。保留本函数
-    名是为了避免破坏外部调用方（如运维脚本）。
-    """
+    """Deprecated: 历史保留入口；新代码请直接调用 :func:`create_end_user_id_indexes`。"""
     await create_end_user_id_indexes()
 
 
 async def create_unique_constraints():
-    """Create uniqueness constraints for core node identifiers.
-    Ensures concurrent MERGE operations remain safe and prevents duplicates.
-    """
+    """Smart Upsert uniqueness constraints."""
     connector = Neo4jConnector()
     try:
-        # Dialogue.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT dialog_id_unique IF NOT EXISTS
-            FOR (d:Dialogue) REQUIRE d.id IS UNIQUE
-            """
+        desired: List[Dict[str, Any]] = []
+        for name, label, prop in CONSTRAINT_DEFS:
+            desired.append({
+                "name": name,
+                "label": label,
+                "property": prop,
+                "drop_query": f"DROP CONSTRAINT {name}",
+                "create_query": (
+                    f"CREATE CONSTRAINT {name} "
+                    f"FOR (n:{label}) REQUIRE n.{prop} IS UNIQUE"
+                ),
+            })
+
+        await _smart_upsert(
+            connector,
+            desired=desired,
+            show_query="""
+                SHOW CONSTRAINTS
+                YIELD name, labelsOrTypes, properties, type
+                WHERE type = 'UNIQUENESS'
+                RETURN name,
+                       labelsOrTypes[0] AS label,
+                       properties[0] AS property,
+                       labelsOrTypes[0] + '|' + properties[0] AS def_key
+            """,
+            category="constraint",
         )
-
-        # Statement.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT statement_id_unique IF NOT EXISTS
-            FOR (s:Statement) REQUIRE s.id IS UNIQUE
-            """
-        )
-
-        # Chunk.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS
-            FOR (c:Chunk) REQUIRE c.id IS UNIQUE
-            """
-        )
-
-        # AssistantOriginal.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT assistant_original_id_unique IF NOT EXISTS
-            FOR (o:AssistantOriginal) REQUIRE o.id IS UNIQUE
-            """
-        )
-
-        # AssistantPruned.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT assistant_pruned_id_unique IF NOT EXISTS
-            FOR (p:AssistantPruned) REQUIRE p.id IS UNIQUE
-            """
-        )
-
-        # Conversation.id unique（会话级中心节点，MERGE 幂等的关键约束）
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT conversation_id_unique IF NOT EXISTS
-            FOR (c:Conversation) REQUIRE c.id IS UNIQUE
-            """
-        )
-
-        # ExtractedEntity.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT entity_id_unique IF NOT EXISTS
-            FOR (e:ExtractedEntity) REQUIRE e.id IS UNIQUE
-            """
-        )
-
-        # MemorySummary.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT memory_summary_id_unique IF NOT EXISTS
-            FOR (m:MemorySummary) REQUIRE m.id IS UNIQUE
-            """
-        )
-
-        # FIXME: 存在重复数据
-        # Community.community_id unique（MERGE 以此字段为查找键，而非 id）
-        # await connector.execute_query(
-        #     """
-        #     CREATE CONSTRAINT community_id_unique IF NOT EXISTS
-        #     FOR (c:Community) REQUIRE c.community_id IS UNIQUE
-        #     """
-        # )
-
-        # Perceptual.id unique
-        await connector.execute_query(
-            """
-            CREATE CONSTRAINT perceptual_id_unique IF NOT EXISTS
-            FOR (p:Perceptual) REQUIRE p.id IS UNIQUE
-            """
-        )
-
     finally:
         await connector.close()
 

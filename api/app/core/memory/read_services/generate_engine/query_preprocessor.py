@@ -21,21 +21,25 @@ class QueryPreprocessor:
         return text
 
     @staticmethod
-    async def split(query: str, history: list, llm_client: RedBearLLM):
+    async def split(query: str, history: list, memory_l0_str: str, llm_client: RedBearLLM) -> tuple[list, str]:
         system_prompt = prompt_manager.render(
             name="problem_split",
             datetime=utcnow_naive().strftime("%Y-%m-%d"),
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"<history>{history}</history><query>{query}</query>"},
+            {"role": "user", "content": f"<history>{history}</history>"
+                                        f"<memory>{memory_l0_str}</memory>"
+                                        f"<query>{query}</query>"},
         ]
         try:
             sub_queries = await llm_client.ainvoke(messages, config={
                 "callbacks": []
             }) | StructResponse(mode='json')
             queries = sub_queries["questions"]
+            answer = sub_queries.get("answer") or ""
         except Exception as e:
             logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")
             queries = [query]
-        return queries
+            answer = ""
+        return queries, answer

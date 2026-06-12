@@ -1637,9 +1637,12 @@ MATCH (e:ExtractedEntity)
 WHERE e.id IN $ids
 RETURN e.id AS id,
        e.name AS name,
+       COALESCE(e.aliases, []) AS aliases,
        e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
        e.description AS description,
+       e.description_summary AS description_summary,
+       e.description_timeline AS description_timeline,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
@@ -1721,8 +1724,11 @@ CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, s
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
 RETURN e.id AS id,
        e.name AS name,
+       COALESCE(e.aliases, []) AS aliases,
        e.entity_type AS entity_type,
        e.description AS description,
+       e.description_summary AS description_summary,
+       e.description_timeline AS description_timeline,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        score
 ORDER BY score DESC
