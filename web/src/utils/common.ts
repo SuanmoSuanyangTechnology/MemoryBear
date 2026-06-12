@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:34:23 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 16:34:23 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-06-11 11:41:31
  */
 /**
  * Common Utility Functions
@@ -45,4 +45,23 @@ export const randomString = (length: number = 12, isHasSpecialChars: boolean = t
     
     /** Shuffle the string characters */
     return str.split('').sort(() => Math.random() - 0.5).join('');
+}
+
+export const updateMetaIcon = (icon: string) => {
+  let link = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
   }
+  link.href = icon;
+
+
+  let meta = document.querySelector("meta[property='og:image']") as HTMLMetaElement;
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'og:image';
+    document.head.appendChild(meta);
+  }
+  meta.content = icon;
+}

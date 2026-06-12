@@ -15,23 +15,7 @@ interface QuickActionsProps {
 }
 
 const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
-  const { t, i18n } = useTranslation();
-
-  // 根据当前语言环境打开帮助中心
-  const openHelpCenter = () => {
-    const currentLang = i18n.language;
-    const lang = currentLang === 'zh' ? 'zh' : 'en';
-    const helpUrl = `https://docs.redbearai.com/s/${lang}-memorybear`;
-    
-    // 创建隐藏的 a 标签来避免弹窗拦截
-    const link = document.createElement('a');
-    link.href = helpUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  const { t } = useTranslation();
 
   const quickActions: QuickAction[] = [
     {
@@ -52,12 +36,6 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
       title: t('quickActions.userManagement'),
       onClick: () => onNavigate?.('/user-management')
     },
-    {
-      key: 'help-center',
-      iconClass: "rb:bg-[url('@/assets/images/index/help_center.svg')]",
-      title: t('quickActions.helpCenter'),
-      onClick: openHelpCenter
-    }
   ];
 
   return (

@@ -2,6 +2,7 @@ import json
 import os
 import csv
 import io
+import time
 from typing import Any, Optional
 import uuid
 
@@ -10,28 +11,21 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
-from app.core.rag.common.settings import kg_retriever
-from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.cv_model import QWenCV
-from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-from app.core.rag.metadata.filter_engine import MetadataFilterEngine, FilterCondition, FilterGroup
-from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
-from app.models import knowledge_model, knowledgeshare_model
 from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import chunk_schema
+from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.schemas.response_schema import ApiResponse
-from app.services import knowledge_service, document_service, file_service, knowledgeshare_service
+from app.services import knowledge_service, document_service, file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
-from app.services.model_service import ModelApiKeyService
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied, KnowledgeRetrievalService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
 
@@ -948,215 +942,18 @@ async def retrieve_chunks(
     """
     api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
 
-    # Resolve ex_ids to kb_ids and merge (union)
-    kb_ids = list(retrieve_data.kb_ids)
-    if retrieve_data.ex_ids:
-        resolved_ids = knowledge_service.get_knowledge_ids_by_external_ids(
+    try:
+        request = KnowledgeRetrievalRequest(**retrieve_data.model_dump(exclude_none=True))
+        api_logger.info(f"retrieve chunk: request={request}")
+        result = KnowledgeRetrievalService.retrieve(
             db=db,
-            external_ids=retrieve_data.ex_ids,
-            workspace_id=current_user.current_workspace_id,
-            current_user=current_user
+            request=request,
+            current_user=current_user,
         )
-        kb_ids = list(set(kb_ids + resolved_ids))
-
-    filters = [
-        knowledge_model.Knowledge.id.in_(kb_ids),
-        knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
-        knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
-        knowledge_model.Knowledge.chunk_num > 0,
-        knowledge_model.Knowledge.status == 1
-    ]
-    private_items = knowledge_service.get_chunked_knowledgeids(
-        db=db,
-        filters=filters,
-        current_user=current_user
-    )
-    private_kb_ids = [item[0] for item in private_items]
-    private_workspace_ids = [item[1] for item in private_items]
-    filters = [
-        knowledge_model.Knowledge.id.in_(kb_ids),
-        knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
-        knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
-        knowledge_model.Knowledge.chunk_num > 0,
-        knowledge_model.Knowledge.status == 1
-    ]
-    items = knowledge_service.get_chunked_knowledgeids(
-        db=db,
-        filters=filters,
-        current_user=current_user
-    )
-    if items:
-        filters = [
-            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids),
-            knowledgeshare_model.KnowledgeShare.target_workspace_id == current_user.current_workspace_id,
-        ]
-        share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
-            db=db,
-            filters=filters,
-            current_user=current_user
-        )
-        share_kb_ids = [item[0] for item in share_items]
-        share_workspace_ids = [item[1] for item in share_items]
-        private_kb_ids.extend(share_kb_ids)
-        private_workspace_ids.extend(share_workspace_ids)
-    if not private_kb_ids:
-        return success(data=[], msg="retrieval successful")
-    kb_id = private_kb_ids[0]
-    uuid_strs = [f"Vector_index_{kb_id}_Node".lower() for kb_id in private_kb_ids]
-    indices = ",".join(uuid_strs)
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
-    if not db_knowledge:
+    except KnowledgeRetrievalAccessDenied as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="The knowledge base does not exist or access is denied"
-        )
+            detail=str(exc),
+        ) from exc
 
-    # === 元数据过滤 ===
-    document_ids_filter = None
-    if retrieve_data.metadata_filters:
-        # 1) auto 模式拒绝
-        if retrieve_data.metadata_filter_mode.value != "manual":
-            raise BusinessException(
-                "metadata_filter_mode 暂仅支持 'manual'",
-                code=BizCode.INVALID_PARAMETER,
-            )
-
-        # 2) 收集所有库的字段定义
-        all_metadata_defs: dict[uuid.UUID, dict[str, dict]] = {}
-        for pk_kb_id in private_kb_ids:
-            all_metadata_defs[pk_kb_id] = KnowledgeMetadataService.get_metadata_defs_for_filtering(db, pk_kb_id)
-
-        # 3) 找出公共字段（所有库都有 + 类型一致）
-        # 先取所有字段名的交集
-        all_field_names = set()
-        for defs in all_metadata_defs.values():
-            all_field_names.update(defs.keys())
-
-        common_fields = set()
-        for field_name in all_field_names:
-            field_types = set()
-            all_have = True
-            for defs in all_metadata_defs.values():
-                if field_name not in defs:
-                    all_have = False
-                    break
-                field_types.add(defs[field_name]["type"])
-            if all_have and len(field_types) == 1:
-                common_fields.add(field_name)
-
-        # 4) 过滤条件中只保留公共字段，非公共字段忽略+打日志
-        filtered_groups = []
-        for group in retrieve_data.metadata_filters:
-            filtered_conditions = []
-            for cond in group.conditions:
-                if cond.field in common_fields:
-                    filtered_conditions.append(cond)
-                else:
-                    api_logger.warning(
-                        f"[MetadataFilter] 字段 '{cond.field}' 不是公共字段（不是所有知识库都有或类型不一致），已忽略"
-                    )
-            if filtered_conditions:
-                filtered_groups.append((group.logic, filtered_conditions))
-
-        if not filtered_groups:
-            api_logger.warning("[MetadataFilter] 过滤条件中无公共字段，跳过元数据过滤")
-        else:
-            all_document_ids = set()
-            for pk_kb_id in private_kb_ids:
-                metadata_defs = all_metadata_defs[pk_kb_id]
-
-                engine = MetadataFilterEngine(db)
-                filter_groups = [
-                    FilterGroup(
-                        conditions=[
-                            FilterCondition(field=c.field, operator=c.operator, value=c.value)
-                            for c in conditions
-                        ],
-                        logic=logic,
-                    )
-                    for logic, conditions in filtered_groups
-                ]
-
-                api_logger.info(
-                    f"[MetadataFilter] executing filter for kb_id={pk_kb_id}, "
-                    f"conditions={[{'field': c.field, 'op': c.operator, 'val': c.value} for g in filter_groups for c in g.conditions]}"
-                )
-                document_ids = engine.execute(
-                    knowledge_id=pk_kb_id,
-                    filter_groups=filter_groups,
-                    metadata_defs=metadata_defs,
-                )
-                api_logger.info(
-                    f"[MetadataFilter] kb_id={pk_kb_id}, "
-                    f"filtered_count={len(document_ids)}, "
-                    f"filtered_document_ids={sorted(str(d) for d in document_ids)}"
-                )
-                all_document_ids.update(document_ids)
-
-            document_ids_filter = [str(d) for d in all_document_ids]
-            api_logger.info(f"[MetadataFilter] final filter list: {document_ids_filter}")
-
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-
-    # default value is topk
-    topn = 100
-    # topn = retrieve_data.top_k
-
-    # Helper: exclude documents in document_ids_filter (blacklist)
-    exclude_ids = set(document_ids_filter) if document_ids_filter else set()
-    def _exclude_filtered(docs):
-        if not exclude_ids:
-            return docs
-        filtered = [d for d in docs if d.metadata.get("document_id") not in exclude_ids]
-        api_logger.info(f"[MetadataFilter] post-filter: total={len(docs)}, excluded={len(docs) - len(filtered)}, remaining={len(filtered)}")
-        return filtered
-
-    # 1 participle search, 2 semantic search, 3 hybrid search
-    match retrieve_data.retrieve_type:
-        case chunk_schema.RetrieveType.PARTICIPLE:
-            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
-            rs = _exclude_filtered(rs)
-            return success(data=jsonable_encoder(rs), msg="retrieval successful")
-        case chunk_schema.RetrieveType.SEMANTIC:
-            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
-            rs = _exclude_filtered(rs)
-            return success(data=jsonable_encoder(rs), msg="retrieval successful")
-        case _:
-            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
-            api_logger.debug(f"[HybridSearch] vector search result: {json.dumps(jsonable_encoder(rs1), ensure_ascii=False)}")
-            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
-            api_logger.debug(f"[HybridSearch] text search result: {json.dumps(jsonable_encoder(rs2), ensure_ascii=False)}")
-            # Efficient deduplication
-            seen_ids = set()
-            unique_rs = []
-            for doc in rs1 + rs2:
-                if doc.metadata["doc_id"] not in seen_ids:
-                    seen_ids.add(doc.metadata["doc_id"])
-                    unique_rs.append(doc)
-            api_logger.debug(f"[HybridSearch] unique result: {json.dumps(jsonable_encoder(unique_rs), ensure_ascii=False)}")
-            rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
-            api_logger.debug(f"[HybridSearch] reranked result: {json.dumps(jsonable_encoder(rs), ensure_ascii=False)}")
-            rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else (retrieve_data.vector_similarity_weight if retrieve_data.vector_similarity_weight is not None else 0.1)
-            rs = [doc for doc in rs if doc.metadata.get("score", 0) > rerank_threshold]
-            api_logger.debug(f"[HybridSearch] rerank_threshold result: {json.dumps(jsonable_encoder(rs), ensure_ascii=False)}")
-            if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
-                kb_ids = [str(kb_id) for kb_id in private_kb_ids]
-                workspace_ids = [str(workspace_id) for workspace_id in private_workspace_ids]
-                llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id)
-                emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id)
-                # Prepare to configure chat_mdl、embedding_model、vision_model information
-                chat_model = Base(
-                    key=llm_key.api_key,
-                    model_name=llm_key.model_name,
-                    base_url=llm_key.api_base
-                )
-                embedding_model = OpenAIEmbed(
-                    key=emb_key.api_key,
-                    model_name=emb_key.model_name,
-                    base_url=emb_key.api_base
-                )
-                doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
-                if doc and doc['page_content'].strip() != '':
-                    rs.insert(0, doc)
-            rs = _exclude_filtered(rs)
-            return success(data=jsonable_encoder(rs), msg="retrieval successful")
+    return success(data=jsonable_encoder(result.chunks), msg="retrieval successful")

@@ -23,7 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App, Flex, Button } from 'antd'
+import { App, Flex, Button, type ButtonProps } from 'antd'
 import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
@@ -302,7 +302,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           actions?: {
             id: string;
             label: string;
-            variant: string;
+            variant: ButtonProps['type'];
           }[];
           timeout_at?: number;
           agent_log?: Record<string, any>;
@@ -536,13 +536,31 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                 const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
                 if (filterIndex > -1) {
                   const lastAgentLog = newSubContent[filterIndex].agent_log || {}
+                  const lastIterations: {
+                    index: number;
+                    [key: string]: any;
+                  }[] = lastAgentLog?.iterations || []
+                  const newIterations: {
+                    index: number;
+                    [key: string]: any;
+                  }[] = agent_log?.iterations || []
+
+                  const indexMap = new Map<number, typeof lastIterations[0]>()
+                  
+                  lastIterations.forEach(item => {
+                    indexMap.set(item.index, item)
+                  })
+                  
+                  newIterations.forEach(item => {
+                    indexMap.set(item.index, item)
+                  })
+                  
+                  const mergedIterations = Array.from(indexMap.values()).sort((a, b) => a.index - b.index)
+
                   newSubContent[filterIndex].agent_log = {
                     ...lastAgentLog,
                     meta: agent_log?.meta || {},
-                    iterations: [
-                      ...(lastAgentLog?.iterations || []),
-                      ...agent_log?.iterations || []
-                    ],
+                    iterations: mergedIterations,
                   }
                 }
               }

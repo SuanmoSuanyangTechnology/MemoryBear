@@ -198,6 +198,121 @@ class AgentRunService:
         """
         self.db = db
 
+    def _build_debug_id(self) -> str:
+        """生成可用于日志和 SSE 对齐的错误追踪 ID。"""
+        return f"err_{uuid.uuid4().hex[:12]}"
+
+    def _extract_exception_message(self, error: Exception) -> str:
+        """优先从异常对象结构中提取更干净的错误消息。"""
+        body = getattr(error, "body", None)
+        if isinstance(body, dict):
+            error_obj = body.get("error")
+            if isinstance(error_obj, dict):
+                message = error_obj.get("message")
+                if isinstance(message, str) and message.strip():
+                    return message
+            message = body.get("message")
+            if isinstance(message, str) and message.strip():
+                return message
+
+        message = getattr(error, "message", None)
+        if isinstance(message, str) and message.strip():
+            return message
+
+        return str(error)
+
+    def _build_compact_error(self, error: Exception, *, debug_id: Optional[str] = None) -> Dict[str, Any]:
+        """构建精简但足够定位问题的结构化错误信息。"""
+        compact_error: Dict[str, Any] = {
+            "message": self._extract_exception_message(error),
+            "type": type(error).__name__,
+            "debug_id": debug_id or self._build_debug_id(),
+        }
+
+        def apply_exception_fields(target: Dict[str, Any], source: Exception) -> None:
+            for attr_name, target_key in (
+                ("status_code", "status"),
+                ("request_id", "request_id"),
+                ("code", "code"),
+                ("param", "param"),
+                ("type", "type"),
+            ):
+                attr_value = getattr(source, attr_name, None)
+                if attr_value is not None:
+                    target[target_key] = attr_value
+
+        if isinstance(error, BusinessException):
+            compact_error["message"] = error.message
+            compact_error["code"] = int(error.code) if error.code is not None else int(BizCode.BAD_REQUEST)
+            if error.context:
+                compact_error["context"] = error.context
+
+            if error.cause:
+                cause_message = self._extract_exception_message(error.cause)
+                if cause_message:
+                    compact_error["message"] = cause_message
+                apply_exception_fields(compact_error, error.cause)
+            return compact_error
+
+        apply_exception_fields(compact_error, error)
+
+        return compact_error
+
+    def _build_model_error_event_data(
+            self,
+            *,
+            model_index: int,
+            model_config_id: str,
+            label: str,
+            conversation_id: Optional[str],
+            error: Any,
+            timestamp: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """统一构建 compare 场景下的 model_error 事件。"""
+        return {
+            "model_index": model_index,
+            "model_config_id": model_config_id,
+            "label": label,
+            "conversation_id": conversation_id,
+            "error": error,
+            "timestamp": timestamp if timestamp is not None else time.time()
+        }
+
+    def _build_model_end_event_data(
+            self,
+            *,
+            model_index: int,
+            model_config_id: str,
+            label: str,
+            conversation_id: Optional[str],
+            elapsed_time: float,
+            message_length: int = 0,
+            audio_url: Optional[str] = None,
+            audio_status: Optional[str] = None,
+            citations: Optional[List[Any]] = None,
+            suggested_questions: Optional[List[Any]] = None,
+            status: str = "completed",
+            error: Any = None,
+    ) -> Dict[str, Any]:
+        """统一构建 compare 场景下的 model_end 事件。"""
+        data = {
+            "model_index": model_index,
+            "model_config_id": model_config_id,
+            "label": label,
+            "conversation_id": conversation_id,
+            "elapsed_time": elapsed_time,
+            "message_length": message_length,
+            "audio_url": audio_url,
+            "audio_status": audio_status,
+            "citations": citations or [],
+            "suggested_questions": suggested_questions or [],
+            "status": status,
+            "timestamp": time.time()
+        }
+        if error is not None:
+            data["error"] = error
+        return data
+
     def _check_annotation_match(self, app_id: uuid.UUID, message: str,
                               source: str = "") -> Optional[dict]:
         """检查是否命中标注
@@ -1252,14 +1367,14 @@ class AgentRunService:
                     yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
                     yield self._format_sse_event("agent_log", chunk)
-                elif isinstance(chunk, str):
+                elif isinstance(chunk, dict):
+                    event_type = str(chunk.get("type") or "unknown")
+                    yield self._format_sse_event(event_type, chunk)
+                else:
                     full_content += chunk
                     yield self._format_sse_event("message", {"content": chunk})
                     if tts_task is not None:
                         await text_queue.put(chunk)
-                elif isinstance(chunk, dict):
-                    event_type = str(chunk.get("type") or "unknown")
-                    yield self._format_sse_event(event_type, chunk)
 
             # 文本结束，通知 TTS
             if tts_task is not None:
@@ -1344,7 +1459,13 @@ class AgentRunService:
             )
 
         except Exception as e:
-            logger.error("流式 Agent 调用失败", extra={"error": str(e)}, exc_info=True)
+            debug_id = self._build_debug_id()
+            compact_error = self._build_compact_error(e, debug_id=debug_id)
+            logger.error(
+                "流式 Agent 调用失败",
+                extra={"error": str(e), "debug_id": debug_id, "compact_error": compact_error},
+                exc_info=True
+            )
             try:
                 self.db.rollback()
             except Exception:
@@ -1366,7 +1487,7 @@ class AgentRunService:
                         conversation_id=conv_uuid,
                         role="assistant",
                         content="",
-                        meta_data={"error": str(e)[:2000]},
+                        meta_data={"error": json.dumps(compact_error, ensure_ascii=False)[:2000]},
                         status="failed",
                     )
                 except Exception:
@@ -1380,13 +1501,13 @@ class AgentRunService:
                         steps=node_executions if 'node_executions' in dir() else [],
                         status="failed",
                         elapsed_time=elapsed_time,
-                        error_message=str(e)[:2000],
+                        error_message=json.dumps(compact_error, ensure_ascii=False)[:2000],
                     )
                 except Exception:
                     pass
             # 发送错误事件
             yield self._format_sse_event("error", {
-                "error": str(e),
+                "error": compact_error,
                 "timestamp": time.time()
             })
 
@@ -2607,6 +2728,7 @@ class AgentRunService:
                 audio_status = None
                 citations = []
                 suggested_questions = []
+                stream_error = None
 
                 # 临时修改参数
                 original_params = agent_config.model_parameters
@@ -2710,13 +2832,18 @@ class AgentRunService:
                                 suggested_questions = event_data.get("suggested_questions", [])
 
                             if event_type == "error" and event_data:
-                                await event_queue.put(self._format_sse_event("model_error", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "label": model_label,
-                                    "conversation_id": returned_conversation_id,
-                                    "error": event_data.get("error", "未知错误")
-                                }))
+                                stream_error = event_data.get("error") or {"message": "未知错误"}
+                                await event_queue.put(self._format_sse_event(
+                                    "model_error",
+                                    self._build_model_error_event_data(
+                                        model_index=idx,
+                                        model_config_id=model_config_id,
+                                        label=model_label,
+                                        conversation_id=returned_conversation_id,
+                                        error=stream_error,
+                                        timestamp=event_data.get("timestamp")
+                                    )
+                                ))
                         except Exception as e:
                             logger.warning(f"解析流式事件失败: {e}")
                 finally:
@@ -2724,6 +2851,40 @@ class AgentRunService:
                     agent_config.model_parameters = original_params
 
                 elapsed = time.time() - start_time
+
+                if stream_error:
+                    await event_queue.put(self._format_sse_event(
+                        "model_end",
+                        self._build_model_end_event_data(
+                            model_index=idx,
+                            model_config_id=model_config_id,
+                            label=model_label,
+                            conversation_id=returned_conversation_id,
+                            elapsed_time=elapsed,
+                            message_length=len(full_content),
+                            audio_url=audio_url,
+                            audio_status=audio_status,
+                            citations=citations,
+                            suggested_questions=suggested_questions,
+                            status="failed",
+                            error=stream_error
+                        )
+                    ))
+                    return {
+                        "model_config_id": model_info["model_config_id"],
+                        "model_name": model_info["model_config"].name,
+                        "label": model_label,
+                        "conversation_id": returned_conversation_id,
+                        "parameters_used": model_info["parameters"],
+                        "message": full_content,
+                        "reasoning_content": full_reasoning or None,
+                        "elapsed_time": elapsed,
+                        "audio_url": audio_url,
+                        "audio_status": audio_status,
+                        "citations": citations,
+                        "suggested_questions": suggested_questions,
+                        "error": stream_error
+                    }
 
                 # 构建结果（参考 run_compare）
                 result = {
@@ -2743,24 +2904,31 @@ class AgentRunService:
                 }
 
                 # 发送模型完成事件
-                await event_queue.put(self._format_sse_event("model_end", {
-                    "model_index": idx,
-                    "model_config_id": model_config_id,
-                    "label": model_label,
-                    "conversation_id": returned_conversation_id,
-                    "elapsed_time": elapsed,
-                    "message_length": len(full_content),
-                    "audio_url": audio_url,
-                    "audio_status": audio_status,
-                    "citations": citations,
-                    "suggested_questions": suggested_questions,
-                    "timestamp": time.time()
-                }))
+                await event_queue.put(self._format_sse_event(
+                    "model_end",
+                    self._build_model_end_event_data(
+                        model_index=idx,
+                        model_config_id=model_config_id,
+                        label=model_label,
+                        conversation_id=returned_conversation_id,
+                        elapsed_time=elapsed,
+                        message_length=len(full_content),
+                        audio_url=audio_url,
+                        audio_status=audio_status,
+                        citations=citations,
+                        suggested_questions=suggested_questions
+                    )
+                ))
 
                 return result
 
             except TimeoutError:
                 logger.warning(f"模型运行超时: {model_label}")
+                compact_error = {
+                    "message": f"执行超时（{timeout}秒）",
+                    "type": "TimeoutError",
+                    "debug_id": self._build_debug_id(),
+                }
                 result = {
                     "model_config_id": model_info["model_config_id"],
                     "model_name": model_info["model_config"].name,
@@ -2768,22 +2936,41 @@ class AgentRunService:
                     "conversation_id": model_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "elapsed_time": timeout,
-                    "error": f"执行超时（{timeout}秒）"
+                    "error": compact_error
                 }
 
-                await event_queue.put(self._format_sse_event("model_error", {
-                    "model_index": idx,
-                    "model_config_id": model_config_id,
-                    "label": model_label,
-                    "conversation_id": model_conversation_id,
-                    "error": result["error"],
-                    "timestamp": time.time()
-                }))
+                await event_queue.put(self._format_sse_event(
+                    "model_error",
+                    self._build_model_error_event_data(
+                        model_index=idx,
+                        model_config_id=model_config_id,
+                        label=model_label,
+                        conversation_id=model_conversation_id,
+                        error=compact_error
+                    )
+                ))
+                await event_queue.put(self._format_sse_event(
+                    "model_end",
+                    self._build_model_end_event_data(
+                        model_index=idx,
+                        model_config_id=model_config_id,
+                        label=model_label,
+                        conversation_id=model_conversation_id,
+                        elapsed_time=timeout,
+                        status="failed",
+                        error=compact_error
+                    )
+                ))
 
                 return result
 
             except Exception as e:
-                logger.error(f"模型运行失败: {model_label}, error: {e}")
+                debug_id = self._build_debug_id()
+                compact_error = self._build_compact_error(e, debug_id=debug_id)
+                logger.error(
+                    f"模型运行失败: {model_label}, error: {e}",
+                    extra={"debug_id": debug_id, "compact_error": compact_error}
+                )
                 result = {
                     "model_config_id": model_info["model_config_id"],
                     "model_name": model_info["model_config"].name,
@@ -2791,17 +2978,31 @@ class AgentRunService:
                     "conversation_id": model_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "elapsed_time": 0,
-                    "error": str(e)
+                    "error": compact_error
                 }
 
-                await event_queue.put(self._format_sse_event("model_error", {
-                    "model_index": idx,
-                    "model_config_id": model_config_id,
-                    "label": model_label,
-                    "conversation_id": model_conversation_id,
-                    "error": str(e),
-                    "timestamp": time.time()
-                }))
+                await event_queue.put(self._format_sse_event(
+                    "model_error",
+                    self._build_model_error_event_data(
+                        model_index=idx,
+                        model_config_id=model_config_id,
+                        label=model_label,
+                        conversation_id=model_conversation_id,
+                        error=compact_error
+                    )
+                ))
+                await event_queue.put(self._format_sse_event(
+                    "model_end",
+                    self._build_model_end_event_data(
+                        model_index=idx,
+                        model_config_id=model_config_id,
+                        label=model_label,
+                        conversation_id=model_conversation_id,
+                        elapsed_time=0,
+                        status="failed",
+                        error=compact_error
+                    )
+                ))
 
                 return result
 

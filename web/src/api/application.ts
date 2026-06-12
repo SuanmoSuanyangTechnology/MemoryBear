@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:11:51
+ * @Last Modified time: 2026-06-11 11:40:21
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
-import type { Config, AppSharingForm, AnnotationSettingForm, AnnotationForm } from '@/views/ApplicationConfig/types'
+import type { Config, AppSharingForm, AnnotationSettingForm, AnnotationForm, ReleaseModalData } from '@/views/ApplicationConfig/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams, ReportMessageData } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
@@ -70,8 +70,12 @@ export const getReleaseList = (app_id: string) => {
   return request.get(`/apps/${app_id}/releases`)
 }
 // Publish release
-export const publishRelease = (app_id: string, values: Record<string, unknown>) => {
+export const publishRelease = (app_id: string, values: ReleaseModalData) => {
   return request.post(`/apps/${app_id}/publish`, values)
+}
+// Get current release name and icon
+export const getCurrentRelease = (app_id: string) => {
+  return request.get(`/apps/${app_id}/release/display_info`)
 }
 // Rollback release
 export const rollbackRelease = (app_id: string, version: string) => {

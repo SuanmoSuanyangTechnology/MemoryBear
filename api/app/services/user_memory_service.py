@@ -8,7 +8,7 @@ import os
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -410,19 +410,39 @@ class UserMemoryService:
                 }
             
             # 构建响应数据（转换时间为毫秒时间戳）
-            # meta_data 只暴露四个核心字段
-            _META_FIELDS = ("goals", "traits", "interests", "core_facts")
+            # 字段优先级：other_name > aliases > relations > goals > core_facts
+            # > interests > traits > beliefs_or_stances > anchors > events
+            # 默认最多展示 6 个非空字段；other_name 即使为空也必显示并占 1 个名额。
+            TOP_FIELDS = ("other_name", "aliases")
+            META_FIELDS = (
+                "relations", "goals", "core_facts", "interests",
+                "traits", "beliefs_or_stances", "anchors", "events",
+            )
+            ALWAYS_INCLUDE = {"other_name"}
+            MAX_VISIBLE = 6
+
             raw_meta = end_user_info_record.meta_data or {}
-            filtered_meta = {k: raw_meta[k] for k in _META_FIELDS if k in raw_meta}
+            candidates = (
+                [(f, getattr(end_user_info_record, f), True) for f in TOP_FIELDS]
+                + [(f, raw_meta.get(f), False) for f in META_FIELDS]
+            )
+
+            selected_top: Dict[str, Any] = {}
+            filtered_meta: Dict[str, Any] = {}
+            for field, value, is_top in candidates:
+                if len(selected_top) + len(filtered_meta) >= MAX_VISIBLE:
+                    break
+                if not value and field not in ALWAYS_INCLUDE:
+                    continue
+                (selected_top if is_top else filtered_meta)[field] = value
 
             response_data = {
                 "end_user_info_id": str(end_user_info_record.id),
                 "end_user_id": str(end_user_info_record.end_user_id),
-                "other_name": end_user_info_record.other_name,
-                "aliases": end_user_info_record.aliases,
+                **selected_top,
                 "meta_data": filtered_meta,
                 "created_at": datetime_to_timestamp(end_user_info_record.created_at),
-                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at),
             }
             
             logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
@@ -2183,6 +2203,42 @@ async def analytics_community_graph_data(
         raise
 
 
+def _is_blank_content(value: Any) -> bool:
+    """判定一个属性值是否视作「空内容」。
+
+    业务规则（仅用于 ``ExtractedEntity`` 的 ``description`` /
+    ``description_summary``）：``None`` / 空字符串 / 仅空白的字符串 / 空列表
+    / 元素全为空白字符串的列表 —— 均视为「无内容」，不应在响应中暴露。
+
+    Args:
+        value: 属性原始值（``_clean_neo4j_value`` 之前的形态即可，本判定仅看
+            字符串与列表的「空」语义）。
+
+    Returns:
+        ``True`` 表示该字段无展示意义，调用方应跳过写入。
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, list):
+        if not value:
+            return True
+        return all(
+            isinstance(item, str) and item.strip() == ""
+            for item in value
+        )
+    return False
+
+
+# ``ExtractedEntity`` 节点中需要做「内容存在性」过滤的字段集合。
+# 命中本集合的字段，若值为空（参见 :func:`_is_blank_content`）将不会写入响应。
+_ENTITY_CONTENT_GATED_FIELDS: FrozenSet[str] = frozenset({
+    "description",
+    "description_summary",
+})
+
+
 def _extract_node_properties(
     label: str,
     properties: Dict[str, Any],
@@ -2198,6 +2254,11 @@ def _extract_node_properties(
 
     保留 ``entity_type`` / ``emotion_type`` / ``emotion_subject`` 三个字段
     的枚举映射逻辑，以维持响应字段的中文化展示。
+
+    业务过滤：当 ``label == "ExtractedEntity"`` 时，``description`` 与
+    ``description_summary`` 仅在「有内容」时才写入响应——空字符串、纯空白、
+    空列表、全空白元素列表均视为无内容（参见 :func:`_is_blank_content`）。
+    其余字段不受影响，节点本身始终返回。
 
     Args:
         label: 节点类型标签（``labels(n)[0]``）。
@@ -2215,6 +2276,15 @@ def _extract_node_properties(
         if field not in properties:
             continue
         value = properties[field]
+        # ExtractedEntity 的 description / description_summary 字段：
+        # 仅在原始值有内容时才纳入响应。判定基于「清洗前」的原始值，避免
+        # _clean_neo4j_value 把空字符串包装成其它形态后再判空。
+        if (
+            label == "ExtractedEntity"
+            and field in _ENTITY_CONTENT_GATED_FIELDS
+            and _is_blank_content(value)
+        ):
+            continue
         mapper = _NODE_FIELD_VALUE_MAPPERS.get(field)
         if mapper is not None:
             value = mapper(value)
@@ -2229,6 +2299,11 @@ _NODE_FIELD_VALUE_MAPPERS: Dict[str, Callable[[Any], Any]] = {
     "entity_type": lambda v: type_mapping.get(v, ""),
     "emotion_type": lambda v: EmotionType.EMOTION_MAPPING.get(v),
     "emotion_subject": lambda v: EmotionSubject.SUBJECT_MAPPING.get(v),
+    # description 存储为分号分隔的字符串，API 返回时拆分为数组
+    "description": lambda v: (
+        [d.strip() for d in v.replace("；", ";").split(";") if d.strip()]
+        if isinstance(v, str) else (v if isinstance(v, list) else [])
+    ),
 }
 
 

@@ -201,7 +201,7 @@ class IterationRuntime:
                 result = await graph.ainvoke(init_state, config=checkpoint)
 
             output = child_pool.get_value(self.output_value)
-            stopped = result["looping"] == 2
+            stopped = result.get("looping") == 2 if isinstance(result, dict) else False
             return idx, output, result, child_pool, stopped, True
         except Exception as e:
             logger.warning(f"Iteration node {self.node_id}: iteration idx={idx} failed: {e}")

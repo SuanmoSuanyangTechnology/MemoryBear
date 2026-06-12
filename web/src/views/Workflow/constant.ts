@@ -1112,7 +1112,7 @@ export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 /**
  * Port position arguments
  */
-export const portItemArgsY = 27.5;
+export const portItemArgsY = 26;
 export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {

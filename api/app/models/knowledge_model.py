@@ -115,6 +115,18 @@ class Knowledge(Base):
     image2text = relationship("ModelConfig", foreign_keys=[image2text_id], uselist=False, backref="image2text")
 
     @property
+    def is_folder(self) -> bool:
+        return self.type == KnowledgeType.FOLDER
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == 1
+
+    @property
+    def is_retrievable_leaf(self) -> bool:
+        return self.is_active and not self.is_folder and (self.chunk_num or 0) > 0
+
+    @property
     def chunk_mode(self) -> int:
         """获取知识库是否已经使用父子分块模式"""
         # 1. None 还为设置模式

@@ -9,7 +9,6 @@ from app.core.logging_config import get_logger
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool
-from app.core.workflow.utils.secret_masker import mask_secrets
 
 logger = get_logger(__name__)
 
@@ -26,7 +25,7 @@ class EventStreamHandler:
         self.execution_id = execution_id
 
     def _mask(self, value):
-        return mask_secrets(value, self.variable_pool.get_secret_values())
+        return value
 
     def update_stream_output_status(self, activate: dict, data: dict):
         """
@@ -214,10 +213,11 @@ class EventStreamHandler:
                     }
         else:
             # Fallback: No active End node, but chunks are arriving.
-            # Find End nodes that depend on this node_id scope and emit chunks directly.
-            # This handles edge cases where End node activation timing differs.
+            # Only emit directly for End nodes that are already activated (no branch control).
+            # End nodes still waiting for branch routing must NOT receive chunks here.
             dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
-            if dependent_ends:
+            active_dependent_ends = [(eid, einfo) for eid, einfo in dependent_ends if einfo.activate]
+            if active_dependent_ends:
                 if done:
                     self.coordinator.mark_scope_streamed(node_id)
                 elif chunk:

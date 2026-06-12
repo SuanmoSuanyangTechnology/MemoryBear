@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 20:12:22
+ * @Last Modified time: 2026-06-11 11:44:24
  */
 /**
  * Conversation Page
@@ -14,7 +14,7 @@ import { type FC, useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, App, Tooltip, Space } from 'antd'
+import { Flex, Skeleton, App, Tooltip, Space, Spin , type ButtonProps} from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -38,6 +38,7 @@ import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { replaceVariables } from '@/views/ApplicationConfig/Agent'
 import ShareModal from './components/ShareModal'
 import ReportModal from './components/ReportModal'
+import { updateMetaIcon } from '@/utils/common'
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
@@ -85,12 +86,8 @@ const Conversation: FC = () => {
     }
     handleResize()
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
-
-
-  useEffect(() => {
     return () => {
+      window.removeEventListener('resize', handleResize)
       abortRef.current?.()
       abortRef.current = null
       audioPollingRef.current.forEach((timer) => clearInterval(timer))
@@ -128,16 +125,34 @@ const Conversation: FC = () => {
     }
   }, [shareToken, page, hasMore, historyList])
 
+  const [configLoading, setConfigLoading] = useState(true)
   useEffect(() => {
     if (shareToken && shareToken !== '') {
+      setConfigLoading(true)
       getExperienceConfig(shareToken)
         .then(res => {
-          const response = res as { variables: Variable[]; features: FeaturesConfigForm; model_parameters?: Record<string, any>; app_type: string; memory: boolean; }
+          const response = res as {
+            variables: Variable[];
+            features: FeaturesConfigForm;
+            app_name?: string;
+            model_parameters?: Record<string, any>;
+            app_type: string;
+            memory: boolean;
+            app_icon?: string;
+          }
           toolbarRef.current?.setVariables(response.variables || [])
           setConfig(response)
           setFeatures(response.features)
           setIsHasMemory((response.app_type === 'workflow' && response.memory) || response.memory)
           setIsDeepThinking(response.model_parameters?.deep_thinking || false)
+          
+          if (response.app_icon && !isFloatBtn && !isIframe) {
+            updateMetaIcon(response.app_icon)
+          }
+          document.title = response.app_name || t('memoryConversation.chatTitle')
+        })
+        .finally(() => {
+          setConfigLoading(false)
         })
     } else {
       setChatList([])
@@ -517,7 +532,7 @@ const Conversation: FC = () => {
           actions?: {
             id: string;
             label: string;
-            variant: string;
+            variant: ButtonProps['type'];
           }[];
           timeout_at?: number;
         }
@@ -765,6 +780,7 @@ const Conversation: FC = () => {
                   const filterIndex = lastAssistantMsg.interventions.findIndex(item => item.node_id === node_id)
                   lastAssistantMsg.interventions[filterIndex] = {
                     ...lastAssistantMsg.interventions[filterIndex],
+                    resolved_form_data: fieldValues,
                     resolved_action_id: actionId,
                   }
               
@@ -829,7 +845,7 @@ const Conversation: FC = () => {
             actions?: {
               id: string;
               label: string;
-              variant: string;
+              variant: ButtonProps['type'];
             }[];
             timeout_at?: number;
           }
@@ -1347,6 +1363,10 @@ const Conversation: FC = () => {
     return conversation?.title
   }, [conversation_id, historyList])
 
+  if (configLoading) {
+    return <Spin spinning={configLoading} fullscreen />
+  }
+
   if (isIframe || isSmallScreen) {
     return (
       <Flex className={clsx("rb:bg-[#FFFFFF]", {
@@ -1570,14 +1590,20 @@ const Conversation: FC = () => {
     )
   }
 
-  console.log('chatList', chatList, loading)
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
       {!isShare &&
         <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
           <Flex align="center" gap={8} className="rb:p-5!">
-            <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/conversation/redbear.png')]"></div>
-            <div className="rb:text-[16px] rb:leading-5 rb:font-[Gilroy-Extrabold] rb:font-extrabold">{t('memoryConversation.chatTitle')}</div>
+            <div
+              className="rb:size-6 rb:bg-cover rb:rounded-md rb:bg-[url('@/assets/images/conversation/redbear.png')]"
+              style={config.app_icon ? {
+                backgroundImage: `url(${config.app_icon})`,
+              }: undefined}
+            ></div>
+            <div className="rb:flex-1 rb:text-[16px] rb:leading-5 rb:font-[Gilroy-Extrabold] rb:font-extrabold rb:truncate">
+              {config.app_name ||t('memoryConversation.chatTitle')}
+            </div>
           </Flex>
 
           <Flex align="center" gap={12}

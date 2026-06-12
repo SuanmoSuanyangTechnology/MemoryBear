@@ -94,6 +94,7 @@ export interface ExtractedEntityNodeProperties {
   aliases: string[];
   connect_strength: string;
   associative_memory: number;
+  description_summary?: string;
 }
 export interface PerceptualNodeProperties {
   file_name: string;
@@ -207,6 +208,9 @@ export interface EndUser {
     traits: string[];
     interests: string[];
     core_facts: string[];
+    alias: string[];
+    beliefs_or_stances: string[];
+    anchors: string[];
   };
   created_at: number;
   updated_at: number;

@@ -40,13 +40,19 @@ class ParameterExtractorNode(BaseNode):
                 }
         return None
 
+    def _get_typed_config(self) -> ParameterExtractorNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = ParameterExtractorNodeConfig(**self.config)
+        return self.typed_config
+
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        cfg = self._get_typed_config()
         return {
-            "text": self._render_template(self.typed_config.text, variable_pool),
-            "prompt": self._render_template(self.typed_config.prompt, variable_pool),
-            "params": [param.model_dump(mode="json") for param in self.typed_config.params],
-            "model_id": str(self.typed_config.model_id),
-            "inference_mode": self.typed_config.inference_mode,
+            "text": self._render_template(cfg.text, variable_pool),
+            "prompt": self._render_template(cfg.prompt, variable_pool),
+            "params": [param.model_dump(mode="json") for param in cfg.params],
+            "model_id": str(cfg.model_id),
+            "inference_mode": cfg.inference_mode,
         }
 
     def _extract_extra_fields(self, business_result: Any) -> dict:
@@ -64,8 +70,8 @@ class ParameterExtractorNode(BaseNode):
 
     def _output_types(self) -> dict[str, VariableType]:
         outputs = {}
-        for param in self.typed_config.params:
-            outputs[param.name] = param.type
+        for param in self.config.get("params", []):
+            outputs[param["name"]] = VariableType(param["type"])
         return outputs
 
     @staticmethod
@@ -277,7 +283,7 @@ class ParameterExtractorNode(BaseNode):
         return result
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
-        self.typed_config = ParameterExtractorNodeConfig(**self.config)
+        self.typed_config = self._get_typed_config()
         llm = self._get_llm_instance()
 
         actual_mode = self._resolve_inference_mode()

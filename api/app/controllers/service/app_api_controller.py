@@ -3,7 +3,7 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Body
+from fastapi import APIRouter, Depends, Request, Body, Query
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -12,7 +12,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.models.app_model import AppType
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
@@ -21,6 +21,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
+from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import get_app_service, AppService
@@ -183,20 +184,23 @@ async def chat(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.agent_chat_stream(
-                        message=payload.message,
-                        conversation_id=conversation.id if conversation else None,
-                        user_id=end_user_id,  # 转换为字符串
-                        variables=payload.variables,
-                        web_search=web_search,
-                        config=agent_config,
-                        memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        workspace_id=workspace_id,
-                        files=payload.files  # 传递多模态文件
-                ):
-                    yield event
+                with get_db_context() as stream_db:
+                    from app.services.app_chat_service import AppChatService as _AppChatService
+                    _chat_service = _AppChatService(stream_db)
+                    async for event in _chat_service.agent_chat_stream(
+                            message=payload.message,
+                            conversation_id=conversation.id if conversation else None,
+                            user_id=end_user_id,
+                            variables=payload.variables,
+                            web_search=web_search,
+                            config=agent_config,
+                            memory=memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            workspace_id=workspace_id,
+                            files=payload.files
+                    ):
+                        yield event
 
             return StreamingResponse(
                 event_generator(),
@@ -228,19 +232,21 @@ async def chat(
         config = multi_agent_config_4_app_release(active_release)
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.multi_agent_chat_stream(
-
-                        message=payload.message,
-                        conversation_id=conversation.id,  # 使用已创建的会话 ID
-                        user_id=end_user_id,  # 转换为字符串
-                        variables=payload.variables,
-                        config=config,
-                        web_search=web_search,
-                        memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-                ):
-                    yield event
+                with get_db_context() as stream_db:
+                    from app.services.app_chat_service import AppChatService as _AppChatService
+                    _chat_service = _AppChatService(stream_db)
+                    async for event in _chat_service.multi_agent_chat_stream(
+                            message=payload.message,
+                            conversation_id=conversation.id,
+                            user_id=end_user_id,
+                            variables=payload.variables,
+                            config=config,
+                            web_search=web_search,
+                            memory=memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id
+                    ):
+                        yield event
 
             return StreamingResponse(
                 event_generator(),
@@ -271,28 +277,29 @@ async def chat(
         config = workflow_config_4_app_release(active_release)
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.workflow_chat_stream(
-                        message=payload.message,
-                        conversation_id=conversation.id,  # 使用已创建的会话 ID
-                        user_id=end_user_id,  # 转换为字符串
-                        variables=payload.variables,
-                        files=payload.files,
-                        config=config,
-                        web_search=web_search,
-                        memory=memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        app_id=app.id,
-                        workspace_id=workspace_id,
-                        release_id=active_release.id,
-                        public=True
-                ):
-                    event_type = event.get("event", "message")
-                    event_data = event.get("data", {})
-
-                    # 转换为标准 SSE 格式（字符串）
-                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                    yield sse_message
+                with get_db_context() as stream_db:
+                    from app.services.app_chat_service import AppChatService as _AppChatService
+                    _chat_service = _AppChatService(stream_db)
+                    async for event in _chat_service.workflow_chat_stream(
+                            message=payload.message,
+                            conversation_id=conversation.id,
+                            user_id=end_user_id,
+                            variables=payload.variables,
+                            files=payload.files,
+                            config=config,
+                            web_search=web_search,
+                            memory=memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            app_id=app.id,
+                            workspace_id=workspace_id,
+                            release_id=active_release.id,
+                            public=True
+                    ):
+                        event_type = event.get("event", "message")
+                        event_data = event.get("data", {})
+                        sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                        yield sse_message
 
             return StreamingResponse(
                 event_generator(),
@@ -334,6 +341,60 @@ async def chat(
         )
     else:
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.get("/conversations")
+@require_api_key(scopes=["app"])
+async def list_v1_conversations(
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+        user_id: str = Query("", description="外部系统用户 ID"),
+        page: int = Query(1, description="页码，从 1 开始"),
+        page_size: int = Query(20, description="每页数量，最大 100"),
+):
+    """获取当前应用下指定外部用户的会话列表。"""
+    result = conversation_service.list_v1_conversations(
+        app_id=api_key_auth.resource_id,
+        workspace_id=api_key_auth.workspace_id,
+        external_user_id=user_id,
+        page=page,
+        page_size=page_size,
+    )
+    items = [
+        conversation_schema.V1ConversationListItem(**item)
+        for item in result["items"]
+    ]
+    page_meta = PageMeta(
+        page=result["page"],
+        pagesize=result["page_size"],
+        total=result["total"],
+        hasnext=result["hasnext"],
+    )
+    return success(data=PageData(page=page_meta, items=items).model_dump(mode="json"))
+
+
+@router.get("/conversations/{conversation_id}/messages")
+@require_api_key(scopes=["app"])
+async def list_v1_conversation_messages(
+        request: Request,
+        conversation_id: uuid.UUID,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+        user_id: str = Query("", description="外部系统用户 ID"),
+        limit: int = Query(20, description="返回消息数量，最大 200"),
+):
+    """获取当前应用下指定会话的历史消息。"""
+    result = conversation_service.list_v1_conversation_messages(
+        app_id=api_key_auth.resource_id,
+        workspace_id=api_key_auth.workspace_id,
+        external_user_id=user_id,
+        conversation_id=conversation_id,
+        limit=limit,
+    )
+    return success(data=conversation_schema.V1ConversationMessageListResponse(**result).model_dump(mode="json"))
 
 
 @router.post(

@@ -29,7 +29,12 @@ logger = logging.getLogger(__name__)
 class KnowledgeRetrievalNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
-        self.typed_config: KnowledgeRetrievalNodeConfig = KnowledgeRetrievalNodeConfig(**self.config)
+        self.typed_config: KnowledgeRetrievalNodeConfig | None = None
+
+    def _get_typed_config(self) -> KnowledgeRetrievalNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
+        return self.typed_config
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -56,9 +61,10 @@ class KnowledgeRetrievalNode(BaseNode):
         return {"citations": citations, "process": process}
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        cfg = self._get_typed_config()
         return {
-            "query": self._render_template(self.typed_config.query, variable_pool),
-            "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in self.typed_config.knowledge_bases],
+            "query": self._render_template(cfg.query, variable_pool),
+            "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
         }
 
     @staticmethod
@@ -326,6 +332,7 @@ class KnowledgeRetrievalNode(BaseNode):
         Raises:
             RuntimeError: If no valid knowledge base is found or access is denied.
         """
+        self.typed_config = self._get_typed_config()
         if not self.typed_config.knowledge_bases:
             return []
         query = self._render_template(self.typed_config.query, variable_pool)

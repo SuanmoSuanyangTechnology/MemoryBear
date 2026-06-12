@@ -228,6 +228,20 @@ class AppDslService:
                 result.append(item)
         return result
 
+    @staticmethod
+    def _clear_imported_secret_environment_variables(environment_variables: list[dict] | None) -> list[dict]:
+        result = []
+        for item in environment_variables or []:
+            if item.get("value_type") == "secret":
+                result.append({**item, "value": None})
+            else:
+                result.append(item)
+        return result
+
+    @staticmethod
+    def _has_secret_environment_variables(environment_variables: list[dict] | None) -> bool:
+        return any(item.get("value_type") == "secret" for item in (environment_variables or []))
+
     def _skill_ref(self, skill_id) -> Optional[dict]:
         if not skill_id:
             return None
@@ -414,13 +428,17 @@ class AppDslService:
             for w in result.warnings:
                 warnings.append(f"[节点警告] {w.node_name or w.node_id}: {w.detail}")
             wf_service = WorkflowService(self.db)
+            raw_env_vars = [v.model_dump() for v in result.environment_variables]
+            if self._has_secret_environment_variables(raw_env_vars):
+                warnings.append("检测到 secret 类型环境变量，导入时其值已清空，请在导入后重新配置。")
+            environment_variables = self._clear_imported_secret_environment_variables(raw_env_vars)
             if create:
                 wf_service.create_workflow_config(
                     app_id=app_id,
                     nodes=[n.model_dump() for n in result.nodes],
                     edges=[e.model_dump() for e in result.edges],
                     variables=[v.model_dump() for v in result.variables],
-                    environment_variables=[v.model_dump() for v in result.environment_variables],
+                    environment_variables=environment_variables,
                     execution_config=raw_wf.get("execution_config", {}),
                     features=raw_wf.get("features", {}),
                     triggers=raw_wf.get("triggers", []),
@@ -432,7 +450,7 @@ class AppDslService:
                     existing.nodes = [n.model_dump() for n in result.nodes]
                     existing.edges = [e.model_dump() for e in result.edges]
                     existing.variables = [v.model_dump() for v in result.variables]
-                    existing.environment_variables = [v.model_dump() for v in result.environment_variables]
+                    existing.environment_variables = environment_variables
                     existing.execution_config = raw_wf.get("execution_config", {})
                     existing.features = raw_wf.get("features", {})
                     existing.triggers = raw_wf.get("triggers", [])
@@ -443,7 +461,7 @@ class AppDslService:
                         nodes=[n.model_dump() for n in result.nodes],
                         edges=[e.model_dump() for e in result.edges],
                         variables=[v.model_dump() for v in result.variables],
-                        environment_variables=[v.model_dump() for v in result.environment_variables],
+                        environment_variables=environment_variables,
                         execution_config=raw_wf.get("execution_config", {}),
                         features=raw_wf.get("features", {}),
                         triggers=raw_wf.get("triggers", []),

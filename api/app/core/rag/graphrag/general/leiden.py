@@ -8,8 +8,8 @@ Reference:
 import logging
 import html
 from typing import Any, cast
-from graspologic.partition import hierarchical_leiden
-from graspologic.utils import largest_connected_component
+# from graspologic.partition import hierarchical_leiden
+# from graspologic.utils import largest_connected_component
 import networkx as nx
 from networkx import is_empty
 
@@ -63,11 +63,11 @@ def normalize_node_names(graph: nx.Graph | nx.DiGraph) -> nx.Graph | nx.DiGraph:
 
 def stable_largest_connected_component(graph: nx.Graph) -> nx.Graph:
     """Return the largest connected component of the graph, with nodes and edges sorted in a stable way."""
+    from graspologic.utils import largest_connected_component
     graph = graph.copy()
     graph = cast(nx.Graph, largest_connected_component(graph))
     graph = normalize_node_names(graph)
     return _stabilize_graph(graph)
-
 
 def _compute_leiden_communities(
         graph: nx.Graph | nx.DiGraph,
@@ -81,7 +81,7 @@ def _compute_leiden_communities(
         return results
     if use_lcc:
         graph = stable_largest_connected_component(graph)
-
+    from graspologic.partition import hierarchical_leiden
     community_mapping = hierarchical_leiden(
         graph, max_cluster_size=max_cluster_size, random_seed=seed
     )

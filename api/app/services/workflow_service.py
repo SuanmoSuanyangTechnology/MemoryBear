@@ -21,7 +21,6 @@ from app.core.utils.datetime_utils import (
     utcnow_naive,
 )
 from app.core.workflow.node_cache import normalize_cache_value, WorkflowNodeCacheManager
-from app.core.workflow.utils.secret_masker import mask_secrets
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
     get_trigger_type,
@@ -2015,10 +2014,8 @@ class WorkflowService:
             )
 
     @staticmethod
-    def _mask_runtime_secrets(payload: dict[str, Any], variable_pool) -> dict[str, Any]:
-        if not variable_pool:
-            return payload
-        return mask_secrets(payload, variable_pool.get_secret_values())
+    def _mask_runtime_secrets(payload: dict[str, Any], _variable_pool) -> dict[str, Any]:
+        return payload
 
     @staticmethod
     def _extract_secret_values_from_environment_variables(
@@ -2034,10 +2031,8 @@ class WorkflowService:
         return sorted(set(secret_values), key=len, reverse=True)
 
     @staticmethod
-    def _mask_payload_with_secret_values(payload: dict[str, Any], secret_values: list[str]) -> dict[str, Any]:
-        if not secret_values:
-            return payload
-        return mask_secrets(payload, secret_values)
+    def _mask_payload_with_secret_values(payload: dict[str, Any], _secret_values: list[str]) -> dict[str, Any]:
+        return payload
 
     @staticmethod
     def _build_debug_execution_output(node_id: str, status: str) -> dict[str, Any]:
@@ -2561,6 +2556,55 @@ class WorkflowService:
         serialized = self._serialize_node_cache(cache)
         return self._mask_payload_with_secret_values(serialized, secret_values) if serialized else None
 
+    def _update_conversation_variable_cache(
+            self,
+            *,
+            app_id: uuid.UUID,
+            config,
+            result_data: dict[str, Any] | None = None,
+            patches: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """将会话变量写入 debug_state.snapshot.conversation，使其在 rerun 时生效。"""
+        debug_state = self._read_workflow_debug_state(app_id=app_id, workflow_config=config)
+        debug_snapshot = dict(debug_state["snapshot"])
+        existing_conv = dict(debug_snapshot.get("conversation") or {})
+
+        if patches:
+            patch_base = self._unwrap_typed_group(existing_conv)
+            # conversation 变量是扁平结构，patch 的 name/path 直接对应变量名，无 scope 层
+            type_map = self._build_snapshot_type_maps(config)["conversation"]
+            next_raw = dict(patch_base)
+            for patch in patches:
+                var_name = patch.get("name") or patch.get("path")
+                if not var_name:
+                    continue
+                next_raw[var_name] = patch.get("value")
+            new_conv_snapshot = self._normalize_typed_group(next_raw, type_map=type_map)
+        else:
+            # result_data 已经是 typed 格式，直接使用，过滤非已知会话变量字段
+            known_vars = {item.get("name") for item in (config.variables or []) if item.get("name")}
+            new_conv_snapshot = {
+                k: normalize_cache_value(v)
+                for k, v in (result_data or {}).items()
+                if k in known_vars
+            }
+
+        merged_conv = self._merge_typed_group(existing_conv, new_conv_snapshot)
+        debug_snapshot["conversation"] = merged_conv
+        self._write_workflow_debug_state(
+            app_id=app_id,
+            workflow_config=config,
+            snapshot=debug_snapshot,
+            messages=debug_state.get("messages"),
+            execution_id=debug_state.get("execution_id"),
+            source="cache_update",
+        )
+        return {
+            "node_id": "conversation",
+            "node_type": "conversation",
+            "result_data": merged_conv,
+        }
+
     def update_node_cache(
             self,
             *,
@@ -2572,6 +2616,10 @@ class WorkflowService:
         config = self.get_workflow_config(app_id)
         if not config:
             return None
+        if node_id == "conversation":
+            return self._update_conversation_variable_cache(
+                app_id=app_id, config=config, result_data=result_data, patches=patches
+            )
         node = next((item for item in config.nodes or [] if item.get("id") == node_id), None)
         if not node:
             return None
@@ -2584,10 +2632,17 @@ class WorkflowService:
         )
         latest_cache = manager.get_latest_cache(include_inactive=False)
         next_result_data = self._sanitize_cache_result_data(result_data or {})
+        if patches:
+            if latest_cache:
+                patch_base = latest_cache.get("result_data") or {}
+            else:
+                debug_state = self._read_workflow_debug_state(
+                    app_id=app_id, workflow_config=config
+                )
+                debug_nodes = (debug_state.get("snapshot") or {}).get("nodes") or {}
+                patch_base = self._unwrap_typed_group(debug_nodes.get(node_id) or {})
+            next_result_data = self._apply_cache_result_patches(patch_base, patches)
         if not latest_cache:
-            # No existing cache record — create one on-the-fly so that nodes
-            # which are not normally cached (e.g. "start") can still have their
-            # debug output persisted when the user edits it in the UI.
             cache_key = manager.build_cache_key(next_result_data)
             updated = manager.save_cache(
                 cache_key=cache_key,
@@ -2597,25 +2652,31 @@ class WorkflowService:
                 ttl_seconds=None,
             )
         else:
-            if patches:
-                next_result_data = self._apply_cache_result_patches(
-                    latest_cache.get("result_data") or {},
-                    patches,
-                )
             updated = manager.update_latest_cache(
                 result_data=next_result_data,
             )
         if not updated:
             return None
         node_type_maps = self._build_snapshot_type_maps(config)["nodes"]
+        # Build the new snapshot for this node from the patched result_data.
+        # Then merge it with the existing snapshot so fields not covered by
+        # the patch (e.g. user_id, workspace_id on the start node) are kept.
+        new_node_snapshot = self._build_public_node_snapshot_from_cache_result(
+            next_result_data,
+            type_map=node_type_maps.get(node_id),
+        )
+        existing_debug_state = self._read_workflow_debug_state(
+            app_id=app_id, workflow_config=config
+        )
+        existing_node_snapshot = (
+            existing_debug_state.get("snapshot") or {}
+        ).get("nodes", {}).get(node_id) or {}
+        merged_node_snapshot = self._merge_typed_group(existing_node_snapshot, new_node_snapshot)
         self._sync_workflow_debug_state_node(
             app_id=app_id,
             workflow_config=config,
             node_id=node_id,
-            node_snapshot=self._build_public_node_snapshot_from_cache_result(
-            next_result_data,
-            type_map=node_type_maps.get(node_id),
-            ),
+            node_snapshot=merged_node_snapshot,
             source="cache_update",
         )
         serialized = self._serialize_node_cache(updated)
@@ -2743,6 +2804,7 @@ class WorkflowService:
             config=config,
             workspace_id=workspace_id,
             input_data=rerun_input,
+            prefer_cached_runtime=True,
         )
 
     def get_execution_detail(
@@ -3661,19 +3723,20 @@ class WorkflowService:
             history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            self.conversation_service.add_message(
-                conversation_id=conversation_id_uuid,
-                role="user",
-                content=payload.message,
-                meta_data={"files": []}
-            )
-            self.conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conversation_id_uuid,
-                role="assistant",
-                content=annotation_match["answer"],
-                meta_data={"usage": {}}
-            )
+            if conversation_id_uuid:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id_uuid,
+                    role="user",
+                    content=payload.message,
+                    meta_data={"files": []}
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id_uuid,
+                    role="assistant",
+                    content=annotation_match["answer"],
+                    meta_data={"usage": {}}
+                )
 
             # 创建 WorkflowExecution 记录，用于日志显示
             execution = self.create_execution(
@@ -4091,19 +4154,20 @@ class WorkflowService:
             history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            self.conversation_service.add_message(
-                conversation_id=conversation_id_uuid,
-                role="user",
-                content=payload.message,
-                meta_data={"files": []}
-            )
-            self.conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conversation_id_uuid,
-                role="assistant",
-                content=annotation_match["answer"],
-                meta_data={"usage": {}}
-            )
+            if conversation_id_uuid:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id_uuid,
+                    role="user",
+                    content=payload.message,
+                    meta_data={"files": []}
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id_uuid,
+                    role="assistant",
+                    content=annotation_match["answer"],
+                    meta_data={"usage": {}}
+                )
 
             # 创建 WorkflowExecution 记录，用于日志显示
             execution = self.create_execution(
@@ -4649,33 +4713,34 @@ class WorkflowService:
                                     "name": f.get("name"),
                                     "size": f.get("size"),
                                 })
-                        self.conversation_service.add_message(
-                            conversation_id=conversation_id_uuid,
-                            role="user",
-                            content=human_message,
-                            meta_data=human_meta,
-                            sync_memory=False,
-                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                                sync_memory=False,
+                            )
 
-                        # Save an assistant message marked as waiting_human.
-                        # Content is intentionally EMPTY — the intervention UI
-                        # (form, buttons, rendered_content) comes from
-                        # pending_intervention in the conversation API, not
-                        # from the message content itself. The message only
-                        # acts as an anchor so the frontend can locate the
-                        # intervention form in the message list.
-                        # Use the same message_id as workflow_start so the
-                        # frontend's local placeholder and the DB message
-                        # share the same ID. On resume, this message is
-                        # updated in-place with the final output content.
-                        self.conversation_service.add_message(
-                            message_id=message_id,
-                            conversation_id=conversation_id_uuid,
-                            role="assistant",
-                            content="",
-                            meta_data={"waiting_human": True, "execution_id": execution.execution_id},
-                            sync_memory=False,
-                        )
+                            # Save an assistant message marked as waiting_human.
+                            # Content is intentionally EMPTY — the intervention UI
+                            # (form, buttons, rendered_content) comes from
+                            # pending_intervention in the conversation API, not
+                            # from the message content itself. The message only
+                            # acts as an anchor so the frontend can locate the
+                            # intervention form in the message list.
+                            # Use the same message_id as workflow_start so the
+                            # frontend's local placeholder and the DB message
+                            # share the same ID. On resume, this message is
+                            # updated in-place with the final output content.
+                            self.conversation_service.add_message(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content="",
+                                meta_data={"waiting_human": True, "execution_id": execution.execution_id},
+                                sync_memory=False,
+                            )
 
                         # message_id is already saved in execution.context["human_intervention"]["message_id"]
                         # at line ~1653, so resume_intervention_stream can find it there.
@@ -5576,6 +5641,7 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             input_data: dict[str, Any],
+            prefer_cached_runtime: bool = False,
     ):
         """构建单节点执行所需的上下文（node_config, node, state, variable_pool）"""
         from app.core.workflow.engine.runtime_schema import ExecutionContext
@@ -5645,17 +5711,28 @@ class WorkflowService:
             variable_pool=variable_pool,
             snapshot=runtime_seed["runtime_snapshot"],
         )
-        await self._apply_input_data_overrides_to_variable_pool(
-            variable_pool=variable_pool,
-            input_data=input_data,
-        )
-        # Promote start-node cached output (e.g. user-edited "message") into sys.*
-        # AFTER input_data overrides so it takes the highest priority.
-        await self._apply_start_node_cache_to_variable_pool(
-            variable_pool=variable_pool,
-            runtime_snapshot=runtime_seed["runtime_snapshot"],
-            workflow_config=config,
-        )
+        if prefer_cached_runtime:
+            # Rerun should inherit the latest debug/cache state as the source of truth.
+            await self._apply_input_data_overrides_to_variable_pool(
+                variable_pool=variable_pool,
+                input_data=input_data,
+            )
+            await self._apply_start_node_cache_to_variable_pool(
+                variable_pool=variable_pool,
+                runtime_snapshot=runtime_seed["runtime_snapshot"],
+                workflow_config=config,
+            )
+        else:
+            # Manual single-node run should honor the current request inputs first.
+            await self._apply_start_node_cache_to_variable_pool(
+                variable_pool=variable_pool,
+                runtime_snapshot=runtime_seed["runtime_snapshot"],
+                workflow_config=config,
+            )
+            await self._apply_input_data_overrides_to_variable_pool(
+                variable_pool=variable_pool,
+                input_data=input_data,
+            )
         await self._inject_single_node_flat_inputs(
             variable_pool=variable_pool,
             input_data=input_data,
@@ -5689,11 +5766,12 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             input_data: dict[str, Any] | None = None,
+            prefer_cached_runtime: bool = False,
     ) -> dict[str, Any]:
         """单节点执行（非流式）"""
         input_data = input_data or {}
         node_config, node, state, variable_pool = await self._build_node_context(
-            app_id, node_id, config, workspace_id, input_data
+            app_id, node_id, config, workspace_id, input_data, prefer_cached_runtime
         )
         run_id = self._build_single_node_run_id()
         start_time = time.time()
@@ -5797,6 +5875,7 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             input_data: dict[str, Any] | None = None,
+            prefer_cached_runtime: bool = False,
     ):
         """单节点执行（流式）
 
@@ -5805,7 +5884,7 @@ class WorkflowService:
         """
         input_data = input_data or {}
         node_config, node, state, variable_pool = await self._build_node_context(
-            app_id, node_id, config, workspace_id, input_data
+            app_id, node_id, config, workspace_id, input_data, prefer_cached_runtime
         )
         node_type = node_config.get("type")
         run_id = self._build_single_node_run_id()
