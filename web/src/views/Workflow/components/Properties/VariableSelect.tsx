@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-12 10:29:21
+ * @Last Modified time: 2026-06-12 12:16:14
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -410,7 +410,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
   console.log('selectedValues', selectedValues)
   return (
-    <div ref={containerRef} className={`rb:relative rb:w-full ${className}`}>
+    <div ref={containerRef} className={`rb:relative rb:w-full rb:min-w-0 rb:max-w-full ${className}`}>
       {/* Trigger */}
       <div
         className={clsx(
@@ -460,9 +460,9 @@ const VariableSelect: FC<VariableSelectProps> = ({
                 return (
                   <span
                     key={v}
-                    className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:cursor-pointer"
+                    className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:cursor-pointer rb:max-w-full!"
                   >
-                    {!isConv && nd?.icon && <div className={`rb:size-3 rb:bg-cover ${nd.icon}`} />}
+                    {!isConv && nd?.icon && <div className={`rb:size-3 rb:shrink-0 rb:bg-cover ${nd.icon}`} />}
                     {!isConv && nd?.name && <span className="rb:text-[#5B6167]">{nd.name}{sep}</span>}
                     <span>
                       {path.map((p, idx) => (
@@ -486,9 +486,9 @@ const VariableSelect: FC<VariableSelectProps> = ({
         ) : selectedSuggestion ? (
           <div className="rb:flex rb:flex-1 rb:min-w-0 rb:max-w-full">
             <span
-              className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:cursor-pointer"
+              className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:cursor-pointer rb:max-w-full!"
             >
-              {!isConversation && nodeData?.icon && <div className={`rb:size-3 rb:bg-cover rb:mr-1 ${nodeData.icon}`} />}
+              {!isConversation && nodeData?.icon && <div className={`rb:size-3 rb:shrink-0 rb:bg-cover rb:mr-1 ${nodeData.icon}`} />}
               {!isConversation && nodeData?.name && <span className="rb:shrink rb:min-w-0 rb:truncate rb:max-w-[40%]">{nodeData.name}</span>}
               {!isConversation && nodeData?.name && <span>{sep}</span>}
               <span className="rb:shrink rb:min-w-0 rb:truncate">

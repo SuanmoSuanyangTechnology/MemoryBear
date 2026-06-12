@@ -2654,7 +2654,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'array[object]': 'Array[Object]',
           'object': 'Object',
           addParams: 'Add Extract Variable',
-          promptPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
+          promptPlaceholder: 'Write prompts here, type "/" to insert variables',
           advanced_settings: 'Advanced Settings',
           inference_mode: 'Inference Mode',
           inference_mode_tip: 'You can choose the inference mode based on the model\'s ability to handle Function calling or Prompt instructions.',
