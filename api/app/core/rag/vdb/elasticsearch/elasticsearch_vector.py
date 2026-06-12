@@ -480,44 +480,17 @@ class ElasticSearchVector(BaseVector):
     @staticmethod
     def _build_vector_filter_clauses(
         file_names_filter: list[str] | None,
-        document_ids_filter: list[str] | None,
+        document_ids_include: list[str] | None,
     ) -> list[dict[str, Any]]:
         filters: list[dict[str, Any]] = [
             {"term": {"metadata.status": 1}},
             {"exists": {"field": Field.VECTOR.value}},
         ]
         if file_names_filter:
-            query_str = {
-                "bool": {
-                    "must": {
-                        "script_score": {
-                            "query": {
-                                "match_all": {}
-                            },
-                            "script": {
-                                "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
-                                "params": {"query_vector": query_vector}
-                            }
-                        }
-                    },
-                    "filter": [
-                        {"term": {"metadata.status": 1}},
-                        {"terms": {"metadata.file_name": file_names_filter}},
-                        {"exists": {"field": Field.VECTOR.value}},
-                    ],
-                }
-            }
-
-        document_ids_include = kwargs.get("document_ids_include")
-        if document_ids_include is None:
-            document_ids_include = kwargs.get("document_ids_filter")
+            filters.append({"terms": {"metadata.file_name": file_names_filter}})
         if document_ids_include:
-            query_str["bool"]["filter"].append({
-                "terms": {Field.DOCUMENT_ID.value: document_ids_include}
-            })
-            logger.info(f"[ES search_by_vector] including document_ids: {document_ids_include}")
-        else:
-            logger.info("[ES search_by_vector] no document_ids_include")
+            filters.append({"terms": {Field.DOCUMENT_ID.value: document_ids_include}})
+        return filters
 
     @staticmethod
     def _resolve_knn_num_candidates(top_k: int, configured: Any = None) -> int:
@@ -653,12 +626,14 @@ class ElasticSearchVector(BaseVector):
         score_threshold = float(kwargs.get("score_threshold") or 0.3)
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
         file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
-        document_ids_filter = kwargs.get("document_ids_filter")
-        filters = self._build_vector_filter_clauses(file_names_filter, document_ids_filter)
+        document_ids_include = kwargs.get("document_ids_include")
+        if document_ids_include is None:
+            document_ids_include = kwargs.get("document_ids_filter")
+        filters = self._build_vector_filter_clauses(file_names_filter, document_ids_include)
 
         logger.info(
             f"[ES search_by_vector] filter_summary file_name_count={len(file_names_filter or [])} "
-            f"excluded_document_id_count={len(document_ids_filter or [])}"
+            f"included_document_id_count={len(document_ids_include or [])}"
         )
 
         if self._resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
