@@ -248,8 +248,8 @@ class WritePipeline:
                 async with bear.step(3, 5, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
-                # Step 3.5: 异步后处理（别名归并 Neo4j 侧 + 第二层去重 + 情绪 + 元数据）
-                await self._post_store_async_tasks(extraction_result)
+                # Step 3.5: 异步后处理（情绪提取）
+                await self._post_store_async_tasks()
 
                 # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
                 async with bear.step(4, 5, "聚类", "增量更新社区") as s:
@@ -478,16 +478,11 @@ class WritePipeline:
     # Step 3.5: 异步后处理（情绪提取 + 元数据提取）
     # ──────────────────────────────────────────────
 
-    async def _post_store_async_tasks(self, result: ExtractionResult) -> None:
+    async def _post_store_async_tasks(self) -> None:
         """提交写入后的异步 Celery 任务（全部 fire-and-forget，失败不影响主流程）：
 
         1. 异步情绪提取
-        2. 异步元数据提取
         """
-        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import (
-            collect_user_entities_for_metadata,
-        )
-
         llm_model_id = (
             str(self.memory_config.llm_model_id)
             if self.memory_config.llm_model_id
@@ -508,20 +503,6 @@ class WritePipeline:
                 "app.tasks.extract_emotion_batch",
                 {
                     "statements": emotion_statements,
-                    "llm_model_id": llm_model_id,
-                    "language": self.language,
-                    "snapshot_dir": snapshot_dir,
-                },
-            )
-
-        # ── 2. 异步元数据提取 ──
-        user_entities = collect_user_entities_for_metadata(result.entity_nodes)
-        if user_entities and llm_model_id:
-            self._submit_celery_task(
-                "Metadata",
-                "app.tasks.extract_metadata_batch",
-                {
-                    "user_entities": user_entities,
                     "llm_model_id": llm_model_id,
                     "language": self.language,
                     "snapshot_dir": snapshot_dir,
@@ -1122,7 +1103,7 @@ class WritePipeline:
                 async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
-                await self._post_store_async_tasks(extraction_result)
+                await self._post_store_async_tasks()
 
                 async with bear.step(5, 6, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)

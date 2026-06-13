@@ -75,7 +75,6 @@ SET c += {
 }
 RETURN c.id AS uuid
 """
-# bug修改点
 
 EXTRACTED_ENTITY_NODE_SAVE = """
 // Upsert entity nodes safely: preserve existing non-empty fields when incoming is empty
@@ -93,8 +92,11 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
     e.description = CASE
         WHEN entity.description IS NOT NULL AND entity.description <> ''
-         AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
-        THEN entity.description ELSE e.description END,
+        THEN CASE
+            WHEN e.description IS NULL OR size(e.description) = 0 THEN entity.description
+            ELSE e.description + '；' + entity.description
+        END
+        ELSE e.description END,
     e.example = CASE 
         WHEN entity.example IS NOT NULL AND entity.example <> '' 
         THEN entity.example 
@@ -1873,6 +1875,17 @@ RETURN n.description AS description,
        n.relations AS relations,
        n.traits AS traits,
        n.id AS id
+"""
+
+# ── 查询用户实体基本信息（供元数据提取使用） ──
+USER_ENTITY_FOR_METADATA = """
+MATCH (n:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id
+  AND (n.entity_type = '用户' OR toLower(n.name) IN ['用户', '我', 'user', 'i'])
+RETURN n.id AS entity_id,
+       n.name AS entity_name,
+       n.description AS description,
+       n.end_user_id AS end_user_id
 """
 
 FULLTEXT_QUERY_CYPHER_MAPPING = {
