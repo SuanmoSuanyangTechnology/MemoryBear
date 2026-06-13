@@ -99,20 +99,19 @@ celery_app.conf.update(
     # task routing
     task_routes={
         # Memory tasks → memory_tasks queue (threads worker)
-        'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
+        # 'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'}, # NOTE：只有路由可以删除
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
 
-        # Long-term storage tasks → memory_tasks queue (batched write strategies)
-        'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
-        'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
-        'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
+        # # Long-term storage tasks → memory_tasks queue (batched write strategies)  # NOTE：只有路由可以删除
+        # 'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
+        # 'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
+        # 'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
 
-        # Clustering tasks → memory_tasks queue (使用相同的 worker，避免 macOS fork 问题)
-        'app.tasks.run_incremental_clustering': {'queue': 'memory_tasks'},
+
 
         # Metadata extraction → memory_tasks queue
-        'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'},
+        # 'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'}, # NOTE：没有使用地方，可以删除
 
         # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
         'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
@@ -132,25 +131,26 @@ celery_app.conf.update(
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.layer2_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.layer2_dedup_full_scan_task': {'queue': 'periodic_tasks'},
-        'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
-        'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
-        'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
-        'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
-        'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
-        'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
-        'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
         'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
-        'app.tasks.flush_conversation': {'queue': 'memory_tasks'},
+        'app.tasks.flush_conversation': {'queue': 'periodic_tasks'},
 
-        # Sliding window idle scan → periodic_tasks queue (Beat scheduler)
-        'app.tasks.scan_idle_conversations': {'queue': 'periodic_tasks'},
         'app.tasks.scan_workflow_schedule_triggers': {'queue': 'periodic_tasks'},
         'app.tasks.run_workflow_schedule_trigger': {'queue': 'workflow_trigger_tasks'},
+        
+        # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
+        'app.tasks.refresh_memory_insight_and_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：生成记忆洞察、用户摘要缓存
+        'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
+        'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
+        'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.init_community_clustering_for_users': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.run_incremental_clustering': {'queue': 'memory_heavy_tasks'},
     },
 )
+
 
 # 自动发现任务模块
 celery_app.autodiscover_tasks(['app'])
@@ -194,7 +194,7 @@ beat_schedule_config = {
     #     "args": (),
     # },
     "regenerate-memory-cache": {
-        "task": "app.tasks.regenerate_memory_cache",
+        "task": "app.tasks.refresh_memory_insight_and_summary_cache",
         "schedule": memory_cache_regeneration_schedule,
         "args": (),
     },
