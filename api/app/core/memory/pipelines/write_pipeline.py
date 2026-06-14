@@ -495,7 +495,7 @@ class WritePipeline:
             else None
         )
 
-        # ── 1. 异步情绪提取 ──
+        # ── 1. 异步情绪提取 ── NOTE：需要移动在statement_temporal_step.py 或 extraction_pipeline_orchestrator.py中作为异步执行
         emotion_statements = getattr(self, "_emotion_statements", [])
         if emotion_statements and llm_model_id:
             self._submit_celery_task(
@@ -809,7 +809,12 @@ class WritePipeline:
 
         使用 MemoryClientFactory 工厂模式，需要短暂的 DB session 来
         查询模型配置（API key、base_url 等），查询完毕立即释放。
+
+        幂等：若已初始化则跳过，避免重复 DB 查询。
         """
+        if self._llm_client is not None and self._embedder_client is not None:
+            return
+
         from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
         from app.db import get_db_context
 
@@ -822,9 +827,11 @@ class WritePipeline:
         logger.info("LLM and embedding clients constructed")
 
     def _init_neo4j_connector(self) -> None:
-        """初始化 Neo4j 连接器。"""
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        """初始化 Neo4j 连接器（幂等：若已存在则跳过）。"""
+        if self._neo4j_connector is not None:
+            return
 
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         self._neo4j_connector = Neo4jConnector()
 
     def _load_ontology_types(self):
@@ -942,6 +949,7 @@ class WritePipeline:
         message_seq: int,
         ref_id: str = "",
         dispatch_at: str = "",
+        skip_cursor_advance: bool = False,
     ) -> WriteResult:
         """滑动窗口写入入口。
 
@@ -953,6 +961,8 @@ class WritePipeline:
             message_seq: 目标消息的 message_seq
             ref_id: 引用 ID，为空则自动生成
             dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+            skip_cursor_advance: 直接写入路径设为 True，跳过 write_cursor 推进
+                （不依赖 memory_messages 表，无需维护 cursor 进度）
 
         Returns:
             WriteResult 包含状态和统计信息
@@ -1113,10 +1123,11 @@ class WritePipeline:
                 async with bear.step(6, 6, "摘要", "生成情景记忆"):
                     await self._summarize(chunked_dialogs)
 
-                await self._advance_write_cursor(
-                    conversation_id=conversation_id,
-                    message_seq=message_seq,
-                )
+                if not skip_cursor_advance:
+                    await self._advance_write_cursor(
+                        conversation_id=conversation_id,
+                        message_seq=message_seq,
+                    )
 
                 await self._update_stats_cache(extraction_result)
 
@@ -1222,13 +1233,9 @@ class WritePipeline:
         conversation_id: str,
         message_seq: int,
     ) -> None:
-        """原子性推进对话的 write_cursor。
+        """原子性推进对话的 write_cursor（委托到共享实现，消除重复代码）。
 
-        执行原子性 UPDATE conversations SET write_cursor = :new_seq
-        WHERE id = :conv_id AND write_cursor < :new_seq，
-        确保 write_cursor 只能单调递增，防止并发任务乱序覆盖。
-
-        更新失败时记录警告日志，不抛出异常（fire-and-forget 语义）。
+        委托 window_utils.advance_write_cursor，该函数内已包含 ZSET 记录。
 
         Args:
             conversation_id: 对话 ID
@@ -1236,46 +1243,16 @@ class WritePipeline:
 
         Requirements: 3.2
         """
-        try:
-            from sqlalchemy import update
-            from app.models.conversation_model import Conversation
-            from app.db import get_db_context
+        from app.core.memory.sliding_window.window_utils import advance_write_cursor
 
-            with get_db_context() as db:
-                result = db.execute(
-                    update(Conversation)
-                    .where(
-                        Conversation.id == conversation_id,
-                        Conversation.write_cursor < message_seq,
-                    )
-                    .values(write_cursor=message_seq)
-                )
-                db.commit()
-
-                if result.rowcount == 0:
-                    logger.warning(
-                        f"[WritePipeline] write_cursor 未更新（可能已被更大的 seq 覆盖）: "
-                        f"conv={conversation_id}, seq={message_seq}"
-                    )
-                else:
-                    logger.info(
-                        f"[WritePipeline] write_cursor 已推进: "
-                        f"conv={conversation_id}, new_cursor={message_seq}"
-                    )
-        except Exception as e:
-            logger.warning(
-                f"[WritePipeline] _advance_write_cursor 失败（不影响主流程）: "
-                f"conv={conversation_id}, seq={message_seq}, err={e}",
-                exc_info=True,
-            )
+        await advance_write_cursor(conversation_id, message_seq)
 
     async def _cleanup(self) -> None:
         """
-        清理资源：关闭 Neo4j 连接器，断开客户端引用。
+        清理资源：关闭 Neo4j 连接器。
 
-        不再尝试反射关闭 httpx 内部 client——由 tasks.py 的
-        _shutdown_loop_gracefully 中 set_exception_handler 兜底，
-        抑制 GC 阶段 'Event loop is closed' 的噪音日志。
+        LLM/Embedding 客户端不在此处清理——它们在 WritePipeline 生命周期内
+        跨多次 run_with_window 调用复用，由 GC 最终回收。
         """
         if self._neo4j_connector:
             try:
@@ -1283,7 +1260,4 @@ class WritePipeline:
             except Exception as e:
                 logger.error(f"Error closing Neo4j connector: {e}")
 
-        # 断开引用链，让 GC 尽早回收（减少 loop 关闭后残留对象的概率）
         self._neo4j_connector = None
-        self._llm_client = None
-        self._embedder_client = None

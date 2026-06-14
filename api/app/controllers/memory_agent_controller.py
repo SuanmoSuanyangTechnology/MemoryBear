@@ -254,7 +254,15 @@ async def write_server_async(
 
         task = celery_app.send_task(
             "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language]
+            kwargs={
+                "end_user_id": user_input.end_user_id,
+                "mode": "api_write",
+                "messages": messages_list,
+                "config_id": config_id,
+                "storage_type": storage_type,
+                "user_rag_memory_id": user_rag_memory_id,
+                "language": language,
+            }
         )
         api_logger.info(f"Write task queued: {task.id}")
 

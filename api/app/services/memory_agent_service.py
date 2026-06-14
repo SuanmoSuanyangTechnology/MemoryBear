@@ -47,9 +47,6 @@ from app.schemas import FileInput
 from app.schemas.memory_agent_schema import Language, MessageItem, StorageType, Write_UserInput, WriteMemoryRequest
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_config_service import MemoryConfigService
-from app.services.memory_konwledges_server import (
-    write_rag,
-)
 from app.services.memory_perceptual_service import MemoryPerceptualService
 
 logger = get_logger(__name__)
@@ -310,11 +307,9 @@ class MemoryAgentService:
         storage_type = request.storage_type
         user_rag_memory_id = request.user_rag_memory_id
         language = request.language
-        conversation_id = request.conversation_id
         start_time = time.time()
 
         # ── per-end_user 互斥锁 ──
-        # 防止同一 end_user_id 的 API 并发调用和 FlushTask 同时操作同一个 conversation
         async with self._acquire_per_user_lock(end_user_id):
             return await self._write_memory_locked(
                 end_user_id=end_user_id,
@@ -323,7 +318,6 @@ class MemoryAgentService:
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
                 language=language,
-                conversation_id=conversation_id,
                 db=db,
                 start_time=start_time,
             )
@@ -333,11 +327,8 @@ class MemoryAgentService:
     async def _acquire_per_user_lock(end_user_id: str):
         """获取 per-end_user 互斥锁（RedisFairLock）。
 
-        防止同一 end_user_id 的并发 API 调用和 FlushTask 同时操作同一个
-        哨兵会话的 write_cursor 和 pending 消息。
-
-        FlushTask (flush_conversation_task) 也使用同一把锁
-        memory_write:{end_user_id}，保证互斥。
+        防止同一 end_user_id 的并发 API 调用同时操作 Neo4j 中的同一个用户节点。
+        与 Celery write_message_task 中的 memory_write:{end_user_id} 锁一致。
 
         失败（Redis 不可用）时不阻塞主流程，仅记录 warning 后放行。
         """
@@ -404,8 +395,7 @@ class MemoryAgentService:
             storage_type,
             user_rag_memory_id,
             language,
-            conversation_id,
-            db: Optional[Session],
+            db: Session,
             start_time: float,
     ) -> str:
         """write_memory 的核心实现（已持有 per-end_user 锁）。"""
@@ -423,26 +413,31 @@ class MemoryAgentService:
         # ── Step 3: 写入存储 ── 根据 storage_type 分流到 RAG 或 Neo4j 流水线
         try:
             if storage_type == StorageType.RAG:
-                await write_rag(end_user_id, message_text, user_rag_memory_id)
+                from app.core.memory.memory_service import MemoryService
+                await MemoryService._write_messages_to_rag(
+                    messages=messages,
+                    end_user_id=end_user_id,
+                    user_rag_memory_id=user_rag_memory_id,
+                )
                 return "success"
             else:
-                # ── 滑动窗口写入路径（所有 Neo4j 写入统一入口）──
-                _conversation_id = str(conversation_id) if conversation_id else None
-                if not _conversation_id:
-                    # Service API 路径：按 (workspace_id, end_user_id) 查找/创建虚拟会话
-                    from app.core.memory.sliding_window.window_utils import get_or_create_service_api_conversation
-                    _conversation_id = get_or_create_service_api_conversation(
-                        workspace_id=str(memory_config.workspace_id),
-                        end_user_id=end_user_id,
-                    )
-                await self._write_to_memory_messages_and_dispatch(
-                    conversation_id=_conversation_id,
-                    messages=messages,
+                # ── 直接写入路径（Neo4j）──
+                # 不经过 memory_messages 表，直接从内存逐条写入
+                from app.core.memory.memory_service import MemoryService
+
+                _messages_dict = [
+                    msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
+                    for msg in messages
+                ]
+
+                result = await MemoryService.write_messages_direct(
+                    messages=_messages_dict,
                     end_user_id=end_user_id,
                     config_id=str(memory_config.config_id),
                     workspace_id=str(memory_config.workspace_id),
                     language=str(language),
                 )
+                logger.info(f"[write_memory] direct write completed: {result}")
 
                 # ── Step 4: 后处理 ── 失效缓存、序列化文件路径、记录审计日志并返回结果
                 await self._invalidate_interest_cache(end_user_id)
@@ -610,61 +605,6 @@ class MemoryAgentService:
                     message.file_content.append((file_object, file["type"]))
         logger.info(messages)
         return messages
-
-    async def _write_to_memory_messages_and_dispatch(
-        self,
-        conversation_id: str,
-        messages: list[MessageItem] | list[dict],
-        end_user_id: str,
-        config_id: str,
-        workspace_id: str,
-        language: str,
-    ) -> None:
-        """Layer 1 + Layer 2：写入候选池 → 同步执行。
-
-        所有 Neo4j 写入任务的统一入口。
-        1. 写入 memory_messages 表（Layer 1）
-        2. 调用 execute_pending_from_pool() 同步执行（Layer 2）
-
-        Args:
-            conversation_id: 对话 ID
-            messages: MessageItem 或 dict 列表
-            end_user_id: 终端用户 ID
-            config_id: 记忆配置 ID
-            workspace_id: 工作空间 ID
-            language: 语言
-        """
-        from app.core.memory.sliding_window.window_utils import (
-            ensure_conversation_exists,
-            write_batch_to_memory_messages,
-            execute_pending_from_pool,
-        )
-
-        messages_dict = [
-            msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
-            for msg in messages
-        ]
-
-        await ensure_conversation_exists(
-            conversation_id=conversation_id,
-            workspace_id=workspace_id,
-        )
-
-        await write_batch_to_memory_messages(
-            conversation_id=conversation_id,
-            messages=messages_dict,
-        )
-
-        await execute_pending_from_pool(
-            conversation_id=conversation_id,
-            end_user_id=end_user_id,
-            config_id=config_id,
-            workspace_id=workspace_id,
-            language=language,
-            enforce_window=False,  # API 同步路径，详见 execute_pending_from_pool docstring
-        )
-
-
 
     async def _invalidate_interest_cache(self, end_user_id: str) -> None:
         """写入完成后失效兴趣分布缓存。"""

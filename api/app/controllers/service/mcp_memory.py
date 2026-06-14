@@ -73,10 +73,10 @@ async def write_memory(
             end_user_id,
             {
                 "end_user_id": end_user_id,
-                "message": [{"role": "user", "content": message}],
+                "mode": "api_write",
+                "messages": [{"role": "user", "content": message}],
                 "config_id": config_id,
                 "storage_type": storage_type,
-                "user_rag_memory_id": "",
                 "workspace_id": str(workspace_id),
             },
         )

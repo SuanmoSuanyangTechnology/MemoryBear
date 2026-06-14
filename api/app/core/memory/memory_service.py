@@ -6,13 +6,8 @@ MemoryService — 记忆模块统一入口（Facade）
 职责：
 - 接收已加载的 MemoryConfig，选择并调用对应的 Pipeline
 - 检查应用级记忆门禁（memory.enabled）
-- 将消息写入 memory_messages 表
-- 分派给 SlidingWindowScheduler
-- 提供 create_long_term_memory_tool() —— 创建 LangChain 长期记忆检索 tool 的工厂函数
-- 不包含任何业务逻辑实现
-- 不直接操作数据库或 LLM（除 memory_messages 写入外）
-
-依赖方向：外部调用方 → MemoryService → Pipeline → Engine → Repository
+- Agent 对话路径：将消息写入 memory_messages 表 + 分派给 SlidingWindowScheduler
+- Workflow / API Service 路径：通过 write_messages_direct 直接从内存逐条写入，不经过 memory_messages
 """
 
 import asyncio
@@ -25,7 +20,7 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from app.models.conversation_model import Message
 
-# Runtime import — used in sync_message and write_workflow_messages
+# Runtime import — used in sync_message and _persist_memory_message
 from app.models.memory_message_model import MemoryMessage
 
 from app.core.memory.enums import SearchStrategy, StorageType
@@ -44,7 +39,7 @@ logger = logging.getLogger(__name__)
 # 是为了避免 memory_service ↔ tasks 之间形成循环 import）
 CONV_ACTIVE_KEY_PREFIX = "conv_active:"
 # 对话活跃 key 的 TTL（秒）。每写入一条 memory_messages 都会 SETEX 续期，
-# 超过该时长无新消息后 scan_idle_conversations_task 会派发兜底 FlushTask
+# 超过该时长无新消息后 flush_conversation_task 扫描模式会派发兜底写入
 CONV_ACTIVE_TTL_SECONDS = 300
 
 
@@ -83,7 +78,7 @@ class MemoryService:
         if memory_config is None and storage_type.lower() == "neo4j":
             logger.warning(
                 "MemoryService 初始化时未提供 memory config（config_id=None），"
-                "仅 sync_message / write_workflow_messages 可用，"
+                "仅 sync_message 可用，"
                 "write/read/pilot_write 方法将不可用"
             )
         self.ctx = MemoryContext(
@@ -380,91 +375,111 @@ class MemoryService:
     # 统一门户：工作流 MemoryWriteNode 消息写入
     # ──────────────────────────────────────────────
 
-    @classmethod
-    async def write_workflow_messages(
-        cls,
-        conversation_id: str,
+    @staticmethod
+    async def _write_messages_to_rag(
         messages: List[dict],
+        end_user_id: str,
+        user_rag_memory_id: str,
+    ) -> None:
+        """将 messages 拼接为文本并写入 RAG 存储。
+
+        供 _run_api_write（celery）和 _write_memory_locked（controller sync）共用。
+        """
+        from app.services.memory_konwledges_server import write_rag
+
+        message_text = "\n".join([
+            f"{(msg['role'] if isinstance(msg, dict) else msg.role)}: "
+            f"{(msg['content'] if isinstance(msg, dict) else msg.content)}"
+            for msg in messages
+        ])
+        await write_rag(end_user_id, message_text, user_rag_memory_id)
+
+    @staticmethod
+    async def write_messages_direct(
+        messages: List[dict],
+        end_user_id: str,
         config_id: str = "",
-        end_user_id: str = "",
         workspace_id: str = "",
         language: str = "zh",
-    ) -> List["MemoryMessage"]:
-        """工作流 MemoryWriteNode 消息写入 memory_messages 表（类方法，无需实例化）。
+    ) -> Dict[str, Any]:
+        """直接写入：不经过 memory_messages 表，逐条写入 Neo4j。
 
-        不依赖 memory_config，专供 MemoryWriteNode 调用——避免在节点路径上
-        额外加载/校验 memory_config，从而绕开配置缺失/校验失败导致的节点崩溃。
-
-        1. 兜底确保 conversations 表存在该记录
-        2. 批量写入 memory_messages 表（should_memorize 强制 TRUE）
-        3. 分派给 SlidingWindowScheduler
+        workflow MemoryWriteNode 和 API Service 的统一入口。
+        从内存 messages 数组构建上下文，串行逐条调用 WritePipeline 写入。
 
         Args:
-            conversation_id: 会话 ID
-            messages: 消息列表 [{"role": "user"|"assistant", "content": "...", "files": [...]}]
-            config_id: 记忆配置 ID
+            messages: 消息列表 [{"role": "user"|"assistant", "content": "...", ...}]
             end_user_id: 终端用户 ID
+            config_id: 记忆配置 ID（UUID string 或 int）
             workspace_id: 工作空间 ID
-            language: 语言
+            language: 语言 ("zh" | "en")
 
         Returns:
-            成功写入的 MemoryMessage 实例列表
+            {"status": "success", "processed": N, "total": len(messages)}
         """
-        from app.core.memory.sliding_window.window_utils import (
-            ensure_conversation_exists,
-            write_batch_to_memory_messages,
-            dispatch_to_scheduler,
-        )
+        from app.core.memory.pipelines.write_pipeline import WritePipeline
+        from app.core.memory.sliding_window.window_utils import precompute_context_windows
+        from app.services.memory_config_service import MemoryConfigService
+        from app.db import get_db_context
 
-        if not conversation_id:
-            logger.warning(
-                "[MemoryService] write_workflow_messages: conversation_id 为空，跳过"
-            )
-            return []
         if not messages:
-            logger.warning(
-                f"[MemoryService] write_workflow_messages: messages 为空，跳过 "
-                f"conv={conversation_id}"
-            )
-            return []
+            logger.warning("[MemoryService] write_messages_direct: messages 为空")
+            return {"status": "success", "processed": 0, "total": 0}
 
-        try:
-            await ensure_conversation_exists(
-                conversation_id=conversation_id,
+        # 预计算所有 user 消息的上下文窗口（O(n)，替代每条消息单独扫描的 O(n²)）
+        context_windows = precompute_context_windows(messages)
+
+        # 加载 memory_config
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.load_memory_config(
+                config_id=config_id,
                 workspace_id=workspace_id,
+                service_name="write_messages_direct",
             )
-
-            written = await write_batch_to_memory_messages(
-                conversation_id=conversation_id,
-                messages=messages,
-            )
-
-            logger.info(
-                f"[MemoryService] write_workflow_messages 写入完成: "
-                f"conv={conversation_id}, written={len(written)}/{len(messages)}"
-            )
-
-            if written:
-                # 刷新 Redis 活跃 key（与 sync_message 行为一致）
-                # —— 工作流写入后也属于"对话活跃"，应阻止 scan_idle 在短期内派发兜底
-                await cls._refresh_active_key(conversation_id)
-
-                await dispatch_to_scheduler(
-                    conversation_id=conversation_id,
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    workspace_id=workspace_id,
-                    language=language,
+            if memory_config is None:
+                raise RuntimeError(
+                    f"[MemoryService] write_messages_direct 无法加载 memory_config: "
+                    f"config_id={config_id}"
                 )
 
-            return written
-        except Exception as e:
-            logger.error(
-                f"[MemoryService] write_workflow_messages 失败: "
-                f"conv={conversation_id}, err={e}",
-                exc_info=True,
+            pipeline = WritePipeline(
+                memory_config=memory_config,
+                end_user_id=end_user_id,
+                language=language,
             )
-            raise
+
+            processed = 0
+            for w in context_windows:
+                msg = messages[w.index]
+
+                try:
+                    await pipeline.run_with_window(
+                        target_message=msg,
+                        context_before=messages[w.before_start:w.before_end],
+                        context_after=messages[w.after_start:w.after_end],
+                        conversation_id="",  # 直接写入路径无需 conversation
+                        message_seq=w.index + 1,  # 仅用作标识，不写入 DB
+                        skip_cursor_advance=True,
+                    )
+                    processed += 1
+                    logger.info(
+                        f"[MemoryService] write_messages_direct: "
+                        f"end_user={end_user_id}, seq={w.index + 1}, processed={processed}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[MemoryService] write_messages_direct 消息处理异常，跳过: "
+                        f"end_user={end_user_id}, index={w.index}, err={e}",
+                        exc_info=True,
+                    )
+                    continue
+
+            logger.info(
+                f"[MemoryService] write_messages_direct 完成: "
+                f"end_user={end_user_id}, processed={processed}/{len(messages)}"
+            )
+            return {"status": "success", "processed": processed, "total": len(messages)}
 
     # ──────────────────────────────────────────────
     # 内部辅助方法

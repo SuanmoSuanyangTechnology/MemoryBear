@@ -116,6 +116,7 @@ class SlidingWindowScheduler:
                     config_id=config_id,
                     workspace_id=workspace_id,
                     language=language,
+                    target_seq=target_seq,
                 )
                 return
 
@@ -125,14 +126,22 @@ class SlidingWindowScheduler:
         )
 
     @staticmethod
-    def _enqueue_pending_consume(
+    def _enqueue_pending_consume( # NOTE:应该一个write_message_task任务，就发送一次，之后再检查再发。
         conversation_id: str,
         end_user_id: str,
         config_id: str,
         workspace_id: str,
         language: str,
+        target_seq: int | None = None,
     ) -> None:
         """通过 celery_task_scheduler 按 end_user_id 串行派发候选池消费任务。
+
+        target_seq 指定本次要处理的 user message seq。push_task 成功后立即原子
+        推进 write_cursor = target_seq，防止后续 SlidingWindowScheduler 重复派发
+        同一条消息。
+
+        task 内部通过 target_seq 直接从 memory_messages 查询该条消息，不依赖
+        write_cursor 查 pending，因此即使 cursor 已推进，重投递仍能正确处理。
 
         分片键 = end_user_id，与旧 write_message 任务沿用同一把 lock_key
         ("{task_name}:{end_user_id}")，保证同一 user 的所有写入串行。
@@ -180,20 +189,46 @@ class SlidingWindowScheduler:
                 end_user_id,
                 {
                     "end_user_id": end_user_id,
-                    # 不传 message → write_message_task 走"仅消费候选池"模式
-                    "message": [],
+                    "mode": "sliding_window",
                     "config_id": config_id or "",
-                    "storage_type": "neo4j",
-                    "user_rag_memory_id": "",
                     "language": language,
                     "conversation_id": conversation_id,
                     "workspace_id": workspace_id or "",
+                    "target_seq": target_seq,
                 },
             )
             logger.info(
                 f"[SlidingWindowScheduler] 已派发候选池消费任务: "
-                f"conv={conversation_id}, end_user_id={end_user_id}, msg_id={msg_id}"
+                f"conv={conversation_id}, end_user_id={end_user_id}, "
+                f"target_seq={target_seq}, msg_id={msg_id}"
             )
+
+            # push 成功后立即推进 write_cursor，防止重复派发同一条消息
+            # task 执行时通过 target_seq 直接查询，不依赖 cursor，重投递仍可正确处理
+            if target_seq is not None:
+                try:
+                    import asyncio
+                    from app.core.memory.sliding_window.window_utils import advance_write_cursor
+
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(
+                            advance_write_cursor(conversation_id, target_seq)
+                        )
+                    else:
+                        loop.run_until_complete(
+                            advance_write_cursor(conversation_id, target_seq)
+                        )
+                    logger.info(
+                        f"[SlidingWindowScheduler] push 后提前推进 write_cursor: "
+                        f"conv={conversation_id}, seq={target_seq}"
+                    )
+                except Exception as cursor_err:
+                    logger.warning(
+                        f"[SlidingWindowScheduler] 提前推进 write_cursor 失败（不影响写入）: "
+                        f"conv={conversation_id}, seq={target_seq}, err={cursor_err}"
+                    )
+
         except Exception as e:
             logger.error(
                 f"[SlidingWindowScheduler] push_task 失败（不影响主流程）: "
