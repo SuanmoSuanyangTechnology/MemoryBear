@@ -283,7 +283,7 @@ const processNodeVariables = (
       const structuredOutput = config.structured_output?.defaultValue ?? config.structured_output;
       if (structuredOutput) {
         const jsonOutputFields = config.json_output_fields?.defaultValue ?? config.json_output_fields ?? [];
-        
+
         // Build children variables recursively, recursing all the way down
         // for any field that has nested children
         const buildChildren = (fields: any[], parentPath: string = ''): Suggestion[] => {
@@ -472,6 +472,30 @@ export const getChildNodeVariables = (
 
   return list;
 };
+
+
+// Recursively filter string/number type variables from children
+export const filterChildrenWithTypes = (variables: Suggestion[], types: string[]): Suggestion[] => {
+  return variables.filter((variable) => {
+    // Include string or number type directly (handle both 'number' and 'Number')
+    if (types.includes(variable.dataType)) {
+      return true;
+    }
+    // For file type or other types with children, recursively filter
+    if (variable.children && variable.children?.length > 0) {
+      const stringChildren = filterChildrenWithTypes(variable.children, types);
+      if (stringChildren.length > 0) {
+        // Keep the parent but mark as disabled and with filtered children
+        Object.assign(variable, {
+          disabled: true,
+          children: stringChildren
+        });
+        return true;
+      }
+    }
+    return false;
+  });
+}
 
 /**
  * Hook for managing workflow variable list

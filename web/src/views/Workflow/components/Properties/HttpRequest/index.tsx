@@ -16,6 +16,7 @@ import type { AuthConfigModalRef, HttpRequestConfigForm } from './types'
 import MessageEditor from '../MessageEditor'
 import EditableTable from './EditableTable'
 import { portTextAttrs, nodeWidth, portItemArgsY } from '../../../constant'
+import { filterChildrenWithTypes } from '../hooks/useVariableList'
 
 const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: any; }> = ({
   options,
@@ -86,14 +87,21 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
   const filterVariables = useMemo(() => {
     const filterList: Suggestion[] = []
     options.forEach(variable => {
-      if (['number', 'string', 'secret'].includes(variable.dataType)) {
+      const types = ['number', 'string', 'secret']
+      if (types.includes(variable.dataType)) {
         filterList.push(variable)
       } else if (variable.dataType === 'file') {
         filterList.push({
           ...variable,
           disabled: true,
-          children: variable.children?.filter(child => ['number', 'string'].includes(child.dataType))
+          children: variable.children?.filter(child => types.includes(child.dataType))
         })
+      } else if (variable.children && variable.children?.length > 0) {
+        // Recursively handle other types with children
+        const filteredVar = filterChildrenWithTypes([variable], types)[0];
+        if (filteredVar) {
+          filterList.push(filteredVar);
+        }
       }
     })
 
@@ -112,7 +120,8 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
   const jsonRawFilterVariables = useMemo(() => {
     const filterList: Suggestion[] = []
     options.forEach(variable => {
-      if (['number', 'string', 'array[string]', 'array[number]', 'object', 'secret'].includes(variable.dataType)) {
+      const types = ['number', 'string', 'array[string]', 'array[number]', 'object', 'secret']
+      if (types.includes(variable.dataType)) {
         filterList.push(variable)
       } else if (variable.dataType === 'file') {
         filterList.push({
@@ -120,6 +129,12 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           disabled: true,
           children: variable.children?.filter(child => ['number', 'string', 'file', 'array[string]', 'array[number]'].includes(child.dataType))
         })
+      } else if (variable.children && variable.children?.length > 0) {
+        // Recursively handle other types with children
+        const filteredVar = filterChildrenWithTypes([variable], types)[0];
+        if (filteredVar) {
+          filterList.push(filteredVar);
+        }
       }
     })
 
