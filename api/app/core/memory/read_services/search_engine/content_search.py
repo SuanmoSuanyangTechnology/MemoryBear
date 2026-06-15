@@ -166,7 +166,7 @@ class Neo4jSearchService:
             query: str,
             limit: int = 10,
     ) -> MemorySearchResult:
-        async with Neo4jConnector() as connector:
+        async with Neo4jConnector(shared_driver=True) as connector:
             self.connector = connector
             kw_task = self._keyword_search(query, limit)
             emb_task = self._embedding_search(query, limit)
@@ -302,7 +302,7 @@ class Neo4jSearchService:
             self,
             pairs: list[EntityPair]
     ) -> tuple[list[dict], list[dict]]:
-        async with Neo4jConnector() as connector:
+        async with Neo4jConnector(shared_driver=True) as connector:
             user_meta = await search_user_metadata(connector, self.ctx.end_user_id)
             user_entity_id = user_meta.get("id", "")
 
@@ -380,7 +380,7 @@ class Neo4jSearchService:
         return MemorySearchResult(memories=[], relations=relations)
 
     async def memory_l0(self) -> Memory:
-        async with Neo4jConnector() as connector:
+        async with Neo4jConnector(shared_driver=True) as connector:
             end_user_id = self.ctx.end_user_id
             user_meta = await search_user_metadata(connector, end_user_id)
             metadata = MetadataBuilder(user_meta)
@@ -515,7 +515,7 @@ class MetaSearchService:
         if self.ctx.storage_type == StorageType.RAG:
             return MemorySearchResult(memories=[])
         else:
-            async with Neo4jConnector() as connector:
+            async with Neo4jConnector(shared_driver=True) as connector:
                 end_user_id = self.ctx.end_user_id
                 user_meta = await search_user_metadata(connector, end_user_id)
                 metadata = MetadataBuilder(user_meta)

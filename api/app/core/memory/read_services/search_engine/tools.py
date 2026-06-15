@@ -31,7 +31,7 @@ def make_entity_search_tool(ctx: MemoryContext):
         Returns:
             [{"id": "entity id", "name": "entity name", "entity_type": "entity type"}, ...]
         """
-        async with Neo4jConnector() as connector:
+        async with Neo4jConnector(shared_driver=True) as connector:
             res = await search_by_fulltext(
                 connector=connector,
                 node_type=Neo4jNodeType.EXTRACTEDENTITY,
@@ -60,7 +60,7 @@ def make_relation_search_tool(ctx: MemoryContext):
         Returns:
             [{"id": "target entity id", "source_name": "source entity name", "relation_predicate": "predicate used", "target_name": "target entity name"}, ...]
         """
-        async with Neo4jConnector() as connector:
+        async with Neo4jConnector(shared_driver=True) as connector:
             if not source_id:
                 source_id = (await search_user_metadata(connector, ctx.end_user_id)).get("id")
             res = await search_graph_by_relationship(

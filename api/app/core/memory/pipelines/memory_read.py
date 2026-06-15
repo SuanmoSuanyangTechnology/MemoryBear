@@ -18,14 +18,10 @@ from app.repositories.memory_short_repository import (
 
 logger = logging.getLogger(__name__)
 
-_MAX_SEARCH_CONCURRENCY = 3
-_search_semaphore = asyncio.Semaphore(_MAX_SEARCH_CONCURRENCY)
-
 
 async def _run_with_semaphore(coro):
-    """在信号量控制下执行协程，限制并发搜索数量。"""
-    async with _search_semaphore:
-        return await coro
+    """直接执行协程（并发限制已关闭）。"""
+    return await coro
 
 
 def _safe_merge_results(results: list, label: str) -> MemorySearchResult:
