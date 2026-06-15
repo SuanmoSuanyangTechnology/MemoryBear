@@ -422,6 +422,9 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
     ) -> list[str] | None:
+        if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
+            return None
+
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL and not request.metadata_filters:
             return None
 
@@ -459,6 +462,9 @@ class KnowledgeRetrievalService:
             knowledge_ids: list[uuid.UUID],
             common_metadata_defs: dict[str, dict],
     ) -> list[EngineFilterGroup]:
+        if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
+            return []
+
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL:
             if not request.metadata_filters:
                 return []
