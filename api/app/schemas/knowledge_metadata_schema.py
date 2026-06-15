@@ -44,6 +44,39 @@ class MetadataFilterMode(StrEnum):
     AUTO = "auto"
 
 
+class MetadataAutoFilterExtraParams(BaseModel):
+    temperature: float | None = Field(None, ge=0.0, le=2.0, description="温度参数")
+    max_tokens: int | None = Field(None, ge=1, le=32000, description="最大生成 token 数")
+    top_p: float | None = Field(None, ge=0.0, le=1.0, description="Top-p 采样参数")
+    stop: list[str] | None = Field(None, max_length=4, description="停止序列，最多 4 个")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MetadataAutoFilterModelParameters(BaseModel):
+    deep_thinking: bool | None = Field(None, description="是否启用深度思考模式")
+    json_output: bool | None = Field(None, description="是否强制 JSON 输出")
+    timeout: float | None = Field(None, gt=0, description="请求超时时间（秒）")
+    max_retries: int | None = Field(None, ge=0, description="最大重试次数")
+    concurrency: int | None = Field(None, ge=1, description="并发限制")
+    extra_params: MetadataAutoFilterExtraParams = Field(
+        default_factory=MetadataAutoFilterExtraParams,
+        description="RedBearModelConfig.extra_params 支持的 auto metadata filter 参数",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MetadataAutoFilterModelConfig(BaseModel):
+    model_config_id: uuid.UUID = Field(..., description="用于 auto 元数据过滤的模型配置 ID")
+    model_parameters: MetadataAutoFilterModelParameters = Field(
+        default_factory=MetadataAutoFilterModelParameters,
+        description="auto 元数据过滤模型参数",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 # === KnowledgeMetadata CRUD Schemas ===
 
 class KnowledgeMetadataCreate(BaseModel):

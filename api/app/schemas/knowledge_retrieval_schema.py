@@ -4,7 +4,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
-from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
+from app.schemas.knowledge_metadata_schema import (
+    FilterGroup,
+    MetadataAutoFilterModelConfig,
+    MetadataFilterMode,
+)
 
 
 class KnowledgeRetrievalRequest(BaseModel):
@@ -22,6 +26,7 @@ class KnowledgeRetrievalRequest(BaseModel):
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
+    metadata_auto_filter_model: MetadataAutoFilterModelConfig | None = None
 
     @field_validator("query")
     @classmethod

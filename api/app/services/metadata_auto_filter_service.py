@@ -104,10 +104,18 @@ class MetadataAutoFilterService:
             "You are a text metadata extract engine. Extract only metadata filters that are clearly "
             "present in the user's input and only use fields from the provided metadata list."
         )
+        user_prompt = cls._build_prompt(query=query, metadata_defs=metadata_defs)
+        if hasattr(llm, "generate"):
+            content = llm.generate(system_prompt=system_prompt, user_prompt=user_prompt)
+            if not content:
+                logger.warning("[MetadataAutoFilter] LLM returned no usable content")
+                return []
+            return cls._parse_llm_response(str(content))
+
         history = [
             {
                 "role": "user",
-                "content": cls._build_prompt(query=query, metadata_defs=metadata_defs),
+                "content": user_prompt,
             }
         ]
         response = llm.chat(

@@ -11,6 +11,7 @@ from app.core.models import RedBearRerank
 from app.core.models.base import RedBearModelConfig
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
+from app.core.rag.metadata.auto_filter_llm import MetadataAutoFilterLLM
 from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
     FilterGroup as EngineFilterGroup,
@@ -67,11 +68,14 @@ class KnowledgeRetrievalService:
         if not db_knowledge:
             raise KnowledgeRetrievalAccessDenied("The knowledge base does not exist or access is denied")
 
-        document_ids_include = cls._build_metadata_document_filter(
-            db=db,
-            request=request,
-            knowledge_ids=knowledge_ids,
-        )
+        metadata_filter_kwargs = {
+            "db": db,
+            "request": request,
+            "knowledge_ids": knowledge_ids,
+        }
+        if current_user is not None:
+            metadata_filter_kwargs["current_user"] = current_user
+        document_ids_include = cls._build_metadata_document_filter(**metadata_filter_kwargs)
         if document_ids_include == []:
             return KnowledgeRetrievalResult(chunks=[])
 
@@ -421,6 +425,7 @@ class KnowledgeRetrievalService:
             db: Session,
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
+            current_user: Any = None,
     ) -> list[str] | None:
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL and not request.metadata_filters:
             return None
@@ -435,6 +440,7 @@ class KnowledgeRetrievalService:
             request=request,
             knowledge_ids=knowledge_ids,
             common_metadata_defs=common_metadata_defs,
+            current_user=current_user,
         )
         if not filter_groups:
             logger.warning("[MetadataFilter] No common metadata fields matched; skipping metadata filter")
@@ -458,6 +464,7 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
             common_metadata_defs: dict[str, dict],
+            current_user: Any = None,
     ) -> list[EngineFilterGroup]:
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL:
             if not request.metadata_filters:
@@ -472,7 +479,9 @@ class KnowledgeRetrievalService:
                 return []
             llm = cls._build_metadata_auto_filter_llm(
                 db=db,
+                request=request,
                 knowledge_id=knowledge_ids[0],
+                current_user=current_user,
             )
             if not llm:
                 logger.warning("[MetadataAutoFilter] LLM is unavailable; skipping metadata filter")
@@ -492,16 +501,63 @@ class KnowledgeRetrievalService:
     def _build_metadata_auto_filter_llm(
             cls,
             db: Session,
+            request: KnowledgeRetrievalRequest,
             knowledge_id: uuid.UUID,
-    ) -> Base | None:
-        knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
-        if not knowledge or not knowledge.llm_id:
+            current_user: Any = None,
+    ) -> MetadataAutoFilterLLM | None:
+        tenant_id = getattr(current_user, "tenant_id", None) if current_user is not None else None
+        auto_filter_model = request.metadata_auto_filter_model
+
+        if auto_filter_model:
+            model_config = ModelConfigService.get_model_by_id(
+                db=db,
+                model_id=auto_filter_model.model_config_id,
+                tenant_id=tenant_id,
+            )
+            model_parameters = auto_filter_model.model_parameters
+            model_source = "custom"
+        else:
+            knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
+            if not knowledge or not knowledge.llm_id:
+                return None
+            model_config = ModelConfigService.get_model_by_id(
+                db=db,
+                model_id=knowledge.llm_id,
+                tenant_id=tenant_id,
+            )
+            model_parameters = None
+            model_source = "first_kb_fallback"
+
+        api_key = ModelApiKeyService.get_available_api_key(db, model_config.id)
+        if not api_key:
+            if auto_filter_model:
+                raise BusinessException(
+                    "auto 元数据过滤模型没有可用的 API Key",
+                    code=BizCode.AGENT_CONFIG_MISSING,
+                )
             return None
 
-        api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id)
-        if not api_key:
-            return None
-        return cls._build_chat_model(api_key)
+        parameter_keys, extra_parameter_keys = cls._metadata_auto_filter_parameter_keys(model_parameters)
+        logger.info(
+            "[MetadataAutoFilter] using %s model: model_config_id=%s, parameter_keys=%s, extra_parameter_keys=%s",
+            model_source,
+            model_config.id,
+            parameter_keys,
+            extra_parameter_keys,
+        )
+        return MetadataAutoFilterLLM.from_model_config(
+            model_config=model_config,
+            api_key=api_key,
+            model_parameters=model_parameters,
+        )
+
+    @staticmethod
+    def _metadata_auto_filter_parameter_keys(model_parameters: Any) -> tuple[list[str], list[str]]:
+        if not model_parameters:
+            return [], []
+        params = model_parameters.model_dump(exclude_none=True)
+        extra_params = params.pop("extra_params", {}) or {}
+        return sorted(params.keys()), sorted(extra_params.keys())
 
     @staticmethod
     def _get_common_metadata_defs(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> dict[str, dict]:

@@ -2,7 +2,12 @@ from pydantic import BaseModel, Field, model_validator
 import uuid
 from enum import StrEnum
 from app.core.rag.models.chunk import QAChunk
-from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
+from app.schemas.knowledge_metadata_schema import (
+    FilterCondition,
+    FilterGroup,
+    MetadataAutoFilterModelConfig,
+    MetadataFilterMode,
+)
 from typing import Union
 
 
@@ -108,6 +113,10 @@ class ChunkRetrieve(BaseModel):
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
     metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="filter mode")
+    metadata_auto_filter_model: MetadataAutoFilterModelConfig | None = Field(
+        None,
+        description="auto metadata filter model configuration",
+    )
 
     @model_validator(mode="after")
     def resolve_top_n(self):
