@@ -127,58 +127,60 @@ async def _update_search_results_activation(
         results: Dict[str, List[Dict[str, Any]]],
         end_user_id: Optional[str] = None
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    更新搜索结果中所有知识节点的激活值
-    
-    对 Statement、ExtractedEntity、MemorySummary 节点进行批量激活值更新。
-    ChunkNode 和 DialogueNode 不参与激活值更新（数据层隔离）。
-    
-    Args:
-        connector: Neo4j连接器
-        results: 搜索结果字典，包含不同类型节点的列表
-        end_user_id: 组ID（可选）
-    
-    Returns:
-        Dict[str, List[Dict[str, Any]]]: 更新后的搜索结果
-    """
-    # 定义需要更新激活值的节点类型
-    knowledge_node_types = {
-        'statements': 'Statement',
-        'entities': 'ExtractedEntity',
-        'summaries': 'MemorySummary',
-        Neo4jNodeType.STATEMENT: Neo4jNodeType.STATEMENT.value,
-        Neo4jNodeType.EXTRACTEDENTITY: Neo4jNodeType.EXTRACTEDENTITY.value,
-        Neo4jNodeType.MEMORYSUMMARY: Neo4jNodeType.MEMORYSUMMARY.value,
-    }
-
-    # 并行更新所有类型的节点
-    update_tasks = []
-    update_keys = []
-
-    for key, label in knowledge_node_types.items():
-        if key in results and results[key]:
-            update_tasks.append(
-                _update_activation_values_batch(
-                    nodes=results[key],
-                    node_label=label,
-                    end_user_id=end_user_id
-                )
-            )
-            update_keys.append(key)
-
-    async def _run_updates(tasks):
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for idx, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(
-                    "后台激活更新任务失败: task_index=%s exception=%r",
-                    idx,
-                    result,
-                )
-
-    if update_tasks:
-        asyncio.create_task(_run_updates(update_tasks))
+    """更新搜索结果中知识节点的激活值"""
     return results
+    # """
+    # 更新搜索结果中所有知识节点的激活值
+    #
+    # 对 Statement、ExtractedEntity、MemorySummary 节点进行批量激活值更新。
+    # ChunkNode 和 DialogueNode 不参与激活值更新（数据层隔离）。
+    #
+    # Args:
+    #     connector: Neo4j连接器
+    #     results: 搜索结果字典，包含不同类型节点的列表
+    #     end_user_id: 组ID（可选）
+    #
+    # Returns:
+    #     Dict[str, List[Dict[str, Any]]]: 更新后的搜索结果
+    # """
+    # # 定义需要更新激活值的节点类型
+    # knowledge_node_types = {
+    #     'statements': 'Statement',
+    #     'entities': 'ExtractedEntity',
+    #     'summaries': 'MemorySummary',
+    #     Neo4jNodeType.STATEMENT: Neo4jNodeType.STATEMENT.value,
+    #     Neo4jNodeType.EXTRACTEDENTITY: Neo4jNodeType.EXTRACTEDENTITY.value,
+    #     Neo4jNodeType.MEMORYSUMMARY: Neo4jNodeType.MEMORYSUMMARY.value,
+    # }
+    #
+    # # 并行更新所有类型的节点
+    # update_tasks = []
+    # update_keys = []
+    #
+    # for key, label in knowledge_node_types.items():
+    #     if key in results and results[key]:
+    #         update_tasks.append(
+    #             _update_activation_values_batch(
+    #                 nodes=results[key],
+    #                 node_label=label,
+    #                 end_user_id=end_user_id
+    #             )
+    #         )
+    #         update_keys.append(key)
+    #
+    # async def _run_updates(tasks):
+    #     results = await asyncio.gather(*tasks, return_exceptions=True)
+    #     for idx, result in enumerate(results):
+    #         if isinstance(result, Exception):
+    #             logger.error(
+    #                 "后台激活更新任务失败: task_index=%s exception=%r",
+    #                 idx,
+    #                 result,
+    #             )
+    #
+    # if update_tasks:
+    #     asyncio.create_task(_run_updates(update_tasks))
+    # return results
 
     # # 更新结果字典，保留原始搜索分数
     # updated_results = results.copy()
@@ -376,6 +378,15 @@ def search_by_fulltext(
     )
 
 
+def _compute_cosine_similarity(
+    batch_vectors: list, query_vec
+) -> list[float]:
+    """在独立线程中计算余弦相似度，避免阻塞事件循环。"""
+    vecs = np.array(batch_vectors, dtype=np.float32)
+    vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+    return np.clip(vecs @ query_vec, 0, 1).tolist()
+
+
 async def search_by_embedding(
         connector: Neo4jConnector,
         node_type: Neo4jNodeType,
@@ -418,7 +429,8 @@ async def search_by_embedding(
         if not batch:
             break
 
-        # 收集有效 embedding
+        await asyncio.sleep(0)
+
         batch_vectors = []
         batch_ids = []
         for record in batch:
@@ -428,10 +440,9 @@ async def search_by_embedding(
                 batch_ids.append(record["id"])
 
         if batch_vectors:
-            vecs = np.array(batch_vectors, dtype=np.float32)
-            vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
-            sims = np.clip(vecs @ query_vec, 0, 1)
-
+            sims = await asyncio.to_thread(
+                _compute_cosine_similarity, batch_vectors, query_vec
+            )
             for node_id, sim in zip(batch_ids, sims):
                 sim_f = float(sim)
                 if len(top_heap) < limit:
@@ -624,7 +635,7 @@ async def search_graph_by_embedding(
         ]
 
     if isinstance(embedder_client, RedBearEmbeddings):
-        embeddings = embedder_client.embed_documents([query_text])
+        embeddings = await embedder_client.aembed_documents([query_text])
     else:
         embeddings = await embedder_client.response([query_text])
     if not embeddings or not embeddings[0]:
