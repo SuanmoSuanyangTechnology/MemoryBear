@@ -383,8 +383,14 @@ def _compute_cosine_similarity(
 ) -> list[float]:
     """在独立线程中计算余弦相似度，避免阻塞事件循环。"""
     vecs = np.array(batch_vectors, dtype=np.float32)
-    vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
-    return np.clip(vecs @ query_vec, 0, 1).tolist()
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    zero_norm_mask = norms[:, 0] == 0.0
+    if zero_norm_mask.any():
+        norms[zero_norm_mask, 0] = 1.0
+    vecs = vecs / norms
+    sims = np.clip(vecs @ query_vec, 0, 1)
+    sims[zero_norm_mask] = 0.0
+    return sims.tolist()
 
 
 async def search_by_embedding(

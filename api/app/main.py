@@ -89,6 +89,8 @@ async def lifespan(app: FastAPI):
     # 应用关闭事件
     from app.services.intervention_timeout_scheduler import stop as stop_timeout_scanner
     stop_timeout_scanner()
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    await Neo4jConnector.shutdown()
     logger.info("应用程序正在关闭")
 
 
