@@ -47,6 +47,21 @@ interface StructuredOutputSchemaModalProps {
   refresh: (schema: JsonSchema) => void;
 }
 
+// 默认展开所有 object 类型节点的 key
+const getAllObjectKeys = (list: Field[], path: number[] = []): string[] => {
+  const keys: string[] = [];
+  list.forEach((field, index) => {
+    const currentPath = [...path, index];
+    if (field.type.includes('object')) {
+      keys.push(currentPath.join(','));
+      if (field.children) {
+        keys.push(...getAllObjectKeys(field.children, currentPath));
+      }
+    }
+  });
+  return keys;
+};
+
 export const StructuredOutputSchemaModal = forwardRef<StructuredOutputSchemaModalRef, StructuredOutputSchemaModalProps>(({
   refresh,
 }, ref) => {
@@ -56,18 +71,22 @@ export const StructuredOutputSchemaModal = forwardRef<StructuredOutputSchemaModa
   const [activeTab, setActiveTab] = useState<'visual' | 'json'>('visual');
   const [fields, setFields] = useState<Field[]>(defaultJsonSchema);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [editForm] = Form.useForm();
   const importModalRef = useRef<JsonImportModalRef>(null);
 
   const handleOpen = (schema: JsonSchema) => {
     setFields(schema || defaultJsonSchema);
     setVisible(true);
+
+    setExpandedKeys(getAllObjectKeys(schema || defaultJsonSchema))
   };
 
   const handleClose = () => {
     setVisible(false);
     setFields([...defaultJsonSchema]);
     setEditingId(null);
+    setExpandedKeys([]);
   };
 
   const handleSave = () => {
@@ -129,6 +148,12 @@ export const StructuredOutputSchemaModal = forwardRef<StructuredOutputSchemaModa
       }));
       
       newFieldIndexPath = [...parentIndexPath, parentChildrenCount];
+
+      // 展开父节点
+      const parentKey = parentIndexPath.join(',');
+      if (!expandedKeys.includes(parentKey)) {
+        setExpandedKeys([...expandedKeys, parentKey]);
+      }
     }
 
     setFields(newFields);
@@ -142,27 +167,19 @@ export const StructuredOutputSchemaModal = forwardRef<StructuredOutputSchemaModa
     
     const deleteFromList = (list: Field[], indices: number[]): Field[] => {
       if (indices.length === 1) {
-        // Check if it's the last field and whether it's a new field (name is undefined)
-        const isNewField = !list[indices[0]]?.name;
-        if (isNewField || list.length > 1) {
-          return list.filter((_, i) => i !== indices[0]);
-        }
-        return list;
+        // Always allow deletion
+        return list.filter((_, i) => i !== indices[0]);
       }
       
       const [first, ...rest] = indices;
       return list.map((field, i) => {
         if (i !== first) return field;
         const children = field.children || [];
-        // Check if it's the last child and whether it's a new field
-        const isNewField = rest.length === 1 && !children[rest[0]]?.name;
-        if (isNewField || children.length > 1) {
-          return {
-            ...field,
-            children: deleteFromList(children, rest)
-          };
-        }
-        return field;
+        // Always allow deletion
+        return {
+          ...field,
+          children: deleteFromList(children, rest)
+        };
       });
     };
     
@@ -484,14 +501,6 @@ export const StructuredOutputSchemaModal = forwardRef<StructuredOutputSchemaModa
           <Button
             size="small"
             type="text"
-            onClick={syncToJson}
-          >
-            AI 生成
-          </Button>
-          <Divider type="vertical" />
-          <Button
-            size="small"
-            type="text"
             onClick={openImportModal}
           >
             {t('workflow.config.llm.importFromJson')}
@@ -511,7 +520,8 @@ export const StructuredOutputSchemaModal = forwardRef<StructuredOutputSchemaModa
             switcherIcon={<DownOutlined />}
             showLine
             blockNode
-            defaultExpandAll
+            expandedKeys={expandedKeys}
+            onExpand={(keys) => setExpandedKeys(keys)}
             selectable={false}
             titleRender={(node) => {
               if (node.key === '__add_field_root__') {
