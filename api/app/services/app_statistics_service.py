@@ -102,7 +102,8 @@ class AppStatisticsService:
             and_(
                 EndUser.app_id == app_id,
                 EndUser.created_at >= start_dt,
-                EndUser.created_at < end_dt
+                EndUser.created_at < end_dt,
+                EndUser.is_active == True,
             )
         ).group_by(cast(EndUser.created_at, Date)).all()
         

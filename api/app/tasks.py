@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import redis
 from redis.exceptions import RedisError
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select, cast, String
 
 # Import a unified Celery instance
 from app.core.utils.datetime_utils import (
@@ -49,7 +50,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
 from app.db import get_db_context
-from app.models import App, AppRelease, Document, File, Knowledge
+from app.models import App, AppRelease, Document, File, Knowledge, User
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
@@ -458,7 +459,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             logger.info(f"[ParseDoc] document={document_id} page number unavailable, continue parsing.")
             progress_lines.append(_progress_ts() + f" parse document '{document_label}' page number unavailable.")
         elif estimated_pages > MAX_DOCUMENT_PAGES:
-            logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
+            logger.info(
+                f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
             progress_lines.append(_progress_ts() + f" parse document '{document_label}' failed: page limit exceeded")
 
             def _mark_page_limit_failed(doc):
@@ -474,7 +476,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
         from app.core.rag.app.naive import chunk_v2 as chunk
-        logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
+        logger.info(
+            f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
         if _should_abort(document_id):
             _clear_redis_state(document_id)
@@ -606,7 +609,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         try:
                             pairs = qa_proposal(chat_model, content, auto_questions_topn, custom_prompt=qa_prompt)
                         except Exception as e:
-                            logger.error(f"[QA] LLM call failed: model={chat_model.model_name}, base_url={getattr(chat_model, 'base_url', 'N/A')}, error={e}")
+                            logger.error(
+                                f"[QA] LLM call failed: model={chat_model.model_name}, base_url={getattr(chat_model, 'base_url', 'N/A')}, error={e}")
                             return global_idx, []
                         logger.info(f"[QA] Chunk {global_idx} generated {len(pairs)} QA pairs")
                         set_llm_cache(
@@ -617,7 +621,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             cache_params,
                         )
                         return global_idx, pairs
-                    logger.info(f"[QA] Cache hit for chunk {global_idx}, cache_params={cache_params}, cached_type={type(cached).__name__}")
+                    logger.info(
+                        f"[QA] Cache hit for chunk {global_idx}, cache_params={cache_params}, cached_type={type(cached).__name__}")
                     if isinstance(cached, str):
                         try:
                             parsed = json.loads(cached)
@@ -752,9 +757,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     f"batch {i}: {type(err).__name__}: {err}"
                     for i, err in sorted(batch_errors.items())
                 )
-                raise RuntimeError(f"Embedding failed for {len(batch_errors)}/{total_batches} batch(es). {failed_detail}")
+                raise RuntimeError(
+                    f"Embedding failed for {len(batch_errors)}/{total_batches} batch(es). {failed_detail}")
 
-            progress_lines.append(f"{_progress_ts()} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
+            progress_lines.append(
+                f"{_progress_ts()} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
 
             def _mark_vectorized(doc):
                 doc.progress = 1.0
@@ -980,7 +987,7 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
                 return f"build_graphrag_for_document '{document_id}' processed successfully."
             # 更新文档进度信息
             db_document.progress_msg = (db_document.progress_msg or "") + \
-                f"{_progress_ts()} Knowledge Graph done ({duration:.1f}s)\n"
+                                       f"{_progress_ts()} Knowledge Graph done ({duration:.1f}s)\n"
             db.commit()
 
         return f"build_graphrag_for_document '{document_id}' processed successfully."
@@ -991,12 +998,12 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
 def import_qa_chunks(
-    kb_id: str,
-    document_id: str,
-    filename: str,
-    contents: bytes | None = None,
-    file_key: str | None = None,
-    clear_parse_task: bool = False,
+        kb_id: str,
+        document_id: str,
+        filename: str,
+        contents: bytes | None = None,
+        file_key: str | None = None,
+        clear_parse_task: bool = False,
 ):
     """
     异步导入 QA 问答对（CSV/Excel）
@@ -1234,13 +1241,13 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             return _snapshot_file(db_file) if db_file else None
 
     def _create_file_record(
-        knowledge_state: dict,
-        *,
-        file_name: str,
-        file_ext: str,
-        file_size: int,
-        file_url: str,
-        created_at: datetime | None = None,
+            knowledge_state: dict,
+            *,
+            file_name: str,
+            file_ext: str,
+            file_size: int,
+            file_url: str,
+            created_at: datetime | None = None,
     ) -> dict:
         with get_db_context() as db:
             upload_file = file_schema.FileCreate(
@@ -1260,15 +1267,15 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             return _snapshot_file(db_file)
 
     def _update_file_record(
-        kb_uuid: uuid.UUID,
-        file_id: uuid.UUID,
-        *,
-        file_name: str,
-        file_ext: str,
-        file_size: int,
-        file_key: str,
-        created_at: datetime | None = None,
-        sync_document_created_at: bool = False,
+            kb_uuid: uuid.UUID,
+            file_id: uuid.UUID,
+            *,
+            file_name: str,
+            file_ext: str,
+            file_size: int,
+            file_key: str,
+            created_at: datetime | None = None,
+            sync_document_created_at: bool = False,
     ) -> tuple[dict | None, dict | None]:
         with get_db_context() as db:
             db_file = db.query(File).filter(File.id == file_id).first()
@@ -1319,7 +1326,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
     def _legacy_file_path(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str) -> Path:
         return Path(settings.FILE_PATH, str(kb_uuid), str(parent_id), f"{file_id}{file_ext}")
 
-    def _write_legacy_file(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str, content: bytes) -> Path:
+    def _write_legacy_file(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str,
+                           content: bytes) -> Path:
         file_path = _legacy_file_path(kb_uuid, parent_id, file_id, file_ext)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         if file_path.exists():
@@ -1327,7 +1335,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
         file_path.write_bytes(content)
         return file_path
 
-    def _copy_legacy_file(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str, source_path: str) -> Path:
+    def _copy_legacy_file(kb_uuid: uuid.UUID, parent_id: uuid.UUID, file_id: uuid.UUID, file_ext: str,
+                          source_path: str) -> Path:
         file_path = _legacy_file_path(kb_uuid, parent_id, file_id, file_ext)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         if file_path.exists():
@@ -1346,7 +1355,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             stale_files = []
             db_files = db.query(File).filter(File.kb_id == kb_uuid, File.file_url.notin_(file_urls)).all()
             for db_file in db_files:
-                db_document = db.query(Document).filter(Document.kb_id == kb_uuid, Document.file_id == db_file.id).first()
+                db_document = db.query(Document).filter(Document.kb_id == kb_uuid,
+                                                        Document.file_id == db_file.id).first()
                 file_state = _snapshot_file(db_file)
                 file_state["document_id"] = db_document.id if db_document else None
                 stale_files.append(file_state)
@@ -1362,7 +1372,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                 try:
                     asyncio.run(storage_service.delete_file(file_state["file_key"]))
                 except Exception:
-                    logger.warning(f"[SyncKB] failed to delete storage file: file_key={file_state['file_key']}", exc_info=True)
+                    logger.warning(f"[SyncKB] failed to delete storage file: file_key={file_state['file_key']}",
+                                   exc_info=True)
             legacy_path = _legacy_file_path(
                 file_state["kb_id"],
                 file_state["parent_id"],
@@ -1374,7 +1385,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
         with get_db_context() as db:
             for file_state in stale_files:
-                db_document = db.query(Document).filter(Document.kb_id == kb_uuid, Document.file_id == file_state["id"]).first()
+                db_document = db.query(Document).filter(Document.kb_id == kb_uuid,
+                                                        Document.file_id == file_state["id"]).first()
                 if db_document:
                     db.delete(db_document)
                 db_file = db.query(File).filter(File.id == file_state["id"]).first()
@@ -1447,7 +1459,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                         )
                         if file_state is None:
                             continue
-                        document_state = _create_document_record(knowledge_state, file_state) if is_new_file else existing_document_state
+                        document_state = _create_document_record(knowledge_state,
+                                                                 file_state) if is_new_file else existing_document_state
                         _dispatch_if_document(file_state, document_state)
 
                     _delete_stale_files(knowledge_state["id"], file_urls, vector_service)
@@ -1491,9 +1504,11 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                             if file_state and file_state["created_at"] == doc.updated_at:
                                 continue
 
-                            save_dir = os.path.join(settings.FILE_PATH, str(knowledge_state["id"]), str(knowledge_state["id"]))
+                            save_dir = os.path.join(settings.FILE_PATH, str(knowledge_state["id"]),
+                                                    str(knowledge_state["id"]))
 
-                            async def async_download_document(api_client: YuqueAPIClient, doc: YuqueDocInfo, save_dir: str):
+                            async def async_download_document(api_client: YuqueAPIClient, doc: YuqueDocInfo,
+                                                              save_dir: str):
                                 async with api_client as client:
                                     return await client.download_document(doc, save_dir)
 
@@ -1539,7 +1554,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                             )
                             if file_state is None:
                                 continue
-                            document_state = _create_document_record(knowledge_state, file_state) if is_new_file else existing_document_state
+                            document_state = _create_document_record(knowledge_state,
+                                                                     file_state) if is_new_file else existing_document_state
                             _dispatch_if_document(file_state, document_state)
 
                         _delete_stale_files(knowledge_state["id"], file_urls, vector_service)
@@ -1575,7 +1591,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                             save_dir = tempfile.mkdtemp()
 
-                            async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo, save_dir: str):
+                            async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
+                                                              save_dir: str):
                                 async with api_client as client:
                                     return await client.download_document(document=doc, save_dir=save_dir)
 
@@ -1621,7 +1638,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                             )
                             if file_state is None:
                                 continue
-                            document_state = _create_document_record(knowledge_state, file_state) if is_new_file else existing_document_state
+                            document_state = _create_document_record(knowledge_state,
+                                                                     file_state) if is_new_file else existing_document_state
                             _dispatch_if_document(file_state, document_state)
 
                         _delete_stale_files(knowledge_state["id"], file_urls, vector_service)
@@ -1960,12 +1978,12 @@ def write_message_task(
     default_retry_delay=30,
 )
 def extract_emotion_batch_task(
-    self,
-    statements: List[Dict[str, str]],
-    llm_model_id: str,
-    language: str = "zh",
-    emotion_config: Optional[Dict[str, Any]] = None,
-    snapshot_dir: Optional[str] = None,
+        self,
+        statements: List[Dict[str, str]],
+        llm_model_id: str,
+        language: str = "zh",
+        emotion_config: Optional[Dict[str, Any]] = None,
+        snapshot_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Celery task: batch emotion extraction + Neo4j backfill.
 
@@ -2075,7 +2093,7 @@ def extract_emotion_batch_task(
             )
 
             if upload_stage_snapshot(
-                snapshot_dir, "4_emotion_outputs", snapshot_outputs
+                    snapshot_dir, "4_emotion_outputs", snapshot_outputs
             ):
                 logger.info(
                     f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → "
@@ -2131,6 +2149,7 @@ def extract_emotion_batch_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
+
 def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int = 36) -> bool:
     """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_hours 小时则跳过。
 
@@ -2164,6 +2183,7 @@ def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: 
     if last_updated.tzinfo is not None:
         last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
     return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
+
 
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
@@ -2361,6 +2381,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
 
+
 @celery_app.task(
     name="app.tasks.layer2_dedup_full_scan_task",
     bind=True,
@@ -2537,10 +2558,11 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
     logger.info(f"反思引擎去重消岐全量扫描任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
 
+
 def _sync_end_user_info_pg(
-    end_user_id: str,
-    aliases: List[str],
-    extracted_metadata: Optional[Dict[str, Any]],
+        end_user_id: str,
+        aliases: List[str],
+        extracted_metadata: Optional[Dict[str, Any]],
 ) -> None:
     """将别名和元数据增量同步到 PostgreSQL end_user_info 表。
 
@@ -2604,11 +2626,11 @@ def _sync_end_user_info_pg(
     default_retry_delay=30,
 )
 def extract_metadata_batch_task(
-    self,
-    user_entities: List[Dict[str, Any]],
-    llm_model_id: str,
-    language: str = "zh",
-    snapshot_dir: Optional[str] = None,
+        self,
+        user_entities: List[Dict[str, Any]],
+        llm_model_id: str,
+        language: str = "zh",
+        snapshot_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Celery task: 用户实体元数据提取 + Neo4j 回写 + PostgreSQL 同步。
 
@@ -2691,8 +2713,8 @@ def extract_metadata_batch_task(
                         if records:
                             rec = records[0]
                             for field in (
-                                "core_facts", "traits", "relations", "goals",
-                                "interests", "beliefs_or_stances", "anchors", "events",
+                                    "core_facts", "traits", "relations", "goals",
+                                    "interests", "beliefs_or_stances", "anchors", "events",
                             ):
                                 val = rec.get(field)
                                 existing_metadata[field] = val if val else []
@@ -2769,7 +2791,7 @@ def extract_metadata_batch_task(
             )
 
             if upload_stage_snapshot(
-                snapshot_dir, "9_metadata_outputs", snapshot_outputs
+                    snapshot_dir, "9_metadata_outputs", snapshot_outputs
             ):
                 logger.info(
                     f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → "
@@ -2867,7 +2889,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
-        from app.models.end_user_model import EndUser
+        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import write_memory_increment
         from app.services.memory_storage_service import search_all_batch
 
@@ -2898,13 +2920,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     }
 
                 # 2. 查询所有app下的end_user_id（去重）
-                # app_ids = [app.id for app in apps]
-                end_users = db.query(EndUser.id).filter(
-                    EndUser.workspace_id == workspace_id
-                ).distinct().all()
+                end_user_repo = EndUserRepository(db)
+                end_users = end_user_repo.get_end_users_by_workspace(workspace_uuid)
+                end_user_id_list = [str(eu.id) for eu in end_users]
 
                 # 3. 批量查询所有宿主的记忆总量
-                end_user_id_list = [str(eid) for (eid,) in end_users]
                 batch_result = await search_all_batch(end_user_id_list)
 
                 total_num = sum(batch_result.values())
@@ -2971,8 +2991,8 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
-        from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
+        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import write_memory_increment
         from app.services.memory_storage_service import search_all_batch
 
@@ -3027,13 +3047,10 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             continue
 
                         # 2. 查询所有app下的end_user_id（去重）
-                        # app_ids = [app.id for app in apps]
-                        end_users = db.query(EndUser.id).filter(
-                            EndUser.workspace_id == workspace_id
-                        ).distinct().all()
+                        end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
+                        end_user_id_list = [str(eu.id) for eu in end_users]
 
                         # 3. 批量查询所有宿主的记忆总量
-                        end_user_id_list = [str(eid) for (eid,) in end_users]
                         batch_result = await search_all_batch(end_user_id_list)
 
                         total_num = sum(batch_result.values())
@@ -3455,8 +3472,9 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
     start_time = time.time()
 
     async def _process_users() -> Dict[str, Any]:
+        from app.repositories.end_user_repository import EndUserRepository
         with get_db_context() as db:
-            end_users = db.query(EndUser).all()
+            end_users = EndUserRepository(db).get_all_active()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
                 return {"status": "SUCCESS", "message": "没有终端用户",
@@ -3495,7 +3513,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
             duration = time.time() - start_time
             logger.info(f"遗忘周期完成: {processed_users}/{len(end_users)} 用户, "
-                       f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
+                        f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
 
             return {
                 "status": "SUCCESS",
@@ -4123,12 +4141,12 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     soft_time_limit=1700,
 )
 def run_incremental_clustering(
-    self,
-    end_user_id: str,
-    new_entity_ids: List[str],
-    llm_model_id: Optional[str] = None,
-    embedding_model_id: Optional[str] = None,
-    language: str = "zh",
+        self,
+        end_user_id: str,
+        new_entity_ids: List[str],
+        llm_model_id: Optional[str] = None,
+        embedding_model_id: Optional[str] = None,
+        language: str = "zh",
 ) -> Dict[str, Any]:
     """增量聚类任务：处理新增实体的社区分配和元数据生成。
     
@@ -4219,7 +4237,8 @@ def run_incremental_clustering(
     time_limit=7200,  # 2小时硬超时
     soft_time_limit=6900,
 )
-def init_community_clustering_for_users(self, end_user_ids: List[str], workspace_id: Optional[str] = None) -> Dict[str, Any]:
+def init_community_clustering_for_users(self, end_user_ids: List[str], workspace_id: Optional[str] = None) -> Dict[
+    str, Any]:
     """触发型任务：检查指定用户列表，对有 ExtractedEntity 但无 Community 节点的用户执行全量聚类。
 
     由 /dashboard/end_users 接口触发，已有社区节点的用户直接跳过。
@@ -4265,7 +4284,8 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                             try:
                                 cfg = MemoryConfigService(db).load_memory_config(config_id=config_id)
                                 user_llm_map[uid] = str(cfg.llm_model_id) if cfg.llm_model_id else None
-                                user_embedding_map[uid] = str(cfg.embedding_model_id) if cfg.embedding_model_id else None
+                                user_embedding_map[uid] = str(
+                                    cfg.embedding_model_id) if cfg.embedding_model_id else None
                             except Exception as e:
                                 logger.warning(f"[CommunityCluster] 用户 {uid} 加载配置失败，将使用 None: {e}")
                                 user_llm_map[uid] = None
@@ -4389,17 +4409,17 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
     acks_late=True,
 )
 def sliding_window_write_task(
-    self,
-    conversation_id: str,
-    message_seq: int,
-    context_before: List[dict],
-    context_after: List[dict],
-    target_message: dict,
-    config_id: str,
-    end_user_id: str,
-    workspace_id: str,
-    language: str,
-    dispatch_at: str,
+        self,
+        conversation_id: str,
+        message_seq: int,
+        context_before: List[dict],
+        context_after: List[dict],
+        target_message: dict,
+        config_id: str,
+        end_user_id: str,
+        workspace_id: str,
+        language: str,
+        dispatch_at: str,
 ) -> None:
     """滑动窗口写入任务。
 
@@ -4410,6 +4430,7 @@ def sliding_window_write_task(
 
     Fire-and-forget：异常时记录日志，不重试。
     """
+
     async def _run() -> None:
         from app.core.memory.pipelines.write_pipeline import WritePipeline
         from app.services.memory_config_service import MemoryConfigService
@@ -4769,7 +4790,8 @@ def scan_idle_conversations_task() -> None:
     )
 
 
-@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks", time_limit=50, soft_time_limit=45)
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks", time_limit=50,
+                 soft_time_limit=45)
 def scan_workflow_schedule_triggers():
     """扫描并派发已发布工作流中的定时触发器。"""
     from app.services.workflow_service import WorkflowService
@@ -4894,3 +4916,47 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
                 exc_info=True,
             )
             raise
+
+
+@celery_app.task(name="app.tasks.draft_data_clean", queue="periodic_tasks")
+def draft_data_clean():
+    import asyncio
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    with get_db_context() as db:
+        stmt = select(EndUser.id).join(
+            User,
+            cast(User.id, String) == EndUser.other_id
+        ).where(
+            EndUser.is_active == True
+        )
+        result = db.execute(stmt)
+        end_user_ids = [str(eid) for eid in result.scalars()]
+
+        if not end_user_ids:
+            logger.info("draft_data_clean: 没有需要清理的终端用户")
+            return {"deleted_count": 0}
+
+        updated = (
+            db.query(EndUser)
+            .filter(EndUser.id.in_(end_user_ids))
+            .update({"is_active": False}, synchronize_session=False)
+        )
+        db.commit()
+        logger.info(f"draft_data_clean: 软删除 {updated} 个终端用户")
+
+    async def _delete_neo4j_groups():
+        connector = Neo4jConnector()
+        deleted = 0
+        for eid in end_user_ids:
+            try:
+                await connector.delete_group(eid)
+                deleted += 1
+            except Exception as e:
+                logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
+        return deleted
+
+    neo4j_deleted = asyncio.run(_delete_neo4j_groups())
+    logger.info(f"draft_data_clean: Neo4j 删除 {neo4j_deleted} 组节点")
+
+    return {"pg_deleted": updated, "neo4j_deleted": neo4j_deleted}

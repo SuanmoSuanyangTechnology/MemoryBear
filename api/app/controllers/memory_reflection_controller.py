@@ -55,7 +55,6 @@ from app.schemas.memory_reflection_schemas import (
 )
 from app.core.response_utils import fail
 from app.core.error_codes import BizCode
-from app.models.end_user_model import EndUser
 # Load environment variables for configuration
 load_dotenv()
 

@@ -3,7 +3,7 @@ import logging
 from uuid import UUID
 
 from app.db import get_db_context
-from app.models.end_user_model import EndUser
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
@@ -30,13 +30,7 @@ async def sync_end_user_memory_count_from_neo4j(
     node_count = int(result[0]["total"]) if result else 0
 
     with get_db_context() as db:
-        db.query(EndUser).filter(
-            EndUser.id == UUID(end_user_id)
-        ).update(
-            {"memory_count": node_count},
-            synchronize_session=False,
-        )
-        db.commit()
+        EndUserRepository(db).update_memory_count(UUID(end_user_id), node_count)
 
     _logger.info(f"{_LOG_PREFIX} 同步完成: end_user_id={end_user_id}, count={node_count}")
     return node_count

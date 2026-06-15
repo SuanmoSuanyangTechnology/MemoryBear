@@ -15,8 +15,9 @@ from app.core.utils.datetime_utils import to_iso_z
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_logger
+from app.models import EndUser
 from app.models.app_model import App
-from app.models.end_user_model import EndUser
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_config_schema import ConfigurationError
 from app.schemas.memory_agent_schema import WriteMemoryRequest
 from app.services.memory_agent_service import MemoryAgentService
@@ -45,7 +46,7 @@ class MemoryAPIService:
             self,
             end_user_id: str,
             workspace_id: uuid.UUID
-    ) -> EndUser:
+    ) -> "EndUser":
         """Validate that end_user exists and belongs to the workspace.
         
         Args:
@@ -71,7 +72,7 @@ class MemoryAPIService:
                 code=BizCode.INVALID_PARAMETER
             )
 
-        end_user = self.db.query(EndUser).filter(EndUser.id == end_user_uuid).first()
+        end_user = EndUserRepository(self.db).get_end_user_by_id(end_user_uuid)
 
         if not end_user:
             logger.warning(f"End user not found: {end_user_id}")

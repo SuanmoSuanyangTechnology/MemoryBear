@@ -619,15 +619,13 @@ async def compute_hot_memory_tags(
     raw_limit = limit * 4
 
     from app.db import SessionLocal
-    from app.models.end_user_model import EndUser
+    from app.repositories.end_user_repository import EndUserRepository
 
     def _get_end_user_ids_in_thread() -> List[str]:
         """独立线程独立 session，避免跨线程共享连接。"""
         with SessionLocal() as thread_db:
-            rows = thread_db.query(EndUser.id).filter(
-                EndUser.workspace_id == workspace_id
-            ).distinct().all()
-            return [str(eid) for (eid,) in rows]
+            end_users = EndUserRepository(thread_db).get_end_users_by_workspace(workspace_id)
+            return [str(eu.id) for eu in end_users]
 
     end_user_ids = await asyncio.to_thread(_get_end_user_ids_in_thread)
     if not end_user_ids:

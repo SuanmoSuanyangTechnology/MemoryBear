@@ -216,7 +216,7 @@ class QuotaUsageRepository:
         from app.models.user_model import User
         query = self.db.query(EndUser).join(
             Workspace, EndUser.workspace_id == Workspace.id
-        )
+        ).filter(EndUser.is_active == True)
         if workspace_id:
             query = query.filter(EndUser.workspace_id == workspace_id)
         else:

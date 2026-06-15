@@ -70,10 +70,11 @@ def get_workspace_end_users(
 
         # 提取所有 app_id
         # app_ids = [app.id for app in apps_orm]
-        # 批量查询所有 end_users（一次查询而非循环查询）
+        # 批量查询所有活跃 end_users（一次查询而非循环查询）
         # 按 created_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
         end_users_orm = db.query(EndUserModel).filter(
-            EndUserModel.workspace_id == workspace_id
+            EndUserModel.workspace_id == workspace_id,
+            EndUserModel.is_active == True,
         ).order_by(
             nullslast(desc(EndUserModel.created_at)),
             desc(EndUserModel.id)
@@ -132,7 +133,8 @@ def get_workspace_end_users_paginated(
         )
         base_query = db.query(EndUserModel).options(_dashboard_columns).filter(
             EndUserModel.workspace_id == workspace_id,
-            EndUserModel.memory_count > 0 , # 只查询有记忆的宿主
+            EndUserModel.memory_count > 0,  # 只查询有记忆的宿主
+            EndUserModel.is_active == True,
         )
 
         # 构建搜索条件（过滤空字符串和None）
@@ -233,6 +235,7 @@ def get_workspace_end_users_paginated_rag(
             .filter(
                 EndUserModel.workspace_id == workspace_id,
                 chunk_subquery.c.memory_count > 0,
+                EndUserModel.is_active == True,
             )
         )
 
@@ -584,17 +587,11 @@ def get_rag_user_kb_total_chunk(
 
     try:
         from app.models.document_model import Document
-        from app.models.end_user_model import EndUser
-        from app.models.app_model import App
+        from app.repositories.end_user_repository import EndUserRepository
         from sqlalchemy import func
 
-        # 通过 App 关联取该 workspace 下所有 end_user_id
-        end_user_ids = [
-            str(eid) for (eid,) in db.query(EndUser.id)
-            .join(App, EndUser.app_id == App.id)
-            .filter(App.workspace_id == workspace_id)
-            .all()
-        ]
+        # 通过 App 关联取该 workspace 下所有活跃 end_user_id
+        end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
         if not end_user_ids:
             return 0
 
@@ -756,15 +753,9 @@ def get_dashboard_yesterday_changes(
                 changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
         elif storage_type == "rag":
             from app.models.document_model import Document
-            from app.models.end_user_model import EndUser as _EndUser
-            from app.models.app_model import App as _App
+            from app.repositories.end_user_repository import EndUserRepository
 
-            end_user_ids = [
-                str(eid) for (eid,) in db.query(_EndUser.id)
-                .join(_App, _EndUser.app_id == _App.id)
-                .filter(_App.workspace_id == workspace_id)
-                .all()
-            ]
+            end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
             if not end_user_ids:
                 changes["total_memory_change"] = None
             else:

@@ -2,6 +2,7 @@
 记忆反思服务
 处理反思引擎的调用和执行
 """
+import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
@@ -18,7 +19,7 @@ from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.models.app_model import App
 from app.models.app_release_model import AppRelease
-from app.models.end_user_model import EndUser
+from app.repositories.end_user_repository import EndUserRepository
 from app.utils.config_utils import resolve_config_id
 
 api_logger = get_api_logger()
@@ -179,7 +180,7 @@ class WorkspaceAppService:
 
     def _process_end_users(self, app: App, app_info: Dict[str, Any]) -> None:
         """Processing end-user information for applications"""
-        end_users = self.db.query(EndUser).filter(EndUser.app_id == app.id).all()
+        end_users = EndUserRepository(self.db).get_end_users_by_app_id(app.id)
 
         for end_user in end_users:
             end_user_info = {
@@ -201,7 +202,7 @@ class WorkspaceAppService:
             Reflection time or None
         """
         try:
-            end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
+            end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
             if end_user:
                 return end_user.reflection_time
             return None
@@ -222,7 +223,7 @@ class WorkspaceAppService:
         try:
             from datetime import datetime
 
-            end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
+            end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
             if end_user:
                 end_user.reflection_time = utcnow_naive()
                 self.db.commit()
