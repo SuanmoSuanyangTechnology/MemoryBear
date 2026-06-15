@@ -1,21 +1,10 @@
 import asyncio
-import ssl
 from typing import Any, Dict, List, Union
 
-import certifi
 from langchain_core.embeddings import Embeddings
 
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
 from app.models.models_model import ModelProvider
-
-_CACHED_SSL_CONTEXT: ssl.SSLContext | None = None
-
-
-def _get_ssl_context() -> ssl.SSLContext:
-    global _CACHED_SSL_CONTEXT
-    if _CACHED_SSL_CONTEXT is None:
-        _CACHED_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-    return _CACHED_SSL_CONTEXT
 
 
 class RedBearEmbeddings(Embeddings):
@@ -43,7 +32,6 @@ class RedBearEmbeddings(Embeddings):
         # (e.g. enable_thinking, model_kwargs) — build params directly.
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
             import httpx
-            ssl_context = _get_ssl_context()
             timeout = httpx.Timeout(timeout=config.timeout, connect=60.0)
             params = {
                 "model": config.model_name,
@@ -51,8 +39,6 @@ class RedBearEmbeddings(Embeddings):
                 "api_key": config.api_key,
                 "timeout": timeout,
                 "max_retries": config.max_retries,
-                "http_client": httpx.Client(verify=ssl_context, timeout=timeout),
-                "http_async_client": httpx.AsyncClient(verify=ssl_context, timeout=timeout),
             }
         elif provider == ModelProvider.DASHSCOPE:
             params = {

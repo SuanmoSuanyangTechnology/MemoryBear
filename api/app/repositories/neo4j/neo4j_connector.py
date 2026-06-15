@@ -108,12 +108,21 @@ class Neo4jConnector:
 
     async def close(self):
         """关闭数据库连接
-        
+
         释放数据库连接资源。应在应用程序关闭时调用。
         """
         if self._shared_driver_enabled:
             return
         await self.driver.close()
+
+    @classmethod
+    async def shutdown(cls):
+        """关闭进程级共享 driver，由应用 shutdown 生命周期调用。"""
+        driver = cls._shared_driver
+        if driver is not None:
+            cls._shared_driver = None
+            cls._shared_driver_pid = None
+            await driver.close()
 
     async def execute_query(self, cypher: str, json_format=False, **kwargs: Any) -> List[Dict[str, Any]]:
         """执行Cypher查询
