@@ -34,6 +34,8 @@ const virtualModulePlugin = () => ({
         const FallbackComponent = () => null;
         export const BrainView = FallbackComponent;
         export const Provider = FallbackComponent;
+        export const ReflectMemory = FallbackComponent;
+        export const ReflectLogList = FallbackComponent;
         export default { BrainView, Provider };
       `
     }
