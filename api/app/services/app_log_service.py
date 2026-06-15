@@ -212,9 +212,20 @@ class AppLogService:
 
             ordered = sorted(merged_by_node.values(), key=_sort_key)
 
+            # Determine intervention status based on whether ALL intervention nodes
+            # have been resolved, NOT based on the workflow's overall execution status.
+            # When a HITL node enters the timeout branch, it has completed (resolved)
+            # its intervention — the node chose the timeout path. Even if the overall
+            # workflow later fails on a downstream node, the intervention itself is done.
+            all_resolved = all(
+                i.get("resolved_action_id") or i.get("resolved_kind")
+                for i in ordered
+            )
+            intervention_status = "completed" if all_resolved else "waiting_human"
+
             intervention_map[message_id] = {
                 "execution_id": wf_exec.execution_id,
-                "status": wf_exec.status,
+                "status": intervention_status,
                 "interventions": [{
                     "node_id": i["node_id"],
                     "node_name": i.get("node_name", ""),
@@ -387,7 +398,9 @@ class AppLogService:
                     output_content = _extract_text(execution.output_data)
                 meta = {"usage": execution.token_usage or {}, "elapsed_time": execution.elapsed_time}
             elif execution.status == "waiting_human":
-                output_content = _extract_text(execution.output_data) or ""
+                # waiting_human 状态下工作流暂停等待人工介入，没有 AI 输出文本。
+                # 不应将 output_data 原始 JSON dump 为 content（包含 node_outputs 等内部数据）。
+                output_content = ""
                 intervention_ctx = (execution.context or {}).get("human_intervention", {})
                 meta = {
                     "waiting_human": True,
@@ -395,10 +408,11 @@ class AppLogService:
                     "elapsed_time": execution.elapsed_time,
                 }
             elif execution.status == "timeout":
-                output_content = _extract_text(execution.output_data) or execution.error_message or ""
+                output_content = execution.error_message or ""
                 meta = {"timeout": True, "error_node_id": execution.error_node_id, "elapsed_time": execution.elapsed_time}
             else:
-                output_content = _extract_text(execution.output_data) or ""
+                # failed 状态：优先用 error_message，不要 dump output_data
+                output_content = execution.error_message or ""
                 meta = {"error": execution.error_message, "error_node_id": execution.error_node_id}
 
             assistant_msg = AppLogMessage(
@@ -588,15 +602,22 @@ class AppLogService:
 def _extract_text(data: Optional[dict]) -> str:
     """从 workflow execution 的 input_data / output_data 中提取可读文本。
 
-    优先取 'text'、'content'、'output' 字段；若都没有则 JSON 序列化整个 dict。
+    优先取 'text'、'content'、'output' 字段（字符串或可转为字符串的值）；
+    若都没有则返回空字符串（不再将整个 dict dump 为 JSON，避免暴露 node_outputs
+    等内部数据作为 assistant 消息的 content）。
     """
     if not data:
         return ""
     for key in ("message", "text", "content", "output", "result", "answer"):
-        if key in data and isinstance(data[key], str):
-            return data[key]
-    import json
-    return json.dumps(data, ensure_ascii=False)
+        val = data.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            return val
+        # output_data["output"] 可能是 End 节点的输出字符串，直接转 str
+        if key == "output" and val is not None:
+            return str(val)
+    return ""
 
 
 def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNodeExecution]:
