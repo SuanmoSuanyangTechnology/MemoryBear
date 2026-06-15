@@ -6,6 +6,7 @@ import { Form, Button, Select, InputNumber, Input, Divider, type SelectProps, Fl
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 import RadioGroupBtn from '../RadioGroupBtn'
+import { filterChildrenWithTypes } from '../hooks/useVariableList'
 
 interface Case {
   logical_operator: 'and' | 'or';
@@ -105,7 +106,13 @@ const ConditionList: FC<CaseListProps> = ({
           disabled: true,
           children: variable.children?.filter(child => child.dataType === 'number')
         })
-      }
+      } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['number'])[0];
+          if (filteredVar) {
+            filterList.push(filteredVar);
+          }
+        }
     })
 
     return filterList

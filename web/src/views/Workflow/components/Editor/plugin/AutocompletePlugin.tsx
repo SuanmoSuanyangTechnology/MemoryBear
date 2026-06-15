@@ -471,11 +471,11 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                         }}
                       >
                         {option.label &&
-                          <div className="rb:font-medium">
+                          <div className="rb:font-medium rb:flex-1 rb:break-all">
                             <span className="rb:text-[#155EEF]">{`{x}`}</span> {option.label}
                           </div>
                         }
-                        <Space size={2}>
+                        <Space size={2} className="rb:shrink-0">
                           {option.dataType && <span>{option.dataType}</span>}
                           {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
                         </Space>
@@ -513,7 +513,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
           >
             <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
               <Flex justify="space-between" align="center" gap={8}>
-                <span>
+                <span className="rb:flex-1 rb:break-all">
                   {expandedPath.slice(0, index + 1).map((item, idx) => (
                     <span key={item.key}>
                       {idx > 0 && '.'}
@@ -521,7 +521,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                     </span>
                   ))}
                 </span>
-                <span>{parent.dataType}</span>
+                <span className="rb:shrink-0">{parent.dataType}</span>
               </Flex>
             </div>
             {parent.children?.map((child, ci) => {
@@ -544,7 +544,6 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                     if (!child.disabled) insertMention(child);
                   }}
                   onMouseEnter={() => {
-                    if (child.disabled) return;
                     setActivePanel('child');
                     setChildActiveIndex(ci);
                     if (hasChildren) {
