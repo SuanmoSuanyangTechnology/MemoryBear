@@ -9,7 +9,7 @@ from app.core.rag.nlp import bullets_category, remove_contents_table, \
     make_colon_as_title, tokenize_chunks, docx_question_level, tree_merge
 from app.core.rag.nlp import rag_tokenizer, Node
 from app.core.rag.deepdoc.parser import PdfParser, DocxParser, HtmlParser
-from app.core.rag.app.naive import by_plaintext, PARSERS
+from app.core.rag.chunk.parser.pdf.selector import PARSERS, by_plaintext
 
 
 

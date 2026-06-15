@@ -474,7 +474,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         def progress_callback(prog=None, msg=None):
             progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
-        from app.core.rag.app.naive import chunk_v2 as chunk
+        from app.core.rag.chunk import chunk_pipeline as chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
         if _should_abort(document_id):
@@ -484,7 +484,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         parent_child_mode = document_info["parent_child_mode"]
         if parent_child_mode:
-            from app.core.rag.app.naive import chunk_parent_child_v2 as chunk_parent_child
+            from app.core.rag.chunk import chunk_parent_child_pipeline as chunk_parent_child
             child_res, parent_res, parent_id_map = chunk_parent_child(
                 filename=file_name,
                 binary=file_binary,
