@@ -2208,10 +2208,14 @@ def _get_max_conversation_updated_at(db, end_user_id: str):
 def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period: int) -> bool:
     """判断该用户现在是否需要反思。scan 派发前和 do 执行前都用它（保证一致 + 幂等）。
 
-    需要同时满足三个条件才反思：
+    需要同时满足两个条件才反思：
       1. 最近还活跃：最后一次对话距今 < REFLECT_LAYER2_INACTIVE_HOURS 小时
       2. 距上次反思已够久：now - reflection_time >= iteration_period 小时（控制反思频率）
-      3. 上次反思后有新对话：最后一次对话时间 > 上次反思时间（没新对话就没必要反思）
+
+    注意：不再要求「上次反思后有新对话」。因为反思本身（实体去重 / 描述合并 /
+    未识别实体解析）会改变图谱、且去重有单轮上限（max_merges_per_run），一轮往往
+    合并不完，需要后续周期继续收敛。若用「有新对话」当闸门，没新对话时残留的
+    重复实体就再也合并不掉。故只要活跃 + 到周期就反思，让图谱有机会多轮收敛。
 
     Args:
         reflection_time: 上次反思时间 end_user.reflection_time（naive UTC 或 None=从未反思）
@@ -2233,9 +2237,8 @@ def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period:
 
     reflection_time = as_utc_aware(reflection_time).replace(tzinfo=None)  # 统一 naive UTC
     period_reached = (now - reflection_time).total_seconds() / 3600 >= iteration_period  # 条件2：够周期
-    has_new_conv = last_conv > reflection_time                                           # 条件3：有新对话
-    #同时满足 放行
-    return is_active and period_reached and has_new_conv
+    # 同时满足「活跃 + 到周期」放行（不再看「上次反思后是否有新对话」）
+    return is_active and period_reached
 
 @celery_app.task(
     name="app.tasks.scan_layer2_reflection",
