@@ -100,6 +100,8 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         )
         if memory_evidence:
             memory_l0.content_str = memory_evidence
+            if memory_l0.memories:
+                memory_l0.memories[0].query = query
             return memory_l0
         all_tasks = []
         for question in questions:
