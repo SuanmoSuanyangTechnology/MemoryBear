@@ -279,6 +279,9 @@ class Settings:
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]
     ).validate_python(int(os.getenv("HOT_MEMORY_TAGS_REFRESH_HOUR", "19")))
+    DRAFT_DATA_CLEAN_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="Draft data clean hour (UTC), 0-23. 16=Beijing 00:00")]
+    ).validate_python(int(os.getenv("DRAFT_DATA_CLEAN_HOUR", "16")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")

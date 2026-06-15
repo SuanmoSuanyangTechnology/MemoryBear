@@ -186,6 +186,7 @@ implicit_emotions_update_schedule = crontab(
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
 hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
+draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
 # 构建定时任务配置
 beat_schedule_config = {
     # "run-workspace-reflection": {
@@ -241,6 +242,11 @@ beat_schedule_config = {
         "task": "app.tasks.scan_workflow_schedule_triggers",
         "schedule": 60.0,
         "options": {"queue": "periodic_tasks"},
+    },
+    "draft-data-clean": {
+        "task": "app.tasks.draft_data_clean",
+        "schedule": draft_data_clean_schedule,
+        "args": (),
     },
 }
 
