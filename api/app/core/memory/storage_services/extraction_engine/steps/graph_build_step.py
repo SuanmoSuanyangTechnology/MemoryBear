@@ -32,7 +32,8 @@ from app.core.memory.models.graph_models import (
     AssistantOriginalNode,
     AssistantPrunedNode,
     AssistantPrunedEdge,
-    AssistantDialogEdge,
+    AssistantConversationEdge,
+    ConversationNode,
 )
 from app.core.memory.models.message_models import DialogData, TemporalInfo
 
@@ -55,7 +56,8 @@ class GraphBuildResult:
         "assistant_original_nodes",
         "assistant_pruned_nodes",
         "assistant_pruned_edges",
-        "assistant_dialog_edges",
+        "conversation_nodes",
+        "assistant_conversation_edges",
     )
 
     def __init__(
@@ -72,7 +74,8 @@ class GraphBuildResult:
         assistant_original_nodes: Optional[List[AssistantOriginalNode]] = None,
         assistant_pruned_nodes: Optional[List[AssistantPrunedNode]] = None,
         assistant_pruned_edges: Optional[List[AssistantPrunedEdge]] = None,
-        assistant_dialog_edges: Optional[List[AssistantDialogEdge]] = None,
+        conversation_nodes: Optional[List[ConversationNode]] = None,
+        assistant_conversation_edges: Optional[List[AssistantConversationEdge]] = None,
     ):
         self.dialogue_nodes = dialogue_nodes
         self.chunk_nodes = chunk_nodes
@@ -86,7 +89,8 @@ class GraphBuildResult:
         self.assistant_original_nodes = assistant_original_nodes or []
         self.assistant_pruned_nodes = assistant_pruned_nodes or []
         self.assistant_pruned_edges = assistant_pruned_edges or []
-        self.assistant_dialog_edges = assistant_dialog_edges or []
+        self.conversation_nodes = conversation_nodes or []
+        self.assistant_conversation_edges = assistant_conversation_edges or []
 
 
 async def build_graph_nodes_and_edges(
@@ -373,10 +377,33 @@ async def build_graph_nodes_and_edges(
     assistant_original_nodes: List[AssistantOriginalNode] = []
     assistant_pruned_nodes: List[AssistantPrunedNode] = []
     assistant_pruned_edges: List[AssistantPrunedEdge] = []
-    assistant_dialog_edges: List[AssistantDialogEdge] = []
+    conversation_nodes: List[ConversationNode] = []
+    assistant_conversation_edges: List[AssistantConversationEdge] = []
+
+    # 按 conversation_id 聚合，避免重复创建 ConversationNode
+    _seen_conversation_ids: Dict[str, ConversationNode] = {}
 
     for dialog_data in dialog_data_list:
         pruning_records = dialog_data.metadata.get("assistant_pruning_records", [])
+        if not pruning_records:
+            continue
+
+        # 获取 conversation_id（agent / workflow / API service 均有真实 conversation_id）
+        conv_id = dialog_data.metadata.get("conversation_id", "")
+
+        # 确保 ConversationNode 存在（MERGE 语义：同 conv_id 只创建一次）
+        if conv_id and conv_id not in _seen_conversation_ids:
+            conv_node = ConversationNode(
+                id=conv_id,
+                name=f"Conversation_{conv_id[:8]}",
+                end_user_id=dialog_data.end_user_id,
+                run_id=dialog_data.run_id,
+                created_at=dialog_data.created_at,
+                conversation_id=conv_id,
+            )
+            _seen_conversation_ids[conv_id] = conv_node
+            conversation_nodes.append(conv_node)
+
         for record in pruning_records:
             pair_id = record["pair_id"]
             original_id = f"ao_{pair_id}"
@@ -395,14 +422,15 @@ async def build_graph_nodes_and_edges(
             )
             assistant_original_nodes.append(original_node)
 
-            # BELONGS_TO_DIALOG: Original → Dialogue
-            assistant_dialog_edges.append(AssistantDialogEdge(
-                source=original_id,
-                target=dialog_data.id,
-                end_user_id=dialog_data.end_user_id,
-                run_id=dialog_data.run_id,
-                created_at=dialog_data.created_at,
-            ))
+            # BELONGS_TO_CONVERSATION: Original → Conversation
+            if conv_id:
+                assistant_conversation_edges.append(AssistantConversationEdge(
+                    source=original_id,
+                    target=conv_id,
+                    end_user_id=dialog_data.end_user_id,
+                    run_id=dialog_data.run_id,
+                    created_at=dialog_data.created_at,
+                ))
 
             # pruned_text 为 NULL 时不创建 AssistantPruned 节点和 PRUNED_TO 边
             if record["pruned_text"] == "NULL":
@@ -463,5 +491,6 @@ async def build_graph_nodes_and_edges(
         assistant_original_nodes=assistant_original_nodes,
         assistant_pruned_nodes=assistant_pruned_nodes,
         assistant_pruned_edges=assistant_pruned_edges,
-        assistant_dialog_edges=assistant_dialog_edges,
+        conversation_nodes=conversation_nodes,
+        assistant_conversation_edges=assistant_conversation_edges,
     )

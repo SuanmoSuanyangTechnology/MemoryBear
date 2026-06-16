@@ -1764,6 +1764,8 @@ def write_message_task(
         messages: Optional[List[dict]] = None,
         storage_type: str = "neo4j",
         user_rag_memory_id: str = "",
+        # 单消息写入模式（仅处理 messages[target_index] 这条 user 消息）
+        target_index: int = -1,
         # 兼容旧调用方（message 参数名）
         message: Optional[List[dict]] = None,
 ) -> Dict[str, Any]:
@@ -1772,10 +1774,16 @@ def write_message_task(
     Modes:
         sliding_window: 实时滑动窗口写入，处理 target_seq 指定的单条 user message。
                        由 SlidingWindowScheduler 满足下文条件时派发。
-        flush:         兜底写入，处理 conversation 中所有剩余未写入消息。
-                       由 flush_conversation_task 扫描空闲对话后派发。
-        api_write:     API Service / MCP 写入，直接用 messages 调用 MemoryAgentService。
-                       不经过 memory_messages 表。—— 进一步成为直接发送write_message_task任务
+        flush:         兜底写入，处理 target_seq 指定的单条消息（user / assistant 均可）。
+                       由 flush_conversation_task 扫描空闲对话后逐条派发，
+                       每条携带 target_seq + 派发时立即原子推进 write_cursor，
+                       复用 target_seq 直查模式确保重试安全。
+        api_write:     API Service 写入，处理 target_seq 指定的单条消息。
+                       由 Controller 先写入 memory_messages 表后逐条派发，
+                       每条携带 target_seq + conversation_id，
+                       内部走 execute_pending_from_pool(target_seq) 从候选池消费。
+        mcp_write:     MCP 工具写入，不经过 memory_messages 表，
+                       直接从内存写入 Neo4j（单条消息，无需候选池缓存）。
 
     Args:
         end_user_id: 终端用户 ID（分片键，保证 per-user 串行）
@@ -1783,11 +1791,12 @@ def write_message_task(
         config_id: 记忆配置 ID（UUID string 或 int）
         language: 语言 ("zh" | "en")
         workspace_id: 工作空间 ID
-        conversation_id: 对话 ID（sliding_window / flush 必须）
-        target_seq: 目标消息 seq（sliding_window 模式必须）
-        messages: 消息列表（api_write 模式必须）
+        conversation_id: 对话 ID（sliding_window / flush / api_write）
+        target_seq: 目标消息 seq（所有模式共用）
+        messages: 消息列表（api_write RAG 模式，保留兼容）
         storage_type: 存储类型（api_write 模式）
         user_rag_memory_id: RAG 记忆 ID（api_write 模式）
+        target_index: [DEPRECATED] 保留兼容，api_write 已改用 target_seq
         message: 兼容旧调用方的 messages 别名（优先使用 messages）
 
     Returns:
@@ -1833,9 +1842,22 @@ def write_message_task(
                 config_id=str(actual_config_id) if actual_config_id else "",
                 workspace_id=workspace_id,
                 language=language,
+                target_seq=target_seq,
             )
         elif mode == "api_write":
             return await _run_api_write(
+                end_user_id=end_user_id,
+                messages=messages or [],
+                config_id=actual_config_id,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                language=language,
+                workspace_id=workspace_id,
+                target_seq=target_seq,
+                conversation_id=conversation_id,
+            )
+        elif mode == "mcp_write":
+            return await _run_mcp_write(
                 end_user_id=end_user_id,
                 messages=messages or [],
                 config_id=actual_config_id,
@@ -2011,8 +2033,16 @@ async def _run_flush(
     config_id: str,
     workspace_id: str,
     language: str,
+    target_seq: Optional[int] = None,
 ) -> dict:
-    """兜底写入：处理 conversation 中所有剩余未写入消息。"""
+    """兜底写入：处理 target_seq 指定的单条消息。
+
+    逐条派发模式：每条 pending 消息独立派发一个 task（携带 target_seq），
+    由 _flush_single_conversation 提前推进 cursor + push_task。
+
+    - target_seq 非空 → 直查模式，只处理这一条消息（user / assistant 均可）
+    - enforce_window=False → 兜底路径不要求下文凑齐 3 条
+    """
     from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
 
     processed = await execute_pending_from_pool(
@@ -2022,7 +2052,7 @@ async def _run_flush(
         workspace_id=workspace_id,
         language=language,
         enforce_window=False,
-        target_seq=None,
+        target_seq=target_seq,
     )
     return {"status": "success", "mode": "flush", "processed": processed}
 
@@ -2035,15 +2065,17 @@ async def _run_api_write(
     user_rag_memory_id: str,
     language: str,
     workspace_id: str = "",
+    target_seq: Optional[int] = None,
+    conversation_id: str = "",
 ) -> dict:
-    """API Service 写入：根据 storage_type 分流。
+    """API Service 写入：处理 target_seq 指定的单条消息。
 
-    - RAG: 沿用 write_rag 直接写入
-    - Neo4j: 不经过 memory_messages 表，直接从内存逐条写入
+    - RAG: 沿用 write_rag 直接写入（不支持 target_seq 单消息模式）
+    - Neo4j: 走 execute_pending_from_pool(target_seq=...) 从 memory_messages 表直查消费
     """
     if storage_type and storage_type.lower() == StorageType.RAG.value:
-        from app.core.memory.memory_service import MemoryService
-        await MemoryService._write_messages_to_rag(
+        from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
+        await write_messages_to_rag(
             messages=messages,
             end_user_id=end_user_id,
             user_rag_memory_id=user_rag_memory_id,
@@ -2051,197 +2083,58 @@ async def _run_api_write(
         logger.info(f"[CELERY WRITE] api_write (RAG) completed for end_user={end_user_id}")
         return {"status": "success", "mode": "api_write", "storage_type": "rag"}
 
-    # Neo4j 直接写入路径
-    from app.core.memory.memory_service import MemoryService
+    # Neo4j 候选池消费路径：直查 target_seq → run_with_window()
+    from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
 
-    result = await MemoryService.write_messages_direct(
+    processed = await execute_pending_from_pool(
+        conversation_id=conversation_id,
+        end_user_id=end_user_id,
+        config_id=str(config_id) if config_id else "",
+        workspace_id=workspace_id,
+        language=language,
+        enforce_window=False,
+        target_seq=target_seq,
+    )
+    logger.info(f"[CELERY WRITE] api_write (single) completed: processed={processed}")
+    return {"status": "success", "mode": "api_write", "storage_type": "neo4j", "processed": processed}
+
+
+async def _run_mcp_write(
+    end_user_id: str,
+    messages: List[dict],
+    config_id,
+    storage_type: str,
+    user_rag_memory_id: str,
+    language: str,
+    workspace_id: str = "",
+) -> dict:
+    """MCP 写入：不经过 memory_messages 表，直接从内存逐条写入 Neo4j。
+
+    MCP 工具单次只发一条消息，不需要候选池缓存和滑动窗口机制。
+    复用 direct_writer 的直接写入路径（含上下文窗口构建）。
+    """
+    if storage_type and storage_type.lower() == StorageType.RAG.value:
+        from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
+        await write_messages_to_rag(
+            messages=messages,
+            end_user_id=end_user_id,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+        logger.info(f"[CELERY WRITE] mcp_write (RAG) completed for end_user={end_user_id}")
+        return {"status": "success", "mode": "mcp_write", "storage_type": "rag"}
+
+    from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_direct
+
+    result = await write_messages_direct(
         messages=messages,
         end_user_id=end_user_id,
         config_id=str(config_id) if config_id else "",
         workspace_id=workspace_id,
         language=language,
     )
-    logger.info(f"[CELERY WRITE] api_write (direct) completed: {result}")
-    return {**result, "mode": "api_write", "storage_type": "neo4j"}
+    logger.info(f"[CELERY WRITE] mcp_write (direct) completed: {result}")
+    return {**result, "mode": "mcp_write", "storage_type": "neo4j"}
 
-# TODO：将extract_emotion_batch_task从tasks.py中移除，移动到write_pipeline.py
-@celery_app.task(
-    bind=True,
-    name="app.tasks.extract_emotion_batch",
-    max_retries=2,
-    default_retry_delay=30,
-)
-def extract_emotion_batch_task(
-    self,
-    statements: List[Dict[str, str]],
-    llm_model_id: str,
-    language: str = "zh",
-    emotion_config: Optional[Dict[str, Any]] = None,
-    snapshot_dir: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Celery task: batch emotion extraction + Neo4j backfill.
-
-    Runs asynchronously after the main write pipeline completes.
-    Each statement is processed independently; individual failures
-    degrade gracefully without affecting other statements.
-
-    Args:
-        statements: List of dicts with keys: statement_id, statement_text, speaker.
-        llm_model_id: UUID string of the LLM model to use.
-        language: Language code ("zh" / "en").
-        emotion_config: Optional dict with emotion step config overrides
-                        (emotion_extract_keywords, emotion_enable_subject).
-        snapshot_dir: Optional absolute path of the current run's snapshot directory.
-                      When provided (only in debug mode), emotion outputs will be
-                      dumped to <snapshot_dir>/4_emotion_outputs.json for offline
-                      comparison between the legacy / new pipelines.
-    """
-    task_id = self.request.id
-    total = len(statements)
-    logger.info(
-        f"[Emotion] 开始批量情绪提取: "
-        f"statements={total}, llm_model_id={llm_model_id}, "
-        f"language={language}, task_id={task_id}"
-    )
-    start_time = time.time()
-
-    if not statements:
-        return {"status": "SUCCESS", "total": 0, "extracted": 0, "failed": 0, "task_id": task_id}
-
-    async def _run() -> Dict[str, Any]:
-        from app.core.memory.models.variate_config import ExtractionPipelineConfig
-        from app.core.memory.storage_services.extraction_engine.steps.base import StepContext
-        from app.core.memory.storage_services.extraction_engine.steps.emotion_step import EmotionExtractionStep
-        from app.core.memory.storage_services.extraction_engine.steps.schema import (
-            EmotionStepInput,
-            EmotionStepOutput,
-        )
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-        from app.db import get_db_context
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.repositories.neo4j.cypher_queries import STATEMENT_EMOTION_UPDATE
-
-        # Build LLM client
-        with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(llm_model_id)
-
-        # Build minimal pipeline config with emotion enabled
-        pipeline_config = ExtractionPipelineConfig(emotion_enabled=True)
-        # Apply optional config overrides
-        emo_cfg = emotion_config or {}
-        for key in ("emotion_extract_keywords", "emotion_enable_subject"):
-            if key in emo_cfg:
-                setattr(pipeline_config, key, emo_cfg[key])
-
-        context = StepContext(
-            llm_client=llm_client,
-            language=language,
-            config=pipeline_config,
-        )
-        step = EmotionExtractionStep(context)
-
-        # Concurrent extraction for all statements
-        extracted = 0
-        failed = 0
-        update_items = []
-        # 快照用：收集每条 statement 的 EmotionStepOutput（仅当 snapshot_dir 非空时使用）
-        snapshot_outputs: Dict[str, Any] = {} if snapshot_dir else None  # type: ignore[assignment]
-
-        async def _extract_one(stmt_dict: Dict[str, str]):
-            nonlocal extracted, failed
-            inp = EmotionStepInput(
-                statement_id=stmt_dict["statement_id"],
-                statement_text=stmt_dict["statement_text"],
-                speaker=stmt_dict.get("speaker", "user"),
-            )
-            try:
-                result: EmotionStepOutput = await step.run(inp)
-                update_items.append({
-                    "statement_id": stmt_dict["statement_id"],
-                    "emotion_type": result.emotion_type,
-                    "emotion_intensity": result.emotion_intensity,
-                    "emotion_keywords": result.emotion_keywords,
-                })
-                if snapshot_outputs is not None:
-                    snapshot_outputs[stmt_dict["statement_id"]] = result.model_dump()
-                extracted += 1
-                logger.debug(
-                    f"[Emotion] 单条提取完成: stmt={stmt_dict['statement_id']}, "
-                    f"type={result.emotion_type}, intensity={result.emotion_intensity}"
-                )
-            except Exception as e:
-                failed += 1
-                if snapshot_outputs is not None:
-                    snapshot_outputs[stmt_dict["statement_id"]] = {"error": str(e)}
-                logger.warning(
-                    f"[Emotion] 单条提取失败 stmt={stmt_dict['statement_id']}: {e}"
-                )
-
-        await asyncio.gather(*[_extract_one(s) for s in statements])
-
-        # 快照落盘（worker 端）：上传到 OSS，不影响 Neo4j 写入流程，失败只打日志
-        if snapshot_outputs is not None and snapshot_dir:
-            from app.core.memory.utils.debug.pipeline_snapshot import (
-                upload_stage_snapshot,
-            )
-
-            if upload_stage_snapshot(
-                snapshot_dir, "4_emotion_outputs", snapshot_outputs
-            ):
-                logger.info(
-                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → "
-                    f"oss://{snapshot_dir}/4_emotion_outputs.json"
-                )
-
-        # Batch update Neo4j via write transaction
-        if update_items:
-            connector = Neo4jConnector()
-            try:
-                async def _write_emotions(tx):
-                    result = await tx.run(STATEMENT_EMOTION_UPDATE, items=update_items)
-                    records = [record async for record in result]
-                    return records
-
-                records = await connector.execute_write_transaction(_write_emotions)
-                logger.info(
-                    f"[Emotion] Neo4j 回写完成: "
-                    f"更新 {len(records)}/{len(update_items)} 条 Statement 节点"
-                )
-            except Exception as e:
-                logger.error(f"[Emotion] Neo4j 回写失败: {e}")
-                raise
-            finally:
-                await connector.close()
-
-        return {"extracted": extracted, "failed": failed}
-
-    loop = None
-    try:
-        loop = set_asyncio_event_loop()
-        result = loop.run_until_complete(_run())
-        elapsed = time.time() - start_time
-        logger.info(
-            f"[Emotion] 任务完成: 提取={result['extracted']}, "
-            f"失败={result['failed']}, 耗时={elapsed:.2f}s, task_id={task_id}"
-        )
-        return {
-            "status": "SUCCESS",
-            "total": total,
-            **result,
-            "elapsed_time": elapsed,
-            "task_id": task_id,
-        }
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(
-            f"[Emotion] 任务失败: {e}, 耗时={elapsed:.2f}s",
-            exc_info=True,
-        )
-        raise self.retry(exc=e)
-    finally:
-        if loop:
-            _shutdown_loop_gracefully(loop)
 
 def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
     """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_hours 小时则跳过。
@@ -4265,115 +4158,42 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
 
 # ─── User Metadata Extraction Task ───────────────────────────────────────────
 
-
-# unused task
-
-
-# =============================================================================
-# Sliding Window Write Tasks
-# =============================================================================
-
-
-@celery_app.task(
-    bind=True,
-    name="app.tasks.sliding_window_write",
-    queue="memory_tasks",
-    max_retries=0,
-    acks_late=True,
-)
-def sliding_window_write_task(
-    self,
-    conversation_id: str,
-    message_seq: int,
-    context_before: List[dict],
-    context_after: List[dict],
-    target_message: dict,
-    config_id: str,
-    end_user_id: str,
-    workspace_id: str,
-    language: str,
-    dispatch_at: str,
-) -> None:
-    """滑动窗口写入任务。
-
-    1. 从数据库加载 memory_config
-    2. 初始化 WritePipeline
-    3. 调用 WritePipeline.run_with_window()
-    4. 任务完成后（无论成功或失败）删除幂等锁 write_task:{conversation_id}:{message_seq}
-
-    Fire-and-forget：异常时记录日志，不重试。
-    """
-    async def _run() -> None:
-        from app.core.memory.pipelines.write_pipeline import WritePipeline
-        from app.services.memory_config_service import MemoryConfigService
-        from app.models.conversation_model import Conversation
-        from sqlalchemy import select
-
-        with get_db_context() as db:
-            config_service = MemoryConfigService(db)
-
-            # config_id 为空时，通过 conversation_id 查出 workspace_id 作为 fallback
-            _config_id = config_id if config_id else None
-            _workspace_id = workspace_id if workspace_id else None
-
-            if not _workspace_id and conversation_id:
-                row = db.execute(
-                    select(Conversation.workspace_id).where(
-                        Conversation.id == conversation_id
-                    )
-                ).scalar_one_or_none()
-                if row:
-                    _workspace_id = str(row)
-
-            memory_config = config_service.load_memory_config(
-                config_id=_config_id,
-                workspace_id=_workspace_id,
-                service_name="SlidingWindowWriteTask",
-            )
-
-        pipeline = WritePipeline(
-            memory_config=memory_config,
-            end_user_id=end_user_id,
-            language=language,
-        )
-        await pipeline.run_with_window(
-            target_message=target_message,
-            context_before=context_before,
-            context_after=context_after,
-            conversation_id=conversation_id,
-            message_seq=message_seq,
-            dispatch_at=dispatch_at,
-        )
-
-    try:
-        asyncio.run(_run())
-    except Exception as e:
-        logger.error(
-            f"[SlidingWindowWrite] 失败: conv={conversation_id}, seq={message_seq}, err={e}",
-            exc_info=True,
-        )
-    finally:
-        redis_client = get_sync_redis_client()
-        if redis_client:
-            try:
-                redis_client.delete(f"write_task:{conversation_id}:{message_seq}")
-            except Exception as e:
-                logger.warning(
-                    f"[SlidingWindowWrite] 删除幂等锁失败: conv={conversation_id}, seq={message_seq}, err={e}"
-                )
-
-
 # ──────────────────────────────────────────────
 # 滑动窗口写入相关常量
 # ──────────────────────────────────────────────
 
 # Redis key 前缀
 CONV_ACTIVE_KEY_PREFIX = "conv_active:"
-FLUSH_LOCK_KEY_PREFIX = "flush_lock:"
 
-# Flush 任务幂等锁 TTL（秒）：派发 flush_conversation_task 时 SETNX 这把锁
-# 防止同一对话被并发兜底，FlushTask 完成（成功或失败）会主动 DELETE 释放
-FLUSH_LOCK_TTL_SECONDS = 600
+
+def _advance_cursor_sync(conversation_id: str, message_seq: int) -> None:
+    """同步版 cursor 推进，供 flush 派发流程（同步函数）使用。
+
+    Celery Beat 在 ThreadPoolExecutor 中执行，该线程无事件循环。
+    这里用 DB 直连绕过 async，避免依赖 asyncio 事件循环。
+    fire-and-forget：失败仅记录 warning，不阻塞派发循环。
+    """
+    try:
+        from sqlalchemy import update
+
+        from app.db import get_db_context
+        from app.models.conversation_model import Conversation
+
+        with get_db_context() as db:
+            db.execute(
+                update(Conversation)
+                .where(
+                    Conversation.id == conversation_id,
+                    Conversation.write_cursor < message_seq,
+                )
+                .values(write_cursor=message_seq)
+            )
+            db.commit()
+    except Exception as e:
+        logger.warning(
+            f"[FlushTask] 提前推进 write_cursor 失败（不影响派发）: "
+            f"conv={conversation_id}, seq={message_seq}, err={e}"
+        )
 
 
 @celery_app.task(
@@ -4384,17 +4204,19 @@ FLUSH_LOCK_TTL_SECONDS = 600
     acks_late=True,
 )
 def flush_conversation_task(self, conversation_id: Optional[str] = None) -> None:
-    """兜底写入任务（幂等触发器）。
+    """兜底写入任务。
 
     支持两种模式：
     1. 单对话模式（conversation_id 非空，外部/手动触发）：
-       检查指定对话是否有未写入消息，若有则通过 push_task 派发 write_message_task。
+       检查指定对话是否有未写入消息，若有则逐条派发 write_message_task。
 
     2. 扫描模式（conversation_id 为空，Beat 定时调度）：
        扫描所有空闲对话（pending_conversations Set + conv_active 检查），
        逐个派发兜底写入任务。
 
-    不持有 memory_write:{end_user_id} 锁，仅使用轻量级 flush_lock:{conversation_id}（SETNX 幂等锁）。
+    _flush_single_conversation 内部逐条派发 target_seq 任务并提前推进 write_cursor，
+    下次扫描时 cursor 已推进不会重复触发。
+
     所有实际写入均收敛到 write_message_task 路径，由 memory_write 锁在 worker 侧保证串行。
 
     Fire-and-forget：异常时记录日志，不重试。
@@ -4408,22 +4230,22 @@ def flush_conversation_task(self, conversation_id: Optional[str] = None) -> None
 
 
 def _flush_single_conversation(conversation_id: str) -> None:
-    """处理单个对话的兜底写入：检查未写入消息 → push_task 派发 write_message_task。
+    """处理单个对话的兜底写入：查询所有未写入消息 → 逐条派发 write_message_task。
 
-    完成后（无论成功或失败）删除 flush_lock:{conversation_id}。
+    每条 pending 消息独立派发一个 task（携带 target_seq），派发后立即原子推进
+    write_cursor。复用 sliding_window 的 target_seq 直查模式，每条消息失败只影响
+    自身，Celery 重试（max_retries=3）时通过 target_seq 直查不依赖 cursor，安全。
     """
-    from sqlalchemy import func, select
+    from sqlalchemy import select as sa_select
 
     from app.models.conversation_model import Conversation
     from app.models.memory_message_model import MemoryMessage
-
-    redis_client = get_sync_redis_client()
 
     try:
         # Step 1: 查询对话信息
         with get_db_context() as db:
             row = db.execute(
-                select(
+                sa_select(
                     Conversation.write_cursor,
                     Conversation.user_id,
                     Conversation.workspace_id,
@@ -4442,15 +4264,21 @@ def _flush_single_conversation(conversation_id: str) -> None:
                 logger.warning(f"[FlushTask] end_user_id 为空，跳过: conv={conversation_id}")
                 return
 
-            # Step 2: 检查是否有 message_seq > write_cursor 的消息
-            max_seq = db.execute(
-                select(func.max(MemoryMessage.message_seq)).where(
-                    MemoryMessage.conversation_id == conversation_id,
-                    MemoryMessage.message_seq > (write_cursor or 0),
+            # Step 2: 查询所有 message_seq > write_cursor 的消息序号
+            pending_seqs = (
+                db.execute(
+                    sa_select(MemoryMessage.message_seq)
+                    .where(
+                        MemoryMessage.conversation_id == conversation_id,
+                        MemoryMessage.message_seq > (write_cursor or 0),
+                    )
+                    .order_by(MemoryMessage.message_seq.asc())
                 )
-            ).scalar()
+                .scalars()
+                .all()
+            )
 
-            if not max_seq:
+            if not pending_seqs:
                 logger.info(f"[FlushTask] 无未写入消息，跳过: conv={conversation_id}")
                 return
 
@@ -4470,37 +4298,37 @@ def _flush_single_conversation(conversation_id: str) -> None:
             logger.warning(f"[FlushTask] 解析 config_id 异常，跳过: conv={conversation_id}, err={e}")
             return
 
-        # Step 4: 通过 celery_task_scheduler.push_task 派发 write_message_task
-        # enforce_window=False 表示兜底路径不要求下文凑齐 3 条
+        # Step 4: 逐条派发 write_message_task，每条携带 target_seq
+        # 与 sliding_window 路径一致：
+        #   - 派发后立即原子推进 write_cursor（防重复派发）
+        #   - task 内部通过 target_seq 直查消息，重试不依赖 cursor
+        #   - enforce_window=False，兜底路径不要求下文凑齐 3 条
         try:
             from app.celery_task_scheduler import scheduler as celery_scheduler
 
-            # 检查该 user 是否已有写入任务在执行或排队中
-            # 如果 lock_key 存在或 user 队列非空，说明实时路径已安排处理，跳过重复派发
-            lock_key = f"app.core.memory.agent.write_message:{end_user_id}"
-            queue_key = f"scheduler:uq:{end_user_id}"
-            if celery_scheduler.redis.exists(lock_key) or celery_scheduler.redis.llen(queue_key) > 0:
-                logger.info(
-                    f"[FlushTask] 该 user 已有写入任务排队/执行中，跳过派发: "
-                    f"conv={conversation_id}, end_user_id={end_user_id}"
+            dispatched = 0
+            for target_seq in pending_seqs:
+                msg_id = celery_scheduler.push_task(
+                    "app.core.memory.agent.write_message",
+                    end_user_id,
+                    {
+                        "end_user_id": end_user_id,
+                        "mode": "flush",
+                        "target_seq": target_seq,
+                        "config_id": config_id,
+                        "language": "zh",
+                        "conversation_id": conversation_id,
+                        "workspace_id": workspace_id,
+                    },
                 )
-                return
+                # 提前推进 cursor，防止后续扫描重复派发同一条消息
+                # target_seq 直查模式确保重投递仍能正确定位消息
+                _advance_cursor_sync(conversation_id, target_seq)
+                dispatched += 1
 
-            msg_id = celery_scheduler.push_task(
-                "app.core.memory.agent.write_message",
-                end_user_id,
-                {
-                    "end_user_id": end_user_id,
-                    "mode": "flush",
-                    "config_id": config_id,
-                    "language": "zh",
-                    "conversation_id": conversation_id,
-                    "workspace_id": workspace_id,
-                },
-            )
             logger.info(
-                f"[FlushTask] 已派发 write_message_task: "
-                f"conv={conversation_id}, end_user_id={end_user_id}, msg_id={msg_id}"
+                f"[FlushTask] 已派发 {dispatched} 个 write_message_task: "
+                f"conv={conversation_id}, end_user_id={end_user_id}"
             )
         except Exception as e:
             logger.error(
@@ -4513,15 +4341,6 @@ def _flush_single_conversation(conversation_id: str) -> None:
             f"[FlushTask] 失败: conv={conversation_id}, err={e}",
             exc_info=True,
         )
-    finally:
-        # 释放幂等锁
-        if redis_client:
-            try:
-                redis_client.delete(f"{FLUSH_LOCK_KEY_PREFIX}{conversation_id}")
-            except Exception as e:
-                logger.warning(
-                    f"[FlushTask] 删除 flush_lock 失败: conv={conversation_id}, err={e}"
-                )
 
 
 def _scan_and_flush_idle_conversations() -> None:
@@ -4530,12 +4349,12 @@ def _scan_and_flush_idle_conversations() -> None:
     优先从 Redis Set (pending_conversations) 获取候选对话 ID，避免全表 JOIN 扫描。
     若 Set 不可用则回退到数据库查询。
 
-    扫描条件（三者同时满足才派发）：
+    扫描条件（两者同时满足才派发）：
     1. 对话存在未写入消息（来自 Redis Set 或 DB 查询）
     2. Redis 中 conv_active:{conversation_id} 已过期或不存在（对话空闲 >5 分钟）
-    3. Redis 中 flush_lock:{conversation_id} 不存在（无正在执行的 FlushTask）
 
-    满足条件时：原子写入 flush_lock（TTL=600s），再调用 _flush_single_conversation。
+    _flush_single_conversation 内部逐条派发 target_seq 任务并提前推进 write_cursor，
+    下次扫描时 cursor 已推进不会重复触发，无需额外幂等锁。
     """
     from sqlalchemy import func, select
 
@@ -4566,7 +4385,6 @@ def _scan_and_flush_idle_conversations() -> None:
 
     dispatched = 0
     skipped_active = 0
-    skipped_locked = 0
 
     try:
         # 优先从 Redis Set 获取候选对话 ID
@@ -4653,31 +4471,14 @@ def _scan_and_flush_idle_conversations() -> None:
                 skipped_active += 1
                 continue
 
-            # 原子写入 flush_lock（nx=True 保证只有一个 worker 能成功）
-            try:
-                flush_lock_key = f"{FLUSH_LOCK_KEY_PREFIX}{conv_id_str}"
-                acquired = redis_client.set(
-                    flush_lock_key, "1",
-                    ex=FLUSH_LOCK_TTL_SECONDS, nx=True,
-                )
-                if not acquired:
-                    skipped_locked += 1
-                    continue
-            except Exception as e:
-                logger.warning(f"[FlushScan] 写入 flush_lock 失败: conv={conv_id_str}, err={e}")
-                continue
-
-            # 直接调用 _flush_single_conversation（同步执行，会处理 flush_lock 释放）
+            # 调用 _flush_single_conversation：内部逐条派发 target_seq 任务 +
+            # 提前推进 write_cursor，后续扫描 cursor 已推进不会重复触发
             try:
                 _flush_single_conversation(conv_id_str)
                 dispatched += 1
                 logger.info(f"[FlushScan] 已处理: conv={conv_id_str}")
             except Exception as e:
                 logger.error(f"[FlushScan] 处理失败: conv={conv_id_str}, err={e}", exc_info=True)
-                try:
-                    redis_client.delete(flush_lock_key)
-                except Exception:
-                    pass
 
     except Exception as e:
         logger.error(f"[FlushScan] 扫描任务失败: err={e}", exc_info=True)
@@ -4689,7 +4490,7 @@ def _scan_and_flush_idle_conversations() -> None:
                 pass
 
     logger.info(
-        f"[FlushScan] 扫描完成: 处理={dispatched}, 跳过(活跃)={skipped_active}, 跳过(已锁)={skipped_locked}"
+        f"[FlushScan] 扫描完成: 处理={dispatched}, 跳过(活跃)={skipped_active}"
     )
 
 

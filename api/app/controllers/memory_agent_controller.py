@@ -249,24 +249,74 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
-        # 获取标准化的消息列表
-        messages_list = memory_agent_service.get_messages_list(user_input)
+        # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
+        if storage_type and storage_type.lower() == StorageType.RAG.value:
+            from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
+            messages_list = memory_agent_service.get_messages_list(user_input)
+            await write_messages_to_rag(
+                messages=messages_list,
+                end_user_id=user_input.end_user_id,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            api_logger.info(f"RAG write completed for end_user={user_input.end_user_id}")
+            return success(data={}, msg="RAG 写入完成")
 
-        task = celery_app.send_task(
-            "app.core.memory.agent.write_message",
-            kwargs={
-                "end_user_id": user_input.end_user_id,
-                "mode": "api_write",
-                "messages": messages_list,
-                "config_id": config_id,
-                "storage_type": storage_type,
-                "user_rag_memory_id": user_rag_memory_id,
-                "language": language,
-            }
+        # ── Neo4j 路径：写入 memory_messages 表 → 逐条派发单消息任务 ──
+        from app.core.memory.sliding_window.window_utils import (
+            get_or_create_service_api_conversation,
+            write_batch_to_memory_messages,
+            advance_write_cursor,
         )
-        api_logger.info(f"Write task queued: {task.id}")
 
-        return success(data={"task_id": task.id}, msg="写入任务已提交")
+        workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
+
+        # 1. 获取/创建哨兵 App 对应的虚拟 conversation
+        conversation_id = get_or_create_service_api_conversation(
+            workspace_id=workspace_id_str,
+            end_user_id=user_input.end_user_id,
+        )
+        api_logger.info(f"Service API conversation: conv={conversation_id}, end_user={user_input.end_user_id}")
+
+        # 2. 获取标准化消息列表并批量写入 memory_messages 表
+        messages_list = memory_agent_service.get_messages_list(user_input)
+        written_mms = write_batch_to_memory_messages(
+            conversation_id=conversation_id,
+            messages=messages_list,
+        )
+
+        if not written_mms:
+            api_logger.info("No valid messages to write")
+            return success(data={"task_ids": []}, msg="无有效消息")
+
+        # 3. 逐条派发单消息任务（user 消息才派发，其他角色只推进 cursor）
+        task_ids = []
+        for mm in written_mms:
+            if mm["role"] != "user":
+                await advance_write_cursor(conversation_id, mm["message_seq"])
+                continue
+
+            task = celery_app.send_task(
+                "app.core.memory.agent.write_message",
+                kwargs={
+                    "end_user_id": user_input.end_user_id,
+                    "mode": "api_write",
+                    "target_seq": mm["message_seq"],
+                    "config_id": config_id,
+                    "storage_type": storage_type,
+                    "conversation_id": conversation_id,
+                    "language": language,
+                },
+            )
+            task_ids.append(task.id)
+            # 提前推进 cursor，防止重复派发（target_seq 直查模式保证重试安全）
+            await advance_write_cursor(conversation_id, mm["message_seq"])
+
+        api_logger.info(
+            f"Write tasks queued: {len(task_ids)} tasks for "
+            f"{len(written_mms)} messages, conv={conversation_id}"
+        )
+
+        return success(data={"task_ids": task_ids}, msg=f"已提交 {len(task_ids)} 个写入任务")
     except Exception as e:
         api_logger.error(f"Async write operation failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))

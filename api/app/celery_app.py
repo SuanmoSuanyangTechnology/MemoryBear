@@ -134,7 +134,6 @@ celery_app.conf.update(
         'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
-        'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
         'app.tasks.flush_conversation': {'queue': 'periodic_tasks'},
 
         'app.tasks.draft_data_clean': {'queue': 'memory_tasks'},
@@ -247,10 +246,10 @@ beat_schedule_config = {
     # },
     # FIXME: Infinite task accumulation
     "flush-idle-conversations": {
-        # 每 5 分钟扫描空闲对话并派发兜底写入
+        # 每分钟扫描空闲对话并派发兜底写入
         # 不传 conversation_id → flush_conversation_task 进入扫描模式
         "task": "app.tasks.flush_conversation",
-        "schedule": 300.0,
+        "schedule": 60.0,
         "options": {"queue": "periodic_tasks"},
     },
 

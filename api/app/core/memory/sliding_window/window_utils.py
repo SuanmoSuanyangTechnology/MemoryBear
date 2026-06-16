@@ -5,15 +5,17 @@ scheduler.py、flush_task.py、MemoryService 共用的：
 - 窗口上下文构建（build_context_before / build_context_after）
 - 内存上下文构建（不查询 DB，供直接写入路径使用）
 - write_cursor 原子推进
+- MemoryMessage 批量写入
 - SlidingWindowScheduler 分派
 - Redis pending 集合管理
 
-数据源：Agent 对话路径基于 memory_messages 表，直接写入路径基于内存 messages 数组。
+数据源：所有查询均基于 memory_messages 表，仅按 conversation_id 维度过滤。
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from bisect import bisect_right
 from datetime import datetime
 from typing import List
@@ -21,13 +23,223 @@ from typing import List
 from sqlalchemy import func, select, update
 
 from app.db import get_db_context
-from app.core.utils.datetime_utils import to_iso_z
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
 
 logger = logging.getLogger(__name__)
 
 WINDOW_SIZE = 3
+
+# ──────────────────────────────────────────────
+# 哨兵 App & Service API 虚拟会话
+# ──────────────────────────────────────────────
+
+# 全局哨兵 App ID（Service API 虚拟会话专用）
+SENTINEL_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+# 模块级缓存：哨兵 App 是否已确认存在（进程生命周期内只需检查一次）
+_sentinel_app_verified: bool = False
+
+
+def _ensure_sentinel_app_exists() -> None:
+    """确保哨兵 App 在 apps 表中存在，不存在则自动创建。
+
+    使用模块级 flag 缓存结果，进程生命周期内只查询一次数据库。
+    其他环境首次运行时无需手动执行 migration，代码自动兜底。
+    """
+    global _sentinel_app_verified
+    if _sentinel_app_verified:
+        return
+
+    from app.models.app_model import App
+
+    try:
+        with get_db_context() as db:
+            existing = db.get(App, SENTINEL_APP_ID)
+            if existing is not None:
+                _sentinel_app_verified = True
+                return
+
+            sentinel = App(
+                id=SENTINEL_APP_ID,
+                workspace_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+                created_by=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+                name="__system_memory_service__",
+                type="agent",
+                visibility="private",
+                status="active",
+                is_active=True,
+            )
+            db.add(sentinel)
+            db.commit()
+            _sentinel_app_verified = True
+            logger.info("[WindowUtils] 创建哨兵 App: id=00000000-0000-0000-0000-000000000001")
+    except Exception as e:
+        # 并发场景下可能 unique violation，忽略即可；标记为已验证避免重复查询
+        _sentinel_app_verified = True
+        logger.debug(f"[WindowUtils] 确保哨兵 App 存在时异常（可忽略）: {e}")
+
+
+def get_or_create_service_api_conversation(
+    workspace_id: str,
+    end_user_id: str,
+) -> str:
+    """按 (workspace_id, end_user_id, app_id=SENTINEL) 查找或创建虚拟会话。
+
+    Service API（v1）写入路径专用。每个 (workspace_id, end_user_id) 对应唯一
+    一条虚拟 conversation，用于承载滑动窗口的 memory_messages 和 write_cursor。
+
+    Args:
+        workspace_id: 工作空间 ID（从 API key 带入）
+        end_user_id: 终端用户 ID
+
+    Returns:
+        conversation_id (str)
+    """
+    import uuid as _uuid
+
+    # 确保哨兵 App 存在（首次运行时自动创建）
+    _ensure_sentinel_app_exists()
+
+    _ws_id = _uuid.UUID(workspace_id)
+
+    with get_db_context() as db:
+        conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.workspace_id == _ws_id,
+                Conversation.app_id == SENTINEL_APP_ID,
+                Conversation.user_id == end_user_id,
+            )
+            .first()
+        )
+
+        if conv:
+            return str(conv.id)
+
+        conv = Conversation(
+            id=_uuid.uuid4(),
+            app_id=SENTINEL_APP_ID,
+            workspace_id=_ws_id,
+            user_id=end_user_id,
+            is_draft=True,
+            write_cursor=0,
+        )
+        db.add(conv)
+        db.commit()
+        logger.info(
+            f"[WindowUtils] 创建 Service API 虚拟会话: "
+            f"workspace_id={workspace_id}, end_user_id={end_user_id}, conv={conv.id}"
+        )
+        return str(conv.id)
+
+
+async def ensure_conversation_exists(
+    conversation_id: str,
+    workspace_id: str = "",
+) -> None:
+    """确保 conversations 表中存在该记录，不存在时创建最小条目。
+
+    memory_messages.conversation_id 有 FK → conversations.id 约束。
+    工作流 MemoryWriteNode 等路径可能在 conversation 创建前就触发写入，
+    这里做容错兜底。
+
+    Args:
+        conversation_id: 会话 ID
+        workspace_id: 工作空间 ID（缺失时用 sentinel UUID）
+    """
+    import uuid as _uuid
+
+    try:
+        with get_db_context() as db:
+            existing = db.get(Conversation, _uuid.UUID(conversation_id))
+            if existing is not None:
+                return
+
+            _ws_id = _uuid.UUID(workspace_id) if workspace_id else _uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+            conv = Conversation(
+                id=_uuid.UUID(conversation_id),
+                app_id=SENTINEL_APP_ID,
+                workspace_id=_ws_id,
+                is_draft=True,
+            )
+            db.add(conv)
+            db.commit()
+            logger.info(
+                f"[WindowUtils] 创建兜底 Conversation: conv={conversation_id}"
+            )
+    except Exception as e:
+        logger.warning(
+            f"[WindowUtils] ensure_conversation_exists 失败: "
+            f"conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+
+
+def write_batch_to_memory_messages(
+    conversation_id: str,
+    messages: List[dict],
+) -> List[dict]:
+    """批量写入 memory_messages 表，自动分配递增 message_seq。
+
+    在单个 DB 事务中完成：查询 max(message_seq) → 逐条分配 + 写入 → commit。
+
+    Args:
+        conversation_id: 对话 ID
+        messages: 消息列表，每条格式 {"role": "user"|"assistant", "content": "...", "files": [...]}
+
+    Returns:
+        成功写入的消息摘要列表 [{"role": "user", "message_seq": 1, "content": "..."}, ...]
+        （跳过 content 为空的消息）。返回 dict 而非 ORM 对象，避免 session 关闭后 detach 报错。
+    """
+    written: List[dict] = []
+
+    with get_db_context() as db:
+        max_seq_result = db.execute(
+            select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
+            .where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
+        ).scalar()
+        next_seq = (max_seq_result or 0)
+
+        for msg in messages:
+            role = str(msg.get("role", "user"))
+            content = str(msg.get("content", "") or "")
+            if not content.strip():
+                continue
+
+            next_seq += 1
+            mm = MemoryMessage(
+                id=uuid.uuid4(),
+                conversation_id=uuid.UUID(conversation_id),
+                original_message_id=None,
+                role=role,
+                content=content,
+                message_seq=next_seq,
+                should_memorize=True,
+                created_at=utcnow_naive(),
+                dialog_at=(msg.get("dialog_at") or None),
+                files=msg.get("files"),
+            )
+            db.add(mm)
+            written.append({
+                "role": role,
+                "message_seq": next_seq,
+                "content": content,
+            })
+            logger.debug(
+                f"[WindowUtils] 写入 memory_messages: "
+                f"conv={conversation_id}, seq={next_seq}, role={role}"
+            )
+
+        db.commit()
+
+    # 标记对话有待处理消息，供 scan_idle 快速过滤
+    if written:
+        mark_conversation_pending(conversation_id)
+
+    return written
 
 # Redis ZSET key 前缀，记录已写入 Neo4j 的 message_seq（按时间戳 score 排序）
 # 仅用于故障排查，不参与业务逻辑

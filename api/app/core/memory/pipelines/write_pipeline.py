@@ -51,6 +51,62 @@ bear = BearLogger("memory.pipeline")
 # ──────────────────────────────────────────────
 
 
+def _convert_pruning_records(raw_records: list) -> List[dict]:
+    """将 PruningPipeline 收集的剪枝记录转换为 graph_build_step 期望的格式。
+
+    PruningPipeline.prune() 产生的记录格式（用于快照/日志）：
+      {
+        "conversation_id": str,
+        "message_seq": int,
+        "source": "cache"|"llm",
+        "input": {"msgs": [{"role": "User"/"Assistant", "msg": str}, ...]},
+        "output"|"gold": {
+            "assistant_memory_hint": str,
+            "assistant_memory_type": str,
+            ...
+        },
+      }
+
+    graph_build_step 期望的格式（= AssistantPruningRecord.model_dump()）：
+      {
+        "pair_id": str,
+        "original_text": str,
+        "pruned_text": str,   # "NULL" 表示无记忆价值
+        "memory_type": str,
+        "created_at": str,
+      }
+    """
+    from datetime import timezone as _tz
+
+    result: List[dict] = []
+    _now = datetime.now(_tz.utc).isoformat()
+    _base = uuid.uuid4().hex[:8]  # 每批次唯一前缀，避免跨 task pair_id 碰撞
+    for idx, r in enumerate(raw_records):
+        conv_id = r.get("conversation_id", "")
+        seq = r.get("message_seq", 0)
+        pair_id = f"{conv_id}_{seq}_{_base}_{idx}" if conv_id else f"{_base}_{idx}"
+
+        # Assistant 消息是 input.msgs 中最后一条
+        msgs = r.get("input", {}).get("msgs", [])
+        assistant_msg = msgs[-1] if msgs else {}
+        original_text = assistant_msg.get("msg", "")
+
+        # 剪枝结果在 "output"（cache）或 "gold"（llm）键下
+        prune_result = r.get("output") or r.get("gold") or {}
+        pruned_text = prune_result.get("assistant_memory_hint", "")
+        memory_type = prune_result.get("assistant_memory_type", "NULL")
+
+        result.append({
+            "pair_id": pair_id,
+            "original_text": original_text,
+            "pruned_text": pruned_text or "NULL",
+            "memory_type": memory_type or "NULL",
+            "created_at": _now,
+        })
+
+    return result
+
+
 class ExtractionResult(BaseModel):
     """萃取 + 图构建 + 去重消歧后的结构化输出。
 
@@ -84,7 +140,8 @@ class ExtractionResult(BaseModel):
     assistant_original_nodes: List[Any] = Field(default_factory=list)
     assistant_pruned_nodes: List[Any] = Field(default_factory=list)
     assistant_pruned_edges: List[Any] = Field(default_factory=list)
-    assistant_dialog_edges: List[Any] = Field(default_factory=list)
+    conversation_nodes: List[Any] = Field(default_factory=list)
+    assistant_conversation_edges: List[Any] = Field(default_factory=list)
     dialog_data_list: List[Any] = Field(
         default_factory=list,
         description="原始 DialogData 列表，类型为 Any 以避免循环依赖",
@@ -220,6 +277,11 @@ class WritePipeline:
                 # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
                 async with bear.step(1, 5, "预处理", "消息分块") as s:
                     chunked_dialogs = await self._preprocess(messages, ref_id)
+                    # 注入 conversation_id 到 metadata（旧 run() 路径无真实 conversation_id）
+                    _conv_id = f"batch_{self.end_user_id}_{ref_id}"
+                    for dd in chunked_dialogs:
+                        dd.metadata["conversation_id"] = _conv_id
+                        dd.metadata["conversation_source"] = "api_service"
                     s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
                 # Step 2: 萃取 - 知识提取 + 第一层去重（仅精确匹配）
@@ -409,7 +471,8 @@ class WritePipeline:
             assistant_original_nodes=graph.assistant_original_nodes,
             assistant_pruned_nodes=graph.assistant_pruned_nodes,
             assistant_pruned_edges=graph.assistant_pruned_edges,
-            assistant_dialog_edges=graph.assistant_dialog_edges,
+            conversation_nodes=graph.conversation_nodes,
+            assistant_conversation_edges=graph.assistant_conversation_edges,
             dialog_data_list=dialog_data_list,
         )
 
@@ -454,7 +517,8 @@ class WritePipeline:
                     assistant_original_nodes=result.assistant_original_nodes,
                     assistant_pruned_nodes=result.assistant_pruned_nodes,
                     assistant_pruned_edges=result.assistant_pruned_edges,
-                    assistant_dialog_edges=result.assistant_dialog_edges,
+                    conversation_nodes=result.conversation_nodes,
+                    assistant_conversation_edges=result.assistant_conversation_edges,
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
@@ -495,7 +559,7 @@ class WritePipeline:
             else None
         )
 
-        # ── 1. 异步情绪提取 ── NOTE：需要移动在statement_temporal_step.py 或 extraction_pipeline_orchestrator.py中作为异步执行
+        # ── 1. 情绪提取（inline 同步执行）──
         emotion_statements = getattr(self, "_emotion_statements", [])
         if emotion_statements and llm_model_id:
             self._submit_celery_task(
@@ -1099,6 +1163,23 @@ class WritePipeline:
                         context_before=context_before_pruned,
                         context_after=context_after_pruned,
                     )
+                    # 将 _build_pruned_context 收集的剪枝记录转换为 graph_build_step
+                    # 期望的格式（AssistantPruningRecord dict），注入到每个 dialog_data.metadata。
+                    # _build_pruned_context 用 PruningPipeline 剪枝上下文中的 assistant，
+                    # 但 get_chunked_dialogs 只处理 target message（无 assistant），
+                    # 其内部的 SemanticPruner 不会看到这些上下文 assistant，故需手动注入。
+                    if pruning_records:
+                        converted = _convert_pruning_records(pruning_records)
+                        for dd in chunked_dialogs:
+                            existing = dd.metadata.get("assistant_pruning_records", [])
+                            dd.metadata["assistant_pruning_records"] = existing + converted
+
+                    # 注入 conversation_id 到 metadata，供 graph_build_step 创建 ConversationNode
+                    # 所有路径（Agent / Workflow / API Service）均有真实 conversation_id
+                    _conv_id = conversation_id or f"batch_{self.end_user_id}_{ref_id}"
+                    for dd in chunked_dialogs:
+                        dd.metadata["conversation_id"] = _conv_id
+
                     s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
                 async with bear.step(3, 6, "萃取", "知识提取") as s:
