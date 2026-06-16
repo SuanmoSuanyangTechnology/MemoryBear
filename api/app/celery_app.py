@@ -113,9 +113,6 @@ celery_app.conf.update(
         # Metadata extraction → memory_tasks queue
         # 'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'}, # NOTE：没有使用地方，可以删除
 
-        # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
-        'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
-
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},

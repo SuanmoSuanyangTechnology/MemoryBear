@@ -310,8 +310,8 @@ class WritePipeline:
                 async with bear.step(3, 5, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
-                # Step 3.5: 异步后处理（情绪提取）
-                await self._post_store_async_tasks()
+                # Step 3.5: 情绪提取
+                await self._run_emotion_extraction()
 
                 # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
                 async with bear.step(4, 5, "聚类", "增量更新社区") as s:
@@ -539,19 +539,24 @@ class WritePipeline:
                     raise
 
     # ──────────────────────────────────────────────
-    # Step 3.5: 异步后处理（情绪提取 + 元数据提取）
+    # Step 3.5: 情绪提取（inline 同步执行）
     # ──────────────────────────────────────────────
 
-    async def _post_store_async_tasks(self) -> None:
-        """提交写入后的异步 Celery 任务（全部 fire-and-forget，失败不影响主流程）：
+    async def _run_emotion_extraction(self) -> None:
+        """写入 Neo4j 后的 inline 情绪提取。
 
-        1. 异步情绪提取
+        复用 EmotionExtractionStep，对 has_emotional_state=True 的 statements
+        进行情绪提取 + Neo4j 回填。失败不影响主流程。
         """
         llm_model_id = (
             str(self.memory_config.llm_model_id)
             if self.memory_config.llm_model_id
             else None
         )
+        emotion_statements = getattr(self, "_emotion_statements", [])
+        if not emotion_statements or not llm_model_id:
+            return
+
         recorder = getattr(self, "_recorder", None)
         snapshot_dir = (
             recorder.snapshot_dir
@@ -559,34 +564,15 @@ class WritePipeline:
             else None
         )
 
-        # ── 1. 情绪提取（inline 同步执行）──
-        emotion_statements = getattr(self, "_emotion_statements", [])
-        if emotion_statements and llm_model_id:
-            self._submit_celery_task(
-                "Emotion",
-                "app.tasks.extract_emotion_batch",
-                {
-                    "statements": emotion_statements,
-                    "llm_model_id": llm_model_id,
-                    "language": self.language,
-                    "snapshot_dir": snapshot_dir,
-                },
-            )
-
-    def _submit_celery_task(
-        self, label: str, task_name: str, kwargs: dict
-    ) -> None:
-        """提交 Celery 异步任务的通用方法。失败只记日志，不抛异常。"""
-        try:
-            from app.celery_app import celery_app
-
-            task_result = celery_app.send_task(task_name, kwargs=kwargs)
-            logger.info(f"[{label}] 异步任务已提交 - task_id={task_result.id}")
-        except Exception as e:
-            logger.error(
-                f"[{label}] 提交异步任务失败（不影响主流程）: {e}",
-                exc_info=True,
-            )
+        from app.core.memory.storage_services.extraction_engine.steps.statement_temporal_step import (
+            run_emotion_extraction,
+        )
+        await run_emotion_extraction(
+            statements=emotion_statements,
+            llm_model_id=llm_model_id,
+            language=self.language,
+            snapshot_dir=snapshot_dir,
+        )
 
     # ──────────────────────────────────────────────
     # Step 4: 聚类
@@ -1194,7 +1180,7 @@ class WritePipeline:
                 async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
-                await self._post_store_async_tasks()
+                await self._run_emotion_extraction()
 
                 async with bear.step(5, 6, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)
