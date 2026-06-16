@@ -75,7 +75,6 @@ SET c += {
 }
 RETURN c.id AS uuid
 """
-# bug修改点
 
 EXTRACTED_ENTITY_NODE_SAVE = """
 // Upsert entity nodes safely: preserve existing non-empty fields when incoming is empty
@@ -93,8 +92,11 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
     e.description = CASE
         WHEN entity.description IS NOT NULL AND entity.description <> ''
-         AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
-        THEN entity.description ELSE e.description END,
+        THEN CASE
+            WHEN e.description IS NULL OR size(e.description) = 0 THEN entity.description
+            ELSE e.description + '；' + entity.description
+        END
+        ELSE e.description END,
     e.example = CASE 
         WHEN entity.example IS NOT NULL AND entity.example <> '' 
         THEN entity.example 
@@ -135,56 +137,108 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
 RETURN e.id AS uuid
 """
 
-# ── 元数据增量回写：将 LLM 提取的元数据追加到用户实体节点 ──
-ENTITY_METADATA_UPDATE = """
-MATCH (e:ExtractedEntity {id: $entity_id})
-SET e.core_facts = CASE
-        WHEN $core_facts IS NOT NULL AND size($core_facts) > 0
-        THEN reduce(acc = coalesce(e.core_facts, []), item IN $core_facts |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.core_facts, []) END,
-    e.traits = CASE
-        WHEN $traits IS NOT NULL AND size($traits) > 0
-        THEN reduce(acc = coalesce(e.traits, []), item IN $traits |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.traits, []) END,
-    e.relations = CASE
-        WHEN $relations IS NOT NULL AND size($relations) > 0
-        THEN reduce(acc = coalesce(e.relations, []), item IN $relations |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.relations, []) END,
-    e.goals = CASE
-        WHEN $goals IS NOT NULL AND size($goals) > 0
-        THEN reduce(acc = coalesce(e.goals, []), item IN $goals |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.goals, []) END,
-    e.interests = CASE
-        WHEN $interests IS NOT NULL AND size($interests) > 0
-        THEN reduce(acc = coalesce(e.interests, []), item IN $interests |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.interests, []) END,
-    e.beliefs_or_stances = CASE
-        WHEN $beliefs_or_stances IS NOT NULL AND size($beliefs_or_stances) > 0
-        THEN reduce(acc = coalesce(e.beliefs_or_stances, []), item IN $beliefs_or_stances |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.beliefs_or_stances, []) END,
-    e.anchors = CASE
-        WHEN $anchors IS NOT NULL AND size($anchors) > 0
-        THEN reduce(acc = coalesce(e.anchors, []), item IN $anchors |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.anchors, []) END,
-    e.events = CASE
-        WHEN $events IS NOT NULL AND size($events) > 0
-        THEN reduce(acc = coalesce(e.events, []), item IN $events |
-            CASE WHEN item IN acc THEN acc ELSE acc + item END)
-        ELSE coalesce(e.events, []) END
-RETURN e.id AS uuid
-"""
-
 # ── 查询用户实体已有的元数据（供增量提取时去重） ──
 ENTITY_METADATA_QUERY = """
 MATCH (e:ExtractedEntity {id: $entity_id})
 RETURN e.core_facts AS core_facts,
+       e.traits AS traits,
+       e.relations AS relations,
+       e.goals AS goals,
+       e.interests AS interests,
+       e.beliefs_or_stances AS beliefs_or_stances,
+       e.anchors AS anchors,
+       e.events AS events
+"""
+
+# ── 元数据 patch 回写：对 8 字段统一应用 delete / update / add 三段操作 ──
+# 设计要点：
+#   1. 8 个字段一次原子 SET，纯 Cypher（不依赖 APOC），无 race 风险
+#   2. delete: [x IN list WHERE NOT x IN $field_delete] —— 仅精确剔除被指名项
+#   3. update: [x IN list | CASE WHEN x = pair.old THEN pair.new ELSE x END]
+#              对每个 (old, new) pair 顺序应用一次，匹配不到则保持原值
+#   4. add:    reduce 去重追加，原值不会丢失
+#   5. 输入参数（每字段三类）：
+#        $<field>_delete : List[str]
+#        $<field>_update : List[{old: str, new: str}]
+#        $<field>_add    : List[str]
+#      上层调用方对未变更字段传空数组即可，避免 Cypher 内部出现 NULL 分支。
+ENTITY_METADATA_PATCH = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+
+// ── core_facts ──
+WITH e,
+     [x IN coalesce(e.core_facts, []) WHERE NOT x IN $core_facts_delete] AS cf0
+WITH e, reduce(acc = cf0, pair IN $core_facts_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS cf1
+WITH e, reduce(acc = cf1, item IN $core_facts_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS cf2
+SET e.core_facts = cf2
+
+// ── traits ──
+WITH e,
+     [x IN coalesce(e.traits, []) WHERE NOT x IN $traits_delete] AS tr0
+WITH e, reduce(acc = tr0, pair IN $traits_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS tr1
+WITH e, reduce(acc = tr1, item IN $traits_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS tr2
+SET e.traits = tr2
+
+// ── relations ──
+WITH e,
+     [x IN coalesce(e.relations, []) WHERE NOT x IN $relations_delete] AS re0
+WITH e, reduce(acc = re0, pair IN $relations_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS re1
+WITH e, reduce(acc = re1, item IN $relations_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS re2
+SET e.relations = re2
+
+// ── goals ──
+WITH e,
+     [x IN coalesce(e.goals, []) WHERE NOT x IN $goals_delete] AS go0
+WITH e, reduce(acc = go0, pair IN $goals_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS go1
+WITH e, reduce(acc = go1, item IN $goals_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS go2
+SET e.goals = go2
+
+// ── interests ──
+WITH e,
+     [x IN coalesce(e.interests, []) WHERE NOT x IN $interests_delete] AS in0
+WITH e, reduce(acc = in0, pair IN $interests_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS in1
+WITH e, reduce(acc = in1, item IN $interests_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS in2
+SET e.interests = in2
+
+// ── beliefs_or_stances ──
+WITH e,
+     [x IN coalesce(e.beliefs_or_stances, []) WHERE NOT x IN $beliefs_or_stances_delete] AS be0
+WITH e, reduce(acc = be0, pair IN $beliefs_or_stances_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS be1
+WITH e, reduce(acc = be1, item IN $beliefs_or_stances_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS be2
+SET e.beliefs_or_stances = be2
+
+// ── anchors ──
+WITH e,
+     [x IN coalesce(e.anchors, []) WHERE NOT x IN $anchors_delete] AS an0
+WITH e, reduce(acc = an0, pair IN $anchors_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS an1
+WITH e, reduce(acc = an1, item IN $anchors_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS an2
+SET e.anchors = an2
+
+// ── events ──
+WITH e,
+     [x IN coalesce(e.events, []) WHERE NOT x IN $events_delete] AS ev0
+WITH e, reduce(acc = ev0, pair IN $events_update |
+        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS ev1
+WITH e, reduce(acc = ev1, item IN $events_add |
+        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS ev2
+SET e.events = ev2
+
+RETURN e.id AS uuid,
+       e.core_facts AS core_facts,
        e.traits AS traits,
        e.relations AS relations,
        e.goals AS goals,
@@ -1829,6 +1883,17 @@ RETURN n.description AS description,
        n.id AS id
 """
 
+# ── 查询用户实体基本信息（供元数据提取使用） ──
+USER_ENTITY_FOR_METADATA = """
+MATCH (n:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id
+  AND (n.entity_type = '用户' OR toLower(n.name) IN ['用户', '我', 'user', 'i'])
+RETURN n.id AS entity_id,
+       n.name AS entity_name,
+       n.description AS description,
+       n.end_user_id AS end_user_id
+"""
+
 FULLTEXT_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_FULLTEXT,
     Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_FULLTEXT,
@@ -2014,7 +2079,11 @@ RETURN e1.id AS a_id, e2.id AS b_id,
        e1.entity_type AS entity_type,
        e1.description AS a_desc, e2.description AS b_desc,
        e1.aliases AS a_aliases, e2.aliases AS b_aliases,
-       e1.name_embedding AS a_embed, e2.name_embedding AS b_embed
+       e1.description_summary AS a_desc_summary, e2.description_summary AS b_desc_summary,
+       CASE
+         WHEN e1.name_embedding IS NULL OR e2.name_embedding IS NULL THEN 0.0
+         ELSE vector.similarity.cosine(e1.name_embedding, e2.name_embedding)
+       END AS emb_sim
 LIMIT $candidate_cap
 """
 
@@ -2036,8 +2105,23 @@ RETURN e1.id AS a_id, e2.id AS b_id,
        e1.entity_type AS entity_type,
        e1.description AS a_desc, e2.description AS b_desc,
        e1.aliases AS a_aliases, e2.aliases AS b_aliases,
+       e1.description_summary AS a_desc_summary, e2.description_summary AS b_desc_summary,
        score AS sim_embed
 LIMIT $candidate_cap
+"""
+
+# 查两个实体各自度数（用于超级节点保护）
+ENTITY_DEGREE_COUNT = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.id IN [$id_a, $id_b]
+RETURN e.id AS id, COUNT{ (e)--() } AS degree
+"""
+
+# 批量查多个实体度数（方案B 桶内同名直合用）
+ENTITY_DEGREES_BY_IDS = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.id IN $ids
+RETURN e.id AS id, COUNT{ (e)--() } AS degree
 """
 
 # 去重两个实体合并
@@ -2105,7 +2189,8 @@ WHERE e.end_user_id = $end_user_id
   AND e.entity_type = $entity_type
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 RETURN e.id AS entity_id, e.name AS name, e.entity_type AS entity_type,
-       e.description AS description, e.aliases AS aliases, e.created_at AS created_at
+       e.description AS description, e.description_summary AS description_summary,
+       e.aliases AS aliases, e.created_at AS created_at
 ORDER BY e.created_at
 """
 
@@ -2141,7 +2226,8 @@ RETURN s.id AS statement_id,
        s.temporal_info AS temporal_info,
        s.speaker AS speaker,
        s.valid_at AS valid_at,
-       s.invalid_at AS invalid_at
+       s.invalid_at AS invalid_at,
+       s.run_id AS run_id
 ORDER BY s.created_at ASC
 LIMIT $batch_size
 """
@@ -2173,7 +2259,17 @@ ON CREATE SET
   e.aliases = [],
   e.connect_strength = "weak",
   e.source = "reflection_unresolved",
-  e.created_at = localdatetime()
+  e.run_id = $run_id,
+  e.type_id = $type_id,
+  e.type_description = $type_description,
+  e.entity_idx = $entity_idx,
+  e.importance_score = 0.5,
+  e.activation_value = null,
+  e.access_history = [],
+  e.access_count = 0,
+  e.last_access_time = null,
+  e.is_explicit_memory = $is_explicit_memory,
+  e.created_at = $created_at
 ON MATCH SET
   e.description = CASE
     WHEN e.description IS NULL OR e.description = "" THEN $description
@@ -2188,6 +2284,19 @@ SET e.name_embedding = $name_embedding
 RETURN e.id
 """
 
+# 反思未解析消解中：把 LLM 输出的"用户"实体的 description 追加到全局用户节点。
+# 用 entity_type='用户' 定位（而非 name='用户'）：兼容用户节点 name 是 "我"/"User" 等
+# 历史变体的情况；end_user_id 唯一约束保证只命中一个全局用户节点。
+UNRESOLVED_APPEND_USER_INFO = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id, entity_type: '用户'})
+SET e.description = CASE
+    WHEN $description IS NULL OR $description = '' THEN e.description
+    WHEN e.description IS NULL OR e.description = '' THEN $description
+    ELSE e.description + '；' + $description
+END
+RETURN e.id AS entity_id
+"""
+
 UNRESOLVED_CREATE_RELATIONSHIP = """
 MATCH (subj:ExtractedEntity {end_user_id: $end_user_id, name: $subject_name})
 MATCH (obj:ExtractedEntity {end_user_id: $end_user_id, name: $object_name})
@@ -2195,13 +2304,15 @@ CREATE (subj)-[r:EXTRACTED_RELATIONSHIP {
   predicate: $predicate,
   predicate_id: $predicate_id,
   predicate_surface: $predicate_surface,
+  predicate_description: $predicate_description,
   statement_id: $statement_id,
   valid_at: $valid_at,
   invalid_at: $invalid_at,
   end_user_id: $end_user_id,
+  run_id: $run_id,
   connect_strength: "weak",
   source: "reflection_unresolved",
-  created_at: datetime()
+  created_at: $created_at
 }]->(obj)
 RETURN r.predicate AS predicate
 """
@@ -2209,7 +2320,11 @@ RETURN r.predicate AS predicate
 UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE = """
 MATCH (s:Statement {id: $statement_id})
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $entity_name})
-MERGE (s)-[:REFERENCES_ENTITY]->(e)
+MERGE (s)-[r:REFERENCES_ENTITY]->(e)
+SET r.end_user_id = $end_user_id,
+    r.run_id = $run_id,
+    r.created_at = $created_at,
+    r.connect_strength = "weak"
 RETURN s.id AS statement_id
 """
 

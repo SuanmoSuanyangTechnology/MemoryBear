@@ -1,13 +1,13 @@
 ===Task===
 {% if language == "zh" %}
 你是一个实体去重专家。你将被提供同一用户下同一类型的多个实体信息。
-请严格根据指引，找出其中可能指向同一真实世界实体的重复对。
+请严格根据指引，找出其中指向同一真实世界实体的重复对。
 
 类型: {{ entity_type }}
 实体数量: {{ entities | length }}
 {% else %}
-You are an entity deduplication expert. You will be provided with multiple entities of the same type belonging to the same user.
-Please strictly follow the guidelines to identify pairs that likely refer to the same real-world entity.
+You are an entity deduplication expert. You will be given multiple entities of the same type belonging to the same user.
+Strictly follow the guidelines and identify pairs that refer to the same real-world entity.
 
 Type: {{ entity_type }}
 Entity Count: {{ entities | length }}
@@ -19,6 +19,7 @@ Entity Count: {{ entities | length }}
 
 {% for e in entities %}
 {{ loop.index }}. 名称: "{{ e.name | default('') }}"
+   - 描述摘要: "{{ e.description_summary | default('') }}"
    - 描述: "{{ e.description | default('') }}"
    - 别名: {{ e.aliases | default([]) }}
 {% endfor %}
@@ -27,6 +28,7 @@ Entity Count: {{ entities | length }}
 
 {% for e in entities %}
 {{ loop.index }}. Name: "{{ e.name | default('') }}"
+   - Description Summary: "{{ e.description_summary | default('') }}"
    - Description: "{{ e.description | default('') }}"
    - Aliases: {{ e.aliases | default([]) }}
 {% endfor %}
@@ -36,65 +38,138 @@ Entity Count: {{ entities | length }}
 {% if language == "zh" %}
 ## 判断规则
 
-1. **别名匹配（最高优先级）**:
-   - 如果一个实体的名称出现在另一个实体的别名列表中，应视为高置信度匹配
-   - 如果两个实体的别名列表有交集，这是强烈的同一性信号
-   - 别名匹配的权重应高于单纯的名称文本相似度
+1. **描述摘要优先**
+   - 判断两个实体是否重复时，主要依据 `description_summary`。
+   - 如果某个实体的 `description_summary` 为空，再回退使用它的 `description`。
+   - 名称和别名是重要信号，但不要让名称/别名覆盖摘要中的核心身份信息。
 
-2. **名称相似**:
-   - 名称字面相似（如"张三"和"张三丰"包含关系）
-   - 名称语义相似（如"张三"和"张总"可能是同一人的不同称呼）
-   - 中英文对应（如"北京"和"Beijing"）
+2. **只配对同一真实世界实体**
+   - 只输出真正指向同一个人、组织、地点、物品、事件、概念或其他具体对象的重复对。
+   - 相关、从属、包含、参与、拥有、发生于、命名来源相同，都不等于同一实体，不要配对。
 
-3. **描述一致**:
-   - 描述内容高度重叠，指向同一个对象
-   - 描述互补但不矛盾（如一个说"后端工程师"，另一个说"负责微服务架构"）
+3. **上下位 / 部分整体 / 实例泛称关系不配对**
+   - 小概念合到大概念、局部合到整体、子类合到父类、具体实例合到泛称，都不是同一实体。
+   - 如果一方语义上是另一方的“一部分”“一个下级”“一个实例”“一个成员”“一个子品牌/子系统/子部门”，不要配对。
+   - 公司与部门不配对：例如“星河数据” vs “设计部”、“星河数据” vs “星河数据设计部”、“某科技公司” vs “某科技公司研发部”。
+   - 即使部门名称包含完整公司名，也不要因为名称包含关系而配对；“公司名 + 部门/团队/小组/事业部/中心/实验室”等通常是下属组织，不是公司本体。
+   - 群体与成员不配对：例如“2026年6月12日来的客户王总和李总” vs “王总”。
+   - 反例：研发部 vs 某科技公司；设计部 vs 某科技公司；腾讯云 vs 腾讯；阿里云 vs 阿里巴巴；2024北京马拉松 vs 马拉松；上海 vs 上海马拉松；支付子系统 vs 电商系统；Model 3 vs 特斯拉。
 
-4. **保守决策**:
-   - 不确定时不要配对
-   - 同名但描述明显矛盾的不配对（如"张三-后端工程师" vs "张三-前端设计师"可能是不同人）
-   - 名称有包含关系但语义不同的不配对（如"上海" vs "上海马拉松"）
+4. **核心身份冲突不配对，细节互补可配对**
+   - 如果摘要/描述中的核心身份属性冲突，不配对。例如职业、所属组织、地点、角色、对象类别、时间范围等互斥。
+   - 如果一方提供经历、关系、偏好或补充细节，另一方没有矛盾，且名称/别名/摘要共同指向同一对象，可以配对。
 
-5. **唯一性约束（必须遵守）**:
-   - 每个序号只能出现在一个配对中，不允许重复
-   - 错误示例：[[1,2],[1,3]] ← 序号1出现了两次，违规
-   - 正确示例：[[1,2],[6,7]] ← 每个序号只出现一次
-   - 如果实体A同时与B和C相似，只输出最确定的一对，另一对留给下次处理
+5. **别名是强信号，但不可滥用**
+   - 名称与对方别名完全匹配、别名互相匹配、常见中英文名对应，都是强同一性信号。
+   - 但当摘要/描述显示核心身份冲突时，即使别名相同也不要配对。
+   - 对“老板”“老师”“朋友”“公司”“系统”“项目”等泛称别名要特别保守。
 
-6. **其他注意事项**:
-   - 只找同一真实世界实体的重复，不要把相关但不同的实体配对
-   - 不确定时不要配对
+6. **保守决策**
+   - 信息不足、证据含糊、只能判断相关但不能判断同一时，不要配对。
+   - 去重时少合并比错合并更安全。
+
+7. **唯一性约束（必须遵守）**
+   - 每个序号最多只能出现在一个配对中，不允许重复。
+   - 错误示例：[[1,2],[1,3]]，因为序号1出现了两次。
+   - 正确示例：[[1,2],[6,7]]，每个序号只出现一次。
+   - 如果一个实体同时与多个实体相似，只输出证据最强、最确定的一对，其余不输出。
+
+8. **输出顺序**
+   - 优先输出置信度高、证据明确的重复对。
+   - 不要输出低置信度候选对。
+   - `results` 只能包含你判断为“同一真实世界实体”的正例重复对。
+   - 不要把不应合并的 pair 放进 `results` 里解释原因；上下位、部分整体、相关但不同的 pair 应直接省略。
+   - 输出前必须核对 pair 序号和 reason：reason 支持的是哪两个实体名称，`pair` 就必须填写这两个实体的序号。
+   - 如果 reason 中出现“正确重复对是 1 与 3”，则 `pair` 必须是 `[1, 3]`，不能写成其他序号。
+   - 如果 reason 中说明某两个实体是产品/公司、子品牌/母公司、从属关系或不构成重复，则这两个序号绝不能出现在同一个 `pair` 中。
+
+9. **合并后命名**
+   - 每个输出的重复对都必须包含 `new_name` 和 `new_aliases`。
+   - `new_name` 是该 pair 合并后的主实体名，可以重新生成，不限于从两个旧名称中二选一。
+   - 主实体名优先保留对用户有用的关系限定、时间限定和具体名称。
+   - 抽象/临时指代与具体名称合并时，优先合成“限定信息 + 具体名称”。
+   - 当一个名称或摘要提供用户关系/身份角色，另一个名称提供具体称呼时，应优先合成主名，而不是只保留具体称呼。例如“用户的吉他搭档”与“阿凯”应输出“用户的吉他搭档阿凯”，“用户的后端同事”与“张伟”应输出“用户的后端同事张伟”，“用户的同事”与“小林”应输出“用户的同事小林”。
+   - 如果摘要/描述中有明确日期或可解析的相对时间，且该时间是该指代的重要限定，应写进 `new_name`，并尽量使用具体日期而不是“后天/明天/下周”等相对表达。
+   - 如果抽象指代实际指向多个人，应把多个人都写入 `new_name`，例如“后天来的客户”指王总和李总时，输出“2026年6月12日来的客户王总和李总”。但如果另一实体只是其中一个成员（例如只有“王总”），则这是群体 vs 成员，不能配对。
+   - 注意区分“群体 vs 单个成员”和“群体 vs 完整成员集合名称”：前者不配对，后者可以配对。例如“2026年6月12日来的客户（包括王总和李总）”与“王总”不配对；但与“王总和李总”可以配对，并输出“2026年6月12日来的客户王总和李总”。
+   - 更名前后同一组织/项目合并时，主名优先使用当前名称或更正式名称，旧名称进入 `new_aliases`。
+   - `new_aliases` 是强合并信号，必须保守。只保留能长期稳定、低歧义地指向同一实体的替代名称。
+   - 输入中的 `aliases` 只用于判断同一性，不能自动复制到输出的 `new_aliases`。输出前必须重新按本节规则过滤。
+   - 应进入 `new_aliases` 的典型名称：原名、笔名、英文名、改名前旧名、正式简称、明确的产品代号/仓库名。
+   - 不应进入 `new_aliases` 的典型名称：相对时间指代（如“后天来的客户”）、泛称（如“客户/老师/老板/同事/朋友/公司/项目”）、单次场景描述（如“这次来的客户”）、群体中的单个成员名、容易重复的短称或职务称呼（如单独的“王总”）。
+   - 如果 `new_name` 已经综合了关系、日期和具体称呼，通常不需要再把其中的普通短称放进 `new_aliases`。
+   - 如果只有人物短称、职务称呼、临时关系称呼可作为别名候选，宁可输出空数组 `[]`。
+   - 对人物短称要特别保守；除非摘要明确说明这是稳定唯一的别名、笔名或长期称呼，否则不要加入 `new_aliases`。
+   - 对人物实体，`new_aliases` 默认应为空数组。只有原名、笔名、法定姓名、英文名等稳定身份名可以进入；普通昵称或称呼后缀（如“哥/总/工/老师/同学”）、单独姓名、职务称呼不要进入。
+   - 例如 `new_name="用户的后端同事张伟"` 时，不要输出“张伟”或“张工”为 alias。
+   - 输出前自检：如果某个 pair 的 reason 会说明“这两者不应合并”“从属关系”“部分/整体”“产品/公司”“群体/成员”，这个 pair 绝不能出现在 `results`。
 {% else %}
 ## Judgment Rules
 
-1. **Alias Matching (Highest Priority)**:
-   - If one entity's name appears in another entity's alias list, it should be considered a high-confidence match
-   - If two entities' alias lists have intersections, this is a strong signal of identity
-   - Alias matching weight should be higher than pure name text similarity
+1. **Description summary first**
+   - Use `description_summary` as the primary evidence when judging duplicate entities.
+   - If an entity's `description_summary` is empty, fall back to its `description`.
+   - Names and aliases are important signals, but they must not override core identity evidence in the summaries.
 
-2. **Name Similarity**:
-   - Literal name similarity (e.g., "Zhang San" contains "Zhang")
-   - Semantic name similarity (e.g., "Zhang San" and "Boss Zhang" may be the same person)
-   - Cross-language correspondence (e.g., "北京" and "Beijing")
+2. **Pair only the same real-world entity**
+   - Output pairs only when both entities truly refer to the same person, organization, place, object, event, concept, or other concrete target.
+   - Being related, subordinate, contained, participating, owning, occurring at, or sharing a naming source does not mean the entities are identical.
 
-3. **Description Consistency**:
-   - Highly overlapping descriptions pointing to the same object
-   - Complementary but non-contradictory descriptions (e.g., "backend engineer" and "responsible for microservice architecture")
+3. **Do not pair hypernym/subtype, part/whole, or instance/generic relations**
+   - A smaller concept merged into a larger concept, a part merged into a whole, a subtype merged into a parent type, or a concrete instance merged into a generic term is not identity.
+   - If one entity is semantically a part, subordinate unit, instance, member, sub-brand, subsystem, or sub-department of the other, do not pair them.
+   - Do not pair a company with one of its departments, such as "Xinghe Data" vs "Design Department", "Xinghe Data" vs "Xinghe Data Design Department", or a technology company vs its R&D Department.
+   - Even when the department name contains the full company name, do not pair based on name containment; patterns like "company name + department/team/group/business unit/center/lab" usually indicate a subordinate organization, not the company itself.
+   - Do not pair a group with one member, such as "the clients coming on June 12, 2026, Mr. Wang and Mr. Li" vs "Mr. Wang".
+   - Negative examples: R&D Department vs a technology company; Design Department vs a technology company; Tencent Cloud vs Tencent; Alibaba Cloud vs Alibaba; 2024 Beijing Marathon vs marathon; Shanghai vs Shanghai Marathon; payment subsystem vs e-commerce system; Model 3 vs Tesla.
 
-4. **Conservative Decision**:
-   - Do not pair when uncertain
-   - Do not pair entities with same name but clearly contradictory descriptions
-   - Do not pair entities with name containment but different semantics (e.g., "Shanghai" vs "Shanghai Marathon")
+4. **Core identity conflict blocks pairing; complementary details may pair**
+   - Do not pair if summaries/descriptions conflict on core identity attributes such as occupation, organization, location, role, object category, or time range.
+   - If one side adds experience, relationships, preferences, or other details without contradiction, and names/aliases/summaries jointly point to the same target, pairing is allowed.
 
-5. **Uniqueness Constraint (MUST follow)**:
-   - Each index can only appear in ONE pair, no duplicates allowed
-   - WRONG: [[1,2],[1,3]] ← index 1 appears twice, violation
-   - CORRECT: [[1,2],[6,7]] ← each index appears only once
-   - If entity A is similar to both B and C, only output the most confident pair, leave the other for next round
+5. **Aliases are strong but not absolute**
+   - Exact name-to-alias matches, shared aliases, and common cross-language name correspondences are strong identity signals.
+   - However, if summaries/descriptions show a core identity conflict, do not pair even when aliases match.
+   - Be especially conservative with generic aliases such as boss, teacher, friend, company, system, or project.
 
-6. **Other Notes**:
-   - Only find duplicates of the same real-world entity, do not pair related but different entities
-   - Do not pair when uncertain
+6. **Conservative decision**
+   - If evidence is insufficient, ambiguous, or only proves relatedness rather than identity, do not pair.
+   - In deduplication, under-merging is safer than wrong merging.
+
+7. **Uniqueness constraint (MUST follow)**
+   - Each index may appear in at most one pair. No duplicates are allowed.
+   - Wrong example: [[1,2],[1,3]], because index 1 appears twice.
+   - Correct example: [[1,2],[6,7]], each index appears only once.
+   - If one entity is similar to multiple entities, output only the strongest and most certain pair; omit the others.
+
+8. **Output ordering**
+   - Output high-confidence, clearly supported duplicate pairs first.
+   - Do not output low-confidence candidate pairs.
+   - `results` must contain only positive duplicate pairs that you judge to be the same real-world entity.
+   - Do not include non-merge pairs in `results` just to explain why they should not merge; omit hypernym/subtype, part/whole, and related-but-different pairs entirely.
+
+9. **Post-merge naming**
+   - Every duplicate pair you output must include `new_name` and `new_aliases`.
+   - `new_name` is the primary entity name after merging that pair. You may generate a new combined name; it is not limited to choosing one of the two old names.
+   - Prefer a primary name that preserves user-useful relationship qualifiers, time qualifiers, and the concrete name.
+   - When an abstract or temporary reference merges with a concrete name, prefer "qualifier + concrete name".
+   - When one name or summary provides the user relationship/role and the other provides the concrete name, prefer a combined primary name instead of only the concrete name. For example, merge "the user's backend coworker" with "Zhang Wei" as "the user's backend coworker Zhang Wei".
+   - If summaries/descriptions contain an explicit date or a resolvable relative time and that time is an important qualifier for the reference, include the concrete date in `new_name` instead of relative wording such as tomorrow/the day after tomorrow/next week.
+   - If an abstract reference actually refers to multiple people, include all concrete people in `new_name`. But if the other entity is only one member, this is group vs member and must not pair.
+   - Distinguish "group vs single member" from "group vs complete member-set name": the former must not pair, while the latter may pair. For example, "the clients coming on June 12, 2026, including Mr. Wang and Mr. Li" must not pair with only "Mr. Wang", but may pair with "Mr. Wang and Mr. Li".
+   - When an organization or project was renamed, prefer the current or more official name as `new_name`, and put old names in `new_aliases`.
+   - `new_aliases` is a strong merge signal, so it must be conservative. Keep only alternative names that are stable, long-lived, and low-ambiguity.
+   - Input `aliases` are evidence for identity judgment only. Do not automatically copy them into output `new_aliases`; re-filter them using this section before output.
+   - Typical names that should enter `new_aliases`: original names, pen names, English names, former names after renaming, official short names, clear product codenames, and repository names.
+   - Typical names that should not enter `new_aliases`: relative-time references, generic roles, one-off situational descriptions, individual member names of a group, and ambiguous short titles such as a bare "Mr. Wang", "customer", "teacher", "boss", "coworker", "friend", "company", or "project".
+   - If `new_name` already combines the relationship, date, and concrete appellation, usually do not add the ordinary short appellation to `new_aliases`.
+   - If the only alias candidates are personal short names, title-based appellations, or temporary relationship references, prefer an empty array `[]`.
+   - Be especially conservative with personal short names; include them only when the summaries clearly establish them as stable unique aliases, pen names, or long-term names.
+   - For person entities, `new_aliases` should default to an empty array. Only stable identity names such as original names, pen names, legal names, or English names may enter; ordinary nicknames, suffix/title forms, bare personal names, and role titles should not.
+   - For example, when `new_name` is "the user's backend coworker Zhang Wei", do not output "Zhang Wei" or "Engineer Zhang" as aliases.
+   - Final self-check before output: if a pair's reason would say "should not merge", "subordinate", "part/whole", "product/company", or "group/member", that pair must not appear in `results`.
+   - Before output, verify that each `pair` index matches the exact two entity names supported by its reason. If the reason says the correct duplicate pair is 1 and 3, the `pair` must be `[1, 3]`, not any other indices.
+   - If the reason says two entities are product/company, sub-brand/parent-company, subordinate, or non-duplicate, those two indices must never appear together in a `pair`.
 {% endif %}
 
 ===Output===
@@ -102,16 +177,18 @@ Entity Count: {{ entities | length }}
 返回JSON格式，必须包含以下字段：
 {
   "results": [
-    {"pair": [1, 3], "confidence": 0.95, "reason": "阿里巴巴的别名包含阿里"},
-    {"pair": [2, 5], "confidence": 0.88, "reason": "描述高度一致"}
+    {"pair": [1, 3], "new_name": "阿里巴巴", "new_aliases": ["阿里", "Alibaba"], "confidence": 0.95, "reason": "阿里巴巴与阿里别名互指，摘要均指向同一电商集团"},
+    {"pair": [2, 5], "new_name": "鲁迅", "new_aliases": ["周树人"], "confidence": 0.88, "reason": "鲁迅与周树人是同一作家的笔名和原名"}
   ]
 }
 
 **字段说明**:
-- results: 重复对列表，每项包含：
-  - pair: 两个实体的序号（从1开始）
-  - confidence: 置信度（0.0~1.0）
-  - reason: 简短判定理由（不超过50字，使用实体名称而非序号（如实体x））
+- results: 重复对列表；没有重复对时返回空数组。
+- pair: 两个实体的序号，从1开始；每个序号最多出现一次。
+- new_name: 该 pair 合并后的实体名称。
+- new_aliases: 该 pair 合并后建议保留或新增的别名数组。
+- confidence: 置信度，范围0.0-1.0。
+- reason: 简短判定理由，使用实体名称而非“实体1/实体2”；不超过100字。
 
 如果没有发现重复对，返回：
 {"results": []}
@@ -119,26 +196,30 @@ Entity Count: {{ entities | length }}
 Return JSON format with the following required fields:
 {
   "results": [
-    {"pair": [1, 3], "confidence": 0.95, "reason": "Alibaba's alias contains Ali"},
-    {"pair": [2, 5], "confidence": 0.88, "reason": "descriptions highly consistent"}
+    {"pair": [1, 3], "new_name": "Alibaba", "new_aliases": ["Ali", "阿里巴巴"], "confidence": 0.95, "reason": "Alibaba and Ali have mutually matching aliases and summaries point to the same e-commerce group"},
+    {"pair": [2, 5], "new_name": "Lu Xun", "new_aliases": ["Zhou Shuren"], "confidence": 0.88, "reason": "Lu Xun and Zhou Shuren are the pen name and original name of the same writer"}
   ]
 }
 
 **Field Descriptions**:
-- results: List of duplicate pairs, each containing:
-  - pair: two entity indices (starting from 1)
-  - confidence: confidence score (0.0~1.0)
-  - reason: brief judgment reason (max 50 chars, use entity names not indices like "entity 3")
+- results: List of duplicate pairs; return an empty array if no duplicates are found.
+- pair: Two entity indices, starting from 1; each index may appear at most once.
+- new_name: Entity name after merging this pair.
+- new_aliases: Aliases to keep or add after merging this pair.
+- confidence: Confidence score, range 0.0-1.0.
+- reason: Brief reason using entity names rather than "entity 1/entity 2"; keep it within 100 words.
 
-If no duplicates found, return:
+If no duplicates are found, return:
 {"results": []}
 {% endif %}
 
 **CRITICAL JSON FORMATTING REQUIREMENTS:**
-1. Use only standard ASCII double quotes (") for JSON structure - never use Chinese quotation marks ("") or other Unicode quotes
-2. Ensure all JSON strings are properly closed and comma-separated
-3. Do not include line breaks within JSON string values
-4. The indices in pairs must be valid (between 1 and {{ entities | length }})
+1. Use only standard ASCII double quotes (") for JSON structure.
+2. Ensure all JSON strings are properly closed and comma-separated.
+3. Do not include line breaks within JSON string values.
+4. The indices in pairs must be valid integers between 1 and {{ entities | length }}.
+5. Each index may appear in at most one pair.
+6. Return only valid JSON, with no Markdown code fence.
 
 {% if language == "zh" %}
 输出语言应始终与输入语言相同。

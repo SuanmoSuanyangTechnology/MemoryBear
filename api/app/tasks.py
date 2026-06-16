@@ -48,7 +48,7 @@ from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
-from app.db import get_db_context
+from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
@@ -2131,15 +2131,56 @@ def extract_emotion_batch_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
-def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int = 36) -> bool:
+def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
     """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_hours 小时则跳过。
 
     通过 conversations.user_id（存的是 end_user_id 的 UUID 字符串）取该用户所有会话
     的最新 updated_at（最后写入时间），与当前 UTC 时间比较。
 
+    Args:
+        inactive_hours: 不活跃阈值（小时）。为 None 时取 settings.REFLECT_LAYER2_INACTIVE_HOURS。
+
     Returns:
         True  -> 跳过反思（无会话记录，或最近更新已超过 inactive_hours 小时）
         False -> 正常执行反思
+    """
+    from sqlalchemy import func
+    from app.models.conversation_model import Conversation
+
+    if inactive_hours is None:
+        inactive_hours = settings.REFLECT_LAYER2_INACTIVE_HOURS
+
+    try:
+        last_updated = (
+            db.query(func.max(Conversation.updated_at))
+            .filter(Conversation.user_id == str(end_user_id))
+            .scalar()
+        )
+    except Exception as e:
+        # 查询异常时不跳过，保证反思仍能执行（保守策略）。
+        # 必须先 rollback：否则本次失败让事务进入 aborted，
+        # 同一 session 后续用户的查询会连环报 current transaction is aborted。
+        logger.warning(f"反思活跃度前置查询失败 user={end_user_id}: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return False
+
+    if last_updated is None:
+        # 无任何会话记录 -> 没有可反思的新数据，跳过
+        return True
+
+    # 统一走 datetime 规范：当前时间 utcnow_naive，DB 读出的值 as_utc_aware 后去 tz
+    now_utc = utcnow_naive()
+    last_updated = as_utc_aware(last_updated).replace(tzinfo=None)
+    return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
+
+
+def _get_max_conversation_updated_at(db, end_user_id: str):
+    """取该用户所有会话的最新 updated_at（naive UTC）。无会话或查询异常返回 None。
+
+    与 conversations.updated_at（naive UTC）口径一致；若库内值带 tzinfo 则转 UTC 去 tz。
     """
     from sqlalchemy import func
     from app.models.conversation_model import Conversation
@@ -2151,659 +2192,396 @@ def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: 
             .scalar()
         )
     except Exception as e:
-        # 查询异常时不跳过，保证反思仍能执行（保守策略）
-        logger.warning(f"反思活跃度前置查询失败 user={end_user_id}: {e}")
-        return False
-
+        # 失败先 rollback，避免事务 aborted 拖垮同一 session 后续查询
+        logger.warning(f"反思活跃度查询失败 user={end_user_id}: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
     if last_updated is None:
-        # 无任何会话记录 -> 没有可反思的新数据，跳过
-        return True
-
-    # updated_at 为 UTC naive，当前时间取 UTC naive 以对齐比较
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    if last_updated.tzinfo is not None:
-        last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
-    return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
-
-@celery_app.task(
-    name="app.tasks.layer2_reflection_task",
-    bind=True,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-)
-def layer2_reflection_task(self) -> Dict[str, Any]:
-    """Layer 2 离线巡检（描述合并等）
-
-    遍历所有 workspace → app → end_user，对每个启用了 enable_self_reflexion 的配置
-    调用 MemoryService.run_reflection_layer2()。
-
-    单例锁：单轮巡检耗时可能超过 10 分钟调度间隔，若不加锁，新一轮会与上一轮
-    重叠执行（并发数 > 1），两个实例同时加载实体 + embedding + 调 LLM 导致内存
-    叠加，超出容器内存上限被 OOMKill (SIGKILL)。这里用 RedisFairLock 保证任意时刻
-    只有一个实例在跑，重叠触发时直接跳过本轮。锁以主动释放为主、后台线程自动续期
-    保活、较短 expire(180s) 兜底：进程被 SIGKILL 后续期线程消失，锁很快自动过期。
-    """
-    start_time = time.time()
-
-    # 单例锁：防止上一轮未结束时本轮重叠执行造成内存叠加。
-    # 用 RedisFairLock 自动续期：持有期间后台线程每 expire/3 秒续期一次，任务跑多久
-    # 锁就有效多久；进程被 OOMKill/SIGKILL 时续期线程随之终止，锁靠较短的 expire(180s)
-    # 自动过期释放，既不会永久泄漏，也不会像 7200s 长 TTL 那样卡死后续轮次。
-    _lock_redis = get_sync_redis_client()
-    _lock = None
-    if _lock_redis is not None:
-        _lock = RedisFairLock(
-            key="lock:layer2_reflection_task",
-            redis_client=_lock_redis,
-            expire=180,
-            timeout=0,  # 非阻塞：抢不到立即返回，本轮跳过
-            auto_renewal=True,
-        )
-        try:
-            _acquired = _lock.acquire()
-        except Exception as e:
-            # Redis 异常时降级为不加锁，避免任务永久无法执行
-            logger.warning(f"反思引擎Layer2 获取单例锁异常，降级为不加锁执行: {e}")
-            _lock = None
-        else:
-            if not _acquired:
-                logger.warning("反思引擎Layer2 上一轮任务仍在执行，本轮跳过")
-                return {
-                    "status": "SKIPPED",
-                    "reason": "previous run still in progress",
-                    "task_id": self.request.id,
-                    "elapsed_time": time.time() - start_time,
-                }
-
-    async def _run() -> Dict[str, Any]:
-        from app.models.workspace_model import Workspace
-        from app.services.memory_reflection_service import WorkspaceAppService
-        from app.core.memory.memory_service import MemoryService
-
-        with get_db_context() as db:
-            try:
-                workspaces = db.query(Workspace).all()
-                if not workspaces:
-                    return {"status": "SUCCESS", "message": "无工作空间"}
-
-                logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
-                processed_users = 0
-                processed_user_ids = []
-                skipped_configs = 0
-                skipped_inactive = 0
-                total_dedup_merged = 0
-                total_desc_merged = 0
-                redis_client = get_sync_redis_client()
-
-                for workspace in workspaces:
-                    service = WorkspaceAppService(db)
-                    result = service.get_workspace_apps_detailed(str(workspace.id))
-
-                    for data in result['apps_detailed_info']:
-                        if not data['memory_configs']:
-                            continue
-
-                        for config in data['memory_configs']:
-                            if not config.get('enable_self_reflexion'):
-                                skipped_configs += 1
-                                continue
-
-                            config_id = config['config_id']
-                            baseline = config.get('baseline', 'HYBRID')
-                            end_users = data['end_users']
-
-                            for user in end_users:
-                                try:
-                                    # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过（仅对活跃用户反思）
-                                    if _should_skip_reflection_by_inactivity(db, str(user['id'])):
-                                        skipped_inactive += 1
-                                        continue
-
-                                    # 获取 Redis 锁，和写入 pipeline 互斥
-                                    write_lock = None
-                                    if redis_client is not None:
-                                        write_lock = RedisFairLock(
-                                            key=f"memory_write:{user['id']}",
-                                            redis_client=redis_client,
-                                            expire=600,
-                                            timeout=30,
-                                            auto_renewal=True,
-                                        )
-                                        if not await asyncio.to_thread(write_lock.acquire):
-                                            logger.warning(
-                                                f"反思引擎Layer2 获取锁超时，跳过用户 {user['id']}"
-                                            )
-                                            # 锁超时的用户仍计入处理列表，保证与低频任务的用户口径一致
-                                            processed_users += 1
-                                            processed_user_ids.append(str(user['id']))
-                                            continue
-
-                                    try:
-                                        memory_service = MemoryService(
-                                            config_id=config_id,
-                                            end_user_id=str(user['id']),
-                                            workspace_id=str(workspace.id),
-                                        )
-                                        r = await memory_service.run_reflection_layer2(
-                                            baseline=baseline,
-                                        )
-                                        processed_users += 1
-                                        processed_user_ids.append(str(user['id']))
-                                        # 增量统计
-                                        dedup_info = r.get("entity_dedup", {})
-                                        merge_info = r.get("description_merge", {})
-                                        total_dedup_merged += dedup_info.get("merged_count", 0)
-                                        total_desc_merged += merge_info.get("merged_count", 0)
-                                        # 只在有实际合并时输出详细日志
-                                        if merge_info.get("merged_count", 0) > 0:
-                                            logger.info(
-                                                f"反思引擎Layer2 用户 {user['id']} 描述合并: "
-                                                f"候选 {merge_info['candidate_count']}, "
-                                                f"合并 {merge_info['merged_count']}"
-                                            )
-                                        if dedup_info.get("merged_count", 0) > 0:
-                                            logger.info(
-                                                f"反思引擎Layer2 用户 {user['id']} 去重合并: "
-                                                f"合并 {dedup_info['merged_count']}"
-                                            )
-                                    finally:
-                                        if write_lock is not None:
-                                            await asyncio.to_thread(write_lock.release)
-                                except Exception as e:
-                                    logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
-                                    # 回滚失败事务，避免污染后续用户的查询
-                                    try:
-                                        db.rollback()
-                                    except Exception:
-                                        pass
-                                    # 失败用户仍计入处理列表，保证与低频任务的用户口径一致
-                                    processed_users += 1
-                                    processed_user_ids.append(str(user['id']))
-
-                logger.info(
-                    f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
-                    f"跳过 {skipped_configs} 个未启用反思的配置, "
-                    f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户"
-                )
-
-                return {
-                    "status": "SUCCESS",
-                    "processed_users": processed_users,
-                    "processed_user_ids": processed_user_ids,
-                    "skipped_configs": skipped_configs,
-                    "skipped_inactive": skipped_inactive,
-                    "total_dedup_merged": total_dedup_merged,
-                    "total_desc_merged": total_desc_merged,
-                }
-
-            except Exception as e:
-                logger.error(f"反思引擎Layer2 定时任务失败: {e}", exc_info=True)
-                return {"status": "FAILED", "error": str(e)}
-
-    loop = set_asyncio_event_loop()
-    try:
-        result = loop.run_until_complete(_run())
-    except Exception as e:
-        result = {"status": "FAILED", "error": str(e)}
-    finally:
-        _shutdown_loop_gracefully(loop)
-        # 释放单例锁：RedisFairLock 内部用 Lua 校验持有者后才删除，
-        # 并停止后台续期线程，避免误删后续实例的锁。
-        if _lock is not None:
-            try:
-                _lock.release()
-            except Exception as e:
-                logger.warning(f"反思引擎Layer2 释放单例锁失败（将靠 expire 自动过期）: {e}")
-
-    result["elapsed_time"] = time.time() - start_time
-    result["task_id"] = self.request.id
-    logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
-    return result
-
-@celery_app.task(
-    name="app.tasks.layer2_dedup_full_scan_task",
-    bind=True,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-)
-def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
-    """方案B：低频全量扫描去重（每天一次）
-
-    复用 layer2_reflection_task 的调度模式：
-    遍历所有 workspace → app → end_user，检查 enable_self_reflexion 配置。
-
-    单例锁：与高频 layer2_reflection_task 共用同一把锁 "lock:layer2_reflection_task"，
-    保证高频/低频两个 Layer2 任务任意时刻只有一个在跑，避免同时加载实体 + embedding +
-    调 LLM 造成内存叠加被 OOMKill。锁以主动释放为主、后台线程自动续期保活、较短
-    expire(180s) 兜底：进程被 SIGKILL 后续期线程消失，锁很快自动过期。
-    """
-    start_time = time.time()
-
-    # 单例锁：与 layer2_reflection_task 共用同一 key，实现高频/低频互斥。
-    # 用 RedisFairLock 自动续期：持有期间后台线程每 expire/3 秒续期一次，任务跑多久
-    # 锁就有效多久；进程被 OOMKill/SIGKILL 时续期线程随之终止，锁靠较短的 expire(180s)
-    # 自动过期释放，既不会永久泄漏，也不会像 7200s 长 TTL 那样卡死后续轮次。
-    _lock_redis = get_sync_redis_client()
-    _lock = None
-    if _lock_redis is not None:
-        _lock = RedisFairLock(
-            key="lock:layer2_reflection_task",
-            redis_client=_lock_redis,
-            expire=180,
-            timeout=0,  # 非阻塞：抢不到立即返回，本轮跳过
-            auto_renewal=True,
-        )
-        try:
-            _acquired = _lock.acquire()
-        except Exception as e:
-            # Redis 异常时降级为不加锁，避免任务永久无法执行
-            logger.warning(f"方案B全量扫描 获取单例锁异常，降级为不加锁执行: {e}")
-            _lock = None
-        else:
-            if not _acquired:
-                logger.warning("方案B全量扫描 Layer2 任务（高频或低频）仍在执行，本轮跳过")
-                return {
-                    "status": "SKIPPED",
-                    "reason": "another layer2 task still in progress",
-                    "task_id": self.request.id,
-                    "elapsed_time": time.time() - start_time,
-                }
-
-    async def _run() -> Dict[str, Any]:
-        from app.models.workspace_model import Workspace
-        from app.services.memory_reflection_service import WorkspaceAppService
-        from app.core.memory.memory_service import MemoryService
-
-        with get_db_context() as db:
-            workspaces = db.query(Workspace).all()
-            if not workspaces:
-                return {"status": "SUCCESS", "message": "无工作空间"}
-
-            processed_users = 0
-            processed_user_ids = []
-            skipped_configs = 0
-            skipped_inactive = 0
-            total_merged = 0
-            redis_client = get_sync_redis_client()
-
-            for workspace in workspaces:
-                service = WorkspaceAppService(db)
-                result = service.get_workspace_apps_detailed(str(workspace.id))
-
-                for data in result['apps_detailed_info']:
-                    if not data['memory_configs']:
-                        continue
-
-                    for config in data['memory_configs']:
-                        # 检查反思引擎是否开启
-                        if not config.get('enable_self_reflexion'):
-                            skipped_configs += 1
-                            continue
-
-                        config_id = config['config_id']
-                        end_users = data['end_users']
-
-                        for user in end_users:
-                            try:
-                                # 前置过滤：最近一次会话更新距今 >= 36 小时则跳过
-                                if _should_skip_reflection_by_inactivity(db, str(user['id'])):
-                                    skipped_inactive += 1
-                                    continue
-
-                                # 获取 Redis 锁，和写入 pipeline 互斥
-                                write_lock = None
-                                if redis_client is not None:
-                                    write_lock = RedisFairLock(
-                                        key=f"memory_write:{user['id']}",
-                                        redis_client=redis_client,
-                                        expire=600,
-                                        timeout=30,
-                                        auto_renewal=True,
-                                    )
-                                    if not await asyncio.to_thread(write_lock.acquire):
-                                        logger.warning(
-                                            f"方案B全量扫描 获取锁超时，跳过用户 {user['id']}"
-                                        )
-                                        # 锁超时的用户仍计入处理列表，保证与高频任务的用户口径一致
-                                        processed_users += 1
-                                        processed_user_ids.append(str(user['id']))
-                                        continue
-
-                                try:
-                                    memory_service = MemoryService(
-                                        config_id=config_id,
-                                        end_user_id=str(user['id']),
-                                        workspace_id=str(workspace.id),
-                                    )
-                                    r = await memory_service.run_dedup_full_scan()
-                                    processed_users += 1
-                                    processed_user_ids.append(str(user['id']))
-                                    merged = r.get("merged_count", 0)
-                                    total_merged += merged
-                                    if merged > 0:
-                                        logger.info(
-                                            f"方案B全量扫描 用户 {user['id']} "
-                                            f"扫描类型 {r.get('scanned_types', 0)}, "
-                                            f"合并 {merged} 对"
-                                        )
-                                finally:
-                                    if write_lock is not None:
-                                        await asyncio.to_thread(write_lock.release)
-                            except Exception as e:
-                                logger.error(f"方案B全量扫描失败 user={user['id']}: {e}")
-                                # 回滚失败事务，避免污染后续用户的查询
-                                try:
-                                    db.rollback()
-                                except Exception:
-                                    pass
-                                # 失败用户仍计入处理列表，保证与高频任务的用户口径一致
-                                processed_users += 1
-                                processed_user_ids.append(str(user['id']))
-
-            logger.info(
-                f"方案B全量扫描完成: 处理 {processed_users} 用户, "
-                f"跳过 {skipped_configs} 个未启用配置, "
-                f"跳过 {skipped_inactive} 个 36 小时内无会话更新的用户, "
-                f"总合并 {total_merged} 对"
-            )
-            return {
-                "status": "SUCCESS",
-                "processed_users": processed_users,
-                "processed_user_ids": processed_user_ids,
-                "skipped_configs": skipped_configs,
-                "skipped_inactive": skipped_inactive,
-                "total_merged": total_merged,
-            }
-
-    loop = set_asyncio_event_loop()
-    try:
-        result = loop.run_until_complete(_run())
-    except Exception as e:
-        result = {"status": "FAILED", "error": str(e)}
-    finally:
-        _shutdown_loop_gracefully(loop)
-        # 释放单例锁：RedisFairLock 内部用 Lua 校验持有者后才删除，
-        # 并停止后台续期线程，避免误删其他实例的锁。
-        if _lock is not None:
-            try:
-                _lock.release()
-            except Exception as e:
-                logger.warning(f"方案B全量扫描 释放单例锁失败（将靠 expire 自动过期）: {e}")
-
-    result["elapsed_time"] = time.time() - start_time
-    result["task_id"] = self.request.id
-    logger.info(f"反思引擎去重消岐全量扫描任务完成，耗时 {result['elapsed_time']:.1f}s")
-    return result
-
-def _sync_end_user_info_pg(
-    end_user_id: str,
-    aliases: List[str],
-    extracted_metadata: Optional[Dict[str, Any]],
-) -> None:
-    """将别名和元数据增量同步到 PostgreSQL end_user_info 表。
-
-    - aliases 合并到 end_user_info.aliases（去重）
-    - end_user_info.other_name 若为空则取 aliases[0]
-    - end_user.other_name 与 end_user_info.other_name 保持同步
-    - extracted_metadata 各字段列表合并到 end_user_info.meta_data（去重）
-
-    失败只记日志，不抛异常，不影响主流程。
-    """
-    try:
-        import uuid as _uuid
-        from app.db import get_db_context
-        from app.repositories.end_user_info_repository import EndUserInfoRepository
-        from app.repositories.end_user_repository import EndUserRepository
-
-        eu_uuid = _uuid.UUID(end_user_id)
-
-        with get_db_context() as db:
-            info_repo = EndUserInfoRepository(db)
-            info = info_repo.update_aliases_and_metadata(
-                end_user_id=eu_uuid,
-                new_aliases=aliases or [],
-                new_metadata=extracted_metadata,
-            )
-            if info is None:
-                logger.warning(
-                    f"[Metadata][PG] end_user_info 记录不存在，跳过同步: end_user_id={end_user_id}"
-                )
-                return
-
-            # 同步 end_user.other_name（与 end_user_info.other_name 保持一致）
-            new_other_name = (info.other_name or "").strip()
-            if new_other_name:
-                eu_repo = EndUserRepository(db)
-                end_user = eu_repo.get_end_user_by_id(eu_uuid)
-                if end_user and not (end_user.other_name or "").strip():
-                    end_user.other_name = new_other_name
-                    db.commit()
-                    logger.info(
-                        f"[Metadata][PG] 同步 end_user.other_name={new_other_name}: "
-                        f"end_user_id={end_user_id}"
-                    )
-
-        logger.info(
-            f"[Metadata][PG] end_user_info 同步完成: end_user_id={end_user_id}, "
-            f"aliases_count={len(aliases or [])}"
-        )
-    except Exception as e:
-        logger.warning(
-            f"[Metadata][PG] 同步 end_user_info 失败（不影响主流程）: "
-            f"end_user_id={end_user_id}, error={e}",
-            exc_info=True,
-        )
+        return None
+    # 统一走 datetime 规范工具：naive 当 UTC、aware 转 UTC，再去 tz 得到 naive UTC
+    return as_utc_aware(last_updated).replace(tzinfo=None)
 
 
-@celery_app.task(
-    bind=True,
-    name="app.tasks.extract_metadata_batch",
-    max_retries=2,
-    default_retry_delay=30,
-)
-def extract_metadata_batch_task(
-    self,
-    user_entities: List[Dict[str, Any]],
-    llm_model_id: str,
-    language: str = "zh",
-    snapshot_dir: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Celery task: 用户实体元数据提取 + Neo4j 回写 + PostgreSQL 同步。
+def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period: int) -> bool:
+    """判断该用户现在是否需要反思。scan 派发前和 do 执行前都用它（保证一致 + 幂等）。
 
-    在主写入流水线完成后异步执行。从用户实体的 description 中提取
-    结构化元数据（core_facts、traits、relations 等），增量回写到 Neo4j，
-    同时将 aliases 和 extracted_metadata 同步到 PostgreSQL end_user_info 表。
+    需要同时满足两个条件才反思：
+      1. 最近还活跃：最后一次对话距今 < REFLECT_LAYER2_INACTIVE_HOURS 小时
+      2. 距上次反思已够久：now - reflection_time >= iteration_period 小时（控制反思频率）
+
+    注意：不再要求「上次反思后有新对话」。因为反思本身（实体去重 / 描述合并 /
+    未识别实体解析）会改变图谱、且去重有单轮上限（max_merges_per_run），一轮往往
+    合并不完，需要后续周期继续收敛。若用「有新对话」当闸门，没新对话时残留的
+    重复实体就再也合并不掉。故只要活跃 + 到周期就反思，让图谱有机会多轮收敛。
 
     Args:
-        user_entities: 用户实体列表，每项包含:
-            - entity_id: 实体 ID
-            - entity_name: 实体名称
-            - descriptions: description 文本列表
-            - aliases: 实体别名列表（来自 "别名属于" 关系归并后的结果）
-            - end_user_id: 终端用户 ID（用于写入 PostgreSQL）
-        llm_model_id: LLM 模型 UUID 字符串
-        language: 语言 ("zh" / "en")
-        snapshot_dir: 可选的快照目录路径（调试模式下使用）
+        reflection_time: 上次反思时间 end_user.reflection_time（naive UTC 或 None=从未反思）
+        iteration_period: 反思周期（小时），由用户记忆配置 iteration_period 决定
+    Returns:
+        True 需要反思；False 跳过
     """
-    task_id = self.request.id
-    total = len(user_entities)
-    logger.info(
-        f"[Metadata] 开始用户元数据提取: "
-        f"entities={total}, llm_model_id={llm_model_id}, "
-        f"language={language}, task_id={task_id}"
-    )
-    start_time = time.time()
+    last_conv = _get_max_conversation_updated_at(db, end_user_id)
+    if last_conv is None:
+        return False                      # 从没对话过 → 没有可反思的数据
 
-    if not user_entities:
-        return {"status": "SUCCESS", "total": 0, "extracted": 0, "failed": 0, "task_id": task_id}
+    now = utcnow_naive()
+    inactive_hours = settings.REFLECT_LAYER2_INACTIVE_HOURS
+    is_active = (now - last_conv).total_seconds() / 3600 < inactive_hours  # 条件1：最近活跃
+
+    if reflection_time is None:
+        # 从未反思过：只要有过对话且最近活跃，就反思（首次）
+        return is_active
+
+    reflection_time = as_utc_aware(reflection_time).replace(tzinfo=None)  # 统一 naive UTC
+    period_reached = (now - reflection_time).total_seconds() / 3600 >= iteration_period  # 条件2：够周期
+    # 同时满足「活跃 + 到周期」放行（不再看「上次反思后是否有新对话」）
+    return is_active and period_reached
+
+@celery_app.task(
+    name="app.tasks.scan_layer2_reflection",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+)
+def scan_layer2_reflection(self) -> Dict[str, Any]:
+    """高频反思扫描器：遍历所有用户，筛选出需要反思的，派发 do_layer2_reflection。
+    轻量、无事件循环、无单例锁、无超时。
+    """
+    start_time = time.time()
+    from app.models.workspace_model import Workspace
+    from app.services.memory_reflection_service import WorkspaceAppService
+
+    redis_client = get_sync_redis_client()
+    dispatched = 0
+    dispatched_user_ids = []
+    skip_period_or_new = 0
+    skip_inflight = 0
+
+    # db-session 规范：先用只读短 session 取 workspace 列表，
+    # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
+    with get_db_read() as db:
+        workspace_ids = [str(w.id) for w in db.query(Workspace.id).all()]
+
+    for ws_id in workspace_ids:
+        with get_db_context() as db:
+            service = WorkspaceAppService(db)
+            workspace_detail = service.get_workspace_apps_detailed(ws_id)
+            for app_detail in workspace_detail['apps_detailed_info']:
+                if not app_detail['memory_configs']:
+                    continue
+                for config in app_detail['memory_configs']:
+                    if not config.get('enable_self_reflexion'):       # 未启用反思的配置跳过
+                        continue
+                    config_id = config['config_id']
+                    baseline = config.get('baseline', 'HYBRID')
+                    try:
+                        iteration_period = int(config.get('iteration_period') or 24)
+                    except (TypeError, ValueError):
+                        iteration_period = 24
+                    for user in app_detail['end_users']:
+                        uid = str(user['id'])
+                        try:
+                            rt = service.get_end_user_reflection_time(uid)
+                            if not _should_reflect_now(db, uid, rt, iteration_period):  # 频率+活跃+有新对话
+                                skip_period_or_new += 1
+                                continue
+                            # 在途锁：抢不到说明该用户已有反思任务在途，跳过（纯 SET NX EX 粗过滤）
+                            if redis_client is not None:
+                                ok = redis_client.set(
+                                    f"reflection:inflight:{uid}", "1", nx=True, ex=1500,
+                                )
+                                if not ok:
+                                    skip_inflight += 1
+                                    continue
+                            do_layer2_reflection.apply_async(
+                                kwargs={
+                                    "user_id": uid,
+                                    "config_id": str(config_id),
+                                    "workspace_id": ws_id,
+                                    "baseline": baseline,
+                                    "iteration_period": iteration_period,
+                                },
+                                queue="reflection_tasks",
+                            )
+                            dispatched += 1
+                            dispatched_user_ids.append(uid)
+                        except Exception as e:
+                            logger.error(f"高频反思scan 处理用户失败 user={uid}: {e}")
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+
+    logger.info(
+        f"scan_layer2_reflection 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"跳过(未到周期/无新增) {skip_period_or_new}, 在途 {skip_inflight}, "
+        f"耗时 {time.time() - start_time:.1f}s"
+    )
+    return {"status": "SUCCESS", "dispatched": dispatched,
+            "dispatched_user_ids": dispatched_user_ids,
+            "skip_period_or_new": skip_period_or_new, "skip_inflight": skip_inflight}
+
+
+@celery_app.task(
+    name="app.tasks.do_layer2_reflection",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
+                         baseline: str = "HYBRID", iteration_period: int = 24) -> Dict[str, Any]:
+    """对【单个用户】执行一次 Layer2 反思（实体去重 / 描述合并 / 未识别实体处理等）。
+
+    由 scan_layer2_reflection 派发，每个用户一个独立任务、独立 db session，跑完即释放内存。
+    返回 status 取值：
+        success            反思成功执行
+        skipped_idempotent 执行前发现已不需要反思（排队期间被别的任务做过）
+        lock_timeout       抢用户写锁超时，本次放弃（下一轮 scan 会重派）
+        failed             执行报错
+    """
+    start_time = time.time()
+    inflight_key = f"reflection:inflight:{user_id}"
 
     async def _run() -> Dict[str, Any]:
-        from app.core.memory.models.variate_config import ExtractionPipelineConfig
-        from app.core.memory.storage_services.extraction_engine.steps.base import StepContext
-        from app.core.memory.storage_services.extraction_engine.steps.metadata_step import MetadataExtractionStep
-        from app.core.memory.storage_services.extraction_engine.steps.schema import (
-            MetadataStepInput,
-        )
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-        from app.db import get_db_context
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.repositories.neo4j.cypher_queries import ENTITY_METADATA_UPDATE, ENTITY_METADATA_QUERY
+        from app.services.memory_reflection_service import WorkspaceAppService
+        from app.core.memory.memory_service import MemoryService
 
-        # Build LLM client
         with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(llm_model_id)
+            ws_svc = WorkspaceAppService(db)
 
-        pipeline_config = ExtractionPipelineConfig()
-        context = StepContext(
-            llm_client=llm_client,
-            language=language,
-            config=pipeline_config,
-        )
-        step = MetadataExtractionStep(context)
+            # 步骤1 执行前再判一次是否真的要反思：
+            #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
+            #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
+            rt = ws_svc.get_end_user_reflection_time(user_id)
+            if not _should_reflect_now(db, user_id, rt, iteration_period):
+                return {"status": "skipped_idempotent"}
 
-        extracted = 0
-        failed = 0
-        snapshot_outputs: Dict[str, Any] = {} if snapshot_dir else None  # type: ignore[assignment]
-
-        connector = Neo4jConnector()
-        try:
-            for entity_dict in user_entities:
-                entity_id = entity_dict["entity_id"]
-                entity_name = entity_dict.get("entity_name", "")
-                descriptions = entity_dict.get("descriptions", [])
-                aliases = entity_dict.get("aliases", [])
-                end_user_id = entity_dict.get("end_user_id", "")
-
-                if not descriptions:
-                    logger.debug(f"[Metadata] 跳过无 description 的实体: {entity_id}")
-                    continue
-
-                try:
-                    # 查询已有元数据用于增量去重
-                    existing_metadata = {}
-                    try:
-                        records = await connector.execute_query(
-                            ENTITY_METADATA_QUERY, entity_id=entity_id
-                        )
-                        if records:
-                            rec = records[0]
-                            for field in (
-                                "core_facts", "traits", "relations", "goals",
-                                "interests", "beliefs_or_stances", "anchors", "events",
-                            ):
-                                val = rec.get(field)
-                                existing_metadata[field] = val if val else []
-                    except Exception as e:
-                        logger.warning(f"[Metadata] 查询已有元数据失败: {e}")
-
-                    inp = MetadataStepInput(
-                        entity_id=entity_id,
-                        entity_name=entity_name,
-                        descriptions=descriptions,
-                        existing_metadata=existing_metadata,
-                    )
-                    result = await step.run(inp)
-
-                    if result.has_any():
-                        # 回写 Neo4j
-                        await connector.execute_query(
-                            ENTITY_METADATA_UPDATE,
-                            entity_id=entity_id,
-                            core_facts=result.core_facts,
-                            traits=result.traits,
-                            relations=result.relations,
-                            goals=result.goals,
-                            interests=result.interests,
-                            beliefs_or_stances=result.beliefs_or_stances,
-                            anchors=result.anchors,
-                            events=result.events,
-                        )
-                        extracted += 1
-                        logger.info(
-                            f"[Metadata] 实体 {entity_name}({entity_id}) 元数据提取并回写成功"
-                        )
-
-                        # 同步写入 PostgreSQL end_user_info
-                        if end_user_id:
-                            _sync_end_user_info_pg(
-                                end_user_id=end_user_id,
-                                aliases=aliases,
-                                extracted_metadata=result.model_dump(),
-                            )
-                    else:
-                        # 即使无新增元数据，也同步 aliases 到 PostgreSQL
-                        if end_user_id and aliases:
-                            _sync_end_user_info_pg(
-                                end_user_id=end_user_id,
-                                aliases=aliases,
-                                extracted_metadata=None,
-                            )
-                        logger.debug(
-                            f"[Metadata] 实体 {entity_name}({entity_id}) 无新增元数据"
-                        )
-
-                    if snapshot_outputs is not None:
-                        snapshot_outputs[entity_id] = {
-                            "entity_name": entity_name,
-                            "descriptions": descriptions,
-                            "extracted_metadata": result.model_dump(),
-                        }
-
-                except Exception as e:
-                    failed += 1
-                    if snapshot_outputs is not None:
-                        snapshot_outputs[entity_id] = {"error": str(e)}
-                    logger.warning(
-                        f"[Metadata] 实体 {entity_id} 元数据提取失败: {e}"
-                    )
-        finally:
-            await connector.close()
-
-        # 快照落盘：上传到 OSS
-        if snapshot_outputs is not None and snapshot_dir:
-            from app.core.memory.utils.debug.pipeline_snapshot import (
-                upload_stage_snapshot,
-            )
-
-            if upload_stage_snapshot(
-                snapshot_dir, "9_metadata_outputs", snapshot_outputs
-            ):
-                logger.info(
-                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → "
-                    f"oss://{snapshot_dir}/9_metadata_outputs.json"
+            # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
+            #   保证同一用户的图谱不被并发修改。抢不到（超时30s）就本次放弃。
+            write_lock = None
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                write_lock = RedisFairLock(
+                    key=f"memory_write:{user_id}",
+                    redis_client=redis_client,
+                    expire=600, timeout=30, auto_renewal=True,
                 )
+                if not await asyncio.to_thread(write_lock.acquire):
+                    logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
+                    return {"status": "lock_timeout"}
+            try:
+                # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
+                #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
+                #   期间已完成同一用户的反思并刷新了 reflection_time。expire_all 先清掉
+                #   本 session 在步骤1 缓存的旧值，强制重读，确保读到最新 reflection_time，
+                #   不满足则放弃，避免同一批数据被反思两次。
+                db.expire_all()
+                rt_recheck = ws_svc.get_end_user_reflection_time(user_id)
+                if not _should_reflect_now(db, user_id, rt_recheck, iteration_period):
+                    logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={user_id}")
+                    return {"status": "skipped_idempotent"}
 
-        return {"extracted": extracted, "failed": failed}
+                # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
+                memory_service = MemoryService(
+                    db=db, config_id=config_id,
+                    end_user_id=user_id, workspace_id=workspace_id,
+                )
+                r = await memory_service.run_reflection_layer2(baseline=baseline)
 
-    loop = None
+                # 步骤4 成功后把"上次反思时间"刷新为当前，供下次周期/增量判断
+                ws_svc.update_end_user_reflection_time(user_id)
+
+                dedup_info = r.get("entity_dedup", {})
+                merge_info = r.get("description_merge", {})
+                logger.info(
+                    f"反思高频do 完成 user={user_id} status=success "
+                    f"去重合并={dedup_info.get('merged_count', 0)} "
+                    f"描述合并={merge_info.get('merged_count', 0)} "
+                    f"耗时={time.time() - start_time:.1f}s"
+                )
+                return {"status": "success",
+                        "dedup_merged": dedup_info.get("merged_count", 0),
+                        "desc_merged": merge_info.get("merged_count", 0)}
+            finally:
+                # 步骤5 释放写锁（无论成功失败）
+                if write_lock is not None:
+                    await asyncio.to_thread(write_lock.release)
+
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
-        elapsed = time.time() - start_time
-        logger.info(
-            f"[Metadata] 任务完成: 提取={result['extracted']}, "
-            f"失败={result['failed']}, 耗时={elapsed:.2f}s, task_id={task_id}"
-        )
-        return {
-            "status": "SUCCESS",
-            "total": total,
-            **result,
-            "elapsed_time": elapsed,
-            "task_id": task_id,
-        }
     except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(
-            f"[Metadata] 任务失败: {e}, 耗时={elapsed:.2f}s",
-            exc_info=True,
-        )
-        raise self.retry(exc=e)
+        logger.error(f"反思高频do 失败 user={user_id}: {e}", exc_info=True)
+        result = {"status": "failed", "error": str(e)}
     finally:
-        if loop:
-            _shutdown_loop_gracefully(loop)
+        _shutdown_loop_gracefully(loop)
+        # 步骤6 删除在途标记：放行下一轮 scan 对该用户的派发（成功/失败/跳过都要删）
+        try:
+            _rc = get_sync_redis_client()
+            if _rc is not None:
+                _rc.delete(inflight_key)
+        except Exception:
+            pass
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    return result
+
+@celery_app.task(
+    name="app.tasks.scan_layer2_dedup_full_scan",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+)
+def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
+    """低频去重扫描器：遍历用户，启用反思 + 最近活跃 + 未在途 的派发 do_layer2_dedup_full_scan。"""
+    start_time = time.time()
+    from app.models.workspace_model import Workspace
+    from app.services.memory_reflection_service import WorkspaceAppService
+
+    redis_client = get_sync_redis_client()
+    dispatched = 0
+    dispatched_user_ids = []
+    skip_inactive = 0
+    skip_inflight = 0
+
+    # db-session 规范：先用只读短 session 取 workspace 列表，
+    # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
+    with get_db_read() as db:
+        workspace_ids = [str(w.id) for w in db.query(Workspace.id).all()]
+
+    for ws_id in workspace_ids:
+        with get_db_context() as db:
+            service = WorkspaceAppService(db)
+            workspace_detail = service.get_workspace_apps_detailed(ws_id)
+            for app_detail in workspace_detail['apps_detailed_info']:
+                if not app_detail['memory_configs']:
+                    continue
+                for config in app_detail['memory_configs']:
+                    if not config.get('enable_self_reflexion'):       # 未启用反思的配置跳过
+                        continue
+                    config_id = config['config_id']
+                    for user in app_detail['end_users']:
+                        uid = str(user['id'])
+                        try:
+                            # 最近活跃度过滤（复用现有函数，阈值取 settings）
+                            if _should_skip_reflection_by_inactivity(db, uid):
+                                skip_inactive += 1
+                                continue
+                            # 在途锁：抢不到说明该用户已有去重任务在途，跳过（独立 key）
+                            if redis_client is not None:
+                                ok = redis_client.set(
+                                    f"dedup:inflight:{uid}", "1", nx=True, ex=1500,
+                                )
+                                if not ok:
+                                    skip_inflight += 1
+                                    continue
+                            do_layer2_dedup_full_scan.apply_async(
+                                kwargs={
+                                    "user_id": uid,
+                                    "config_id": str(config_id),
+                                    "workspace_id": ws_id,
+                                },
+                                queue="reflection_tasks",
+                            )
+                            dispatched += 1
+                            dispatched_user_ids.append(uid)
+                        except Exception as e:
+                            logger.error(f"反思低频去重scan 处理用户失败 user={uid}: {e}")
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+
+    logger.info(
+        f"scan_layer2_dedup_full_scan 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"跳过(不活跃) {skip_inactive}, 在途 {skip_inflight}, "
+        f"耗时 {time.time() - start_time:.1f}s"
+    )
+    return {"status": "SUCCESS", "dispatched": dispatched,
+            "dispatched_user_ids": dispatched_user_ids,
+            "skip_inactive": skip_inactive, "skip_inflight": skip_inflight}
+
+
+@celery_app.task(
+    name="app.tasks.do_layer2_dedup_full_scan",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
+                              workspace_id: str) -> Dict[str, Any]:
+    """对【单个用户】执行一次低频全量去重扫描。
+
+    由 scan_layer2_dedup_full_scan 派发。精确的增量判断在 run_dedup_full_scan 内部
+    （check_new_entities 按实体类型查 Neo4j 新增数），do 这层不重复做。
+    返回 status：success / lock_timeout / failed。
+    """
+    start_time = time.time()
+    inflight_key = f"dedup:inflight:{user_id}"
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.memory_service import MemoryService
+
+        with get_db_context() as db:
+            # 抢该用户写锁：与反思 do、写入 pipeline 互斥。
+            # 去重低频、半夜跑，给更长抢锁等待（120s），避免被高频反思挤掉；抢不到本次放弃。
+            write_lock = None
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                write_lock = RedisFairLock(
+                    key=f"memory_write:{user_id}",
+                    redis_client=redis_client,
+                    expire=600, timeout=120, auto_renewal=True,
+                )
+                if not await asyncio.to_thread(write_lock.acquire):
+                    logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
+                    return {"status": "lock_timeout"}
+            try:
+                memory_service = MemoryService(
+                    db=db, config_id=config_id,
+                    end_user_id=user_id, workspace_id=workspace_id,
+                )
+                r = await memory_service.run_dedup_full_scan()
+                merged = r.get("merged_count", 0)
+                logger.info(
+                    f"反思低频去重do 完成 user={user_id} status=success "
+                    f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
+                    f"耗时={time.time() - start_time:.1f}s"
+                )
+                return {"status": "success", "merged_count": merged}
+            finally:
+                if write_lock is not None:
+                    await asyncio.to_thread(write_lock.release)
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"反思低频去重do 失败 user={user_id}: {e}", exc_info=True)
+        result = {"status": "failed", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 删除在途标记：放行下一轮 scan 对该用户的派发（成功/失败都删）
+        try:
+            _rc = get_sync_redis_client()
+            if _rc is not None:
+                _rc.delete(inflight_key)
+        except Exception:
+            pass
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    return result
 
 
 # unused task
@@ -3118,7 +2896,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
 
 @celery_app.task(
-    name="app.tasks.regenerate_memory_cache",
+    name="app.tasks.refresh_memory_insight_and_summary_cache",
     bind=True,
     ignore_result=True,
     max_retries=0,
@@ -3126,7 +2904,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
     time_limit=3600,
     soft_time_limit=3300,
 )
-def regenerate_memory_cache(self) -> Dict[str, Any]:
+def refresh_memory_insight_and_summary_cache(self) -> Dict[str, Any]:
     """定时任务：为所有用户重新生成记忆洞察和用户摘要缓存
 
     遍历所有活动工作空间的所有终端用户，为每个用户重新生成记忆洞察和用户摘要。

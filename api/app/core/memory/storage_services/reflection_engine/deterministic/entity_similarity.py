@@ -30,7 +30,7 @@ def _prefixed_row(row: dict, prefix: str, end_user_id: str) -> dict:
         "entity_type": row["entity_type"],
         "description": row.get(f"{prefix}_desc", ""),
         "aliases": row.get(f"{prefix}_aliases") or [],
-        "name_embedding": row.get(f"{prefix}_embed") or [],
+        "name_embedding": [],
         "end_user_id": end_user_id,
         **_ENTITY_DEFAULTS,
     }
@@ -45,6 +45,8 @@ class DedupCandidatePair(BaseModel):
     entity_type: str = ""
     a_desc: str = ""
     b_desc: str = ""
+    a_desc_summary: str = ""
+    b_desc_summary: str = ""
     a_aliases: List[str] = Field(default_factory=list)
     b_aliases: List[str] = Field(default_factory=list)
     sim_name: float = 0.0       # 路径A：名称相似度（0~1）
@@ -83,7 +85,9 @@ async def fetch_name_candidates(
         if _would_merge_cross_role(entity_a, entity_b):
             continue
 
-        sim_result = name_similarity_with_aliases(entity_a, entity_b)
+        # emb_sim 由 Neo4j 侧 vector.similarity.cosine 算好直接传入，避免拉回向量在 Python 重算
+        emb_sim = row.get("emb_sim") or 0.0
+        sim_result = name_similarity_with_aliases(entity_a, entity_b, emb_sim=emb_sim)
         sim = sim_result[0]
 
         has_exact = has_exact_alias_match(entity_a, entity_b)
@@ -98,6 +102,8 @@ async def fetch_name_candidates(
                 entity_type=row["entity_type"],
                 a_desc=row.get("a_desc", ""),
                 b_desc=row.get("b_desc", ""),
+                a_desc_summary=row.get("a_desc_summary") or "",
+                b_desc_summary=row.get("b_desc_summary") or "",
                 a_aliases=row.get("a_aliases") or [],
                 b_aliases=row.get("b_aliases") or [],
                 sim_name=sim,
@@ -140,6 +146,8 @@ async def fetch_embed_candidates(
             entity_type=row["entity_type"],
             a_desc=row.get("a_desc", ""),
             b_desc=row.get("b_desc", ""),
+            a_desc_summary=row.get("a_desc_summary") or "",
+            b_desc_summary=row.get("b_desc_summary") or "",
             a_aliases=row.get("a_aliases") or [],
             b_aliases=row.get("b_aliases") or [],
             sim_embed=row["sim_embed"],

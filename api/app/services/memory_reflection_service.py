@@ -207,6 +207,11 @@ class WorkspaceAppService:
             return None
         except Exception as e:
             api_logger.error(f"读取用户反思时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
+            # 失败先 rollback，避免事务 aborted 拖垮同一 session 后续查询
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             return None
 
     def update_end_user_reflection_time(self, end_user_id: str) -> bool:

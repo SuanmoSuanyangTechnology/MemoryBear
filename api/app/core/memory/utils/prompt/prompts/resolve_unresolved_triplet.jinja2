@@ -1,13 +1,16 @@
-===Task===
+﻿===Task===
 Resolve unresolved references and extract entities and knowledge triplets from the given statement.
 
 {% if language == "zh" %}
 重要：
 - 这是对已标记为 has_unsolved_reference=true 的 statement 进行二次处理。
+- 本 prompt 只用于 retry/reflection 队列；输入一定来自写入阶段已跳过的 unresolved statement。
+- `has_unsolved_reference` 在本阶段只是来源标记，不是判断是否抽取的开关。
 - 必须从上下文中尝试消解未识别指代（如"他""那个""该活动"等）。
-- 无论是否成功消解，都必须提取至少一个实体和三元组（不允许返回空结果）。
-- 如果无法消解，使用描述性名称强制提取，谓词用 `关联于`（predicate_id=13）兜底。
-- 如果上下文为空，只用 statement 本身的信息强制提取。
+- 不要检查 `has_unsolved_reference` 后返回空结果；写入阶段已经做过 hard gate，本阶段负责补救。
+- 如果无法稳定消解，允许生成带时间、场景、动作或关系限定的描述性弱实体。
+- 只在 statement 本身表达了有效关系时输出 triplet；不要为了补救 unresolved 而强行使用 `关联于` 兜底。
+- 如果上下文为空，只能使用 statement 本身的信息生成弱实体或有效关系。
 
 - `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，不要翻译。
 - 但在抽取前，必须先做指代解析。
@@ -34,6 +37,11 @@ Resolve unresolved references and extract entities and knowledge triplets from t
 - Normalize user possessive expressions by input language: for Chinese source text, use `用户的X`; for English source text, use `the user's X`; never output mixed possessives such as `用户'sX`, `用户's X`, or `user的X`.
 - For non-user pronouns or demonstratives such as "he", "she", "it", "this", "that", "this company", "that place", if a stable referent can be resolved from `supporting_context`, replace them with the resolved entity name.
 - If such references cannot be resolved stably, use descriptive names for forced extraction.
+- This prompt is a second-pass repair stage for statements already skipped by the write-time hard gate; do not return the empty result merely because `has_unsolved_reference=true`.
+- This prompt is used only for the retry/reflection queue. The input is always an unresolved statement skipped by the write-time extraction stage.
+- `has_unsolved_reference` is only a source marker in this stage, not a switch for whether extraction should run.
+- If a reference still cannot be resolved stably, create a descriptive weak entity using time, scene, action, or relationship qualifiers from the statement when useful.
+- Output triplets only when the statement itself expresses a valid relation. Do not force `关联于` as a fallback just because resolution failed.
 - Newly introduced names in naming or alias expressions must stay in their original form.
 - Generate `description` in English.
 - Every entity `description` MUST start with the input `dialog_at` timestamp, formatted as `[dialog_at] description text`; if `dialog_at` is empty or absent, use `[NULL]`.
@@ -53,24 +61,24 @@ Resolve unresolved references and extract entities and knowledge triplets from t
 - `statement_text`: 陈述句文本
 - `statement_type`: 上游提供的陈述类别，例如 `FACT` / `OPINION` / `OTHER`
 - `temporal_type`: 上游提供的时间类别，例如 `STATIC` / `DYNAMIC` / `ATEMPORAL`
-- `supporting_context`: 时间最近的对话原文列表（纯字符串数组，按时间正序）
+- `supporting_context`: 可为时间最近的对话原文列表（纯字符串数组，按时间正序），也可为包含 `before_msgs` / `after_msgs` 的上下文对象
 - `speaker`: `user` / `assistant`
 - `dialog_at`: 会话时间，ISO 8601 时间点；每个实体 `description` 必须复制该值作为开头时间戳
 - `valid_at`: ISO 8601 时间点，或 `NULL`
 - `invalid_at`: ISO 8601 时间点，或 `NULL`
-- `has_unsolved_reference`: 布尔值
+- `has_unsolved_reference`: 固定为 `true`；表示该 statement 来自 unresolved retry/reflection 队列
   {% else %}
   The input JSON contains these fields:
 - `statement_id`: unique statement ID
 - `statement_text`: statement text
 - `statement_type`: upstream statement category such as `FACT` / `OPINION` / `OTHER`
 - `temporal_type`: upstream temporal category such as `STATIC` / `DYNAMIC` / `ATEMPORAL`
-- `supporting_context`: nearby dialogue texts (string array, chronological order)
+- `supporting_context`: nearby dialogue texts as a string array, or a context object containing `before_msgs` / `after_msgs`
 - `speaker`: `user` / `assistant`
 - `dialog_at`: session time as an ISO 8601 timestamp; every entity `description` must copy this value as its leading timestamp
 - `valid_at`: ISO 8601 timestamp or `NULL`
 - `invalid_at`: ISO 8601 timestamp or `NULL`
-- `has_unsolved_reference`: boolean
+- `has_unsolved_reference`: always `true`; indicates this statement comes from the unresolved retry/reflection queue
   {% endif %}
 
 Input JSON:
@@ -95,10 +103,17 @@ Primary statement to analyze:
 
 - 先尝试从 `supporting_context` 中消解未识别指代。
 - 用户自指（"我""我的"）统一规范为"用户"，"用户"本身不是未识别指代。
-- 如果能从上下文确定具体指代对象，替换为具体实体名，设 `resolved=true`。
-- 如果无法确定，使用描述性名称强制提取，设 `resolved=false`。
-- 绝不允许返回空的 `entities` 或 `triplets`。
-- 无法消解时，谓词用"关联于"(predicate_id=13)兜底。
+- 如果能从上下文确定所有关键指代对象，替换为具体实体名，并在输出中设 `resolved=true`。
+- 如果任一关键指代无法确定，使用描述性弱实体名称提取仍有记忆价值的内容，并在输出中设 `resolved=false`。
+- “稳定解析”不要求一定有身份证式专名；只要上下文能唯一确定被指对象，也可以解析为稳定限定名，例如 `用户的小狗`、`用户今天联系的几个客户`、`星河数据设计部`。
+- 所有格实体如果边界清楚，应视为稳定解析。例如上下文出现 `我家小狗`，则 `它` 可以稳定解析为 `用户的小狗`，即使不知道小狗专名。
+- 如果上下文中只有一个类型匹配且语义相容的候选先行词，应优先解析到该候选，而不是生成新的弱实体。例如前文唯一部门是 `星河数据设计部`，则 `那个部门` 应解析为 `星河数据设计部`。
+- 如果上下文只能提供宽泛背景，不能唯一确定指代对象，则不要过度消解。例如只知道“王磊最近在找工作”，不能把 `那家公司` 解析为某个稳定公司；应生成弱实体。
+- 输出一致性：只要任何关键实体名称包含 `未具名`，或 `resolution_note` 明确说明某个关键指代无法稳定解析，则 `resolved` 必须为 `false`。
+- 弱实体名称必须带限定信息，不能直接输出 `他`、`她`、`它`、`这个`、`那个`、`这家公司`、`那个地方` 等原始弱指代表达。
+- 弱实体名称只能使用 `statement_text` 已有信息、`dialog_at`/`valid_at`/`invalid_at` 中的时间信息，以及上下文能支持但不足以确定专名的关系信息；不要引入外部推断。
+- 允许 `triplets` 为空；只有当 statement 本身表达了有效关系时才输出 triplet。
+- 不要使用"关联于"(predicate_id=13)作为 unresolved 的默认兜底关系。
 - 上下文为空时，只用 `statement_text` 本身信息强制提取。
 - 强制提取命名规则：泛指动物/物品保持原文；跨对话指代人物用关系限定；未具名角色用描述限定。
 {% else %}
@@ -106,10 +121,17 @@ Resolution rules:
 
 - First attempt to resolve references from `supporting_context`.
 - Normalize user self-reference to "用户"; "用户" itself is NOT unresolved.
-- If context supports resolution, use resolved name, set `resolved=true`.
-- If unresolvable, use descriptive name for forced extraction, set `resolved=false`.
-- NEVER return empty `entities` or `triplets`.
-- Fallback predicate: "关联于" (predicate_id=13).
+- If context resolves all key references, use resolved names and set output `resolved=true`.
+- If any key reference is still unresolvable, extract useful content with descriptive weak entity names and set output `resolved=false`.
+- Stable resolution does not require a legal or proper name. If context uniquely identifies the referent, a stable qualified name is allowed, such as `the user's dog`, `the customers the user contacted today`, or `Xinghe Data Design Department`.
+- Possessive entities with clear boundaries count as stable resolution. For example, if context mentions `my dog`, then `it` can be resolved to `the user's dog` even if the dog's proper name is unknown.
+- If context contains exactly one type-compatible and semantically compatible antecedent, prefer resolving to that antecedent instead of creating a new weak entity. For example, if the only prior department is `Xinghe Data Design Department`, resolve `that department` to it.
+- If context only gives broad background and does not uniquely identify the referent, do not over-resolve. For example, knowing only that "Wang Lei is job hunting" is not enough to resolve `that company` to a stable company; create a weak entity instead.
+- Output consistency: if any key entity name contains an unnamed/unknown marker, or if `resolution_note` says a key reference cannot be stably resolved, `resolved` must be `false`.
+- A weak entity name must include qualifiers and must not preserve raw weak references such as "he", "she", "it", "this", "that", "this company", or "that place".
+- Weak entity names may use only information from `statement_text`, time fields, and context-supported relationship information that is still insufficient for a proper name. Do not add external inference.
+- `triplets` may be empty. Output triplets only when the statement itself expresses a valid relation.
+- Do not use "关联于" (predicate_id=13) as the default fallback for unresolved references.
 - If context is empty, extract from `statement_text` alone.
 {% endif %}
  
@@ -225,11 +247,11 @@ Resolution rules:
 
 实体类型总规则：
 
-- unresolved 或边界不稳的表达，不因“看起来像名词”就创建实体。
+- unresolved 或边界不稳的表达，不因“看起来像名词”就创建实体；但本二次处理阶段允许为仍有记忆价值的 unresolved 指代生成带限定信息的弱实体。
 - 情绪、心理状态、金额、数量、普通时间、一次性动作短语，默认不作为独立实体抽取。
 - 抽象命题片段、泛化结果、价值判断，默认不创建实体；如有保留价值，应写入相关高价值实体的 `description`。
 - 只有当某个名字、概念、对象、群体或地点在当前陈述中承担明确语义角色，或是理解有效关系所必需时，才创建实体。
-- 如果陈述里有值得保留的实体信息，但没有有效关系，可以只返回 `entities`，并把 `triplets` 设为 `[]`。
+- 如果陈述里有值得保留的实体信息或弱实体信息，但没有有效关系，可以只返回 `entities`，并把 `triplets` 设为 `[]`。
 
 ===关系本体大类===
 以下大类是当前 `predicate` 本体树的第一层，用于帮助理解和约束后面的具体关系白名单。输出具体 `predicate` 时仍然必须使用后文列出的细关系，而不是直接输出这些大类名称。
@@ -399,20 +421,24 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 {% if language == "zh" %}
 按以下顺序执行：
 
-0. 先检查 `has_unsolved_reference`；如果为 `true`，直接返回空结果。
+0. 把输入视为 unresolved retry/reflection 任务，不执行写入阶段的 hard gate。
 1. 先做指代解析：用户自指统一替换为 `用户`；其他可稳定解析的代词或指示表达替换为具体指代实体名。
-2. 如果仍存在无法稳定解析的代词、指示词或省略主体，直接返回空结果。
-3. 识别 `statement_text` 中值得抽取的稳定实体。
-4. 判断这些实体之间是否存在可由预定义关系类型表达的有效关系。
-5. 最后补充实体字段和关系字段。
+2. 标记消解结果：所有关键指代都稳定解析时 `resolved=true`；否则 `resolved=false`。
+3. 如果仍存在无法稳定解析的代词、指示词或省略主体，用描述性弱实体名称替代，而不是保留原代词或返回空。
+4. 识别 `statement_text` 中值得抽取的实体，包括已解析实体和有记忆价值的弱实体。
+5. 判断这些实体之间是否存在可由预定义关系类型表达的有效关系；没有有效关系时允许 `triplets: []`。
+6. 对同名实体去重，并确保同一个 `name` 只对应一个 `type/type_id`。
+7. 最后补充实体字段和关系字段。
    {% else %}
    Follow this order:
-6. First check `has_unsolved_reference`; if it is `true`, immediately return the empty result.
-7. Resolve references first: normalize user self-reference to `用户`; replace other stably resolvable pronouns or demonstratives with their resolved entity names.
-8. If unresolved pronouns, demonstratives, or omitted subjects still remain, immediately return the empty result.
-9. Identify stable entities worth extracting from `statement_text`.
-10. Determine whether any valid relations between those entities can be expressed using the predefined Chinese predicates.
-11. Finally fill auxiliary entity and predicate fields.
+0. Treat the input as an unresolved retry/reflection task; do not run the write-time hard gate.
+1. Resolve references first: normalize user self-reference to `用户`; replace other stably resolvable pronouns or demonstratives with their resolved entity names.
+2. Set the resolution status: `resolved=true` only if all key references are stably resolved; otherwise `resolved=false`.
+3. If unresolved pronouns, demonstratives, or omitted subjects still remain, replace them with descriptive weak entity names instead of preserving raw pronouns or returning empty.
+4. Identify entities worth extracting from `statement_text`, including resolved entities and memory-worthy weak entities.
+5. Determine whether any valid relations between those entities can be expressed using the predefined Chinese predicates; if no valid relation exists, `triplets: []` is allowed.
+6. Deduplicate entities by exact `name`, and make sure one `name` maps to only one `type/type_id`.
+7. Finally fill auxiliary entity and predicate fields.
     {% endif %}
 
 ===Guidelines===
@@ -422,14 +448,24 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 
 - 指代解析优先于实体抽取和关系抽取。
 - 所有用户自指表达都必须规范成 `用户`，包括“我”“我的”“我自己”等。
+- `他说`、`她说`、`他们说` 中的 `他/她/他们` 是非用户指代，不是 speaker，也不能规范为 `用户`；如果上下文不能解析，应生成未具名说话者弱实体。
 - 对“他”“她”“它”“这个”“那个”“这家”“那家”“这里”“那里”等非用户自指表达，若上下文可稳定解析，则必须用解析后的具体实体名替换。
-- 若非用户自指表达无法稳定解析，则整条跳过，不输出部分结果。
+- 若非用户自指表达无法稳定解析，则生成描述性弱实体名称，不要整条跳过。
+- 弱实体名称要说明“哪个上下文中的哪个对象”，例如 `2026年3月加入这家公司的未具名人员`、`statement中提到的这家公司`、`用户昨天提到的那个项目`。
+- 弱实体名称不能是裸代词或裸指示词，例如 `他`、`她`、`它`、`这个`、`那个`、`这家公司`。
+- 复数指代或集合指代要保持为 `群体`，不要拆成单个 `生命体`。例如 `他们` 指向几个客户时，应生成 `用户今天联系的几个客户` 或类似群体名，type 为 `群体`。
+- 当角色名后面紧跟代词，且语义上代词回指该角色承担者时，应把二者合并为同一个具体人或弱人物实体。例如 `导师说他下周会帮我看论文` 中，`他` 回指 `导师`，应输出 `用户的未具名导师` 这个 `生命体`，不要同时输出 `导师` 作为 `角色职业` 和另一个未具名人员。
 - 新出现的称呼、别名、昵称、产品名不是待消解代词，应保持原样。
   {% else %}
 - Reference resolution happens before entity or relation extraction.
 - All user self-reference must be normalized to `用户`, including forms such as "I", "me", "my", and "myself".
+- In phrases like `he said`, `she said`, or `they said`, the third-person pronoun is a non-user reference, not the speaker, and must not be normalized to `用户`; if context cannot resolve it, create an unnamed speaker weak entity.
 - For non-user references such as "he", "she", "it", "this", "that", "this company", "that place", "here", or "there", if the context supports a stable resolution, replace them with the resolved entity name.
-- If a non-user reference cannot be resolved stably, skip the entire statement and do not output partial results.
+- If a non-user reference cannot be resolved stably, create a descriptive weak entity name instead of skipping the whole statement.
+- The weak entity name should identify which object in which context is being referenced, such as `the unnamed person who joined this company in March 2026`, `the company mentioned in the statement`, or `the project the user mentioned yesterday`.
+- The weak entity name must not be a bare pronoun or demonstrative such as `he`, `she`, `it`, `this`, `that`, or `this company`.
+- Preserve plural or set references as `群体`; do not collapse them into one `生命体`. For example, if `they` refers to several customers, create a group entity such as `the customers the user contacted today`.
+- When a role name is followed by a pronoun and the pronoun refers back to the role holder, merge them into one concrete or weak person entity. For example, in `the advisor said he will review my paper next week`, `he` refers to the advisor, so output a `生命体` such as `the user's unnamed advisor`; do not output both `导师` as `角色职业` and another unnamed person.
 - Newly introduced names, aliases, nicknames, and product names are not pronouns to be resolved; keep them in their original form.
   {% endif %}
 
@@ -443,13 +479,15 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - 当句子只是在讨论一般道理、抽象规律、空泛结果或非个体化概念，而这些概念本身不构成可复用记忆时，不要创建实体。
 - 如果句子表达的是用户的观点、信念、判断、愿望或目标倾向，但其中抽象对象不值得作为独立实体保留，则只保留相关高价值实体，不要再创建这些低价值对象实体；只有当未抽取内容适合作为该实体的稳定描述时，才写入相关实体的 `description`。
 - 当前阶段不要把情绪或心理状态抽成实体；像“紧张”“开心”“难过”“焦虑”“放松”等不应映射到 `知识能力`、`偏好习惯`、`具体目标` 或其他近似类型。
-- triplet 阶段不重新判断 unresolved reference；应从当前 statement 抽取可表达的实体，无法消解的使用描述性名称。
+- triplet 阶段不重新执行 hard gate；应从当前 statement 抽取可表达的实体，无法消解的使用描述性弱实体名称。
 - 实体 `name` 必须尽量具体，避免同名同类型误合并。命名优先级：1）有专名或上游已解析到具体实体时，使用该具体实体名，例如 `海底捞`；2）没有专名但表达稳定关系时，使用稳定语义限定，例如 `用户就职的公司`、`用户常去的图书馆`、`用户的手机`；3）只有泛称时，使用 `statement_text` 中已有或已由上游解析出的具体时间、动作、用途、内容、地点或场景限定补全 name，例如 `2026-05-15早上去吃饭的饭店`，不要只写 `饭店`。
 - 补全 name 时只能使用 `statement_text` 中已有或上游已解析出的信息，不要引入外部推断，也不要使用未解析的相对时间。
+- 弱实体仍然要选择真实语义 type，而不是统一归入 `称呼别名` 或 `角色职业`。例如 `2026年3月加入这家公司的未具名人员` 是 `生命体`，`statement中提到的这家公司` 是 `组织`。
+- 复数人物、客户、同事、来访者等集合性弱实体应使用 `群体`，不是 `生命体`。
 - 对 `文档媒体`、`物品设备`、`地点设施`、`组织`、`群体`、`识别联系信息`，尤其避免直接使用泛称 name；如果已有专名、稳定归属、平台、主题、内容、用途、地点、时间或场景限定，应写进 name。
 - `角色职业` 是例外：角色/职业类别本身可以作为实体，例如 `导师`、`程序员`；但具体人物的稳定关系应通过 triplet 或 description 表达。
 - 用户本人节点必须命名为 `用户`；用户拥有、归属或关联的实体应使用完整所有格、归属短语或稳定语义限定，例如 `用户的小狗`、`用户的 GitHub 账号`、`用户的公司办公室`、`用户就职的公司`，不要简化成 `小狗`、`账号`，也不要使用 `用户's小狗` 等中英混合形式。
-- 泛化或未稳定指向的表达不要抽取，例如 `一只狗`、`狗这种动物`、`某个朋友`、`一个账号`、`某个办公室`。
+- 泛化表达不要抽取，例如 `一只狗`、`狗这种动物`。但本二次处理阶段允许抽取有 statement 限定的弱实体，例如 `2026年3月加入这家公司的未具名人员`；不要输出裸泛称 `某个朋友`、`一个账号`、`某个办公室`。
 - `description` 必须使用中文。
 - `type` 必须使用上方预定义的中文标签；`type_description` 必须直接复用对应 `type` 的预定义中文定义。
   {% else %}
@@ -460,15 +498,45 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - If the sentence is only about a generic principle, abstract outcome, or non-personalized concept that is not worth remembering on its own, do not create an entity for it.
 - If a statement expresses the user's belief, judgment, opinion, wish, or goal tendency but the referenced abstract concepts are not worth keeping as standalone entities, keep only the relevant high-value entities and do not create those low-value concept entities; write the unextracted content into an entity `description` only when it is suitable as a stable description of that entity.
 - In the current stage, do not extract emotional or psychological states as entities. States such as nervousness, happiness, sadness, anxiety, or relief should not be mapped to `知识能力`, `偏好习惯`, `具体目标`, or any other approximate type.
-- The triplet stage must not re-decide unresolved references. Extract expressible entities from the current statement; use descriptive names for unresolved references.
+- The triplet stage must not re-run the hard gate. Extract expressible entities from the current statement; use descriptive weak entity names for unresolved references.
 - Entity `name` must be as specific as possible to avoid same-name same-type false merges. Naming priority: 1) if there is a proper name or upstream has resolved the mention to a concrete entity, use that concrete name, such as `Haidilao`; 2) if there is no proper name but the statement expresses a stable relation, use a stable semantic qualifier, such as `the company where the user works`, `the library the user often visits`, or `the user's phone`; 3) if there is only a generic name, complete `name` using concrete time, action, purpose, content, location, or scene qualifiers already present in `statement_text` or resolved from context, such as `the restaurant where the user will eat on the morning of 2026-05-15`, rather than only `restaurant`.
 - When completing `name`, use only information already present in `statement_text` or resolved upstream. Do not introduce external inference, and do not use unresolved relative time.
+- Weak entities must still use their true semantic type, not default to `称呼别名` or `角色职业`. For example, `the unnamed person who joined this company in March 2026` is `生命体`, and `the company mentioned in the statement` is `组织`.
+- Weak entities that refer to multiple people, customers, coworkers, or visitors should use `群体`, not `生命体`.
 - For `文档媒体`, `物品设备`, `地点设施`, `组织`, `群体`, and `识别联系信息`, especially avoid generic names. If a proper name, stable owner, platform, topic, content, purpose, location, time, or scene qualifier is available, include it in `name`.
 - `角色职业` is an exception: role and occupation categories may themselves be entities, such as `导师` or `程序员`; but stable relations involving specific people should be represented through triplets or descriptions.
 - The user node itself must be named `用户`; entities owned by, affiliated with, or associated with the user should use a complete possessive phrase, affiliation phrase, or stable semantic qualifier, such as `the user's dog`, `the user's GitHub account`, `the user's company office`, or `the company where the user works`. Do not collapse these names to `dog` or `account`, and never use mixed forms such as `用户's dog`.
-- Do not extract generic or weakly resolved mentions, such as `a dog`, `dogs as a species`, `some friend`, `an account`, or `some office`.
+- Do not extract generic mentions such as `a dog` or `dogs as a species`. In this second-pass repair stage, weak entities are allowed only when they include statement-specific qualifiers; do not output bare generic names such as `some friend`, `an account`, or `some office`.
 - `description` must be in English.
 - `type` must use the predefined Chinese label above, while `type_description` must explain that predefined type in English.
+  {% endif %}
+
+**Same-Name Entity Deduplication:**
+{% if language == "zh" %}
+
+- 同一次输出中，`entities` 必须按 `name` 去重；同一个 `name` 只能出现一次。
+- 如果多个候选实体的 `name` 完全相同，只保留一个 `entity_idx`，并让所有 triplet 引用这个唯一实体。
+- 同一个 `name` 不能同时输出为不同 `type/type_id`。
+- type 决策优先级：
+  1. 如果该 `name` 指向具体对象，优先使用真实实体类型，如 `生命体`、`组织`、`地点设施`、`软件平台`。
+  2. 只有当该 `name` 明确只是名字、昵称、代号本身，而不是被称呼的对象时，才使用 `称呼别名`。
+  3. 只有当该 `name` 表达身份、职业或类别本身，而不是某个具体人时，才使用 `角色职业`。
+  4. 如果同名候选在 `称呼别名` 与真实实体类型之间冲突，优先保留真实实体类型；只有不同名字之间才用 `别名属于`。
+- 不允许输出同名 alias entity 和 canonical entity。`别名属于` 的两端 `name` 必须不同。
+- 例如，不要同时输出 `{"name": "王总", "type": "生命体"}` 和 `{"name": "王总", "type": "称呼别名"}`。
+- 例如，如果 `导师` 指某个具体人但没有名字，应输出带限定的 `生命体`，如 `用户的未具名导师`；如果只是在说导师这个身份，才输出 `角色职业: 导师`。
+  {% else %}
+- Within one output, deduplicate `entities` by exact `name`; the same `name` may appear only once.
+- If several candidate entities have the exact same `name`, keep one `entity_idx` and make all triplets point to that single entity.
+- One `name` must not be emitted with multiple `type/type_id` values.
+- Type priority:
+  1. If the `name` refers to a concrete object, prefer the true entity type such as `生命体`, `组织`, `地点设施`, or `软件平台`.
+  2. Use `称呼别名` only when the `name` is explicitly the name, nickname, or code itself, not the object being named.
+  3. Use `角色职业` only when the `name` denotes the role, occupation, or category itself, not a specific person.
+  4. If the same-name candidate conflicts between `称呼别名` and a real entity type, keep the real entity type. Use `别名属于` only between different names.
+- Do not emit a same-name alias entity and canonical entity. The two ends of `别名属于` must have different `name` values.
+- For example, do not output both `{"name": "Mr. Wang", "type": "生命体"}` and `{"name": "Mr. Wang", "type": "称呼别名"}`.
+- If `advisor` refers to a specific unnamed person, output a qualified `生命体` such as `the user's unnamed advisor`; use `角色职业: advisor` only when the statement is about the role itself.
   {% endif %}
 
 **Semantic Memory (`is_explicit_memory`):**
@@ -519,7 +587,7 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `predicate` 只能使用上方预定义的中文关系类型。
 - `predicate_id` 必须只由 `predicate` 决定，并严格使用“本体 ID 映射”中的整数。
 - `predicate_surface` 用于记录当前陈述中更贴近原文的关系表达；它可以比 `predicate` 更自然或更细，但不得改变 `predicate_id` 和 `predicate` 的 canonical 判断。
-
+- 如果没有任何预定义关系适用，返回 `triplets: []`。
 - 不要为了保留一句抽象判断或泛因果命题，而强行构造“用户-拥有-努力”“努力-导致-回报”这类低价值 triplet。
 - `关联于` 不用于补救无法成立的关系，也不用于连接“努力”“回报”“成功”“意义”这类抽象概念。
 - `偏好` 只用于具体、明确、用户特异且值得保留的对象或目标；如果相关内容过于抽象或空泛，不要抽取 `偏好`，应改写进相关实体的 `description`。
@@ -531,7 +599,7 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `predicate` must use one of the predefined Chinese relation labels above.
 - `predicate_id` must be determined only by `predicate` and must strictly use the integer from the ontology ID mapping.
 - `predicate_surface` records the relation expression closer to the source statement; it may be more natural or specific than `predicate`, but it must not change the canonical `predicate_id` or `predicate`.
-
+- If no predefined relation fits, return `triplets: []`.
 - Do not force low-value triplets such as "user-has-effort" or "effort-causes-reward" just to preserve a generic causal belief or slogan-like proposition.
 - Do not use `关联于` as a rescue relation when no real relation exists, and do not connect abstract concepts such as "effort", "reward", "success", or "meaning" with it.
 - Use `偏好` only for concrete, specific, user-grounded objects or goals worth retaining; if the relevant content is too abstract or generic, do not extract `偏好` and instead rewrite it into the relevant entity `description`.
@@ -581,6 +649,11 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
   {% endif %}
 
 ===Examples===
+{% if language == "zh" %}
+说明：本 prompt 的真实输入一定是 unresolved statement。部分通用抽取示例只展示 entity/triplet 结构；遇到冲突时，以 unresolved repair 规则和示例 9 为准。最终输出必须以 `Output Format` 为准，始终包含 `resolved` 和 `resolution_note`。
+{% else %}
+Note: Real inputs to this prompt are always unresolved statements. Some general extraction examples only demonstrate entity/triplet structure; if there is any conflict, follow the unresolved repair rules and Example 9. The final output must still follow `Output Format` and always include `resolved` and `resolution_note`.
+{% endif %}
 {% if language == "zh" %}
 **示例 1**
 Statement: "我住在巴黎。"
@@ -714,8 +787,15 @@ Input JSON includes: `"dialog_at": "2026-03-01T09:00:00Z"`
 
 Output:
 {
-  "triplets": [],
-  "entities": []
+  "resolved": false,
+  "resolution_note": "has_unsolved_reference 为 true，且上下文未提供足够信息确定“他”和“这家公司”的专名；使用带时间和关系限定的弱实体名称。",
+  "triplets": [
+    {"subject_name": "2026年3月加入这家公司的未具名人员", "subject_id": 0, "predicate_id": 2, "predicate": "属于类型", "predicate_surface": "加入了", "predicate_description": "表达主体所属的类别、身份、职业、角色，或其与组织、群体、集合之间的归属关系。", "object_name": "2026年3月被加入的未具名公司", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "2026年3月加入这家公司的未具名人员", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2026-03-01T09:00:00Z] 2026年3月加入这家公司的未具名人员；上下文不足以确定其专名", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "2026年3月被加入的未具名公司", "type_id": 2, "type": "组织", "type_description": "公司、机构、学校、实验室、团队、社群等组织性主体。", "description": "[2026-03-01T09:00:00Z] 有未具名人员在2026年3月加入的公司；上下文不足以确定公司专名", "is_explicit_memory": false}
+  ]
 }
 {% else %}
 **Example 1**
@@ -850,8 +930,15 @@ Input JSON includes: `"dialog_at": "2026-03-01T09:00:00Z"`
 
 Output:
 {
-  "triplets": [],
-  "entities": []
+  "resolved": false,
+  "resolution_note": "`has_unsolved_reference` is true, and context is insufficient to identify the proper names of `he` and `this company`; descriptive weak entity names are used.",
+  "triplets": [
+    {"subject_name": "the unnamed person who joined this company in March 2026", "subject_id": 0, "predicate_id": 2, "predicate": "属于类型", "predicate_surface": "joined", "predicate_description": "A relation expressing the type, identity, profession, role, or organizational/group affiliation of a subject.", "object_name": "the unnamed company joined in March 2026", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "the unnamed person who joined this company in March 2026", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2026-03-01T09:00:00Z] The unnamed person who joined this company in March 2026; context is insufficient to identify the proper name.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "the unnamed company joined in March 2026", "type_id": 2, "type": "组织", "type_description": "An organizational actor such as a company, institution, school, lab, team, or community.", "description": "[2026-03-01T09:00:00Z] The unnamed company joined by an unnamed person in March 2026; context is insufficient to identify the proper name.", "is_explicit_memory": false}
+  ]
 }
 {% endif %}
 ===End of Examples===
@@ -872,10 +959,13 @@ JSON 要求：
 - 每个 triplet 都必须包含 `predicate_surface`；中文输入下使用中文或原文中的关系表达
 - 每个 triplet 都必须包含 `valid_at` 和 `invalid_at`，并与输入中的同名字段完全一致
 - 输出必须包含 `resolved`（bool）和 `resolution_note`（string）字段
-- `resolved` 为 true 表示成功从上下文消解了指代，false 表示使用描述性名称强制提取
+- `resolved` 为 true 表示所有关键指代都成功从上下文消解为稳定实体名，false 表示至少一个关键指代使用了描述性弱实体名称
+- 在输出最终 JSON 前必须做一致性检查：如果任一关键实体 `name` 或 `description` 包含 `未具名`、`未知`、`不明`，或 `resolution_note` 中写了“无法稳定解析”“上下文未提供”“未提供其名称”，则 `resolved` 必须是 `false`。
+- 只有当所有关键指代都被替换为不含 `未具名`/`未知`/`不明` 的稳定实体名时，`resolved` 才能是 `true`。
 - `resolution_note` 简要说明消解结果或无法消解的原因
-- 绝不允许返回空的 `entities` 或 `triplets`
-- 如果没有有效 triplet，使用 `关联于`(predicate_id=13) 兜底创建至少一个
+- 允许 `triplets` 为空；不要为了补救 unresolved 而使用 `关联于`(predicate_id=13) 兜底创建关系
+- 如果 `entities` 中包含弱实体，弱实体名称必须带具体限定，不能是裸代词、裸角色或裸泛称
+- 同一次输出中，`entities` 必须按 `name` 去重；同一个 `name` 不能对应多个 `type/type_id`
   {% else %}
   JSON Requirements:
 - Use standard ASCII double quotes (`"`)
@@ -890,10 +980,13 @@ JSON 要求：
 - Every triplet must include `predicate_surface`; for English input, use English or the source-text relation expression
 - Every triplet must include `valid_at` and `invalid_at`, exactly matching the input fields with the same names
 - Output must include `resolved` (bool) and `resolution_note` (string) fields
-- `resolved` is true if references were successfully resolved from context, false if descriptive names were used for forced extraction
+- `resolved` is true only if all key references were resolved to stable entity names from context; false if at least one key reference uses a descriptive weak entity name
+- Before emitting the final JSON, run a consistency check: if any key entity `name` or `description` contains markers such as `未具名`, `未知`, `不明`, `unnamed`, `unknown`, or if `resolution_note` says context is insufficient or the name is not provided, `resolved` MUST be `false`.
+- `resolved` may be `true` only when all key references are replaced by stable entity names without unnamed/unknown markers.
 - `resolution_note` briefly explains the resolution result or why resolution failed
-- NEVER return empty `entities` or `triplets`
-- If no valid triplet exists, use `关联于` (predicate_id=13) as fallback to create at least one
+- `triplets` may be empty. Do not use `关联于` (predicate_id=13) as a fallback just to repair unresolved references
+- If `entities` contains weak entities, their names must include concrete qualifiers and must not be bare pronouns, bare roles, or bare generic nouns
+- Within one output, deduplicate `entities` by `name`; one `name` must not map to multiple `type/type_id` values
   {% endif %}
 
 {% if language == "zh" %}
@@ -904,7 +997,7 @@ Output JSON structure:
 
 ```json
 {
-  "resolved": "<boolean: true if resolved, false if forced>",
+  "resolved": false,
   "resolution_note": "<string: 消解说明或无法消解的原因>",
   "entities": [
     {

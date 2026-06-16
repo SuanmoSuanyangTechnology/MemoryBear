@@ -122,7 +122,6 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
             "end_user_id": input_data.end_user_id,
             "dialog_at": input_data.dialog_at or "",
             "target_content": input_data.target_content,
-            "target_message_date": input_data.target_message_date,
             "supporting_context": {
                 "before_msgs": [
                     {"role": m.role, "msg": m.msg} for m in ctx.before_msgs
