@@ -55,7 +55,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
     const values: Record<string, any> = {}
     documentMetadataFields.map((item: MetadataField) => {
       if (item.type === 'time') {
-        values[item.name] = dayjs(item.value);
+        values[item.name] = dayjs.tz(item.value);
       } else {
         values[item.name] = item.value;
       }
@@ -96,7 +96,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
 
       Object.keys(values).forEach(key => {
         if (typeof values[key] === 'object') {
-          values[key] = values[key].format('YYYY-MM-DD HH:mm:ss');
+          values[key] = values[key].format('YYYY-MM-DD HH:mm:ssZZ');
         }
       });
 
