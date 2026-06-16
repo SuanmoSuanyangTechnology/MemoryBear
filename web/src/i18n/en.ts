@@ -2628,6 +2628,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           gte: '≥',
           before: 'Before',
           after: 'After',
+          metadataTip: 'Only metadata fields common to all selected knowledge bases can be configured',
         },
         'parameter-extractor': {
           model_id: 'Model',

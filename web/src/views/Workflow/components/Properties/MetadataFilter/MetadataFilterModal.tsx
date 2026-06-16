@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { useTranslation } from 'react-i18next';
-import { Form, Button, Select, Input, Space, Row, Col, type SelectProps, Flex, Divider, InputNumber } from 'antd';
+import { Form, Button, Select, Input, Space, Row, Col, type SelectProps, Flex, Divider, InputNumber, DatePicker } from 'antd';
 import clsx from 'clsx';
 
 import RbModal from '@/components/RbModal';
@@ -9,6 +9,8 @@ import VariableSelect from '../VariableSelect'
 import { getPublicMetadataFields } from '@/api/knowledgeBase';
 import type { MetadataField } from '@/views/KnowledgeBase/types'
 import Tag from '@/components/Tag'
+import type { Dayjs } from "dayjs";
+import dayjs from "dayjs";
 
 export interface MetadataFilterModalRef {
   open: (metadata_filters: { conditions: FilterCondition[], logic: 'or' | 'and' }) => void;
@@ -25,7 +27,7 @@ export interface FilterCondition {
   field: string;
   operator: string;
   value_type: 'constant' | 'variable';
-  value: string;
+  value: string | Dayjs;
 }
 
 const operatorsObj: { [key: string]: SelectProps['options'] } = {
@@ -87,9 +89,7 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
     form.resetFields();
   }
   const handleOpen = (metadata_filters: { conditions: FilterCondition[], logic: 'or' | 'and' }) => {
-    form.setFieldsValue({
-      metadata_filters
-    });
+    console.log('metadata_filters', metadata_filters)
     setLogicalOperator(metadata_filters.logic || 'and');
     setOpen(true);
 
@@ -97,16 +97,38 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
       getPublicMetadataFields({ kb_ids })
         .then(res => {
           const { custom, builtin_fields } = res as { custom: MetadataField[], builtin_fields: MetadataField[] };
-          setMetadataFields([...custom, ...builtin_fields]);
+          const allMetadataFields = [...custom, ...builtin_fields]
+          setMetadataFields(allMetadataFields);
+
+          // 将 time 类型字段的值转换为 dayjs 格式
+          const processedConditions = metadata_filters.conditions.map(item => {
+            const fieldType = allMetadataFields.find(f => f.name === item.field)?.type;
+            if (fieldType === 'time' && item.value && typeof item.value === 'string') {
+              return { ...item, value: dayjs(item.value) };
+            }
+            return item;
+          });
+          form.setFieldsValue({
+            metadata_filters: {
+              ...metadata_filters,
+              conditions: processedConditions
+            }
+          });
         })
     }
   }
+  
 
   const handleSave = () => {
     form.validateFields().then((values) => {
       const { metadata_filters } = values;
       const validFilters = metadata_filters?.conditions?.filter((v: FilterCondition) => v.field && v.value);
-      onSave({ conditions: validFilters, logic: logicalOperator });
+      onSave({ conditions: validFilters.map((vo: FilterCondition) => ({
+        ...vo,
+        value: typeof vo.value === 'object' && vo.value !== null
+          ? vo.value.format('YYYY-MM-DD HH:mm:ssZZ')
+          : vo.value
+      })), logic: logicalOperator });
       handleCancel();
     });
   };
@@ -119,21 +141,21 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
           ...conditions[index],
           operator: 'eq',
           field: newValue,
-          value: lastFilter.value_type === 'variable' ? undefined : lastFilter.value
+          value: lastFilter.value_type === 'variable'
+            ? undefined
+            : lastFilter.value
         }
       }
     });
   };
 
   const handleInputTypeChange = (index: number) => {
-    form.setFieldValue(['metadata_filters', index, 'value'], undefined);
+    form.setFieldValue(['metadata_filters', 'conditions', index, 'value'], undefined);
   };
 
   const handleChangeLogicalOperator = () => {
     setLogicalOperator(prev => prev === 'and' ? 'or' : 'and');
   };
-
-  console.log('logicalOperator', logicalOperator)
 
   return (
     <RbModal
@@ -176,10 +198,10 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
                     const currentCondition = conditions?.[index] || {};
                     const currentOperator = currentCondition.operator;
                     const leftFieldValue = currentCondition.field;
-                    const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue)
+                    const leftFieldOption = metadataFields.find(option => option.name === leftFieldValue)
                       ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === leftFieldValue)
                       ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === leftFieldValue);
-                    const leftFieldType = leftFieldOption?.dataType;
+                    const leftFieldType = leftFieldOption?.type;
                     const hideRightField = currentOperator === 'is_empty' || currentOperator === 'not_empty';
                     const operatorList = leftFieldType && ['array[object]', 'object'].includes(leftFieldType)
                       ? operatorsObj.object
@@ -190,7 +212,7 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
                       : leftFieldType?.includes('array')
                       ? operatorsObj.array
                       : operatorsObj.default
-                    const valueType = leftFieldType === 'number' ? currentCondition.value_type : undefined;
+                    const valueType = currentCondition.value_type;
                     return (
                       <Flex
                         key={field.key} 
@@ -257,12 +279,22 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
                                         variant="borderless"
                                       />
                                     )
-                                    : leftFieldType === 'number' ? (
+                                    : leftFieldType === 'number'
+                                    ? (
                                       <InputNumber
                                         placeholder={t('common.pleaseEnter')}
                                         variant="borderless"
                                         className="rb:w-full!"
                                         onChange={(value) => form.setFieldValue(['metadata_filters', index, 'value'], value)}
+                                      />
+                                    )
+                                    : leftFieldType === 'time'
+                                    ? (
+                                      <DatePicker
+                                        showTime
+                                        format="YYYY-MM-DD HH:mm:ssZZ"
+                                        className="rb:w-full!"
+                                        variant="borderless"
                                       />
                                     )
                                     : (
