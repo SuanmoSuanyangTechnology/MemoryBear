@@ -152,29 +152,53 @@ class Layer2Inspector:
         当前已实现子问题 3（去重）和 6（描述合并），其他预留。
         """
         results = {}
+        run_t0 = time.perf_counter()
+        logger.info(f"[Layer2] 巡检开始 end_user_id={end_user_id}, baseline={baseline}")
 
         # TODO: 子问题 1 — 过期检测（stale_detection）
         # TODO: 子问题 2 — 事实矛盾检测（fact_contradiction）
-       
-        # 子问题 5 — 未识别实体处理（unresolved_entity）
-        results["unresolved_entity"] = await self._run_unresolved_resolver(
+
+        # 未识别实体处理：把"未识别实体"语句解析成正式实体/关系并入图
+        unresolved = await self._run_unresolved_resolver(
             end_user_id, baseline, language
         )
+        results["unresolved_entity"] = unresolved
+        logger.info(
+            f"[Layer2 高频] 未识别实体处理完成 end_user_id={end_user_id}, "
+            f"候选={unresolved.get('total', 0)}, 解析={unresolved.get('resolved', 0)}, "
+            f"强制入库={unresolved.get('forced', 0)}, 失败={unresolved.get('failed', 0)}"
+        )
 
-        # 别名归并 — 处理 "别名属于" 关系（确定性 Cypher，无 LLM）
-        # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点，
+        # 别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+        # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点
         results["alias_merge"] = await self._run_alias_merge(end_user_id)
 
-        # 子问题 3 — 复杂去重消歧（entity_dedup）
-        results["entity_dedup"] = await self._run_entity_dedup(end_user_id, baseline)
+        # 复杂去重消歧：两路召回候选 + LLM 判定后合并重复实体
+        dedup = await self._run_entity_dedup(end_user_id, baseline)
+        results["entity_dedup"] = dedup
+        logger.info(
+            f"[Layer2 高频] 实体去重完成 end_user_id={end_user_id}, "
+            f"候选={dedup.get('candidate_count', 0)}, LLM判定={dedup.get('llm_pool', 0)}, "
+            f"合并={dedup.get('merged_count', 0)}, 记录未合并={dedup.get('recorded_count', 0)}"
+        )
 
-        # 子问题 6 — 描述合并
-        results["description_merge"] = await self._run_description_merge(
+        # 描述合并：把同一实体的多条描述合并、必要时更名
+        desc = await self._run_description_merge(
             end_user_id, baseline, language
+        )
+        results["description_merge"] = desc
+        logger.info(
+            f"[Layer2 高频] 描述合并完成 end_user_id={end_user_id}, "
+            f"候选={desc.get('candidate_count', 0)}, 合并={desc.get('merged_count', 0)}, "
+            f"失败={desc.get('failed_count', 0)}"
         )
 
         # TODO: 子问题 4 — 本体 Metadata 校验（metadata_validation）
 
+        logger.info(
+            f"[Layer2 高频] 巡检结束 end_user_id={end_user_id}, "
+            f"耗时={time.perf_counter() - run_t0:.2f}s"
+        )
         return results
 
     async def _run_alias_merge(self, end_user_id: str) -> Dict[str, Any]:
@@ -300,7 +324,16 @@ class Layer2Inspector:
 
     async def run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重（公共入口）"""
-        return await self._run_dedup_full_scan(end_user_id)
+        t0 = time.perf_counter()
+        logger.info(f"[Layer2 低频] 全量去重开始 end_user_id={end_user_id}")
+        result = await self._run_dedup_full_scan(end_user_id)
+        logger.info(
+            f"[Layer2 低频] 全量去重完成 end_user_id={end_user_id}, "
+            f"扫描类型={result.get('scanned_types', 0)}, "
+            f"合并={result.get('merged_count', 0)}, "
+            f"耗时={time.perf_counter() - t0:.2f}s"
+        )
+        return result
 
     async def _run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重"""
