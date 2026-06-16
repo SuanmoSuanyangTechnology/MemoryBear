@@ -27,15 +27,17 @@ logger = logging.getLogger(__name__)
 
 class S3Storage(StorageBackend):
     """
-    AWS S3 storage implementation.
+    AWS S3-compatible storage implementation.
 
     This class implements the StorageBackend interface for storing files
-    on AWS Simple Storage Service (S3).
+    on AWS Simple Storage Service (S3) or S3-compatible services (e.g., MinIO)
+    using the boto3 SDK.
 
     Attributes:
         client: The boto3 S3 client instance.
         bucket_name: The name of the S3 bucket.
         region: The AWS region.
+        endpoint_url: The endpoint URL (AWS or custom S3-compatible endpoint).
     """
     AMAZON_S3_ENDPOINT_MAP = {
         "us-east-1": "https://s3.us-east-1.amazonaws.com",  # 特殊：无地域后缀
@@ -94,6 +96,8 @@ class S3Storage(StorageBackend):
             else:
                 endpoint_url = f"https://s3.{region}.amazonaws.com"
 
+        self.endpoint_url = endpoint_url
+
         try:
             self.client = boto3.client(
                 "s3",
@@ -103,7 +107,8 @@ class S3Storage(StorageBackend):
                 aws_secret_access_key=secret_access_key,
             )
             logger.info(
-                f"S3Storage initialized with region: {region}, bucket: {bucket_name}"
+                f"S3Storage initialized with region: {region}, bucket: {bucket_name}, "
+                f"endpoint: {endpoint_url}"
             )
         except NoCredentialsError as e:
             logger.error(f"Invalid AWS credentials: {e}")
@@ -117,6 +122,34 @@ class S3Storage(StorageBackend):
                 message=f"Failed to initialize S3 client: {e}",
                 cause=e,
             )
+
+        # Auto-create bucket if it doesn't exist (useful for MinIO / self-hosted S3)
+        try:
+            self.client.head_bucket(Bucket=bucket_name)
+            logger.info(f"Bucket '{bucket_name}' already exists")
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in ("404", "NoSuchBucket"):
+                try:
+                    if region == "us-east-1":
+                        # us-east-1 has special create_bucket behavior (no LocationConstraint)
+                        self.client.create_bucket(Bucket=bucket_name)
+                    else:
+                        self.client.create_bucket(
+                            Bucket=bucket_name,
+                            CreateBucketConfiguration={"LocationConstraint": region},
+                        )
+                    logger.info(f"Bucket '{bucket_name}' created automatically")
+                except ClientError as create_err:
+                    logger.warning(
+                        f"Failed to create bucket '{bucket_name}': {create_err}. "
+                        f"Upload will fail if bucket does not exist."
+                    )
+            else:
+                logger.warning(
+                    f"Failed to check bucket '{bucket_name}' existence: {e}. "
+                    f"Proceeding anyway."
+                )
 
     async def upload(
         self,
@@ -384,13 +417,26 @@ class S3Storage(StorageBackend):
             return url
         except Exception as e:
             logger.error(f"Failed to generate presigned URL for {file_key}: {e}")
+            # Fallback: construct URL manually based on endpoint type
+            if self.endpoint_url and "amazonaws.com" not in self.endpoint_url:
+                return f"{self.endpoint_url}/{self.bucket_name}/{file_key}"
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
 
     async def get_permanent_url(self, file_key: str) -> str:
         """
         Get a permanent public URL for the file (requires bucket public read).
 
+        For custom S3-compatible endpoints (MinIO etc.), returns:
+            {endpoint_url}/{bucket_name}/{file_key}
+
+        For AWS S3, returns:
+            https://{bucket_name}.s3.{region}.amazonaws.com/{file_key}
+
         Returns:
-            A permanent URL in the format: https://{bucket}.s3.{region}.amazonaws.com/{file_key}
+            A permanent URL for the file.
         """
+        # Custom S3-compatible endpoint (MinIO, Ceph, etc.)
+        if self.endpoint_url and "amazonaws.com" not in self.endpoint_url:
+            return f"{self.endpoint_url}/{self.bucket_name}/{file_key}"
+        # AWS S3 standard format
         return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"

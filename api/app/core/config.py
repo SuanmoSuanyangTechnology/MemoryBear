@@ -118,6 +118,14 @@ class Settings:
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")
     S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
 
+    # MinIO Configuration (required when STORAGE_TYPE=minio)
+    # MinIO is a self-hosted S3-compatible object storage, ideal for development
+    MINIO_ENDPOINT_URL: str = os.getenv("MINIO_ENDPOINT_URL", "")
+    MINIO_ACCESS_KEY_ID: str = os.getenv("MINIO_ACCESS_KEY_ID", "")
+    MINIO_SECRET_ACCESS_KEY: str = os.getenv("MINIO_SECRET_ACCESS_KEY", "")
+    MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "")
+    MINIO_REGION: str = os.getenv("MINIO_REGION", "")
+
     # VOLC ASR settings
     VOLC_APP_KEY: str = os.getenv("VOLC_APP_KEY", "")
     VOLC_ACCESS_KEY: str = os.getenv("VOLC_ACCESS_KEY", "")
