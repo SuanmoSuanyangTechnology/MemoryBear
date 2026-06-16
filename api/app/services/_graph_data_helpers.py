@@ -10,7 +10,7 @@ Validates: Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 6.1, 6.3, 6.4,
 import logging
 import math
 from logging import Logger
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from app.core.memory.constants.graph_data_constants import (
     DEFAULT_PER_TYPE_LIMIT_MAP,
@@ -443,7 +443,7 @@ def assemble_center_per_type_stat(
 
 def build_edge_groups(
     edges: Iterable[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
     """聚合「同一对节点之间的多条边」并按方向分桶（纯逻辑）。
 
     业务背景：``EXTRACTED_RELATIONSHIP`` 等关系常常出现在同一对实体之间多次，
@@ -454,25 +454,36 @@ def build_edge_groups(
     
     Args:
         edges: 已经装配好的响应边列表。每项至少含 ``id`` / ``source`` /
-            ``target`` 三个字符串键；其它字段（type / properties / caption）
-            本函数不读取，由调用方维护。
+            ``target`` 三个字符串键；还会读取 ``type`` / ``properties``
+            以填充 edge_groups 中的边对象。
+
+    说明：仅聚合 ``type == "EXTRACTED_RELATIONSHIP"`` 的边（实体间语义关系），
+    其他边类型（如 REFERENCES_ENTITY）不参与聚合。
 
     Returns:
-        ``edge_groups`` 字段对应的列表。每个元素形如::
+        ``(edge_groups, grouped_edge_ids)`` 二元组：
+        - ``edge_groups``: 聚合后的分组列表，每个元素形如::
 
             {
                 "node_a": "A",
                 "node_b": "B",
                 "total": 3,
-                "a_to_b": ["e1", "e3"],
-                "b_to_a": ["e2"],
+                "edge_type": "双向多维边",
+                "a_to_b": [
+                    {"id": "e1", "type": "EXTRACTED_RELATIONSHIP", "predicate": "相关于", "predicate_surface": "和...有关", "predicate_description": "表达实体间的相关关系"},
+                    ...
+                ],
+                "b_to_a": [...],
             }
 
-        当不存在任何重边对时返回 ``[]``。
+        - ``grouped_edge_ids``: 已被聚合的边 id 集合，调用方应从 ``edges``
+          中剔除这些边，避免与 ``edge_groups`` 重复。
+
+        当不存在任何重边对时返回 ``([], set())``。
     """
     # 用 dict 收口，键 = (node_a, node_b) 元组（已字典序排序）。
-    # 值同时记录两个方向的边 id 列表，避免二次遍历。
-    groups: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
+    # 值同时记录两个方向的边对象列表（含 id/type/predicate_description）。
+    groups: Dict[Tuple[str, str], Dict[str, List[Dict[str, Any]]]] = {}
 
     for edge in edges:
         edge_id = edge.get("id")
@@ -483,6 +494,20 @@ def build_edge_groups(
         if source == target:
             # 自环不属于「双向重边」语义，跳过。
             continue
+
+        # 仅聚合 EXTRACTED_RELATIONSHIP 类型的边
+        rel_type = edge.get("type", "")
+        if rel_type != "EXTRACTED_RELATIONSHIP":
+            continue
+
+        edge_props = edge.get("properties") or {}
+        edge_item = {
+            "id": edge_id,
+            "type": rel_type,
+            "predicate": edge_props.get("predicate"),
+            "predicate_surface": edge_props.get("predicate_surface"),
+            "predicate_description": edge.get("predicate_description"),
+        }
 
         if source < target:
             node_a, node_b = source, target
@@ -496,22 +521,41 @@ def build_edge_groups(
         if bucket is None:
             bucket = {"a_to_b": [], "b_to_a": []}
             groups[(node_a, node_b)] = bucket
-        bucket[direction].append(edge_id)
+        bucket[direction].append(edge_item)
 
     result: List[Dict[str, Any]] = []
+    grouped_edge_ids: Set[str] = set()
     for (node_a, node_b), bucket in sorted(groups.items()):
-        total = len(bucket["a_to_b"]) + len(bucket["b_to_a"])
+        a_to_b_count = len(bucket["a_to_b"])
+        b_to_a_count = len(bucket["b_to_a"])
+        total = a_to_b_count + b_to_a_count
         if total < 2:
             # 单边对不进 edge_groups；它已经在顶层 edges 中，前端无需再聚合。
             continue
+
+        # 收集被聚合的边 id
+        for item in bucket["a_to_b"]:
+            grouped_edge_ids.add(item["id"])
+        for item in bucket["b_to_a"]:
+            grouped_edge_ids.add(item["id"])
+
+        # 计算 edge_type
+        if total == 2 and a_to_b_count == 1 and b_to_a_count == 1:
+            edge_type = "双向边"
+        elif a_to_b_count > 0 and b_to_a_count > 0:
+            edge_type = "双向多维边"
+        else:
+            edge_type = "单向多维边"
+
         result.append({
             "node_a": node_a,
             "node_b": node_b,
             "total": total,
+            "edge_type": edge_type,
             "a_to_b": bucket["a_to_b"],
             "b_to_a": bucket["b_to_a"],
         })
-    return result
+    return result, grouped_edge_ids
 
 
 # ---------------------------------------------------------------------------

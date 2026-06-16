@@ -33,6 +33,10 @@ class GraphEdge(BaseModel):
     type: str = Field(..., description="关系类型（type(r)）")
     properties: Dict[str, Any] = Field(default_factory=dict, description="关系属性")
     caption: str = Field(..., description="前端展示文案，缺省时由 service 层填充关系类型")
+    predicate_description: Optional[str] = Field(
+        default=None,
+        description="关系描述，仅在 EXTRACTED_RELATIONSHIP 等关系类型上存在",
+    )
 
 
 class PerTypeStat(BaseModel):
@@ -73,6 +77,24 @@ class GraphStatistics(BaseModel):
     )
 
 
+class EdgeGroupItem(BaseModel):
+    """edge_groups 中 a_to_b / b_to_a 的边条目，携带边类型和关系描述。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., description="边 elementId")
+    type: str = Field(..., description="关系类型")
+    predicate: Optional[str] = Field(
+        default=None, description="关系谓词"
+    )
+    predicate_surface: Optional[str] = Field(
+        default=None, description="关系原文表述"
+    )
+    predicate_description: Optional[str] = Field(
+        default=None, description="关系描述"
+    )
+
+
 class GraphEdgeGroup(BaseModel):
     """同一对节点之间的多边聚合（含双向）。
 
@@ -89,13 +111,21 @@ class GraphEdgeGroup(BaseModel):
     node_a: str = Field(..., description="按 elementId 字典序较小的端点")
     node_b: str = Field(..., description="按 elementId 字典序较大的端点")
     total: int = Field(..., ge=2, description="本组涵盖的边总数（双向合计），最少 2")
-    a_to_b: List[str] = Field(
-        default_factory=list,
-        description="source=node_a, target=node_b 的边 id 列表；按 edges 中出现顺序",
+    edge_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "边的种类：'单向多维边'（复数边指向同一方向）、"
+            "'双向边'（恰好 2 条边双向各一）、"
+            "'双向多维边'（>=3 条边且双向均有）"
+        ),
     )
-    b_to_a: List[str] = Field(
+    a_to_b: List[EdgeGroupItem] = Field(
         default_factory=list,
-        description="source=node_b, target=node_a 的边 id 列表；按 edges 中出现顺序",
+        description="source=node_a, target=node_b 的边列表；按 edges 中出现顺序",
+    )
+    b_to_a: List[EdgeGroupItem] = Field(
+        default_factory=list,
+        description="source=node_b, target=node_a 的边列表；按 edges 中出现顺序",
     )
 
 

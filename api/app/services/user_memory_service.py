@@ -1764,7 +1764,10 @@ async def analytics_graph_data(
         edges, edge_type_counts = await _format_edges(node_ids)
 
         # 6.1 同对节点重边聚合（双向分桶）。仅依赖 edges 列表，纯逻辑无 IO。
-        edge_groups = build_edge_groups(edges)
+        edge_groups, grouped_edge_ids = build_edge_groups(edges)
+
+        # 6.2 从 edges 中剔除已聚合到 edge_groups 的边，避免重复
+        edges = [e for e in edges if e["id"] not in grouped_edge_ids]
 
         # 7. Q4 全量计数 + statistics.per_type 装配
         per_type_stat = await _build_per_type_stat(
@@ -1929,10 +1932,13 @@ async def _format_edges(
         if source not in node_id_set or target not in node_id_set:
             continue
         rel_type = record.get("rel_type")
+        raw_props = record.get("properties") or {}
         cleaned_edge_props = {
-            key: _clean_neo4j_value(value)
-            for key, value in (record.get("properties") or {}).items()
+            key: _clean_neo4j_value(value) for key, value in raw_props.items()
         }
+        predicate_description = _clean_neo4j_value(
+            raw_props.get("predicate_description")
+        )
         edges.append({
             "id": record.get("id"),
             "source": source,
@@ -1940,6 +1946,7 @@ async def _format_edges(
             "type": rel_type,
             "properties": cleaned_edge_props,
             "caption": _resolve_edge_caption(rel_type, cleaned_edge_props),
+            "predicate_description": predicate_description if predicate_description else None,
         })
         edge_type_counts[rel_type] = edge_type_counts.get(rel_type, 0) + 1
 
@@ -2003,6 +2010,7 @@ def _empty_graph_response(message: str) -> Dict[str, Any]:
     return {
         "nodes": [],
         "edges": [],
+        "edge_groups": [],
         "statistics": {
             "total_nodes": 0,
             "total_edges": 0,
@@ -2163,11 +2171,14 @@ async def analytics_community_graph_data(
                 r_props = {k: _clean_neo4j_value(v) for k, v in (row["r_props"] or {}).items()}
                 source = e_id if row.get("r_from_e") else e2_id
                 target = e2_id if row.get("r_from_e") else e_id
-                edges_map[r_id] = {
+                edge_entry: Dict[str, Any] = {
                     "id": r_id,
                     "source": source,
                     "target": target,
+                    "properties": r_props,
+                    "predicate_description": r_props.get("predicate_description"),
                 }
+                edges_map[r_id] = edge_entry
 
         nodes = list(nodes_map.values())
         edges = list(edges_map.values())
