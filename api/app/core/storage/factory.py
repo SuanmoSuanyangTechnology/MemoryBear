@@ -96,7 +96,7 @@ class StorageFactory:
             # to avoid AWS-specific LocationConstraint issues when
             # MINIO_REGION is empty or a custom value.
             return S3Storage(
-                region=settings.MINIO_REGION or "us-east-1",
+                region=settings.MINIO_REGION,
                 access_key_id=settings.MINIO_ACCESS_KEY_ID,
                 secret_access_key=settings.MINIO_SECRET_ACCESS_KEY,
                 bucket_name=settings.MINIO_BUCKET_NAME,

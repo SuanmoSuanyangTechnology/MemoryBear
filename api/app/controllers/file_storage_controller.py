@@ -62,31 +62,6 @@ def _match_scheme(request: Request, url: str) -> str:
         return "http://" + url[8:]
     return url
 
-def _is_internal_host(url: str) -> bool:
-    """
-    判断 URL 的主机是否为内网/本机地址。
-
-    用于 /public-url：如果存储后端返回的是 localhost/私有 IP 等浏览器无法直接
-    访问的地址，则降级为应用自身的永久下载入口。
-    """
-    parsed = urlparse(url)
-    host = parsed.hostname
-    if not host:
-        return True
-    if host.lower() in ("localhost",):
-        return True
-    parts = host.split(".")
-    if len(parts) == 4 and all(p.isdigit() for p in parts):
-        ip = [int(p) for p in parts]
-        if ip[0] == 10:
-            return True
-        if ip[0] == 172 and 16 <= ip[1] <= 31:
-            return True
-        if ip[0] == 192 and ip[1] == 168:
-            return True
-        if ip[0] == 127:
-            return True
-    return False
 
 @router.post("/files", response_model=ApiResponse)
 async def upload_file(
@@ -657,10 +632,6 @@ async def get_permanent_file_url(
             if not url:
                 raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
                                     detail="Permanent URL not supported for current storage backend")
-            # 如果 permanent URL 指向内网/本机地址（如 Docker 里的 MinIO），
-            # 浏览器或其他设备可能无法直接访问，降级为应用自身的永久公开下载入口。
-            if _is_internal_host(url):
-                url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
 
         api_logger.info(f"Generated permanent URL: file_id={file_id}")
         return success(
