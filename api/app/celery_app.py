@@ -117,9 +117,6 @@ celery_app.conf.update(
         # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
         'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
 
-        # Async metadata extraction → memory_tasks queue
-        'app.tasks.extract_metadata_batch': {'queue': 'memory_tasks'},
-
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
