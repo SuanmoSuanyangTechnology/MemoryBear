@@ -240,7 +240,27 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     // If children not loaded, load them
     if (!node.isLeaf && (!node.children || node.children.length === 0)) {
       loadFolderChildren(node.key).then(children => {
-        updateTreeNodeChildren(node.key, children)
+        const selectedIds = selectedList.map(item => item.id)
+        const allSelected = children.length > 0 && children.every(child => selectedIds.includes(child.key))
+        
+        if (children.length === 0 || allSelected) {
+          setTreeData(prev => {
+            const markAsLeaf = (nodes: TreeNode[]): TreeNode[] => {
+              return nodes.map(n => {
+                if (n.key === node.key) {
+                  return { ...n, isLeaf: true }
+                }
+                if (n.children) {
+                  return { ...n, children: markAsLeaf(n.children) }
+                }
+                return n
+              })
+            }
+            return markAsLeaf(prev)
+          })
+        } else {
+          updateTreeNodeChildren(node.key, children)
+        }
       })
     }
 
@@ -248,7 +268,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   }
 
   // Handle selection (both check and select)
-  const handleSelectNode = (keys: Key[], info: { node: any }) => {
+  const handleSelectNode = (_keys: Key[], info: { node: any }) => {
     const node = info.node as TreeNode
     
     // Skip if it's a load more node
@@ -265,7 +285,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   }
 
   // Handle tree check (same as select)
-  const handleCheck = (checked: Key[] | { checked: Key[]; halfChecked: Key[] }, info: any) => {
+  const handleCheck = (checked: Key[] | { checked: Key[]; halfChecked: Key[] }) => {
     const keys = Array.isArray(checked) ? checked : checked.checked
     setCheckedIds(keys)
     setCheckedRows(getCheckedItems(treeData, keys))
