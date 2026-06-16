@@ -179,11 +179,26 @@ class Layer2Inspector:
 
         # 复杂去重消歧：两路召回候选 + LLM 判定后合并重复实体
         dedup = await self._run_entity_dedup(end_user_id, baseline)
+
+
         results["entity_dedup"] = dedup
         logger.info(
             f"[Layer2 高频] 实体去重完成 end_user_id={end_user_id}, "
             f"候选={dedup.get('candidate_count', 0)}, LLM判定={dedup.get('llm_pool', 0)}, "
             f"合并={dedup.get('merged_count', 0)}, 记录未合并={dedup.get('recorded_count', 0)}"
+        )
+
+
+        # 子问题 7 — 用户实体元数据提取
+        # 放在 description_merge 之前：metadata 提取的输入是 description 原始碎片，
+        # description_merge 会清空 description 并写入 description_summary
+        meta = await self._run_metadata_extraction(
+            end_user_id, language
+        )
+        results["metadata_extraction"] = meta
+        logger.info(
+            f"[Layer2 高频] 元数据提取完成 end_user_id={end_user_id}, "
+            f"提取={meta.get('extracted', 0)}, 失败={meta.get('failed', 0)}"
         )
 
         # 描述合并：把同一实体的多条描述合并、必要时更名
@@ -217,6 +232,38 @@ class Layer2Inspector:
             return await merge_alias_belongs_to(self.connector, end_user_id)
         except Exception as e:
             logger.warning(f"[AliasMerge] 执行失败 end_user_id={end_user_id}: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def _run_metadata_extraction(self, end_user_id: str,
+                                       language: str = "zh") -> Dict[str, Any]:
+        """子问题 7：用户实体元数据提取。
+
+        从 Neo4j 中读取当前用户的 User 实体及其 description，
+        调用 MetadataExtractionStep 进行 LLM 结构化提取，
+        将 patch operations 回写 Neo4j 并同步 PostgreSQL。
+
+        门控：description 碎片数 >= min_fragments（默认 5）才触发提取，
+        与 description_merge 共用同一阈值配置。
+        放在 entity_dedup 之后、description_merge 之前执行：
+        metadata 提取需要 description 原始碎片，而 description_merge 会将其清空。
+        """
+        try:
+            from app.core.memory.storage_services.reflection_engine.deterministic.extract_metadata_service import (
+                extract_metadata_for_user,
+            )
+
+            result = await extract_metadata_for_user(
+                connector=self.connector,
+                llm_client=self.llm_client,
+                end_user_id=end_user_id,
+                language=language,
+                min_fragments=self.desc_config.min_fragments,
+            )
+            return {"status": "success", **result}
+        except Exception as e:
+            logger.warning(
+                f"[Metadata] 元数据提取失败 end_user_id={end_user_id}: {e}"
+            )
             return {"status": "error", "error": str(e)}
 
     async def _run_entity_dedup(self, end_user_id: str, baseline: str) -> Dict[str, Any]:

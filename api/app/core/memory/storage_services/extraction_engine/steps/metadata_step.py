@@ -1,7 +1,8 @@
 """MetadataExtractionStep — 用户实体元数据提取 step。
 
 从用户实体的 description 中提取结构化元数据（core_facts、traits、relations 等），
-通过 Celery 异步任务在去重消歧完成后执行，结果回写到 Neo4j ExtractedEntity 节点。
+通过 Celery 异步任务在去重消歧完成后执行，结果以 patch operations 的形式回写到
+Neo4j ExtractedEntity 节点。
 
 不注册为 SidecarStepFactory 的自动旁路（因为它在去重后异步执行，不在主萃取流程中），
 而是由 Celery 任务直接实例化调用。
@@ -70,20 +71,27 @@ class MetadataExtractionStep(ExtractionStep[MetadataStepInput, MetadataStepOutpu
     async def parse_response(
         self, raw_response: Any, input_data: MetadataStepInput
     ) -> MetadataStepOutput:
-        """将 LLM 响应解析为 MetadataStepOutput。"""
+        """将 LLM 响应解析为 MetadataStepOutput。
+
+        仅识别新 schema 的 ``operations``。无效输出统一返回空结果，由
+        上层日志告警，不再尝试任何旧 schema 的兼容回退。
+
+        ``dropped_ops_count`` 从 ``MetadataExtractionResponse`` 的 before-validator
+        传递到输出，使调用方可在日志/快照中追踪被丢弃的无效 op。
+        """
         if raw_response is None:
             return self.get_default_output()
 
+        operations = list(getattr(raw_response, "operations", []) or [])
+
+        # _dropped_ops_count 由 MetadataExtractionResponse._filter_operations 写入
+        # data dict；由于 extra="ignore" 不会成为实例属性，此处用 getattr 安全取值。
+        dropped_ops_count = getattr(raw_response, "_dropped_ops_count", 0) or 0
+
         return MetadataStepOutput(
-            core_facts=getattr(raw_response, "core_facts", []) or [],
-            traits=getattr(raw_response, "traits", []) or [],
-            relations=getattr(raw_response, "relations", []) or [],
-            goals=getattr(raw_response, "goals", []) or [],
-            interests=getattr(raw_response, "interests", []) or [],
-            beliefs_or_stances=getattr(raw_response, "beliefs_or_stances", []) or [],
-            anchors=getattr(raw_response, "anchors", []) or [],
-            events=getattr(raw_response, "events", []) or [],
+            operations=operations,
+            dropped_ops_count=dropped_ops_count,
         )
 
     def get_default_output(self) -> MetadataStepOutput:
-        return MetadataStepOutput()
+        return MetadataStepOutput(operations=[])
