@@ -572,10 +572,11 @@ class VariablePoolInitializer:
                 # Convert FileInput-format dicts to full FileObject dicts
                 if var_type == VariableType.FILE:
                     if not var_value:
-                        continue
-                    var_value = await self._resolve_file_default(var_value)
-                    if not var_value:
-                        continue
+                        var_value = None
+                    else:
+                        var_value = await self._resolve_file_default(var_value)
+                        if not var_value:
+                            var_value = None
                 elif var_type == VariableType.ARRAY_FILE:
                     if not var_value:
                         var_value = []

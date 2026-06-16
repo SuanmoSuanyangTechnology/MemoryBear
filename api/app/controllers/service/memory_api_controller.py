@@ -99,7 +99,6 @@ async def read_memory_sync(
 
     memory_config = get_config(payload.end_user_id, db)
     service = MemoryService(
-        db,
         memory_config["memory_config_id"],
         end_user_id=payload.end_user_id,
     )

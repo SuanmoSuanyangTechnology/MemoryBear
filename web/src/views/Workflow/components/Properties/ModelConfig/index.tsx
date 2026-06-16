@@ -19,12 +19,14 @@ interface ModelConfigProps {
   variableOptions: Suggestion[];
   needLabel?: boolean;
   name?: string;
+  hideStructuredOutputConfig?: boolean;
 }
 const ModelConfig: FC<ModelConfigProps> = ({
   parentName,
   variableOptions,
   needLabel = true,
-  name = 'model_id'
+  name = 'model_id',
+  hideStructuredOutputConfig
 }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
@@ -90,6 +92,7 @@ const ModelConfig: FC<ModelConfigProps> = ({
         name={name}
         refresh={handleRefresh}
         variableOptions={variableOptions}
+        hideStructuredOutputConfig={hideStructuredOutputConfig}
       />
     </>
   );

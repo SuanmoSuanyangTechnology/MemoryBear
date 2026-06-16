@@ -1,5 +1,6 @@
-
+import asyncio
 from typing import Any, Dict, List, Union
+
 from langchain_core.embeddings import Embeddings
 
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
@@ -31,12 +32,13 @@ class RedBearEmbeddings(Embeddings):
         # (e.g. enable_thinking, model_kwargs) — build params directly.
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
             import httpx
+            timeout = httpx.Timeout(timeout=config.timeout, connect=60.0)
             params = {
                 "model": config.model_name,
                 "base_url": config.base_url,
                 "api_key": config.api_key,
-                "timeout": httpx.Timeout(timeout=config.timeout, connect=60.0),
-                "max_retries": config.max_retries
+                "timeout": timeout,
+                "max_retries": config.max_retries,
             }
         elif provider == ModelProvider.DASHSCOPE:
             params = {
@@ -61,11 +63,10 @@ class RedBearEmbeddings(Embeddings):
         return Ark(api_key=config.api_key, base_url=config.base_url)
 
     # ==================== LangChain 标准接口 ====================
-    
+
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """批量文本向量化（LangChain 标准接口）"""
         if self._is_volcano:
-            # 火山引擎多模态 Embedding
             contents = [{"type": "text", "text": text} for text in texts]
             response = self._client.multimodal_embeddings.create(
                 model=self._config.model_name,
@@ -74,18 +75,30 @@ class RedBearEmbeddings(Embeddings):
             )
             return [response.data.embedding]
         else:
-            # 其他 provider
             return self._model.embed_documents(texts)
 
     def embed_query(self, text: str) -> List[float]:
         """单个文本向量化（LangChain 标准接口）"""
         if self._is_volcano:
-            # 火山引擎多模态 Embedding
             result = self.embed_documents([text])
             return result[0] if result else []
         else:
-            # 其他 provider
             return self._model.embed_query(text)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        """批量文本向量化（异步）"""
+        if self._is_volcano:
+            return await asyncio.to_thread(self.embed_documents, texts)
+        else:
+            return await self._model.aembed_documents(texts)
+
+    async def aembed_query(self, text: str) -> List[float]:
+        """单个文本向量化（异步）"""
+        if self._is_volcano:
+            result = await self.aembed_documents([text])
+            return result[0] if result else []
+        else:
+            return await self._model.aembed_query(text)
     
     # ==================== 多模态扩展方法 ====================
     

@@ -26,6 +26,7 @@ class MemoryContext(BaseModel):
     storage_type: StorageType = StorageType.NEO4J
     user_rag_memory_id: str | None = None
     conversation_id: str | None = None
+    draft: bool = Field(default=False)
     language: str = "zh"
 
 
