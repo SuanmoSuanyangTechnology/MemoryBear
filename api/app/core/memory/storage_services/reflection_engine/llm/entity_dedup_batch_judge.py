@@ -3,7 +3,7 @@
 """
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 from jinja2 import Environment, FileSystemLoader
@@ -21,6 +21,8 @@ _prompt_env = Environment(loader=FileSystemLoader(_prompt_dir))
 class DedupResultItem(BaseModel):
     """单个重复对结果"""
     pair: List[int]             # [1, 3] 索引从1开始
+    new_name: Optional[str] = None   # 合并后主名
+    new_aliases: List[str] = []      # 合并后新增/保留别名
     confidence: float = 0.9
     reason: str = ""
 
@@ -35,7 +37,7 @@ async def judge_batch_dedup(
     entities: List[Dict],
     entity_type: str,
     language: str = "zh",
-) -> List[Tuple[int, int, float, str]]:
+) -> List[Tuple[int, int, float, str, Optional[str], List[str]]]:
     """分组 LLM 判定：一次性找出所有重复对
 
     Args:
@@ -76,7 +78,8 @@ async def judge_batch_dedup(
                 continue
             seen_entities.add(idx_a)
             seen_entities.add(idx_b)
-            results.append((idx_a, idx_b, item.confidence, item.reason))
+            results.append((idx_a, idx_b, item.confidence, item.reason,
+                            item.new_name, item.new_aliases or []))
 
         return results
     except Exception as e:

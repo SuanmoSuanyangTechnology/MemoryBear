@@ -130,8 +130,10 @@ celery_app.conf.update(
 
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
-        'app.tasks.layer2_reflection_task': {'queue': 'periodic_tasks'},
-        'app.tasks.layer2_dedup_full_scan_task': {'queue': 'periodic_tasks'},
+        'app.tasks.scan_layer2_reflection': {'queue': 'periodic_tasks'},
+        'app.tasks.do_layer2_reflection': {'queue': 'reflection_tasks'},
+        'app.tasks.scan_layer2_dedup_full_scan': {'queue': 'periodic_tasks'},
+        'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
@@ -219,12 +221,12 @@ beat_schedule_config = {
         "args": (),
     },
     "run-layer2-reflection": {
-            "task": "app.tasks.layer2_reflection_task",
+            "task": "app.tasks.scan_layer2_reflection",
             "schedule": layer2_reflection_schedule,
             "args": (),
     },
     "run-layer2-dedup-full-scan": {
-        "task": "app.tasks.layer2_dedup_full_scan_task",
+        "task": "app.tasks.scan_layer2_dedup_full_scan",
         "schedule": layer2_dedup_full_scan_schedule,
         "args": (),
     },

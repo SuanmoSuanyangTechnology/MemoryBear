@@ -275,6 +275,10 @@ class Settings:
     LAYER2_DEDUP_FULL_SCAN_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Layer 2 dedup full scan hour, must be 0-23")]
     ).validate_python(int(os.getenv("LAYER2_DEDUP_FULL_SCAN_HOUR", "3")))
+    # 反思/去重活跃度过滤：最近一次会话更新距今 >= 该小时数则跳过（仅对活跃用户反思）
+    REFLECT_LAYER2_INACTIVE_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="Layer 2 inactivity filter in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("REFLECT_LAYER2_INACTIVE_HOURS", "36")))
     # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]

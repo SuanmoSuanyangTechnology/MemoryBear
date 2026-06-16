@@ -43,7 +43,6 @@ Each output item should be a structured candidate memory statement.
 - end_user_id: 终端用户 ID
 - dialog_at: 会话时间，通常是 ISO 8601 时间点；输出时必须原样复制输入中的 dialog_at
 - target_content: 当前要处理的对话片段文本，也是唯一允许被抽取的目标文本
-- target_message_date: 目标文本对应的时间，可作为辅助时间背景；输入中可能是 ISO 8601 或普通日期时间字符串；当与 dialog_at 同时存在时，只有对相对当前会话时间的表达才优先使用 dialog_at
 - supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
 - supporting_context.before_msgs: 发生在 target_content **之前**的上下文消息列表（按时间升序），可包含 User 和 Assistant
 - supporting_context.after_msgs: 发生在 target_content **之后**的上下文消息列表（按时间升序），可包含 User 和 Assistant
@@ -57,7 +56,6 @@ Each output item should be a structured candidate memory statement.
 - end_user_id: end-user identifier
 - dialog_at: session time, usually an ISO 8601 timestamp; output must copy the input `dialog_at` verbatim
 - target_content: the current dialogue fragment to process, and the only text span that may be extracted from
-- target_message_date: the time associated with the target content and may serve as supporting temporal context; the input may be ISO 8601 or a plain datetime string; when both exist, prefer `dialog_at` only for expressions relative to the current conversation time
 - supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
 - supporting_context.before_msgs: ordered list of messages that occurred **before** target_content (chronological), may include User and Assistant
 - supporting_context.after_msgs: ordered list of messages that occurred **after** target_content (chronological), may include User and Assistant
@@ -191,9 +189,9 @@ statement_type：
 
 时间规则：
 
-- 仅使用目标文本中明确陈述、可由 `dialog_at` / `target_message_date` 直接解析，或可由 `target_content` 中的事件日期 / `supporting_context.before_msgs` 中已确认事件锚点解析的时间信息；不要使用外部知识补时间。
+- 仅使用目标文本中明确陈述、可由 `dialog_at` 直接解析，或可由 `target_content` 中的事件日期 / `supporting_context.before_msgs` 中已确认事件锚点解析的时间信息；不要使用外部知识补时间。
 - 解析时间表达前，先判断它的时间锚点类型，不要把所有相对时间都默认锚定到 `dialog_at`。
-- 对“昨天”“上周五”“下个月”“最近”“接下来”这类相对当前会话时间的表达，优先使用 `dialog_at` 作为“现在”；只有在 `dialog_at` 缺失时才退回 `target_message_date`。
+- 对“昨天”“上周五”“下个月”“最近”“接下来”这类相对当前会话时间的表达，必须使用 `dialog_at` 作为“现在”；不要使用抽取时间、写入时间或任何非对话时间作为锚点。
 - 对“提前一周”“提前三天”“后一周”“当天”“那天”“到时候”“活动前”“考试后”“生日前一晚”这类事件相对时间表达，必须先寻找其所依附的事件锚点。
 - 如果事件锚点在 `target_content` 中明确出现，使用该事件的已解析日期作为锚点。
 - 如果事件锚点在 `target_content` 中被省略，优先从 `supporting_context.before_msgs` 中寻找当前 target 之前已经确认的事件锚点。
@@ -206,7 +204,7 @@ statement_type：
 - 例：`dialog_at` 为 `2026-06-08`，上下文已明确用户计划在 `2026年7月15日` 举办某个活动，`target_content` 说“我让他俩提前一周准备”，则“提前一周”应解析为 `2026年7月8日`，而不是 `2026年6月1日`。
 - 错误示例：输入 `dialog_at=2026-06-08`，上下文事件为 `2026年7月15日活动`，target_content 为“提前一周准备”。错误输出为 `2026年6月1日准备`；正确输出为 `2026年7月8日准备`。原因是“提前一周”锚定的是活动事件，不是当前会话时间。
 - 如果一个句子被拆成多条 statement，每条 statement 都必须独立解析自己的时间表达，不能默认继承前一条 statement 的时间范围。
-- 对局部时间词，例如“晚上”“当天”“第二天”“次日”“周末”，优先绑定当前分句自身的最近可解释时间锚点；如果当前分句没有更近的显式时间锚点，则优先绑定 `dialog_at` / `target_message_date` 所在时间，而不是默认继承前一分句中更大的时间区间，例如“这周”“上个月”“去年冬天”。
+- 对局部时间词，例如“晚上”“当天”“第二天”“次日”“周末”，优先绑定当前分句自身的最近可解释时间锚点；如果当前分句没有更近的显式时间锚点，则优先绑定 `dialog_at` 所在时间，而不是默认继承前一分句中更大的时间区间，例如“这周”“上个月”“去年冬天”。
 - 只有当原文明确表示多个分句共享同一时间范围时，后续分句才允许继承前一分句的时间区间。
 - 如果相对时间可以稳定落到更具体的中文时间表达，就应直接改写进 `statement_text`，而不要保留原始模糊表达。
 - 如果某个相对时间已经被解析进 `valid_at` 或 `invalid_at`，则同一时间也必须写回 `statement_text`；不能出现字段里是具体日期、文本里仍保留“下个月”“那周”“提前一周”“提前两天”“到时候”等原始相对词的情况。
@@ -230,12 +228,13 @@ statement_type：
   - “接下来” -> “在2026年4月1日之后接下来的一段时间”
   - “很快” -> “在2026年4月1日之后不久”
 - 如果相对时间不能稳定落到具体日期或日期区间，就保留其最小可信粗粒度，但仍尽量做相对时间消解；例如“去年冬天”可改写为“2025年冬天”，而不是保留“去年冬天”。
+- 相对年份示例：如果 `dialog_at=2023-05-08T13:56:26+08:00`，且 `target_content` 说“我去年画了那幅湖上日出”，则“去年”应按对话时间解析为 2022 年，输出“用户在2022年画了那幅湖上日出”；不要使用抽取运行时间、写入时间或任何非对话时间来解析“去年”。
 - 对节假日类表达，能稳定映射到具体日期或日期区间时应具体化；例如“五一”通常可改写为具体日期，“清明节”通常也可改写为具体日期或短区间；“春节前后”这类边界不稳的表达仍保留较粗粒度。
 - `valid_at` 表示陈述开始成立或生效的时间。
 - `invalid_at` 表示陈述结束或不再成立的时间；如果仍在持续，填 `"NULL"`。
 - 对“最近”“近来”“这段时间”这类开放过去区间，如果只能确定截至某个参考时间之前的一段时间，但无法确定开始边界，不要把参考时间误填为 `valid_at`；可以在 `statement_text` 中保留锚定后的开放区间，并将 `valid_at` 填 `"NULL"`。
 - `dialog_at` 表示当前会话时间，每条 statement 都必须原样复制输入中的 `dialog_at`。
-- 如果输入中缺少 `dialog_at`，则把 `target_message_date` 作为当前会话时间使用，并在每条 statement 的 `dialog_at` 字段中填入 `target_message_date` 的原值。
+- `dialog_at` 是必需输入。若 `dialog_at` 缺失或不可解析，不要发明当前时间锚点；只能保留最小可信时间表达，并将无法可靠确定的 `valid_at` / `invalid_at` 填为 `"NULL"`。
 - `valid_at` 和 `invalid_at` 输出必须使用 ISO 8601 UTC 日期时间并以 `Z` 结尾，或在无可用时间时填 `"NULL"`。
 - 对于只有日期没有时分秒的时间，默认使用整天边界，便于后续检索。
 - 如果没有明确时间，不要编造时间。
@@ -268,7 +267,7 @@ temporal_type：
 
 - 允许为解决代词、省略和时间歧义做最小必要改写。
 - 不要引入原文未明确表达的新事实、额外推断或风格化概括。
-- 不要伪造无法从正确参考锚点可靠落地的时间精度；正确参考锚点可能是 `dialog_at`、`target_message_date`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点。
+- 不要伪造无法从正确参考锚点可靠落地的时间精度；正确参考锚点可能是 `dialog_at`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点。
   {% else %}
   Splitting rules:
 - Extract statements at the level of one complete thought, usually one full sentence or one natural semantic unit.
@@ -372,9 +371,9 @@ statement_type:
 
 Temporal rules:
 
-- Use only temporal information explicitly stated in the target text, directly resolvable from `dialog_at` / `target_message_date`, or resolvable from an event date in `target_content` / an already-confirmed event anchor in `supporting_context.before_msgs`; do not add dates from external knowledge.
+- Use only temporal information explicitly stated in the target text, directly resolvable from `dialog_at`, or resolvable from an event date in `target_content` / an already-confirmed event anchor in `supporting_context.before_msgs`; do not add dates from external knowledge.
 - Before resolving a temporal expression, first determine its temporal anchor type. Do not default every relative expression to `dialog_at`.
-- For expressions relative to the current conversation time, such as “yesterday,” “last Friday,” “next month,” “recently,” or “coming up,” prefer `dialog_at` as “now”; only fall back to `target_message_date` when `dialog_at` is unavailable.
+- For expressions relative to the current conversation time, such as “yesterday,” “last Friday,” “next month,” “recently,” or “coming up,” use `dialog_at` as “now”; do not use extraction time, write time, or any non-dialogue timestamp as the anchor.
 - For event-relative expressions such as “one week in advance,” “three days before,” “the following week,” “that day,” “then,” “before the event,” “after the exam,” or “the night before the birthday,” first identify the event anchor they depend on.
 - If the event anchor appears explicitly in `target_content`, use the resolved date of that event as the anchor.
 - If the event anchor is omitted from `target_content`, first look for an event anchor that was already confirmed in `supporting_context.before_msgs` before the current target.
@@ -387,7 +386,7 @@ Temporal rules:
 - Example: if `dialog_at` is `2026-06-08`, the context clearly says the user plans to hold an event on `July 15, 2026`, and `target_content` says “I'll ask the two of them to prepare one week in advance,” then “one week in advance” should resolve to `July 8, 2026`, not `June 1, 2026`.
 - Negative example: input `dialog_at=2026-06-08`, contextual event `event on July 15, 2026`, target_content “prepare one week in advance.” Incorrect output: `prepare on June 1, 2026`. Correct output: `prepare on July 8, 2026`. Reason: “one week in advance” is anchored to the event, not to the current conversation time.
 - If one sentence is split into multiple statements, each statement must resolve its own temporal expression independently and must not automatically inherit the previous statement's time range.
-- For local temporal words such as “that evening,” “the same day,” “the next day,” or “that weekend,” prefer the nearest interpretable temporal anchor inside the current clause itself. If the current clause has no nearer explicit anchor, prefer the time anchored by `dialog_at` / `target_message_date`, rather than automatically inheriting a larger time range from the previous clause such as “this week,” “last month,” or “last winter.”
+- For local temporal words such as “that evening,” “the same day,” “the next day,” or “that weekend,” prefer the nearest interpretable temporal anchor inside the current clause itself. If the current clause has no nearer explicit anchor, prefer the time anchored by `dialog_at`, rather than automatically inheriting a larger time range from the previous clause such as “this week,” “last month,” or “last winter.”
 - Only let a later clause inherit the previous clause's time range when the source text clearly indicates that the clauses share the same temporal span.
 - If a relative time can be stably grounded to a more concrete time expression in the output language, rewrite it directly into `statement_text` rather than keeping the vague source phrase.
 - If a relative time has already been resolved into `valid_at` or `invalid_at`, the same time must also be written back into `statement_text`; do not output concrete date fields while leaving source phrases such as “next month,” “that week,” “one week in advance,” “two days before,” or “then” in the text.
@@ -411,12 +410,13 @@ Temporal rules:
   - `coming up` -> `coming up after April 1, 2026`
   - `soon` -> `soon after April 1, 2026`
 - If the relative time cannot be stably grounded to an exact date or date range, keep the smallest trustworthy coarse granularity but still resolve the relative reference as much as possible; for example, “last winter” may become “winter 2025” rather than remaining “last winter”.
+- Relative-year example: if `dialog_at=2023-05-08T13:56:26+08:00` and `target_content` says “I painted that lake sunrise last year,” resolve “last year” from the dialogue time as 2022 and output “The user painted the lake sunrise in 2022.” Do not use extraction runtime, write time, or any non-dialogue timestamp to resolve “last year.”
 - For holiday expressions, concretize them when they can be stably mapped to specific dates or short date ranges; for example, Labor Day or Qingming Festival usually can be grounded, while expressions such as “around Spring Festival” should stay at a coarser granularity.
 - `valid_at` means when the statement became valid or started to hold.
 - `invalid_at` means when the statement ended or stopped being valid; use `"NULL"` if it is still ongoing.
 - For open past intervals such as “recently,” “lately,” or “these days,” if only the reference endpoint is known and the start boundary is unknown, do not incorrectly use the reference time as `valid_at`; keep the anchored open interval in `statement_text` and use `"NULL"` for `valid_at`.
 - `dialog_at` is the session timestamp, and every statement must copy the input `dialog_at` verbatim.
-- If `dialog_at` is missing from the input, use `target_message_date` as the session timestamp and copy the original `target_message_date` value into each statement's `dialog_at` field.
+- `dialog_at` is required. If `dialog_at` is missing or cannot be parsed, do not invent a current-time anchor; keep only the smallest trustworthy temporal expression and set unreliable `valid_at` / `invalid_at` values to `"NULL"`.
 - `valid_at` and `invalid_at` outputs must use ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - When only a date can be resolved, default to full-day boundaries for retrieval use.
 - If no explicit time is available, do not invent one.
@@ -450,7 +450,7 @@ Rewrite boundary:
 - Minimal rewriting is allowed only to resolve reference, ellipsis, and temporal ambiguity.
 - For resolvable relative time expressions, rewrite them into grounded time expressions directly inside `statement_text`, using the output language.
 - Do not keep both the vague source phrase and the grounded phrase together; output only the rewritten concrete form.
-- Do not fake precision for time expressions that cannot be grounded reliably from the correct reference anchor. The correct anchor may be `dialog_at`, `target_message_date`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`.
+- Do not fake precision for time expressions that cannot be grounded reliably from the correct reference anchor. The correct anchor may be `dialog_at`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`.
 - In English, you may use a slightly more natural anchored paraphrase for reflexive user-self expressions when a literal replacement would be awkward, as long as the rewritten form still keeps “the user” as the retrieval anchor and does not change the meaning.
 - Do not introduce unsupported facts, extra inference, or stylistic summarization.
   {% endif %}
@@ -468,7 +468,6 @@ Rewrite boundary:
   "end_user_id": "eu_12345678",
   "dialog_at": "2023-09-04T18:00:00Z",
   "target_content": "老李这学期要求还是一如既往地严，不过他讲课确实清晰透彻，而且每节课的结构都特别清楚。就是气场实在太吓人了，我每次被他点名都有点发怵。",
-  "target_message_date": "2023-09-04T18:00:00",
   "supporting_context": {
     "before_msgs": [
       {
@@ -531,7 +530,6 @@ Rewrite boundary:
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "我最近在学它，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
-  "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
@@ -594,7 +592,6 @@ Rewrite boundary:
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。",
-  "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
@@ -667,7 +664,6 @@ Example Input: {
   "end_user_id": "eu_12345678",
   "dialog_at": "2023-09-04T18:00:00Z",
   "target_content": "Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating, and I get nervous every time he calls on me.",
-  "target_message_date": "2023-09-04T18:00:00",
   "supporting_context": {
     "before_msgs": [
       {
@@ -730,7 +726,6 @@ Example Input: {
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "I've been learning it recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
-  "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
@@ -793,7 +788,6 @@ Example Input: {
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "Those two projects seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA.",
-  "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
     "before_msgs": [
       {
@@ -867,7 +861,7 @@ Example Output: {
 - 非用户主体是否尽量写成具体名称；若无法做到，是否已正确标记 `has_unsolved_reference = true`
 - 如果最终 `statement_text` 已经落到具体实体名，`has_unsolved_reference` 是否已经改为 `false`
 - 是否已优先用 User 原始消息消解人物、职业、关系和计划，避免被 Assistant 错误总结带偏
-- 如果 `statement_text` 中出现可由 `dialog_at`、`target_message_date`、target_content 事件日期或 before_msgs 中已确认事件锚点解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
+- 如果 `statement_text` 中出现可由 `dialog_at`、target_content 事件日期或 before_msgs 中已确认事件锚点解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
 - 如果 `statement_text` 中已经写出具体执行日期、开始日期或日期区间，`valid_at` 是否已经对齐该执行/开始时间，而不是误用 `dialog_at`
 - 如果上下文中同一事件已有无条件确认的新日期，后续“提前N天/提前N周”“那周”“到时候”等是否使用该新日期作为锚点
 - 如果新日期只出现在“如果/要是……就改到……”这类条件或备选方案中，是否没有反向覆盖当前 target 的时间锚点
@@ -892,7 +886,7 @@ Example Output: {
 - Render non-user subjects as concrete names when possible; otherwise mark `has_unsolved_reference = true`
 - If the final `statement_text` already resolves the reference to a concrete named entity, ensure `has_unsolved_reference = false`
 - Prefer original User messages when resolving people, occupations, relationships, and plans; do not let incorrect Assistant summaries override them
-- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, `target_message_date`, an event date in target_content, or an already-confirmed event anchor in before_msgs, rewrite them into more concrete date, month, or date-range expressions
+- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, an event date in target_content, or an already-confirmed event anchor in before_msgs, rewrite them into more concrete date, month, or date-range expressions
 - If `statement_text` contains a concrete execution date, start date, or date range, ensure `valid_at` aligns to that execution/start time rather than incorrectly using `dialog_at`
 - If context has an unconditionally confirmed latest date for the same event, ensure later expressions such as “N days/weeks in advance,” “that week,” or “then” use that latest date as the anchor
 - If a new date appears only inside a conditional or alternative plan such as “if ... then move it to ...,” ensure it does not retroactively overwrite the current target's temporal anchor
@@ -924,7 +918,7 @@ Example Output: {
 {% if language == "zh" %}
 
 - `statement_text` 是最终记忆文本，必须在文本本身包含已解析后的时间表达，不能只依赖 `valid_at` / `invalid_at` 表示时间。
-- 如果相对时间或开放区间时间可以根据 `dialog_at`、`target_message_date`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点解析，必须直接改写进 `statement_text`。
+- 如果相对时间或开放区间时间可以根据 `dialog_at`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点解析，必须直接改写进 `statement_text`。
 - 不要在 `statement_text` 中保留可解析的原始模糊时间表达。
 - 不要同时保留原始模糊时间表达和解析后的时间表达。
 - `statement_text` 中禁止残留未锚定、未解析的相对时间词，例如：`今天`、`昨天`、`前天`、`明天`、`后天`、`本周`、`这周`、`上周`、`下周`、`本月`、`这个月`、`上个月`、`下个月`、`去年`、`明年`、`最近`、`近来`、`这段时间`、`这些天`、`即将`、`接下来`、`很快`。
@@ -937,7 +931,7 @@ Example Output: {
 - 错误示例：`用户最近拿到了腾讯公司的offer。`
   {% else %}
 - `statement_text` is the final memory text, so it must contain the resolved temporal expression itself, not only rely on `valid_at` / `invalid_at`.
-- If a relative or open-interval temporal expression can be resolved from `dialog_at`, `target_message_date`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`, rewrite it inside `statement_text`.
+- If a relative or open-interval temporal expression can be resolved from `dialog_at`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`, rewrite it inside `statement_text`.
 - Do not leave a resolvable source temporal phrase in `statement_text`.
 - Do not keep both the vague phrase and the resolved phrase together.
 - `statement_text` must not contain unanchored, unresolved relative temporal words such as: `today`, `yesterday`, `the day before yesterday`, `tomorrow`, `the day after tomorrow`, `this week`, `last week`, `next week`, `this month`, `last month`, `next month`, `last year`, `next year`, `recently`, `lately`, `these days`, `upcoming`, `coming up`, or `soon`.
@@ -958,7 +952,6 @@ Example Output: {
 **ISO 8601 HARD CONSTRAINT:**
 
 - `dialog_at` must be ISO 8601.
-- Input `target_message_date` may be ISO 8601 or a plain datetime string. Use it as supporting context when needed, but do not reject the input only because this field is not ISO 8601.
 - `valid_at` and `invalid_at` must be ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
 - When only a date is known, still output an ISO 8601 UTC datetime boundary ending with `Z`.
