@@ -7,8 +7,8 @@ a function within the Reflection Layer2 pipeline rather than as a standalone
 Celery task.
 
 The entry point ``extract_metadata_for_user`` scans Neo4j for User entities
-and runs LLM extraction + patch. Description minimum fragment count is gated
-upstream by the reflection pipeline (description_merge.min_fragments=5).
+and runs LLM extraction + patch. Description fragment count is gated by the
+``min_fragments`` parameter (default 5, shared with description_merge config).
 """
 
 import logging
@@ -106,6 +106,7 @@ async def extract_metadata_for_user(
     llm_client: Any,
     end_user_id: str,
     language: str = "zh",
+    min_fragments: int = 5,
     max_list_len_per_field: int = 200,
 ) -> Dict[str, Any]:
     """对指定用户的 User 实体执行元数据提取 + Neo4j 回写 + PostgreSQL 同步。
@@ -119,6 +120,7 @@ async def extract_metadata_for_user(
         llm_client: LLM 客户端
         end_user_id: 终端用户 ID
         language: 语言 ("zh" / "en")
+        min_fragments: description 碎片数阈值（≥此值才触发提取）
         max_list_len_per_field: 单字段（Neo4j 列表属性）最大长度
 
     Returns:
@@ -147,14 +149,14 @@ async def extract_metadata_for_user(
         logger.debug(f"[Metadata] 未找到 User 实体，跳过: end_user_id={end_user_id}")
         return {"extracted": 0, "failed": 0}
 
-    # 过滤无 description 的实体（门控由反思巡检上游保证）
+    # 过滤无 description 的实体 + min_fragments 门控
     candidates: List[Dict[str, Any]] = []
     for rec in records:
         desc = (rec.get("description") or "").strip()
         if not desc:
             continue
         descriptions = [d.strip() for d in desc.replace("；", ";").split(";") if d.strip()]
-        if not descriptions:
+        if len(descriptions) < min_fragments:
             continue
         candidates.append({
             "entity_id": rec["entity_id"],

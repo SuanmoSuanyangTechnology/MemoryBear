@@ -238,8 +238,9 @@ class Layer2Inspector:
         调用 MetadataExtractionStep 进行 LLM 结构化提取，
         将 patch operations 回写 Neo4j 并同步 PostgreSQL。
 
-        门控由反思巡检上游保证（description_merge.min_fragments=5），
-        且放在 entity_dedup 之后、description_merge 之前执行：
+        门控：description 碎片数 >= min_fragments（默认 5）才触发提取，
+        与 description_merge 共用同一阈值配置。
+        放在 entity_dedup 之后、description_merge 之前执行：
         metadata 提取需要 description 原始碎片，而 description_merge 会将其清空。
         """
         try:
@@ -252,6 +253,7 @@ class Layer2Inspector:
                 llm_client=self.llm_client,
                 end_user_id=end_user_id,
                 language=language,
+                min_fragments=self.desc_config.min_fragments,
             )
             return {"status": "success", **result}
         except Exception as e:
