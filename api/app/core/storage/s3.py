@@ -123,33 +123,38 @@ class S3Storage(StorageBackend):
                 cause=e,
             )
 
-        # Auto-create bucket if it doesn't exist (useful for MinIO / self-hosted S3)
-        try:
-            self.client.head_bucket(Bucket=bucket_name)
-            logger.info(f"Bucket '{bucket_name}' already exists")
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code in ("404", "NoSuchBucket"):
-                try:
-                    if region == "us-east-1":
-                        # us-east-1 has special create_bucket behavior (no LocationConstraint)
-                        self.client.create_bucket(Bucket=bucket_name)
-                    else:
-                        self.client.create_bucket(
-                            Bucket=bucket_name,
-                            CreateBucketConfiguration={"LocationConstraint": region},
+        # Auto-create bucket only for self-hosted / S3-compatible endpoints (e.g. MinIO, Ceph).
+        # Skip this for AWS S3 to avoid accidental bucket creation and IAM permission issues.
+        is_custom_endpoint = self.endpoint_url and "amazonaws.com" not in self.endpoint_url
+        if is_custom_endpoint:
+            try:
+                self.client.head_bucket(Bucket=bucket_name)
+                logger.info(f"Bucket '{bucket_name}' already exists")
+            except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "")
+                if error_code in ("404", "NoSuchBucket"):
+                    try:
+                        if region == "us-east-1":
+                            # us-east-1 has special create_bucket behavior (no LocationConstraint)
+                            self.client.create_bucket(Bucket=bucket_name)
+                        else:
+                            self.client.create_bucket(
+                                Bucket=bucket_name,
+                                CreateBucketConfiguration={"LocationConstraint": region},
+                            )
+                        logger.info(f"Bucket '{bucket_name}' created automatically")
+                    except ClientError as create_err:
+                        logger.warning(
+                            f"Failed to create bucket '{bucket_name}': {create_err}. "
+                            f"Upload will fail if bucket does not exist."
                         )
-                    logger.info(f"Bucket '{bucket_name}' created automatically")
-                except ClientError as create_err:
+                else:
                     logger.warning(
-                        f"Failed to create bucket '{bucket_name}': {create_err}. "
-                        f"Upload will fail if bucket does not exist."
+                        f"Failed to check bucket '{bucket_name}' existence: {e}. "
+                        f"Proceeding anyway."
                     )
-            else:
-                logger.warning(
-                    f"Failed to check bucket '{bucket_name}' existence: {e}. "
-                    f"Proceeding anyway."
-                )
+        else:
+            logger.info(f"Skipping auto-create bucket for AWS S3 endpoint: bucket='{bucket_name}'")
 
     async def upload(
         self,
