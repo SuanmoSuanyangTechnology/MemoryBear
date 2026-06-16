@@ -186,9 +186,15 @@ except ImportError:
 
 # Celery Beat schedule for periodic tasks
 memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
-memory_cache_regeneration_schedule = timedelta(hours=settings.MEMORY_CACHE_REGENERATION_HOURS)
+memory_cache_regeneration_schedule = crontab(
+    hour=settings.MEMORY_CACHE_REGENERATION_HOUR,
+    minute=settings.MEMORY_CACHE_REGENERATION_MINUTE,
+)
 workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
-forgetting_cycle_schedule = timedelta(hours=settings.FORGETTING_CYCLE_INTERVAL_HOURS)
+forgetting_cycle_schedule = crontab(
+    hour=settings.FORGETTING_CYCLE_HOUR,
+    minute=settings.FORGETTING_CYCLE_MINUTE,
+)
 implicit_emotions_update_schedule = crontab(
     hour=settings.IMPLICIT_EMOTIONS_UPDATE_HOUR,
     minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
