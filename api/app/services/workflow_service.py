@@ -3862,6 +3862,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=config,
             features=feature_configs,
+            runtime_options={"bypass_node_cache": True},
         )
 
         try:
@@ -4369,6 +4370,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=config,
             features=feature_configs,
+            runtime_options={"bypass_node_cache": True},
         )
 
         try:
