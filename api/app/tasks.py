@@ -4918,7 +4918,7 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
             raise
 
 
-@celery_app.task(name="app.tasks.draft_data_clean", queue="periodic_tasks")
+@celery_app.task(name="app.tasks.draft_data_clean", queue="memory_tasks")
 def draft_data_clean():
     import asyncio
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector

@@ -145,6 +145,8 @@ celery_app.conf.update(
         'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
         'app.tasks.flush_conversation': {'queue': 'memory_tasks'},
 
+        'app.tasks.draft_data_clean': {'queue': 'memory_tasks'},
+
         # Sliding window idle scan → periodic_tasks queue (Beat scheduler)
         'app.tasks.scan_idle_conversations': {'queue': 'periodic_tasks'},
         'app.tasks.scan_workflow_schedule_triggers': {'queue': 'periodic_tasks'},
