@@ -295,9 +295,12 @@ async def write_server_async(
                 await advance_write_cursor(conversation_id, mm["message_seq"])
                 continue
 
-            task = celery_app.send_task(
+            from app.celery_task_scheduler import scheduler as celery_scheduler
+
+            msg_id = celery_scheduler.push_task(
                 "app.core.memory.agent.write_message",
-                kwargs={
+                user_input.end_user_id,
+                {
                     "end_user_id": user_input.end_user_id,
                     "mode": "api_write",
                     "target_seq": mm["message_seq"],
@@ -307,7 +310,7 @@ async def write_server_async(
                     "language": language,
                 },
             )
-            task_ids.append(task.id)
+            task_ids.append(msg_id)
             # 提前推进 cursor，防止重复派发（target_seq 直查模式保证重试安全）
             await advance_write_cursor(conversation_id, mm["message_seq"])
 

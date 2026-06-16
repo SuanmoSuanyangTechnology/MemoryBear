@@ -59,7 +59,6 @@ from app.services.memory_agent_service import MemoryAgentService, get_end_user_c
 from app.services.memory_forget_service import MemoryForgetService
 from app.utils.config_utils import resolve_config_id
 from app.utils.redis_lock import RedisFairLock
-from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
 
 logger = get_logger(__name__)
 
@@ -1869,34 +1868,8 @@ def write_message_task(
         else:
             raise ValueError(f"Unknown write mode: {mode}")
 
-    # ── 获取 per-user 写入锁 ──
-    redis_client = get_sync_redis_client()
-    lock = None
+    # ── 执行写入（锁已下沉到 WritePipeline._acquire_store_lock） ──
     loop = None
-    lock_token = None
-    if redis_client is not None:
-        lock = RedisFairLock(
-            key=f"memory_write:{end_user_id}",
-            redis_client=redis_client,
-            expire=600,
-            timeout=3600,
-            auto_renewal=True,
-        )
-        if not lock.acquire():
-            logger.warning(f"[CELERY WRITE] 获取锁超时，跳过本次写入: end_user_id={end_user_id}")
-            return {
-                "status": "SKIPPED",
-                "error": "acquire lock timeout",
-                "end_user_id": end_user_id,
-                "config_id": str(config_id),
-                "elapsed_time": time.time() - start_time,
-                "task_id": self.request.id,
-            }
-
-        from app.services.memory_agent_service import _set_write_lock_holder
-        lock_token = _set_write_lock_holder(end_user_id)
-
-    # ── 执行写入 ──
     try:
         task_start_time = int(time.time())
         loop = set_asyncio_event_loop()
@@ -1908,6 +1881,7 @@ def write_message_task(
                     f"elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
         # 记录最近一次写入完成时间戳
+        redis_client = get_sync_redis_client()
         try:
             if redis_client is not None:
                 from datetime import timezone as _tz
@@ -1918,8 +1892,17 @@ def write_message_task(
 
         # 同步 end_user 记忆计数
         try:
-            from app.core.memory.utils.memory_count_utils import sync_memory_count_neo4j
-            sync_memory_count_neo4j(end_user_id)
+            from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
+            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+            async def _sync_count():
+                connector = Neo4jConnector()
+                try:
+                    return await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+                finally:
+                    await connector.close()
+
+            loop.run_until_complete(_sync_count())
         except Exception as _count_e:
             logger.warning(f"[CELERY WRITE] 同步记忆计数失败: {_count_e}")
 
@@ -1960,17 +1943,6 @@ def write_message_task(
             "mode": mode,
         }
     finally:
-        if lock_token is not None:
-            try:
-                from app.services.memory_agent_service import _reset_write_lock_holder
-                _reset_write_lock_holder(lock_token)
-            except Exception as e:
-                logger.warning(f"[CELERY WRITE] 重置锁标记失败: {e}")
-        if lock is not None:
-            try:
-                lock.release()
-            except Exception as e:
-                logger.warning(f"[CELERY WRITE] 释放锁失败: {e}")
         if loop:
             _shutdown_loop_gracefully(loop)
 
@@ -4230,9 +4202,12 @@ def flush_conversation_task(self, conversation_id: Optional[str] = None) -> None
 
 
 def _flush_single_conversation(conversation_id: str) -> None:
-    """处理单个对话的兜底写入：查询所有未写入消息 → 逐条派发 write_message_task。
+    """处理单个对话的兜底写入：查询所有未写入的 user 消息 → 逐条派发 write_message_task。
 
-    每条 pending 消息独立派发一个 task（携带 target_seq），派发后立即原子推进
+    只派发 role=user 的消息任务，assistant 消息作为上下文使用（通过 build_context_before/after
+    在 execute_pending_from_pool 中构建）。
+
+    每条 user 消息独立派发一个 task（携带 target_seq），派发后立即原子推进
     write_cursor。复用 sliding_window 的 target_seq 直查模式，每条消息失败只影响
     自身，Celery 重试（max_retries=3）时通过 target_seq 直查不依赖 cursor，安全。
     """
@@ -4264,8 +4239,8 @@ def _flush_single_conversation(conversation_id: str) -> None:
                 logger.warning(f"[FlushTask] end_user_id 为空，跳过: conv={conversation_id}")
                 return
 
-            # Step 2: 查询所有 message_seq > write_cursor 的消息序号
-            pending_seqs = (
+            # Step 2: 查询所有未写入消息的 seq（用于获取最大 seq）
+            all_pending_seqs = (
                 db.execute(
                     sa_select(MemoryMessage.message_seq)
                     .where(
@@ -4278,11 +4253,29 @@ def _flush_single_conversation(conversation_id: str) -> None:
                 .all()
             )
 
-            if not pending_seqs:
+            if not all_pending_seqs:
                 logger.info(f"[FlushTask] 无未写入消息，跳过: conv={conversation_id}")
                 return
 
-        # Step 3: 解析 memory_config_id（用于派发）
+            max_pending_seq = max(all_pending_seqs)
+
+            # Step 3: 只查询 role=user 的消息序号用于派发任务
+            # assistant 消息作为上下文使用，不单独派发任务
+            pending_user_seqs = (
+                db.execute(
+                    sa_select(MemoryMessage.message_seq)
+                    .where(
+                        MemoryMessage.conversation_id == conversation_id,
+                        MemoryMessage.message_seq > (write_cursor or 0),
+                        MemoryMessage.role == "user",  # 只派发 user 消息
+                    )
+                    .order_by(MemoryMessage.message_seq.asc())
+                )
+                .scalars()
+                .all()
+            )
+
+        # Step 4: 解析 memory_config_id（用于派发）
         config_id = ""
         try:
             from app.core.memory.sliding_window.flush_task import FlushTask as _FlushTaskHelper
@@ -4298,16 +4291,18 @@ def _flush_single_conversation(conversation_id: str) -> None:
             logger.warning(f"[FlushTask] 解析 config_id 异常，跳过: conv={conversation_id}, err={e}")
             return
 
-        # Step 4: 逐条派发 write_message_task，每条携带 target_seq
+        # Step 5: 逐条派发 write_message_task（只派发 user 消息）
         # 与 sliding_window 路径一致：
         #   - 派发后立即原子推进 write_cursor（防重复派发）
         #   - task 内部通过 target_seq 直查消息，重试不依赖 cursor
         #   - enforce_window=False，兜底路径不要求下文凑齐 3 条
+        #   - assistant 消息作为上下文在 execute_pending_from_pool 中通过
+        #     build_context_before/after 构建
         try:
             from app.celery_task_scheduler import scheduler as celery_scheduler
 
             dispatched = 0
-            for target_seq in pending_seqs:
+            for target_seq in pending_user_seqs:
                 msg_id = celery_scheduler.push_task(
                     "app.core.memory.agent.write_message",
                     end_user_id,
@@ -4321,14 +4316,16 @@ def _flush_single_conversation(conversation_id: str) -> None:
                         "workspace_id": workspace_id,
                     },
                 )
-                # 提前推进 cursor，防止后续扫描重复派发同一条消息
-                # target_seq 直查模式确保重投递仍能正确定位消息
-                _advance_cursor_sync(conversation_id, target_seq)
                 dispatched += 1
 
+            # 统一推进 cursor 到最大 seq，确保 assistant 消息也被跳过
+            # 不再逐条推进，避免多次 DB 更新
+            _advance_cursor_sync(conversation_id, max_pending_seq)
+
             logger.info(
-                f"[FlushTask] 已派发 {dispatched} 个 write_message_task: "
-                f"conv={conversation_id}, end_user_id={end_user_id}"
+                f"[FlushTask] 已派发 {dispatched} 个 user 消息任务，cursor 推进到 {max_pending_seq}: "
+                f"conv={conversation_id}, end_user_id={end_user_id}, "
+                f"total_pending={len(all_pending_seqs)}"
             )
         except Exception as e:
             logger.error(

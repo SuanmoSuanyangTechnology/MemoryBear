@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
@@ -207,6 +208,86 @@ class WritePipeline:
         self._embedder_client = None
         self._neo4j_connector = None
 
+        # 存储阶段锁（延迟初始化）
+        self._store_lock = None
+        self._redis_client = None
+
+    # ──────────────────────────────────────────────
+    # 存储阶段锁
+    # ──────────────────────────────────────────────
+
+    @asynccontextmanager
+    async def _acquire_store_lock(self):
+        """获取存储阶段的 per-end_user 互斥锁。
+
+        仅在 Neo4j 写入阶段持锁，避免同一 end_user_id 的并发写入产生竞态。
+        锁的 key 与旧的任务级锁一致：memory_write:{end_user_id}
+
+        失败（Redis 不可用）时不阻塞主流程，仅记录 warning 后放行。
+        """
+        import redis
+        from app.core.config import settings
+        from app.utils.redis_lock import RedisFairLock
+
+        if not self.end_user_id:
+            yield
+            return
+
+        # 检查是否已由外层（如 Celery task）持有锁（重入检测）
+        from app.services.memory_agent_service import _is_holding_write_lock
+        if _is_holding_write_lock(self.end_user_id):
+            logger.debug(f"[StoreLock] 已持有锁，跳过: end_user_id={self.end_user_id}")
+            yield
+            return
+
+        # 初始化 Redis 客户端
+        try:
+            self._redis_client = redis.StrictRedis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB_CELERY_BACKEND,
+                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+                decode_responses=True,
+            )
+            self._redis_client.ping()
+        except Exception as e:
+            logger.warning(
+                f"[StoreLock] Redis 不可用，跳过锁保护: end_user_id={self.end_user_id}, err={e}"
+            )
+            yield
+            return
+
+        # 创建锁实例
+        self._store_lock = RedisFairLock(
+            key=f"memory_write:{self.end_user_id}",
+            redis_client=self._redis_client,
+            expire=300,  # 存储阶段超时 5 分钟（比整个任务短）
+            timeout=600,  # 等待锁超时 10 分钟
+            auto_renewal=True,
+        )
+
+        # 获取锁（在线程中执行，避免阻塞事件循环）
+        acquired = await asyncio.to_thread(self._store_lock.acquire)
+        if not acquired:
+            logger.warning(
+                f"[StoreLock] 获取锁超时: end_user_id={self.end_user_id}"
+            )
+            # 获取锁失败也继续执行（与旧行为一致，降级为无锁模式）
+            yield
+            return
+
+        logger.debug(f"[StoreLock] 获取锁成功: end_user_id={self.end_user_id}")
+        try:
+            yield
+        finally:
+            try:
+                await asyncio.to_thread(self._store_lock.release)
+                logger.debug(f"[StoreLock] 释放锁成功: end_user_id={self.end_user_id}")
+            except Exception as e:
+                logger.warning(
+                    f"[StoreLock] 释放锁失败: end_user_id={self.end_user_id}, err={e}"
+                )
+
     # ──────────────────────────────────────────────
     # 公开接口
     # ──────────────────────────────────────────────
@@ -306,21 +387,25 @@ class WritePipeline:
                         elapsed_seconds=0.0,
                     )
 
-                # Step 3: 存储 - 写入 Neo4j
-                async with bear.step(3, 5, "存储", "写入 Neo4j"):
-                    await self._store(extraction_result)
+                # ── 存储阶段加锁（Step 3 ~ Step 5 共享锁） ──
+                # 仅在 Neo4j 写入阶段持锁，避免同一 end_user 的并发写入产生竞态
+                # 聚类是提交 Celery 异步任务，在锁释放后执行
+                async with self._acquire_store_lock():
+                    # Step 3: 存储 - 写入 Neo4j
+                    async with bear.step(3, 5, "存储", "写入 Neo4j"):
+                        await self._store(extraction_result)
 
-                # Step 3.5: 情绪提取
-                await self._run_emotion_extraction()
+                    # Step 3.5: 情绪提取（更新 Neo4j）
+                    await self._run_emotion_extraction()
 
-                # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
+                    # Step 5: 摘要 - 生成情景记忆摘要（写入 Neo4j）
+                    async with bear.step(5, 5, "摘要", "生成情景记忆"):
+                        await self._summarize(chunked_dialogs)
+
+                # Step 4: 聚类 - 增量更新社区（Celery 异步任务，无需持锁）
                 async with bear.step(4, 5, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)
                     s.metadata(mode="async")
-
-                # Step 5: 摘要 - 生成情景记忆摘要
-                async with bear.step(5, 5, "摘要", "生成情景记忆"):
-                    await self._summarize(chunked_dialogs)
 
                 # 更新活动统计缓存
                 await self._update_stats_cache(extraction_result)
@@ -1177,24 +1262,29 @@ class WritePipeline:
                         relations=stats["relation_count"],
                     )
 
-                async with bear.step(4, 6, "存储", "写入 Neo4j"):
-                    await self._store(extraction_result)
+                # ── 存储阶段加锁（Step 4 ~ Step 6 共享锁） ──
+                # 仅在 Neo4j 写入阶段持锁，避免同一 end_user 的并发写入产生竞态
+                # 聚类是提交 Celery 异步任务，在锁释放后执行
+                async with self._acquire_store_lock():
+                    async with bear.step(4, 6, "存储", "写入 Neo4j"):
+                        await self._store(extraction_result)
 
-                await self._run_emotion_extraction()
+                    await self._run_emotion_extraction()
 
+                    # Step 6: 摘要 - 生成情景记忆摘要
+                    async with bear.step(6, 6, "摘要", "生成情景记忆"):
+                        await self._summarize(chunked_dialogs)
+
+                    if not skip_cursor_advance:
+                        await self._advance_write_cursor(
+                            conversation_id=conversation_id,
+                            message_seq=message_seq,
+                        )
+
+                # Step 5: 聚类 - 增量更新社区（Celery 异步任务，无需持锁）
                 async with bear.step(5, 6, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)
                     s.metadata(mode="async")
-
-                # Step 6: 摘要 - 生成情景记忆摘要
-                async with bear.step(6, 6, "摘要", "生成情景记忆"):
-                    await self._summarize(chunked_dialogs)
-
-                if not skip_cursor_advance:
-                    await self._advance_write_cursor(
-                        conversation_id=conversation_id,
-                        message_seq=message_seq,
-                    )
 
                 await self._update_stats_cache(extraction_result)
 
