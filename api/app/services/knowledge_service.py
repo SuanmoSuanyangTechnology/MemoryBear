@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy.orm import Session
 from app.models.user_model import User
-from app.models.knowledge_model import Knowledge
+from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.models.workspace_model import Workspace
 from app.models.models_model import ModelConfig
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
@@ -12,6 +12,29 @@ from app.core.error_codes import BizCode
 from app.models.models_model import ModelType
 
 business_logger = get_business_logger()
+
+
+def _replace_folder_doc_nums(
+        db: Session,
+        items: list,
+        workspace_id: uuid.UUID,
+) -> list:
+    folder_ids = [
+        item.id for item in items
+        if item.type == KnowledgeType.FOLDER
+    ]
+    if not folder_ids:
+        return items
+
+    doc_counts = knowledge_repository.get_folder_doc_counts(
+        db=db,
+        folder_ids=folder_ids,
+        workspace_id=workspace_id,
+    )
+    for item in items:
+        if item.id in doc_counts:
+            item.doc_num = doc_counts[item.id]
+    return items
 
 
 def get_knowledges_paginated(
@@ -34,6 +57,11 @@ def get_knowledges_paginated(
                 orderby=orderby,
                 desc=desc
             )
+        items = _replace_folder_doc_nums(
+            db=db,
+            items=items,
+            workspace_id=current_user.current_workspace_id,
+        )
         business_logger.info(f"The knowledge base paging query has been successful: username={current_user.username}, total={total}, Number of current page={len(items)}")
         return total, items
     except Exception as e:
