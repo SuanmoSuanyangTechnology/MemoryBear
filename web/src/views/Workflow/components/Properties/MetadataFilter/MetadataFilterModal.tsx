@@ -134,18 +134,12 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
   };
 
   const handleLeftFieldChange = (index: number, newValue?: string | string[]) => {
-    const lastFilter = conditions[index];
-    form.setFieldsValue({
-      metadata_filters: {
-        [index]: {
-          ...conditions[index],
-          operator: 'eq',
-          field: newValue,
-          value: lastFilter.value_type === 'variable'
-            ? undefined
-            : lastFilter.value
-        }
-      }
+    form.setFieldValue(['metadata_filters', 'conditions', index], {
+      ...conditions[index],
+      operator: 'eq',
+      field: newValue,
+      value_type: 'constant',
+      value: undefined
     });
   };
 
@@ -258,17 +252,19 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
                           {!hideRightField && (
                             <div>
                               <Flex align="center">
-                                <Form.Item name={[field.name, 'value_type']} noStyle>
-                                  <Select
-                                    placeholder={t('common.pleaseSelect')}
-                                    options={inputTypeOptions}
-                                    popupMatchSelectWidth={false}
-                                    variant="borderless"
-                                    className="rb:w-30!"
-                                    onChange={() => handleInputTypeChange(index)}
-                                  />
-                                </Form.Item>
-                                <Divider type="vertical" />
+                                {leftFieldType !== 'time' && <>
+                                  <Form.Item name={[field.name, 'value_type']} noStyle>
+                                    <Select
+                                      placeholder={t('common.pleaseSelect')}
+                                      options={inputTypeOptions}
+                                      popupMatchSelectWidth={false}
+                                      variant="borderless"
+                                      className="rb:w-30!"
+                                      onChange={() => handleInputTypeChange(index)}
+                                    />
+                                  </Form.Item>
+                                  <Divider type="vertical" />
+                                </>}
                                 <Form.Item name={[field.name, 'value']} noStyle>
                                   {valueType === 'variable'
                                     ? (
