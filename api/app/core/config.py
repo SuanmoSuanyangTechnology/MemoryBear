@@ -249,9 +249,6 @@ class Settings:
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
     REFLECTION_INTERVAL_TIME: Optional[str] = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
 
-    # Memory Cache Regeneration Configuration
-    MEMORY_CACHE_REGENERATION_HOURS: int = int(os.getenv("MEMORY_CACHE_REGENERATION_HOURS", "24"))
-
     # Celery Beat Schedule Configuration (定时任务执行频率)
     MEMORY_INCREMENT_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="cron hour [0, 23]")]
@@ -262,10 +259,23 @@ class Settings:
     WORKSPACE_REFLECTION_INTERVAL_SECONDS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="reflection interval in seconds, must be >= 1")]
     ).validate_python(int(os.getenv("WORKSPACE_REFLECTION_INTERVAL_SECONDS", "30")))
-    FORGETTING_CYCLE_INTERVAL_HOURS: int = TypeAdapter(
-        Annotated[int, Field(ge=1, description="forgetting cycle interval in hours, must be >= 1")]
-    ).validate_python(int(os.getenv("FORGETTING_CYCLE_INTERVAL_HOURS", "24")))
-    
+
+    # memory cache regeneration 执行时间点（UTC 小时 0-23，默认 18 = 北京时间 2:00）
+    MEMORY_CACHE_REGENERATION_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="memory cache regeneration cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_HOUR", "18")))
+    MEMORY_CACHE_REGENERATION_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="memory cache regeneration cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_MINUTE", "0")))
+
+    # forgetting cycle 执行时间点（UTC 小时 0-23，默认 18 = 北京时间 2:00）
+    FORGETTING_CYCLE_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="forgetting cycle cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("FORGETTING_CYCLE_HOUR", "18")))
+    FORGETTING_CYCLE_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="forgetting cycle cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("FORGETTING_CYCLE_MINUTE", "0")))
+
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）
     IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  

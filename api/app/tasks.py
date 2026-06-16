@@ -2896,7 +2896,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
 
 @celery_app.task(
-    name="app.tasks.regenerate_memory_cache",
+    name="app.tasks.refresh_memory_insight_and_summary_cache",
     bind=True,
     ignore_result=True,
     max_retries=0,
@@ -2904,7 +2904,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
     time_limit=3600,
     soft_time_limit=3300,
 )
-def regenerate_memory_cache(self) -> Dict[str, Any]:
+def refresh_memory_insight_and_summary_cache(self) -> Dict[str, Any]:
     """定时任务：为所有用户重新生成记忆洞察和用户摘要缓存
 
     遍历所有活动工作空间的所有终端用户，为每个用户重新生成记忆洞察和用户摘要。
