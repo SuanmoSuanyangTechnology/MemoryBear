@@ -134,16 +134,13 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
   };
 
   const handleLeftFieldChange = (index: number, newValue?: string | string[]) => {
-    const lastFilter = conditions[index];
     form.setFieldsValue({
       metadata_filters: {
         [index]: {
           ...conditions[index],
           operator: 'eq',
           field: newValue,
-          value: lastFilter.value_type === 'variable'
-            ? undefined
-            : lastFilter.value
+          value: undefined
         }
       }
     });
