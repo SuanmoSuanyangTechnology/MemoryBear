@@ -2784,14 +2784,13 @@ class WorkflowService:
         node_execution = self.node_execution_repo.get_latest_by_app_node(
             app_id=app_id,
             node_id=node_id,
-            source="single_node_debug",
         )
         if not node_execution:
             raise BusinessException("没有可用于重跑的单节点调试输入", BizCode.NOT_FOUND)
         meta_data = node_execution.meta_data or {}
         debug_input_data = meta_data.get("debug_input")
         if not isinstance(debug_input_data, dict):
-            debug_input_data = {}
+            debug_input_data = node_execution.input_data if isinstance(node_execution.input_data, dict) else {}
         if not debug_input_data and not isinstance(node_execution.input_data, dict):
             raise BusinessException("未找到可复用的单节点调试输入", BizCode.NOT_FOUND)
         if invalidate_cache:
