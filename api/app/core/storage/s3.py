@@ -132,10 +132,18 @@ class S3Storage(StorageBackend):
                 logger.info(f"Bucket '{bucket_name}' already exists")
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
-                if error_code in ("404", "NoSuchBucket"):
+                if error_code in ("403", "AccessDenied"):
+                    # Bucket likely exists but the credential lacks permission to list it.
+                    # This is acceptable for self-hosted endpoints; proceed with uploads.
+                    logger.info(
+                        f"Bucket '{bucket_name}' may exist but head_bucket is not allowed "
+                        f"(AccessDenied). Proceeding anyway."
+                    )
+                elif error_code in ("404", "NoSuchBucket"):
                     try:
-                        if region == "us-east-1":
-                            # us-east-1 has special create_bucket behavior (no LocationConstraint)
+                        # Treat empty/falsy region the same as us-east-1 to avoid sending
+                        # an invalid LocationConstraint to non-AWS S3 backends.
+                        if not region or region == "us-east-1":
                             self.client.create_bucket(Bucket=bucket_name)
                         else:
                             self.client.create_bucket(
