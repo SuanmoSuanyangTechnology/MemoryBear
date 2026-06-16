@@ -1,6 +1,6 @@
 import { type FC, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Form, Select, Button, Space, Flex } from 'antd';
+import { Form, Select, Button, Space, Flex, Tooltip } from 'antd';
 
 import ModelConfig from '../ModelConfig'
 import MetadataFilterModal, { type MetadataFilterModalRef, type FilterCondition } from './MetadataFilterModal';
@@ -39,7 +39,14 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
   return (
     <>
       <Flex align="center" justify="space-between" className="rb:w-full!">
-        <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">{t('workflow.config.knowledge-retrieval.metadata')}</div>
+        <Flex align="center" gap={4} className="rb:font-medium rb:text-[12px] rb:leading-4.5">
+          {t('workflow.config.knowledge-retrieval.metadata')}
+          {currentMode === 'manual' &&
+            <Tooltip title={t('workflow.config.knowledge-retrieval.metadataTip')}>
+              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+            </Tooltip>
+          }
+        </Flex>
         <Space size={8}>
           <Form.Item
             name="metadata_filter_mode"

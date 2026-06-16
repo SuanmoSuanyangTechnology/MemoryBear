@@ -2638,6 +2638,7 @@ export const zh = {
           gte: '≥',
           before: '早于',
           after: '晚于',
+          metadataTip: '仅支持配置所有已选知识库中共有的元数据字段',
         },
         'parameter-extractor': {
           model_id: '模型',

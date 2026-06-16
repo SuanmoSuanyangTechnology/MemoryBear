@@ -138,7 +138,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
             <Form.Item name={field.name} className="rb:mb-0!">
               <DatePicker
                 showTime
-                format="YYYY-MM-DD HH:mm:ss"
+                format="YYYY-MM-DD HH:mm:ssZZ"
               />
             </Form.Item>
           );
