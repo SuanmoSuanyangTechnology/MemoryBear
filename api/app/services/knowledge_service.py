@@ -1,9 +1,12 @@
 import uuid
+from typing import Any
+
 from sqlalchemy.orm import Session
 from app.models.user_model import User
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.models.workspace_model import Workspace
 from app.models.models_model import ModelConfig
+from app.schemas import knowledge_schema
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
 from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
@@ -14,27 +17,73 @@ from app.models.models_model import ModelType
 business_logger = get_business_logger()
 
 
-def _replace_folder_doc_nums(
+def _build_knowledge_items_with_folder_trees(
         db: Session,
         items: list,
         workspace_id: uuid.UUID,
-) -> list:
+) -> list[dict[str, Any]]:
+    knowledge_items = [
+        knowledge_schema.Knowledge.model_validate(item)
+        for item in items
+    ]
     folder_ids = [
-        item.id for item in items
+        item.id for item in knowledge_items
         if item.type == KnowledgeType.FOLDER
     ]
     if not folder_ids:
-        return items
+        return [item.model_dump(mode="json") for item in knowledge_items]
 
+    children_by_parent: dict[uuid.UUID, list[knowledge_schema.Knowledge]] = {}
+    pending_parent_ids = list(folder_ids)
+    visited_parent_ids: set[uuid.UUID] = set()
+    all_folder_ids = list(folder_ids)
+
+    while pending_parent_ids:
+        current_parent_ids = [
+            parent_id for parent_id in pending_parent_ids
+            if parent_id not in visited_parent_ids
+        ]
+        if not current_parent_ids:
+            break
+
+        visited_parent_ids.update(current_parent_ids)
+        children = knowledge_repository.get_knowledges_by_parent_ids(
+            db=db,
+            parent_ids=current_parent_ids,
+            workspace_id=workspace_id,
+        )
+        pending_parent_ids = []
+
+        for child in children:
+            children_by_parent.setdefault(child.parent_id, []).append(child)
+            if child.type == KnowledgeType.FOLDER:
+                all_folder_ids.append(child.id)
+                pending_parent_ids.append(child.id)
+
+    all_folder_ids = list(dict.fromkeys(all_folder_ids))
     doc_counts = knowledge_repository.get_folder_doc_counts(
         db=db,
-        folder_ids=folder_ids,
+        folder_ids=all_folder_ids,
         workspace_id=workspace_id,
     )
-    for item in items:
+
+    def build_item(item: knowledge_schema.Knowledge, ancestors: set[uuid.UUID]) -> dict[str, Any]:
+        data = item.model_dump(mode="json")
         if item.id in doc_counts:
-            item.doc_num = doc_counts[item.id]
-    return items
+            data["doc_num"] = doc_counts[item.id]
+        if item.type == KnowledgeType.FOLDER:
+            next_ancestors = ancestors | {item.id}
+            data["children"] = [
+                build_item(child, next_ancestors)
+                for child in children_by_parent.get(item.id, [])
+                if child.id not in next_ancestors
+            ]
+        return data
+
+    return [
+        build_item(item, set())
+        for item in knowledge_items
+    ]
 
 
 def get_knowledges_paginated(
@@ -57,7 +106,7 @@ def get_knowledges_paginated(
                 orderby=orderby,
                 desc=desc
             )
-        items = _replace_folder_doc_nums(
+        items = _build_knowledge_items_with_folder_trees(
             db=db,
             items=items,
             workspace_id=current_user.current_workspace_id,

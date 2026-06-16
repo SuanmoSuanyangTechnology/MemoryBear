@@ -164,6 +164,39 @@ def get_knowledges_by_parent_id(db: Session, parent_id: uuid.UUID) -> list[Knowl
         raise
 
 
+def get_knowledges_by_parent_ids(
+        db: Session,
+        parent_ids: list[uuid.UUID],
+        workspace_id: uuid.UUID,
+) -> list[knowledge_schema.Knowledge]:
+    db_logger.debug(
+        f"Batch query knowledge bases by parent IDs: parent_count={len(parent_ids)}, workspace_id={workspace_id}"
+    )
+    if not parent_ids:
+        return []
+
+    try:
+        knowledges = (
+            db.query(Knowledge)
+            .filter(
+                Knowledge.parent_id.in_(parent_ids),
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status != 2,
+                Knowledge.permission_id != PermissionType.Memory,
+            )
+            .all()
+        )
+        db_logger.debug(
+            f"Batch knowledge bases query successful: parent_count={len(parent_ids)}, count={len(knowledges)}"
+        )
+        return [knowledge_schema.Knowledge.model_validate(item) for item in knowledges]
+    except Exception as e:
+        db_logger.error(
+            f"Failed to batch query knowledge bases by parent IDs: workspace_id={workspace_id} - {str(e)}"
+        )
+        raise
+
+
 def get_folder_doc_counts(
         db: Session,
         folder_ids: list[uuid.UUID],
