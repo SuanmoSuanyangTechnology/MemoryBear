@@ -212,7 +212,7 @@ class WriteSnapshotRecorder:
         新格式按 chunk 分组，每条记录包含：
         - dialog_id / chunk_id：定位信息
         - input：本次 extract_statement 注入给 LLM 的上下文
-            （target_content / target_message_date / dialog_at /
+            （target_content / dialog_at /
              supporting_context.before_msgs / supporting_context.after_msgs）
         - outputs：LLM 抽取出来的 statement 列表
         便于人工核对每个 chunk 的输入是否正确、输出是否合理。
@@ -236,7 +236,6 @@ class WriteSnapshotRecorder:
                         "end_user_id": full.get("end_user_id"),
                         "dialog_at": full.get("dialog_at") or "",
                         "target_content": full.get("target_content"),
-                        "target_message_date": full.get("target_message_date"),
                         "supporting_context": {
                             "before_msgs": [
                                 {"role": m.get("role", ""), "msg": m.get("msg", "")}

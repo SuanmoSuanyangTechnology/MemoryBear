@@ -124,7 +124,6 @@ class StatementExtractor:
                 "chunk_id": getattr(chunk, "id", ""),
                 "end_user_id": end_user_id or "",
                 "target_content": chunk_content,
-                "target_message_date": to_iso_z(utcnow_naive()),
                 "supporting_context": {
                     "before_msgs": [
                         {"role": "context", "msg": dialogue_content}

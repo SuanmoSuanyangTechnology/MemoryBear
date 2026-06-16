@@ -532,9 +532,6 @@ class NewExtractionOrchestrator:
                     chunk_id=chunk.id,
                     end_user_id=dialog.end_user_id,
                     target_content=chunk.content,
-                    target_message_date=str(
-                        getattr(dialog, "created_at", "") or ""
-                    ),
                     dialog_at=getattr(chunk, "dialog_at", "") or "",
                     supporting_context=ctx,
                 )
