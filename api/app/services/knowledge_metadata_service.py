@@ -2,7 +2,7 @@ import uuid
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from app.core.utils.datetime_utils import parse_iso_to_utc_naive, utcnow_naive
+from app.core.utils.datetime_utils import parse_metadata_time_to_utc_naive, utcnow_naive
 from app.core.exceptions import (
     BusinessException,
     ResourceNotFoundException,
@@ -349,8 +349,12 @@ class KnowledgeMetadataService:
                 doc_id = item["document_id"]
                 metadata = item["metadata"]
                 doc = doc_map[doc_id]
+                normalized_metadata = KnowledgeMetadataService._normalize_metadata_for_storage(
+                    metadata,
+                    field_defs,
+                )
                 doc.meta_data = doc.meta_data or {}
-                doc.meta_data.update(metadata)
+                doc.meta_data.update(normalized_metadata)
                 flag_modified(doc, "meta_data")
                 doc.updated_at = utcnow_naive()
 
@@ -420,8 +424,12 @@ class KnowledgeMetadataService:
                 )
 
         # 4. 更新 metadata JSON
+        normalized_metadata = KnowledgeMetadataService._normalize_metadata_for_storage(
+            metadata,
+            field_defs,
+        )
         doc.meta_data = doc.meta_data or {}
-        doc.meta_data.update(metadata)
+        doc.meta_data.update(normalized_metadata)
         flag_modified(doc, "meta_data")
         doc.updated_at = utcnow_naive()
 
@@ -563,14 +571,43 @@ class KnowledgeMetadataService:
             case "number":
                 return isinstance(value, (int, float)) and not isinstance(value, bool)
             case "time":
-                if not isinstance(value, str):
-                    return False
                 try:
-                    return parse_iso_to_utc_naive(value) is not None
-                except ValueError:
+                    return parse_metadata_time_to_utc_naive(value) is not None
+                except (TypeError, ValueError):
                     return False
             case _:
                 return False
+
+    @staticmethod
+    def _normalize_metadata_value_for_storage(field_type: str, value: Any) -> Any:
+        """Normalize metadata values before storing them in Document.meta_data."""
+        if value is None or field_type != "time":
+            return value
+        dt = parse_metadata_time_to_utc_naive(value)
+        if dt is None:
+            return None
+        return dt.isoformat(sep=" ")
+
+    @staticmethod
+    def _normalize_metadata_for_storage(
+        metadata: dict[str, Any],
+        field_defs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize time metadata to naive UTC strings before JSONB storage."""
+        normalized = {}
+        for field_name, value in metadata.items():
+            field_def = field_defs[field_name]
+            normalized[field_name] = KnowledgeMetadataService._normalize_metadata_value_for_storage(
+                field_def.type,
+                value,
+            )
+            if field_def.type == "time":
+                api_logger.debug(
+                    "Normalized document time metadata: "
+                    f"field={field_name}, raw_value={value!r}, raw_type={type(value).__name__}, "
+                    f"stored_value={normalized[field_name]!r}"
+                )
+        return normalized
 
     @staticmethod
     def get_metadata_defs_for_filtering(

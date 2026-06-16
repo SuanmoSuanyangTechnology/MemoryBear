@@ -15,6 +15,7 @@ UTC = timezone.utc
 _BARE_CLOCK_LINE_RE = re.compile(
     r"(?m)^(?P<hour>[01]\d|2[0-3]):(?P<minute>[0-5]\d):(?P<second>[0-5]\d)(?P<rest>\s+)"
 )
+_NUMERIC_TIMESTAMP_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 
 
 def utcnow() -> datetime:
@@ -91,3 +92,33 @@ def parse_iso_to_utc_naive(value: str | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(UTC).replace(tzinfo=None)
+
+
+def parse_metadata_time_to_utc_naive(value: str | int | float | datetime | None) -> datetime | None:
+    """Parse metadata time values and normalize them to naive UTC.
+
+    Metadata filters accept ISO datetime strings with an optional timezone
+    offset, or Unix timestamps in seconds/milliseconds. Naive datetime strings
+    keep the project convention and are interpreted as UTC.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return as_utc_aware(value).replace(tzinfo=None)
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid metadata time value")
+    if isinstance(value, (int, float)):
+        return parse_timestamp_to_utc_naive(value)
+    if not isinstance(value, str):
+        raise ValueError("metadata time value must be a string, timestamp, or datetime")
+
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    numeric_part = stripped.lstrip("+-").split(".", 1)[0]
+    if _NUMERIC_TIMESTAMP_RE.fullmatch(stripped) and len(numeric_part) >= 10:
+        timestamp = float(stripped) if "." in stripped else int(stripped)
+        return parse_timestamp_to_utc_naive(timestamp)
+
+    return parse_iso_to_utc_naive(stripped)

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.core.utils.datetime_utils import parse_iso_to_utc_naive
+from app.core.utils.datetime_utils import parse_metadata_time_to_utc_naive
 from app.models.document_model import Document
 from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy, _escape_like
 from .builtin_resolver import BuiltinFieldResolver
@@ -175,14 +175,23 @@ class MetadataFilterEngine:
         dt = None
         if operator in ("eq", "before", "after"):
             try:
-                dt = parse_iso_to_utc_naive(str(value))
+                dt = parse_metadata_time_to_utc_naive(value)
                 if dt is None:
                     raise ValueError
-            except ValueError as exc:
+            except (TypeError, ValueError) as exc:
                 raise BusinessException(
-                    "时间字段过滤参数必须为 ISO 时间格式，例如: 2024-12-31T23:59:59",
+                    "时间字段过滤参数必须为 ISO 时间格式或 Unix 时间戳，例如: 2024-12-31T23:59:59+08:00",
                     code=BizCode.METADATA_INVALID_VALUE_TYPE,
                 ) from exc
+            logger.debug(
+                "[MetadataFilterEngine] normalized builtin time filter: "
+                "column=%s operator=%s raw_value=%r raw_type=%s utc_naive=%s",
+                column_name,
+                operator,
+                value,
+                type(value).__name__,
+                dt.isoformat(sep=" "),
+            )
         dt_lit = literal(dt, DateTime) if dt else None
         match operator:
             case "eq":
