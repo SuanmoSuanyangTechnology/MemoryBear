@@ -42,7 +42,6 @@ class StatementStepInput(BaseModel):
     chunk_id: str
     end_user_id: str
     target_content: str
-    target_message_date: str
     dialog_at: str = ""   # ISO 8601 timestamp of the source message; used as "now" for relative time resolution
     supporting_context: SupportingContext
 
