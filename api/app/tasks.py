@@ -475,6 +475,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
         from app.core.rag.chunk import chunk_pipeline as chunk
+        from app.core.rag.chunk.context import ChunkOutputMode
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
         if _should_abort(document_id):
@@ -484,8 +485,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         parent_child_mode = document_info["parent_child_mode"]
         if parent_child_mode:
-            from app.core.rag.chunk import chunk_parent_child_pipeline as chunk_parent_child
-            child_res, parent_res, parent_id_map = chunk_parent_child(
+            child_res, parent_res, parent_id_map = chunk(
                 filename=file_name,
                 binary=file_binary,
                 from_page=0,
@@ -494,6 +494,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
             )
         else:
             res = chunk(
@@ -520,7 +521,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
             return f"parse document '{document_label}' aborted (deleted or cancelled)."
 
-        total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
+        total_chunks = len(child_res) if parent_child_mode else len(res)
         progress_lines.append(f"{_progress_ts()} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:

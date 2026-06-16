@@ -115,11 +115,11 @@ async def get_preview_chunks(
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
     from app.core.rag.chunk import chunk_pipeline as chunk
+    from app.core.rag.chunk.context import ChunkOutputMode
     parent_child_mode = db_document.is_parent_child_mode
     api_logger.debug(f"当前文档分块模式：{db_document.is_parent_child_mode}")
     if parent_child_mode:
-        from app.core.rag.chunk import chunk_parent_child_pipeline as chunk_parent_child
-        child_res, parent_res, parent_id_map = chunk_parent_child(
+        child_res, parent_res, parent_id_map = chunk(
             filename=db_file.file_name,
             binary=file_binary,
             from_page=0,
@@ -128,6 +128,7 @@ async def get_preview_chunks(
             vision_model=vision_model,
             parser_config=db_document.parser_config,
             is_root=False,
+            chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
         )
         # Combine parent and child chunks for preview
         parent_id_to_doc_id = {}
@@ -282,7 +283,8 @@ async def get_preview_chunks_hierarchy(
         lang="Chinese",
         base_url=db_knowledge.image2text.api_keys[0].api_base
     )
-    from app.core.rag.chunk import chunk_pipeline as chunk, chunk_parent_child_pipeline as chunk_parent_child
+    from app.core.rag.chunk import chunk_pipeline as chunk
+    from app.core.rag.chunk.context import ChunkOutputMode
 
     parser_config = dict(db_document.parser_config)
 
@@ -300,7 +302,7 @@ async def get_preview_chunks_hierarchy(
 
     try:
         if chunk_mode == "parent_child":
-            child_res, parent_res, parent_id_map = chunk_parent_child(
+            child_res, parent_res, parent_id_map = chunk(
                 filename=db_file.file_name,
                 binary=file_binary,
                 from_page=0,
@@ -309,6 +311,7 @@ async def get_preview_chunks_hierarchy(
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
             )
             hierarchy = _build_preview_hierarchy(
                 child_res,

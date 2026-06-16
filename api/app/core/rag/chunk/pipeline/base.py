@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from timeit import default_timer as timer
 
-from app.core.rag.chunk.context import ChunkContext, MergeResult, ParseResult
+from app.core.rag.chunk.context import ChunkContext, ChunkOutputMode, MergeResult, ParseResult
 
 
 class ChunkPipeline(ABC):
@@ -14,17 +14,22 @@ class ChunkPipeline(ABC):
         self.hyperlink_preprocessor = HyperlinkPreprocessor()
         self.postprocessor = ChunkPostProcessor()
 
-    def run(self, ctx: ChunkContext) -> list:
+    def run(self, ctx: ChunkContext) -> list | tuple[list[dict], list[dict], dict[int, int]]:
         embed_res = self.embed_preprocessor.collect(ctx, self.run_child)
         parse_result = self.parse(ctx)
 
         if parse_result.direct_result is not None:
-            return self.finalize_result(
+            finalized = self.finalize_result(
                 parse_result.direct_result,
                 embed_res,
                 parse_result.url_res or [],
                 parse_result.append_embed,
             )
+            if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
+                from app.core.rag.chunk.parent_child import build_parent_child_chunks
+
+                return build_parent_child_chunks(finalized, ctx.parser_config)
+            return finalized
 
         start = timer()
         merge_result = self.merge(ctx, parse_result)
@@ -35,7 +40,12 @@ class ChunkPipeline(ABC):
         url_res = parse_result.url_res or []
         url_res.extend(self.hyperlink_preprocessor.collect_url_chunks(ctx, parse_result.urls or set(), self.run_child))
         logging.info("naive_merge({}): {}".format(ctx.filename, timer() - start))
-        return self.finalize_result(main_result, embed_res, url_res)
+        finalized = self.finalize_result(main_result, embed_res, url_res)
+        if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
+            from app.core.rag.chunk.parent_child import build_parent_child_chunks
+
+            return build_parent_child_chunks(finalized, ctx.parser_config)
+        return finalized
 
     @abstractmethod
     def parse(self, ctx: ChunkContext) -> ParseResult:
@@ -85,6 +95,7 @@ class ChunkPipeline(ABC):
             return {}
         child_kwargs = dict(ctx.kwargs)
         child_kwargs.pop("is_root", None)
+        child_kwargs["chunk_output_mode"] = ChunkOutputMode.NORMAL
         return child_kwargs
 
     def finalize_result(self, main_result, embed_res, url_res, append_embed=True) -> list:

@@ -1,5 +1,6 @@
 import logging
 
+from app.core.rag.chunk.context import ChunkOutputMode
 from app.core.rag.common.token_utils import num_tokens_from_string
 from app.core.rag.nlp import concat_img
 
@@ -11,17 +12,7 @@ def truncate_to_chars(text: str, max_chars: int) -> str:
     return text if len(text) <= max_chars else text[:max_chars]
 
 
-def chunk_parent_child_pipeline(
-    filename,
-    binary=None,
-    from_page=0,
-    to_page=100000,
-    lang="Chinese",
-    callback=None,
-    vision_model=None,
-    **kwargs,
-):
-    parser_config = kwargs.get("parser_config", {})
+def build_parent_child_chunks(child_res: list[dict], parser_config: dict) -> tuple[list[dict], list[dict], dict[int, int]]:
     child_token_num = int(parser_config.get("chunk_token_num", 128))
     parent_token_num = int(parser_config.get("parent_chunk_token_num", 1024))
 
@@ -31,20 +22,6 @@ def chunk_parent_child_pipeline(
             f"falling back to default 1024"
         )
         parent_token_num = 1024
-
-    from app.core.rag.chunk import chunk_pipeline
-
-    child_res = chunk_pipeline(
-        filename,
-        binary=binary,
-        from_page=from_page,
-        to_page=to_page,
-        lang=lang,
-        callback=callback,
-        vision_model=vision_model,
-        **kwargs,
-    )
-    logging.info(f"[ParentChild] child: token_num={child_token_num}, chunk_count={len(child_res)}")
 
     parent_chunk_mode = parser_config.get("parent_chunk_mode", "paragraph")
 
@@ -96,3 +73,29 @@ def chunk_parent_child_pipeline(
 
     logging.info(f"[ParentChild] parent: mode=paragraph, token_num={parent_token_num}, chunk_count={len(parent_res)}")
     return child_res, parent_res, parent_id_map
+
+
+def chunk_parent_child_pipeline(
+    filename,
+    binary=None,
+    from_page=0,
+    to_page=100000,
+    lang="Chinese",
+    callback=None,
+    vision_model=None,
+    **kwargs,
+):
+    from app.core.rag.chunk import chunk_pipeline
+
+    wrapper_kwargs = dict(kwargs)
+    wrapper_kwargs["chunk_output_mode"] = ChunkOutputMode.PARENT_CHILD
+    return chunk_pipeline(
+        filename,
+        binary=binary,
+        from_page=from_page,
+        to_page=to_page,
+        lang=lang,
+        callback=callback,
+        vision_model=vision_model,
+        **wrapper_kwargs,
+    )
