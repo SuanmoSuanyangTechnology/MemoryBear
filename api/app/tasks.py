@@ -2469,6 +2469,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                     if not config.get('enable_self_reflexion'):       # 未启用反思的配置跳过
                         continue
                     config_id = config['config_id']
+                    baseline = config.get('baseline', 'HYBRID')
                     for user in app_detail['end_users']:
                         uid = str(user['id'])
                         try:
@@ -2489,6 +2490,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                                     "user_id": uid,
                                     "config_id": str(config_id),
                                     "workspace_id": ws_id,
+                                    "baseline": baseline,
                                 },
                                 queue="reflection_tasks",
                             )
@@ -2521,7 +2523,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     soft_time_limit=540,
 )
 def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
-                              workspace_id: str) -> Dict[str, Any]:
+                              workspace_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
     """对【单个用户】执行一次低频全量去重扫描。
 
     由 scan_layer2_dedup_full_scan 派发。精确的增量判断在 run_dedup_full_scan 内部
@@ -2552,7 +2554,7 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
                 config_id=config_id,
                 end_user_id=user_id, workspace_id=workspace_id,
             )
-            r = await memory_service.run_dedup_full_scan()
+            r = await memory_service.run_dedup_full_scan(baseline=baseline)
             merged = r.get("merged_count", 0)
             logger.info(
                 f"反思低频去重do 完成 user={user_id} status=success "
