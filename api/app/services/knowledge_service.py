@@ -61,11 +61,42 @@ def _build_knowledge_items_with_folder_trees(
                 pending_parent_ids.append(child.id)
 
     all_folder_ids = list(dict.fromkeys(all_folder_ids))
-    doc_counts = knowledge_repository.get_folder_doc_counts(
+    knowledge_ids_by_folder: dict[uuid.UUID, set[uuid.UUID]] = {}
+
+    def collect_knowledge_ids(folder_id: uuid.UUID, ancestors: set[uuid.UUID]) -> set[uuid.UUID]:
+        if folder_id in knowledge_ids_by_folder:
+            return knowledge_ids_by_folder[folder_id]
+        if folder_id in ancestors:
+            return set()
+
+        knowledge_ids = {folder_id}
+        next_ancestors = ancestors | {folder_id}
+        for child in children_by_parent.get(folder_id, []):
+            if child.id in next_ancestors:
+                continue
+            knowledge_ids.add(child.id)
+            if child.type == KnowledgeType.FOLDER:
+                knowledge_ids.update(collect_knowledge_ids(child.id, next_ancestors))
+
+        knowledge_ids_by_folder[folder_id] = knowledge_ids
+        return knowledge_ids
+
+    for folder_id in all_folder_ids:
+        collect_knowledge_ids(folder_id, set())
+
+    counted_knowledge_ids = list({
+        knowledge_id
+        for knowledge_ids in knowledge_ids_by_folder.values()
+        for knowledge_id in knowledge_ids
+    })
+    document_counts = knowledge_repository.get_document_counts_by_knowledge_ids(
         db=db,
-        folder_ids=all_folder_ids,
-        workspace_id=workspace_id,
+        knowledge_ids=counted_knowledge_ids,
     )
+    doc_counts = {
+        folder_id: sum(document_counts.get(knowledge_id, 0) for knowledge_id in knowledge_ids)
+        for folder_id, knowledge_ids in knowledge_ids_by_folder.items()
+    }
 
     def build_item(item: knowledge_schema.Knowledge, ancestors: set[uuid.UUID]) -> dict[str, Any]:
         data = item.model_dump(mode="json")
