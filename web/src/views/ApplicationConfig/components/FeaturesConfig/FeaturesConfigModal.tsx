@@ -25,7 +25,9 @@ import ContentModerationSettingModal, { type ContentModerationSettingModalRef } 
 import type { ContentModerationConfig } from '../../types'
 import type { Variable } from '../VariableList/types'
 import LabelWrapper from '@/components/FormItem/LabelWrapper'
+import { ContextEngine } from '@redbear/memory-brick';
 
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 interface FeaturesConfigModalProps {
   refresh: (value: FeaturesConfigForm) => void;
   source?: Application['type'];
@@ -264,6 +266,8 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
               })()}
               <Form.Item name="file_upload" hidden />
             </div>
+
+            {isSaas && ContextEngine && <ContextEngine />}
           </Flex>
         </Form>
       </RbModal>

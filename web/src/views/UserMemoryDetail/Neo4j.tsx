@@ -29,8 +29,8 @@ import {
 import { useI18n } from '@/store/locale'
 
 import PrivateWrap from '@/components/PrivateWrap'
-import { BrainView } from '@redbear/memory-brick'
-import ReflectMemory from './components/ReflectMemory'
+import { BrainView, ReflectMemory } from '@redbear/memory-brick'
+import { request } from '@/utils/request'
 
 
 const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
@@ -193,20 +193,13 @@ const Neo4j: FC = () => {
                 })}></div>
               </Flex>
 
-              <Flex
-                align="center"
-                justify="center"
-                className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
-                  'rb:bg-[#171719]': selectedKey === 'reflect',
-                  'rb:hover:bg-[#EBEBEB]': selectedKey !== 'reflect',
-                })}
-                onClick={(e) => onOpenChange(e, 'reflect')}
-              >
-                <div className={clsx("rb:size-6 rb:bg-cover", {
-                  "rb:bg-[url('@/assets/images/userMemory/reflectLogs.svg')]": selectedKey !== 'reflect',
-                  "rb:bg-[url('@/assets/images/userMemory/reflectLogs_active.svg')]": selectedKey === 'reflect'
-                })}></div>
-              </Flex>
+              {isSaas && ReflectMemory &&
+                <ReflectMemory
+                  request={request}
+                  onOpenChange={(e) => onOpenChange(e, 'reflect')}
+                  selectedKey={selectedKey}
+                />
+              }
             </Flex>
           </Flex>
 
@@ -243,7 +236,6 @@ const Neo4j: FC = () => {
         )}
         <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
         <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
-        <ReflectMemory className={selectedKey === 'reflect' ? 'rb:block!' : 'rb:hidden!'} />
       </div>
     </div>
   )
