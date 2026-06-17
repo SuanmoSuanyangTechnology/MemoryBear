@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from typing import Any
@@ -78,12 +79,23 @@ class MetadataAutoFilterService:
             metadata_defs=metadata_defs,
             llm=llm,
         )
+        logger.info(
+            "[MetadataAutoFilter] generated candidate conditions: candidate_count=%s, conditions=%s",
+            len(raw_conditions),
+            cls._summarize_raw_conditions(raw_conditions),
+        )
         conditions = []
         for raw_condition in raw_conditions:
             condition = cls._normalize_condition(raw_condition, metadata_defs)
             if condition:
                 conditions.append(condition)
 
+        logger.info(
+            "[MetadataAutoFilter] generated normalized conditions: valid_count=%s, candidate_count=%s, conditions=%s",
+            len(conditions),
+            len(raw_conditions),
+            cls._summarize_normalized_conditions(conditions),
+        )
         logger.info(
             "[MetadataAutoFilter] extracted %s valid conditions from %s candidates",
             len(conditions),
@@ -268,6 +280,54 @@ class MetadataAutoFilterService:
         except ValueError:
             return _InvalidValue
         return value.strip()
+
+    @classmethod
+    def _summarize_raw_conditions(cls, raw_conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "field": cls._get_first_present(raw_condition, ("metadata_field_name", "field", "name")),
+                "operator": cls._get_first_present(raw_condition, ("comparison_operator", "operator")),
+                "value": cls._summarize_value_for_log(
+                    cls._get_first_present(raw_condition, ("metadata_field_value", "value"))
+                ),
+            }
+            for raw_condition in raw_conditions
+        ]
+
+    @classmethod
+    def _summarize_normalized_conditions(
+        cls,
+        conditions: list[EngineFilterCondition],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "field": condition.field,
+                "operator": condition.operator,
+                "value": cls._summarize_value_for_log(condition.value),
+            }
+            for condition in conditions
+        ]
+
+    @staticmethod
+    def _summarize_value_for_log(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            return {
+                "type": "string",
+                "length": len(value),
+                "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12],
+            }
+        if isinstance(value, (list, tuple, set)):
+            return {
+                "type": type(value).__name__,
+                "length": len(value),
+            }
+        return {"type": type(value).__name__}
 
 
 _InvalidValue = object()
