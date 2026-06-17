@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 15:14:40
+ * @Last Modified time: 2026-06-17 17:40:02
  */
 /**
  * Relationship Network Component
@@ -10,7 +10,7 @@
  * Interactive force-directed graph visualization
  */
 
-import React, { type FC, useEffect, useState, useCallback, useRef } from 'react'
+import React, { type FC, useEffect, useState, useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Space, Flex, Divider, type SegmentedProps, Image, Button } from 'antd'
@@ -18,17 +18,19 @@ import dayjs from 'dayjs'
 import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
-import type { GraphData, Node as GraphNode, Edge as GraphEdge, PerceptualNodeProperties, StatementNodeProperties, ExtractedEntityNodeProperties, AssistantPrunedNodeProperties } from '../types'
+import type { GraphData, Node as GraphNode, PerceptualNodeProperties, StatementNodeProperties, ExtractedEntityNodeProperties, AssistantPrunedNodeProperties } from '../types'
 import type { RawCommunityNode } from '@/components/D3Graph/types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Tag from '@/components/Tag'
-import GraphNetworkChart, { type Node, type Edge, type EdgeClickData, Colors } from '@/components/Charts/GraphNetworkChart'
+import GraphNetworkChart from '@/components/Charts/GraphNetworkChart'
+import { type Node, type Edge, type EdgeClickData, Colors } from '@/components/Charts/graphNetworkUtils'
 import CommunityNetwork from './CommunityNetwork'
 import PageTabs from '@/components/PageTabs'
 import AudioPlayer from './AudioPlayer'
 import VideoPlayer from './VideoPlayer'
+import EdgeDetailPanel from './EdgeDetailPanel'
 
 export const KEYS: Record<string, string[]> = {
   image: ['summary', 'keywords', 'topic', 'domain', 'scene'],
@@ -49,14 +51,21 @@ const getFileType = (fileType: string) => {
 interface RelationshipNetworkProps {
   regionId: string | null;
   selectedKey: string | null;
+  setRegionId: Dispatch<SetStateAction<string | null>>;
+  setSelectedKey: Dispatch<SetStateAction<string | null>>;
+  setBrainMemories: Dispatch<SetStateAction<string[]>>;
 }
-const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey }) => {
+const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey }) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [nodes, setNodes] = useState<Node[]>([])
-  const [links, setLinks] = useState<Edge[]>([])
+  const [links, setLinks] = useState<Edge[]>()
   const [categories, setCategories] = useState<{ name: string; value: number; }[]>([])
   const [selectedNode, setSelectedNode] = useState<GraphNode | RawCommunityNode | EdgeClickData | null>(null)
+  // 双向边当前选中的半边方向
+  const [activeEdgeDirection, setActiveEdgeDirection] = useState<'a_to_b' | 'b_to_a' | null>(null)
+  // 边详情面板中当前激活的关系下标
+  const [activeRelationIndex, setActiveRelationIndex] = useState(0)
   // const [fullScreen, setFullScreen] = useState<boolean>(false)
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<SegmentedProps['value']>('relationshipNetwork')
@@ -66,24 +75,20 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
 
   /** Fetch relationship network data */
   const getEdgeData = useCallback(() => {
-    console.log('getEdgeData')
     if (!id) return
     edgeAbortRef.current?.abort()
     edgeAbortRef.current = new AbortController()
     setSelectedNode(null)
     getMemorySearchEdges(id, { signal: edgeAbortRef.current.signal }).then((res) => {
-      console.log('API Response:', res)
       const { nodes, edges, statistics } = res as GraphData
-      console.log('GraphData - nodes:', nodes, 'edges:', edges, 'statistics:', statistics)
       const curNodes: Node[] = []
-      const curEdges: Edge[] = []
       const curNodeTypes = Object.keys(statistics.node_types)
 
       // Calculate connection count for each node
       const connectionCount: Record<string, number> = {}
-      edges.forEach((edge: GraphEdge) => {
-        connectionCount[edge.source] = (connectionCount[edge.source] || 0) + 1
-        connectionCount[edge.target] = (connectionCount[edge.target] || 0) + 1
+      edges.forEach((edge: Edge) => {
+        connectionCount[`${edge.node_a}_${edge.node_b}`] = (connectionCount[`${edge.node_a}_${edge.node_b}`] || 0) + 1
+        connectionCount[`${edge.node_b}_${edge.node_a}`] = (connectionCount[`${edge.node_b}_${edge.node_a}`] || 0) + 1
       })
 
       // Process node data
@@ -130,22 +135,12 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       nodes.forEach(node => {
         nodeIdToLabel[node.id] = node.label
       })
-      // Process edge data
-      edges.forEach((edge: GraphEdge) => {
-        curEdges.push({
-          ...edge,
-          source: edge.source,
-          target: edge.target,
-          value: edge.weight || 1,
-          caption: edge.caption || '',
-        })
-      })
 
       // Set categories
       const curCategories = Object.keys(statistics.node_types).map(type => ({ name: type, value: (statistics as GraphData['statistics']).node_types[type] || 0 }))
 
       setNodes(curNodes)
-      setLinks(curEdges)
+      setLinks(edges)
       setCategories(curCategories)
     })
   }, [id])
@@ -160,7 +155,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
     if (!selectedNode) return
     const params = new URLSearchParams({
       nodeId: selectedNode.id,
-      nodeLabel: selectedNode.label,
+      nodeLabel: (selectedNode as GraphNode).label,
       nodeName: (selectedNode as Node).name || ''
     })
     navigate(`/user-memory/detail/${id}/GRAPH?${params.toString()}`)
@@ -172,11 +167,13 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       getEdgeData()
     }
     setActiveTab(tab)
-    setSelectedNode(null)
+    handleReset()
   }
 
   const [fileSize, setFileSize] = useState<string>('')
   useEffect(() => {
+    setActiveRelationIndex(0)
+    setActiveEdgeDirection(null)
     setFileSize('')
     if (selectedNode) {
       setSelectedCategory(null)
@@ -206,11 +203,21 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       setSelectedCategory(prev => category === prev ? null : category)
     }, 0)
   }
-  const handleClickNode = (node: GraphNode) => {
+  const handleClickNode = useCallback((node: GraphNode) => {
     setSelectedCategory(null)
     setTimeout(() => {
       setSelectedNode(node)
     }, 0)
+  }, [])
+  const handleReset = () => {
+    console.log('handleReset')
+    setActiveRelationIndex(0)
+    setActiveEdgeDirection(null)
+    setSelectedNode(null)
+    setSelectedCategory(null)
+    setRegionId(null)
+    setBrainMemories([])
+    setSelectedKey(null)
   }
   console.log('selectedCategory', selectedCategory, selectedNode)
   return (
@@ -258,18 +265,17 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                   </Flex>
                 ))}
               </Flex>
-              <Button onClick={() => setSelectedCategory(null)}>{t('userMemory.resetView')}</Button>
+              <Button onClick={() => handleReset()}>{t('userMemory.resetView')}</Button>
             </Flex>
           }
           <GraphNetworkChart
             nodes={nodes}
-            links={links}
-            categories={categories.map(vo => ({
-              name: t(`userMemory.${vo.name}`)
-            })) || []}
-            onNodeClick={(node) => handleClickNode(node as GraphNode)}
+            links={links || []}
+            onNodeClick={handleClickNode as any}
             selectedNodeId={selectedNode?.id}
             selectedCategory={selectedCategory}
+            activeEdgeDirection={activeEdgeDirection}
+            activeRelationIndex={activeRelationIndex}
             regionId={regionId}
           />
         </div>
@@ -277,47 +283,26 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       {selectedNode &&
         <RbCard
           title={t('userMemory.memoryDetails')}
-          className="rb:absolute! rb:top-4 rb:right-0 rb:w-100! rb:bg-white!"
+          className="rb:absolute! rb:top-4 rb:right-0 rb:w-100! rb:bg-white! rb:max-h-[calc(100vh-140px)]!"
           headerType="borderless"
           headerClassName="rb:min-h-[60px]!"
-          bodyClassName={clsx('rb:px-5! rb:pt-0! rb:h-auto!', {
-            'rb:pb-[76px]!': activeTab !== 'communityNetwork',
-            'rb:pb-3!': activeTab === 'communityNetwork',
+          bodyClassName={clsx('rb:px-5! rb:pt-0! rb:pb-3! rb:max-h-[calc(100vh-194px)]! rb:overflow-auto!', {
+            'rb:pb-[76px]!': activeTab !== 'communityNetwork' && !(selectedNode && 'type' in selectedNode && (selectedNode as EdgeClickData).type === 'edge'),
+            // 'rb:pb-3!': activeTab === 'communityNetwork',
           })}
           extra={<div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/close.svg')]" onClick={() => setSelectedNode(null)}></div>}
         >
           {selectedNode && 'type' in selectedNode && (selectedNode as EdgeClickData).type === 'edge'
-            ? (() => {
-              const sourceNode = nodes.find(n => n.id === (selectedNode as EdgeClickData).source)
-              const targetNode = nodes.find(n => n.id === (selectedNode as EdgeClickData).target)
-              return (
-                <Flex vertical gap={12}>
-                  {(selectedNode as EdgeClickData).properties?.predicate_surface &&
-                    <div className="rb:text-[#212332]">
-                      {(selectedNode as EdgeClickData).properties?.predicate_surface}
-                    </div>
-                  }
-                  <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.predicate')}</div>
-                  <div className="rb:font-medium">
-                    {(selectedNode as EdgeClickData).properties?.predicate}
-                  </div>
-
-                  <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.sourceNode')}</div>
-                  <div className="rb:font-medium">
-                    {sourceNode?.name || (selectedNode as EdgeClickData).source}
-                    {sourceNode?.caption && ` (${sourceNode!.caption})`}
-                  </div>
-
-                  <div className="rb:text-[#5B6167] rb:font-regular">{t('userMemory.targetNode')}</div>
-                  <div className="rb:font-medium">
-                    {targetNode?.name || (selectedNode as EdgeClickData).target}
-                    {targetNode?.caption && ` (${targetNode!.caption})`}
-                  </div>
-                </Flex>
-              )
-            })()
+            ? <EdgeDetailPanel 
+                selectedNode={selectedNode as any} 
+                nodes={nodes} 
+                t={t} 
+                activeRelationIndex={activeRelationIndex}
+                onActiveIndexChange={setActiveRelationIndex}
+                onRelationChange={(_, direction) => setActiveEdgeDirection(direction)}
+              />
             : <>
-              <div className={clsx("rb:max-h-[calc(100vh-269px)] rb:overflow-auto", {
+              <div className={clsx("rb:max-h-[calc(100vh-272px)] rb:overflow-auto", {
                 'rb:max-h-[calc(100vh-269px)]': activeTab !== 'communityNetwork',
                 'rb:max-h-[calc(100vh-205px)]': activeTab == 'communityNetwork',
               })}>
@@ -346,30 +331,30 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                       </>}
                     </div>
                   : <>
-                    {((selectedNode as Node).name || selectedNode.label === 'Conversation') &&
+                    {((selectedNode as Node).name || (selectedNode as GraphNode).label === 'Conversation') &&
                       <div className="rb:font-medium rb:text-[16px] rb:text-[#212332] rb:leading-5.5 rb:mb-3">
-                        {(selectedNode as Node).name || selectedNode.label}
+                        {(selectedNode as Node).name || (selectedNode as GraphNode).label}
                       </div>
                     }
                     <Flex vertical gap={24}>
-                      {selectedNode.label !== 'ExtractedEntity' &&
+                      {(selectedNode as GraphNode).label !== 'ExtractedEntity' &&
                         <div>
                           <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
                           <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
-                            {['Chunk', 'Dialogue', 'MemorySummary', 'AssistantOriginal'].includes(selectedNode.label) && 'content' in ((selectedNode as GraphNode).properties as { content: string })
+                            {['Chunk', 'Dialogue', 'MemorySummary', 'AssistantOriginal'].includes((selectedNode as GraphNode).label) && 'content' in ((selectedNode as GraphNode).properties as { content: string })
                               ? ((selectedNode as GraphNode).properties as { content: string }).content
-                                : selectedNode.label === 'Statement' && 'statement' in ((selectedNode as GraphNode).properties as { statement: string })
+                                : (selectedNode as GraphNode).label === 'Statement' && 'statement' in ((selectedNode as GraphNode).properties as { statement: string })
                                   ? ((selectedNode as GraphNode).properties as { statement: string }).statement
-                                  : selectedNode.label === 'Perceptual' && 'summary' in ((selectedNode as GraphNode).properties as { summary: string })
+                                  : (selectedNode as GraphNode).label === 'Perceptual' && 'summary' in ((selectedNode as GraphNode).properties as { summary: string })
                                     ? ((selectedNode as GraphNode).properties as { summary: string }).summary
-                                    : ['AssistantOriginal', 'AssistantPruned'].includes(selectedNode.label ) && 'text' in ((selectedNode as GraphNode).properties as { text: string })
+                                    : ['AssistantOriginal', 'AssistantPruned'].includes((selectedNode as GraphNode).label ) && 'text' in ((selectedNode as GraphNode).properties as { text: string })
                                       ? ((selectedNode as GraphNode).properties as { text: string }).text
                                       : ''
                             }
                           </div>
                         </div>
                       }
-                      {selectedNode.label === 'ExtractedEntity' && <>
+                      {(selectedNode as GraphNode).label === 'ExtractedEntity' && <>
                         <div>
                           <div className="rb:font-medium rb:leading-5">{t('userMemory.ExtractedEntity_description_summary')}</div>
                           {((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description_summary
@@ -421,7 +406,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                       </div>}
 
 
-                      {selectedNode.label === 'ExtractedEntity' && <>
+                      {(selectedNode as GraphNode).label === 'ExtractedEntity' && <>
                         {(['description_summary', 'entity_type', 'aliases'] as const).map(key => {
                           const p = (selectedNode as Node).properties as ExtractedEntityNodeProperties
                           if (p[key]) {
@@ -440,7 +425,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                           return null
                         })}
                       </>}
-                      {selectedNode.label === 'Perceptual' && <>
+                      {(selectedNode as GraphNode).label === 'Perceptual' && <>
                         <Flex vertical gap={16} className="rb:w-full!">
                           {((selectedNode as GraphNode).properties as { file_path: string }).file_path
                             ? <>
@@ -494,7 +479,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                           })}
                         </Flex>
                       </>}
-                      {selectedNode.label === 'Statement' && (<>
+                      {(selectedNode as GraphNode).label === 'Statement' && (<>
                         {(['emotion_keywords'] as const).map(key => {
                           const p = (selectedNode as GraphNode).properties as StatementNodeProperties
                           if ((key === 'emotion_keywords' && p[key]?.length > 0) || typeof p[key] === 'string') {
@@ -513,7 +498,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                         })}
                       </>)}
 
-                      {selectedNode.label === 'AssistantPruned' && <>
+                      {(selectedNode as GraphNode).label === 'AssistantPruned' && <>
                         {(['memory_type'] as const).map(key => {
                           const p = (selectedNode as Node).properties as AssistantPrunedNodeProperties
                           if (p[key]) {
