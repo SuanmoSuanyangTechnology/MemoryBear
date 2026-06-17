@@ -2,7 +2,11 @@ import uuid
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from app.core.utils.datetime_utils import parse_metadata_time_to_utc_naive, utcnow_naive
+from app.core.utils.datetime_utils import (
+    parse_metadata_time_to_utc_naive,
+    to_utc_offset_string,
+    utcnow_naive,
+)
 from app.core.exceptions import (
     BusinessException,
     ResourceNotFoundException,
@@ -472,10 +476,15 @@ class KnowledgeMetadataService:
         # 获取字段定义
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, doc.kb_id)
         field_map = {f.id: f for f in custom_fields}
+        field_defs_by_name = {f.name: f for f in custom_fields}
+        metadata = KnowledgeMetadataService._serialize_metadata_for_response(
+            doc.meta_data or {},
+            field_defs_by_name,
+        )
 
         result = {
             "document_id": str(document_id),
-            "metadata": doc.meta_data or {},
+            "metadata": metadata,
             "fields": [],
         }
 
@@ -486,7 +495,7 @@ class KnowledgeMetadataService:
                     "field_id": str(field_def.id),
                     "name": field_def.name,
                     "type": field_def.type,
-                    "value": doc.meta_data.get(field_def.name) if doc.meta_data else None,
+                    "value": metadata.get(field_def.name),
                 })
 
         return result
@@ -608,6 +617,41 @@ class KnowledgeMetadataService:
                     f"stored_value={normalized[field_name]!r}"
                 )
         return normalized
+
+    @staticmethod
+    def _serialize_metadata_value_for_response(field_type: str, value: Any) -> Any:
+        """Format metadata values for API responses without changing storage."""
+        if value is None or field_type != "time":
+            return value
+        try:
+            dt = parse_metadata_time_to_utc_naive(value)
+        except (TypeError, ValueError):
+            api_logger.warning(
+                "Skipped invalid document time metadata response formatting: "
+                f"raw_value={value!r}, raw_type={type(value).__name__}"
+            )
+            return value
+        if dt is None:
+            return value
+        return to_utc_offset_string(dt)
+
+    @staticmethod
+    def _serialize_metadata_for_response(
+        metadata: dict[str, Any],
+        field_defs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Format typed metadata values for API responses."""
+        serialized = {}
+        for field_name, value in metadata.items():
+            field_def = field_defs.get(field_name)
+            if not field_def:
+                serialized[field_name] = value
+                continue
+            serialized[field_name] = KnowledgeMetadataService._serialize_metadata_value_for_response(
+                field_def.type,
+                value,
+            )
+        return serialized
 
     @staticmethod
     def get_metadata_defs_for_filtering(
