@@ -62,13 +62,16 @@ class KnowledgeRetrievalNode(BaseNode):
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         cfg = self._get_typed_config()
+        # 复用 execute() 中的渲染逻辑，保证 input 记录的是变量解析后的真实值，
+        # 而非原始模板 {{xxx}}，与 assigner / LLM 等节点的展示约定保持一致。
+        rendered_filters = self._render_filter_variables(cfg.metadata_filters, variable_pool)
         return {
             "query": self._render_template(cfg.query, variable_pool),
             "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
             "metadata_filter_mode": cfg.metadata_filter_mode.value,
-            "metadata_filters": cfg.metadata_filters and {
-                "logic": cfg.metadata_filters.logic.value,
-                "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in cfg.metadata_filters.conditions],
+            "metadata_filters": rendered_filters and {
+                "logic": rendered_filters.logic.value,
+                "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in rendered_filters.conditions],
             },
         }
 
