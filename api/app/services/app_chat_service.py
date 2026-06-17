@@ -24,6 +24,7 @@ from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
+from app.services.context_engine_manager import ContextEngineManager
 from app.services.draft_run_service import AgentRunService
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
@@ -221,17 +222,36 @@ class AppChatService:
         )
 
         # 加载历史消息（包含开场白）
+        used_context_engine = False
         if history is None:
-            # 没有外部传入的历史，从数据库加载
-            history = await self.conversation_service.get_conversation_history(
+            context_engine_manager = ContextEngineManager(self.db)
+            prepared_input = await context_engine_manager.prepare_app_agent_input(
+                features=features_config,
                 conversation_id=conversation_id,
-                max_history=10,
+                system_prompt=system_prompt,
+                current_input=message,
                 current_provider=api_key_obj.provider,
-                current_is_omni=api_key_obj.is_omni
+                current_is_omni=api_key_obj.is_omni,
+                legacy_max_history=6,
+                model_config_id=config.default_model_config_id,
             )
+            if prepared_input:
+                system_prompt, history = prepared_input
+                used_context_engine = True
+            else:
+                history = await self.conversation_service.get_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=20,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni
+                )
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
-        is_new_conversation = len(history) == 0
+        existing_messages = self.conversation_service.message_repo.get_message_by_conversation_id(
+            conversation_id=conversation_id,
+            limit=1,
+        )
+        is_new_conversation = len(existing_messages) == 0
         if is_new_conversation:
             opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
             if opening:
@@ -453,6 +473,15 @@ class AppChatService:
                 meta_data=assistant_meta,
                 should_memorize=memory,
             )
+            if used_context_engine:
+                await context_engine_manager.after_app_turn(
+                    features=features_config,
+                    conversation_id=conversation_id,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni,
+                    legacy_max_history=6,
+                    model_config_id=config.default_model_config_id,
+                )
         else:
             new_msg = Message(
                 id=message_id,
@@ -613,17 +642,36 @@ class AppChatService:
             )
 
             # 加载历史消息（包含开场白）
+            used_context_engine = False
             if history is None:
-                # 没有外部传入的历史，从数据库加载
-                history = await self.conversation_service.get_conversation_history(
+                context_engine_manager = ContextEngineManager(self.db)
+                prepared_input = await context_engine_manager.prepare_app_agent_input(
+                    features=features_config,
                     conversation_id=conversation_id,
-                    max_history=10,
+                    system_prompt=system_prompt,
+                    current_input=message,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
+                    current_is_omni=api_key_obj.is_omni,
+                    legacy_max_history=6,
+                    model_config_id=config.default_model_config_id,
                 )
+                if prepared_input:
+                    system_prompt, history = prepared_input
+                    used_context_engine = True
+                else:
+                    history = await self.conversation_service.get_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=20,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni
+                    )
 
             # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
-            is_new_conversation = len(history) == 0
+            existing_messages = self.conversation_service.message_repo.get_message_by_conversation_id(
+                conversation_id=conversation_id,
+                limit=1,
+            )
+            is_new_conversation = len(existing_messages) == 0
             if is_new_conversation:
                 opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
                 if opening:
@@ -891,6 +939,15 @@ class AppChatService:
                     meta_data=assistant_meta,
                     should_memorize=memory,
                 )
+                if used_context_engine:
+                    await context_engine_manager.after_app_turn(
+                        features=features_config,
+                        conversation_id=conversation_id,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni,
+                        legacy_max_history=6,
+                        model_config_id=config.default_model_config_id,
+                    )
             else:
                 new_msg = Message(
                     id=message_id,

@@ -30,6 +30,7 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
+from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
 from app.models.models_model import ModelCapability, ModelProvider
 
@@ -449,6 +450,25 @@ class LLMNode(BaseNode):
         cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL).strip()
         return cleaned_content, reasoning_content
 
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text" or "text" in item:
+                        text_parts.append(str(item.get("text") or ""))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+            return "".join(text_parts)
+        if isinstance(content, dict):
+            return str(content.get("text") or "")
+        return str(content)
+
     def _is_inside_reasoning_block(self, text: str, pos: int) -> bool:
         import re
         think_ranges = [(m.start(), m.end()) for m in re.finditer(r' thinking(.*?) response', text, re.DOTALL)]
@@ -708,7 +728,24 @@ class LLMNode(BaseNode):
 
             if self.typed_config.memory.enable:
                 history_message = []
-                history_messages = deepcopy(state["messages"][-self.typed_config.memory.window_size:])
+                conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                history_prefix = None
+                if conversation_id:
+                    with get_db_context() as db:
+                        context_engine_manager = ContextEngineManager(db)
+                        history_prefix = await context_engine_manager.prepare_workflow_history_prefix(
+                            features=self.workflow_config.get("features", {}),
+                            conversation_id=conversation_id,
+                            scope_key=f"node:{self.node_id}",
+                            current_input=self._content_to_text(messages[-1]["content"]) if messages else "",
+                            workflow_messages=state.get("messages", []),
+                            window_size=self.typed_config.memory.window_size,
+                            model_config_id=self.typed_config.model_id,
+                        )
+
+                history_messages = deepcopy(history_prefix) if history_prefix is not None else deepcopy(
+                    state["messages"][-self.typed_config.memory.window_size:]
+                )
                 for message in history_messages:
                     if isinstance(message["content"], list):
                         file_content = []
@@ -720,11 +757,12 @@ class LLMNode(BaseNode):
                             {"role": message["role"], "content": file_content}
                         )
                     else:
-                        message["content"] = await self.process_message(
-                            model_info,
-                            message["content"],
-                            effective_vision
-                        )
+                        if history_prefix is None:
+                            message["content"] = await self.process_message(
+                                model_info,
+                                message["content"],
+                                effective_vision
+                            )
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
                 self.history_messages = history_message
@@ -811,6 +849,20 @@ class LLMNode(BaseNode):
                 
                 if hasattr(self, '_param_warnings') and self._param_warnings:
                     result["param_warnings"] = self._param_warnings
+
+                if self.typed_config.memory.enable:
+                    conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                    if conversation_id:
+                        with get_db_context() as db:
+                            context_engine_manager = ContextEngineManager(db)
+                            await context_engine_manager.after_workflow_turn(
+                                features=self.workflow_config.get("features", {}),
+                                conversation_id=conversation_id,
+                                scope_key=f"node:{self.node_id}",
+                                workflow_messages=state.get("messages", []),
+                                window_size=self.typed_config.memory.window_size,
+                                model_config_id=self.typed_config.model_id,
+                            )
                 
                 return result
                 
@@ -1077,6 +1129,20 @@ class LLMNode(BaseNode):
 
                 if hasattr(self, '_param_warnings') and self._param_warnings:
                     result["param_warnings"] = self._param_warnings
+
+                if self.typed_config.memory.enable:
+                    conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                    if conversation_id:
+                        with get_db_context() as db:
+                            context_engine_manager = ContextEngineManager(db)
+                            await context_engine_manager.after_workflow_turn(
+                                features=self.workflow_config.get("features", {}),
+                                conversation_id=conversation_id,
+                                scope_key=f"node:{self.node_id}",
+                                workflow_messages=state.get("messages", []),
+                                window_size=self.typed_config.memory.window_size,
+                                model_config_id=self.typed_config.model_id,
+                            )
 
                 yield {"__final__": True, "result": result}
                 return
