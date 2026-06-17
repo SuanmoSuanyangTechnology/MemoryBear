@@ -1,11 +1,11 @@
 # ===== 标准库 =====
 import asyncio
 import json
+import os
 
 # ===== 第三方库 =====
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
-from uuid import UUID
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.langgraph_graph.tools.tool import (
@@ -19,70 +19,66 @@ from app.core.memory.agent.utils.llm_tools import (
     deduplicate_entries,
     merge_to_key_value_pairs,
 )
+from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.schemas import model_schema
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
-from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_service import ModelConfigService
 
 logger = get_agent_logger(__name__)
 
 
+async def rag_config(state):
+    """
+    Configure RAG (Retrieval-Augmented Generation) settings
+    
+    Creates configuration for knowledge base retrieval including similarity thresholds,
+    weights, and reranker settings.
+    
+    Args:
+        state: Current state containing user_rag_memory_id
+        
+    Returns:
+        dict: RAG configuration dictionary
+    """
+    user_rag_memory_id = state.get('user_rag_memory_id', '')
+    kb_config = {
+        "knowledge_bases": [
+            {
+                "kb_id": user_rag_memory_id,
+                "similarity_threshold": 0.7,
+                "vector_similarity_weight": 0.5,
+                "top_k": 10,
+                "retrieve_type": "participle"
+            }
+        ],
+        "merge_strategy": "weight",
+        "reranker_id": os.getenv('reranker_id'),
+        "reranker_top_k": 10
+    }
+    return kb_config
+
+
 async def rag_knowledge(state, question):
     """
-    Retrieve knowledge using unified KnowledgeRetrievalService
-
-    Constructs a KnowledgeRetrievalRequest with agent-specific defaults
-    and delegates all retrieval logic to the unified entry point,
-    per the knowledge retrieval API convention document.
-
+    Retrieve knowledge using RAG approach
+    
+    Performs knowledge retrieval from configured knowledge bases using the
+    provided question and returns formatted results.
+    
     Args:
-        state: Current state containing user_rag_memory_id and end_user_id
-        question: Question to search for in knowledge base
-
+        state: Current state containing configuration
+        question: Question to search for
+        
     Returns:
         tuple: (retrieval_knowledge, clean_content, cleaned_query, raw_results)
-            - retrieval_knowledge: List of retrieved knowledge chunks (page_content strings)
-            - clean_content: Formatted content string joined by newlines
-            - cleaned_query: Processed query string (unchanged)
-            - raw_results: Raw retrieval content string
     """
-    user_rag_memory_id = state.get("user_rag_memory_id", '')
+    kb_config = await rag_config(state)
     end_user_id = state.get('end_user_id', '')
-
-    # Preserve original per-user file filtering (end_user_id → file_names_filter)
-    file_names_filter = [f"{end_user_id}.txt"] if end_user_id else []
-
-    # Agent-side defaults differ from KnowledgeRetrievalRequest general defaults:
-    # similarity_threshold=0.7, vector_similarity_weight=0.5, top_k=10, retrieve_type=participle
-    request = KnowledgeRetrievalRequest(
-        query=question,
-        kb_ids=[UUID(user_rag_memory_id)] if user_rag_memory_id else [],
-        file_names_filter=file_names_filter,
-        similarity_threshold=0.7,
-        vector_similarity_weight=0.5,
-        top_k=10,
-        retrieve_type=RetrieveType.PARTICIPLE,
-        caller=KnowledgeRetrievalCaller.AGENT,
-    )
-
-    # Call unified retrieval service (synchronous classmethod → run in thread)
-    with get_db_context() as db:
-        result = await asyncio.to_thread(
-            KnowledgeRetrievalService.retrieve,
-            db=db,
-            request=request,
-            current_user=None,
-        )
-
-    chunks = result.chunks
+    user_rag_memory_id = state.get("user_rag_memory_id", '')
+    retrieve_chunks_result = knowledge_retrieval(question, kb_config, [str(end_user_id)])
     try:
-        retrieval_knowledge = [
-            chunk.page_content for chunk in chunks
-            if hasattr(chunk, 'page_content')
-        ]
+        retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
         clean_content = '\n\n'.join(retrieval_knowledge)
         cleaned_query = question
         raw_results = clean_content
