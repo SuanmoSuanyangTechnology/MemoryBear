@@ -3,7 +3,7 @@
  * Displays and allows selection of knowledge bases using Tree component
  */
 
-import { forwardRef, useImperativeHandle, useState, useCallback, useRef, type Key, useEffect } from 'react';
+import { forwardRef, useImperativeHandle, useState, useCallback, type Key, useEffect } from 'react';
 import { Form, Flex, Tree, Spin } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -171,10 +171,14 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const filterTreeData = (nodes: TreeNode[]): TreeNode[] => {
     return nodes
       .filter(node => !selectedList.some(selected => selected.id === node.key))
-      .map(node => ({
-        ...node,
-        children: node.children ? filterTreeData(node.children) : undefined,
-      }))
+      .map(node => {
+        const childNodes = node.children ? filterTreeData(node.children) : undefined
+        return {
+          ...node,
+          isLeaf: !childNodes || childNodes.length < 1,
+          children: childNodes,
+        }
+      })
   }
 
   const handleSave = () => {
