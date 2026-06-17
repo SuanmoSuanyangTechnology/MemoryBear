@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import redis
 from redis.exceptions import RedisError
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select, cast, String
 
 # Import a unified Celery instance
 from app.core.utils.datetime_utils import (
@@ -49,7 +50,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
 from app.db import get_db_context, get_db_read
-from app.models import App, AppRelease, Document, File, Knowledge
+from app.models import App, AppRelease, Document, File, Knowledge, User
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
@@ -2390,7 +2391,7 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
 
                 # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
                 memory_service = MemoryService(
-                    db=db, config_id=config_id,
+                    config_id=config_id,
                     end_user_id=user_id, workspace_id=workspace_id,
                 )
                 r = await memory_service.run_reflection_layer2(baseline=baseline)
@@ -2549,7 +2550,7 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
                     return {"status": "lock_timeout"}
             try:
                 memory_service = MemoryService(
-                    db=db, config_id=config_id,
+                    config_id=config_id,
                     end_user_id=user_id, workspace_id=workspace_id,
                 )
                 r = await memory_service.run_dedup_full_scan()
@@ -2645,7 +2646,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
-        from app.models.end_user_model import EndUser
+        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import write_memory_increment
         from app.services.memory_storage_service import search_all_batch
 
@@ -2676,13 +2677,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     }
 
                 # 2. 查询所有app下的end_user_id（去重）
-                # app_ids = [app.id for app in apps]
-                end_users = db.query(EndUser.id).filter(
-                    EndUser.workspace_id == workspace_id
-                ).distinct().all()
+                end_user_repo = EndUserRepository(db)
+                end_users = end_user_repo.get_end_users_by_workspace(workspace_uuid)
+                end_user_id_list = [str(eu.id) for eu in end_users]
 
                 # 3. 批量查询所有宿主的记忆总量
-                end_user_id_list = [str(eid) for (eid,) in end_users]
                 batch_result = await search_all_batch(end_user_id_list)
 
                 total_num = sum(batch_result.values())
@@ -2749,8 +2748,8 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
-        from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
+        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import write_memory_increment
         from app.services.memory_storage_service import search_all_batch
 
@@ -2805,13 +2804,10 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             continue
 
                         # 2. 查询所有app下的end_user_id（去重）
-                        # app_ids = [app.id for app in apps]
-                        end_users = db.query(EndUser.id).filter(
-                            EndUser.workspace_id == workspace_id
-                        ).distinct().all()
+                        end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
+                        end_user_id_list = [str(eu.id) for eu in end_users]
 
                         # 3. 批量查询所有宿主的记忆总量
-                        end_user_id_list = [str(eid) for (eid,) in end_users]
                         batch_result = await search_all_batch(end_user_id_list)
 
                         total_num = sum(batch_result.values())
@@ -3233,8 +3229,9 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
     start_time = time.time()
 
     async def _process_users() -> Dict[str, Any]:
+        from app.repositories.end_user_repository import EndUserRepository
         with get_db_context() as db:
-            end_users = db.query(EndUser).all()
+            end_users = EndUserRepository(db).get_all_active()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
                 return {"status": "SUCCESS", "message": "没有终端用户",
@@ -3273,7 +3270,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
             duration = time.time() - start_time
             logger.info(f"遗忘周期完成: {processed_users}/{len(end_users)} 用户, "
-                       f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
+                        f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
 
             return {
                 "status": "SUCCESS",
@@ -4672,3 +4669,47 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
                 exc_info=True,
             )
             raise
+
+
+@celery_app.task(name="app.tasks.draft_data_clean", queue="memory_tasks")
+def draft_data_clean():
+    import asyncio
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    with get_db_context() as db:
+        stmt = select(EndUser.id).join(
+            User,
+            cast(User.id, String) == EndUser.other_id
+        ).where(
+            EndUser.is_active == True
+        )
+        result = db.execute(stmt)
+        end_user_ids = [str(eid) for eid in result.scalars()]
+
+        if not end_user_ids:
+            logger.info("draft_data_clean: 没有需要清理的终端用户")
+            return {"deleted_count": 0}
+
+        updated = (
+            db.query(EndUser)
+            .filter(EndUser.id.in_(end_user_ids))
+            .update({"is_active": False}, synchronize_session=False)
+        )
+        db.commit()
+        logger.info(f"draft_data_clean: 软删除 {updated} 个终端用户")
+
+    async def _delete_neo4j_groups():
+        async with Neo4jConnector() as connector:
+            deleted = 0
+            for eid in end_user_ids:
+                try:
+                    await connector.delete_group(eid)
+                    deleted += 1
+                except Exception as e:
+                    logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
+        return deleted
+
+    neo4j_deleted = asyncio.run(_delete_neo4j_groups())
+    logger.info(f"draft_data_clean: Neo4j 删除 {neo4j_deleted} 组节点")
+
+    return {"pg_deleted": updated, "neo4j_deleted": neo4j_deleted}
