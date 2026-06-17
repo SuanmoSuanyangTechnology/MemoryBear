@@ -424,11 +424,11 @@ class Layer2Inspector:
         }
 
 
-    async def run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
+    async def run_dedup_full_scan(self, end_user_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重（公共入口）"""
         t0 = time.perf_counter()
         logger.info(f"[Layer2 低频] 全量去重开始 end_user_id={end_user_id}")
-        result = await self._run_dedup_full_scan(end_user_id)
+        result = await self._run_dedup_full_scan(end_user_id, baseline=baseline)
         logger.info(
             f"[Layer2 低频] 全量去重完成 end_user_id={end_user_id}, "
             f"扫描类型={result.get('scanned_types', 0)}, "
@@ -437,7 +437,7 @@ class Layer2Inspector:
         )
         return result
 
-    async def _run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
+    async def _run_dedup_full_scan(self, end_user_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重"""
         from .deterministic.full_scan_dedup import (
             get_entity_types, get_last_scan_time, check_new_entities,
