@@ -211,7 +211,7 @@ const Chat: FC<ChatProps> = ({
   }
   /** Update assistant message when error occurs */
   const updateErrorAssistantMessage = (message_length: number, model_config_id?: string, error?: { message?: string; }) => {
-    if (!model_config_id || !error) return
+    if (!model_config_id && !error) return
 
     if (message_length > 0) {
       updateChatList(prev => {
@@ -227,6 +227,8 @@ const Chat: FC<ChatProps> = ({
           const subContent = lastAssistantMsg.subContent || []
           const hasFailed = subContent.some(vo => vo.status === 'failed')
           let messageStatus = hasFailed ? 'failed' : 'completed'
+
+          console.log('messageStatus', messageStatus)
 
           modelChatList[targetIndex] = {
             ...modelChatList[targetIndex],

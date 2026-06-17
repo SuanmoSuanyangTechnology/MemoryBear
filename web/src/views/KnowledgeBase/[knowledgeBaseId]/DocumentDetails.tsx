@@ -125,7 +125,12 @@ const DocumentDetails: FC = () => {
       {
         key: 'file_name',
         label: t('knowledgeBase.fileName') || '文件名',
-        value: doc.file_name ?? '-',
+        value: <span onClick={() => handleCopy(doc.file_name ?? '-')}>
+          {doc.file_name ?? '-'}
+          <span
+            className="rb:cursor-pointer rb:-mb-0.5 rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
+          ></span>
+        </span>,
       },
       {
         key: 'status',
@@ -319,7 +324,11 @@ const DocumentDetails: FC = () => {
         return true;
       } else {
         // Insert mode: Create new chunk
-        await createDocumentChunk(knowledgeBaseId || '', documentId, { content, chunk_type: parentChunkId ? 'child' : undefined, parent_id: parentChunkId });
+        await createDocumentChunk(knowledgeBaseId || '', documentId, {
+          content,
+          chunk_type: parentChunkId ? 'child' : isParentChildMode ? 'parent' : undefined,
+          parent_id: parentChunkId
+        });
         return true;
       }
     } catch (error) {

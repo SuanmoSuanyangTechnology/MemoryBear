@@ -90,7 +90,13 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
         {
           name: selectedVariable.name,
           type: selectedVariable.type,
-          value: currentValue,
+          value: selectedVariable.type === 'file' && (!currentValue || currentValue.length < 1)
+            ? null
+            : selectedVariable.type === 'file'
+            ? currentValue[0]
+            : selectedVariable.type === 'array[file]' && (!currentValue || currentValue.length < 1)
+            ? []
+            : currentValue
         }
       ]
     });
@@ -132,7 +138,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
               ...groupVariables[varName],
               nodeKey,
 
-              value: groupVariables[varName].type === 'object' || (groupVariables[varName].type?.includes('file') && typeof groupVariables[varName].value === 'object')
+              value: groupVariables[varName].type === 'object' || (!groupVariables[varName].type?.includes('file') && typeof groupVariables[varName].value === 'object')
                 ? JSON.stringify(groupVariables[varName].value, null, 2)
                 : groupVariables[varName].value,
             };

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:34:43 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 16:34:43 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-06-17 17:17:56
  */
 /**
  * Format Utility
@@ -39,8 +39,6 @@ export const formatDateTime = (
 
   /** Get current timezone setting from localStorage */
   const currentTimeZone = localStorage.getItem('timeZone') || 'Asia/Shanghai';
-  dayjs.tz.setDefault(currentTimeZone);
   
-  /** Format date with current timezone */
-  return dayjs.tz(value).format(format);
+  return dayjs(value).tz(currentTimeZone).format(format);
 };
