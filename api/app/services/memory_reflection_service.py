@@ -6,12 +6,10 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
-from fastapi import Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
-from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine import ReflectionConfig, ReflectionEngine
 from app.core.memory.storage_services.reflection_engine.self_reflexion import ReflectionRange, ReflectionBaseline
@@ -246,8 +244,8 @@ class WorkspaceAppService:
 class MemoryReflectionService:
     """Memory reflection service category"""
 
-    def __init__(self,db: Session = Depends(get_db)):
-        self.db=db
+    def __init__(self, db: Session):
+        self.db = db
 
     async def start_text_reflection(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         try:

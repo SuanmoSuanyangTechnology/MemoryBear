@@ -2354,66 +2354,66 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         from app.services.memory_reflection_service import WorkspaceAppService
         from app.core.memory.memory_service import MemoryService
 
-        with get_db_context() as db:
+        # 步骤1 执行前再判一次是否真的要反思：
+        #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
+        #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
+        with get_db_read() as db:
             ws_svc = WorkspaceAppService(db)
-
-            # 步骤1 执行前再判一次是否真的要反思：
-            #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
-            #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
             rt = ws_svc.get_end_user_reflection_time(user_id)
             if not _should_reflect_now(db, user_id, rt, iteration_period):
                 return {"status": "skipped_idempotent"}
 
-            # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
-            #   保证同一用户的图谱不被并发修改。抢不到（超时30s）就本次放弃。
-            write_lock = None
-            redis_client = get_sync_redis_client()
-            if redis_client is not None:
-                write_lock = RedisFairLock(
-                    key=f"memory_write:{user_id}",
-                    redis_client=redis_client,
-                    expire=600, timeout=30, auto_renewal=True,
-                )
-                if not await asyncio.to_thread(write_lock.acquire):
-                    logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
-                    return {"status": "lock_timeout"}
-            try:
-                # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
-                #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
-                #   期间已完成同一用户的反思并刷新了 reflection_time。expire_all 先清掉
-                #   本 session 在步骤1 缓存的旧值，强制重读，确保读到最新 reflection_time，
-                #   不满足则放弃，避免同一批数据被反思两次。
-                db.expire_all()
+        # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
+        #   保证同一用户的图谱不被并发修改。抢不到（超时30s）就本次放弃。
+        write_lock = None
+        redis_client = get_sync_redis_client()
+        if redis_client is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{user_id}",
+                redis_client=redis_client,
+                expire=600, timeout=30, auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
+                return {"status": "lock_timeout"}
+        try:
+            # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
+            #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
+            #   期间已完成同一用户的反思并刷新了 reflection_time，
+            #   不满足则放弃，避免同一批数据被反思两次。
+            with get_db_read() as db:
+                ws_svc = WorkspaceAppService(db)
                 rt_recheck = ws_svc.get_end_user_reflection_time(user_id)
                 if not _should_reflect_now(db, user_id, rt_recheck, iteration_period):
                     logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={user_id}")
                     return {"status": "skipped_idempotent"}
 
-                # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
-                memory_service = MemoryService(
-                    config_id=config_id,
-                    end_user_id=user_id, workspace_id=workspace_id,
-                )
-                r = await memory_service.run_reflection_layer2(baseline=baseline)
+            # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
+            memory_service = MemoryService(
+                config_id=config_id,
+                end_user_id=user_id, workspace_id=workspace_id,
+            )
+            r = await memory_service.run_reflection_layer2(baseline=baseline)
 
-                # 步骤4 成功后把"上次反思时间"刷新为当前，供下次周期/增量判断
-                ws_svc.update_end_user_reflection_time(user_id)
+            # 步骤4 成功后把"上次反思时间"刷新为当前，供下次周期/增量判断
+            with get_db_context() as db:
+                WorkspaceAppService(db).update_end_user_reflection_time(user_id)
 
-                dedup_info = r.get("entity_dedup", {})
-                merge_info = r.get("description_merge", {})
-                logger.info(
-                    f"反思高频do 完成 user={user_id} status=success "
-                    f"去重合并={dedup_info.get('merged_count', 0)} "
-                    f"描述合并={merge_info.get('merged_count', 0)} "
-                    f"耗时={time.time() - start_time:.1f}s"
-                )
-                return {"status": "success",
-                        "dedup_merged": dedup_info.get("merged_count", 0),
-                        "desc_merged": merge_info.get("merged_count", 0)}
-            finally:
-                # 步骤5 释放写锁（无论成功失败）
-                if write_lock is not None:
-                    await asyncio.to_thread(write_lock.release)
+            dedup_info = r.get("entity_dedup", {})
+            merge_info = r.get("description_merge", {})
+            logger.info(
+                f"反思高频do 完成 user={user_id} status=success "
+                f"去重合并={dedup_info.get('merged_count', 0)} "
+                f"描述合并={merge_info.get('merged_count', 0)} "
+                f"耗时={time.time() - start_time:.1f}s"
+            )
+            return {"status": "success",
+                    "dedup_merged": dedup_info.get("merged_count", 0),
+                    "desc_merged": merge_info.get("merged_count", 0)}
+        finally:
+            # 步骤5 释放写锁（无论成功失败）
+            if write_lock is not None:
+                await asyncio.to_thread(write_lock.release)
 
     loop = set_asyncio_event_loop()
     try:
@@ -2534,36 +2534,35 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
     async def _run() -> Dict[str, Any]:
         from app.core.memory.memory_service import MemoryService
 
-        with get_db_context() as db:
-            # 抢该用户写锁：与反思 do、写入 pipeline 互斥。
-            # 去重低频、半夜跑，给更长抢锁等待（120s），避免被高频反思挤掉；抢不到本次放弃。
-            write_lock = None
-            redis_client = get_sync_redis_client()
-            if redis_client is not None:
-                write_lock = RedisFairLock(
-                    key=f"memory_write:{user_id}",
-                    redis_client=redis_client,
-                    expire=600, timeout=120, auto_renewal=True,
-                )
-                if not await asyncio.to_thread(write_lock.acquire):
-                    logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
-                    return {"status": "lock_timeout"}
-            try:
-                memory_service = MemoryService(
-                    config_id=config_id,
-                    end_user_id=user_id, workspace_id=workspace_id,
-                )
-                r = await memory_service.run_dedup_full_scan()
-                merged = r.get("merged_count", 0)
-                logger.info(
-                    f"反思低频去重do 完成 user={user_id} status=success "
-                    f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
-                    f"耗时={time.time() - start_time:.1f}s"
-                )
-                return {"status": "success", "merged_count": merged}
-            finally:
-                if write_lock is not None:
-                    await asyncio.to_thread(write_lock.release)
+        # 抢该用户写锁：与反思 do、写入 pipeline 互斥。
+        # 去重低频、半夜跑，给更长抢锁等待（120s），避免被高频反思挤掉；抢不到本次放弃。
+        write_lock = None
+        redis_client = get_sync_redis_client()
+        if redis_client is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{user_id}",
+                redis_client=redis_client,
+                expire=600, timeout=120, auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
+                return {"status": "lock_timeout"}
+        try:
+            memory_service = MemoryService(
+                config_id=config_id,
+                end_user_id=user_id, workspace_id=workspace_id,
+            )
+            r = await memory_service.run_dedup_full_scan()
+            merged = r.get("merged_count", 0)
+            logger.info(
+                f"反思低频去重do 完成 user={user_id} status=success "
+                f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
+                f"耗时={time.time() - start_time:.1f}s"
+            )
+            return {"status": "success", "merged_count": merged}
+        finally:
+            if write_lock is not None:
+                await asyncio.to_thread(write_lock.release)
 
     loop = set_asyncio_event_loop()
     try:
