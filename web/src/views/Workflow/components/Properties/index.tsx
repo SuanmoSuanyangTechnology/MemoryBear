@@ -420,7 +420,20 @@ const Properties: FC<PropertiesProps> = ({
       return filteredList
     }
     if (nodeType === 'memory-read') {
-      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string');
+      const allList = addParentIterationVars(variableList);
+      let filteredList: Suggestion[] = []
+      allList.forEach(variable => {
+        if (variable.dataType === 'string') {
+          filteredList.push(variable)
+        } else if (variable.dataType === 'file') {
+        } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredVar) {
+            filteredList.push(filteredVar);
+          }
+        }
+      })
       return filteredList;
     }
     if (nodeType === 'memory-write') {
