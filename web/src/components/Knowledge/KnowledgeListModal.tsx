@@ -3,9 +3,8 @@
  * Displays and allows selection of knowledge bases using Tree component
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useState, useCallback, type Key } from 'react';
-import { Form, Flex, Tree, Spin, Button } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { forwardRef, useImperativeHandle, useState, useCallback, useRef, type Key, useEffect } from 'react';
+import { Form, Flex, Tree, Spin } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { KnowledgeModalRef, KnowledgeBase } from './types'
@@ -27,7 +26,6 @@ interface TreeNode {
   item?: KnowledgeBaseListItem;
   children?: TreeNode[];
   isLeaf?: boolean;
-  isLoadMore?: boolean;
 }
 
 const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
@@ -41,7 +39,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const [checkedRows, setCheckedRows] = useState<KnowledgeBase[]>([])
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([])
   const [treeData, setTreeData] = useState<TreeNode[]>([])
-  const [loadMoreKeys, setLoadMoreKeys] = useState<Set<string>>(new Set()) // Track which nodes have load more
 
   // Pagination state for root and folders
   const [pagination, setPagination] = useState<Record<string, { page: number; hasMore: boolean }>>({})
@@ -52,146 +49,50 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   // Load root list (first page)
   const loadRootList = useCallback((isLoadMore = false) => {
     setLoading(true)
-    const page = isLoadMore ? (pagination['root']?.page || 1) + 1 : 1
+    const page = isLoadMore ? (pagination['root']?.page || 1) + 1 : 1  
     getKnowledgeBaseList(undefined, {
       keywords,
-      pagesize: 20,
+      page,
+      pagesize: 50,
       orderby: 'created_at',
       desc: true,
     })
       .then(res => {
         const items = (res as { items: KnowledgeBaseListItem[] }).items || []
-        const hasMore = items.length >= 20
+        const hasMore = res.page?.has_next ?? false
         const newNodes = items.map(item => transformToTreeNode(item))
         
-        if (isLoadMore) {
-          setTreeData(prev => [...prev, ...newNodes])
-        } else {
-          setTreeData(newNodes)
-        }
+        setTreeData(newNodes)
         
         setPagination(prev => ({
           ...prev,
           root: { page, hasMore }
         }))
-        
-        // Add or remove load more node
-        if (hasMore) {
-          setLoadMoreKeys(prev => new Set([...prev, 'root']))
-        } else {
-          setLoadMoreKeys(prev => {
-            const next = new Set(prev)
-            next.delete('root')
-            return next
-          })
-        }
       })
       .finally(() => {
         setLoading(false)
       })
   }, [keywords, pagination])
 
-  // Load folder children (with pagination)
-  const loadFolderChildren = useCallback((parentId: string, isLoadMore = false) => {
-    setLoading(true)
-    const page = isLoadMore ? (pagination[parentId]?.page || 1) + 1 : 1
-    return getKnowledgeBaseList(undefined, {
-      keywords,
-      parent_id: parentId,
-      pagesize: 20,
-      orderby: 'created_at',
-      desc: true,
-    }).then(res => {
-      const items = (res as { items: KnowledgeBaseListItem[] }).items || []
-      const hasMore = items.length >= 20
-      const newChildren = items.map(item => transformToTreeNode(item))
-      
-      // Update pagination state
-      setPagination(prev => ({
-        ...prev,
-        [parentId]: { page, hasMore }
-      }))
-      
-      // Add or remove load more for this folder
-      if (hasMore) {
-        setLoadMoreKeys(prev => new Set([...prev, parentId]))
-      } else {
-        setLoadMoreKeys(prev => {
-          const next = new Set(prev)
-          next.delete(parentId)
-          return next
-        })
-      }
-      
-      return newChildren
-    }).finally(() => {
-      setLoading(false)
-    })
-  }, [keywords, pagination])
-
   // Transform item to tree node
-  const transformToTreeNode = (item: KnowledgeBaseListItem): TreeNode => ({
-    key: item.id,
-    title: (
-      <Flex align="center" justify="space-between" className="rb:pr-2">
-        <div className="rb:text-[14px]">
-          {item.name}
-          <div className="rb:text-[12px]">{t('application.contains', { include_count: item.doc_num })}</div>
-        </div>
-      </Flex>
-    ),
-    item,
-    isLeaf: item.type?.toLowerCase() !== 'folder',
-  })
-
-  // Create load more node
-  const createLoadMoreNode = (parentId: string, isRoot = false): TreeNode => ({
-    key: `load-more-${parentId}`,
-    title: (
-      <Button 
-        type="link" 
-        size="small" 
-        icon={<ReloadOutlined spin={loading} />}
-        onClick={(e) => {
-          e.stopPropagation()
-          if (isRoot) {
-            loadRootList(true)
-          } else {
-            loadFolderChildren(parentId, true).then(children => {
-              updateTreeNodeChildren(parentId, children, true)
-            })
-          }
-        }}
-        loading={loading}
-      >
-        {t('common.loadMore')}
-      </Button>
-    ),
-    isLoadMore: true,
-    isLeaf: true,
-  })
-
-  // Update tree node children
-  const updateTreeNodeChildren = useCallback((parentId: string, children: TreeNode[], append = false) => {
-    setTreeData(prev => updateNodeChildren(prev, parentId, children, append))
-  }, [])
-
-  const updateNodeChildren = (nodes: TreeNode[], parentId: string, children: TreeNode[], append = false): TreeNode[] => {
-    return nodes.map(node => {
-      if (node.key === parentId) {
-        if (append) {
-          const existingChildren = node.children || []
-          // Filter out load more nodes before appending
-          const filteredExisting = existingChildren.filter(child => !child.isLoadMore)
-          return { ...node, children: [...filteredExisting, ...children] }
-        }
-        return { ...node, children }
-      }
-      if (node.children) {
-        return { ...node, children: updateNodeChildren(node.children, parentId, children, append) }
-      }
-      return node
-    })
+  const transformToTreeNode = (item: KnowledgeBaseListItem): TreeNode => {
+    const node: TreeNode = {
+      key: item.id,
+      title: (
+        <Flex align="center" justify="space-between" className="rb:pr-2">
+          <div className="rb:text-[14px]">
+            {item.name}
+            <div className="rb:text-[12px]">{t('application.contains', { include_count: item.doc_num })}</div>
+          </div>
+        </Flex>
+      ),
+      item,
+      isLeaf: !item.children || item.children.length === 0,
+    }
+    if (item.children && item.children.length > 0) {
+      node.children = item.children.map(child => transformToTreeNode(child))
+    }
+    return node
   }
 
   // Reset selections when keywords change
@@ -201,7 +102,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       setCheckedRows([])
       setExpandedKeys([])
       setPagination({}) // Reset pagination on open
-      setLoadMoreKeys(new Set())
       loadRootList()
     }
   }, [keywords, visible])
@@ -224,57 +124,14 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   };
 
   // Handle folder expansion
-  const handleExpand = (keys: Key[], info: { node: any }) => {
-    const node = info.node as TreeNode
-    
-    // Skip if it's a load more node
-    if (node.isLoadMore) {
-      return
-    }
-    
-    if (!node.item) {
-      setExpandedKeys(keys)
-      return
-    }
-
-    // If children not loaded, load them
-    if (!node.isLeaf && (!node.children || node.children.length === 0)) {
-      loadFolderChildren(node.key).then(children => {
-        const selectedIds = selectedList.map(item => item.id)
-        const allSelected = children.length > 0 && children.every(child => selectedIds.includes(child.key))
-        
-        if (children.length === 0 || allSelected) {
-          setTreeData(prev => {
-            const markAsLeaf = (nodes: TreeNode[]): TreeNode[] => {
-              return nodes.map(n => {
-                if (n.key === node.key) {
-                  return { ...n, isLeaf: true }
-                }
-                if (n.children) {
-                  return { ...n, children: markAsLeaf(n.children) }
-                }
-                return n
-              })
-            }
-            return markAsLeaf(prev)
-          })
-        } else {
-          updateTreeNodeChildren(node.key, children)
-        }
-      })
-    }
-
+  const handleExpand = (keys: Key[]) => {
     setExpandedKeys(keys)
   }
 
   // Handle selection (both check and select)
   const handleSelectNode = (_keys: Key[], info: { node: any }) => {
     const node = info.node as TreeNode
-    
-    // Skip if it's a load more node
-    if (node.isLoadMore) {
-      return
-    }
+
     
     const isChecked = checkedIds.includes(node.key)
     const newCheckedIds = isChecked
@@ -284,7 +141,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     setCheckedRows(getCheckedItems(treeData, newCheckedIds))
   }
 
-  // Handle tree check (same as select)
+  // Handle tree check
   const handleCheck = (checked: Key[] | { checked: Key[]; halfChecked: Key[] }) => {
     const keys = Array.isArray(checked) ? checked : checked.checked
     setCheckedIds(keys)
@@ -320,32 +177,21 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       }))
   }
 
+  const handleSave = () => {
+    refresh(checkedRows.map(item => ({
+      ...item,
+      config: {
+        vector_similarity_weight: 0.5,
+        similarity_threshold: 0.7,
+        retrieve_type: "hybrid",
+        top_k: 3,
+        weight: 1,
+      }
+    })), 'knowledge')
+    setVisible(false);
+  }
+
   const filteredTreeData = filterTreeData(treeData)
-
-  // Add load more nodes to tree data
-  const getTreeDataWithLoadMore = (nodes: TreeNode[]): TreeNode[] => {
-    return nodes.map(node => {
-      if (!node.children || node.children.length === 0) {
-        return node
-      }
-      // Recursively process children
-      const processedChildren = getTreeDataWithLoadMore(node.children)
-      // Add load more for this folder if needed
-      if (loadMoreKeys.has(node.key)) {
-        processedChildren.push(createLoadMoreNode(node.key, false))
-      }
-      return { ...node, children: processedChildren }
-    })
-  }
-
-  // Get tree data with load more nodes for root
-  const getRootTreeData = (): TreeNode[] => {
-    const nodes = getTreeDataWithLoadMore(filteredTreeData)
-    if (loadMoreKeys.has('root')) {
-      nodes.push(createLoadMoreNode('root', true))
-    }
-    return nodes
-  }
 
   return (
     <RbModal
@@ -374,12 +220,12 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
         )}
 
         {!loading && filteredTreeData.length === 0 && (
-          <Empty />
+          <Empty size={88} />
         )}
 
-        {!loading && filteredTreeData.length > 0 && (
+        {(loading || filteredTreeData.length > 0) && (
           <Tree
-            treeData={getRootTreeData()}
+            treeData={filteredTreeData}
             expandedKeys={expandedKeys}
             onExpand={handleExpand}
             checkedKeys={checkedIds}
@@ -395,20 +241,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       </Flex>
     </RbModal>
   );
-
-  function handleSave() {
-    refresh(checkedRows.map(item => ({
-      ...item,
-      config: {
-        vector_similarity_weight: 0.5,
-        similarity_threshold: 0.7,
-        retrieve_type: "hybrid",
-        top_k: 3,
-        weight: 1,
-      }
-    })), 'knowledge')
-    setVisible(false);
-  }
 });
 
 export default KnowledgeListModal

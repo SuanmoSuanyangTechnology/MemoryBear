@@ -50,7 +50,7 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
     { value: 'lt', label: 'workflow.config.if-else.num.lt' },
     { value: 'lte', label: 'workflow.config.knowledge-retrieval.lte' },
     { value: 'gte', label: 'workflow.config.knowledge-retrieval.gte' },
-    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'is_empty', label: 'workflow.config.knowledge-retrieval.is_empty' },
     { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
   ],
   time: [
@@ -124,7 +124,11 @@ const MetadataFilterModal = forwardRef<MetadataFilterModalRef, MetadataFilterMod
   const handleSave = () => {
     form.validateFields().then((values) => {
       const { metadata_filters } = values;
-      const validFilters = metadata_filters?.conditions?.filter((v: FilterCondition) => v.field && v.value);
+      const validFilters = metadata_filters?.conditions?.filter((v: FilterCondition) => {
+        return (v.field && v.value)
+          || (v.field && typeof v.value === 'number')
+          || (v.field && (v.operator === 'is_empty' || v.operator === 'not_empty'))
+      });
       onSave({ conditions: validFilters.map((vo: FilterCondition) => ({
         ...vo,
         value: typeof vo.value === 'object' && vo.value !== null
