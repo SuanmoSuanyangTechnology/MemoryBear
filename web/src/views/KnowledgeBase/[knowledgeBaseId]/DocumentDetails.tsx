@@ -324,7 +324,11 @@ const DocumentDetails: FC = () => {
         return true;
       } else {
         // Insert mode: Create new chunk
-        await createDocumentChunk(knowledgeBaseId || '', documentId, { content, chunk_type: parentChunkId ? 'child' : undefined, parent_id: parentChunkId });
+        await createDocumentChunk(knowledgeBaseId || '', documentId, {
+          content,
+          chunk_type: parentChunkId ? 'child' : isParentChildMode ? 'parent' : undefined,
+          parent_id: parentChunkId
+        });
         return true;
       }
     } catch (error) {
