@@ -616,7 +616,7 @@ class KnowledgeMetadataService:
     ) -> dict[str, dict]:
         """
         获取用于过滤的字段定义映射
-        Returns: {field_name: {"type": "string", "is_builtin": False}}
+        Returns: {field_name: {"id": uuid, "type": "string", "is_builtin": False}}
         """
         from app.models.knowledge_model import Knowledge
 
@@ -625,7 +625,7 @@ class KnowledgeMetadataService:
         # 自定义字段
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
         for f in custom_fields:
-            result[f.name] = {"type": f.type, "is_builtin": False}
+            result[f.name] = {"id": f.id, "type": f.type, "is_builtin": False}
 
         # 内置字段（如果开启）
         knowledge = db.query(Knowledge).filter(Knowledge.id == knowledge_id).first()
