@@ -686,7 +686,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     return <PageEmpty />
   }
 
-  return <div ref={containerRef} className="w-full h-full" />
+  return <div ref={containerRef} className="rb:absolute rb:inset-0" />
 }
 
 export default GraphNetworkChart
