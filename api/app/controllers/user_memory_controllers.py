@@ -34,7 +34,6 @@ from app.schemas.end_user_info_schema import (
     EndUserInfoCreate,
     EndUserInfoUpdate,
 )
-from app.models.end_user_model import EndUser
 from app.dependencies import get_current_user
 from app.models.user_model import User
 

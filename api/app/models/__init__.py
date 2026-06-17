@@ -20,7 +20,7 @@ from .end_user_model import EndUser
 from .end_user_info_model import EndUserInfo
 from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
-from .conversation_model import Conversation, Message
+from .conversation_model import Conversation, Message, ConversationContextState
 from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from .memory_config_model import MemoryConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
@@ -75,6 +75,7 @@ __all__ = [
     "ReleaseShare",
     "Conversation",
     "Message",
+    "ConversationContextState",
     "MessageFeedback",
     "MessageReport",
     "ConversationShare",

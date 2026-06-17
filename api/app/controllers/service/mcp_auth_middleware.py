@@ -123,17 +123,9 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _find_end_user(db, other_id: str, workspace_id: uuid.UUID):
-        from app.models.end_user_model import EndUser
+        from app.repositories.end_user_repository import EndUserRepository
 
-        return (
-            db.query(EndUser)
-            .filter(
-                EndUser.other_id == other_id,
-                EndUser.workspace_id == workspace_id,
-            )
-            .order_by(EndUser.created_at.asc())
-            .first()
-        )
+        return EndUserRepository(db).get_end_user_by_other_id(workspace_id, other_id)
 
     @staticmethod
     def _resolve_config_id(db, end_user, workspace_id: uuid.UUID) -> str | None:

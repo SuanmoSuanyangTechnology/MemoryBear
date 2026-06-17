@@ -1446,14 +1446,14 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
     from app.models.app_model import App
     from app.models.app_release_model import AppRelease
-    from app.models.end_user_model import EndUser
+    from app.repositories.end_user_repository import EndUserRepository
     from app.services.memory_config_service import MemoryConfigService
 
     logger.info(f"Getting connected config for end_user_id: {end_user_id}")
 
     # TODO: check sources for enduserid, should be one of these three: chat, draft, apikey
     # 1. 获取 end_user 及其 app_id
-    end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
+    end_user = EndUserRepository(db).get_end_user_by_id(UUID(end_user_id))
     if not end_user:
         logger.warning(f"End user not found: {end_user_id}")
         raise ValueError(f"终端用户不存在: {end_user_id}")
@@ -1578,9 +1578,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     """
     from sqlalchemy import and_, or_
 
-    from app.models.app_model import App
-    from app.models.end_user_model import EndUser
     from app.models.memory_config_model import MemoryConfig
+    from app.repositories.end_user_repository import EndUserRepository
 
     logger.info(f"Batch getting connected configs for {len(end_user_ids)} end_users")
 
@@ -1590,17 +1589,8 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         return result
 
     # 1) 一次 JOIN 拿齐 (end_user_id, app_id, memory_config_id, workspace_id)
-    rows = (
-        db.query(
-            EndUser.id.label("end_user_id"),
-            EndUser.memory_config_id.label("memory_config_id"),
-            EndUser.workspace_id.label("end_user_workspace_id"),
-            App.workspace_id.label("app_workspace_id"),
-        )
-        .outerjoin(App, App.id == EndUser.app_id)
-        .filter(EndUser.id.in_(end_user_ids))
-        .all()
-    )
+    repo = EndUserRepository(db)
+    rows = repo.get_config_batch_by_ids([UUID(uid) if isinstance(uid, str) else uid for uid in end_user_ids])
 
     # found_ids 用于补齐"未找到的用户"
     found_ids = set()

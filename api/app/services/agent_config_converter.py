@@ -4,6 +4,7 @@ Agent 配置格式转换器
 """
 from typing import Dict, Any, Optional, Union
 from app.schemas.app_schema import (
+    AppFeatures,
     KnowledgeRetrievalConfig,
     MemoryConfig,
     VariableDefinition,
@@ -50,10 +51,18 @@ class AgentConfigConverter:
             result["tools"] = [tool.model_dump() for tool in config.tools]
 
         if hasattr(config, "skills") and config.skills:
-            result["skills"] = config.skills.model_dump()
+            result["skills"] = (
+                config.skills.model_dump()
+                if hasattr(config.skills, "model_dump")
+                else config.skills
+            )
 
         if hasattr(config, "features") and config.features:
-            result["features"] = config.features.model_dump()
+            result["features"] = (
+                config.features.model_dump()
+                if hasattr(config.features, "model_dump")
+                else config.features
+            )
         
         return result
     
@@ -64,7 +73,8 @@ class AgentConfigConverter:
         memory: Optional[Dict[str, Any]],
         variables: Optional[list],
         tools: Optional[Union[list, Dict[str, Any]]],
-        skills: Optional[dict]
+        skills: Optional[dict],
+        features: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """
         将数据库存储格式转换为 Pydantic 对象
@@ -76,6 +86,7 @@ class AgentConfigConverter:
             variables: 变量配置
             tools: 工具配置
             skills: 技能列表
+            features: 功能特性配置
             
         Returns:
             包含 Pydantic 对象的字典
@@ -86,7 +97,8 @@ class AgentConfigConverter:
             "memory": MemoryConfig(enabled=True),
             "variables": [],
             "tools": [],
-            "skills": SkillConfig(enabled=False, all_skills=False, skill_ids=[])
+            "skills": SkillConfig(enabled=False, all_skills=False, skill_ids=[]),
+            "features": AppFeatures(),
         }
         
         # 1. 解析模型参数配置
@@ -131,5 +143,8 @@ class AgentConfigConverter:
             result["skills"] = SkillConfig(**skills)
         else:
             result["skills"] = SkillConfig(enabled=False, all_skills=False, skill_ids=[])
+
+        if features:
+            result["features"] = AppFeatures(**features)
         
         return result
