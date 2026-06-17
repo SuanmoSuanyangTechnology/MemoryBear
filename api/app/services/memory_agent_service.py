@@ -1462,10 +1462,16 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     logger.debug(f"Found end_user app_id: {app_id}")
 
     # 2. 获取应用以确定 workspace_id
-    app = db.query(App).filter(App.id == app_id).first()
-    if not app:
-        logger.warning(f"App not found: {app_id}")
-        # raise ValueError(f"应用不存在: {app_id}")
+    # app_id 为 None 是合法状态（例如 service-API-key 创建的 end_user），
+    # 后续会通过 end_user.workspace_id 走 workspace 默认 config 兜底。
+    # 仅在 app_id 有值但查不到 App 行时才告警。
+    app = None
+    if app_id:
+        app = db.query(App).filter(App.id == app_id).first()
+        if not app:
+            # 孤儿 end_user（app_id 指向已删除的 App）：降级为 debug，
+            # 不影响主流程，仍会通过 end_user.workspace_id 走 workspace 默认 config 兜底。
+            logger.debug(f"App not found: {app_id}")
     # TODO: temp fix for draft run
     # if not app.current_release_id:
     #     logger.warning(f"No current release for app: {app_id}")
