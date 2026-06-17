@@ -15,6 +15,7 @@ class ApiKeyCreate(BaseModel):
     description: Optional[str] = Field(None, description="描述")
     type: ApiKeyType = Field(..., description="API Key 类型")
     scopes: List[str] = Field(default_factory=list, description="权限范围列表")
+    user_id: str | None = Field(default=None, description="user/other_id")
     resource_id: Optional[uuid.UUID] = Field(None, description="关联资源ID")
     rate_limit: Optional[int] = Field(50, ge=1, le=1000, description="QPS限制（请求/秒）")
     daily_request_limit: Optional[int] = Field(100000, description="日请求限制", ge=1)
@@ -119,6 +120,8 @@ class ApiKeyResponse(BaseModel):
     is_active: bool
     expires_at: Optional[datetime.datetime]
     created_at: datetime.datetime
+    end_user_id: Optional[uuid.UUID] = Field(default=None)
+    other_id: Optional[str] = Field(default=None)
 
     @computed_field
     @property

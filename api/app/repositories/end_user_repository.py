@@ -1,23 +1,45 @@
-import datetime
 import uuid
+from contextlib import contextmanager
 from typing import List, Optional
 
+import sqlalchemy as sa
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
-from app.models.app_model import App
-from app.models.end_user_model import EndUser
+from app.core.utils.datetime_utils import utcnow_naive
+from app.models import User
 from app.models.end_user_info_model import EndUserInfo
+from app.models.end_user_model import EndUser
 from app.models.workspace_model import Workspace
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 
 
+def is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
 class EndUserRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    @contextmanager
+    def _acquire_eu_lock(self, workspace_id, other_id):
+        """获取 EndUser 创建/查找的排他锁，防止并发重复创建。
+
+        使用 pg_advisory_xact_lock，锁在事务提交/回滚时自动释放，
+        无需显式 unlock。
+        """
+        self.db.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"{workspace_id}|{other_id}"},
+        )
+        yield
 
     def get_end_users_by_app_id(self, app_id: uuid.UUID) -> List[EndUser]:
         """根据应用ID查询宿主"""
@@ -75,7 +97,7 @@ class EndUserRepository:
                 EndUser.workspace_id == workspace_id,
                 EndUser.other_id == other_id,
                 EndUser.is_active == True,
-            )
+            ).order_by(EndUser.created_at.asc())
             .first()
         )
 
@@ -97,45 +119,46 @@ class EndUserRepository:
             other_name: 用户名称（用于创建 EndUserInfo）
         """
         try:
-            # 尝试查找现有用户
-            end_user = (
-                self.db.query(EndUser)
-                .filter(
-                    EndUser.workspace_id == workspace_id,
-                    EndUser.other_id == other_id,
-                    EndUser.is_active == True,
+            with self._acquire_eu_lock(workspace_id, other_id):
+                # 尝试查找现有用户
+                end_user = (
+                    self.db.query(EndUser)
+                    .filter(
+                        EndUser.workspace_id == workspace_id,
+                        EndUser.other_id == other_id,
+                        EndUser.is_active == True,
+                    )
+                    .order_by(EndUser.created_at.asc())
+                    .first()
                 )
-                .order_by(EndUser.created_at.asc())
-                .first()
-            )
 
-            if end_user:
-                db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
-                end_user.app_id=app_id
+                if end_user:
+                    db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
+                    end_user.app_id = app_id
+                    self.db.commit()
+                    self.db.refresh(end_user)
+                    return end_user
+
+                # 创建新用户
+                end_user = EndUser(
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    other_id=other_id
+                )
+                self.db.add(end_user)
+                self.db.flush()  # 刷新以获取 end_user.id，但不提交事务
+
+                # 创建对应的 EndUserInfo 记录
+                end_user_info = EndUserInfo(
+                    end_user_id=end_user.id,
+                    other_name=other_name or "",  # 如果没有提供 other_name，使用空字符串
+                    aliases=[],
+                    meta_data={}
+                )
+                self.db.add(end_user_info)
+
+                # 一起提交
                 self.db.commit()
-                self.db.refresh(end_user)
-                return end_user
-
-            # 创建新用户
-            end_user = EndUser(
-                app_id=app_id,
-                workspace_id=workspace_id,
-                other_id=other_id
-            )
-            self.db.add(end_user)
-            self.db.flush()  # 刷新以获取 end_user.id，但不提交事务
-            
-            # 创建对应的 EndUserInfo 记录
-            end_user_info = EndUserInfo(
-                end_user_id=end_user.id,
-                other_name=other_name or "",  # 如果没有提供 other_name，使用空字符串
-                aliases=[],
-                meta_data={}  
-            )
-            self.db.add(end_user_info)
-            
-            # 一起提交
-            self.db.commit()
             self.db.refresh(end_user)
             
             db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
@@ -144,6 +167,54 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
+            raise
+
+    def get_or_create_end_user_mcp(
+            self,
+            workspace_id: uuid.UUID,
+            user_id: str
+    ):
+        try:
+            with self._acquire_eu_lock(workspace_id, user_id):
+                if is_uuid(user_id):
+                    user_stmt = select(User.id).where(
+                        User.is_active == True,
+                        User.id == user_id
+                    )
+                    if self.db.scalar(user_stmt):
+                        raise Exception("不可对草稿运行用户创建mcp user")
+
+                    end_user_stmt = select(EndUser).where(
+                        EndUser.is_active == True,
+                        EndUser.workspace_id == workspace_id,
+                        or_(
+                            EndUser.id == user_id,
+                            EndUser.other_id == user_id,
+                        )
+                    ).order_by(EndUser.created_at.asc()).limit(1)
+                else:
+                    end_user_stmt = select(EndUser).where(
+                        EndUser.is_active == True,
+                        EndUser.workspace_id == workspace_id,
+                        EndUser.other_id == user_id,
+                    ).order_by(EndUser.created_at.asc()).limit(1)
+
+                existing: EndUser | None = self.db.scalar(end_user_stmt)
+                if existing:
+                    return existing.id, existing.other_id
+
+                end_user = EndUser(
+                    workspace_id=workspace_id,
+                    other_id=user_id
+                )
+                self.db.add(end_user)
+                self.db.commit()
+                self.db.refresh(end_user)
+                return end_user.id, end_user.other_id
+
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"获取或创建终端用户出错: {str(e)}")
             raise
 
     def get_or_create_end_user_with_config(
