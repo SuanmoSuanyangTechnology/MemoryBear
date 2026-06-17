@@ -45,28 +45,28 @@ logger = logging.getLogger(__name__)
 class DescriptionMergeConfig(BaseModel):
     """子问题 6 实体描述合并配置"""
     min_fragments: int = 5              # 碎片数阈值（≥此值才触发合并）
-    merge_batch_size: int = 30          # 每批最多处理实体数
+    merge_batch_size: int = 15          # 每批最多处理实体数
     merge_concurrency: int = 5          # LLM 并发数
 
 
 class EntityDedupConfig(BaseModel):
     """子问题 3 去重消歧配置"""
     # === 方案A：高频两路召回 ===
-    candidate_cap_name: int = 500       # 路径A最大候选数
-    candidate_cap_embed: int = 500      # 路径B最大候选数
-    top_k_embed: int = 100              # 向量索引top-K（需穿透跨用户干扰）
+    candidate_cap_name: int = 200       # 路径A最大候选数
+    candidate_cap_embed: int = 200      # 路径B最大候选数
+    top_k_embed: int = 60              # 向量索引top-K
     theta_embed_floor: float = 0.85     # 向量初筛阈值
     alpha: float = 0.4                  # 名称权重
     beta: float = 0.6                   # 向量权重
     theta_low: float = 0.70             # 丢弃阈值（P≤此值写Redis缓存）
     llm_merge_threshold: float = 0.85   # LLM确认后合并阈值
-    max_merges_per_run: int = 20        # 单次最多合并数
+    max_merges_per_run: int = 10        # 单次最多合并数
     merge_concurrency: int = 5          # LLM并发数
     merge_max_degree: int = 1000        # loser 度数 ≤ 此值原子合并；> 则跳过（超级节点保护，需压测校准）
 
     # === 方案B：低频分组 LLM ===
     min_entities_for_scan: int = 3      # 少于此数不扫描
-    max_pairs_per_run: int = 20         # 单次最多合并对数
+    max_pairs_per_run: int = 10         # 单次最多合并对数
 
 
 class ReflectionConfig(BaseModel):
@@ -958,7 +958,7 @@ class Layer2Inspector:
                                        language: str) -> Dict[str, Any]:
         """子问题 5：未识别实体处理（并发控制）"""
         candidates = await scan_unresolved_candidates(
-            self.connector, end_user_id, batch_size=30
+            self.connector, end_user_id, batch_size=15  # 从30降至15，防止总耗时超soft_time_limit
         )
         if not candidates:
             return {"status": "success", "total": 0, "resolved": 0, "forced": 0}
