@@ -2391,7 +2391,7 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
 
                 # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
                 memory_service = MemoryService(
-                    db=db, config_id=config_id,
+                    config_id=config_id,
                     end_user_id=user_id, workspace_id=workspace_id,
                 )
                 r = await memory_service.run_reflection_layer2(baseline=baseline)
@@ -2550,7 +2550,7 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
                     return {"status": "lock_timeout"}
             try:
                 memory_service = MemoryService(
-                    db=db, config_id=config_id,
+                    config_id=config_id,
                     end_user_id=user_id, workspace_id=workspace_id,
                 )
                 r = await memory_service.run_dedup_full_scan()
