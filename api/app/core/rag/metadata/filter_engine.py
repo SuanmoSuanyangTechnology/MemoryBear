@@ -2,11 +2,12 @@ import uuid
 import logging
 from typing import Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, exists, or_
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import parse_metadata_time_to_utc_naive
 from app.models.document_model import Document
+from app.models.knowledge_metadata_model import KnowledgeMetadataBinding
 from .filter_strategies import StringFilterStrategy, NumberFilterStrategy, TimeFilterStrategy, _escape_like
 from .builtin_resolver import BuiltinFieldResolver
 
@@ -79,13 +80,13 @@ class MetadataFilterEngine:
                     filter_expr = self._build_builtin_filter(cond, field_def)
                 else:
                     strategy = self._strategies[field_def["type"]]
-                    if not strategy.supports(cond.operator):
+                    if cond.operator not in ("is_missing", "not_missing") and not strategy.supports(cond.operator):
                         raise BusinessException(
                             f"字段 '{cond.field}' (类型 {field_def['type']}) "
                             f"不支持操作符 '{cond.operator}'",
                             code=BizCode.METADATA_INVALID_OPERATOR,
                         )
-                    filter_expr = strategy.apply(cond.field, cond.operator, cond.value)
+                    filter_expr = self._build_custom_filter(cond, field_def, strategy)
 
                 conditions.append(filter_expr)
 
@@ -111,6 +112,33 @@ class MetadataFilterEngine:
         """执行过滤，返回符合条件的 document_id 列表"""
         query = self.build_query(*args, **kwargs)
         return [row[0] for row in query.all()]
+
+    def _build_custom_filter(self, cond: FilterCondition, field_def: dict, strategy):
+        metadata_id = field_def.get("id")
+        if metadata_id is None:
+            raise BusinessException(
+                f"元数据字段缺少绑定标识: {cond.field}",
+                code=BizCode.METADATA_FIELD_NOT_FOUND,
+            )
+
+        exists_binding = self._build_custom_binding_exists_filter(metadata_id)
+        match cond.operator:
+            case "is_missing":
+                return ~exists_binding
+            case "not_missing":
+                return exists_binding
+            case _:
+                return and_(exists_binding, strategy.apply(cond.field, cond.operator, cond.value))
+
+    @staticmethod
+    def _build_custom_binding_exists_filter(metadata_id: uuid.UUID):
+        return exists().where(
+            and_(
+                KnowledgeMetadataBinding.knowledge_id == Document.kb_id,
+                KnowledgeMetadataBinding.document_id == Document.id,
+                KnowledgeMetadataBinding.metadata_id == metadata_id,
+            )
+        )
 
     def _build_builtin_filter(self, cond: FilterCondition, field_def: dict):
         """构建内置字段的过滤表达式（查真实列）"""
