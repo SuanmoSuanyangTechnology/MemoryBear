@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-06-05 13:33:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-08 09:58:25
+ * @Last Modified time: 2026-06-17 15:08:31
  */
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -55,7 +55,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
     const values: Record<string, any> = {}
     documentMetadataFields.map((item: MetadataField) => {
       if (item.type === 'time') {
-        values[item.name] = dayjs.tz(item.value);
+        values[item.name] = item.value ? dayjs.tz(item.value) : undefined;
       } else {
         values[item.name] = item.value;
       }
