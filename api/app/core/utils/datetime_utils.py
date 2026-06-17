@@ -56,6 +56,14 @@ def to_iso_z(dt: datetime | None) -> str | None:
     return aware_dt.isoformat().replace("+00:00", "Z")
 
 
+def to_utc_offset_string(dt: datetime | None) -> str | None:
+    """Serialize a datetime as an explicit UTC offset string."""
+    aware_dt = as_utc_aware(dt)
+    if aware_dt is None:
+        return None
+    return aware_dt.strftime("%Y-%m-%d %H:%M:%S%z")
+
+
 def normalize_progress_message_timestamps(message: str | None, reference_dt: datetime | None) -> str | None:
     """Convert legacy leading HH:MM:SS progress lines to explicit UTC ISO strings."""
     if not message:
