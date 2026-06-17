@@ -535,6 +535,7 @@ export const nodeLibrary: NodeLibrary[] = [
               { value: '0', label: 'memoryConversation.deepThinking' },
               { value: '1', label: 'memoryConversation.normalReply' },
               { value: '2', label: 'memoryConversation.quickReply' },
+              { value: '5', label: 'memoryConversation.quickReplyPlus' },
               { value: '3', label: 'memoryConversation.conv' },
               { value: '4', label: 'memoryConversation.metadata' },
             ],

@@ -2078,6 +2078,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       startANewConversation: 'Start a new conversation',
       normalReply: 'Normal Reply',
       quickReply: 'Quick Reply',
+      quickReplyPlus: 'Quick Reply Plus',
       web_search: 'Online search',
       memory: 'Memory',
       memoryConversationAnalysisEmpty: 'No conversation analysis available.',

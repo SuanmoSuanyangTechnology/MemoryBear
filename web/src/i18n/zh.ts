@@ -2072,6 +2072,7 @@ export const zh = {
       startANewConversation: '开始新对话',
       normalReply: '正常回复',
       quickReply: '快速回复',
+      quickReplyPlus: '极速回复',
       web_search: '联网搜索',
       memory: '记忆',
       memoryConversationAnalysisEmpty: '目前没有可用的对话分析内容',
