@@ -95,7 +95,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
         if memory_evidence:
-            memory_l0.content_str = memory_evidence
+            memory_l0.content_str = str(memory_evidence)
             return memory_l0
         all_tasks = []
         for question in questions:
