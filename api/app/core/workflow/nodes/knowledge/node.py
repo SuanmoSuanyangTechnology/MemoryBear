@@ -2,6 +2,9 @@ import asyncio
 import logging
 from typing import Any
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.rag.llm.chat_model import Base as ChatModelBase
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -10,7 +13,10 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
+from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
+from app.services.metadata_auto_filter_service import MetadataAutoFilterService
+from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +125,153 @@ class KnowledgeRetrievalNode(BaseNode):
                 })
         return citations
 
+    def _build_auto_filter_llm(self, db) -> ChatModelBase:
+        """auto 模式：用节点配置的模型 + 参数构造 LLM
+
+        复用 service._build_chat_model 的构造方式（chat_model.Base），与
+        MetadataAutoFilterService.generate_filter_groups 期望的 llm.chat() 接口一致。
+        """
+        model_cfg = self.typed_config.metadata_model
+        config = ModelConfigService.get_model_by_id(db=db, model_id=model_cfg.model_id)
+        if not config:
+            raise BusinessException(
+                "auto 模式配置的模型不存在", code=BizCode.NOT_FOUND
+            )
+        if not config.api_keys:
+            raise BusinessException(
+                "auto 模式配置的模型缺少 API Key", code=BizCode.INVALID_PARAMETER
+            )
+        api_key = self.model_balance(config)  # BaseNode.model_balance -> ModelApiKey
+        return ChatModelBase(
+            key=api_key.api_key,
+            model_name=api_key.model_name,
+            base_url=api_key.api_base,
+        )
+
+    def _build_gen_conf(self) -> dict:
+        """AgentModelConfig.completion_params -> chat_model.Base 的 gen_conf
+
+        auto 模式底层 LLM 是知识库工程师 generate_filter_groups 定好的 chat_model.Base，
+        其 _chat 将 gen_conf 直接透传给 OpenAI chat.completions.create(**gen_conf)，
+        并经 _clean_conf 过滤掉不支持的键。
+
+        因此配置层与 agent 节点完全一致（不阉割），运行时按 OpenAI API 参数语义全量映射；
+        少数 chat_model.Base 不支持的键（top_k / repetition_penalty 等）会被 _clean_conf 自动丢弃，
+        并在此给出 warning 告知用户该参数在 auto 过滤场景下不生效。
+        """
+        import json as _json
+
+        p = self.typed_config.metadata_model.completion_params
+        conf: dict[str, Any] = {}
+        # 基础生成参数（OpenAI API 原生支持）
+        if p.temperature is not None:
+            conf["temperature"] = p.temperature
+        if p.max_tokens is not None:
+            # chat_model.Base._clean_conf 会删掉 max_tokens，改用 OpenAI 的 max_completion_tokens
+            conf["max_completion_tokens"] = p.max_tokens
+        if p.top_p.enable and p.top_p.value is not None:
+            conf["top_p"] = p.top_p.value
+        if p.seed.enable and p.seed.value is not None:
+            conf["seed"] = p.seed.value
+        if p.frequency_penalty.enable and p.frequency_penalty.value is not None:
+            conf["frequency_penalty"] = p.frequency_penalty.value
+        if p.presence_penalty.enable and p.presence_penalty.value is not None:
+            conf["presence_penalty"] = p.presence_penalty.value
+        if p.stop.enable and p.stop.value:
+            conf["stop"] = p.stop.value[:4]
+        if p.response_format.enable and p.response_format.value:
+            conf["response_format"] = {"type": p.response_format.value}
+        if p.extra_headers.enable and p.extra_headers.value:
+            try:
+                conf["extra_headers"] = _json.loads(p.extra_headers.value)
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"node: {self.node_id} auto filter: extra_headers JSON parse failed: {e}"
+                )
+
+        # 下列参数 chat_model.Base 不支持（_clean_conf 会丢弃），配了也不生效，给出 warning 提示
+        unsupported_hits = []
+        if p.top_k.enable and p.top_k.value is not None:
+            unsupported_hits.append("top_k")
+            conf["top_k"] = p.top_k.value
+        if p.repetition_penalty.enable and p.repetition_penalty.value is not None:
+            unsupported_hits.append("repetition_penalty")
+            conf["repetition_penalty"] = p.repetition_penalty.value
+        if getattr(p, "search", False):
+            unsupported_hits.append("search")
+        if getattr(p.thinking, "enable", False):
+            unsupported_hits.append("thinking")
+        if unsupported_hits:
+            logger.warning(
+                f"node: {self.node_id} auto filter: parameters {unsupported_hits} are not supported "
+                f"by the underlying chat_model.Base and will be ignored"
+            )
+
+        return conf
+
+    def _extract_auto_filter_groups(
+        self,
+        query: str,
+        variable_pool: VariablePool,
+    ) -> list:
+        """auto 模式：用配置好的模型 + 参数，调用 LLM 提取出源数据过滤条件。
+
+        产出 list[EngineFilterGroup]，交给 service 的 MetadataFilterEngine 做真正的过滤。
+        """
+        cfg = self._get_typed_config()
+        model_cfg = cfg.metadata_model
+        if not model_cfg or not model_cfg.model_id:
+            raise BusinessException(
+                "auto 模式必须配置 metadata_model.model_id",
+                code=BizCode.INVALID_PARAMETER,
+            )
+
+        with get_db_read() as db:
+            # 1. 取各知识库的元数据定义，求公共字段（与 service._build_metadata_document_filter 一致）
+            metadata_defs_by_kb = {
+                kb.kb_id: KnowledgeMetadataService.get_metadata_defs_for_filtering(db, kb.kb_id)
+                for kb in cfg.knowledge_bases
+            }
+            common_metadata_defs = KnowledgeRetrievalService._get_common_metadata_defs(metadata_defs_by_kb)
+
+            if not common_metadata_defs:
+                logger.info(
+                    "node: %s auto filter: no common metadata fields, skip extraction",
+                    self.node_id,
+                )
+                return []
+
+            # 2. 构造配置好的 LLM（含模型参数）
+            llm = self._build_auto_filter_llm(db)
+
+        # 3. 调用知识库工程师已写好的提取方法，传入自定义 gen_conf（应用模型参数）
+        gen_conf = self._build_gen_conf()
+        logger.info(
+            "node: %s auto filter: query=%r, fields=%s, gen_conf=%s",
+            self.node_id, query, list(common_metadata_defs.keys()), gen_conf,
+        )
+        filter_groups = MetadataAutoFilterService.generate_filter_groups(
+            query=query,
+            metadata_defs=common_metadata_defs,
+            llm=llm,
+            gen_conf=gen_conf,
+        )
+        # 打印提取出的过滤条件（即交接给知识库工程师做真正过滤的内容）
+        # EngineFilterGroup/EngineFilterCondition 是 filter_engine 里的简单数据类，
+        # 直接用 vars() 取 __dict__，避免凭空构造属性名。
+        logger.info(
+            "node: %s auto filter extracted: %s",
+            self.node_id,
+            [
+                {
+                    "logic": group.logic,
+                    "conditions": [vars(cond) for cond in (group.conditions or [])],
+                }
+                for group in (filter_groups or [])
+            ],
+        )
+        return filter_groups
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the knowledge retrieval workflow node.
@@ -150,6 +303,14 @@ class KnowledgeRetrievalNode(BaseNode):
             self.typed_config.metadata_filters, variable_pool
         )
 
+        # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[EngineFilterGroup]）
+        auto_filter_groups: list | None = None
+        if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
+            # generate_filter_groups 内部走同步 LLM.chat 网络调用，放到工作线程避免阻塞事件循环
+            auto_filter_groups = await asyncio.to_thread(
+                self._extract_auto_filter_groups, query, variable_pool
+            )
+
         # 3. Construct KnowledgeRetrievalRequest
         #    Use first KB's config as global defaults (user confirmed: accept global params)
         first_kb = self.typed_config.knowledge_bases[0]
@@ -165,6 +326,7 @@ class KnowledgeRetrievalNode(BaseNode):
             rerank_id=self.typed_config.reranker_id,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,
             metadata_filters=[rendered_filters] if rendered_filters else [],
+            metadata_auto_filter_groups=auto_filter_groups,
         )
 
         # 4. Call unified retrieval service
