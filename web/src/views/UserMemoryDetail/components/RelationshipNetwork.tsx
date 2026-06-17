@@ -235,10 +235,10 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       </div>
       {activeTab === 'communityNetwork'
         ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
-        : <div className="rb:h-full rb:w-full">
+        : <div className="rb:absolute rb:inset-0">
           {categories.length > 0 &&
             <Flex gap={24} align="center" justify="space-between" wrap={false}
-              className={clsx('rb:absolute! rb:top-4 rb:bg-[#FFFFFF] rb:rounded-xl rb:py-2! rb:px-3!', {
+              className={clsx('rb:absolute! rb:z-9999 rb:top-4 rb:bg-[#FFFFFF] rb:rounded-xl rb:py-2! rb:px-3!', {
                 'rb:w-full': !selectedNode && !selectedKey,
                 'rb:w-[calc(100%-412px)]': selectedNode,
                 'rb:left-103 rb:w-[calc(100%-412px)]': selectedKey,
