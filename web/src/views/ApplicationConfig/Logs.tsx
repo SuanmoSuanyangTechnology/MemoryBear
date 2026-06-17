@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 14:30:53
+ * @Last Modified time: 2026-06-17 17:04:45
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -315,7 +315,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
         />
         <LogDetailModal ref={logDetailRef} source={application?.type} />
       </>}
-      {isHideAnnotations && activeTab === 'annotations' && <>
+      {!isHideAnnotations && activeTab === 'annotations' && <>
         <Table<AnnotationItem>
           ref={annotationsTableRef}
           apiUrl={getAnnotationsListUrl(id || '')}
