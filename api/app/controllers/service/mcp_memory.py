@@ -68,13 +68,16 @@ async def write_memory(
         return {"success": False, "error": str(e)}
 
     try:
+        from datetime import datetime, timezone
+        dialog_at = datetime.now(timezone.utc).isoformat()
+
         msg_id = scheduler.push_task(
             "app.core.memory.agent.write_message",
             end_user_id,
             {
                 "end_user_id": end_user_id,
                 "mode": "mcp_write",
-                "messages": [{"role": "user", "content": message}],
+                "messages": [{"role": "user", "content": message, "dialog_at": dialog_at}],
                 "config_id": config_id,
                 "storage_type": storage_type,
                 "user_rag_memory_id": "",

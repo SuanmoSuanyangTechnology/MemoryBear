@@ -1,18 +1,15 @@
-import asyncio
 import os
 from typing import List, Optional
 
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.add_nodes import add_dialogue_nodes, add_statement_nodes, add_chunk_nodes
+from app.repositories.neo4j.add_nodes import add_chunk_nodes
 from app.repositories.neo4j.cypher_queries import (
     STATEMENT_ENTITY_EDGE_SAVE,
     ENTITY_RELATIONSHIP_SAVE,
     EXTRACTED_ENTITY_NODE_SAVE,
     CHUNK_STATEMENT_EDGE_SAVE,
-    STATEMENT_ENTITY_EDGE_SAVE,
-    ENTITY_RELATIONSHIP_SAVE,
-    EXTRACTED_ENTITY_NODE_SAVE,
+    SPECIAL_ENTITY_QUERY,
 )
 from app.core.memory.models.graph_models import (
     DialogueNode,
@@ -206,13 +203,8 @@ async def save_dialog_and_statements_to_neo4j(
         if end_user_id:
             try:
                 # 查询已有的特殊实体
-                cypher = """
-                MATCH (e:ExtractedEntity)
-                WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
-                RETURN e.id AS id, e.name AS name
-                """
                 existing = await connector.execute_query(
-                    cypher,
+                    SPECIAL_ENTITY_QUERY,
                     end_user_id=end_user_id,
                     names=list(_SPECIAL_NAMES),
                 )

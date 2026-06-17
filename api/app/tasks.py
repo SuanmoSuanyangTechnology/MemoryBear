@@ -4322,6 +4322,20 @@ def _flush_single_conversation(conversation_id: str) -> None:
             # 不再逐条推进，避免多次 DB 更新
             _advance_cursor_sync(conversation_id, max_pending_seq)
 
+            # 主动清理 pending_conversations Set，避免后续 Beat 无效扫描
+            # cursor 已推进到 max_pending_seq，若此时无新消息则可安全 unmark
+            try:
+                from app.core.memory.sliding_window.window_utils import (
+                    verify_unmark_safe,
+                    unmark_conversation_pending,
+                )
+                if verify_unmark_safe(conversation_id):
+                    unmark_conversation_pending(conversation_id)
+                    logger.debug(f"[FlushTask] 已从 pending_conversations Set 移除: conv={conversation_id}")
+            except Exception as e:
+                # fire-and-forget：unmark 失败不影响主流程，后续 Beat 扫描会再次尝试
+                logger.debug(f"[FlushTask] unmark 失败（可忽略）: conv={conversation_id}, err={e}")
+
             logger.info(
                 f"[FlushTask] 已派发 {dispatched} 个 user 消息任务，cursor 推进到 {max_pending_seq}: "
                 f"conv={conversation_id}, end_user_id={end_user_id}, "

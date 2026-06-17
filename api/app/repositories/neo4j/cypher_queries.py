@@ -2448,3 +2448,12 @@ WHERE toLower(e.name) IN ['用户', '我', 'user', 'i']
    OR e.entity_type = '用户'
 RETURN e.id AS entity_id, e.name AS name, coalesce(e.aliases, []) AS aliases
 """
+
+
+# ── 查询已有的特殊实体（用户、AI助手）以便复用 ID ──
+# 用于 graph_saver 预处理阶段，确保同一个 end_user_id 下只有一个"用户"节点和一个"AI助手"节点
+SPECIAL_ENTITY_QUERY = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
+RETURN e.id AS id, e.name AS name
+"""
