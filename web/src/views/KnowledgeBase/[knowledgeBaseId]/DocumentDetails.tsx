@@ -504,6 +504,7 @@ const DocumentDetails: FC = () => {
             parserMode={parserMode}
             handleCopy={handleCopy}
             handleInsert={handleInsert}
+            isParentChildMode={isParentChildMode}
           />
         </div>
       </div>
