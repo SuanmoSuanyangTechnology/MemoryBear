@@ -175,8 +175,7 @@ class MemoryService:
             history = []
         if self.ctx.memory_config is None:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
-        with get_db_context() as db:
-            return await ReadPipeLine(self.ctx, db).run(query, search_switch, history, limit)
+        return await ReadPipeLine(self.ctx).run(query, search_switch, history, limit)
 
     async def forget(
             self, max_batch: int = 100, min_days: int = 30
@@ -613,10 +612,6 @@ class MemoryService:
                 f"conv={conversation_id}, err={e}",
                 exc_info=True,
             )
-
-    @staticmethod
-    async def get_conv_history(db: Session, conv_id: str):
-        return
 
 
 def create_long_term_memory_tool(

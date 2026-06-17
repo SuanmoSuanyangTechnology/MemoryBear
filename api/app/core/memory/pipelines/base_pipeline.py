@@ -57,7 +57,3 @@ class BasePipeline(ABC):
         pass
 
 
-class DBRequiredPipeline(BasePipeline, ABC):
-    def __init__(self, ctx: MemoryContext, db: Session):
-        super().__init__(ctx)
-        self.db = db
