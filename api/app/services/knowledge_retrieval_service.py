@@ -51,6 +51,7 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             current_user: Any = None,
     ) -> KnowledgeRetrievalResult:
+        logger.info("Knowledge retrieval request params: %s", request.model_dump() if hasattr(request, "model_dump") else request.dict())
         knowledge_ids, workspace_ids = cls._resolve_retrievable_knowledge_ids(
             db=db,
             request=request,
