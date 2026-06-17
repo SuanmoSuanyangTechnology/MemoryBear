@@ -4,7 +4,7 @@
 import uuid
 import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Integer, Text, JSON
+from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Integer, Text, JSON, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -115,3 +115,26 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
     feedbacks = relationship("MessageFeedback", back_populates="message", cascade="all, delete-orphan")
     reports = relationship("MessageReport", back_populates="message", cascade="all, delete-orphan")
+
+
+class ConversationContextState(Base):
+    """会话上下文状态表。
+
+    用于持久化商业版上下文引擎的摘要文本与业务边界。
+    """
+
+    __tablename__ = "conversation_context_state"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "scope_key", name="uq_conversation_context_state_scope"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, comment="会话ID")
+    scope_key = Column(String(255), nullable=False, comment="上下文作用域键")
+    source_type = Column(String(32), nullable=False, comment="上下文来源类型：conversation/workflow")
+    summary_text = Column(Text, nullable=True, comment="滚动摘要文本")
+    summarized_until_message_id = Column(UUID(as_uuid=True), nullable=True, comment="应用聊天摘要边界消息ID")
+    summarized_until_at = Column(DateTime, nullable=True, comment="应用聊天摘要边界时间")
+    summarized_until_seq = Column(BigInteger, nullable=True, comment="工作流摘要边界序号")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False, comment="更新时间")
