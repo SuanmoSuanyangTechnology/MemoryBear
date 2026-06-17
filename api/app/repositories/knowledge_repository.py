@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.document_model import Document
-from app.models.knowledge_model import Knowledge, KnowledgeType, PermissionType
+from app.models.knowledge_model import Knowledge, PermissionType
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
 
@@ -164,87 +164,68 @@ def get_knowledges_by_parent_id(db: Session, parent_id: uuid.UUID) -> list[Knowl
         raise
 
 
-def get_folder_doc_counts(
+def get_knowledges_by_parent_ids(
         db: Session,
-        folder_ids: list[uuid.UUID],
+        parent_ids: list[uuid.UUID],
         workspace_id: uuid.UUID,
-) -> dict[uuid.UUID, int]:
+) -> list[knowledge_schema.Knowledge]:
     db_logger.debug(
-        f"Query real folder document counts: folder_count={len(folder_ids)}, workspace_id={workspace_id}"
+        f"Batch query knowledge bases by parent IDs: parent_count={len(parent_ids)}, workspace_id={workspace_id}"
     )
-    if not folder_ids:
-        return {}
-
-    unique_folder_ids = list(dict.fromkeys(folder_ids))
-    knowledge_ids_by_folder = {folder_id: {folder_id} for folder_id in unique_folder_ids}
-    parent_roots = {folder_id: {folder_id} for folder_id in unique_folder_ids}
-    processed_roots_by_parent: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if not parent_ids:
+        return []
 
     try:
-        while parent_roots:
-            current_parent_roots = {}
-            for parent_id, root_ids in parent_roots.items():
-                processed_root_ids = processed_roots_by_parent.get(parent_id, set())
-                unprocessed_root_ids = root_ids - processed_root_ids
-                if unprocessed_root_ids:
-                    current_parent_roots[parent_id] = unprocessed_root_ids
-
-            if not current_parent_roots:
-                break
-
-            for parent_id, root_ids in current_parent_roots.items():
-                processed_roots_by_parent.setdefault(parent_id, set()).update(root_ids)
-
-            children = (
-                db.query(Knowledge.id, Knowledge.parent_id, Knowledge.type)
-                .filter(
-                    Knowledge.parent_id.in_(list(current_parent_roots.keys())),
-                    Knowledge.workspace_id == workspace_id,
-                    Knowledge.status != 2,
-                    Knowledge.permission_id != PermissionType.Memory,
-                )
-                .all()
+        knowledges = (
+            db.query(Knowledge)
+            .filter(
+                Knowledge.parent_id.in_(parent_ids),
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status != 2,
+                Knowledge.permission_id != PermissionType.Memory,
             )
+            .all()
+        )
+        db_logger.debug(
+            f"Batch knowledge bases query successful: parent_count={len(parent_ids)}, count={len(knowledges)}"
+        )
+        return [knowledge_schema.Knowledge.model_validate(item) for item in knowledges]
+    except Exception as e:
+        db_logger.error(
+            f"Failed to batch query knowledge bases by parent IDs: workspace_id={workspace_id} - {str(e)}"
+        )
+        raise
 
-            next_parent_roots: dict[uuid.UUID, set[uuid.UUID]] = {}
-            for child_id, parent_id, knowledge_type in children:
-                root_ids = current_parent_roots.get(parent_id, set())
-                for root_id in root_ids:
-                    knowledge_ids_by_folder[root_id].add(child_id)
-                if knowledge_type == KnowledgeType.FOLDER:
-                    next_parent_roots.setdefault(child_id, set()).update(root_ids)
 
-            parent_roots = next_parent_roots
+def get_document_counts_by_knowledge_ids(
+        db: Session,
+        knowledge_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    db_logger.debug(
+        f"Query document counts by knowledge IDs: knowledge_count={len(knowledge_ids)}"
+    )
+    if not knowledge_ids:
+        return {}
 
-        all_knowledge_ids = list({
-            knowledge_id
-            for knowledge_ids in knowledge_ids_by_folder.values()
-            for knowledge_id in knowledge_ids
-        })
-        if not all_knowledge_ids:
-            return {folder_id: 0 for folder_id in unique_folder_ids}
+    unique_knowledge_ids = list(dict.fromkeys(knowledge_ids))
 
+    try:
         document_count_rows = (
             db.query(Document.kb_id, func.count(Document.id))
             .filter(
-                Document.kb_id.in_(all_knowledge_ids),
+                Document.kb_id.in_(unique_knowledge_ids),
                 Document.status == 1,
             )
             .group_by(Document.kb_id)
             .all()
         )
-        document_counts = {
+        return {
             kb_id: int(count)
             for kb_id, count in document_count_rows
         }
-
-        return {
-            folder_id: sum(document_counts.get(knowledge_id, 0) for knowledge_id in knowledge_ids)
-            for folder_id, knowledge_ids in knowledge_ids_by_folder.items()
-        }
     except Exception as e:
         db_logger.error(
-            f"Failed to query real folder document counts: workspace_id={workspace_id} - {str(e)}"
+            f"Failed to query document counts by knowledge IDs: {str(e)}"
         )
         raise
 
