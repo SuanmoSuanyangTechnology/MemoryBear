@@ -2310,6 +2310,12 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                             )
                             dispatched += 1
                             dispatched_user_ids.append(uid)
+                            # 每派发 10 个用户打印一次进度
+                            if dispatched % 10 == 0:
+                                logger.info(
+                                    f"scan_layer2_reflection 进度: 已派发 {dispatched} 个用户, "
+                                    f"最近10个: {dispatched_user_ids[-10:]}"
+                                )
                         except Exception as e:
                             logger.error(f"高频反思scan 处理用户失败 user={uid}: {e}")
                             try:
