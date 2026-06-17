@@ -911,6 +911,7 @@ export const en = {
       replaceWhitespace: 'Replace consecutive whitespace characters',
       removeEmails: 'Remove all email addresses',
       // Knowledge Graph related
+      list: 'List',
       graph: 'Graph',
       knowledgeGraph: 'Knowledge Graph',
       basicConfig: 'Basic Configuration',

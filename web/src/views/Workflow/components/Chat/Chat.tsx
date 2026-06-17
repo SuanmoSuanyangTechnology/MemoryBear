@@ -760,7 +760,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
   if (!open) return null
 
   return (
-    <div className="rb:w-150 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5">
+    <div className="rb:w-150 rb:fixed rb:right-2.5 rb:top-30 rb:bottom-2.5">
       <RbCard
         title={t('workflow.run')}
         extra={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={() => handleClose()}></div>}

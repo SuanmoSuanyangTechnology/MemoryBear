@@ -13,12 +13,12 @@ import type { ChatRef, AddChatVariableRef, AddEnvVariableRef } from './types'
 import AddChatVariable from './components/AddChatVariable';
 import FeaturesConfigModal from '@/views/ApplicationConfig/components/FeaturesConfig/FeaturesConfigModal'
 import AddEnvVariable from './components/AddEnvVariable';
+import Operations from './components/Operations'
 
 interface WorkflowProps {
   appType?: Application['type'];
-  onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
 }
-const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appType }, ref) => {
+const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const miniMapRef = useRef<HTMLDivElement>(null);
   const addChatVariableRef = useRef<AddChatVariableRef>(null)
@@ -55,15 +55,18 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     canRedo,
     undo,
     redo,
-  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad, setRunOpen });
+  } = useWorkflowGraph({ containerRef, miniMapRef, setRunOpen });
 
 
   const onDragOver = (event: React.DragEvent) => {
     event.preventDefault();
   };
   const handleRun = () => {
-    blankClick()
-    setRunOpen(true)
+    handleSave()
+      .then(() => {
+        blankClick()
+        setRunOpen(true)
+      })
   }
   const handleToggle = () => {
     setCollapsed(prev => !prev)
@@ -76,6 +79,10 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
   }
   const refreshCache = () => {
     canvasToolbarRef.current?.refreshCache()
+  }
+  /** Clear all cells from the graph. */
+  const clear = () => {
+    graphRef.current?.clearCells()
   }
 
   // Ref used to imperatively open the config modal
@@ -116,6 +123,32 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
         onDrop={onDrop}
         onDragOver={onDragOver}
       >
+        {/* 操作按钮 */}
+        <Operations
+          selectedNode={selectedNode}
+          miniMapRef={miniMapRef}
+          graphRef={graphRef}
+          isHandMode={isHandMode}
+          setIsHandMode={setIsHandMode}
+          zoomLevel={zoomLevel}
+          addNotes={handleAddNotes}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
+          config={config}
+          collapsed={collapsed}
+          runOpen={runOpen}
+          appType={appType}
+          appId={config?.app_id}
+          workflowRef={ref as React.RefObject<WorkflowRef>}
+          onFeaturesConfig={handleFeaturesConfig}
+          onClear={clear}
+          onAddVariable={addVariable}
+          onAddEnvVariable={addEnvVariable}
+          onRun={handleRun}
+          onSave={handleSave}
+        />
         <div ref={containerRef} className="rb:w-full rb:h-full" />
         {/* 地图工具栏 */}
         <CanvasToolbar
