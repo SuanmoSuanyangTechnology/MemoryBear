@@ -516,7 +516,7 @@ class EndUserRepository:
                 .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
                 .all()
             )
-            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
+            db_logger.debug(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
             return end_users
         except Exception as e:
             self.db.rollback()
