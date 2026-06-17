@@ -89,13 +89,11 @@ class StorageFactory:
             )
 
         elif storage_type == "minio":
-            from app.core.storage.s3 import S3Storage
+            from app.core.storage.minio import MinIOStorage
 
-            # MinIO is S3-compatible; reuse S3Storage with MinIO endpoint.
-            # MinIO ignores the region for most setups; use a safe default
-            # to avoid AWS-specific LocationConstraint issues when
-            # MINIO_REGION is empty or a custom value.
-            return S3Storage(
+            # MinIO is S3-compatible; MinIOStorage handles endpoint,
+            # bucket auto-creation and path-style permanent URLs.
+            return MinIOStorage(
                 region=settings.MINIO_REGION,
                 access_key_id=settings.MINIO_ACCESS_KEY_ID,
                 secret_access_key=settings.MINIO_SECRET_ACCESS_KEY,
