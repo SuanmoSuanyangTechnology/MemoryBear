@@ -10,7 +10,7 @@ Validates: Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 6.1, 6.3, 6.4,
 import logging
 import math
 from logging import Logger
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.core.memory.constants.graph_data_constants import (
     DEFAULT_PER_TYPE_LIMIT_MAP,
@@ -42,7 +42,7 @@ __all__ = [
     "compute_stat_types",
     "assemble_per_type_stat",
     "assemble_center_per_type_stat",
-    "build_edge_groups",
+    "build_unified_edges",
     # Neo4j 查询封装
     "query_nodes_by_type_limits",
     "query_rel_count_batch",
@@ -441,49 +441,72 @@ def assemble_center_per_type_stat(
     return per_type_stat
 
 
-def build_edge_groups(
-    edges: Iterable[Dict[str, Any]],
-) -> Tuple[List[Dict[str, Any]], Set[str]]:
-    """聚合「同一对节点之间的多条边」并按方向分桶（纯逻辑）。
+def _make_edge_item(edge: Dict[str, Any]) -> Dict[str, Any]:
+    """从原始边 dict 构造 EdgeGroupItem 风格的边条目。"""
+    edge_props = edge.get("properties") or {}
+    rel_type = edge.get("type", "")
+    item: Dict[str, Any] = {
+        "id": edge.get("id"),
+        "type": rel_type,
+    }
+    created_at = edge_props.get("created_at")
+    valid_at = edge_props.get("valid_at")
+    if created_at is not None:
+        item["created_at"] = created_at
+    if valid_at is not None:
+        item["valid_at"] = valid_at
+    if rel_type == "EXTRACTED_RELATIONSHIP":
+        item["predicate"] = edge_props.get("predicate")
+        item["predicate_surface"] = edge_props.get("predicate_surface")
+        item["predicate_description"] = edge.get("predicate_description")
+    return item
 
-    业务背景：``EXTRACTED_RELATIONSHIP`` 等关系常常出现在同一对实体之间多次，
-    例如 (A)-[:关联于 {predicate_surface: 女朋友}]->(B) 与
-    (A)-[:关联于 {predicate_surface: 给…过生日}]->(B)。这些边在顶层 ``edges``
-    数组中是平铺的；前端如果想呈现「重边」效果，需要自己做一次 O(N) 聚合。
-    本函数把这部分逻辑下沉到后端，输出与方向无关的稳定分组。
+
+def _classify_edge_type(a_to_b_count: int, b_to_a_count: int) -> str:
+    """根据双向桶中的边数判定边类型。"""
+    total = a_to_b_count + b_to_a_count
+    if total == 1:
+        return "SINGLE"
+    if total == 2 and a_to_b_count == 1 and b_to_a_count == 1:
+        return "BIDIRECTIONAL"
+    if a_to_b_count > 0 and b_to_a_count > 0:
+        return "MULTI_BIDIRECTIONAL"
+    return "UNIDIRECTIONAL_MULTI"
+
+
+def build_unified_edges(
+    edges: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """将所有边统一为 UnifiedEdge 列表（纯逻辑）。
+
+    合并了原 ``edges`` 与 ``edge_groups`` 的二分结构：
     
+    - ``EXTRACTED_RELATIONSHIP`` 类型的边按 ``(node_a, node_b)`` 聚合分组，
+      根据双向桶中的边数产出 ``SINGLE`` / ``UNIDIRECTIONAL_MULTI`` /
+      ``BIDIRECTIONAL`` / ``MULTI_BIDIRECTIONAL`` 条目。
+    - 其他边类型（如 ``REFERENCES_ENTITY``、``PRUNED_TO`` 等）各自生成
+      独立的 ``SINGLE`` 条目。
+    - 自环（``source == target``）直接跳过。
+
     Args:
         edges: 已经装配好的响应边列表。每项至少含 ``id`` / ``source`` /
-            ``target`` 三个字符串键；还会读取 ``type`` / ``properties``
-            以填充 edge_groups 中的边对象。
-
-    说明：仅聚合 ``type == "EXTRACTED_RELATIONSHIP"`` 的边（实体间语义关系），
-    其他边类型（如 REFERENCES_ENTITY）不参与聚合。
+            ``target`` / ``type`` 字符串键。
 
     Returns:
-        ``(edge_groups, grouped_edge_ids)`` 二元组：
-        - ``edge_groups``: 聚合后的分组列表，每个元素形如::
+        统一边列表，每项形如::
 
             {
                 "node_a": "A",
                 "node_b": "B",
-                "total": 3,
-                "edge_type": "双向多维边",
-                "a_to_b": [
-                    {"id": "e1", "type": "EXTRACTED_RELATIONSHIP", "predicate": "相关于", "predicate_surface": "和...有关", "predicate_description": "表达实体间的相关关系"},
-                    ...
-                ],
-                "b_to_a": [...],
+                "total": 1,
+                "edge_type": "SINGLE",
+                "a_to_b": [{"id": "e1", "type": "REFERENCES_ENTITY"}],
+                "b_to_a": [],
             }
-
-        - ``grouped_edge_ids``: 已被聚合的边 id 集合，调用方应从 ``edges``
-          中剔除这些边，避免与 ``edge_groups`` 重复。
-
-        当不存在任何重边对时返回 ``([], set())``。
     """
-    # 用 dict 收口，键 = (node_a, node_b) 元组（已字典序排序）。
-    # 值同时记录两个方向的边对象列表（含 id/type/predicate_description）。
-    groups: Dict[Tuple[str, str], Dict[str, List[Dict[str, Any]]]] = {}
+    # 分两路处理：EXTRACTED_RELATIONSHIP 边聚合分组，其他边各成独立条目。
+    relationship_groups: Dict[Tuple[str, str], Dict[str, List[Dict[str, Any]]]] = {}
+    standalone_items: List[Dict[str, Any]] = []
 
     for edge in edges:
         edge_id = edge.get("id")
@@ -492,70 +515,63 @@ def build_edge_groups(
         if not edge_id or not source or not target:
             continue
         if source == target:
-            # 自环不属于「双向重边」语义，跳过。
             continue
 
-        # 仅聚合 EXTRACTED_RELATIONSHIP 类型的边
         rel_type = edge.get("type", "")
-        if rel_type != "EXTRACTED_RELATIONSHIP":
-            continue
-
-        edge_props = edge.get("properties") or {}
-        edge_item = {
-            "id": edge_id,
-            "type": rel_type,
-            "predicate": edge_props.get("predicate"),
-            "predicate_surface": edge_props.get("predicate_surface"),
-            "predicate_description": edge.get("predicate_description"),
-        }
+        edge_item = _make_edge_item(edge)
 
         if source < target:
             node_a, node_b = source, target
             direction = "a_to_b"
         else:
             node_a, node_b = target, source
-            # source > target 时，原边实际是 b_to_a 方向。
             direction = "b_to_a"
 
-        bucket = groups.get((node_a, node_b))
-        if bucket is None:
-            bucket = {"a_to_b": [], "b_to_a": []}
-            groups[(node_a, node_b)] = bucket
-        bucket[direction].append(edge_item)
+        if rel_type == "EXTRACTED_RELATIONSHIP":
+            bucket = relationship_groups.get((node_a, node_b))
+            if bucket is None:
+                bucket = {"a_to_b": [], "b_to_a": []}
+                relationship_groups[(node_a, node_b)] = bucket
+            bucket[direction].append(edge_item)
+        else:
+            standalone_items.append({
+                "node_a": node_a,
+                "node_b": node_b,
+                "edge_item": edge_item,
+                "direction": direction,
+            })
 
     result: List[Dict[str, Any]] = []
-    grouped_edge_ids: Set[str] = set()
-    for (node_a, node_b), bucket in sorted(groups.items()):
+
+    # 处理 EXTRACTED_RELATIONSHIP 分组
+    for (node_a, node_b), bucket in sorted(relationship_groups.items()):
         a_to_b_count = len(bucket["a_to_b"])
         b_to_a_count = len(bucket["b_to_a"])
-        total = a_to_b_count + b_to_a_count
-        if total < 2:
-            # 单边对不进 edge_groups；它已经在顶层 edges 中，前端无需再聚合。
-            continue
-
-        # 收集被聚合的边 id
-        for item in bucket["a_to_b"]:
-            grouped_edge_ids.add(item["id"])
-        for item in bucket["b_to_a"]:
-            grouped_edge_ids.add(item["id"])
-
-        # 计算 edge_type
-        if total == 2 and a_to_b_count == 1 and b_to_a_count == 1:
-            edge_type = "双向边"
-        elif a_to_b_count > 0 and b_to_a_count > 0:
-            edge_type = "双向多维边"
-        else:
-            edge_type = "单向多维边"
-
+        edge_type = _classify_edge_type(a_to_b_count, b_to_a_count)
         result.append({
             "node_a": node_a,
             "node_b": node_b,
-            "total": total,
+            "total": a_to_b_count + b_to_a_count,
             "edge_type": edge_type,
             "a_to_b": bucket["a_to_b"],
             "b_to_a": bucket["b_to_a"],
         })
-    return result, grouped_edge_ids
+
+    # 处理非 EXTRACTED_RELATIONSHIP 的独立边
+    for item in standalone_items:
+        direction = item["direction"]
+        a_to_b = [item["edge_item"]] if direction == "a_to_b" else []
+        b_to_a = [item["edge_item"]] if direction == "b_to_a" else []
+        result.append({
+            "node_a": item["node_a"],
+            "node_b": item["node_b"],
+            "total": 1,
+            "edge_type": "SINGLE",
+            "a_to_b": a_to_b,
+            "b_to_a": b_to_a,
+        })
+
+    return result
 
 
 # ---------------------------------------------------------------------------

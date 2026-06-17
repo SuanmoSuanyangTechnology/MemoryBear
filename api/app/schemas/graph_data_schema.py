@@ -3,9 +3,16 @@
 所有模型均为 Pydantic v2，统一使用 ``ConfigDict(extra="ignore")`` 静默丢弃多余字段，
 以保证后端在装配响应或前端在反序列化时都能向后兼容（Requirement 3.1 / 7.4）。
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+# ---------------------------------------------------------------------------
+# 边类型枚举
+# ---------------------------------------------------------------------------
+
+EdgeType = Literal["SINGLE", "UNIDIRECTIONAL_MULTI", "BIDIRECTIONAL", "MULTI_BIDIRECTIONAL"]
 
 
 class GraphNode(BaseModel):
@@ -20,23 +27,6 @@ class GraphNode(BaseModel):
         description="按 NODE_PROPERTY_WHITELIST 过滤后的属性 + associative_memory 计数",
     )
     caption: str = Field(..., description="前端展示文案；优先取 properties.caption，否则取 label")
-
-
-class GraphEdge(BaseModel):
-    """单条边的展示形态。两端节点必定都在响应 nodes 数组中。"""
-
-    model_config = ConfigDict(extra="ignore")
-
-    id: str = Field(..., description="Neo4j 关系 elementId")
-    source: str = Field(..., description="起点节点 elementId")
-    target: str = Field(..., description="终点节点 elementId")
-    type: str = Field(..., description="关系类型（type(r)）")
-    properties: Dict[str, Any] = Field(default_factory=dict, description="关系属性")
-    caption: str = Field(..., description="前端展示文案，缺省时由 service 层填充关系类型")
-    predicate_description: Optional[str] = Field(
-        default=None,
-        description="关系描述，仅在 EXTRACTED_RELATIONSHIP 等关系类型上存在",
-    )
 
 
 class PerTypeStat(BaseModel):
@@ -78,12 +68,18 @@ class GraphStatistics(BaseModel):
 
 
 class EdgeGroupItem(BaseModel):
-    """edge_groups 中 a_to_b / b_to_a 的边条目，携带边类型和关系描述。"""
+    """a_to_b / b_to_a 中的单条边条目，携带边类型和关系描述。"""
 
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(..., description="边 elementId")
     type: str = Field(..., description="关系类型")
+    created_at: Optional[str] = Field(
+        default=None, description="关系创建时间 (ISO 8601)"
+    )
+    valid_at: Optional[str] = Field(
+        default=None, description="关系有效期 (ISO 8601)"
+    )
     predicate: Optional[str] = Field(
         default=None, description="关系谓词"
     )
@@ -95,37 +91,40 @@ class EdgeGroupItem(BaseModel):
     )
 
 
-class GraphEdgeGroup(BaseModel):
-    """同一对节点之间的多边聚合（含双向）。
+class UnifiedEdge(BaseModel):
+    """统一的边条目——合并了原 edges 和 edge_groups。
 
-    仅当两个节点间存在 ``>= 2`` 条边（无论方向）时，才会出现在响应的
-    ``edge_groups`` 数组中。``node_a`` / ``node_b`` 取两端 elementId 的字典序
-    升序，保证同一对节点对应唯一的分组——不论 Cypher 返回顺序如何，前端
-    都能用 ``(node_a, node_b)`` 作为稳定 key。
+    所有边（无论单边还是重边聚合组）都使用此结构：
 
-    自环（``source == target``）不会构成分组。
+    - ``node_a`` / ``node_b`` 始终按 elementId 字典序排序，保证同一对节点对
+      应的条目唯一。
+    - 方向信息由 ``a_to_b``（node_a → node_b）和 ``b_to_a``（node_b → node_a）
+      两个桶承载。
+    - ``edge_type`` 枚举区分四种类型：
+        * SINGLE：该对节点间仅 1 条边；
+        * UNIDIRECTIONAL_MULTI：>=2 条边，所有边指向同一方向；
+        * BIDIRECTIONAL：恰好 2 条边，双向各 1 条；
+        * MULTI_BIDIRECTIONAL：>=3 条边，两个方向均有。
+
+    自环（source == target）不会创建条目。
     """
 
     model_config = ConfigDict(extra="ignore")
 
     node_a: str = Field(..., description="按 elementId 字典序较小的端点")
     node_b: str = Field(..., description="按 elementId 字典序较大的端点")
-    total: int = Field(..., ge=2, description="本组涵盖的边总数（双向合计），最少 2")
-    edge_type: Optional[str] = Field(
-        default=None,
-        description=(
-            "边的种类：'单向多维边'（复数边指向同一方向）、"
-            "'双向边'（恰好 2 条边双向各一）、"
-            "'双向多维边'（>=3 条边且双向均有）"
-        ),
+    total: int = Field(..., ge=1, description="本组涵盖的边总数，最少 1")
+    edge_type: EdgeType = Field(
+        ...,
+        description="边类型：SINGLE | UNIDIRECTIONAL_MULTI | BIDIRECTIONAL | MULTI_BIDIRECTIONAL",
     )
     a_to_b: List[EdgeGroupItem] = Field(
         default_factory=list,
-        description="source=node_a, target=node_b 的边列表；按 edges 中出现顺序",
+        description="source=node_a, target=node_b 的边列表",
     )
     b_to_a: List[EdgeGroupItem] = Field(
         default_factory=list,
-        description="source=node_b, target=node_a 的边列表；按 edges 中出现顺序",
+        description="source=node_b, target=node_a 的边列表",
     )
 
 
@@ -135,13 +134,9 @@ class GraphDataResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     nodes: List[GraphNode] = Field(default_factory=list)
-    edges: List[GraphEdge] = Field(default_factory=list)
-    edge_groups: List[GraphEdgeGroup] = Field(
+    edges: List[UnifiedEdge] = Field(
         default_factory=list,
-        description=(
-            "同一对节点之间存在多条边（双向合计 >= 2）的聚合视图。"
-            "便于前端在重边场景渲染聚合标签或多边弧线。"
-        ),
+        description="统一的边列表。所有边（单边和重边聚合组）均以此结构表示，通过 edge_type 区分类型。",
     )
     statistics: GraphStatistics = Field(
         default_factory=GraphStatistics,

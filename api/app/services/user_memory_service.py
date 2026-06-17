@@ -29,7 +29,7 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
     assemble_center_per_type_stat,
-    build_edge_groups,
+    build_unified_edges,
     compute_stat_types,
     resolve_mode_and_type_limits,
     _query_nodes_by_type_limits,
@@ -1730,9 +1730,9 @@ async def analytics_graph_data(
 
     Returns:
         ``GraphDataResponse.model_dump()`` 后的字典，顶层键为
-        ``nodes / edges / edge_groups / statistics``，必要时附带 ``message``。
-        ``edge_groups`` 把同一对节点之间的多条边按方向分桶（仅当某对节点的
-        总边数 ≥ 2 时才出现），便于前端做重边聚合渲染。
+        ``nodes / edges / statistics``，必要时附带 ``message``。
+        ``edges`` 为统一边列表，所有边均以 UnifiedEdge 结构表示，
+        通过 ``edge_type`` 区分 SINGLE / UNIDIRECTIONAL_MULTI / BIDIRECTIONAL / MULTI_BIDIRECTIONAL。
     """
     try:
         # 1. 用户校验
@@ -1763,11 +1763,9 @@ async def analytics_graph_data(
         # 6. Q3 边查询（try/except 降级，Requirement 8.4）
         edges, edge_type_counts = await _format_edges(node_ids)
 
-        # 6.1 同对节点重边聚合（双向分桶）。仅依赖 edges 列表，纯逻辑无 IO。
-        edge_groups, grouped_edge_ids = build_edge_groups(edges)
-
-        # 6.2 从 edges 中剔除已聚合到 edge_groups 的边，避免重复
-        edges = [e for e in edges if e["id"] not in grouped_edge_ids]
+        # 6.1 统一边聚合：EXTRACTED_RELATIONSHIP 按同对节点聚合，
+        # 其他边类型各成独立 SINGLE 边条目。纯逻辑无 IO。
+        unified_edges = build_unified_edges(edges)
 
         # 7. Q4 全量计数 + statistics.per_type 装配
         per_type_stat = await _build_per_type_stat(
@@ -1781,7 +1779,7 @@ async def analytics_graph_data(
 
         statistics = {
             "total_nodes": len(nodes),
-            "total_edges": len(edges),
+            "total_edges": len(unified_edges),
             "node_types": node_type_counts,
             "edge_types": edge_type_counts,
             "per_type": per_type_stat,
@@ -1794,16 +1792,15 @@ async def analytics_graph_data(
         )
         logger.info(
             f"图数据查询: end_user_id={end_user_id} mode={mode} "
-            f"nodes={len(nodes)} edges={len(edges)} "
-            f"edge_groups={len(edge_groups)} per_type=[{per_type_log}]"
+            f"nodes={len(nodes)} edges={len(unified_edges)} "
+            f"per_type=[{per_type_log}]"
         )
 
         # 通过 GraphDataResponse 装配响应：拿到 ge=0 / 必填字段校验与向后兼容契约，
         # 再 model_dump() 回 dict 以维持 controller 接口形态。无 message 时不输出该键。
         response = GraphDataResponse(
             nodes=nodes,
-            edges=edges,
-            edge_groups=edge_groups,
+            edges=unified_edges,
             statistics=statistics,
         )
         return response.model_dump(exclude_none=True)
@@ -2010,7 +2007,6 @@ def _empty_graph_response(message: str) -> Dict[str, Any]:
     return {
         "nodes": [],
         "edges": [],
-        "edge_groups": [],
         "statistics": {
             "total_nodes": 0,
             "total_edges": 0,
