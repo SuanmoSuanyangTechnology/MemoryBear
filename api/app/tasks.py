@@ -4699,14 +4699,14 @@ def draft_data_clean():
         logger.info(f"draft_data_clean: 软删除 {updated} 个终端用户")
 
     async def _delete_neo4j_groups():
-        connector = Neo4jConnector()
-        deleted = 0
-        for eid in end_user_ids:
-            try:
-                await connector.delete_group(eid)
-                deleted += 1
-            except Exception as e:
-                logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
+        async with Neo4jConnector() as connector:
+            deleted = 0
+            for eid in end_user_ids:
+                try:
+                    await connector.delete_group(eid)
+                    deleted += 1
+                except Exception as e:
+                    logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
         return deleted
 
     neo4j_deleted = asyncio.run(_delete_neo4j_groups())
