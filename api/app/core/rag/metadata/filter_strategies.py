@@ -1,10 +1,13 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 from sqlalchemy import or_, and_, cast, func, DateTime, Numeric, String
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.core.utils.datetime_utils import parse_iso_to_utc_naive
+from app.core.utils.datetime_utils import parse_metadata_time_to_utc_naive
 from app.models.document_model import Document
+
+logger = logging.getLogger(__name__)
 
 
 def _escape_like(value: str) -> str:
@@ -114,18 +117,28 @@ class TimeFilterStrategy(FilterStrategy):
 
     def apply(self, field_name: str, operator: str, value: Any):
         from sqlalchemy import literal
-        col = cast(Document.meta_data[field_name].astext, DateTime)
+        col_text = Document.meta_data[field_name].astext
+        col = func.timezone("UTC", cast(col_text, DateTime(timezone=True)))
         dt = None
         if operator in ("eq", "before", "after"):
             try:
-                dt = parse_iso_to_utc_naive(str(value))
+                dt = parse_metadata_time_to_utc_naive(value)
                 if dt is None:
                     raise ValueError
-            except ValueError as exc:
+            except (TypeError, ValueError) as exc:
                 raise BusinessException(
-                    "时间字段过滤参数必须为 ISO 时间格式，例如: 2024-12-31T23:59:59",
+                    "时间字段过滤参数必须为 ISO 时间格式或 Unix 时间戳，例如: 2024-12-31T23:59:59+08:00",
                     code=BizCode.METADATA_INVALID_VALUE_TYPE,
                 ) from exc
+            logger.debug(
+                "[MetadataFilterStrategy] normalized custom time filter: "
+                "field=%s operator=%s raw_value=%r raw_type=%s utc_naive=%s",
+                field_name,
+                operator,
+                value,
+                type(value).__name__,
+                dt.isoformat(sep=" "),
+            )
         dt_lit = literal(dt, DateTime) if dt else None
 
         match operator:

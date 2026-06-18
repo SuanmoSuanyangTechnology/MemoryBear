@@ -51,6 +51,7 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             current_user: Any = None,
     ) -> KnowledgeRetrievalResult:
+        logger.info("Knowledge retrieval request params: %s", request.model_dump() if hasattr(request, "model_dump") else request.dict())
         knowledge_ids, workspace_ids = cls._resolve_retrievable_knowledge_ids(
             db=db,
             request=request,
@@ -422,6 +423,9 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
     ) -> list[str] | None:
+        if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
+            return None
+
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL and not request.metadata_filters:
             return None
 
@@ -459,6 +463,9 @@ class KnowledgeRetrievalService:
             knowledge_ids: list[uuid.UUID],
             common_metadata_defs: dict[str, dict],
     ) -> list[EngineFilterGroup]:
+        if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
+            return []
+
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL:
             if not request.metadata_filters:
                 return []

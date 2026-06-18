@@ -27,6 +27,8 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
   const knowledge_bases = Form.useWatch(['knowledge_retrieval', 'knowledge_bases'], form) || [];
   const currentMode = Form.useWatch(['metadata_filter_mode'], form) || 'disabled';
   const metadata_filters = Form.useWatch(['metadata_filters'], form) || { conditions: [], logic: 'and' };
+  const isInitialized = useRef(false);
+  const prevKnowledgeBases = useRef<any[]>([]);
 
   const handleOpenModal = () => {
     metadataFilterModalRef.current?.open(metadata_filters);
@@ -48,20 +50,32 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
           const conditions = metadata_filters.conditions || []
           const filterConditions = conditions.filter((item: FilterCondition) => allMetadataFields.find(f => f.name === item.field))
 
-          form.setFieldsValue({
-            metadata_filters: {
-              conditions: filterConditions,
-              logic: metadata_filters.logic
-            }
-          })
+          if (!isInitialized.current) {
+            isInitialized.current = true;
+            prevKnowledgeBases.current = knowledge_bases;
+            return;
+          }
+
+          const isKnowledgeBasesChanged = JSON.stringify(prevKnowledgeBases.current) !== JSON.stringify(knowledge_bases);
+          if (isKnowledgeBasesChanged) {
+            prevKnowledgeBases.current = knowledge_bases;
+            form.setFieldsValue({
+              metadata_filters: {
+                conditions: filterConditions,
+                logic: metadata_filters.logic
+              }
+            })
+          }
         })
     } else {
-      form.setFieldsValue({
-        metadata_filters: {
-          conditions: [],
-          logic: 'and'
-        }
-      })
+      if (isInitialized.current) {
+        form.setFieldsValue({
+          metadata_filters: {
+            conditions: [],
+            logic: 'and'
+          }
+        })
+      }
     }
   }, [knowledge_bases, metadata_filters])
 
