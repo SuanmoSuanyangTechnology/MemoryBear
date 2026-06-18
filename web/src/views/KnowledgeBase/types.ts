@@ -145,6 +145,7 @@ export interface KnowledgeBaseDocumentData { // 知识库文档数据
   updated_at?: string; // 更新时间
   qa_prompt?: string; // 提示词
   metadata?: Record<string, any>; // 文档元数据
+  parent_child_mode?: boolean; // 是否开启父子模式
 }
 export interface DocumentModalRef {
   handleOpen: (file?: KnowledgeBaseDocumentData | null) => void;

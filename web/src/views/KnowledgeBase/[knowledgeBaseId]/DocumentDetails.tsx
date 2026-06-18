@@ -171,9 +171,8 @@ const DocumentDetails: FC = () => {
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
       const auto_questions = response?.parser_config?.auto_questions || 0
-      const parent_chunk_mode = response?.parser_config?.parent_chunk_mode || false
       setParserMode(auto_questions)
-      setIsParentChildMode(auto_questions === 0 && parent_chunk_mode)
+      setIsParentChildMode(response.parent_child_mode || false)
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
