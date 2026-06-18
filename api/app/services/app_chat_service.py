@@ -455,8 +455,8 @@ class AppChatService:
 
         if audio_url:
             assistant_meta["audio_url"] = audio_url
-        # 长期记忆写入由 conversation_service.add_message → MemoryService.sync_message
-        # → SlidingWindowScheduler 统一接管，这里不再触发老的 write_long_term 路径。
+        # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
+        # 这里不再触发老的 write_long_term 路径。
         if not skip_save:
             self.conversation_service.add_message(
                 conversation_id=conversation_id,
@@ -921,8 +921,8 @@ class AppChatService:
             if stream_audio_url:
                 assistant_meta["audio_url"] = stream_audio_url
 
-            # 长期记忆写入由 conversation_service.add_message → MemoryService.sync_message
-            # → SlidingWindowScheduler 统一接管，这里不再触发老的 write_long_term 路径。
+            # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
+            # 这里不再触发老的 write_long_term 路径。
             if not skip_save:
                 self.conversation_service.add_message(
                     conversation_id=conversation_id,

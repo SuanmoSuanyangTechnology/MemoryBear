@@ -183,7 +183,8 @@ class MemoryAPIService:
             end_user_id,
             {
                 "end_user_id": end_user_id,
-                "message": messages,
+                "mode": "api_write",
+                "messages": messages,
                 "config_id": config_id,
                 "storage_type": storage_type,
                 "user_rag_memory_id": user_rag_memory_id or "",
