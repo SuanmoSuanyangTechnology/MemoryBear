@@ -275,6 +275,10 @@ class Settings:
     LAYER2_DEDUP_FULL_SCAN_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Layer 2 dedup full scan hour, must be 0-23")]
     ).validate_python(int(os.getenv("LAYER2_DEDUP_FULL_SCAN_HOUR", "3")))
+    # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
+    HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]
+    ).validate_python(int(os.getenv("HOT_MEMORY_TAGS_REFRESH_HOUR", "19")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")

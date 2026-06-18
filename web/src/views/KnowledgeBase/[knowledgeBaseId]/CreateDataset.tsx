@@ -855,12 +855,14 @@ const CreateDataset = () => {
                   </div>
                   <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
                 </div>
+                {processingMethod === 'qaExtract' && (
                 <div>
                   <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2 rb:mt-4'>
                     {t('knowledgeBase.qaPrompt')}
                   </div>
                   <Input.TextArea value={qaPrompt} rows={6} onChange={(e) => setQaPrompt(e.target.value)} />
                 </div>
+                )}
               </>)}
               {parameterSettings === 'customSettings' && processingMethod === 'parentChildBlock' &&
                 <ParentChildBlockConfig initialValue={parentChildConfig} onChange={setParentChildConfig} />

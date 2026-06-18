@@ -2,7 +2,11 @@ import uuid
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from app.core.utils.datetime_utils import parse_iso_to_utc_naive, utcnow_naive
+from app.core.utils.datetime_utils import (
+    parse_metadata_time_to_utc_naive,
+    to_utc_offset_string,
+    utcnow_naive,
+)
 from app.core.exceptions import (
     BusinessException,
     ResourceNotFoundException,
@@ -30,17 +34,126 @@ class KnowledgeMetadataService:
         获取知识库的所有元数据字段（自定义 + 内置）
         Returns: {"custom": [...], "builtin_enabled": bool, "builtin_fields": [...]}
         """
+        return KnowledgeMetadataService.list_metadata_fields_for_knowledge_ids(
+            db=db,
+            knowledge_ids=[knowledge_id],
+            include_builtin_when_disabled=True,
+            preserve_single_ids=True,
+        )
+
+    @staticmethod
+    def list_metadata_fields_for_knowledge_ids(
+        db: Session,
+        knowledge_ids: list[uuid.UUID],
+        *,
+        include_builtin_when_disabled: bool = False,
+        preserve_single_ids: bool = False,
+        include_counts: bool = True,
+    ) -> dict:
+        """List common metadata fields across knowledge bases."""
         from app.models.knowledge_model import Knowledge
 
-        custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
+        unique_knowledge_ids = list(dict.fromkeys(knowledge_ids))
+        if not unique_knowledge_ids:
+            return {
+                "custom": [],
+                "builtin_enabled": False,
+                "builtin_fields": [],
+            }
 
-        knowledge = db.query(Knowledge).filter(Knowledge.id == knowledge_id).first()
-        builtin_enabled = knowledge.builtin_metadata_enabled == 1 if knowledge else False
+        custom_fields = KnowledgeMetadataRepository.get_by_knowledge_ids(db, unique_knowledge_ids)
+        fields_by_kb = {knowledge_id: [] for knowledge_id in unique_knowledge_ids}
+        for field in custom_fields:
+            fields_by_kb.setdefault(field.knowledge_id, []).append(field)
+
+        counts_by_metadata_id = {}
+        if include_counts:
+            metadata_ids = [field.id for field in custom_fields]
+            counts_by_metadata_id = KnowledgeMetadataRepository.count_active_bindings_by_metadata_ids(
+                db,
+                metadata_ids,
+            )
+
+        knowledge_rows = (
+            db.query(Knowledge.id, Knowledge.builtin_metadata_enabled)
+            .filter(Knowledge.id.in_(unique_knowledge_ids))
+            .all()
+        )
+        builtin_enabled_by_kb = {
+            row[0]: row[1] == 1
+            for row in knowledge_rows
+        }
+        for knowledge_id in unique_knowledge_ids:
+            builtin_enabled_by_kb.setdefault(knowledge_id, False)
+
+        return KnowledgeMetadataService._build_common_metadata_fields_response(
+            fields_by_kb=fields_by_kb,
+            builtin_enabled_by_kb=builtin_enabled_by_kb,
+            counts_by_metadata_id=counts_by_metadata_id,
+            include_builtin_when_disabled=include_builtin_when_disabled,
+            preserve_single_ids=preserve_single_ids,
+        )
+
+    @staticmethod
+    def _build_common_metadata_fields_response(
+        fields_by_kb: dict[uuid.UUID, list[KnowledgeMetadata]],
+        builtin_enabled_by_kb: dict[uuid.UUID, bool],
+        counts_by_metadata_id: dict[uuid.UUID, int],
+        *,
+        include_builtin_when_disabled: bool = False,
+        preserve_single_ids: bool = False,
+    ) -> dict:
+        knowledge_ids = list(fields_by_kb.keys())
+        common_keys: set[tuple[str, str]] | None = None
+        field_lookup_by_kb: dict[uuid.UUID, dict[tuple[str, str], KnowledgeMetadata]] = {}
+
+        for knowledge_id, fields in fields_by_kb.items():
+            lookup = {(field.name, field.type): field for field in fields}
+            field_lookup_by_kb[knowledge_id] = lookup
+            keys = set(lookup.keys())
+            common_keys = keys if common_keys is None else common_keys & keys
+
+        common_keys = common_keys or set()
+        first_kb_id = knowledge_ids[0] if knowledge_ids else None
+        first_kb_fields = fields_by_kb.get(first_kb_id, []) if first_kb_id else []
+        ordered_keys = [
+            (field.name, field.type)
+            for field in first_kb_fields
+            if (field.name, field.type) in common_keys
+        ]
+
+        single_kb = len(knowledge_ids) == 1
+        custom_fields = []
+        for key in ordered_keys:
+            fields = [
+                field_lookup_by_kb[knowledge_id][key]
+                for knowledge_id in knowledge_ids
+            ]
+            count = sum(counts_by_metadata_id.get(field.id, 0) for field in fields)
+            first_field = fields[0]
+            custom_field = {
+                "id": first_field.id if single_kb and preserve_single_ids else None,
+                "type": first_field.type,
+                "name": first_field.name,
+                "is_builtin": False,
+                "count": count,
+            }
+            if single_kb and preserve_single_ids:
+                custom_field["created_at"] = first_field.created_at
+                custom_field["updated_at"] = first_field.updated_at
+            custom_fields.append(custom_field)
+
+        builtin_enabled = all(
+            builtin_enabled_by_kb.get(knowledge_id, False)
+            for knowledge_id in knowledge_ids
+        ) if knowledge_ids else False
 
         return {
             "custom": custom_fields,
             "builtin_enabled": builtin_enabled,
-            "builtin_fields": BuiltinFieldResolver.get_all() if builtin_enabled else [],
+            "builtin_fields": BuiltinFieldResolver.get_all()
+            if builtin_enabled or include_builtin_when_disabled
+            else [],
         }
 
     @staticmethod
@@ -143,7 +256,7 @@ class KnowledgeMetadataService:
 
         return {
             "enabled": enabled,
-            "fields": BuiltinFieldResolver.get_all() if enabled else [],
+            "fields": BuiltinFieldResolver.get_all(),
         }
 
     @staticmethod
@@ -240,8 +353,12 @@ class KnowledgeMetadataService:
                 doc_id = item["document_id"]
                 metadata = item["metadata"]
                 doc = doc_map[doc_id]
+                normalized_metadata = KnowledgeMetadataService._normalize_metadata_for_storage(
+                    metadata,
+                    field_defs,
+                )
                 doc.meta_data = doc.meta_data or {}
-                doc.meta_data.update(metadata)
+                doc.meta_data.update(normalized_metadata)
                 flag_modified(doc, "meta_data")
                 doc.updated_at = utcnow_naive()
 
@@ -311,8 +428,12 @@ class KnowledgeMetadataService:
                 )
 
         # 4. 更新 metadata JSON
+        normalized_metadata = KnowledgeMetadataService._normalize_metadata_for_storage(
+            metadata,
+            field_defs,
+        )
         doc.meta_data = doc.meta_data or {}
-        doc.meta_data.update(metadata)
+        doc.meta_data.update(normalized_metadata)
         flag_modified(doc, "meta_data")
         doc.updated_at = utcnow_naive()
 
@@ -355,10 +476,15 @@ class KnowledgeMetadataService:
         # 获取字段定义
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, doc.kb_id)
         field_map = {f.id: f for f in custom_fields}
+        field_defs_by_name = {f.name: f for f in custom_fields}
+        metadata = KnowledgeMetadataService._serialize_metadata_for_response(
+            doc.meta_data or {},
+            field_defs_by_name,
+        )
 
         result = {
             "document_id": str(document_id),
-            "metadata": doc.meta_data or {},
+            "metadata": metadata,
             "fields": [],
         }
 
@@ -369,7 +495,7 @@ class KnowledgeMetadataService:
                     "field_id": str(field_def.id),
                     "name": field_def.name,
                     "type": field_def.type,
-                    "value": doc.meta_data.get(field_def.name) if doc.meta_data else None,
+                    "value": metadata.get(field_def.name),
                 })
 
         return result
@@ -454,14 +580,78 @@ class KnowledgeMetadataService:
             case "number":
                 return isinstance(value, (int, float)) and not isinstance(value, bool)
             case "time":
-                if not isinstance(value, str):
-                    return False
                 try:
-                    return parse_iso_to_utc_naive(value) is not None
-                except ValueError:
+                    return parse_metadata_time_to_utc_naive(value) is not None
+                except (TypeError, ValueError):
                     return False
             case _:
                 return False
+
+    @staticmethod
+    def _normalize_metadata_value_for_storage(field_type: str, value: Any) -> Any:
+        """Normalize metadata values before storing them in Document.meta_data."""
+        if value is None or field_type != "time":
+            return value
+        dt = parse_metadata_time_to_utc_naive(value)
+        if dt is None:
+            return None
+        return dt.isoformat(sep=" ")
+
+    @staticmethod
+    def _normalize_metadata_for_storage(
+        metadata: dict[str, Any],
+        field_defs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize time metadata to naive UTC strings before JSONB storage."""
+        normalized = {}
+        for field_name, value in metadata.items():
+            field_def = field_defs[field_name]
+            normalized[field_name] = KnowledgeMetadataService._normalize_metadata_value_for_storage(
+                field_def.type,
+                value,
+            )
+            if field_def.type == "time":
+                api_logger.debug(
+                    "Normalized document time metadata: "
+                    f"field={field_name}, raw_value={value!r}, raw_type={type(value).__name__}, "
+                    f"stored_value={normalized[field_name]!r}"
+                )
+        return normalized
+
+    @staticmethod
+    def _serialize_metadata_value_for_response(field_type: str, value: Any) -> Any:
+        """Format metadata values for API responses without changing storage."""
+        if value is None or field_type != "time":
+            return value
+        try:
+            dt = parse_metadata_time_to_utc_naive(value)
+        except (TypeError, ValueError):
+            api_logger.warning(
+                "Skipped invalid document time metadata response formatting: "
+                f"raw_value={value!r}, raw_type={type(value).__name__}"
+            )
+            return value
+        if dt is None:
+            return value
+        return to_utc_offset_string(dt)
+
+    @staticmethod
+    def _serialize_metadata_for_response(
+        metadata: dict[str, Any],
+        field_defs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Format typed metadata values for API responses."""
+        serialized = {}
+        for field_name, value in metadata.items():
+            field_def = field_defs.get(field_name)
+            if not field_def:
+                serialized[field_name] = value
+                continue
+            serialized[field_name] = KnowledgeMetadataService._serialize_metadata_value_for_response(
+                field_def.type,
+                value,
+            )
+        return serialized
 
     @staticmethod
     def get_metadata_defs_for_filtering(
@@ -470,7 +660,7 @@ class KnowledgeMetadataService:
     ) -> dict[str, dict]:
         """
         获取用于过滤的字段定义映射
-        Returns: {field_name: {"type": "string", "is_builtin": False}}
+        Returns: {field_name: {"id": uuid, "type": "string", "is_builtin": False}}
         """
         from app.models.knowledge_model import Knowledge
 
@@ -479,7 +669,7 @@ class KnowledgeMetadataService:
         # 自定义字段
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
         for f in custom_fields:
-            result[f.name] = {"type": f.type, "is_builtin": False}
+            result[f.name] = {"id": f.id, "type": f.type, "is_builtin": False}
 
         # 内置字段（如果开启）
         knowledge = db.query(Knowledge).filter(Knowledge.id == knowledge_id).first()

@@ -20,6 +20,17 @@ class SearchStrategy(StrEnum):
     CONV = "3"
     META = "4"
 
+    @classmethod
+    def _missing_(cls, value: str):
+        aliases = {
+            "deep": cls.DEEP,
+            "normal": cls.NORMAL,
+            "quick": cls.QUICK,
+            "conv": cls.CONV,
+            "meta": cls.META,
+        }
+        return aliases.get(str(value).lower(), cls.QUICK)
+
 
 class Neo4jNodeType(StrEnum):
     CHUNK = "Chunk"

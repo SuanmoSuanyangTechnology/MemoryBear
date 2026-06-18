@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-06-11 15:18:48
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
-  // Scroller,
+  Scroller,
 type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
@@ -798,13 +798,13 @@ export const useWorkflowGraph = ({
         padding: 5,
       }),
     );
-    // graphRef.current.use(
-    //   new Scroller({
-    //     enabled: true,
-    //     pannable: false,
-    //     autoResize: true,
-    //   }),
-    // );
+    graphRef.current.use(
+      new Scroller({
+        enabled: true,
+        pannable: false,
+        autoResize: true,
+      }),
+    );
     graphRef.current.use(
       new Snapline({
         enabled: true,

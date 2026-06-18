@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, delete, update
+from sqlalchemy import and_, delete, update, func
 from app.models.knowledge_metadata_model import KnowledgeMetadata, KnowledgeMetadataBinding
 from app.core.logging_config import get_db_logger
 
@@ -25,6 +25,14 @@ class KnowledgeMetadataRepository:
     def get_by_knowledge_id(db: Session, knowledge_id: uuid.UUID) -> list[KnowledgeMetadata]:
         return db.query(KnowledgeMetadata).filter(
             KnowledgeMetadata.knowledge_id == knowledge_id
+        ).all()
+
+    @staticmethod
+    def get_by_knowledge_ids(db: Session, knowledge_ids: list[uuid.UUID]) -> list[KnowledgeMetadata]:
+        if not knowledge_ids:
+            return []
+        return db.query(KnowledgeMetadata).filter(
+            KnowledgeMetadata.knowledge_id.in_(knowledge_ids)
         ).all()
 
     @staticmethod
@@ -106,3 +114,28 @@ class KnowledgeMetadataRepository:
                 KnowledgeMetadataBinding.document_id == document_id,
             )
         ).first() is not None
+
+    @staticmethod
+    def count_active_bindings_by_metadata_ids(
+        db: Session,
+        metadata_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, int]:
+        if not metadata_ids:
+            return {}
+
+        from app.models.document_model import Document
+
+        rows = (
+            db.query(
+                KnowledgeMetadataBinding.metadata_id,
+                func.count(KnowledgeMetadataBinding.document_id),
+            )
+            .join(Document, Document.id == KnowledgeMetadataBinding.document_id)
+            .filter(
+                KnowledgeMetadataBinding.metadata_id.in_(metadata_ids),
+                Document.status == 1,
+            )
+            .group_by(KnowledgeMetadataBinding.metadata_id)
+            .all()
+        )
+        return {metadata_id: int(count) for metadata_id, count in rows}

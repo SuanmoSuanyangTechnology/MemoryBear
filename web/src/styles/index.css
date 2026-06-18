@@ -513,3 +513,6 @@ input:-webkit-autofill:active {
 .ant-app {
   height: 100%;
 }
+.ant-tree .ant-tree-checkbox .ant-tree-checkbox-inner {
+  border-radius: 4px !important;
+}

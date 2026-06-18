@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 14:30:53
+ * @Last Modified time: 2026-06-17 17:04:45
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -202,13 +202,13 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       ),
     },
   ]
-  const isHasAnnotations = useMemo(() => {
-    return application.type !== 'multi_agent' && source !== 'sharing'
+  const isHideAnnotations = useMemo(() => {
+    return ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
   }, [source, application.type])
   return (
     <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex justify={isHasAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
-        {isHasAnnotations &&
+      <Flex justify={!isHideAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
+        {!isHideAnnotations &&
           <PageTabs
             value={activeTab}
             options={formatTabItems}
@@ -315,7 +315,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
         />
         <LogDetailModal ref={logDetailRef} source={application?.type} />
       </>}
-      {isHasAnnotations && activeTab === 'annotations' && <>
+      {!isHideAnnotations && activeTab === 'annotations' && <>
         <Table<AnnotationItem>
           ref={annotationsTableRef}
           apiUrl={getAnnotationsListUrl(id || '')}

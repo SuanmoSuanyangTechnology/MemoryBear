@@ -33,6 +33,7 @@ interface RecallTestResultProps {
   parserMode?: number; // Parser mode, 1 means QA format
   handleCopy?: (text?: string) => void;
   handleInsert?: (parentChunkId?: string) => void;
+  isParentChildMode?: boolean | string;
 }
 
 const RecallTestResult = ({ 
@@ -48,7 +49,8 @@ const RecallTestResult = ({
   onItemClick,
   parserMode = 0,
   handleCopy,
-  handleInsert
+  handleInsert,
+  isParentChildMode
 }: RecallTestResultProps) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp()
@@ -228,7 +230,7 @@ const RecallTestResult = ({
   }
 
   const renderChild = (children: RecallTestData[], item: RecallTestData, index: number) => {
-    if (children.length === 0) {
+    if (children.length === 0 && !editable || !isParentChildMode) {
       return null;
     }
     const isExpanded = expandedChunks[`chunk_${item.metadata?.doc_id || index}`];
@@ -270,11 +272,12 @@ const RecallTestResult = ({
             >+ {t('common.add')}</span>
           }
         </Flex>
-        {isExpanded && (
+        {isExpanded && children.length > 0 && (
           <Flex vertical gap={8} className="rb:pl-3! rb:border-l-2 rb:border-l-[#155EEF]">
             {children?.map((child, childIndex) => (
               <Flex
                 key={child.metadata?.doc_id || childIndex}
+                gap={8}
                 className="rb:group rb:bg-[#c8ceda33] rb:hover:bg-[rgba(21,94,239,0.25)]"
               >
                 <Flex

@@ -62,10 +62,12 @@ class DictVariable(BaseVariable):
 
 
 class FileVariable(BaseVariable):
-    value: FileObject
+    value: FileObject | None
     type = 'file'
 
-    def valid_value(self, value) -> FileObject:
+    def valid_value(self, value) -> FileObject | None:
+        if value is None:
+            return None
         if isinstance(value, dict):
             if not value.get("is_file"):
                 raise TypeError(f"Value must be a FileObject  - {type(value)}:{value}")
@@ -75,9 +77,13 @@ class FileVariable(BaseVariable):
         raise TypeError(f"Value must be a FileObject - {type(value)}:{value}")
 
     def to_literal(self) -> str:
+        if self.value is None:
+            return ""
         return f'{"!"if self.value.type == FileType.IMAGE else ""}[file]({self.value.url})'
 
     def get_value(self) -> Any:
+        if self.value is None:
+            return None
         return self.value.model_dump(exclude={"content_cache"})
 
     async def get_content(self):

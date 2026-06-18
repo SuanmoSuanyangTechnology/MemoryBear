@@ -19,7 +19,7 @@ from datetime import datetime
 
 from app.schemas.memory_episodic_schema import EmotionType
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
-from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAMES
+from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +205,160 @@ class MemoryEntityService:
         # 排序：valid_at 降序（最新在前）
         events.sort(key=lambda e: e["valid_at"], reverse=True)
         return events
+
+    async def get_unified_timeline(self, source_type: str = "all", page: int = 1, pagesize: int = 10) -> dict:
+        """ExtractedEntity 合并时间线（关键节点 / 情绪记忆 / 长期沉淀），分页 + 按来源筛选。
+
+        本方法仅服务 ExtractedEntity 节点：
+        - 关键节点：读自身 event_timeline 结构化事件。
+        - 情绪记忆 / 长期沉淀：走图遍历查询，取关联 Statement / MemorySummary。
+        三类合并按 created_at 毫秒降序（时间未知排最后），再按 source_type 筛选 + 分页。
+        total_count / type_stats 始终基于全量，不受筛选影响。
+        """
+        # 1. 关键节点：读 ExtractedEntity 自身 event_timeline
+        entity_name = None
+        entity_type = None
+        description_summary = None
+        key_node_items = []
+        kn_results = await self.connector.execute_query(
+            Memory_Timeline_Entity_Events, id=self.id
+        )
+        if kn_results:
+            record = kn_results[0]
+            entity_name = record.get("entity_name")
+            entity_type = record.get("entity_type")
+            description_summary = record.get("description_summary")
+            events = self._parse_event_timeline(record.get("event_timeline") or "")
+            key_node_items = [
+                {
+                    "type": "key_node",
+                    "category": EVENT_CATEGORY_NAME_TO_ID.get(e.get("category")),
+                    "title": e.get("title"),
+                    "text": e.get("fact"),
+                    "created_at": e.get("valid_at"),
+                }
+                for e in events
+            ]
+
+        # 2. 情绪记忆 + 长期沉淀：走 ExtractedEntity 图遍历查询
+        graph_results = await self.connector.execute_query(
+            Memory_Timeline_ExtractedEntity, id=self.id
+        )
+
+        statement_items, summary_items = [], []
+        if graph_results and isinstance(graph_results, list):
+            for record in graph_results:
+                if not isinstance(record, dict):
+                    continue
+                statement_items.extend(
+                    self._collect_graph_source_items(record.get("statement"), "statement")
+                )
+                summary_items.extend(
+                    self._collect_graph_source_items(record.get("MemorySummary"), "memory_summary")
+                )
+            # 跨 record 再按 text 去重
+            statement_items = self._dedup_by_text(statement_items)
+            summary_items = self._dedup_by_text(summary_items)
+
+        # 3. type_stats（全量，不受筛选影响）；total_count 单独拎出
+        total_count = len(key_node_items) + len(statement_items) + len(summary_items)
+        type_stats = [
+            {"type": "key_node", "count": len(key_node_items)},
+            {"type": "statement", "count": len(statement_items)},
+            {"type": "memory_summary", "count": len(summary_items)},
+        ]
+
+        # 4. 合并 + 排序（created_at 均非空，按毫秒降序）
+        all_items = key_node_items + statement_items + summary_items
+        all_items.sort(key=lambda x: x["created_at"], reverse=True)
+        sorted_items = all_items
+
+        # 5. type 筛选（入参 type 即英文 key，直接比对）
+        if source_type != "all":
+            filtered = [i for i in sorted_items if i["type"] == source_type]
+        else:
+            filtered = sorted_items
+
+        # 6. 分页
+        total = len(filtered)
+        start = (page - 1) * pagesize
+        items = filtered[start:start + pagesize]
+        hasnext = page * pagesize < total
+
+        logger.info(
+            f"合并时间线: id={self.id}, type={source_type}, "
+            f"key_node={len(key_node_items)}, statement={len(statement_items)}, "
+            f"summary={len(summary_items)}, total={total}, page={page}, pagesize={pagesize}"
+        )
+
+        return {
+            "entity_name": entity_name,
+            "entity_type": entity_type,
+            "description_summary": description_summary,
+            "total_count": total_count,
+            "type_stats": type_stats,
+            "items": items,
+            "page": {"page": page, "pagesize": pagesize, "total": total, "hasnext": hasnext},
+        }
+
+    def _collect_graph_source_items(self, raw_value, source_type: str) -> list:
+        """把图遍历返回的 statement / MemorySummary 字段转为统一 item（created_at 毫秒）。
+
+        raw_value 可能是 collect 列表（ExtractedEntity / MemorySummary 查询）或单个对象
+        （Statement 查询的 statement 字段）；CASE 未匹配会产生 None，需过滤。
+        时间无法解析（created_at 为 None）的记录直接丢弃，保证每条都有有效时间。
+        """
+        items = []
+        candidates = raw_value if isinstance(raw_value, list) else [raw_value]
+        for c in candidates:
+            if not isinstance(c, dict):
+                continue
+            text = c.get("text")
+            if text is None or str(text).strip() == "" or "MemorySummaryChunk" in str(text):
+                continue
+            created_at = self._neo4j_dt_to_ms(c.get("created_at"))
+            if created_at is None:
+                continue
+            items.append({
+                "type": source_type,
+                "category": None,
+                "title": None,
+                "text": text,
+                "created_at": created_at,
+            })
+        return items
+
+    @staticmethod
+    def _dedup_by_text(items: list) -> list:
+        """按 text 去重，保留首次出现（保留其 created_at）。"""
+        seen = set()
+        result = []
+        for item in items:
+            text = item.get("text")
+            if text in seen:
+                continue
+            seen.add(text)
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _neo4j_dt_to_ms(dt):
+        """Neo4j DateTime / ISO 字符串 → Unix 毫秒时间戳（UTC）；无法解析返回 None。
+
+        统一走项目 datetime_utils：先取 ISO 字符串，parse 为 naive UTC，再转毫秒。
+        """
+        if dt is None:
+            return None
+        try:
+            if hasattr(dt, "iso_format"):
+                iso = dt.iso_format()
+            elif isinstance(dt, str):
+                iso = dt
+            else:
+                iso = str(dt)
+            return to_timestamp_ms(parse_iso_to_utc_naive(iso))
+        except Exception:
+            return None
 
     async def get_timeline_memories_server(self,model_id, language_type):
         """

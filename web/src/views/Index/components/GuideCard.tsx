@@ -9,11 +9,13 @@
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Button, Tour } from 'antd';
+import { Button, Tour, Flex } from 'antd';
 import type { TourProps } from 'antd';
 
+import { openHelpCenter } from '@/utils/help';
+
 const GuideCard: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState<boolean>(false);
   const [currentStep, setCurrentStep] = useState<number>(0);
@@ -63,12 +65,27 @@ const GuideCard: React.FC = () => {
     navigate('/model');
   };
 
+  const gotoHelpCenter = () => {
+    const currentLang = i18n.language;
+    const lang = currentLang === 'zh' ? 'zh' : 'en';
+    openHelpCenter(lang);
+  };
+
   return (
     <>
       <div className='rb:w-full rb:bg-white rb:rounded-xl rb:pb-3'>
-        <div className='rb:font-[MiSans-Bold] rb:font-bold rb:leading-5 rb:p-3 rb:bg-cover rb:rounded-tl-xl rb:rounded-tr-xl rb:bg-[url("@/assets/images/index/guide_bg@2x.png")]' >
-          { t('index.getStarted')}
-        </div>
+        <Flex align="center" justify="space-between"
+          className=' rb:leading-5 rb:p-3! rb:bg-cover rb:rounded-tl-xl rb:rounded-tr-xl rb:bg-[url("@/assets/images/index/guide_bg@2x.png")]'
+        >
+          <div className="rb:font-[MiSans-Bold] rb:font-bold">{ t('index.getStarted')}</div>
+          <Flex align="center" gap={4}
+            className="rb:text-[12px] rb:text-[#5F6266] rb:cursor-pointer"
+            onClick={gotoHelpCenter}
+          >
+            <div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+            {t('quickActions.helpCenter')}
+          </Flex>
+        </Flex>
         <div className='rb:leading-4.5 rb:text-[12px] rb:-mt-2 rb:pl-3 rb:pr-1.75'>
             { t('index.startedDesc')}
         </div>

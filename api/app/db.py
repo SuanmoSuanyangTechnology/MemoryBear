@@ -59,13 +59,14 @@ def get_db_context() -> Generator[Session, None, None]:
 
 @contextmanager
 def get_db_read() -> Generator[Session, None, None]:
-    """只读场景专用，出上下文自动 rollback，绝不留下 idle in transaction"""
-    with get_db_context() as db:
-        try:
-            yield db
-        finally:
-            db.rollback()  # 只读任务无需 commit
-            db.close()
+    """只读场景专用，出上下文强制 rollback，绝不留下 idle in transaction"""
+    db: Session = SessionLocal()
+    try:
+        yield db
+    finally:
+        if db.in_transaction():
+            db.rollback()
+        db.close()
 
 
 def get_pool_status():

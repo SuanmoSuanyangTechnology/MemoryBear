@@ -49,8 +49,9 @@ logger = logging.getLogger(__name__)
 #   "Hello {{user.name}}!" ->
 #   ["Hello ", "{{user.name}}", "!"]
 _OUTPUT_PATTERN = re.compile(r'\{\{.*?}}|[^{]+|{')
-# Strict variable format: {{ node_id.field_name }}
-_VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?\s*}}')
+# Strict variable format: {{ node_id.field_name }} and nested paths like
+# {{ node_id.structured_output.customer.address.city }}
+_VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+\s*}}')
 
 
 class GraphBuilder:

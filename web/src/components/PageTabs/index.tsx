@@ -25,7 +25,6 @@ const PageTabs: FC<SegmentedProps> = ({
   options,
   onChange
 }) => {
-  console.log('value', value)
   return <Segmented
     value={value}
     options={options}

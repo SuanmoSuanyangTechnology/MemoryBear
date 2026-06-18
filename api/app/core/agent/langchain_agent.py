@@ -284,7 +284,7 @@ class LangChainAgent:
 
         # 所有 provider 统一注入 JSON prompt 兜底，确保即使 API 层 response_format 未生效也能引导 JSON 输出
         if json_output:
-            self.system_prompt += "\n请以JSON格式输出。"
+            self.system_prompt += "\n请仅输出一个合法JSON对象，不要输出Markdown代码块或额外说明。"
 
         logger.debug(
             f"Agent 迭代次数配置: max_iterations={self.max_iterations}, "

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:56:42
+ * @Last Modified time: 2026-06-12 11:40:46
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -120,6 +120,13 @@ const modelConfig: Record<string, any> = {
   json_output: {
     type: 'define',
     defaultValue: false
+  },
+  structured_output: {
+    type: 'define',
+    defaultValue: false
+  },
+  json_output_fields: {
+    type: 'define',
   },
   // Top P 采样参数
   top_p: {
@@ -448,7 +455,25 @@ export const nodeLibrary: NodeLibrary[] = [
           knowledge_retrieval: {
             type: 'knowledge',
             required: true,
-          }
+          },
+          metadata_filter_mode: {
+            type: 'metadata',
+            defaultValue: 'disabled'
+          },
+          // metadata_model: {
+          //   type: 'define',
+          //   defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
+          //     acc[key] = value.defaultValue;
+          //     return acc;
+          //   }, {} as Record<string, any>),
+          // },
+          metadata_filters: {
+            type: 'define',
+            defaultValue: {
+              conditions: [],
+              logic: 'and'
+            }
+          },
         }
       },
       { type: "parameter-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/parameter_extraction.svg")]',

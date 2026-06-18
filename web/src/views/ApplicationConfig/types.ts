@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 20:04:42
+ * @Last Modified time: 2026-06-11 10:58:50
  */
-import type { KnowledgeConfig } from './components/Knowledge/types'
+import type { KnowledgeConfig } from '@/components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
 import type { ToolOption } from './components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
@@ -286,6 +286,13 @@ export interface Release {
   version_name?: string;
   /** Tag key for UI display */
   tagKey: 'current' | 'rolledBack' | 'history';
+}
+
+export interface ReleaseModalData {
+  version_name: string
+  release_notes: string
+  icon?: any;
+  name?: string;
 }
 
 /**

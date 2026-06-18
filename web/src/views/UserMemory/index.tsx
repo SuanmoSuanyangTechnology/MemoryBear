@@ -76,7 +76,7 @@ export default function UserMemory() {
           return (
             <RbCard
               key={item.end_user.id}
-              title={<Flex gap={4}>
+              title={() => <Flex gap={4}>
                 <div className="rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:text-white rb:bg-[#155EEF]">{name[0]}</div>
 
                 <Tooltip title={name || '-'}><div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap`}>{name || '-'}</div></Tooltip>

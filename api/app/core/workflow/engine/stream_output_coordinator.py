@@ -14,11 +14,11 @@ from app.core.workflow.engine.variable_pool import VariablePool
 logger = get_logger(__name__)
 
 SCOPE_PATTERN = re.compile(
-    r"\{\{\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?\s*}}"
+    r"\{\{\s*([a-zA-Z0-9_]+)(?:\.[a-zA-Z0-9_]+)+\s*}}"
 )
 
 FIELD_PATTERN = re.compile(
-    r"\{\{\s*[a-zA-Z0-9_]+\.([a-zA-Z0-9_]+)(?:\.[a-zA-Z0-9_]+)?\s*}}"
+    r"\{\{\s*[a-zA-Z0-9_]+\.([a-zA-Z0-9_]+)(?:\.[a-zA-Z0-9_]+)*\s*}}"
 )
 
 
@@ -275,7 +275,7 @@ class StreamOutputCoordinator:
         self.processed_outputs = []
         # Track node scopes whose output was fully streamed via node_chunk events.
         # Used to prevent duplicate emission in emit_activate_chunk().
-        self._streamed_scopes: set[str] = set()
+        self._streamed_scopes: set[tuple[str, str]] = set()
 
     def initialize_end_outputs(
             self,
@@ -295,7 +295,7 @@ class StreamOutputCoordinator:
         self.end_outputs.pop(self.activate_end)
         self.activate_end = None
 
-    def mark_scope_streamed(self, scope: str):
+    def mark_scope_streamed(self, scope: str, field: str = "output"):
         """Mark a node scope as fully streamed via node_chunk events.
 
         When a scope is marked as streamed, emit_activate_chunk() will skip
@@ -305,9 +305,10 @@ class StreamOutputCoordinator:
 
         Args:
             scope (str): The node ID whose output was fully streamed via chunks.
+            field (str): The output field that was streamed.
         """
-        self._streamed_scopes.add(scope)
-        logger.debug(f"[STREAM] Marked scope '{scope}' as streamed via node_chunk events")
+        self._streamed_scopes.add((scope, field))
+        logger.debug(f"[STREAM] Marked scope '{scope}.{field}' as streamed via node_chunk events")
 
     def find_ends_dependent_on_scope(self, scope: str) -> list[tuple[str, StreamOutputConfig]]:
         """Find all End nodes that have variable segments depending on the given scope.
@@ -422,10 +423,11 @@ class StreamOutputCoordinator:
                 # Check if this variable's scope was already fully streamed via node_chunk events.
                 # If so, skip emission to prevent duplicate message events.
                 scope = current_segment.get_scope()
-                if scope and scope in self._streamed_scopes:
+                field = current_segment.get_field() or "output"
+                if scope and (scope, field) in self._streamed_scopes:
                     logger.debug(
                         f"[STREAM] Skipping already-streamed variable segment "
-                        f"'{current_segment.literal}' (scope={scope}) for End node '{self.activate_end}'"
+                        f"'{current_segment.literal}' (scope={scope}, field={field}) for End node '{self.activate_end}'"
                     )
                     # Advance cursor without emitting - content was already streamed via chunks
                     end_info.cursor += 1

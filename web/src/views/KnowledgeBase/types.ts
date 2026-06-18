@@ -72,6 +72,7 @@ export interface RecallTestParams {
   top_k?: number;
   hybrid?: boolean; // 是否混合检索
   hybrid_weight?: string;
+  retrieve_type?: string; //
 }
 // 文件夹 
 export interface FolderFormData {
@@ -311,6 +312,7 @@ export interface KnowledgeBaseListItem extends KnowledgeBase {
   llm?: Model;
   image2text?: Model;
   _expanded?: boolean;
+  children?: KnowledgeBaseListItem[];
 }
 
 // 知识库列表响应

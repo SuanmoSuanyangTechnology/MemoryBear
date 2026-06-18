@@ -516,6 +516,14 @@ class PublishRequest(BaseModel):
     """发布应用请求"""
     version_name: str
     release_notes: Optional[str] = Field(None, description="版本说明")
+    name: Optional[str] = Field(None, description="公开分享标题，未传则使用应用名称")
+    icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
+
+
+class AppDisplayInfo(BaseModel):
+    """发布展示信息"""
+    name: str
+    icon: Optional[str] = None
 
 
 class AppRelease(BaseModel):

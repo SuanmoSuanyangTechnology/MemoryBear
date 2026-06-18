@@ -47,6 +47,7 @@ export interface Edge {
   caption: string;
   value: number;
   weight: number;
+  properties?: Record<string, any>;
 }
 
 export interface EdgeClickData extends Edge {
@@ -140,7 +141,8 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
         target: l.target,
         caption: l.caption,
         type: l.type,
-        label: l.type === 'EXTRACTED_RELATIONSHIP' ? (l as any).properties?.predicate || undefined : undefined,
+        label: l.type === 'EXTRACTED_RELATIONSHIP' ? (l as any).properties?.predicate_surface || undefined : undefined,
+        properties: l.properties
       }))
     return { nodes: d3Nodes, links: d3Links }
   }, [nodes, links, colors])
@@ -297,9 +299,21 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       .attr('font-size', '12px')
       .attr('fill', '#5B6167')
       .attr('dy', -5)
-      .style('pointer-events', 'none')
+      .style('cursor', 'pointer')
       .style('user-select', 'none')
       .style('display', 'none')
+      .on('click', (_event, d) => {
+        const sourceId = typeof d.source === 'string' ? d.source : d.source.id
+        const targetId = typeof d.target === 'string' ? d.target : d.target.id
+        onNodeClick?.(selectedNodeId === d.id ? null : {
+          ...d,
+          id: d.id,
+          source: sourceId,
+          target: targetId,
+          label: d.label || '',
+          type: 'edge',
+        } as any)
+      })
     linkLabelSelRef.current = linkLabelSel
 
     const nodeSel = g.append('g').selectAll<SVGGElement, D3Node>('g')
@@ -545,8 +559,22 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
 
     simulation.on('tick', () => {
       linkSel
-        .attr('x1', d => (d.source as D3Node).x ?? 0)
-        .attr('y1', d => (d.source as D3Node).y ?? 0)
+        .attr('x1', d => {
+          const source = d.source as D3Node
+          const target = d.target as D3Node
+          const dx = (target.x ?? 0) - (source.x ?? 0)
+          const dy = (target.y ?? 0) - (source.y ?? 0)
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1
+          return (source.x ?? 0) + (dx / dist) * (source.symbolSize + 2)
+        })
+        .attr('y1', d => {
+          const source = d.source as D3Node
+          const target = d.target as D3Node
+          const dx = (target.x ?? 0) - (source.x ?? 0)
+          const dy = (target.y ?? 0) - (source.y ?? 0)
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1
+          return (source.y ?? 0) + (dy / dist) * (source.symbolSize + 2)
+        })
         .attr('x2', d => {
           const source = d.source as D3Node
           const target = d.target as D3Node

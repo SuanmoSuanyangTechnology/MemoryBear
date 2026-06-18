@@ -21,6 +21,86 @@ router = APIRouter(
 )
 
 
+def _format_builtin_fields(fields) -> list[schemas.KnowledgeMetadataResponse]:
+    return [
+        schemas.KnowledgeMetadataResponse(
+            id=None,
+            type=field.type,
+            name=field.name,
+            is_builtin=True,
+        )
+        for field in fields
+    ]
+
+
+def _format_metadata_fields_result(result: dict) -> dict:
+    custom_responses = [
+        schemas.KnowledgeMetadataResponse.model_validate(field)
+        for field in result["custom"]
+    ]
+    return {
+        "custom": custom_responses,
+        "builtin_enabled": result["builtin_enabled"],
+        "builtin_fields": _format_builtin_fields(result["builtin_fields"]),
+    }
+
+
+def _field_value(field, key: str):
+    if isinstance(field, dict):
+        return field.get(key)
+    return getattr(field, key)
+
+
+def _format_common_metadata_fields_result(result: dict) -> dict:
+    return {
+        "custom": [
+            {
+                "type": _field_value(field, "type"),
+                "name": _field_value(field, "name"),
+                "is_builtin": False,
+            }
+            for field in result["custom"]
+        ],
+        "builtin_enabled": result["builtin_enabled"],
+        "builtin_fields": [
+            {
+                "type": _field_value(field, "type"),
+                "name": _field_value(field, "name"),
+                "is_builtin": True,
+            }
+            for field in result["builtin_fields"]
+        ],
+    }
+
+
+@router.post("/metadata/fields", response_model=ApiResponse)
+async def list_common_metadata_fields(
+    data: schemas.KnowledgeMetadataFieldsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List common metadata fields across knowledge bases."""
+    kb_ids = list(dict.fromkeys(data.kb_ids))
+    api_logger.info(f"List common metadata fields: kb_ids={kb_ids}, user={current_user.username}")
+
+    for kb_id in kb_ids:
+        db_knowledge = require_current_workspace_knowledge(
+            db=db,
+            knowledge_id=kb_id,
+            current_user=current_user,
+        )
+        if not db_knowledge:
+            raise ResourceNotFoundException("知识库", str(kb_id))
+
+    result = KnowledgeMetadataService.list_metadata_fields_for_knowledge_ids(
+        db,
+        kb_ids,
+        include_counts=False,
+    )
+
+    return success(data=_format_common_metadata_fields_result(result))
+
+
 @router.get("/{kb_id}/metadata", response_model=ApiResponse)
 async def list_metadata_fields(
     kb_id: uuid.UUID,
@@ -41,26 +121,7 @@ async def list_metadata_fields(
 
     result = KnowledgeMetadataService.list_metadata_fields(db, kb_id)
 
-    custom_responses = [
-        schemas.KnowledgeMetadataResponse.model_validate(f) for f in result["custom"]
-    ]
-
-    # 内置字段转换为响应格式
-    builtin_responses = []
-    if result["builtin_enabled"]:
-        for bf in result["builtin_fields"]:
-            builtin_responses.append(schemas.KnowledgeMetadataResponse(
-                id=None,
-                type=bf.type,
-                name=bf.name,
-                is_builtin=True,
-            ))
-
-    return success(data={
-        "custom": custom_responses,
-        "builtin_enabled": result["builtin_enabled"],
-        "builtin_fields": builtin_responses,
-    })
+    return success(data=_format_metadata_fields_result(result))
 
 
 @router.post("/{kb_id}/metadata", response_model=ApiResponse)
@@ -171,18 +232,9 @@ async def get_builtin_metadata_fields(
 
     result = KnowledgeMetadataService.get_builtin_fields(db, kb_id)
 
-    field_responses = []
-    for bf in result["fields"]:
-        field_responses.append(schemas.KnowledgeMetadataResponse(
-            id=None,
-            type=bf.type,
-            name=bf.name,
-            is_builtin=True,
-        ))
-
     return success(data=schemas.BuiltinMetadataListResponse(
         enabled=result["enabled"],
-        fields=field_responses,
+        fields=_format_builtin_fields(result["fields"]),
     ))
 
 

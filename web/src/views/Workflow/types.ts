@@ -1,6 +1,6 @@
 
 import { Graph } from '@antv/x6';
-import type { KnowledgeConfig } from './components/Properties/Knowledge/types'
+import type { KnowledgeConfig } from '@/components/Knowledge/types'
 import type { Variable } from './components/Properties/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 export interface NodeConfig {

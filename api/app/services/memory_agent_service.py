@@ -289,14 +289,14 @@ class MemoryAgentService:
     async def write_memory(
             self,
             request: WriteMemoryRequest,
-            db: Session,
+            db: Optional[Session] = None,
     ) -> str:
         """
         长期记忆写入
 
         Args:
             request: 写入请求参数（end_user_id、messages、config_id、storage_type、language 等）
-            db: SQLAlchemy database session
+            db: SQLAlchemy database session（可选，传 None 时内部自行管理短暂 session）
 
         Returns:
             Write operation result status
@@ -405,7 +405,7 @@ class MemoryAgentService:
             user_rag_memory_id,
             language,
             conversation_id,
-            db: Session,
+            db: Optional[Session],
             start_time: float,
     ) -> str:
         """write_memory 的核心实现（已持有 per-end_user 锁）。"""
@@ -495,13 +495,21 @@ class MemoryAgentService:
             self,
             end_user_id: str,
             config_id: Optional[uuid.UUID] | int,
-            db: Session,
+            db: Optional[Session],
             start_time: float,
     ):
-        """解析 end_user 关联配置并从数据库加载完整 memory_config。"""
+        """解析 end_user 关联配置并从数据库加载完整 memory_config。
+
+        当 db=None 时（Celery 后台任务路径），内部自行开短暂 session 完成查询。
+        """
         workspace_id = None
         try:
-            connected_config = get_end_user_connected_config(end_user_id, db)
+            # 短暂 session：仅用于查询 end_user 关联配置
+            if db is not None:
+                connected_config = get_end_user_connected_config(end_user_id, db)
+            else:
+                with get_db_context() as _db:
+                    connected_config = get_end_user_connected_config(end_user_id, _db)
             # get_end_user_connected_config 返回字符串，需转为 UUID
             workspace_id_raw = connected_config.get("workspace_id")
             if workspace_id_raw and workspace_id_raw != "None":
@@ -556,10 +564,16 @@ class MemoryAgentService:
             messages: list[MessageItem] | list[dict],
             end_user_id: str,
             memory_config,
-            db: Session,
+            db: Optional[Session],
     ) -> list[dict]:
-        """处理消息中附带的文件，生成感知记忆对象并挂载到 message['file_content']。"""
-        perceptual_service = MemoryPerceptualService(db)
+        """处理消息中附带的文件，生成感知记忆对象并挂载到 message['file_content']。
+
+        当 db=None 时（Celery 后台任务路径），每个文件单独开短暂 session，
+        避免长时间持有 DB 连接等待 LLM 推理。
+        """
+        # 当外层提供 db 时，复用同一个 service 实例，避免每个文件重复实例化
+        perceptual_service = MemoryPerceptualService(db) if db is not None else None
+
         for message in messages:
             if isinstance(message, dict):
                 message["file_content"] = []
@@ -568,12 +582,24 @@ class MemoryAgentService:
                 message.file_content = []
                 files = message.files or []
             for file in files:
-                file_object = await perceptual_service.generate_perceptual_memory(
-                    end_user_id=end_user_id,
-                    memory_config=memory_config,
-                    file=FileInput(**file),
-                    content=message.content if isinstance(message, MessageItem) else message["content"],
-                )
+                # 注意：generate_perceptual_memory 内部含 LLM 调用（10-60s），
+                # 此处复用外层 db（Controller 路径）或自行开 session（Celery 路径）
+                if perceptual_service is not None:
+                    file_object = await perceptual_service.generate_perceptual_memory(
+                        end_user_id=end_user_id,
+                        memory_config=memory_config,
+                        file=FileInput(**file),
+                        content=message.content if isinstance(message, MessageItem) else message["content"],
+                    )
+                else:
+                    with get_db_context() as _db:
+                        _perceptual_service = MemoryPerceptualService(_db)
+                        file_object = await _perceptual_service.generate_perceptual_memory(
+                            end_user_id=end_user_id,
+                            memory_config=memory_config,
+                            file=FileInput(**file),
+                            content=message.content if isinstance(message, MessageItem) else message["content"],
+                        )
                 if file_object is None:
                     continue
                 if isinstance(message, dict):

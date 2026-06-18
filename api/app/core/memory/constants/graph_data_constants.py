@@ -68,6 +68,7 @@ NODE_PROPERTY_WHITELIST: Dict[str, List[str]] = {
     ],
     "ExtractedEntity": [
         "description",
+        "description_summary",
         "name",
         "entity_type",
         "created_at",

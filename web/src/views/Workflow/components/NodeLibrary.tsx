@@ -7,7 +7,7 @@ import { nodeLibrary } from '../constant';
 import { filterNodeByAppType } from '../utils';
 import RbCard from '@/components/RbCard/Card';
 import type { Application } from '@/views/ApplicationManagement/types';
-// import CognitiveUpgradingHelp from './CognitiveUpgradingHelp';
+import CognitiveUpgradingHelp from './CognitiveUpgradingHelp';
 
 interface NodeLibraryProps {
   appType?: Application['type'];
@@ -72,18 +72,18 @@ const NodeLibrary: FC<NodeLibraryProps> = ({
                 if (filteredNodes.length === 0) return null;
                 return (
                   <div key={category.category}>
-                    {/* {category.category === 'cognitiveUpgrading'
+                    {category.category === 'cognitiveUpgrading'
                       ? <Flex align="center" gap={4} className="rb:mb-2!">
                         <div className="rb:font-semibold rb:text-[12px] rb:leading-4.5 rb:pl-1">
                           {t(`workflow.${category.category}.label`)}
                         </div>
                         <CognitiveUpgradingHelp />
                       </Flex>
-                      : */}
+                      :
                       <div className="rb:font-semibold rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:pl-1">
                         {category.category === 'cognitiveUpgrading' ? t(`workflow.${category.category}.label`) : t(`workflow.${category.category}`)}
                       </div>
-                    {/* } */}
+                    }
                     <Flex gap={6} vertical>
                       {filteredNodes.map((node) => (
                         <Flex

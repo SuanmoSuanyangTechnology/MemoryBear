@@ -25,6 +25,7 @@ import { useMenu } from '@/store/menu';
 import styles from './index.module.css'
 import SettingModal, { type SettingModalRef } from './SettingModal'
 import UserInfoModal, { type UserInfoModalRef } from './UserInfoModal'
+import { openHelpCenter } from '@/utils/help';
 
 const { Header } = Layout;
 
@@ -32,7 +33,7 @@ const { Header } = Layout;
  * @param source - Breadcrumb source type ('space' or 'manage'), defaults to 'manage'
  */
 const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const location = useLocation();
   const settingModalRef = useRef<SettingModalRef>(null)
   const userInfoModalRef = useRef<UserInfoModalRef>(null)
@@ -71,6 +72,11 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
   const handleLogout = () => {
     logout()
   };
+  const gotoHelpCenter = () => {
+    const currentLang = i18n.language;
+    const lang = currentLang === 'zh' ? 'zh' : 'en';
+    openHelpCenter(lang);
+  };
 
   /** User dropdown menu configuration with profile, settings, and logout options */
   const userMenuItems: MenuProps['items'] = [
@@ -102,6 +108,16 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
       onClick: () => {
         userInfoModalRef.current?.handleOpen()
       },
+    },
+    {
+      key: '7',
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question_bold.svg')]"></div>,
+      label: <Flex justify="space-between" align="center">
+        {t('quickActions.helpCenter')}
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
+      </Flex>,
+      className: 'rb:text-[#212332]!',
+      onClick: gotoHelpCenter,
     },
     {
       key: '4',

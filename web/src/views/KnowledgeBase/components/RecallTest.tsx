@@ -6,7 +6,6 @@ import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '@/vi
 // import refreshIcon from '@/assets/images/knowledgeBase/refresh-blue.png';
 import RecallTestResult from './RecallTestResult';
 import { reChunks, getRetrievalModeType } from '@/api/knowledgeBase';
-import { hybrid } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 const { TextArea } = Input;
 
@@ -27,6 +26,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         { label: t('knowledgeBase.vector'), value: false },
     ]);
 
+    console.log('RecallTest - knowledgeBaseId:', knowledgeBaseId);
     // Get retrieval mode options
     useEffect(() => {
         fetchRetrievalModeOptions();
@@ -100,7 +100,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
     }));
   return (
     <div className='rb:w-full rb:h-full rb:flex rb:flex-col rb:overflow-hidden'>
-      <div className='rb:flex-shrink-0'>
+      <div className='rb:shrink-0'>
         <div className='rb:flexx rb:mb-2 rb:items-center rb:justify-between'>
           <span className='rb:font-medium'>{ t('knowledgeBase.testQuestion')}</span>
           {/* <div className='rb:flex rb:items-center rb:justify-end'>

@@ -440,9 +440,20 @@ def get_conversation(
                 return "interrupt"
             return kind
 
+        # Determine intervention status based on whether ALL intervention nodes
+        # have been resolved, NOT based on the workflow's overall execution status.
+        # When a HITL node enters the timeout branch, it has completed (resolved)
+        # its intervention — the node chose the timeout path. Even if the overall
+        # workflow later fails on a downstream node, the intervention itself is done.
+        all_resolved = all(
+            i.get("resolved_action_id") or i.get("resolved_kind")
+            for i in ordered
+        )
+        intervention_status = "completed" if all_resolved else "waiting_human"
+
         intervention_map[message_id] = {
             "execution_id": wf_exec.execution_id,
-            "status": wf_exec.status,
+            "status": intervention_status,
             "interventions": [{
                 "node_id": i["node_id"],
                 "node_name": i.get("node_name", ""),
@@ -935,28 +946,34 @@ async def config_query(
     share_service = SharedChatService(db)
     share_token = share_data.share_token
     share, release = share_service.get_release_by_share_token(share_token, password)
-    if release.app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+    app_name = release.name
+    app_icon = release.icon
+
+    if release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         workflow_service = WorkflowService(db)
         content = {
-            "app_name": release.app.name,
-            "app_type": release.app.type,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "app_type": release.type,
             "variables": workflow_service.get_start_node_variables(release.config),
             "memory":  workflow_service.is_memory_enable(release.config),
             "features": release.config.get("features")
         }
-    elif release.app.type == AppType.AGENT:
+    elif release.type == AppType.AGENT:
         content = {
-            "app_name": release.app.name,
-            "app_type": release.app.type,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "app_type": release.type,
             "variables": release.config.get("variables"),
             "memory": release.config.get("memory", {}).get("enabled"),
             "features": release.config.get("features"),
             "model_parameters": release.config.get("model_parameters")
         }
-    elif release.app.type == AppType.MULTI_AGENT:
+    elif release.type == AppType.MULTI_AGENT:
         content = {
-            "app_name": release.app.name,
-            "app_type": release.app.type,
+            "app_name": app_name,
+            "app_icon": app_icon,
+            "app_type": release.type,
             "variables": [],
             "features": release.config.get("features")
         }
@@ -1283,4 +1300,3 @@ async def switch_message_version(
     )
 
     return success(data=result)
-

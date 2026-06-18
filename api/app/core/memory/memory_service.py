@@ -34,7 +34,7 @@ from app.core.memory.models.service_models import LongTermMemoryInput, MemoryCon
 from app.core.memory.pipelines.memory_read import ReadPipeLine
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
-from app.db import get_db_context
+from app.db import get_db_context, get_db_read
 from app.services.memory_config_service import MemoryConfigService
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,6 @@ class MemoryService:
 
     def __init__(
             self,
-            db: Session,
             config_id: str | None,
             end_user_id: str,
             workspace_id: str | None = None,
@@ -70,15 +69,17 @@ class MemoryService:
             user_rag_memory_id: str | None = None,
             conversation_id: str | None = None,
             language: str = "zh",
+            draft=False
     ):
-        config_service = MemoryConfigService(db)
-        memory_config = None
-        if config_id is not None and config_id != "":
-            memory_config = config_service.load_memory_config(
-                config_id=config_id,
-                workspace_id=workspace_id,
-                service_name="MemoryService",
-            )
+        with get_db_read() as db:
+            config_service = MemoryConfigService(db)
+            memory_config = None
+            if config_id is not None and config_id != "":
+                memory_config = config_service.load_memory_config(
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    service_name="MemoryService",
+                )
         if memory_config is None and storage_type.lower() == "neo4j":
             logger.warning(
                 "MemoryService 初始化时未提供 memory config（config_id=None），"
@@ -91,7 +92,8 @@ class MemoryService:
             storage_type=StorageType(storage_type),
             user_rag_memory_id=user_rag_memory_id,
             language=language,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            draft=draft
         )
 
     async def write(
@@ -669,9 +671,8 @@ def create_long_term_memory_tool(
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            with get_db_context() as db_ctx:
-                memory_service = MemoryService(db_ctx, config_id, end_user_id)
-                search_result = await memory_service.read(question, SearchStrategy(search_mode))
+            memory_service = MemoryService(config_id, end_user_id)
+            search_result = await memory_service.read(question, SearchStrategy(search_mode))
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 11:17:20
+ * @Last Modified time: 2026-06-11 14:51:48
  */
 /**
  * User Memory Detail Types
@@ -87,13 +87,14 @@ export interface StatementNodeProperties {
  * Extracted entity node properties
  */
 export interface ExtractedEntityNodeProperties {
-  description: string;
+  description: string[];
   name: string;
   entity_type: string;
   created_at: number;
   aliases: string[];
   connect_strength: string;
   associative_memory: number;
+  description_summary?: string;
 }
 export interface PerceptualNodeProperties {
   file_name: string;
@@ -197,6 +198,7 @@ export interface NodeStatisticsItem {
  * End user profile
  */
 export interface EndUser {
+  id?: string;
   end_user_info_id: string;
   end_user_id: string;
   other_name: string;
@@ -206,6 +208,9 @@ export interface EndUser {
     traits: string[];
     interests: string[];
     core_facts: string[];
+    alias: string[];
+    beliefs_or_stances: string[];
+    anchors: string[];
   };
   created_at: number;
   updated_at: number;
@@ -309,7 +314,7 @@ export interface ExtractedEntityTypeNode {
   properties: {
     name: string;
     end_user_id: string;
-    description: string;
+    description: string[];
     created_at: string;
     entity_type: CommunityEntityType;
     community_name: string;

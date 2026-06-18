@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:56:28
+ * @Last Modified time: 2026-06-10 18:00:35
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -230,7 +230,7 @@ const TestChat: FC<TestChatProps> = ({
     })
   }
 
-  const updateErrorAssistantMessage = (message_length: number) => {
+  const updateErrorAssistantMessage = (message_length: number, error?: { message?: string; }) => {
     if (message_length > 0) {
       setChatList(prev => {
         const newList = [...prev]
@@ -246,7 +246,8 @@ const TestChat: FC<TestChatProps> = ({
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
       if (lastMsg.role === 'assistant') {
-        lastMsg.content = null
+        lastMsg.content = error?.message || lastMsg.content || null;
+        lastMsg.status = error?.message ? 'failed' : 'completed'
       }
       return newList
     })
@@ -409,10 +410,11 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleStreamMessage = (data: SSEMessage[]) => {
     data.map(item => {
-      const { conversation_id, content, message_length, audio_url, citations, suggested_questions } = item.data as {
+      const { conversation_id, content, message_length, audio_url, citations, suggested_questions, error } = item.data as {
         conversation_id: string, content: string, message_length: number; audio_url?: string;
         citations?: NodeData['citations'];
-        suggested_questions?: string[]
+        suggested_questions?: string[];
+        error?: { message?: string; };
       };
       switch (item.event) {
         case 'start':
@@ -431,6 +433,9 @@ const TestChat: FC<TestChatProps> = ({
         case 'message':
           updateAssistantMessage(content)
           if (conversation_id && conversationId !== conversation_id) setConversationId(conversation_id)
+          break
+        case 'error':
+          updateErrorAssistantMessage(message_length, error)
           break
         case 'end':
           if (audio_url && !audioStatusMap[audio_url]) {
@@ -469,7 +474,7 @@ const TestChat: FC<TestChatProps> = ({
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions)
           }
-          updateErrorAssistantMessage(message_length)
+          updateErrorAssistantMessage(message_length, error)
           streamLoadingRef.current = false
           setStreamLoading(false)
           break

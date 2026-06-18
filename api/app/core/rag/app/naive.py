@@ -1,9 +1,11 @@
 import logging
 import re
 import os
+from dataclasses import dataclass
 from functools import reduce
 from io import BytesIO
 from timeit import default_timer as timer
+from typing import Any, Callable
 from docx import Document
 from docx.image.exceptions import InvalidImageStreamError, UnexpectedEndOfFileError, UnrecognizedImageError
 from docx.opc.pkgreader import _SerializedRelationships, _SerializedRelationship
@@ -843,6 +845,544 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     return res
 
 
+@dataclass
+class ChunkContext:
+    filename: str
+    binary: bytes | None
+    from_page: int
+    to_page: int
+    lang: str
+    callback: Callable | None
+    vision_model: Any
+    kwargs: dict
+    parser_config: dict
+    doc: dict
+    is_english: bool
+    is_root: bool
+
+
+@dataclass
+class ParseResult:
+    sections: list | None = None
+    tables: list | None = None
+    pdf_parser: Any = None
+    section_images: list | None = None
+    urls: set | None = None
+    direct_result: list | None = None
+    merge_strategy: str = "naive"
+    url_res: list | None = None
+    append_embed: bool = True
+
+
+@dataclass
+class MergeResult:
+    chunks: list
+    images: list | None = None
+
+
+def _build_chunk_doc(filename):
+    doc = {
+        "docnm_kwd": filename,
+        "title_tks": rag_tokenizer.tokenize(re.sub(r"\.[a-zA-Z]+$", "", filename))
+    }
+    doc["title_sm_tks"] = rag_tokenizer.fine_grained_tokenize(doc["title_tks"])
+    return doc
+
+
+def _prepare_chunk_context(
+    filename, binary=None, from_page=0, to_page=100000,
+    lang="Chinese", callback=None, vision_model=None, **kwargs
+):
+    parser_config = kwargs.get(
+        "parser_config", {
+            "layout_recognize": "DeepDOC", "chunk_token_num": 512, "delimiter": "\n!?。；！？", "analyze_hyperlink": True})
+    return ChunkContext(
+        filename=filename,
+        binary=binary,
+        from_page=from_page,
+        to_page=to_page,
+        lang=lang,
+        callback=callback,
+        vision_model=vision_model,
+        kwargs=kwargs,
+        parser_config=parser_config,
+        doc=_build_chunk_doc(filename),
+        is_english=lang.lower() == "english",
+        is_root=kwargs.get("is_root", True),
+    )
+
+
+def _collect_embedded_chunks(ctx: ChunkContext):
+    embed_res = []
+    if not ctx.is_root:
+        return embed_res
+
+    embeds = []
+    if ctx.binary is not None:
+        embeds = extract_embed_file(ctx.binary)
+    else:
+        raise Exception("Embedding extraction from file path is not supported.")
+
+    for embed_filename, embed_bytes in embeds:
+        try:
+            sub_res = chunk_v2(
+                embed_filename,
+                binary=embed_bytes,
+                lang=ctx.lang,
+                callback=ctx.callback,
+                vision_model=ctx.vision_model,
+                is_root=False,
+                **ctx.kwargs,
+            ) or []
+            embed_res.extend(sub_res)
+        except Exception as exc:
+            if ctx.callback:
+                ctx.callback(0.05, f"Failed to chunk embed {embed_filename}: {exc}")
+            continue
+
+    return embed_res
+
+
+def _collect_docx_hyperlink_chunks(ctx: ChunkContext):
+    url_res = []
+    if not ctx.parser_config.get("analyze_hyperlink", False) or not ctx.is_root:
+        return url_res
+
+    urls = extract_links_from_docx(ctx.binary)
+    for index, url in enumerate(urls):
+        html_bytes, metadata = extract_html(url)
+        if not html_bytes:
+            continue
+        try:
+            sub_url_res = chunk_v2(
+                url,
+                html_bytes,
+                lang=ctx.lang,
+                callback=ctx.callback,
+                vision_model=ctx.vision_model,
+                is_root=False,
+                **ctx.kwargs,
+            )
+        except Exception as exc:
+            logging.info(f"Failed to chunk url in registered file type {url}: {exc}")
+            sub_url_res = chunk_v2(
+                f"{index}.html",
+                html_bytes,
+                lang=ctx.lang,
+                callback=ctx.callback,
+                vision_model=ctx.vision_model,
+                is_root=False,
+                **ctx.kwargs,
+            )
+        url_res.extend(sub_url_res)
+    return url_res
+
+
+def _collect_hyperlink_chunks(ctx: ChunkContext, urls):
+    url_res = []
+    if not urls or not ctx.parser_config.get("analyze_hyperlink", False) or not ctx.is_root:
+        return url_res
+
+    for index, url in enumerate(urls):
+        html_bytes, metadata = extract_html(url)
+        if not html_bytes:
+            continue
+        try:
+            sub_url_res = chunk_v2(url, html_bytes, callback=ctx.callback, lang=ctx.lang, is_root=False, **ctx.kwargs)
+        except Exception as exc:
+            logging.info(f"Failed to chunk url in registered file type {url}: {exc}")
+            sub_url_res = chunk_v2(
+                f"{index}.html",
+                html_bytes,
+                lang=ctx.lang,
+                callback=ctx.callback,
+                vision_model=ctx.vision_model,
+                is_root=False,
+                **ctx.kwargs,
+            )
+        url_res.extend(sub_url_res)
+    return url_res
+
+
+def _parse_docx_document(ctx: ChunkContext):
+    ctx.callback(0.1, "Start to parse.")
+    url_res = _collect_docx_hyperlink_chunks(ctx)
+
+    _SerializedRelationships.load_from_xml = load_from_xml_v2
+    sections, tables = Docx()(ctx.filename, ctx.binary)
+
+    tables = vision_figure_parser_docx_wrapper(
+        sections=sections,
+        tbls=tables,
+        callback=ctx.callback,
+        vision_model=ctx.vision_model,
+        **ctx.kwargs,
+    )
+    ctx.callback(0.8, "Finish parsing.")
+    return ParseResult(
+        sections=sections,
+        tables=tables,
+        merge_strategy="docx",
+        url_res=url_res,
+    )
+
+
+def _parse_pdf_document(ctx: ChunkContext):
+    urls = set()
+    layout_recognizer = ctx.parser_config.get("layout_recognize", "DeepDOC")
+    if ctx.parser_config.get("analyze_hyperlink", False) and ctx.is_root:
+        urls = extract_links_from_pdf(ctx.binary)
+
+    if isinstance(layout_recognizer, bool):
+        layout_recognizer = "DeepDOC" if layout_recognizer else "Plain Text"
+
+    name = layout_recognizer.strip().lower()
+    parser = PARSERS.get(name, by_plaintext)
+    ctx.callback(0.1, "Start to parse.")
+
+    sections, tables, pdf_parser = parser(
+        filename=ctx.filename,
+        binary=ctx.binary,
+        from_page=ctx.from_page,
+        to_page=ctx.to_page,
+        lang=ctx.lang,
+        callback=ctx.callback,
+        vision_model=ctx.vision_model,
+        layout_recognizer=layout_recognizer,
+        **ctx.kwargs
+    )
+
+    if not sections and not tables:
+        return ParseResult(direct_result=[], append_embed=False)
+
+    if name in ["mineru", "textln"] and not ctx.kwargs.get("_keep_chunk_token_num"):
+        ctx.parser_config["chunk_token_num"] = 0
+
+    ctx.callback(0.8, "Finish parsing.")
+    return ParseResult(sections=sections, tables=tables, pdf_parser=pdf_parser, urls=urls)
+
+
+def _parse_presentation_document(ctx: ChunkContext):
+    import tempfile
+
+    tmp_file = None
+    dest_pdf_path = None
+    try:
+        suffix = os.path.splitext(ctx.filename)[1] or ".pptx"
+        tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        if ctx.binary:
+            tmp_file.write(ctx.binary)
+        else:
+            with open(ctx.filename, "rb") as file:
+                tmp_file.write(file.read())
+        tmp_file.close()
+
+        future = async_convert_to_pdf(tmp_file.name)
+        dest_pdf_path = future.result()
+        direct_result = chunk_v2(
+            dest_pdf_path,
+            binary=None,
+            lang=ctx.lang,
+            callback=ctx.callback,
+            vision_model=ctx.vision_model,
+            **ctx.kwargs,
+        )
+        return ParseResult(direct_result=direct_result, append_embed=False)
+    finally:
+        if tmp_file and os.path.exists(tmp_file.name):
+            os.unlink(tmp_file.name)
+        if dest_pdf_path and os.path.exists(dest_pdf_path):
+            os.unlink(dest_pdf_path)
+
+
+def _parse_audio_document(ctx: ChunkContext):
+    binary = ctx.binary
+    if not binary:
+        with open(ctx.filename, "rb") as file:
+            binary = file.read()
+    from app.core.rag.app.audio import chunk as parser
+    return ParseResult(
+        direct_result=parser(ctx.filename, binary, lang=ctx.lang, callback=ctx.callback, seq2txt_mdl=ctx.vision_model, **ctx.kwargs),
+        append_embed=False,
+    )
+
+
+def _parse_picture_or_video_document(ctx: ChunkContext):
+    binary = ctx.binary
+    if not binary:
+        with open(ctx.filename, "rb") as file:
+            binary = file.read()
+    from app.core.rag.app.picture import chunk as parser
+    return ParseResult(
+        direct_result=parser(ctx.filename, binary, lang=ctx.lang, callback=ctx.callback, vision_model=ctx.vision_model, **ctx.kwargs),
+        append_embed=False,
+    )
+
+
+def _parse_excel_document(ctx: ChunkContext):
+    ctx.callback(0.1, "Start to parse.")
+    binary = ctx.binary
+    if not binary:
+        with open(ctx.filename, "rb") as file:
+            binary = file.read()
+    excel_parser = ExcelParser()
+    if ctx.parser_config.get("html4excel") and ctx.parser_config.get("html4excel").lower() == "true":
+        sections = [(_, "") for _ in excel_parser.html(binary, 12) if _]
+    else:
+        sections = [(_, "") for _ in excel_parser(binary) if _]
+    ctx.callback(0.8, "Finish parsing.")
+    chunks = [section for section, _ in sections]
+    direct_result = tokenize_chunks(chunks, ctx.doc, ctx.is_english, None)
+    return ParseResult(direct_result=direct_result)
+
+
+def _parse_text_document(ctx: ChunkContext):
+    ctx.callback(0.1, "Start to parse.")
+    sections = TxtParser()(
+        ctx.filename,
+        ctx.binary,
+        ctx.parser_config.get("chunk_token_num", 128),
+        ctx.parser_config.get("delimiter", "\n!?;。；！？"),
+    )
+    ctx.callback(0.8, "Finish parsing.")
+    return ParseResult(sections=sections)
+
+
+def _parse_markdown_document(ctx: ChunkContext):
+    urls = set()
+    section_images = None
+    ctx.callback(0.1, "Start to parse.")
+    markdown_parser = Markdown(int(ctx.parser_config.get("chunk_token_num", 128)))
+    sections, tables = markdown_parser(
+        ctx.filename,
+        ctx.binary,
+        separate_tables=False,
+        delimiter=ctx.parser_config.get("delimiter", "\n!?;。；！？")
+    )
+
+    if ctx.vision_model:
+        section_images = []
+        for idx, (section_text, _) in enumerate(sections):
+            images = markdown_parser.get_pictures(section_text) if section_text else None
+
+            if images:
+                combined_image = reduce(concat_img, images) if len(images) > 1 else images[0]
+                section_images.append(combined_image)
+                markdown_vision_parser = VisionFigureParser(
+                    vision_model=ctx.vision_model,
+                    figures_data=[((combined_image, ["markdown image"]), [(0, 0, 0, 0, 0)])],
+                    **ctx.kwargs,
+                )
+                boosted_figures = markdown_vision_parser(callback=ctx.callback)
+                sections[idx] = (
+                    section_text + "\n\n" + "\n\n".join([fig[0][1][0] for fig in boosted_figures]),
+                    sections[idx][1],
+                )
+            else:
+                section_images.append(None)
+    else:
+        logging.warning("No visual model detected. Skipping figure parsing enhancement.")
+
+    if ctx.parser_config.get("hyperlink_urls", False) and ctx.is_root:
+        for idx, (section_text, _) in enumerate(sections):
+            soup = markdown_parser.md_to_html(section_text)
+            hyperlink_urls = markdown_parser.get_hyperlink_urls(soup)
+            urls.update(hyperlink_urls)
+
+    ctx.callback(0.8, "Finish parsing.")
+    merge_strategy = "with_images" if section_images else "naive"
+    return ParseResult(
+        sections=sections,
+        tables=tables,
+        section_images=section_images,
+        urls=urls,
+        merge_strategy=merge_strategy,
+    )
+
+
+def _parse_html_document(ctx: ChunkContext):
+    ctx.callback(0.1, "Start to parse.")
+    chunk_token_num = int(ctx.parser_config.get("chunk_token_num", 128))
+    sections = HtmlParser()(ctx.filename, ctx.binary, chunk_token_num)
+    sections = [(_, "") for _ in sections if _]
+    ctx.callback(0.8, "Finish parsing.")
+    return ParseResult(sections=sections)
+
+
+def _parse_json_document(ctx: ChunkContext):
+    ctx.callback(0.1, "Start to parse.")
+    chunk_token_num = int(ctx.parser_config.get("chunk_token_num", 128))
+    if ctx.binary:
+        import tempfile
+        tmp_file = None
+        try:
+            suffix = os.path.splitext(ctx.filename)[1] or ".json"
+            tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb")
+            tmp_file.write(ctx.binary)
+            tmp_file.close()
+            sections = JsonParser(chunk_token_num)(tmp_file.name)
+        finally:
+            if tmp_file and os.path.exists(tmp_file.name):
+                os.unlink(tmp_file.name)
+    else:
+        sections = JsonParser(chunk_token_num)(ctx.filename)
+    sections = [(_, "") for _ in sections if _]
+    ctx.callback(0.8, "Finish parsing.")
+    return ParseResult(sections=sections)
+
+
+def _parse_doc_document(ctx: ChunkContext):
+    ctx.callback(0.1, "Start to parse.")
+
+    try:
+        import tika
+        os.environ.setdefault('TIKA_SERVER_JAR', '/opt/tika/tika-server.jar')
+        os.environ.setdefault('TIKA_SERVER_PORT', '9998')
+        tika.initVM()
+        from tika import parser as tika_parser
+    except Exception as exc:
+        ctx.callback(0.8, f"tika not available: {exc}. Unsupported .doc parsing.")
+        logging.warning(f"tika not available: {exc}. Unsupported .doc parsing for {ctx.filename}.")
+        return ParseResult(direct_result=[], append_embed=False)
+
+    import tempfile
+    tmp_file = None
+    try:
+        suffix = os.path.splitext(ctx.filename)[1] or ".doc"
+        tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        if ctx.binary:
+            tmp_file.write(ctx.binary)
+        else:
+            with open(ctx.filename, "rb") as file:
+                tmp_file.write(file.read())
+        tmp_file.close()
+
+        doc_parsed = tika_parser.from_file(tmp_file.name)
+    finally:
+        if tmp_file and os.path.exists(tmp_file.name):
+            os.unlink(tmp_file.name)
+
+    if doc_parsed.get('content', None) is not None:
+        sections = doc_parsed['content'].split('\n')
+        sections = [(_, "") for _ in sections if _]
+        ctx.callback(0.8, "Finish parsing.")
+        return ParseResult(sections=sections)
+
+    ctx.callback(0.8, f"tika.parser got empty content from {ctx.filename}.")
+    logging.warning(f"tika.parser got empty content from {ctx.filename}.")
+    return ParseResult(direct_result=[], append_embed=False)
+
+
+def _parse_document(ctx: ChunkContext):
+    filename = ctx.filename
+    if re.search(r"\.docx$", filename, re.IGNORECASE):
+        return _parse_docx_document(ctx)
+    if re.search(r"\.pdf$", filename, re.IGNORECASE):
+        return _parse_pdf_document(ctx)
+    if re.search(r"\.(pptx|ppt)$", filename, re.IGNORECASE):
+        return _parse_presentation_document(ctx)
+    if re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", filename, re.IGNORECASE):
+        return _parse_audio_document(ctx)
+    if re.search(r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", filename, re.IGNORECASE):
+        return _parse_picture_or_video_document(ctx)
+    if re.search(r"\.(csv|xlsx?)$", filename, re.IGNORECASE):
+        return _parse_excel_document(ctx)
+    if re.search(r"\.(txt|py|js|java|c|cpp|h|php|go|ts|sh|cs|kt|sql)$", filename, re.IGNORECASE):
+        return _parse_text_document(ctx)
+    if re.search(r"\.(md|markdown)$", filename, re.IGNORECASE):
+        return _parse_markdown_document(ctx)
+    if re.search(r"\.(htm|html)$", filename, re.IGNORECASE):
+        return _parse_html_document(ctx)
+    if re.search(r"\.(json|jsonl|ldjson)$", filename, re.IGNORECASE):
+        return _parse_json_document(ctx)
+    if re.search(r"\.doc$", filename, re.IGNORECASE):
+        return _parse_doc_document(ctx)
+    raise NotImplementedError("file type not supported yet(pdf, xlsx, doc, docx, txt supported)")
+
+
+def _merge_sections(ctx: ChunkContext, parse_result: ParseResult):
+    if parse_result.merge_strategy == "docx":
+        chunks, images = naive_merge_docx(
+            parse_result.sections,
+            int(ctx.parser_config.get("chunk_token_num", 128)),
+            ctx.parser_config.get("delimiter", "\n!?。；！？"),
+        )
+        return MergeResult(chunks=chunks, images=images)
+
+    section_images = parse_result.section_images
+    if section_images and all(image is None for image in section_images):
+        section_images = None
+
+    if parse_result.merge_strategy == "with_images" and section_images:
+        chunks, images = naive_merge_with_images(
+            parse_result.sections,
+            section_images,
+            int(ctx.parser_config.get("chunk_token_num", 128)),
+            ctx.parser_config.get("delimiter", "\n!?。；！？"),
+        )
+        return MergeResult(chunks=chunks, images=images)
+
+    chunks = naive_merge(
+        parse_result.sections,
+        int(ctx.parser_config.get("chunk_token_num", 128)),
+        ctx.parser_config.get("delimiter", "\n!?。；！？"),
+    )
+    return MergeResult(chunks=chunks)
+
+
+def _tokenize_chunks_result(ctx: ChunkContext, parse_result: ParseResult, merge_result: MergeResult):
+    res = tokenize_table(parse_result.tables or [], ctx.doc, ctx.is_english)
+    if parse_result.merge_strategy in ["docx", "with_images"] and merge_result.images is not None:
+        res.extend(tokenize_chunks_with_images(merge_result.chunks, ctx.doc, ctx.is_english, merge_result.images))
+    else:
+        res.extend(tokenize_chunks(merge_result.chunks, ctx.doc, ctx.is_english, parse_result.pdf_parser))
+    return res
+
+
+def _finalize_chunk_result(main_result, embed_res, url_res, append_embed=True):
+    result = main_result or []
+    if append_embed and embed_res:
+        result.extend(embed_res)
+    if url_res:
+        result.extend(url_res)
+    return result
+
+
+def chunk_v2(filename, binary=None, from_page=0, to_page=100000,
+             lang="Chinese", callback=None, vision_model=None, **kwargs):
+    """
+    Flow-oriented chunking entrypoint.
+
+    The legacy chunk() implementation is intentionally kept for rollback.
+    """
+    ctx = _prepare_chunk_context(
+        filename=filename,
+        binary=binary,
+        from_page=from_page,
+        to_page=to_page,
+        lang=lang,
+        callback=callback,
+        vision_model=vision_model,
+        **kwargs,
+    )
+    embed_res = _collect_embedded_chunks(ctx)
+    parse_result = _parse_document(ctx)
+
+    if parse_result.direct_result is not None:
+        return _finalize_chunk_result(parse_result.direct_result, embed_res, parse_result.url_res or [], parse_result.append_embed)
+
+    st = timer()
+    merge_result = _merge_sections(ctx, parse_result)
+    if ctx.kwargs.get("section_only", False):
+        return _finalize_chunk_result(merge_result.chunks, embed_res, parse_result.url_res or [])
+
+    main_result = _tokenize_chunks_result(ctx, parse_result, merge_result)
+    url_res = parse_result.url_res or []
+    url_res.extend(_collect_hyperlink_chunks(ctx, parse_result.urls or set()))
+    logging.info("naive_merge({}): {}".format(filename, timer() - st))
+    return _finalize_chunk_result(main_result, embed_res, url_res)
+
+
 FULL_DOC_MAX_CHARS = 10000
 
 
@@ -899,6 +1439,85 @@ def chunk_parent_child(
         return child_res, parent_res, parent_id_map
 
     # Paragraph mode (default): merge consecutive children up to parent_token_num
+    parent_res: list[dict] = []
+    parent_id_map: dict[int, int] = {}
+    buf_texts: list[str] = []
+    buf_images: list = []
+    buf_tokens = 0
+
+    def flush_parent():
+        nonlocal buf_texts, buf_images, buf_tokens
+        merged = "\n\n".join(buf_texts)
+        merged_image = None
+        for img in buf_images:
+            merged_image = concat_img(merged_image, img) if merged_image else img
+        parent_res.append({
+            "content_with_weight": merged,
+            "image": merged_image,
+        })
+        buf_texts = []
+        buf_images = []
+        buf_tokens = 0
+
+    for child_idx, child in enumerate(child_res):
+        text = child["content_with_weight"]
+        image = child.get("image")
+        tkn = num_tokens_from_string(text)
+
+        if buf_texts and buf_tokens + tkn > parent_token_num:
+            flush_parent()
+
+        buf_texts.append(text)
+        if image is not None:
+            buf_images.append(image)
+        buf_tokens += tkn
+        parent_id_map[child_idx] = len(parent_res)
+
+    if buf_texts:
+        flush_parent()
+
+    logging.info(f"[ParentChild] parent: mode=paragraph, token_num={parent_token_num}, chunk_count={len(parent_res)}")
+    return child_res, parent_res, parent_id_map
+
+
+def chunk_parent_child_v2(
+    filename, binary=None, from_page=0, to_page=100000,
+    lang="Chinese", callback=None, vision_model=None, **kwargs
+):
+    """
+    Parent-child chunking mode using the flow-oriented chunk_v2() entrypoint.
+
+    The legacy chunk_parent_child() implementation is intentionally kept for rollback.
+    """
+    parser_config = kwargs.get("parser_config", {})
+    child_token_num = int(parser_config.get("chunk_token_num", 128))
+    parent_token_num = int(parser_config.get("parent_chunk_token_num", 1024))
+
+    if parent_token_num <= child_token_num:
+        logging.warning(
+            f"parent_chunk_token_num({parent_token_num}) <= chunk_token_num({child_token_num}), "
+            f"falling back to default 1024"
+        )
+        parent_token_num = 1024
+
+    child_res = chunk_v2(
+        filename, binary=binary, from_page=from_page, to_page=to_page,
+        lang=lang, callback=callback, vision_model=vision_model,
+        **kwargs
+    )
+    logging.info(f"[ParentChild] child: token_num={child_token_num}, chunk_count={len(child_res)}")
+
+    parent_chunk_mode = parser_config.get("parent_chunk_mode", "paragraph")
+
+    if parent_chunk_mode == "full-doc":
+        all_texts = [child["content_with_weight"] for child in child_res]
+        full_text = "\n\n".join(all_texts)
+        truncated = truncate_to_chars(full_text, FULL_DOC_MAX_CHARS)
+        parent_res = [{"content_with_weight": truncated, "image": None}]
+        parent_id_map = {i: 0 for i in range(len(child_res))}
+        logging.info(f"[ParentChild] parent: mode=full-doc, max_chars={FULL_DOC_MAX_CHARS}, chunk_count=1")
+        return child_res, parent_res, parent_id_map
+
     parent_res: list[dict] = []
     parent_id_map: dict[int, int] = {}
     buf_texts: list[str] = []

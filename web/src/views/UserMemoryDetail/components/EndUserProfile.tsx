@@ -84,7 +84,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
         ></div>
       }
       headerClassName="rb:min-h-[46px]!! rb:font-medium!"
-      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-80 rb:top-29 rb:left-26", className)}
+      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-29 rb:left-26", className)}
       bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-186px)] rb:overflow-auto"
     >
       {loading
@@ -94,30 +94,15 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
             <div className="rb:text-[#7B8085]">{t('userMemory.other_name')}</div>
             <div className="rb:mt-0.5">{data?.other_name || '-'}</div>
           </div>
-          {data?.meta_data?.goals && data?.meta_data?.goals.length > 0 &&
-            <div>
-              <div className="rb:text-[#7B8085]">{t('userMemory.goals')}</div>
-              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.goals?.join(' | ') || '-')}</div>
-            </div>
-          }
-          {data?.meta_data?.traits && data?.meta_data?.traits.length > 0 &&
-            <div>
-              <div className="rb:text-[#7B8085]">{t('userMemory.traits')}</div>
-              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.traits?.join(' | ') || '-')}</div>
-            </div>
-          }
-          {data?.meta_data?.core_facts && data?.meta_data?.core_facts.length > 0 &&
-            <div>
-              <div className="rb:text-[#7B8085]">{t('userMemory.core_facts')}</div>
-              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.core_facts?.join(' | ') || '-')}</div>
-            </div>
-          }
-          {data?.meta_data?.interests && data?.meta_data?.interests.length > 0 &&
-            <div>
-              <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
-              <div className="rb:mt-0.5">{formatValue(data?.meta_data?.interests?.join(' | ') || '-')}</div>
-            </div>
-          }
+          {(['alias', 'relations', 'goals', 'core_facts', 'interests', 'traits', 'beliefs_or_stances', 'anchors'] as (keyof EndUser['meta_data'])[]).map((key) => {
+            if (!data?.meta_data?.[key] || (Array.isArray(data?.meta_data?.[key]) && data?.meta_data?.[key].length < 1)) return null
+            return(
+              <div key={key}>
+                <div className="rb:text-[#7B8085]">{t(`userMemory.${key}`)}</div>
+                <div className="rb:mt-0.5">{formatValue(data?.meta_data?.[key])}</div>
+              </div>
+            )
+          })}
 
           <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
             {t('userMemory.updated_at')}: {data?.updated_at ? dayjs(data?.updated_at).format('YYYY/MM/DD HH:mm:ss') : ''}

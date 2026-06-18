@@ -152,6 +152,12 @@ export const lightTheme: ThemeConfig = {
     },
     Pagination: {
       itemSizeSM: 28,
+    },
+    Tree: {
+      // nodeSelectedColor: '#FFFFFF',
+      directoryNodeSelectedBg: 'rgba(23,23,25,0.25)',
+      nodeSelectedBg: 'rgba(23,23,25,0.25)',
+      nodeHoverColor: '#171719',
     }
   }
 };
