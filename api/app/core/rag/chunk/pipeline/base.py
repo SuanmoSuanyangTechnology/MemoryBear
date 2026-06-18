@@ -1,8 +1,42 @@
 import logging
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from timeit import default_timer as timer
 
 from app.core.rag.chunk.context import ChunkContext, ChunkOutputMode, MergeResult, ParseResult
+
+
+def _append_external_parent_child_chunks(
+    child_res: list[dict],
+    parent_res: list[dict],
+    parent_id_map: dict[int, int],
+    external_chunks: list[dict],
+) -> tuple[list[dict], list[dict], dict[int, int]]:
+    for external_chunk in external_chunks:
+        child_index = len(child_res)
+        parent_index = len(parent_res)
+        content = external_chunk.get("content_with_weight", "")
+        parent_res.append({
+            "content_with_weight": content,
+            "image": external_chunk.get("image"),
+            "metadata": deepcopy(external_chunk.get("metadata", {})),
+        })
+        child_res.append(external_chunk)
+        parent_id_map[child_index] = parent_index
+    return child_res, parent_res, parent_id_map
+
+
+def _build_atomic_parent_child_chunks(chunks: list[dict]) -> tuple[list[dict], list[dict], dict[int, int]]:
+    parent_res: list[dict] = []
+    parent_id_map: dict[int, int] = {}
+    for index, chunk in enumerate(chunks):
+        parent_res.append({
+            "content_with_weight": chunk.get("content_with_weight", ""),
+            "image": chunk.get("image"),
+            "metadata": deepcopy(chunk.get("metadata", {})),
+        })
+        parent_id_map[index] = index
+    return chunks, parent_res, parent_id_map
 
 
 class ChunkPipeline(ABC):
@@ -26,9 +60,7 @@ class ChunkPipeline(ABC):
                 parse_result.append_embed,
             )
             if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
-                from app.core.rag.chunk.parent_child import build_atomic_parent_child_chunks
-
-                return build_atomic_parent_child_chunks(finalized)
+                return _build_atomic_parent_child_chunks(finalized)
             return finalized
 
         start = timer()
@@ -41,10 +73,8 @@ class ChunkPipeline(ABC):
         main_result = self.postprocessor.process(ctx, parse_result, merge_result)
         logging.info("naive_merge({}): {}".format(ctx.filename, timer() - start))
         if isinstance(main_result, tuple):
-            from app.core.rag.chunk.parent_child import append_external_parent_child_chunks
-
             child_res, parent_res, parent_id_map = main_result
-            return append_external_parent_child_chunks(child_res, parent_res, parent_id_map, embed_res + url_res)
+            return _append_external_parent_child_chunks(child_res, parent_res, parent_id_map, embed_res + url_res)
 
         finalized = self.finalize_result(main_result, embed_res, url_res)
         return finalized

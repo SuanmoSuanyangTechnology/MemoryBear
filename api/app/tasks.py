@@ -44,6 +44,7 @@ from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
+from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
@@ -562,7 +563,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "status": 1,
                         "chunk_type": "parent",
                     }
-                    parent_chunks_list.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+                    parent_chunks_list.append(
+                        DocumentChunk(
+                            page_content=item["content_with_weight"],
+                            metadata=merge_parser_metadata(meta, item),
+                        )
+                    )
 
                 child_chunks_list = []
                 for idx, item in enumerate(child_res):
@@ -580,7 +586,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "chunk_type": "child",
                         "parent_id": parent_doc_id,
                     }
-                    child_chunks_list.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+                    child_chunks_list.append(
+                        DocumentChunk(
+                            page_content=item["content_with_weight"],
+                            metadata=merge_parser_metadata(meta, item),
+                        )
+                    )
 
                 all_chunks = prioritize_vectorized_chunks(parent_chunks_list + child_chunks_list)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
@@ -662,7 +673,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "status": 1,
                         "chunk_type": "source",
                     }
-                    source_chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=source_meta))
+                    source_chunks.append(
+                        DocumentChunk(
+                            page_content=item["content_with_weight"],
+                            metadata=merge_parser_metadata(source_meta, item),
+                        )
+                    )
 
                     pairs = qa_map.get(global_idx, [])
                     for pair in pairs:
@@ -708,7 +724,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             "sort_id": global_idx,
                             "status": 1,
                         }
-                        chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+                        chunks.append(
+                            DocumentChunk(
+                                page_content=item["content_with_weight"],
+                                metadata=merge_parser_metadata(metadata, item),
+                            )
+                        )
                     all_batch_chunks.append(chunks)
 
             total_batches = len(all_batch_chunks)

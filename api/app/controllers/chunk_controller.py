@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
+from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
@@ -147,7 +148,12 @@ async def get_preview_chunks(
                 "status": 1,
                 "chunk_type": "parent",
             }
-            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+            all_preview.append(
+                DocumentChunk(
+                    page_content=item["content_with_weight"],
+                    metadata=merge_parser_metadata(meta, item),
+                )
+            )
         for idx, item in enumerate(child_res):
             parent_idx = parent_id_map.get(idx)
             meta = {
@@ -162,7 +168,12 @@ async def get_preview_chunks(
                 "chunk_type": "child",
                 "parent_id": parent_id_to_doc_id.get(parent_idx, ""),
             }
-            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+            all_preview.append(
+                DocumentChunk(
+                    page_content=item["content_with_weight"],
+                    metadata=merge_parser_metadata(meta, item),
+                )
+            )
         res = all_preview
     else:
         res = chunk(filename=db_file.file_name,
@@ -194,7 +205,12 @@ async def get_preview_chunks(
                 "sort_id": idx,
                 "status": 1,
             }
-            chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+            chunks.append(
+                DocumentChunk(
+                    page_content=item["content_with_weight"],
+                    metadata=merge_parser_metadata(metadata, item),
+                )
+            )
 
     # 8. Return structured response
     total = len(res)

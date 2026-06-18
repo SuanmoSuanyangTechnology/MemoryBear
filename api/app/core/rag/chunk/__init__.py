@@ -26,7 +26,4 @@ def chunk_pipeline(
     return pipeline.run(ctx)
 
 
-from .parent_child import chunk_parent_child_pipeline
-
-
-__all__ = ["chunk_pipeline", "chunk_parent_child_pipeline"]
+__all__ = ["chunk_pipeline"]
