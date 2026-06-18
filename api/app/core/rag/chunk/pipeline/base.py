@@ -26,9 +26,9 @@ class ChunkPipeline(ABC):
                 parse_result.append_embed,
             )
             if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
-                from app.core.rag.chunk.parent_child import build_parent_child_chunks
+                from app.core.rag.chunk.parent_child import build_atomic_parent_child_chunks
 
-                return build_parent_child_chunks(finalized, ctx.parser_config)
+                return build_atomic_parent_child_chunks(finalized)
             return finalized
 
         start = timer()
@@ -36,15 +36,17 @@ class ChunkPipeline(ABC):
         if ctx.kwargs.get("section_only", False):
             return self.finalize_result(merge_result.chunks, embed_res, parse_result.url_res or [])
 
-        main_result = self.postprocessor.process(ctx, parse_result, merge_result)
         url_res = parse_result.url_res or []
         url_res.extend(self.hyperlink_preprocessor.collect_url_chunks(ctx, parse_result.urls or set(), self.run_child))
+        main_result = self.postprocessor.process(ctx, parse_result, merge_result)
         logging.info("naive_merge({}): {}".format(ctx.filename, timer() - start))
-        finalized = self.finalize_result(main_result, embed_res, url_res)
-        if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
-            from app.core.rag.chunk.parent_child import build_parent_child_chunks
+        if isinstance(main_result, tuple):
+            from app.core.rag.chunk.parent_child import append_external_parent_child_chunks
 
-            return build_parent_child_chunks(finalized, ctx.parser_config)
+            child_res, parent_res, parent_id_map = main_result
+            return append_external_parent_child_chunks(child_res, parent_res, parent_id_map, embed_res + url_res)
+
+        finalized = self.finalize_result(main_result, embed_res, url_res)
         return finalized
 
     @abstractmethod

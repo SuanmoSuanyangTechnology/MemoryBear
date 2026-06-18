@@ -21,16 +21,34 @@ TITLE_TAGS = {"h1": "#", "h2": "##", "h3": "###", "h4": "#####", "h5": "#####", 
 
 class RAGHtmlParser:
     def __call__(self, fnm, binary=None, chunk_token_num=512):
+        txt = self.read_text(fnm, binary)
+        return self.parser_txt(txt, chunk_token_num)
+
+    def parse_blocks(self, fnm, binary=None):
+        txt = self.read_text(fnm, binary)
+        return self.parser_blocks(txt)
+
+    @staticmethod
+    def read_text(fnm, binary=None):
         if binary:
             encoding = find_codec(binary)
-            txt = binary.decode(encoding, errors="ignore")
-        else:
-            with open(fnm, "r",encoding=get_encoding(fnm)) as f:
-                txt = f.read()
-        return self.parser_txt(txt, chunk_token_num)
+            return binary.decode(encoding, errors="ignore")
+        with open(fnm, "r", encoding=get_encoding(fnm)) as f:
+            return f.read()
 
     @classmethod
     def parser_txt(cls, txt, chunk_token_num):
+        if not isinstance(txt, str):
+            raise TypeError("txt type should be string!")
+
+        block_txt_list, table_list = cls.parser_blocks(txt)
+        sections = cls.chunk_block(block_txt_list, chunk_token_num=chunk_token_num)
+        for table in table_list:
+            sections.append(table.get("content", ""))
+        return sections
+
+    @classmethod
+    def parser_blocks(cls, txt):
         if not isinstance(txt, str):
             raise TypeError("txt type should be string!")
 
@@ -51,12 +69,8 @@ class RAGHtmlParser:
         for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
             comment.extract()
 
-        cls.read_text_recursively(soup.body, temp_sections, chunk_token_num=chunk_token_num)
-        block_txt_list, table_list = cls.merge_block_text(temp_sections)
-        sections = cls.chunk_block(block_txt_list, chunk_token_num=chunk_token_num)
-        for table in table_list:
-            sections.append(table.get("content", ""))
-        return sections
+        cls.read_text_recursively(soup.body, temp_sections)
+        return cls.merge_block_text(temp_sections)
 
     @classmethod
     def split_table(cls, html_table, chunk_token_num=512):
@@ -155,7 +169,7 @@ class RAGHtmlParser:
                 if tag_name == "table":
                     table_info_list.append(item)
                 else:
-                    current_content += (" " if current_content else "" + content)
+                    current_content += (" " if current_content else "") + content
         if current_content:
             block_content.append(current_content)
         return block_content, table_info_list
@@ -194,4 +208,3 @@ class RAGHtmlParser:
             chunks.append(current_block)
 
         return chunks
-

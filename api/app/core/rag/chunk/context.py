@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
@@ -18,6 +18,21 @@ class ChunkOutputMode(str, Enum):
     NORMAL = "normal"
     QA = "qa"
     PARENT_CHILD = "parent_child"
+
+
+class LogicalChunkType(str, Enum):
+    TEXT = "text"
+    TABLE = "table"
+    IMAGE = "image"
+
+
+@dataclass
+class LogicalChunk:
+    type: LogicalChunkType
+    content: Any = ""
+    image: Any = None
+    positions: list | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -52,8 +67,13 @@ class ParseResult:
 
 @dataclass
 class MergeResult:
-    chunks: list
+    chunks: list = field(default_factory=list)
     images: list | None = None
+    logical_chunks: list[LogicalChunk] | None = None
+    parent_chunks: list[LogicalChunk] | None = None
+    child_chunks: list[LogicalChunk] | None = None
+    parent_id_map: dict[int, int] | None = None
+    pdf_parser: Any = None
 
 
 def build_chunk_doc(filename: str) -> dict:

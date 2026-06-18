@@ -19,7 +19,7 @@ class MarkdownParser(RAGMarkdownParser, DocumentParser):
             ctx.filename,
             ctx.binary,
             separate_tables=False,
-            delimiter=ctx.parser_config.get("delimiter", "\n!?;。；！？"),
+            delimiter=None,
         )
 
     def md_to_html(self, sections):

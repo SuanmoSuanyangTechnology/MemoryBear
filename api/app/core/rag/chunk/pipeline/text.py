@@ -73,9 +73,9 @@ class MarkdownChunkPipeline(ChunkPipeline):
 class HtmlChunkPipeline(ChunkPipeline):
     def parse(self, ctx: ChunkContext) -> ParseResult:
         ctx.callback(0.1, "Start to parse.")
-        sections = HtmlParser().parse(ctx)
+        sections, tables = HtmlParser().parse(ctx)
         ctx.callback(0.8, "Finish parsing.")
-        return ParseResult(sections=sections)
+        return ParseResult(sections=sections, tables=tables)
 
 
 class JsonChunkPipeline(ChunkPipeline):
