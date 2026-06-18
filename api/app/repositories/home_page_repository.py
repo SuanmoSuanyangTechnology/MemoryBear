@@ -93,7 +93,8 @@ class HomePageRepository:
         ).filter(
             App.workspace_id.in_(workspace_ids),
             App.is_active.is_(True),
-            App.status == "active"
+            App.status == "active",
+            EndUser.is_active == True,
         ).count()
 
         new_users_this_week = db.query(EndUser).join(
@@ -103,6 +104,7 @@ class HomePageRepository:
             App.workspace_id.in_(workspace_ids),
             App.is_active.is_(True),
             App.status == "active",
+            EndUser.is_active == True,
             EndUser.created_at >= week_start
         ).count()
 
@@ -186,7 +188,8 @@ class HomePageRepository:
         ).filter(
             App.workspace_id.in_(workspace_ids),
             App.is_active.is_(True),
-            App.status == "active"
+            App.status == "active",
+            EndUser.is_active == True,
         ).group_by(App.workspace_id).all()
         
         user_count_dict = {workspace_id: count for workspace_id, count in user_counts}

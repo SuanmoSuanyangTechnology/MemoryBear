@@ -225,6 +225,7 @@ class ImplicitEmotionsStorageRepository:
                 stmt = (
                     select(EndUser.id)
                     .where(
+                        EndUser.is_active == True,
                         EndUser.created_at >= today_start,
                         EndUser.created_at < tomorrow_start,
                         not_(

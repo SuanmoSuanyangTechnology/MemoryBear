@@ -34,6 +34,9 @@ export interface ApiKey {
   expires_at?: number | Dayjs;
   /** Memory engine permission flag */
   memory?: boolean;
+  /** End user name when memory is enabled */
+  user_id?: string;
+  end_user?: any[];
   /** RAG/Knowledge base permission flag */
   rag?: boolean;
 

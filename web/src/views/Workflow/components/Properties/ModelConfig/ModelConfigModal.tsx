@@ -217,7 +217,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   const [form] = Form.useForm<ModelConfigForm>();
   const [options, setOptions] = useState<Model[]>([]);
   const structuredOutputSchemaModalRef = useRef<StructuredOutputSchemaModalRef>(null);
-
+  const json_output = Form.useWatch('json_output', form)
 
   const values = Form.useWatch([], form);
 
@@ -304,6 +304,11 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   const handleSaveSchema = (schema: JsonSchema) => {
     form.setFieldValue('json_output_fields', schema)
   }
+  const handleSwitch = (checked: boolean, field: string) => {
+    if (field === 'json_output' && !checked) {
+      form.setFieldValue('structured_output', false)
+    }
+  }
 
   return (
     <>
@@ -343,7 +348,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
               const dependence = firstFieldConfigs.dependence as keyof ModelConfigForm
               const dependenceValue = (values as any)?.[dependence] as string[] | undefined
               const isHidden = field === 'structured_output'
-                ? !dependenceValue?.includes('json_output') || hideStructuredOutputConfig
+                ? !dependenceValue?.includes('json_output') || !json_output || hideStructuredOutputConfig
                 : dependence && !dependenceValue?.includes(field)
               const isThinkingOnly = values?.capability?.includes('thinking_only')
 
@@ -421,7 +426,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                           name={field}
                           noStyle
                         >
-                          <Switch />
+                          <Switch onChange={(checked) => handleSwitch(checked, field)} />
                         </FormItem>
                         <Flex align="center" gap={4}>
                           {t(`workflow.config.llm.${field}`)}

@@ -1,10 +1,12 @@
-import { type FC, useRef } from "react";
+import { type FC, useEffect, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Form, Select, Button, Space, Flex } from 'antd';
+import { Form, Select, Button, Space, Flex, Tooltip } from 'antd';
 
 import ModelConfig from '../ModelConfig'
 import MetadataFilterModal, { type MetadataFilterModalRef, type FilterCondition } from './MetadataFilterModal';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
+import { getPublicMetadataFields } from '@/api/knowledgeBase';
+import type { MetadataField } from '@/views/KnowledgeBase/types'
 
 interface MetadataFilterProps {
   options: Suggestion[];
@@ -36,10 +38,44 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
     })
   };
 
+  useEffect(() => {
+    const kb_ids = knowledge_bases?.map((kb: any) => kb.kb_id || kb.id).filter(Boolean) || [];
+    if (kb_ids.length) {
+      getPublicMetadataFields({ kb_ids })
+        .then(res => {
+          const { custom, builtin_fields } = res as { custom: MetadataField[], builtin_fields: MetadataField[] };
+          const allMetadataFields = [...custom, ...builtin_fields]
+          const conditions = metadata_filters.conditions || []
+          const filterConditions = conditions.filter((item: FilterCondition) => allMetadataFields.find(f => f.name === item.field))
+
+          form.setFieldsValue({
+            metadata_filters: {
+              conditions: filterConditions,
+              logic: metadata_filters.logic
+            }
+          })
+        })
+    } else {
+      form.setFieldsValue({
+        metadata_filters: {
+          conditions: [],
+          logic: 'and'
+        }
+      })
+    }
+  }, [knowledge_bases, metadata_filters])
+
   return (
     <>
       <Flex align="center" justify="space-between" className="rb:w-full!">
-        <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">{t('workflow.config.knowledge-retrieval.metadata')}</div>
+        <Flex align="center" gap={4} className="rb:font-medium rb:text-[12px] rb:leading-4.5">
+          {t('workflow.config.knowledge-retrieval.metadata')}
+          {currentMode === 'manual' &&
+            <Tooltip title={t('workflow.config.knowledge-retrieval.metadataTip')}>
+              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+            </Tooltip>
+          }
+        </Flex>
         <Space size={8}>
           <Form.Item
             name="metadata_filter_mode"

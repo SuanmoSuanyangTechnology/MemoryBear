@@ -34,6 +34,7 @@ from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.langchain_tool_server import Search
@@ -861,14 +862,29 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息（包含开场白）
+            used_context_engine = False
             if history is None:
-                # 没有外部传入的历史，从数据库加载
-                history = await self._load_conversation_history(
-                    conversation_id=conversation_id,
-                    max_history=10,
+                context_engine_manager = ContextEngineManager(self.db)
+                prepared_input = await context_engine_manager.prepare_app_agent_input(
+                    features=features_config,
+                    conversation_id=uuid.UUID(conversation_id),
+                    system_prompt=system_prompt,
+                    current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False)
+                    current_is_omni=api_key_config.get("is_omni", False),
+                    legacy_max_history=6,
+                    model_config_id=model_config.id,
                 )
+                if prepared_input:
+                    system_prompt, history = prepared_input
+                    used_context_engine = True
+                else:
+                    history = await self._load_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=20,
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False)
+                    )
             # 否则使用外部传入的历史（用于重新生成场景）
 
             # 6. 处理多模态文件
@@ -1028,6 +1044,15 @@ class AgentRunService:
                     provider=api_key_config.get("provider"),
                     is_omni=api_key_config.get("is_omni", False)
                 )
+                if used_context_engine and not skip_save:
+                    await context_engine_manager.after_app_turn(
+                        features=features_config,
+                        conversation_id=uuid.UUID(conversation_id),
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False),
+                        legacy_max_history=6,
+                        model_config_id=model_config.id,
+                    )
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
@@ -1257,16 +1282,29 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息
+            used_context_engine = False
             if history is None:
-                max_history = 10
-                if isinstance(memory_config, dict):
-                    max_history = memory_config.get("max_history", 10)
-                history = await self._load_conversation_history(
-                    conversation_id=conversation_id,
-                    max_history=max_history,
+                context_engine_manager = ContextEngineManager(self.db)
+                prepared_input = await context_engine_manager.prepare_app_agent_input(
+                    features=features_config,
+                    conversation_id=uuid.UUID(conversation_id),
+                    system_prompt=system_prompt,
+                    current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False)
+                    current_is_omni=api_key_config.get("is_omni", False),
+                    legacy_max_history=6,
+                    model_config_id=model_config.id,
                 )
+                if prepared_input:
+                    system_prompt, history = prepared_input
+                    used_context_engine = True
+                else:
+                    history = await self._load_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=20,
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False)
+                    )
 
             # 6. 处理多模态文件
             processed_files = None
@@ -1472,6 +1510,15 @@ class AgentRunService:
                     provider=api_key_config.get("provider"),
                     is_omni=api_key_config.get("is_omni", False)
                 )
+                if used_context_engine and not skip_save:
+                    await context_engine_manager.after_app_turn(
+                        features=features_config,
+                        conversation_id=uuid.UUID(conversation_id),
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False),
+                        legacy_max_history=6,
+                        model_config_id=model_config.id,
+                    )
 
             # 11.5 更新 Agent 执行记录为 completed
             if not sub_agent:

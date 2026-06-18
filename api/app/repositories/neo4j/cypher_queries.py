@@ -2163,21 +2163,21 @@ WHERE NOT (s)-[:REFERENCES_ENTITY]->(keeper)
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
   CREATE (s)-[:REFERENCES_ENTITY]->(keeper)
 )
-WITH keeper, loser
+WITH DISTINCT keeper, loser
 OPTIONAL MATCH (loser)-[r:EXTRACTED_RELATIONSHIP]->(target)
 WHERE target <> keeper
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
   MERGE (keeper)-[nr:EXTRACTED_RELATIONSHIP {predicate: r.predicate}]->(target)
   SET nr += properties(r)
 )
-WITH keeper, loser
+WITH DISTINCT keeper, loser
 OPTIONAL MATCH (source)-[r:EXTRACTED_RELATIONSHIP]->(loser)
 WHERE source <> keeper
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
   MERGE (source)-[nr:EXTRACTED_RELATIONSHIP {predicate: r.predicate}]->(keeper)
   SET nr += properties(r)
 )
-WITH keeper, loser
+WITH DISTINCT keeper, loser
 DETACH DELETE loser
 RETURN keeper.id AS merged_id
 """

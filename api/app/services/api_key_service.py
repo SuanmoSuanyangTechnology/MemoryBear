@@ -1,26 +1,26 @@
 """API Key Service"""
+import math
 import time
 import uuid
-import math
-from typing import Optional, Tuple
 from datetime import timedelta
+from typing import Optional, Tuple
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
 from app.aioRedis import aio_redis
-from app.models.api_key_model import ApiKey, ApiKeyType
-from app.repositories.api_key_repository import ApiKeyRepository, ApiKeyLogRepository
-from app.schemas import api_key_schema
-from app.schemas.response_schema import PageData, PageMeta
 from app.core.api_key_utils import generate_api_key
+from app.core.error_codes import BizCode
 from app.core.exceptions import (
     BusinessException,
 )
-from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
+from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
+from app.models.api_key_model import ApiKey, ApiKeyType
 from app.models.app_model import App
+from app.repositories.api_key_repository import ApiKeyRepository, ApiKeyLogRepository
+from app.schemas import api_key_schema
+from app.schemas.response_schema import PageData, PageMeta
 
 logger = get_business_logger()
 

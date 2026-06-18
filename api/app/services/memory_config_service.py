@@ -905,7 +905,7 @@ class MemoryConfigService:
             memory_dict = config.get("memory", {})
             # Support both field names: memory_config_id (new) and memory_content (legacy)
             memory_value = memory_dict.get("memory_config_id") or memory_dict.get("memory_content")
-            logger.info(
+            logger.debug(
                 f"Extracting memory_config_id: memory_value={memory_value}, "
                 f"type={type(memory_value).__name__ if memory_value else 'None'}"
             )

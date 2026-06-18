@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import redis
 from redis.exceptions import RedisError
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select, cast, String
 
 # Import a unified Celery instance
 from app.core.utils.datetime_utils import (
@@ -49,7 +50,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
 from app.db import get_db_context, get_db_read
-from app.models import App, AppRelease, Document, File, Knowledge
+from app.models import App, AppRelease, Document, File, Knowledge, User
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
@@ -2309,6 +2310,12 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                             )
                             dispatched += 1
                             dispatched_user_ids.append(uid)
+                            # 每派发 10 个用户打印一次进度
+                            if dispatched % 10 == 0:
+                                logger.info(
+                                    f"scan_layer2_reflection 进度: 已派发 {dispatched} 个用户, "
+                                    f"最近10个: {dispatched_user_ids[-10:]}"
+                                )
                         except Exception as e:
                             logger.error(f"高频反思scan 处理用户失败 user={uid}: {e}")
                             try:
@@ -2353,66 +2360,66 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         from app.services.memory_reflection_service import WorkspaceAppService
         from app.core.memory.memory_service import MemoryService
 
-        with get_db_context() as db:
+        # 步骤1 执行前再判一次是否真的要反思：
+        #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
+        #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
+        with get_db_read() as db:
             ws_svc = WorkspaceAppService(db)
-
-            # 步骤1 执行前再判一次是否真的要反思：
-            #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
-            #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
             rt = ws_svc.get_end_user_reflection_time(user_id)
             if not _should_reflect_now(db, user_id, rt, iteration_period):
                 return {"status": "skipped_idempotent"}
 
-            # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
-            #   保证同一用户的图谱不被并发修改。抢不到（超时30s）就本次放弃。
-            write_lock = None
-            redis_client = get_sync_redis_client()
-            if redis_client is not None:
-                write_lock = RedisFairLock(
-                    key=f"memory_write:{user_id}",
-                    redis_client=redis_client,
-                    expire=600, timeout=30, auto_renewal=True,
-                )
-                if not await asyncio.to_thread(write_lock.acquire):
-                    logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
-                    return {"status": "lock_timeout"}
-            try:
-                # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
-                #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
-                #   期间已完成同一用户的反思并刷新了 reflection_time。expire_all 先清掉
-                #   本 session 在步骤1 缓存的旧值，强制重读，确保读到最新 reflection_time，
-                #   不满足则放弃，避免同一批数据被反思两次。
-                db.expire_all()
+        # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
+        #   保证同一用户的图谱不被并发修改。抢不到（超时30s）就本次放弃。
+        write_lock = None
+        redis_client = get_sync_redis_client()
+        if redis_client is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{user_id}",
+                redis_client=redis_client,
+                expire=600, timeout=30, auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
+                return {"status": "lock_timeout"}
+        try:
+            # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
+            #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
+            #   期间已完成同一用户的反思并刷新了 reflection_time，
+            #   不满足则放弃，避免同一批数据被反思两次。
+            with get_db_read() as db:
+                ws_svc = WorkspaceAppService(db)
                 rt_recheck = ws_svc.get_end_user_reflection_time(user_id)
                 if not _should_reflect_now(db, user_id, rt_recheck, iteration_period):
                     logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={user_id}")
                     return {"status": "skipped_idempotent"}
 
-                # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
-                memory_service = MemoryService(
-                    db=db, config_id=config_id,
-                    end_user_id=user_id, workspace_id=workspace_id,
-                )
-                r = await memory_service.run_reflection_layer2(baseline=baseline)
+            # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
+            memory_service = MemoryService(
+                config_id=config_id,
+                end_user_id=user_id, workspace_id=workspace_id,
+            )
+            r = await memory_service.run_reflection_layer2(baseline=baseline)
 
-                # 步骤4 成功后把"上次反思时间"刷新为当前，供下次周期/增量判断
-                ws_svc.update_end_user_reflection_time(user_id)
+            # 步骤4 成功后把"上次反思时间"刷新为当前，供下次周期/增量判断
+            with get_db_context() as db:
+                WorkspaceAppService(db).update_end_user_reflection_time(user_id)
 
-                dedup_info = r.get("entity_dedup", {})
-                merge_info = r.get("description_merge", {})
-                logger.info(
-                    f"反思高频do 完成 user={user_id} status=success "
-                    f"去重合并={dedup_info.get('merged_count', 0)} "
-                    f"描述合并={merge_info.get('merged_count', 0)} "
-                    f"耗时={time.time() - start_time:.1f}s"
-                )
-                return {"status": "success",
-                        "dedup_merged": dedup_info.get("merged_count", 0),
-                        "desc_merged": merge_info.get("merged_count", 0)}
-            finally:
-                # 步骤5 释放写锁（无论成功失败）
-                if write_lock is not None:
-                    await asyncio.to_thread(write_lock.release)
+            dedup_info = r.get("entity_dedup", {})
+            merge_info = r.get("description_merge", {})
+            logger.info(
+                f"反思高频do 完成 user={user_id} status=success "
+                f"去重合并={dedup_info.get('merged_count', 0)} "
+                f"描述合并={merge_info.get('merged_count', 0)} "
+                f"耗时={time.time() - start_time:.1f}s"
+            )
+            return {"status": "success",
+                    "dedup_merged": dedup_info.get("merged_count", 0),
+                    "desc_merged": merge_info.get("merged_count", 0)}
+        finally:
+            # 步骤5 释放写锁（无论成功失败）
+            if write_lock is not None:
+                await asyncio.to_thread(write_lock.release)
 
     loop = set_asyncio_event_loop()
     try:
@@ -2468,6 +2475,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                     if not config.get('enable_self_reflexion'):       # 未启用反思的配置跳过
                         continue
                     config_id = config['config_id']
+                    baseline = config.get('baseline', 'HYBRID')
                     for user in app_detail['end_users']:
                         uid = str(user['id'])
                         try:
@@ -2488,6 +2496,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                                     "user_id": uid,
                                     "config_id": str(config_id),
                                     "workspace_id": ws_id,
+                                    "baseline": baseline,
                                 },
                                 queue="reflection_tasks",
                             )
@@ -2520,7 +2529,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     soft_time_limit=540,
 )
 def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
-                              workspace_id: str) -> Dict[str, Any]:
+                              workspace_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
     """对【单个用户】执行一次低频全量去重扫描。
 
     由 scan_layer2_dedup_full_scan 派发。精确的增量判断在 run_dedup_full_scan 内部
@@ -2533,36 +2542,35 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
     async def _run() -> Dict[str, Any]:
         from app.core.memory.memory_service import MemoryService
 
-        with get_db_context() as db:
-            # 抢该用户写锁：与反思 do、写入 pipeline 互斥。
-            # 去重低频、半夜跑，给更长抢锁等待（120s），避免被高频反思挤掉；抢不到本次放弃。
-            write_lock = None
-            redis_client = get_sync_redis_client()
-            if redis_client is not None:
-                write_lock = RedisFairLock(
-                    key=f"memory_write:{user_id}",
-                    redis_client=redis_client,
-                    expire=600, timeout=120, auto_renewal=True,
-                )
-                if not await asyncio.to_thread(write_lock.acquire):
-                    logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
-                    return {"status": "lock_timeout"}
-            try:
-                memory_service = MemoryService(
-                    db=db, config_id=config_id,
-                    end_user_id=user_id, workspace_id=workspace_id,
-                )
-                r = await memory_service.run_dedup_full_scan()
-                merged = r.get("merged_count", 0)
-                logger.info(
-                    f"反思低频去重do 完成 user={user_id} status=success "
-                    f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
-                    f"耗时={time.time() - start_time:.1f}s"
-                )
-                return {"status": "success", "merged_count": merged}
-            finally:
-                if write_lock is not None:
-                    await asyncio.to_thread(write_lock.release)
+        # 抢该用户写锁：与反思 do、写入 pipeline 互斥。
+        # 去重低频、半夜跑，给更长抢锁等待（120s），避免被高频反思挤掉；抢不到本次放弃。
+        write_lock = None
+        redis_client = get_sync_redis_client()
+        if redis_client is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{user_id}",
+                redis_client=redis_client,
+                expire=600, timeout=120, auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
+                return {"status": "lock_timeout"}
+        try:
+            memory_service = MemoryService(
+                config_id=config_id,
+                end_user_id=user_id, workspace_id=workspace_id,
+            )
+            r = await memory_service.run_dedup_full_scan(baseline=baseline)
+            merged = r.get("merged_count", 0)
+            logger.info(
+                f"反思低频去重do 完成 user={user_id} status=success "
+                f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
+                f"耗时={time.time() - start_time:.1f}s"
+            )
+            return {"status": "success", "merged_count": merged}
+        finally:
+            if write_lock is not None:
+                await asyncio.to_thread(write_lock.release)
 
     loop = set_asyncio_event_loop()
     try:
@@ -2645,7 +2653,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
-        from app.models.end_user_model import EndUser
+        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import write_memory_increment
         from app.services.memory_storage_service import search_all_batch
 
@@ -2676,13 +2684,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     }
 
                 # 2. 查询所有app下的end_user_id（去重）
-                # app_ids = [app.id for app in apps]
-                end_users = db.query(EndUser.id).filter(
-                    EndUser.workspace_id == workspace_id
-                ).distinct().all()
+                end_user_repo = EndUserRepository(db)
+                end_users = end_user_repo.get_end_users_by_workspace(workspace_uuid)
+                end_user_id_list = [str(eu.id) for eu in end_users]
 
                 # 3. 批量查询所有宿主的记忆总量
-                end_user_id_list = [str(eid) for (eid,) in end_users]
                 batch_result = await search_all_batch(end_user_id_list)
 
                 total_num = sum(batch_result.values())
@@ -2749,8 +2755,8 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
-        from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
+        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import write_memory_increment
         from app.services.memory_storage_service import search_all_batch
 
@@ -2805,13 +2811,10 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             continue
 
                         # 2. 查询所有app下的end_user_id（去重）
-                        # app_ids = [app.id for app in apps]
-                        end_users = db.query(EndUser.id).filter(
-                            EndUser.workspace_id == workspace_id
-                        ).distinct().all()
+                        end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
+                        end_user_id_list = [str(eu.id) for eu in end_users]
 
                         # 3. 批量查询所有宿主的记忆总量
-                        end_user_id_list = [str(eid) for (eid,) in end_users]
                         batch_result = await search_all_batch(end_user_id_list)
 
                         total_num = sum(batch_result.values())
@@ -3233,8 +3236,9 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
     start_time = time.time()
 
     async def _process_users() -> Dict[str, Any]:
+        from app.repositories.end_user_repository import EndUserRepository
         with get_db_context() as db:
-            end_users = db.query(EndUser).all()
+            end_users = EndUserRepository(db).get_all_active()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
                 return {"status": "SUCCESS", "message": "没有终端用户",
@@ -3273,7 +3277,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
             duration = time.time() - start_time
             logger.info(f"遗忘周期完成: {processed_users}/{len(end_users)} 用户, "
-                       f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
+                        f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
 
             return {
                 "status": "SUCCESS",
@@ -4672,3 +4676,47 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
                 exc_info=True,
             )
             raise
+
+
+@celery_app.task(name="app.tasks.draft_data_clean", queue="memory_tasks")
+def draft_data_clean():
+    import asyncio
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    with get_db_context() as db:
+        stmt = select(EndUser.id).join(
+            User,
+            cast(User.id, String) == EndUser.other_id
+        ).where(
+            EndUser.is_active == True
+        )
+        result = db.execute(stmt)
+        end_user_ids = [str(eid) for eid in result.scalars()]
+
+        if not end_user_ids:
+            logger.info("draft_data_clean: 没有需要清理的终端用户")
+            return {"deleted_count": 0}
+
+        updated = (
+            db.query(EndUser)
+            .filter(EndUser.id.in_(end_user_ids))
+            .update({"is_active": False}, synchronize_session=False)
+        )
+        db.commit()
+        logger.info(f"draft_data_clean: 软删除 {updated} 个终端用户")
+
+    async def _delete_neo4j_groups():
+        async with Neo4jConnector() as connector:
+            deleted = 0
+            for eid in end_user_ids:
+                try:
+                    await connector.delete_group(eid)
+                    deleted += 1
+                except Exception as e:
+                    logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
+        return deleted
+
+    neo4j_deleted = asyncio.run(_delete_neo4j_groups())
+    logger.info(f"draft_data_clean: Neo4j 删除 {neo4j_deleted} 组节点")
+
+    return {"pg_deleted": updated, "neo4j_deleted": neo4j_deleted}

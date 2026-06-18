@@ -1,12 +1,11 @@
-import datetime
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class EndUser(Base):
@@ -34,6 +33,7 @@ class EndUser(Base):
     other_id = Column(String, nullable=True)  # Store original user_id
     other_name = Column(String, default="", nullable=False)
     other_address = Column(String, default="", nullable=False)
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False, comment="是否有效，False 表示已删除")
     reflection_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
