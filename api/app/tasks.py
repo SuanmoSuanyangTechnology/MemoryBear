@@ -44,6 +44,7 @@ from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
+from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
@@ -474,7 +475,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         def progress_callback(prog=None, msg=None):
             progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
 
-        from app.core.rag.app.naive import chunk_v2 as chunk
+        from app.core.rag.chunk import chunk_pipeline as chunk
+        from app.core.rag.chunk.context import ChunkOutputMode
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
         if _should_abort(document_id):
@@ -484,8 +486,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         parent_child_mode = document_info["parent_child_mode"]
         if parent_child_mode:
-            from app.core.rag.app.naive import chunk_parent_child_v2 as chunk_parent_child
-            child_res, parent_res, parent_id_map = chunk_parent_child(
+            child_res, parent_res, parent_id_map = chunk(
                 filename=file_name,
                 binary=file_binary,
                 from_page=0,
@@ -494,6 +495,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
             )
         else:
             res = chunk(
@@ -520,7 +522,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
             return f"parse document '{document_label}' aborted (deleted or cancelled)."
 
-        total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
+        total_chunks = len(child_res) if parent_child_mode else len(res)
         progress_lines.append(f"{_progress_ts()} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
@@ -561,7 +563,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "status": 1,
                         "chunk_type": "parent",
                     }
-                    parent_chunks_list.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+                    parent_chunks_list.append(
+                        DocumentChunk(
+                            page_content=item["content_with_weight"],
+                            metadata=merge_parser_metadata(meta, item),
+                        )
+                    )
 
                 child_chunks_list = []
                 for idx, item in enumerate(child_res):
@@ -579,7 +586,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "chunk_type": "child",
                         "parent_id": parent_doc_id,
                     }
-                    child_chunks_list.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+                    child_chunks_list.append(
+                        DocumentChunk(
+                            page_content=item["content_with_weight"],
+                            metadata=merge_parser_metadata(meta, item),
+                        )
+                    )
 
                 all_chunks = prioritize_vectorized_chunks(parent_chunks_list + child_chunks_list)
                 for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
@@ -661,7 +673,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         "status": 1,
                         "chunk_type": "source",
                     }
-                    source_chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=source_meta))
+                    source_chunks.append(
+                        DocumentChunk(
+                            page_content=item["content_with_weight"],
+                            metadata=merge_parser_metadata(source_meta, item),
+                        )
+                    )
 
                     pairs = qa_map.get(global_idx, [])
                     for pair in pairs:
@@ -707,7 +724,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                             "sort_id": global_idx,
                             "status": 1,
                         }
-                        chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+                        chunks.append(
+                            DocumentChunk(
+                                page_content=item["content_with_weight"],
+                                metadata=merge_parser_metadata(metadata, item),
+                            )
+                        )
                     all_batch_chunks.append(chunks)
 
             total_batches = len(all_batch_chunks)

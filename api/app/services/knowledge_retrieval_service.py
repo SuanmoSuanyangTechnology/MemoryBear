@@ -641,7 +641,7 @@ class KnowledgeRetrievalService:
             result = []
             for item in reranked_docs[:top_k]:
                 for doc in docs:
-                    if doc.page_content == item.page_content:
+                    if doc.metadata['doc_id'] == item.metadata['doc_id']:
                         doc.metadata["score"] = item.metadata["relevance_score"]
                         result.append(doc)
             return result

@@ -1,10 +1,21 @@
 import datetime
 import uuid
+from typing import Any
 from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey, Float
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+
+
+def _parse_bool_config(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y", "on"}
+    return bool(value)
 
 
 class Document(Base):
@@ -58,10 +69,14 @@ class Document(Base):
     updated_at = Column(DateTime, default=utcnow_naive)
 
     @property
+    def parent_child_mode(self) -> bool:
+        """Return whether the document uses parent-child chunk mode."""
+        parser_config = self.parser_config or {}
+        if "parent_child_mode" in parser_config:
+            return _parse_bool_config(parser_config.get("parent_child_mode"))
+        return parser_config.get("parent_chunk_mode", None) in ["paragraph", "full-doc"]
+
+    @property
     def is_parent_child_mode(self) -> bool:
-        """获取文档是否使用父子分块模式"""
-        # parent_child_mode 显式存在时，以它的值为准
-        if "parent_child_mode" in self.parser_config:
-            return self.parser_config["parent_child_mode"]
-        # 不存在时，fallback 到 parent_chunk_mode 判断
-        return self.parser_config.get("parent_chunk_mode", None) in ["paragraph", "full-doc"]
+        """Return whether the document uses parent-child chunk mode."""
+        return self.parent_child_mode

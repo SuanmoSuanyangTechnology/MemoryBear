@@ -39,6 +39,7 @@ class DocumentUpdate(BaseModel):
 
 class Document(DocumentBase):
     id: uuid.UUID
+    parent_child_mode: bool = False
     chunk_num: int
     progress: float
     progress_msg: str
