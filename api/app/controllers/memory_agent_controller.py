@@ -123,6 +123,7 @@ async def download_log(
             return fail(BizCode.INTERNAL_ERROR, "启动日志流式传输失败", str(e))
 
 
+# [DEPRECATED] 下一版本移除：/writer_service 同步写入端点将改为统一走 dispatcher → push_task 异步路径
 @router.post("/writer_service", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def write_server(
@@ -251,9 +252,9 @@ async def write_server_async(
     try:
         # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
         if storage_type and storage_type.lower() == StorageType.RAG.value:
-            from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
+            from app.core.memory.memory_service import MemoryService
             messages_list = memory_agent_service.get_messages_list(user_input)
-            await write_messages_to_rag(
+            await MemoryService.write_messages_to_rag(
                 messages=messages_list,
                 end_user_id=user_input.end_user_id,
                 user_rag_memory_id=user_rag_memory_id,
@@ -261,62 +262,22 @@ async def write_server_async(
             api_logger.info(f"RAG write completed for end_user={user_input.end_user_id}")
             return success(data={}, msg="RAG 写入完成")
 
-        # ── Neo4j 路径：写入 memory_messages 表 → 逐条派发单消息任务 ──
-        from app.core.memory.sliding_window.window_utils import (
-            get_or_create_service_api_conversation,
-            write_batch_to_memory_messages,
-            advance_write_cursor,
-        )
+        # ── Neo4j 路径：通过 dispatcher 写入 ──
+        from app.core.memory.memory_service import MemoryService as _MemoryService
 
         workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
-
-        # 1. 获取/创建哨兵 App 对应的虚拟 conversation
-        conversation_id = get_or_create_service_api_conversation(
-            workspace_id=workspace_id_str,
-            end_user_id=user_input.end_user_id,
-        )
-        api_logger.info(f"Service API conversation: conv={conversation_id}, end_user={user_input.end_user_id}")
-
-        # 2. 获取标准化消息列表并批量写入 memory_messages 表
         messages_list = memory_agent_service.get_messages_list(user_input)
-        written_mms = write_batch_to_memory_messages(
-            conversation_id=conversation_id,
+
+        task_ids = await _MemoryService.dispatch_api_service_async(
             messages=messages_list,
+            end_user_id=user_input.end_user_id,
+            config_id=config_id,
+            workspace_id=workspace_id_str,
+            language=language,
         )
-
-        if not written_mms:
-            api_logger.info("No valid messages to write")
-            return success(data={"task_ids": []}, msg="无有效消息")
-
-        # 3. 逐条派发单消息任务（user 消息才派发，其他角色只推进 cursor）
-        task_ids = []
-        for mm in written_mms:
-            if mm["role"] != "user":
-                await advance_write_cursor(conversation_id, mm["message_seq"])
-                continue
-
-            from app.celery_task_scheduler import scheduler as celery_scheduler
-
-            msg_id = celery_scheduler.push_task(
-                "app.core.memory.agent.write_message",
-                user_input.end_user_id,
-                {
-                    "end_user_id": user_input.end_user_id,
-                    "mode": "api_write",
-                    "target_seq": mm["message_seq"],
-                    "config_id": config_id,
-                    "storage_type": storage_type,
-                    "conversation_id": conversation_id,
-                    "language": language,
-                },
-            )
-            task_ids.append(msg_id)
-            # 提前推进 cursor，防止重复派发（target_seq 直查模式保证重试安全）
-            await advance_write_cursor(conversation_id, mm["message_seq"])
 
         api_logger.info(
-            f"Write tasks queued: {len(task_ids)} tasks for "
-            f"{len(written_mms)} messages, conv={conversation_id}"
+            f"Write tasks queued: {len(task_ids)} tasks, end_user={user_input.end_user_id}"
         )
 
         return success(data={"task_ids": task_ids}, msg=f"已提交 {len(task_ids)} 个写入任务")

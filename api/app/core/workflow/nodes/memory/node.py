@@ -137,38 +137,16 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        from app.core.memory.sliding_window.window_utils import (
-            write_batch_to_memory_messages,
-            ensure_conversation_exists,
-            dispatch_to_scheduler,
-        )
-        from app.core.memory.storage_services.extraction_engine.message_ingestion import refresh_active_key
+        from app.core.memory.memory_service import MemoryService
 
         conversation_id = variable_pool.get_value("sys.conversation_id") or ""
         workspace_id = str(state.get("workspace_id", "") or "")
 
-        # 确保 conversations 表存在该记录（FK 约束）
-        await ensure_conversation_exists(
-            conversation_id=conversation_id,
-            workspace_id=workspace_id,
-        )
-
-        # 批量写入 memory_messages 表（内部自动 mark_conversation_pending）
-        write_batch_to_memory_messages(
-            conversation_id=conversation_id,
+        await MemoryService.ingest_workflow_messages(
             messages=messages,
-        )
-
-        # 刷新活跃 key（SETEX conv_active:{id} 300），供 Flush Beat 判断空闲
-        await refresh_active_key(conversation_id)
-
-        # 分派 SlidingWindowScheduler：检查下文条件 → 满足后逐条派发 target_seq 任务
-        # 未满足下文条件（< 3 条 memorable user Q）则等待更多消息
-        # 对话空闲 >5min 后由 Flush Beat 兜底
-        await dispatch_to_scheduler(
             conversation_id=conversation_id,
-            config_id=str(self.typed_config.config_id),
             end_user_id=end_user_id,
+            config_id=str(self.typed_config.config_id),
             workspace_id=workspace_id,
             language="zh",
         )

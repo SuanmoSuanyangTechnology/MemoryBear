@@ -242,9 +242,8 @@ beat_schedule_config = {
     #     "options": {"queue": "periodic_tasks"},
     # },
     # FIXME: Infinite task accumulation
-    "flush-idle-conversations": {
+    "flush-conversation": {
         # 每分钟扫描空闲对话并派发兜底写入
-        # 不传 conversation_id → flush_conversation_task 进入扫描模式
         "task": "app.tasks.flush_conversation",
         "schedule": 60.0,
         "options": {"queue": "periodic_tasks"},

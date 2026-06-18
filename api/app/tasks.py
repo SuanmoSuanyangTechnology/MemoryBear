@@ -54,7 +54,6 @@ from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
-from app.schemas.memory_agent_schema import StorageType
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
 from app.services.memory_forget_service import MemoryForgetService
 from app.utils.config_utils import resolve_config_id
@@ -1751,124 +1750,104 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 def write_message_task(
         self,
         end_user_id: str,
-        mode: str = "api_write",
-        # 公共参数
+        target_message: Optional[dict] = None,
+        context_before: Optional[List[dict]] = None,
+        context_after: Optional[List[dict]] = None,
         config_id: str | int = "",
-        language: str = "zh",
         workspace_id: str = "",
-        # sliding_window / flush 模式专用
         conversation_id: str = "",
-        target_seq: Optional[int] = None,
-        # api_write 模式专用
+        message_seq: int = 0,
+        language: str = "zh",
+        skip_cursor_advance: bool = False,
+        # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
         messages: Optional[List[dict]] = None,
         storage_type: str = "neo4j",
         user_rag_memory_id: str = "",
-        # 单消息写入模式（仅处理 messages[target_index] 这条 user 消息）
-        target_index: int = -1,
-        # 兼容旧调用方（message 参数名）
-        message: Optional[List[dict]] = None,
 ) -> Dict[str, Any]:
-    """统一写入任务 — 根据 mode 路由到不同写入路径。
-
-    Modes:
-        sliding_window: 实时滑动窗口写入，处理 target_seq 指定的单条 user message。
-                       由 SlidingWindowScheduler 满足下文条件时派发。
-        flush:         兜底写入，处理 target_seq 指定的单条消息（user / assistant 均可）。
-                       由 flush_conversation_task 扫描空闲对话后逐条派发，
-                       每条携带 target_seq + 派发时立即原子推进 write_cursor，
-                       复用 target_seq 直查模式确保重试安全。
-        api_write:     API Service 写入，处理 target_seq 指定的单条消息。
-                       由 Controller 先写入 memory_messages 表后逐条派发，
-                       每条携带 target_seq + conversation_id，
-                       内部走 execute_pending_from_pool(target_seq) 从候选池消费。
-        mcp_write:     MCP 工具写入，不经过 memory_messages 表，
-                       直接从内存写入 Neo4j（单条消息，无需候选池缓存）。
+    """统一写入任务 — 纯净入口，接收完整参数直接写入。
 
     Args:
-        end_user_id: 终端用户 ID（分片键，保证 per-user 串行）
-        mode: 写入模式 ("sliding_window" | "flush" | "api_write")
-        config_id: 记忆配置 ID（UUID string 或 int）
-        language: 语言 ("zh" | "en")
+        end_user_id: 终端用户 ID（分片键）
+        target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+        context_before: 上文消息列表
+        context_after: 下文消息列表
+        config_id: 记忆配置 ID
         workspace_id: 工作空间 ID
-        conversation_id: 对话 ID（sliding_window / flush / api_write）
-        target_seq: 目标消息 seq（所有模式共用）
-        messages: 消息列表（api_write RAG 模式，保留兼容）
-        storage_type: 存储类型（api_write 模式）
-        user_rag_memory_id: RAG 记忆 ID（api_write 模式）
-        target_index: [DEPRECATED] 保留兼容，api_write 已改用 target_seq
-        message: 兼容旧调用方的 messages 别名（优先使用 messages）
+        conversation_id: 对话 ID
+        message_seq: 消息序号
+        language: 语言
+        skip_cursor_advance: 是否跳过 cursor 推进（MCP 等直接写入路径）
+        messages: MCP 入口兼容字段，单条消息列表 [{"role", "content", "dialog_at"}]
+        storage_type: MCP 入口兼容字段，存储类型（neo4j / rag）
+        user_rag_memory_id: MCP 入口兼容字段，RAG 记忆 ID
 
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
-    # 兼容旧调用方：message → messages # NOTE：除开memory_mcp之外，还有哪些调用方会使用write_message_task
-    if messages is None and message is not None:
-        messages = message
 
-    # 兼容旧调用方：无 mode 参数时根据参数组合推断
-    if mode == "api_write" and not messages and conversation_id:
-        # 旧的候选池消费模式调用（message=[], conversation_id=有）
-        if target_seq is not None:
-            mode = "sliding_window"
-        else:
-            mode = "flush"
+    # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
+    if target_message is None and messages:
+        msg = messages[0] if messages else {"role": "user", "content": ""}
+        target_message = msg
+        context_before = []
+        context_after = []
+        skip_cursor_advance = True
 
+        # RAG 存储类型走独立路径
+        if storage_type and storage_type.lower() == "rag":
+            loop = None
+            try:
+                loop = set_asyncio_event_loop()
+
+                async def _rag_write():
+                    from app.core.memory.memory_service import MemoryService
+                    await MemoryService.write_messages_to_rag(
+                        messages=messages,
+                        end_user_id=end_user_id,
+                        user_rag_memory_id=user_rag_memory_id,
+                    )
+
+                loop.run_until_complete(_rag_write())
+                return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
+            except Exception as e:
+                logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
+                return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
+            finally:
+                if loop:
+                    _shutdown_loop_gracefully(loop)
+
+    # 新格式：直接调用 MemoryService.write()
     logger.info(
-        f"[CELERY WRITE] Starting - mode={mode}, end_user_id={end_user_id}, "
-        f"config_id={config_id}, language={language}, "
-        f"conversation_id={conversation_id or '-'}, "
-        f"target_seq={target_seq}, workspace_id={workspace_id or '-'}")
+        f"[CELERY WRITE] Starting - end_user_id={end_user_id}, "
+        f"config_id={config_id}, conv={conversation_id or '-'}, "
+        f"seq={message_seq}, language={language}"
+    )
     start_time = time.time()
 
-    # ── 解析 config_id ──
+    # 解析 config_id
     actual_config_id = _resolve_write_config_id(config_id, end_user_id, self.request.id)
 
-    # ── 构建异步执行函数 ──
     async def _run() -> dict:
-        if mode == "sliding_window":
-            return await _run_sliding_window(
-                conversation_id=conversation_id,
-                end_user_id=end_user_id,
-                config_id=str(actual_config_id) if actual_config_id else "",
-                workspace_id=workspace_id,
-                language=language,
-                target_seq=target_seq,
-            )
-        elif mode == "flush":
-            return await _run_flush(
-                conversation_id=conversation_id,
-                end_user_id=end_user_id,
-                config_id=str(actual_config_id) if actual_config_id else "",
-                workspace_id=workspace_id,
-                language=language,
-                target_seq=target_seq,
-            )
-        elif mode == "api_write":
-            return await _run_api_write(
-                end_user_id=end_user_id,
-                messages=messages or [],
-                config_id=actual_config_id,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                language=language,
-                workspace_id=workspace_id,
-                target_seq=target_seq,
-                conversation_id=conversation_id,
-            )
-        elif mode == "mcp_write":
-            return await _run_mcp_write(
-                end_user_id=end_user_id,
-                messages=messages or [],
-                config_id=actual_config_id,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                language=language,
-                workspace_id=workspace_id,
-            )
-        else:
-            raise ValueError(f"Unknown write mode: {mode}")
+        from app.core.memory.memory_service import MemoryService
 
-    # ── 执行写入（锁已下沉到 WritePipeline._acquire_store_lock） ──
+        service = MemoryService(
+            config_id=str(actual_config_id) if actual_config_id else None,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+        result = await service.write(
+            target_message=target_message or {"role": "user", "content": ""},
+            context_before=context_before or [],
+            context_after=context_after or [],
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            language=language,
+            skip_cursor_advance=skip_cursor_advance,
+        )
+        return {"status": result.status, "extraction": result.extraction}
+
     loop = None
     try:
         task_start_time = int(time.time())
@@ -1877,8 +1856,7 @@ def write_message_task(
         result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
 
-        logger.info(f"[CELERY WRITE] Task completed - mode={mode}, "
-                    f"elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
+        logger.info(f"[CELERY WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
 
         # 记录最近一次写入完成时间戳
         redis_client = get_sync_redis_client()
@@ -1908,8 +1886,7 @@ def write_message_task(
 
         try:
             safe_result = jsonable_encoder(result)
-        except Exception as _enc_e:
-            logger.warning(f"[CELERY WRITE] jsonable_encoder 失败: {_enc_e}")
+        except Exception:
             safe_result = str(result)
 
         return {
@@ -1920,7 +1897,6 @@ def write_message_task(
             "config_id": str(config_id) if config_id else None,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id,
-            "mode": mode,
         }
     except BaseException as e:
         elapsed_time = time.time() - start_time
@@ -1930,8 +1906,7 @@ def write_message_task(
         else:
             detailed_error = str(e)
 
-        logger.error(f"[CELERY WRITE] Task failed - mode={mode}, "
-                     f"elapsed_time={elapsed_time:.2f}s, error={detailed_error}", exc_info=True)
+        logger.error(f"[CELERY WRITE] Task failed - elapsed_time={elapsed_time:.2f}s, error={detailed_error}", exc_info=True)
 
         return {
             "status": "FAILURE",
@@ -1940,7 +1915,6 @@ def write_message_task(
             "config_id": str(config_id) if config_id else None,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id,
-            "mode": mode,
         }
     finally:
         if loop:
@@ -1948,7 +1922,7 @@ def write_message_task(
 
 
 # ──────────────────────────────────────────────
-# write_message_task 内部路由实现
+# write_message_task 内部辅助
 # ──────────────────────────────────────────────
 
 
@@ -1974,138 +1948,6 @@ def _resolve_write_config_id(config_id, end_user_id: str, request_id: str):
             pass
 
     return actual_config_id
-
-
-async def _run_sliding_window(
-    conversation_id: str,
-    end_user_id: str,
-    config_id: str,
-    workspace_id: str,
-    language: str,
-    target_seq: Optional[int],
-) -> dict:
-    """实时滑动窗口：处理 target_seq 指定的单条 user message。"""
-    from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
-
-    processed = await execute_pending_from_pool(
-        conversation_id=conversation_id,
-        end_user_id=end_user_id,
-        config_id=config_id,
-        workspace_id=workspace_id,
-        language=language,
-        enforce_window=True,
-        target_seq=target_seq,
-    )
-    return {"status": "success", "mode": "sliding_window", "processed": processed}
-
-
-async def _run_flush(
-    conversation_id: str,
-    end_user_id: str,
-    config_id: str,
-    workspace_id: str,
-    language: str,
-    target_seq: Optional[int] = None,
-) -> dict:
-    """兜底写入：处理 target_seq 指定的单条消息。
-
-    逐条派发模式：每条 pending 消息独立派发一个 task（携带 target_seq），
-    由 _flush_single_conversation 提前推进 cursor + push_task。
-
-    - target_seq 非空 → 直查模式，只处理这一条消息（user / assistant 均可）
-    - enforce_window=False → 兜底路径不要求下文凑齐 3 条
-    """
-    from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
-
-    processed = await execute_pending_from_pool(
-        conversation_id=conversation_id,
-        end_user_id=end_user_id,
-        config_id=config_id,
-        workspace_id=workspace_id,
-        language=language,
-        enforce_window=False,
-        target_seq=target_seq,
-    )
-    return {"status": "success", "mode": "flush", "processed": processed}
-
-
-async def _run_api_write(
-    end_user_id: str,
-    messages: List[dict],
-    config_id,
-    storage_type: str,
-    user_rag_memory_id: str,
-    language: str,
-    workspace_id: str = "",
-    target_seq: Optional[int] = None,
-    conversation_id: str = "",
-) -> dict:
-    """API Service 写入：处理 target_seq 指定的单条消息。
-
-    - RAG: 沿用 write_rag 直接写入（不支持 target_seq 单消息模式）
-    - Neo4j: 走 execute_pending_from_pool(target_seq=...) 从 memory_messages 表直查消费
-    """
-    if storage_type and storage_type.lower() == StorageType.RAG.value:
-        from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
-        await write_messages_to_rag(
-            messages=messages,
-            end_user_id=end_user_id,
-            user_rag_memory_id=user_rag_memory_id,
-        )
-        logger.info(f"[CELERY WRITE] api_write (RAG) completed for end_user={end_user_id}")
-        return {"status": "success", "mode": "api_write", "storage_type": "rag"}
-
-    # Neo4j 候选池消费路径：直查 target_seq → run_with_window()
-    from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
-
-    processed = await execute_pending_from_pool(
-        conversation_id=conversation_id,
-        end_user_id=end_user_id,
-        config_id=str(config_id) if config_id else "",
-        workspace_id=workspace_id,
-        language=language,
-        enforce_window=False,
-        target_seq=target_seq,
-    )
-    logger.info(f"[CELERY WRITE] api_write (single) completed: processed={processed}")
-    return {"status": "success", "mode": "api_write", "storage_type": "neo4j", "processed": processed}
-
-
-async def _run_mcp_write(
-    end_user_id: str,
-    messages: List[dict],
-    config_id,
-    storage_type: str,
-    user_rag_memory_id: str,
-    language: str,
-    workspace_id: str = "",
-) -> dict:
-    """MCP 写入：不经过 memory_messages 表，直接从内存逐条写入 Neo4j。
-
-    MCP 工具单次只发一条消息，不需要候选池缓存和滑动窗口机制。
-    复用 direct_writer 的直接写入路径（含上下文窗口构建）。
-    """
-    if storage_type and storage_type.lower() == StorageType.RAG.value:
-        from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
-        await write_messages_to_rag(
-            messages=messages,
-            end_user_id=end_user_id,
-            user_rag_memory_id=user_rag_memory_id,
-        )
-        logger.info(f"[CELERY WRITE] mcp_write (RAG) completed for end_user={end_user_id}")
-        return {"status": "success", "mode": "mcp_write", "storage_type": "rag"}
-
-    from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_direct
-
-    result = await write_messages_direct(
-        messages=messages,
-        end_user_id=end_user_id,
-        config_id=str(config_id) if config_id else "",
-        workspace_id=workspace_id,
-        language=language,
-    )
-    logger.info(f"[CELERY WRITE] mcp_write (direct) completed: {result}")
-    return {**result, "mode": "mcp_write", "storage_type": "neo4j"}
 
 
 def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
@@ -4137,37 +3979,6 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
 # Redis key 前缀
 CONV_ACTIVE_KEY_PREFIX = "conv_active:"
 
-
-def _advance_cursor_sync(conversation_id: str, message_seq: int) -> None:
-    """同步版 cursor 推进，供 flush 派发流程（同步函数）使用。
-
-    Celery Beat 在 ThreadPoolExecutor 中执行，该线程无事件循环。
-    这里用 DB 直连绕过 async，避免依赖 asyncio 事件循环。
-    fire-and-forget：失败仅记录 warning，不阻塞派发循环。
-    """
-    try:
-        from sqlalchemy import update
-
-        from app.db import get_db_context
-        from app.models.conversation_model import Conversation
-
-        with get_db_context() as db:
-            db.execute(
-                update(Conversation)
-                .where(
-                    Conversation.id == conversation_id,
-                    Conversation.write_cursor < message_seq,
-                )
-                .values(write_cursor=message_seq)
-            )
-            db.commit()
-    except Exception as e:
-        logger.warning(
-            f"[FlushTask] 提前推进 write_cursor 失败（不影响派发）: "
-            f"conv={conversation_id}, seq={message_seq}, err={e}"
-        )
-
-
 @celery_app.task(
     bind=True,
     name="app.tasks.flush_conversation",
@@ -4175,187 +3986,10 @@ def _advance_cursor_sync(conversation_id: str, message_seq: int) -> None:
     max_retries=0,
     acks_late=True,
 )
-def flush_conversation_task(self, conversation_id: Optional[str] = None) -> None:
-    """兜底写入任务。
+def flush_conversation_task(self) -> None:
+    """兜底写入任务（Beat 定时调度）。
 
-    支持两种模式：
-    1. 单对话模式（conversation_id 非空，外部/手动触发）：
-       检查指定对话是否有未写入消息，若有则逐条派发 write_message_task。
-
-    2. 扫描模式（conversation_id 为空，Beat 定时调度）：
-       扫描所有空闲对话（pending_conversations Set + conv_active 检查），
-       逐个派发兜底写入任务。
-
-    _flush_single_conversation 内部逐条派发 target_seq 任务并提前推进 write_cursor，
-    下次扫描时 cursor 已推进不会重复触发。
-
-    所有实际写入均收敛到 write_message_task 路径，由 memory_write 锁在 worker 侧保证串行。
-
-    Fire-and-forget：异常时记录日志，不重试。
-    """
-    if conversation_id:
-        # 单对话模式 调试使用（flush_conversation_task(conversation_id="xxx")，直接将剩余message推入队列执行）
-        _flush_single_conversation(conversation_id)
-    else:
-        # 扫描模式（Beat 调度）
-        _scan_and_flush_idle_conversations()
-
-
-def _flush_single_conversation(conversation_id: str) -> None:
-    """处理单个对话的兜底写入：查询所有未写入的 user 消息 → 逐条派发 write_message_task。
-
-    只派发 role=user 的消息任务，assistant 消息作为上下文使用（通过 build_context_before/after
-    在 execute_pending_from_pool 中构建）。
-
-    每条 user 消息独立派发一个 task（携带 target_seq），派发后立即原子推进
-    write_cursor。复用 sliding_window 的 target_seq 直查模式，每条消息失败只影响
-    自身，Celery 重试（max_retries=3）时通过 target_seq 直查不依赖 cursor，安全。
-    """
-    from sqlalchemy import select as sa_select
-
-    from app.models.conversation_model import Conversation
-    from app.models.memory_message_model import MemoryMessage
-
-    try:
-        # Step 1: 查询对话信息
-        with get_db_context() as db:
-            row = db.execute(
-                sa_select(
-                    Conversation.write_cursor,
-                    Conversation.user_id,
-                    Conversation.workspace_id,
-                ).where(Conversation.id == conversation_id)
-            ).one_or_none()
-
-            if row is None:
-                logger.warning(f"[FlushTask] 对话不存在: conv={conversation_id}")
-                return
-
-            write_cursor, end_user_id, workspace_id = row
-            end_user_id = str(end_user_id) if end_user_id else ""
-            workspace_id = str(workspace_id) if workspace_id else ""
-
-            if not end_user_id:
-                logger.warning(f"[FlushTask] end_user_id 为空，跳过: conv={conversation_id}")
-                return
-
-            # Step 2: 查询所有未写入消息的 seq（用于获取最大 seq）
-            all_pending_seqs = (
-                db.execute(
-                    sa_select(MemoryMessage.message_seq)
-                    .where(
-                        MemoryMessage.conversation_id == conversation_id,
-                        MemoryMessage.message_seq > (write_cursor or 0),
-                    )
-                    .order_by(MemoryMessage.message_seq.asc())
-                )
-                .scalars()
-                .all()
-            )
-
-            if not all_pending_seqs:
-                logger.info(f"[FlushTask] 无未写入消息，跳过: conv={conversation_id}")
-                return
-
-            max_pending_seq = max(all_pending_seqs)
-
-            # Step 3: 只查询 role=user 的消息序号用于派发任务
-            # assistant 消息作为上下文使用，不单独派发任务
-            pending_user_seqs = (
-                db.execute(
-                    sa_select(MemoryMessage.message_seq)
-                    .where(
-                        MemoryMessage.conversation_id == conversation_id,
-                        MemoryMessage.message_seq > (write_cursor or 0),
-                        MemoryMessage.role == "user",  # 只派发 user 消息
-                    )
-                    .order_by(MemoryMessage.message_seq.asc())
-                )
-                .scalars()
-                .all()
-            )
-
-        # Step 4: 解析 memory_config_id（用于派发）
-        config_id = ""
-        try:
-            from app.core.memory.sliding_window.flush_task import FlushTask as _FlushTaskHelper
-            release_config_id = _FlushTaskHelper()._resolve_release_memory_config_id(conversation_id)
-            if release_config_id:
-                config_id = str(release_config_id)
-            else:
-                logger.warning(
-                    f"[FlushTask] 未能解析 memory_config_id，跳过: conv={conversation_id}"
-                )
-                return
-        except Exception as e:
-            logger.warning(f"[FlushTask] 解析 config_id 异常，跳过: conv={conversation_id}, err={e}")
-            return
-
-        # Step 5: 逐条派发 write_message_task（只派发 user 消息）
-        # 与 sliding_window 路径一致：
-        #   - 派发后立即原子推进 write_cursor（防重复派发）
-        #   - task 内部通过 target_seq 直查消息，重试不依赖 cursor
-        #   - enforce_window=False，兜底路径不要求下文凑齐 3 条
-        #   - assistant 消息作为上下文在 execute_pending_from_pool 中通过
-        #     build_context_before/after 构建
-        try:
-            from app.celery_task_scheduler import scheduler as celery_scheduler
-
-            dispatched = 0
-            for target_seq in pending_user_seqs:
-                msg_id = celery_scheduler.push_task(
-                    "app.core.memory.agent.write_message",
-                    end_user_id,
-                    {
-                        "end_user_id": end_user_id,
-                        "mode": "flush",
-                        "target_seq": target_seq,
-                        "config_id": config_id,
-                        "language": "zh",
-                        "conversation_id": conversation_id,
-                        "workspace_id": workspace_id,
-                    },
-                )
-                dispatched += 1
-
-            # 统一推进 cursor 到最大 seq，确保 assistant 消息也被跳过
-            # 不再逐条推进，避免多次 DB 更新
-            _advance_cursor_sync(conversation_id, max_pending_seq)
-
-            # 主动清理 pending_conversations Set，避免后续 Beat 无效扫描
-            # cursor 已推进到 max_pending_seq，若此时无新消息则可安全 unmark
-            try:
-                from app.core.memory.sliding_window.window_utils import (
-                    verify_unmark_safe,
-                    unmark_conversation_pending,
-                )
-                if verify_unmark_safe(conversation_id):
-                    unmark_conversation_pending(conversation_id)
-                    logger.debug(f"[FlushTask] 已从 pending_conversations Set 移除: conv={conversation_id}")
-            except Exception as e:
-                # fire-and-forget：unmark 失败不影响主流程，后续 Beat 扫描会再次尝试
-                logger.debug(f"[FlushTask] unmark 失败（可忽略）: conv={conversation_id}, err={e}")
-
-            logger.info(
-                f"[FlushTask] 已派发 {dispatched} 个 user 消息任务，cursor 推进到 {max_pending_seq}: "
-                f"conv={conversation_id}, end_user_id={end_user_id}, "
-                f"total_pending={len(all_pending_seqs)}"
-            )
-        except Exception as e:
-            logger.error(
-                f"[FlushTask] push_task 派发失败: conv={conversation_id}, err={e}",
-                exc_info=True,
-            )
-
-    except Exception as e:
-        logger.error(
-            f"[FlushTask] 失败: conv={conversation_id}, err={e}",
-            exc_info=True,
-        )
-
-
-def _scan_and_flush_idle_conversations() -> None:
-    """扫描所有空闲对话并逐个派发兜底写入（Beat 调度模式）。
+    扫描所有空闲对话，逐个派发兜底写入任务。
 
     优先从 Redis Set (pending_conversations) 获取候选对话 ID，避免全表 JOIN 扫描。
     若 Set 不可用则回退到数据库查询。
@@ -4364,11 +3998,17 @@ def _scan_and_flush_idle_conversations() -> None:
     1. 对话存在未写入消息（来自 Redis Set 或 DB 查询）
     2. Redis 中 conv_active:{conversation_id} 已过期或不存在（对话空闲 >5 分钟）
 
-    _flush_single_conversation 内部逐条派发 target_seq 任务并提前推进 write_cursor，
+    dispatcher 内部逐条派发 write_message_task 并推进 write_cursor，
     下次扫描时 cursor 已推进不会重复触发，无需额外幂等锁。
+
+    所有实际写入均收敛到 write_message_task 路径，由 memory_write 锁在 worker 侧保证串行。
+
+    Fire-and-forget：异常时记录日志，不重试。
     """
     from sqlalchemy import func, select
 
+    from app.core.memory.memory_service import MemoryService as _MS
+    _dispatch_flush = _MS.dispatch_flush_conversation
     from app.models.conversation_model import Conversation
 
     redis_client = get_sync_redis_client()
@@ -4402,7 +4042,7 @@ def _scan_and_flush_idle_conversations() -> None:
         candidate_conv_ids: list[str] | None = None
         if active_redis_client is not None:
             try:
-                from app.core.memory.sliding_window.window_utils import PENDING_CONVERSATIONS_SET_KEY
+                from app.core.memory.pipelines.dispatcher import PENDING_CONVERSATIONS_SET_KEY
                 candidates = active_redis_client.smembers(PENDING_CONVERSATIONS_SET_KEY)
                 if candidates:
                     candidate_conv_ids = list(candidates)
@@ -4482,10 +4122,9 @@ def _scan_and_flush_idle_conversations() -> None:
                 skipped_active += 1
                 continue
 
-            # 调用 _flush_single_conversation：内部逐条派发 target_seq 任务 +
-            # 提前推进 write_cursor，后续扫描 cursor 已推进不会重复触发
+            # 派发单个对话的兜底写入
             try:
-                _flush_single_conversation(conv_id_str)
+                _dispatch_flush(conv_id_str)
                 dispatched += 1
                 logger.info(f"[FlushScan] 已处理: conv={conv_id_str}")
             except Exception as e:

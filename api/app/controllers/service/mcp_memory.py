@@ -76,7 +76,6 @@ async def write_memory(
             end_user_id,
             {
                 "end_user_id": end_user_id,
-                "mode": "mcp_write",
                 "messages": [{"role": "user", "content": message, "dialog_at": dialog_at}],
                 "config_id": config_id,
                 "storage_type": storage_type,

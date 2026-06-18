@@ -7,9 +7,6 @@ MemoryService — 记忆模块统一入口（Facade）
 - 接收已加载的 MemoryConfig，选择并调用对应的 Pipeline
 - 暴露 write / read / pilot_write / forget / reflection 等实例方法
 - create_long_term_memory_tool 创建长期记忆检索工具
-
-注：消息摄入（sync_message）和直接写入（write_messages_direct）已迁至
-   storage_services/extraction_engine/message_ingestion.py 和 direct_writer.py
 """
 
 import logging
@@ -77,12 +74,132 @@ class MemoryService:
             draft=draft
         )
 
+    # ──────────────────────────────────────────────
+    # 静态方法：摄入/派发（不需要实例化，不加载 config）
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    async def ingest_agent_message(
+        conversation_id: str,
+        message: Any,
+        app_id: str,
+        config_id: str = "",
+        workspace_id: str = "",
+        end_user_id: str = "",
+        should_memorize: bool = True,
+        language: str = "zh",
+    ) -> bool:
+        """Agent 消息摄入：写入 memory_messages 表 + 触发滑动窗口派发。"""
+        from app.core.memory.pipelines.dispatcher import ingest_agent_message
+        return await ingest_agent_message(
+            conversation_id=conversation_id,
+            message=message,
+            app_id=app_id,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            end_user_id=end_user_id,
+            should_memorize=should_memorize,
+            language=language,
+        )
+
+    @staticmethod
+    async def ingest_workflow_messages(
+        messages: List[dict],
+        conversation_id: str,
+        end_user_id: str,
+        config_id: str,
+        workspace_id: str,
+        language: str = "zh",
+    ) -> None:
+        """Workflow 消息摄入：批量写入 memory_messages 表 + 触发滑动窗口派发。"""
+        from app.core.memory.pipelines.dispatcher import ingest_workflow_messages
+        await ingest_workflow_messages(
+            messages=messages,
+            conversation_id=conversation_id,
+            end_user_id=end_user_id,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+    @staticmethod
+    async def dispatch_api_service_async(
+        messages: List[dict],
+        end_user_id: str,
+        config_id: str,
+        workspace_id: str,
+        language: str = "zh",
+    ) -> List[str]:
+        """API Service 异步写入入口。"""
+        from app.core.memory.pipelines.dispatcher import dispatch_api_service_async
+        return await dispatch_api_service_async(
+            messages=messages,
+            end_user_id=end_user_id,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+    @staticmethod
+    async def write_messages_to_rag(
+        messages: List[dict],
+        end_user_id: str,
+        user_rag_memory_id: str,
+    ) -> None:
+        """将 messages 写入 RAG 存储。"""
+        from app.core.memory.pipelines.dispatcher import write_messages_to_rag
+        await write_messages_to_rag(
+            messages=messages,
+            end_user_id=end_user_id,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+
+    @staticmethod
+    def dispatch_flush_conversation(conversation_id: str) -> int:
+        """Flush 兜底任务派发。"""
+        from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
+        return dispatch_flush_conversation(conversation_id)
+
+    @staticmethod # 同步写入 下一个版本移除
+    def get_or_create_service_api_conversation(workspace_id: str, end_user_id: str) -> str:
+        """获取或创建 Service API 虚拟会话。"""
+        from app.core.memory.pipelines.dispatcher import get_or_create_service_api_conversation
+        return get_or_create_service_api_conversation(workspace_id, end_user_id)
+
+    @staticmethod # 同步写入 下一个版本移除
+    async def ensure_conversation_exists(conversation_id: str, workspace_id: str = "") -> None:
+        """确保 conversations 表中存在该记录。"""
+        from app.core.memory.pipelines.dispatcher import ensure_conversation_exists
+        await ensure_conversation_exists(conversation_id, workspace_id)
+
+    @staticmethod # 同步写入 下一个版本移除
+    def verify_unmark_safe(conversation_id: str) -> bool:
+        """验证对话是否可以安全 unmark。"""
+        from app.core.memory.pipelines.dispatcher import verify_unmark_safe
+        return verify_unmark_safe(conversation_id)
+
+    @staticmethod # 同步写入 下一个版本移除
+    def unmark_conversation_pending(conversation_id: str) -> None:
+        """将对话从 pending set 中移除。"""
+        from app.core.memory.pipelines.dispatcher import unmark_conversation_pending
+        unmark_conversation_pending(conversation_id)
+
+    # ──────────────────────────────────────────────
+    # 实例方法：写入执行（由 write_message_task 调用）
+    # ──────────────────────────────────────────────
+
     async def write(
             self,
-            messages: List[dict],
+            target_message: dict,
+            context_before: List[dict] = None,
+            context_after: List[dict] = None,
+            conversation_id: str = "",
+            message_seq: int = 0,
             language: str = "zh",
             ref_id: str = "",
             is_pilot_run: bool = False,
+            skip_cursor_advance: bool = False,
+            dispatch_at: str = "",
             progress_callback: Optional[
                 Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]
             ] = None,
@@ -90,10 +207,16 @@ class MemoryService:
         """写入记忆：对话 → 萃取 → 存储 → 聚类 → 摘要
 
         Args:
-            messages: 结构化消息 [{"role": "user"/"assistant", "content": "...", "dialog_at": "..."}]
+            target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+            context_before: 上文消息列表（按 message_seq 升序）
+            context_after: 下文消息列表（按 message_seq 升序）
+            conversation_id: 对话 ID
+            message_seq: 目标消息的 message_seq
             language: 语言 ("zh" | "en")
             ref_id: 引用 ID，为空则自动生成
             is_pilot_run: 试运行模式（只萃取不写入）
+            skip_cursor_advance: 跳过 write_cursor 推进（直接写入路径）
+            dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
             progress_callback: 可选的进度回调
 
         Returns:
@@ -110,9 +233,15 @@ class MemoryService:
             progress_callback=progress_callback,
         )
         return await pipeline.run(
-            messages=messages,
+            target_message=target_message,
+            context_before=context_before,
+            context_after=context_after,
+            conversation_id=conversation_id,
+            message_seq=message_seq,
             ref_id=ref_id,
             is_pilot_run=is_pilot_run,
+            skip_cursor_advance=skip_cursor_advance,
+            dispatch_at=dispatch_at,
         )
 
     async def pilot_write(

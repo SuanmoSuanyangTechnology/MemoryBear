@@ -282,6 +282,7 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
+    # [DEPRECATED] 下一版本移除：write_memory 同步路径将改为统一走 dispatcher → push_task 异步路径
     async def write_memory(
             self,
             request: WriteMemoryRequest,
@@ -308,8 +309,8 @@ class MemoryAgentService:
         language = request.language
         start_time = time.time()
 
-        # 锁已下沉到 WritePipeline._acquire_store_lock，仅在 Neo4j 写入阶段持锁
-        return await self._write_memory_locked(
+        # 写入流水线内部不再对存储阶段加锁，仅情绪回写等旁路操作内部自行持锁
+        return await self._do_sync_write(
             end_user_id=end_user_id,
             messages=messages,
             config_id=config_id,
@@ -320,7 +321,8 @@ class MemoryAgentService:
             start_time=start_time,
         )
 
-    async def _write_memory_locked(
+    # [DEPRECATED] 下一版本移除：同步写入核心实现，将改为统一走 dispatcher → push_task 异步路径
+    async def _do_sync_write(
             self,
             end_user_id: str,
             messages,
@@ -350,8 +352,8 @@ class MemoryAgentService:
         # ── Step 3: 写入存储 ── 根据 storage_type 分流到 RAG 或 Neo4j 流水线
         try:
             if storage_type == StorageType.RAG:
-                from app.core.memory.storage_services.extraction_engine.direct_writer import write_messages_to_rag
-                await write_messages_to_rag(
+                from app.core.memory.memory_service import MemoryService
+                await MemoryService.write_messages_to_rag(
                     messages=messages,
                     end_user_id=end_user_id,
                     user_rag_memory_id=user_rag_memory_id,
@@ -360,11 +362,9 @@ class MemoryAgentService:
             else:
                 # ── 候选池消费路径（Neo4j）──
                 # 写入 memory_messages 表 → 同步执行 execute_pending_from_pool
-                from app.core.memory.sliding_window.window_utils import (
-                    get_or_create_service_api_conversation,
-                )
+                from app.core.memory.memory_service import MemoryService as _MS
 
-                _conversation_id = get_or_create_service_api_conversation(
+                _conversation_id = _MS.get_or_create_service_api_conversation(
                     workspace_id=str(memory_config.workspace_id),
                     end_user_id=end_user_id,
                 )
@@ -539,6 +539,7 @@ class MemoryAgentService:
         logger.info(messages)
         return messages
 
+    # [DEPRECATED] 下一版本移除：同步写入路径专用，将改为统一走 dispatcher → push_task
     async def _write_to_memory_messages_and_dispatch(
         self,
         conversation_id: str,
@@ -566,26 +567,25 @@ class MemoryAgentService:
         Returns:
             处理的消息数
         """
-        from app.core.memory.sliding_window.window_utils import (
-            ensure_conversation_exists,
-            write_batch_to_memory_messages,
-            execute_pending_from_pool,
-        )
+        from app.core.memory.memory_service import MemoryService as _MS
+        from app.core.memory.sliding_window.memory_message_pool_executor import execute_pending_from_pool
+        from app.db import get_db_context
+        from app.repositories.memory_message_repository import MemoryMessageRepository
 
         messages_dict = [
             msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
             for msg in messages
         ]
 
-        await ensure_conversation_exists(
+        await _MS.ensure_conversation_exists(
             conversation_id=conversation_id,
             workspace_id=workspace_id,
         )
 
-        written_mms = write_batch_to_memory_messages(
-            conversation_id=conversation_id,
-            messages=messages_dict,
-        )
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            written_mms = repo.write_batch(conversation_id, messages_dict)
+            db.commit()
 
         if not written_mms:
             logger.info(f"[write_memory] No valid messages to write: conv={conversation_id}")
