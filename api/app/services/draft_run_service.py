@@ -22,7 +22,9 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.rag.nlp.search import knowledge_retrieval
+from app.schemas.chunk_schema import RetrieveType
+from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig, Message
 from app.models.agent_execution_model import AgentExecution
@@ -98,6 +100,62 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
+def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
+    """标准化知识库检索：走 KnowledgeRetrievalService + KnowledgeRetrievalRequest。
+
+    读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
+    vector_similarity_weight / retrieve_type / reranker_id）。由于
+    KnowledgeRetrievalRequest 只携带一组检索参数，这里沿用工作流知识库节点的约定，
+    用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
+    """
+    knowledge_bases = (kb_config or {}).get("knowledge_bases", []) or []
+    kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
+    if not kb_ids:
+        return []
+
+    first_kb = knowledge_bases[0] or {}
+
+    def _as_float(value: Any, default: float) -> float:
+        try:
+            return float(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            return int(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    retrieve_type_str = str(first_kb.get("retrieve_type") or "hybrid").strip().lower()
+    try:
+        retrieve_type = RetrieveType(retrieve_type_str)
+    except ValueError:
+        retrieve_type = RetrieveType.HYBRID
+
+    rerank_id = None
+    if kb_config.get("reranker_id"):
+        try:
+            rerank_id = uuid.UUID(str(kb_config.get("reranker_id")))
+        except (ValueError, AttributeError):
+            rerank_id = None
+
+    request = KnowledgeRetrievalRequest(
+        query=query,
+        kb_ids=[uuid.UUID(kid) for kid in kb_ids],
+        top_k=_as_int(first_kb.get("top_k"), 3),
+        similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
+        vector_similarity_weight=_as_float(first_kb.get("vector_similarity_weight"), 0.5),
+        retrieve_type=retrieve_type,
+        rerank_id=rerank_id,
+    )
+
+    with get_db_context() as db:
+        result = KnowledgeRetrievalService.retrieve(db=db, request=request, current_user=None)
+
+    return result.chunks
+
+
 def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None, kb_names: Optional[List[Dict]] = None):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
@@ -126,7 +184,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 
         try:
 
-            retrieve_chunks_result = knowledge_retrieval(query, kb_config)
+            retrieve_chunks_result = _retrieve_chunks_via_standard(query, kb_config)
             if retrieve_chunks_result:
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)
