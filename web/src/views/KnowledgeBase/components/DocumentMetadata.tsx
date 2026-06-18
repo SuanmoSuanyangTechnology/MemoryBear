@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-06-05 13:33:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-08 09:58:25
+ * @Last Modified time: 2026-06-17 17:20:34
  */
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,7 @@ import type { MetadataField } from '../types';
 import { getDocumentMetadata, updateDocumentMetadata, deleteDocumentMetadata } from '@/api/knowledgeBase';
 import MetadataFieldSelectorModal, { type MetadataFieldSelectorModalRef } from './MetadataFieldSelectorModal';
 import dayjs from 'dayjs';
+import { formatDateTime } from '@/utils/format'
 
 interface DocumentMetadataProps {
   documentId: string;
@@ -34,12 +35,21 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
     setLoading(true);
     getDocumentMetadata(documentId)
       .then((res) => {
-        const response = res as {
+        const { metadata, fields } = res as {
           metadata: Record<string, any>;
           fields: MetadataField[];
         }
-        setDocumentMetadataFields(response.fields || []);
-        setDocumentMetadata(response.metadata || {});
+        const newMetadata: Record<string, any> = {}
+        Object.keys(metadata || {}).forEach(key => {
+          const filterField = fields.find(item => item.name === key);
+          if (filterField && filterField.type === 'time') {
+            newMetadata[key] = metadata[key] ? formatDateTime(metadata[key], 'YYYY-MM-DD HH:mm:ssZZ') : null;
+          } else {
+            newMetadata[key] = metadata[key];
+          }
+        })
+        setDocumentMetadataFields(fields || []);
+        setDocumentMetadata(newMetadata || {});
       })
       .finally(() => {
         setLoading(false);
@@ -55,7 +65,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
     const values: Record<string, any> = {}
     documentMetadataFields.map((item: MetadataField) => {
       if (item.type === 'time') {
-        values[item.name] = dayjs(item.value);
+        values[item.name] = item.value ? dayjs.tz(item.value) : undefined;
       } else {
         values[item.name] = item.value;
       }
@@ -96,7 +106,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
 
       Object.keys(values).forEach(key => {
         if (typeof values[key] === 'object') {
-          values[key] = values[key].format('YYYY-MM-DD HH:mm:ss');
+          values[key] = values[key].format('YYYY-MM-DD HH:mm:ssZZ');
         }
       });
 
@@ -138,7 +148,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
             <Form.Item name={field.name} className="rb:mb-0!">
               <DatePicker
                 showTime
-                format="YYYY-MM-DD HH:mm:ss"
+                format="YYYY-MM-DD HH:mm:ssZZ"
               />
             </Form.Item>
           );

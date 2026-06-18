@@ -228,7 +228,7 @@ const RecallTestResult = ({
   }
 
   const renderChild = (children: RecallTestData[], item: RecallTestData, index: number) => {
-    if (children.length === 0) {
+    if (children.length === 0 && !editable) {
       return null;
     }
     const isExpanded = expandedChunks[`chunk_${item.metadata?.doc_id || index}`];
@@ -270,11 +270,12 @@ const RecallTestResult = ({
             >+ {t('common.add')}</span>
           }
         </Flex>
-        {isExpanded && (
+        {isExpanded && children.length > 0 && (
           <Flex vertical gap={8} className="rb:pl-3! rb:border-l-2 rb:border-l-[#155EEF]">
             {children?.map((child, childIndex) => (
               <Flex
                 key={child.metadata?.doc_id || childIndex}
+                gap={8}
                 className="rb:group rb:bg-[#c8ceda33] rb:hover:bg-[rgba(21,94,239,0.25)]"
               >
                 <Flex

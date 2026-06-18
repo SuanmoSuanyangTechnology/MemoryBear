@@ -94,6 +94,12 @@ const DebounceSelect: FC<DebounceSelectProps> = ({
     debounceFetcher(null);
   }, []);
 
+  const handleClear = useCallback(() => {
+    setOptions([]);
+    setHasMore(true);
+    debounceFetcher(null);
+  }, [debounceFetcher]);
+
   const handlePopupScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (!fetching && hasMore && scrollHeight - scrollTop - clientHeight < 50) {
@@ -111,9 +117,10 @@ const DebounceSelect: FC<DebounceSelectProps> = ({
       onPopupScroll={handlePopupScroll}
       notFoundContent={fetching ? <Spin size="small" /> : null}
       allowClear
+      onClear={handleClear}
       {...props}
       options={options}
-      dropdownRender={(menu) => (
+      popupRender={(menu) => (
         <>
           {menu}
           {fetching && options.length > 0 && (

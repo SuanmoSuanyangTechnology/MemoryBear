@@ -175,8 +175,7 @@ class MemoryService:
             history = []
         if self.ctx.memory_config is None:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
-        with get_db_context() as db:
-            return await ReadPipeLine(self.ctx, db).run(query, search_switch, history, limit)
+        return await ReadPipeLine(self.ctx).run(query, search_switch, history, limit)
 
     async def forget(
             self, max_batch: int = 100, min_days: int = 30
@@ -198,7 +197,7 @@ class MemoryService:
         )
         return await pipeline.run_layer2(baseline=baseline)
 
-    async def run_dedup_full_scan(self) -> Dict[str, Any]:
+    async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """反思引擎 Layer 2 — 去重方案B低频全量扫描去重（单用户入口）
 
         由 Celery 定时任务调用（每天）。
@@ -210,7 +209,7 @@ class MemoryService:
             end_user_id=self.ctx.end_user_id,
             language="zh",
         )
-        return await pipeline.run_dedup_full_scan()
+        return await pipeline.run_dedup_full_scan(baseline=baseline)
 
     async def run_reflection_layer3(self) -> dict:
         """反思引擎 Layer 3 知识综合
@@ -613,10 +612,6 @@ class MemoryService:
                 f"conv={conversation_id}, err={e}",
                 exc_info=True,
             )
-
-    @staticmethod
-    async def get_conv_history(db: Session, conv_id: str):
-        return
 
 
 def create_long_term_memory_tool(

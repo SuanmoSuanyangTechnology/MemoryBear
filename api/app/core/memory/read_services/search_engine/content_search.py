@@ -24,6 +24,7 @@ from app.core.memory.read_services.search_engine.tools import make_entity_search
 from app.core.memory.utils.llm.llm_utils import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
+from app.db import get_db_context
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
@@ -45,8 +46,8 @@ class Neo4jSearchService:
     def __init__(
             self,
             ctx: MemoryContext,
-            embedder: RedBearEmbeddings,
-            llm: RedBearLLM,
+            embedder: RedBearEmbeddings | None = None,
+            llm: RedBearLLM | None = None,
             includes: list[Neo4jNodeType] | None = None,
             alpha: float = DEFAULT_ALPHA,
             fulltext_score_threshold: float = DEFAULT_FULLTEXT_SCORE_THRESHOLD,
@@ -59,8 +60,8 @@ class Neo4jSearchService:
         self.cosine_score_threshold = cosine_score_threshold
         self.content_score_threshold = content_score_threshold
 
-        self.embedder: RedBearEmbeddings = embedder
-        self.llm: RedBearLLM = llm
+        self.embedder: RedBearEmbeddings | None = embedder
+        self.llm: RedBearLLM | None = llm
         self.connector: Neo4jConnector | None = None
 
         self.includes = includes
@@ -160,6 +161,40 @@ class Neo4jSearchService:
         for it, s in zip(items, scores):
             it[f"normalized_kw_score"] = 1 / (1 + math.exp(-(s - self.fulltext_score_threshold) / 2)) if s else 0
         return items
+
+    async def keyword_search(
+            self,
+            query: str,
+            limit: int = 10,
+    ) -> MemorySearchResult:
+        """仅全文检索，不做 embedding / rerank / 关系检索。"""
+        async with Neo4jConnector(shared_driver=True) as connector:
+            self.connector = connector
+            kw_results = await self._keyword_search(query, limit)
+
+        if isinstance(kw_results, Exception):
+            logger.warning(f"[MemorySearch] keyword search error: {kw_results}")
+            kw_results = {}
+
+        memories = []
+        for node_type in self.includes:
+            records = kw_results.get(node_type, [])
+            records = self._normalize_kw_scores(records)
+            for record in records:
+                record["content_score"] = float(record.get("normalized_kw_score", 0))
+            records.sort(key=lambda x: x["content_score"], reverse=True)
+            for record in records[:limit]:
+                memory = data_builder_factory(node_type, record)
+                memories.append(Memory(
+                    score=memory.score,
+                    content=memory.content,
+                    data=memory.data,
+                    source=node_type,
+                    query=query,
+                    id=memory.id
+                ))
+        memories.sort(key=lambda x: x.score, reverse=True)
+        return MemorySearchResult(memories=memories[:limit])
 
     async def hybrid_search(
             self,
@@ -397,15 +432,18 @@ class Neo4jSearchService:
 
 
 class RAGSearchService:
-    def __init__(self, ctx: MemoryContext, db: Session):
+    def __init__(self, ctx: MemoryContext):
         self.ctx = ctx
-        self.db = db
 
-    def get_kb_config(self, limit: int) -> dict:
+    async def keyword_search(self, query: str, limit: int = 10) -> MemorySearchResult:
+        """RAG 不支持纯全文检索，回退到 hybrid_search。"""
+        return await self.hybrid_search(query, limit)
+
+    def get_kb_config(self, db: Session, limit: int) -> dict:
         if self.ctx.user_rag_memory_id is None:
             raise RuntimeError("Knowledge base ID not specified")
         knowledge_config = knowledge_repository.get_knowledge_by_id(
-            self.db,
+            db,
             knowledge_id=uuid.UUID(self.ctx.user_rag_memory_id)
         )
         if knowledge_config is None:
@@ -429,7 +467,8 @@ class RAGSearchService:
 
     async def hybrid_search(self, query: str, limit: int) -> MemorySearchResult:
         try:
-            kb_config = self.get_kb_config(limit)
+            with get_db_context() as db:
+                kb_config = self.get_kb_config(db, limit)
         except RuntimeError as e:
             logger.error(f"[MemorySearch] get_kb_config error: {self.ctx.user_rag_memory_id} - {e}")
             return MemorySearchResult(memories=[])
@@ -458,58 +497,58 @@ class RAGSearchService:
 
 
 class HistorySearchService:
-    def __init__(self, ctx: MemoryContext, db: Session):
+    def __init__(self, ctx: MemoryContext):
         self.ctx = ctx
-        self.db = db
 
     async def run(self) -> MemorySearchResult:
-        conversation: Conversation | None = self.db.scalar(
-            select(Conversation).where(
-                Conversation.user_id == self.ctx.end_user_id,
-                Conversation.id != self.ctx.conversation_id
-            ).order_by(
-                Conversation.updated_at.desc()
-            ).limit(1)
-        )
+        with get_db_context() as db:
+            conversation: Conversation | None = db.scalar(
+                select(Conversation).where(
+                    Conversation.user_id == self.ctx.end_user_id,
+                    Conversation.id != self.ctx.conversation_id,
+                    Conversation.app_id != "00000000-0000-0000-0000-000000000001"
+                ).order_by(
+                    Conversation.updated_at.desc()
+                ).limit(1)
+            )
 
-        if conversation is None:
-            return MemorySearchResult(memories=[])
+            if conversation is None:
+                return MemorySearchResult(memories=[])
 
-        cursor = conversation.write_cursor
-        messages: list[MemoryMessage] | None = list(self.db.scalars(
-            select(MemoryMessage).where(
-                MemoryMessage.conversation_id == conversation.id,
-                MemoryMessage.message_seq > cursor
-            ).order_by(MemoryMessage.message_seq)
-        ))
-        if messages is None:
-            return MemorySearchResult(memories=[])
+            cursor = conversation.write_cursor
+            messages: list[MemoryMessage] | None = list(db.scalars(
+                select(MemoryMessage).where(
+                    MemoryMessage.conversation_id == conversation.id,
+                    MemoryMessage.message_seq > cursor
+                ).order_by(MemoryMessage.message_seq)
+            ))
+            if messages is None:
+                return MemorySearchResult(memories=[])
 
-        messages_lst = []
-        for message in messages:
-            message_dict = {
-                "role": message.role,
-                "content": message.content,
-                "files": message.files,
-            }
-            messages_lst.append(message_dict)
-        memory = Memory(
-            content='\n'.join([
-                f'{_["role"]}:{_['content']}'
-                for _ in messages_lst
-            ]),
-            source=Neo4jNodeType.HISTORY,
-            query="",
-            id=str(conversation.id),
-            data={"messages": messages_lst}
-        )
+            messages_lst = []
+            for message in messages:
+                message_dict = {
+                    "role": message.role,
+                    "content": message.content,
+                    "files": message.files,
+                }
+                messages_lst.append(message_dict)
+            memory = Memory(
+                content='\n'.join([
+                    f'{_["role"]}:{_['content']}'
+                    for _ in messages_lst
+                ]),
+                source=Neo4jNodeType.HISTORY,
+                query="",
+                id=str(conversation.id),
+                data={"messages": messages_lst}
+            )
         return MemorySearchResult(memories=[memory])
 
 
 class MetaSearchService:
-    def __init__(self, ctx: MemoryContext, db: Session):
+    def __init__(self, ctx: MemoryContext):
         self.ctx = ctx
-        self.db = db
 
     async def run(self) -> MemorySearchResult:
         if self.ctx.storage_type == StorageType.RAG:

@@ -106,14 +106,14 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
     }
   }
 
-  if (!renderedContent) {
+  if (!renderedContent && actions.length < 1) {
     return null
   }
   
   // 不可编辑状态使用纯文本展示，可编辑状态使用 Markdown 渲染
   if (!editable) {
     return <div className="rb:text-gray-600 rb:text-sm">
-      <Markdown content={renderedContent} />
+      {renderedContent && <Markdown content={renderedContent} />}
       {resolved_action_id && <>
         <Divider />
         {t('memoryConversation.triggeredAction')}: {resolved_action_id || ''}
@@ -123,7 +123,7 @@ const RenderedForm: React.FC<RenderedFormProps> = ({
   
   return <>
     <form ref={formRef}>
-      <Markdown content={renderedContent} />
+      {renderedContent && <Markdown content={renderedContent} />}
       {editable && actions.length > 0 && (
         <Flex wrap gap={12} className="rb:mt-2!">
           {actions.map((action, index: number) => (

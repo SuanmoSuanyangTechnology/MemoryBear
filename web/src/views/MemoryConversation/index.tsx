@@ -50,6 +50,11 @@ const searchSwitchList = [
     value: '2',
     key: 'quickReply'
   },
+  {
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/quickReplyPlus.svg')]"></div>,
+    value: '5',
+    key: 'quickReplyPlus'
+  },
 ]
 
 /**
@@ -202,6 +207,7 @@ const MemoryConversation: FC = () => {
               onChange={setMsg}
               onSend={handleSend}
               loading={loading}
+              streamLoading={loading}
               labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
             >
               <Segmented

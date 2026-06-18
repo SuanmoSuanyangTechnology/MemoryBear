@@ -39,11 +39,11 @@ const ApplicationConfig: React.FC = () => {
   const agentRef = useRef<AgentRef>(null)
   const clusterRef = useRef<ClusterRef>(null)
   const workflowRef = useRef<WorkflowRef>(null)
-  
+
   // State
   const [application, setApplication] = useState<Application | null>(null);
   const [activeTab, setActiveTab] = useState('arrangement');
-  const [features, setFeatures] = useState<import('./types').FeaturesConfigForm | undefined>(undefined);
+  const [, setFeatures] = useState<import('./types').FeaturesConfigForm | undefined>(undefined);
 
   useEffect(() => {
     setActiveTab(source === 'sharing' ? 'test' : 'arrangement')
@@ -126,15 +126,16 @@ const ApplicationConfig: React.FC = () => {
         handleChangeTab={handleChangeTab}
         application={application as Application}
         refresh={getApplicationInfo}
-        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type.includes('workflow') ? workflowRef : undefined}
-        workflowRef={workflowRef}
-        features={features}
+        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : undefined}
       />
       <div className="rb:p-3 rb:flex-1 rb:overflow-auto">
         {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type.includes('workflow') &&
-          <Workflow ref={workflowRef} onFeaturesLoad={setFeatures} appType={application?.type} />
+          <Workflow
+            ref={workflowRef}
+            appType={application?.type}
+          />
         }
         {activeTab === 'api' && <Api application={application} />}
         {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}

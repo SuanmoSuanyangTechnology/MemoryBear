@@ -77,11 +77,11 @@ const SKIP_TITLE_PATTERNS = [
 
 
 // 根据环境选择 Provider：saas 用私有组件库的 Provider，其他用 antd ConfigProvider
-const AppProvider: FC<{ locale: any; theme: any; children: ReactNode }> = ({ locale, theme, children }) => {
+const AppProvider: FC<{ locale: any; theme: any; children: ReactNode; lng: string; }> = ({ locale, theme, lng, children }) => {
   if (isSaas && PrivateProvider) {
     return (
       <Suspense fallback={<Spin fullscreen />}>
-        <PrivateProvider locale={locale} theme={theme}>
+        <PrivateProvider locale={locale} theme={theme} lng={lng}>
           {children}
         </PrivateProvider>
       </Suspense>
@@ -135,7 +135,7 @@ function App() {
   }, [timeZone])
 
   return (
-    <AppProvider locale={locale} theme={lightTheme}>
+    <AppProvider locale={locale} theme={lightTheme} lng={language}>
       <AntdApp>
         <Suspense fallback={<Spin fullscreen></Spin>}>
           <RouterProvider 

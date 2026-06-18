@@ -312,6 +312,7 @@ export interface KnowledgeBaseListItem extends KnowledgeBase {
   llm?: Model;
   image2text?: Model;
   _expanded?: boolean;
+  children?: KnowledgeBaseListItem[];
 }
 
 // 知识库列表响应
