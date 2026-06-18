@@ -40,7 +40,7 @@ from app.schemas.graph_data_schema import GraphDataResponse
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
-from app.services.memory_short_service import ShortService
+from app.services.memory_short_service import LongService, ShortService
 
 logger = get_logger(__name__)
 
@@ -1619,19 +1619,27 @@ async def analytics_memory_types(
     #         logger.warning(f"获取行为习惯数量失败，隐性记忆数量设为0: {str(e)}")
     #         implicit_count = 0
     
-    # 获取短期记忆数量（基于 /short_term 接口返回的问答对数量）
+    # 获取短期记忆数量（问答对数）和长期记忆数量
     short_term_count = 0
+    long_term_number = 0
     if end_user_id:
         try:
             short_term_service = ShortService(end_user_id, db)
-            short_term_data = short_term_service.get_short_databasets()
-            # 统计 short_term 数组的长度
-            if short_term_data:
-                short_term_count = len(short_term_data)
+            short_term_count = short_term_service.get_short_count()
             logger.debug(f"短期记忆数量（问答对数）: {short_term_count} (end_user_id={end_user_id})")
         except Exception as e:
             logger.warning(f"获取短期记忆数量失败，短期记忆数量设为0: {str(e)}")
             short_term_count = 0
+
+        try:
+            long_term_service = LongService(end_user_id, db)
+            long_term_data = long_term_service.get_long_databasets()
+            if long_term_data:
+                long_term_number = len(long_term_data)
+            logger.debug(f"长期记忆数量: {long_term_number} (end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取长期记忆数量失败，长期记忆数量设为0: {str(e)}")
+            long_term_number = 0
     
     # 获取用户的遗忘阈值配置
     forgetting_threshold = 0.3  # 默认值
@@ -1666,7 +1674,7 @@ async def analytics_memory_types(
     memory_counts = {
         "PERCEPTUAL_MEMORY": perceptual_count,                    # 感知记忆
         "WORKING_MEMORY": work_count,                             # 工作记忆（基于会话数量）
-        "SHORT_TERM_MEMORY": short_term_count,                    # 短期记忆（基于问答对数量）
+        "SHORT_TERM_MEMORY": short_term_count+long_term_number,   # 短期记忆（基于问答对数量）
         "EXPLICIT_MEMORY": explicit_count,                        # 显性记忆（情景记忆 + 语义记忆）
         "IMPLICIT_MEMORY": implicit_count,                        # 隐性记忆（MemorySummary节点数，需>=MIN_MEMORY_SUMMARY_COUNT）
         "EMOTIONAL_MEMORY": emotion_count,                        # 情绪记忆（使用情绪标签统计）

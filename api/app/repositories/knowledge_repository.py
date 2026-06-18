@@ -1,6 +1,8 @@
 import uuid
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from app.models.knowledge_model import Knowledge
+from app.models.document_model import Document
+from app.models.knowledge_model import Knowledge, PermissionType
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
 
@@ -162,6 +164,72 @@ def get_knowledges_by_parent_id(db: Session, parent_id: uuid.UUID) -> list[Knowl
         raise
 
 
+def get_knowledges_by_parent_ids(
+        db: Session,
+        parent_ids: list[uuid.UUID],
+        workspace_id: uuid.UUID,
+) -> list[knowledge_schema.Knowledge]:
+    db_logger.debug(
+        f"Batch query knowledge bases by parent IDs: parent_count={len(parent_ids)}, workspace_id={workspace_id}"
+    )
+    if not parent_ids:
+        return []
+
+    try:
+        knowledges = (
+            db.query(Knowledge)
+            .filter(
+                Knowledge.parent_id.in_(parent_ids),
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status != 2,
+                Knowledge.permission_id != PermissionType.Memory,
+            )
+            .all()
+        )
+        db_logger.debug(
+            f"Batch knowledge bases query successful: parent_count={len(parent_ids)}, count={len(knowledges)}"
+        )
+        return [knowledge_schema.Knowledge.model_validate(item) for item in knowledges]
+    except Exception as e:
+        db_logger.error(
+            f"Failed to batch query knowledge bases by parent IDs: workspace_id={workspace_id} - {str(e)}"
+        )
+        raise
+
+
+def get_document_counts_by_knowledge_ids(
+        db: Session,
+        knowledge_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    db_logger.debug(
+        f"Query document counts by knowledge IDs: knowledge_count={len(knowledge_ids)}"
+    )
+    if not knowledge_ids:
+        return {}
+
+    unique_knowledge_ids = list(dict.fromkeys(knowledge_ids))
+
+    try:
+        document_count_rows = (
+            db.query(Document.kb_id, func.count(Document.id))
+            .filter(
+                Document.kb_id.in_(unique_knowledge_ids),
+                Document.status == 1,
+            )
+            .group_by(Document.kb_id)
+            .all()
+        )
+        return {
+            kb_id: int(count)
+            for kb_id, count in document_count_rows
+        }
+    except Exception as e:
+        db_logger.error(
+            f"Failed to query document counts by knowledge IDs: {str(e)}"
+        )
+        raise
+
+
 def get_knowledge_by_name(db: Session, name: str, workspace_id: uuid.UUID) -> Knowledge | None:
     db_logger.debug(f"Query knowledge base based on name and workspace_id: name={name}, workspace_id={workspace_id}")
 
@@ -304,4 +372,3 @@ def get_non_user_kb_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> 
     except Exception as e:
         db_logger.error(f"Failed to query non-user KB count: workspace_id={workspace_id} - {str(e)}")
         raise
-
