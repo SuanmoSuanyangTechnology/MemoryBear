@@ -2784,14 +2784,13 @@ class WorkflowService:
         node_execution = self.node_execution_repo.get_latest_by_app_node(
             app_id=app_id,
             node_id=node_id,
-            source="single_node_debug",
         )
         if not node_execution:
             raise BusinessException("没有可用于重跑的单节点调试输入", BizCode.NOT_FOUND)
         meta_data = node_execution.meta_data or {}
         debug_input_data = meta_data.get("debug_input")
         if not isinstance(debug_input_data, dict):
-            debug_input_data = {}
+            debug_input_data = node_execution.input_data if isinstance(node_execution.input_data, dict) else {}
         if not debug_input_data and not isinstance(node_execution.input_data, dict):
             raise BusinessException("未找到可复用的单节点调试输入", BizCode.NOT_FOUND)
         if invalidate_cache:
@@ -3862,6 +3861,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=config,
             features=feature_configs,
+            runtime_options={"bypass_node_cache": True},
         )
 
         try:
@@ -4369,6 +4369,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=config,
             features=feature_configs,
+            runtime_options={"bypass_node_cache": True},
         )
 
         try:
@@ -5171,6 +5172,38 @@ class WorkflowService:
                                     f"accumulated_output_length={len(accumulated_content)}, "
                                     f"execution_id={execution.execution_id}"
                                 )
+
+                            # 如果在 resume 时，遇到了 status 为 failed 的 workflow_end
+                            if resume_event.get("event") == "workflow_end" and resume_event.get("data", {}).get("status") == "failed":
+                                resume_data = resume_event.get("data", {})
+                                # 如果 resume_data 包含 node_outputs（图正常返回 failed 状态，
+                                # 如 _wrap_error 有错误边），用它更新 execution.output_data。
+                                # 否则（异常场景：resume_workflow_stream 只 yield {status, error,
+                                # execution_id}），保留 execution.output_data（异常处理已
+                                # 正确构建了含 node_outputs 的数据），不覆盖。
+                                if isinstance(resume_data.get("node_outputs"), dict) and resume_data["node_outputs"]:
+                                    execution.output_data = resume_data
+                                elif not execution.output_data:
+                                    execution.output_data = resume_data
+                                execution.status = "failed"
+                                execution.completed_at = utcnow_naive()
+                                execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
+                                execution.error_node_id = resume_data.get("error_node")
+                                execution.error_message = resume_data.get("error")
+
+                                # 失败时清除 waiting_human 标记，更新消息
+                                _resolved_meta = {"waiting_human": False, "execution_id": execution.execution_id}
+                                self.conversation_service.update_message(
+                                    message_id=message_id,
+                                    meta_data=_resolved_meta,
+                                )
+                                self.db.commit()
+
+                                try:
+                                    self._persist_workflow_node_executions(execution, config, execution.output_data)
+                                    self._refresh_workflow_debug_state_from_execution(execution)
+                                except Exception as persist_err:
+                                    logger.warning(f"Failed to persist node executions on intervention failed: {persist_err}")
                             emitted = self._emit(public, resume_event)
                             if emitted:
                                 if resume_event.get("event") == "workflow_end" and resume_event.get("data", {}).get("status") == "completed":
@@ -5700,6 +5733,43 @@ class WorkflowService:
                             self._refresh_workflow_debug_state_from_execution(execution)
                         except Exception as persist_err:
                             logger.warning(f"Failed to persist node executions on resume complete: {persist_err}")
+
+                    # 如果在 resume 时，遇到了 status 为 failed 的 workflow_end
+                    if resume_event.get("event") == "workflow_end" and \
+                            resume_event.get("data", {}).get("status") == "failed":
+                        resume_data = resume_event.get("data", {})
+                        # 如果 resume_data 包含 node_outputs（图正常返回 failed 状态，
+                        # 如 _wrap_error 有错误边），用它更新 execution.output_data。
+                        # 否则（异常场景：resume_workflow_stream 只 yield {status, error,
+                        # execution_id}），保留 execution.output_data（异常处理已
+                        # 正确构建了含 node_outputs 的数据），不覆盖。
+                        if isinstance(resume_data.get("node_outputs"), dict) and resume_data["node_outputs"]:
+                            execution.output_data = resume_data
+                        elif not execution.output_data:
+                            execution.output_data = resume_data
+                        execution.status = "failed"
+                        execution.completed_at = utcnow_naive()
+                        execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
+                        execution.error_node_id = resume_data.get("error_node")
+                        execution.error_message = resume_data.get("error")
+
+                        # 失败时清除 waiting_human 标记，更新消息
+                        if conversation_id_uuid:
+                            resolved_meta = {"waiting_human": False, "execution_id": execution_id}
+                            if hitl_message_id:
+                                self.conversation_service.update_message(
+                                    hitl_message_id,
+                                    meta_data=resolved_meta,
+                                )
+
+                        self._touch_conversation(conversation_id_uuid)
+                        self.db.commit()
+
+                        try:
+                            self._persist_workflow_node_executions(execution, config, execution.output_data)
+                            self._refresh_workflow_debug_state_from_execution(execution)
+                        except Exception as persist_err:
+                            logger.warning(f"Failed to persist node executions on resume failed: {persist_err}")
                     emitted = self._emit(public, resume_event)
                     if emitted:
                         if resume_event.get("event") == "workflow_end" and \
@@ -6861,6 +6931,16 @@ class WorkflowService:
                     execution.output_data = new_output_data
             except Exception as recover_err:
                 logger.warning(f"Failed to recover state on resume error: {recover_err}")
+
+            # If the error is a NodeExecutionError, inject the failed node's output
+            # into node_outputs so it appears in the log (same pattern as executor.py).
+            from app.core.workflow.nodes.base_node import NodeExecutionError
+            if isinstance(e, NodeExecutionError):
+                if not execution.output_data:
+                    execution.output_data = {}
+                node_outputs = execution.output_data.setdefault("node_outputs", {})
+                node_outputs.setdefault(e.node_id, e.node_output)
+                execution.error_node_id = e.node_id
 
             execution.status = "failed"
             execution.error_message = str(e)

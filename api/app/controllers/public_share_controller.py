@@ -440,9 +440,20 @@ def get_conversation(
                 return "interrupt"
             return kind
 
+        # Determine intervention status based on whether ALL intervention nodes
+        # have been resolved, NOT based on the workflow's overall execution status.
+        # When a HITL node enters the timeout branch, it has completed (resolved)
+        # its intervention — the node chose the timeout path. Even if the overall
+        # workflow later fails on a downstream node, the intervention itself is done.
+        all_resolved = all(
+            i.get("resolved_action_id") or i.get("resolved_kind")
+            for i in ordered
+        )
+        intervention_status = "completed" if all_resolved else "waiting_human"
+
         intervention_map[message_id] = {
             "execution_id": wf_exec.execution_id,
-            "status": wf_exec.status,
+            "status": intervention_status,
             "interventions": [{
                 "node_id": i["node_id"],
                 "node_name": i.get("node_name", ""),

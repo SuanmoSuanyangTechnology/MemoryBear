@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from typing import Any
 
 from app.core.workflow.engine.state_manager import WorkflowState
@@ -13,6 +14,10 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 
 logger = logging.getLogger(__name__)
+
+# 匹配"纯变量引用"，如 {{node.x.output}} / {{ sys.message }}（无其它文本）。
+# 用于把数组/数字等变量解析为原生值，而不是被 Jinja2 str 化成 Python repr（如 ['22222']）。
+_PURE_VARIABLE_PATTERN = re.compile(r"^\{\{\s*(.*?)\s*\}\}$", re.DOTALL)
 
 
 class KnowledgeRetrievalNode(BaseNode):
@@ -62,13 +67,16 @@ class KnowledgeRetrievalNode(BaseNode):
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         cfg = self._get_typed_config()
+        # 复用 execute() 中的渲染逻辑，保证 input 记录的是变量解析后的真实值，
+        # 而非原始模板 {{xxx}}，与 assigner / LLM 等节点的展示约定保持一致。
+        rendered_filters = self._render_filter_variables(cfg.metadata_filters, variable_pool)
         return {
             "query": self._render_template(cfg.query, variable_pool),
             "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
             "metadata_filter_mode": cfg.metadata_filter_mode.value,
-            "metadata_filters": cfg.metadata_filters and {
-                "logic": cfg.metadata_filters.logic.value,
-                "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in cfg.metadata_filters.conditions],
+            "metadata_filters": rendered_filters and {
+                "logic": rendered_filters.logic.value,
+                "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in rendered_filters.conditions],
             },
         }
 
@@ -79,8 +87,11 @@ class KnowledgeRetrievalNode(BaseNode):
     ) -> FilterGroup | None:
         """渲染 metadata_filters 中 value_type=variable 的条件值。
 
-        遍历 FilterGroup，对 value_type 为 'variable' 且值含 {{...}} 的条件，
-        使用 BaseNode._render_template 渲染工作流变量模板后返回新的 FilterGroup。
+        遍历 FilterGroup，对 value_type 为 'variable' 且值含 {{...}} 的条件：
+          - 纯变量引用（如 {{node.x.output}}）：直接取变量池中的原生值，
+            保留 list/number/dict 等结构，避免 Jinja2 把数组 str 化成 Python repr（如 ['22222']）。
+            这样数组既能在 input 里显示为 JSON 数组，也能让 in/not_in 等操作符正确工作。
+          - 混合模板（如 "前缀 {{x}}"）：退回到 _render_template 字符串渲染。
         """
         if not filter_group:
             return None
@@ -88,9 +99,14 @@ class KnowledgeRetrievalNode(BaseNode):
         rendered_conditions = []
         for condition in filter_group.conditions:
             value = condition.value
-            # Render variable templates (e.g. {{sys.message}})
             if condition.value_type == "variable" and isinstance(value, str) and "{{" in value:
-                value = self._render_template(value, variable_pool, strict=False)
+                pure_ref = _PURE_VARIABLE_PATTERN.match(value.strip())
+                if pure_ref and variable_pool.has(value.strip()):
+                    # 纯变量引用：保留原生结构（list/number/...）
+                    value = variable_pool.get_value(value.strip(), default=value, strict=False)
+                else:
+                    # 混合模板或变量不存在：字符串渲染
+                    value = self._render_template(value, variable_pool, strict=False)
             rendered_conditions.append(FilterCondition(
                 field=condition.field,
                 operator=condition.operator,
