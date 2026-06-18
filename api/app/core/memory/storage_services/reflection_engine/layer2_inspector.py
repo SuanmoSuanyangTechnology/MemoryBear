@@ -19,7 +19,8 @@ from app.core.memory.storage_services.reflection_engine.llm.description_synthesi
     merge_description,
     summarize_extract_and_rename,
     validate_summary_output,
-    filter_events,
+    apply_event_operations,
+    validate_event_operations,
 )
 from app.core.memory.storage_services.reflection_engine.llm.unresolved_resolver import (
     resolve_unresolved_statement,
@@ -1263,7 +1264,7 @@ class Layer2Inspector:
 
         tracker.end_step(
             f"summary={len(result.description_summary)}字, "
-            f"events={len(result.events)}, "
+            f"operations={len(result.operations)}, "
             f"rename={result.should_rename_entity}"
         )
 
@@ -1278,27 +1279,14 @@ class Layer2Inspector:
             return False
         tracker.end_step("校验通过")
 
-        # Step 4: 过滤 events
+        # Step 4: 应用事件操作（add/delete/update）
         tracker.start_step("事件过滤", "decide")
-        valid_events = filter_events(result.events)
-
-        # 构建 event_timeline
-        # 单条格式：[valid_at|invalid_at] fact|title|category|category_id
-        # title / category / category_id 已在 filter_events 内兜底为合法值或 "NULL"
-        if valid_events:
-            events_str = '；'.join(
-                f'[{e.valid_at}|{e.invalid_at}] {e.fact}|{e.title}|{e.category}|{e.category_id}'
-                for e in valid_events
-            )
-            if existing_event_timeline:
-                event_timeline = existing_event_timeline + "；" + events_str
-            else:
-                event_timeline = events_str
-        else:
-            event_timeline = existing_event_timeline
-
+        valid_ops = validate_event_operations(result.operations)
+        event_timeline, ev_stats = apply_event_operations(
+            existing_event_timeline, valid_ops
+        )
         tracker.end_step(
-            f"有效事件 {len(valid_events)}/{len(result.events)}"
+            f"事件操作 新增{ev_stats['added']} 更新{ev_stats['updated']} 删除{ev_stats['deleted']}"
         )
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）

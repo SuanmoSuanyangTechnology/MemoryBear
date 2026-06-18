@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 from typing import List, Optional
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
@@ -87,13 +88,26 @@ async def merge_description(
 # ===== 新增：描述合并 + 事件提取 + 更名判断（一次调用） =====
 
 class EventItem(BaseModel):
-    """单个事件"""
-    valid_at: str
-    invalid_at: str
-    fact: str
+    """单条事件对象（add.value / delete.old_value / update.old_value / update.new_value 通用）"""
     title: str = "NULL"
+    category_id: str = "NULL"   # 稳定分类ID，直接存、不做枚举校验
     category: str = "NULL"
-    category_id: str = "NULL"   # 稳定分类ID，按需求直接存、不做枚举校验
+    valid_at: str = "NULL"
+    invalid_at: str = "NULL"
+    fact: str = "NULL"
+
+
+class EventOperation(BaseModel):
+    """单条事件操作：add / delete / update
+
+    - add:    仅 value
+    - delete: 仅 old_value（定位旧事件）
+    - update: old_value（定位）+ new_value（覆盖值）
+    """
+    op: str
+    value: Optional[EventItem] = None
+    old_value: Optional[EventItem] = None
+    new_value: Optional[EventItem] = None
 
 
 def _sanitize_field(value: str) -> str:
@@ -109,9 +123,9 @@ def _sanitize_field(value: str) -> str:
 
 
 class SummarizeExtractRenameOutput(BaseModel):
-    """LLM 输出：合并摘要 + 事件列表 + 更名判断"""
+    """LLM 输出：合并摘要 + 事件操作列表 + 更名判断"""
     description_summary: str
-    events: List[EventItem] = []
+    operations: List[EventOperation] = []
     should_rename_entity: bool = False
     suggested_entity_name: Optional[str] = None
 
@@ -136,45 +150,201 @@ def validate_summary_output(
     return True, "ok"
 
 
-def filter_events(
-    events: List[EventItem],
-) -> List[EventItem]:
-    """过滤无效事件
+# ===== 事件时间线 patch：解析 / 匹配 / 应用 =====
 
-    Args:
-        events: LLM 输出的新事件列表
+# 单条事件格式：[valid_at|invalid_at] fact|title|category|category_id
+_TIMELINE_HEAD_RE = re.compile(r'^\[([^|]*)\|([^\]]*)\]\s*(.*)$')
 
-    Returns:
-        过滤后的有效事件列表
+
+def _norm_match_key(value: str) -> str:
+    """归一化匹配键：NULL/空 → ''，去空白、转小写。"""
+    if value is None:
+        return ""
+    v = value.strip()
+    if v == "NULL":
+        return ""
+    return re.sub(r'\s+', '', v).lower()
+
+
+def _parse_timeline_full(event_timeline: str) -> List[dict]:
+    """解析 event_timeline 为全字段 dict 列表，不过滤、不转换，保证写回无损。
+
+    旧格式（仅 fact）按 fact=正文、其余 NULL 保留。
     """
-    valid_events = []
-    seen_facts = set()
+    if not event_timeline or not event_timeline.strip():
+        return []
 
-    for event in events:
-        # 过滤 fact 为空
-        if not event.fact or not event.fact.strip():
+    events: List[dict] = []
+    for item in event_timeline.split('；'):
+        item = item.strip()
+        if not item:
             continue
 
-        # 过滤"说话者"后缀
-        if "的说话者" in event.fact:
-            continue
+        m = _TIMELINE_HEAD_RE.match(item)
+        if m:
+            valid_at = m.group(1).strip() or "NULL"
+            invalid_at = m.group(2).strip() or "NULL"
+            body = m.group(3)
+        else:
+            valid_at = "NULL"
+            invalid_at = "NULL"
+            body = item
 
-        # 本轮内去重
-        fact_lower = event.fact.strip().lower()
-        if fact_lower in seen_facts:
-            continue
-        seen_facts.add(fact_lower)
+        parts = body.split('|')
+        fact = parts[0].strip() if len(parts) > 0 else ""
+        title = parts[1].strip() if len(parts) > 1 else "NULL"
+        category = parts[2].strip() if len(parts) > 2 else "NULL"
+        category_id = parts[3].strip() if len(parts) > 3 else "NULL"
 
-        # 写入前兜底：清洗分隔符 + category 枚举校验，保证拼接结构稳定
-        event.fact = _sanitize_field(event.fact)
-        event.title = _sanitize_field(event.title) if (event.title and event.title != "NULL") else "NULL"
-        event.category = event.category if event.category in EVENT_CATEGORY_NAME_SET else "NULL"
-        # category_id 不做枚举校验，仅清洗分隔符后原样透传（后续检索/聚合使用）
-        event.category_id = _sanitize_field(event.category_id) if (event.category_id and event.category_id != "NULL") else "NULL"
+        events.append({
+            "valid_at": valid_at or "NULL",
+            "invalid_at": invalid_at or "NULL",
+            "fact": fact,
+            "title": title or "NULL",
+            "category": category or "NULL",
+            "category_id": category_id or "NULL",
+        })
+    return events
 
-        valid_events.append(event)
 
-    return valid_events
+def _serialize_timeline(events: List[dict]) -> str:
+    """dict 列表序列化为 event_timeline 字符串。
+
+    旧格式兼容：title/category/category_id 全为 NULL 时不补后缀，前端继续跳过。
+    """
+    parts = []
+    for e in events:
+        valid_at = e.get("valid_at") or "NULL"
+        invalid_at = e.get("invalid_at") or "NULL"
+        fact = e.get("fact") or ""
+        title = e.get("title") or "NULL"
+        category = e.get("category") or "NULL"
+        category_id = e.get("category_id") or "NULL"
+
+        # 旧格式兼容：三段全 NULL 时保持原样（不补 |NULL|NULL|NULL）
+        if title == "NULL" and category == "NULL" and category_id == "NULL":
+            body = fact
+        else:
+            body = f'{fact}|{title}|{category}|{category_id}'
+
+        parts.append(f'[{valid_at}|{invalid_at}] {body}')
+    return '；'.join(parts)
+
+
+def _clean_event_item(item: EventItem) -> dict:
+    """清洗事件对象为可写入 dict：分隔符转义、category 枚举校验。"""
+    fact = _sanitize_field(item.fact) if item.fact and item.fact != "NULL" else ""
+    title = _sanitize_field(item.title) if (item.title and item.title != "NULL") else "NULL"
+    category = item.category if item.category in EVENT_CATEGORY_NAME_SET else "NULL"
+    category_id = _sanitize_field(item.category_id) if (item.category_id and item.category_id != "NULL") else "NULL"
+    return {
+        "valid_at": item.valid_at or "NULL",
+        "invalid_at": item.invalid_at or "NULL",
+        "fact": fact,
+        "title": title,
+        "category": category,
+        "category_id": category_id,
+    }
+
+
+def _find_matches(events: List[dict], old_value: EventItem) -> List[int]:
+    """fact + title 双键定位旧事件，返回命中下标列表。
+
+    一级精确 → 二级归一化回退；空串与 'NULL' 等价。
+    """
+    # 一级：精确
+    f_exact = _sanitize_field(old_value.fact) if old_value.fact else ""
+    t_exact = _sanitize_field(old_value.title) if (old_value.title and old_value.title != "NULL") else ""
+    exact = [
+        i for i, e in enumerate(events)
+        if (_sanitize_field(e["fact"]) if e["fact"] else "") == f_exact
+        and (_sanitize_field(e["title"]) if (e["title"] and e["title"] != "NULL") else "") == t_exact
+    ]
+    if exact:
+        return exact
+
+    # 二级：归一化
+    f_norm = _norm_match_key(old_value.fact)
+    t_norm = _norm_match_key(old_value.title)
+    return [
+        i for i, e in enumerate(events)
+        if _norm_match_key(e["fact"]) == f_norm and _norm_match_key(e["title"]) == t_norm
+    ]
+
+
+def validate_event_operations(operations: List[EventOperation]) -> List[EventOperation]:
+    """过滤非法操作，返回合法子集。非法的直接丢弃。"""
+    valid = []
+    for op in operations or []:
+        kind = (op.op or "").strip().lower()
+        if kind == "add":
+            if op.value and op.value.fact and op.value.fact.strip() and op.value.fact != "NULL":
+                valid.append(op)
+        elif kind == "delete":
+            if op.old_value and _norm_match_key(op.old_value.fact):
+                valid.append(op)
+        elif kind == "update":
+            if (op.old_value and op.new_value
+                    and _norm_match_key(op.old_value.fact)
+                    and op.new_value.fact and op.new_value.fact.strip() and op.new_value.fact != "NULL"):
+                valid.append(op)
+        # 其余 op 一律丢弃
+    return valid
+
+
+def apply_event_operations(
+    existing_event_timeline: str,
+    operations: List[EventOperation],
+) -> tuple:
+    """对已有 event_timeline 应用 add/delete/update patch 操作。
+
+    返回 (new_event_timeline, stats)，stats = {added, updated, deleted}。
+    匹配不上或多命中的操作静默跳过。
+    """
+    events = _parse_timeline_full(existing_event_timeline)
+    stats = {"added": 0, "updated": 0, "deleted": 0}
+
+    # 无有效操作时直接返回原串，避免纯解析→序列化造成格式微变
+    if not operations:
+        return existing_event_timeline or "", stats
+
+    # add 去重用：已有 + 本轮 fact 的归一化集合
+    seen_facts = {_norm_match_key(e["fact"]) for e in events if e["fact"]}
+
+    for op in operations:
+        kind = (op.op or "").strip().lower()
+
+        if kind == "add":
+            cleaned = _clean_event_item(op.value)
+            if not cleaned["fact"]:
+                continue
+            if "的说话者" in cleaned["fact"]:
+                continue
+            key = _norm_match_key(cleaned["fact"])
+            if key in seen_facts:
+                continue
+            seen_facts.add(key)
+            events.append(cleaned)
+            stats["added"] += 1
+
+        elif kind == "delete":
+            idxs = _find_matches(events, op.old_value)
+            if len(idxs) != 1:
+                continue
+            events.pop(idxs[0])
+            stats["deleted"] += 1
+
+        elif kind == "update":
+            idxs = _find_matches(events, op.old_value)
+            if len(idxs) != 1:
+                continue
+            cleaned = _clean_event_item(op.new_value)
+            if not cleaned["fact"]:
+                continue
+            events[idxs[0]] = cleaned
+            stats["updated"] += 1
+
+    return _serialize_timeline(events), stats
 
 
 async def summarize_extract_and_rename(
@@ -194,7 +364,7 @@ async def summarize_extract_and_rename(
         entity_type: 实体类型
         description: 当前 description 碎片（；分隔字符串）
         summary: 上次的摘要（首次为 None）
-        event_timeline: 已有的 event_timeline（全量，用于去重）
+        event_timeline: 已有的 event_timeline（全量，作为 patch 基准与去重依据）
         language: 语言类型
 
     Returns:
@@ -210,7 +380,7 @@ async def summarize_extract_and_rename(
             "entity_type": entity_type,
             "description": description,
             "description_summary": summary or "",
-            "event_timeline": event_timeline or "",
+            "event_timeline": _parse_timeline_full(event_timeline) if event_timeline else [],
         }
 
         rendered_prompt = template.render(
@@ -226,7 +396,7 @@ async def summarize_extract_and_rename(
         elif isinstance(response, dict):
             result = SummarizeExtractRenameOutput(
                 description_summary=response.get("description_summary", ""),
-                events=[EventItem(**e) for e in response.get("events", [])],
+                operations=[EventOperation(**o) for o in response.get("operations", [])],
                 should_rename_entity=response.get("should_rename_entity", False),
                 suggested_entity_name=response.get("suggested_entity_name"),
             )
@@ -234,7 +404,7 @@ async def summarize_extract_and_rename(
             data = response.model_dump()
             result = SummarizeExtractRenameOutput(
                 description_summary=data.get("description_summary", ""),
-                events=[EventItem(**e) for e in data.get("events", [])],
+                operations=[EventOperation(**o) for o in data.get("operations", [])],
                 should_rename_entity=data.get("should_rename_entity", False),
                 suggested_entity_name=data.get("suggested_entity_name"),
             )
