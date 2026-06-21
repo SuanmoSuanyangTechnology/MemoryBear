@@ -324,6 +324,9 @@ class MemoryMessageRepository:
         向后查找最多 window_size 个 user 消息，取最大 message_seq 作为下边界，
         查询 (target_seq, lower_bound] 范围内所有消息。
 
+        若下游无 user 消息，则返回 target_seq 之后的所有消息（包含尾部 assistant 消息），
+        确保最后一条 assistant 消息也能作为上下文被处理。
+
         Returns:
             消息列表，按 message_seq 升序排列
         """
@@ -339,7 +342,17 @@ class MemoryMessageRepository:
         ).scalars().all()
 
         if not downstream_q_seqs:
-            return []
+            # 下游无 user 消息，返回 target_seq 之后的所有消息（尾部 assistant 消息）
+            return list(
+                self.db.execute(
+                    select(MemoryMessage)
+                    .where(
+                        MemoryMessage.conversation_id == conversation_id,
+                        MemoryMessage.message_seq > target_seq,
+                    )
+                    .order_by(MemoryMessage.message_seq.asc())
+                ).scalars().all()
+            )
 
         lower_bound = max(downstream_q_seqs)
 

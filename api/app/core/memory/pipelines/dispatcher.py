@@ -373,8 +373,12 @@ async def dispatch_api_service_async(
 
         # 下文：向后找最多 WINDOW_SIZE 个 user
         after_user_p = min(len(user_indices) - 1, p + WINDOW_SIZE)
-        after_end = user_indices[after_user_p] + 1
-        context_after = written_mms[idx + 1:after_end]
+        if after_user_p == p:
+            # 当前是最后一条 user 消息，context_after 取到列表末尾（包含尾部 assistant 消息）
+            context_after = written_mms[idx + 1:]
+        else:
+            after_end = user_indices[after_user_p] + 1
+            context_after = written_mms[idx + 1:after_end]
 
         # 派发任务
         msg_id = push_write_task(
@@ -616,6 +620,7 @@ def dispatch_flush_conversation(conversation_id: str) -> int:
 
         # Step 3: 逐条处理
         dispatched = 0
+        skipped_non_user = 0 # 统计在 Flush 流程中因角色不是 user 或 should_memorize=False 而被跳过（只推进游标、不派发写入任务）的消息数量
         for msg in pending_messages:
             target_seq = msg["message_seq"]
 
@@ -623,6 +628,7 @@ def dispatch_flush_conversation(conversation_id: str) -> int:
                 with get_db_context() as db:
                     MemoryMessageRepository(db).advance_write_cursor(conversation_id, target_seq)
                     db.commit()
+                skipped_non_user += 1
                 continue
 
             if dispatch_single_message(
@@ -640,7 +646,8 @@ def dispatch_flush_conversation(conversation_id: str) -> int:
 
         logger.info(
             f"[Dispatcher] Flush 已派发 {dispatched} 个 user 消息任务: "
-            f"conv={conversation_id}, total_pending={len(pending_messages)}"
+            f"conv={conversation_id}, total_pending={len(pending_messages)}, "
+            f"skipped_non_user={skipped_non_user}"
         )
         return dispatched
 
@@ -700,6 +707,21 @@ async def check_sliding_window_and_dispatch(
             logger.info(
                 f"[WriteDispatcher] 下文不足，等待更多消息: conv={conversation_id}, "
                 f"seq={target_seq}, downstream={downstream_count} < {WINDOW_SIZE}"
+            )
+            return
+
+        # 先推进 cursor，确保同一条消息不会被后续调用（flush 或下次 ingest）重复派发。
+        # advance_write_cursor 使用 WHERE write_cursor < seq，具有原子性保护。
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            acquired = repo.advance_write_cursor(conversation_id, target_seq)
+            db.commit()
+
+        if not acquired:
+            # cursor 已被推进（该消息已被其他路径处理），跳过
+            logger.info(
+                f"[WriteDispatcher] cursor 已被推进，跳过重复派发: "
+                f"conv={conversation_id}, seq={target_seq}"
             )
             return
 

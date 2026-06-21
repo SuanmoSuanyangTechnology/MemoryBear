@@ -80,11 +80,12 @@ def _convert_pruning_records(raw_records: list) -> List[dict]:
 
     result: List[dict] = []
     _now = datetime.now(_tz.utc).isoformat()
-    _base = uuid.uuid4().hex[:8]  # 每批次唯一前缀，避免跨 task pair_id 碰撞
     for idx, r in enumerate(raw_records):
         conv_id = r.get("conversation_id", "")
         seq = r.get("message_seq", 0)
-        pair_id = f"{conv_id}_{seq}_{_base}_{idx}" if conv_id else f"{_base}_{idx}"
+        # pair_id 基于 conversation_id + message_seq 确定性生成，
+        # graph_build_step 用它构造 Neo4j 节点 ID（orig_{pair_id} / pruned_{pair_id}），确保 MERGE 幂等。
+        pair_id = f"{conv_id}_{seq}" if (conv_id and seq) else f"orphan_{uuid.uuid4().hex[:8]}_{idx}"
 
         # Assistant 消息是 input.msgs 中最后一条
         msgs = r.get("input", {}).get("msgs", [])
