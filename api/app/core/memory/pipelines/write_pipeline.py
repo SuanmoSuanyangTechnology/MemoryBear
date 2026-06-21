@@ -421,13 +421,6 @@ class WritePipeline:
                 async with bear.step(6, 6, "摘要", "生成情景记忆"):
                     await self._summarize(chunked_dialogs)
 
-                # 推进 write_cursor（如果需要）
-                if not skip_cursor_advance and conversation_id and message_seq > 0:
-                    await self._advance_write_cursor(
-                        conversation_id=conversation_id,
-                        message_seq=message_seq,
-                    )
-
                 # Step 5: 聚类 - 增量更新社区（Celery 异步任务，无需持锁）
                 async with bear.step(5, 6, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)
@@ -1139,28 +1132,6 @@ class WritePipeline:
                         result[user_idx] = {**result[user_idx], "content": processed_user_msg}
 
         return [m for m in result if m is not None]
-
-    async def _advance_write_cursor(
-        self,
-        conversation_id: str,
-        message_seq: int,
-    ) -> None:
-        """原子性推进对话的 write_cursor。
-
-        通过 MemoryMessageRepository.advance_write_cursor 实现，确保 cursor 单调递增。
-
-        Args:
-            conversation_id: 对话 ID
-            message_seq: 目标 user 消息的 message_seq，作为新的 write_cursor 值
-
-        Requirements: 3.2
-        """
-        from app.db import get_db_context
-        from app.repositories.memory_message_repository import MemoryMessageRepository
-
-        with get_db_context() as db:
-            MemoryMessageRepository(db).advance_write_cursor(conversation_id, message_seq)
-            db.commit()
 
     async def _cleanup(self) -> None:
         """

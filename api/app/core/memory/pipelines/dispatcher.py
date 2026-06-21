@@ -356,12 +356,16 @@ async def dispatch_api_service_async(
     if not written_mms:
         return []
 
-    # 标记 pending
-    mark_conversation_pending(conversation_id)
-
     # 3. 预计算上下文窗口并逐条派发
     task_ids = []
     user_indices = [i for i, m in enumerate(written_mms) if m["role"] == "user"]
+
+    # 先推进 cursor 到 max_seq，防止 flush 路径在 push_write_task 期间扫到这批消息重复派发
+    max_seq = max(mm["message_seq"] for mm in written_mms)
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        repo.advance_write_cursor(conversation_id, max_seq)
+        db.commit()
 
     for p, idx in enumerate(user_indices):
         msg = written_mms[idx]
@@ -393,13 +397,6 @@ async def dispatch_api_service_async(
             language=language,
         )
         task_ids.append(msg_id)
-
-    # 统一推进所有消息的 cursor（user + 非 user 一次性完成）
-    max_seq = max(mm["message_seq"] for mm in written_mms)
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        repo.advance_write_cursor(conversation_id, max_seq)
-        db.commit()
 
     return task_ids
 
@@ -771,6 +768,19 @@ def dispatch_single_message(
         context_before = [message_to_dict(m) for m in repo.build_context_before(conversation_id, target_seq)]
         context_after = [message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)]
 
+    # 先推进 cursor，防止并发 flush 重复派发同一条消息
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        acquired = repo.advance_write_cursor(conversation_id, target_seq)
+        db.commit()
+
+    if not acquired:
+        logger.info(
+            f"[WriteDispatcher] cursor 已被推进，跳过重复派发: "
+            f"conv={conversation_id}, seq={target_seq}"
+        )
+        return False
+
     push_write_task(
         end_user_id=end_user_id,
         target_message=msg_dict,
@@ -781,10 +791,5 @@ def dispatch_single_message(
         conversation_id=conversation_id,
         message_seq=target_seq,
     )
-
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        repo.advance_write_cursor(conversation_id, target_seq)
-        db.commit()
 
     return True
