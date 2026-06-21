@@ -198,6 +198,7 @@ def get_workspace_end_users(
             memory_total = int(getattr(end_user, "memory_count", 0) or 0)
 
         items.append({
+            "end_user_id": user_id,
             "end_user": {
                 "id": user_id,
                 "other_name": end_user.other_name,
