@@ -7,7 +7,7 @@
 认证方式: API Key (@require_api_key)
 """
 
-from fastapi import APIRouter, Body, Depends, Header, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from starlette.responses import Response
@@ -156,7 +156,7 @@ async def read_memory_async(
     Requires API Key with 'memory' scope.
     Returns task_id for polling via GET /read/status.
     """
-    raise Exception("该接口已弃用，请使用同步读取接口/v1/memory/read/sync")
+    raise HTTPException(status_code=410, detail="该接口已弃用，请使用同步读取接口 /v1/memory/read/sync")
 
 
 @router.get("/write/status")
