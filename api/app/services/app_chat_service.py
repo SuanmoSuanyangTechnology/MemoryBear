@@ -475,13 +475,15 @@ class AppChatService:
                 should_memorize=memory,
             )
             if used_context_engine:
-                await context_engine_manager.after_app_turn(
-                    features=features_config,
-                    conversation_id=conversation_id,
-                    current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
-                    legacy_max_history=settings.AGENT_MAX_HISTORY,
-                    model_config_id=config.default_model_config_id,
+                asyncio.create_task(
+                    context_engine_manager.after_app_turn(
+                        features=features_config,
+                        conversation_id=conversation_id,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=config.default_model_config_id,
+                    )
                 )
         else:
             new_msg = Message(
@@ -941,13 +943,15 @@ class AppChatService:
                     should_memorize=memory,
                 )
                 if used_context_engine:
-                    await context_engine_manager.after_app_turn(
-                        features=features_config,
-                        conversation_id=conversation_id,
-                        current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni,
-                        legacy_max_history=settings.AGENT_MAX_HISTORY,
-                        model_config_id=config.default_model_config_id,
+                    asyncio.create_task(
+                        context_engine_manager.after_app_turn(
+                            features=features_config,
+                            conversation_id=conversation_id,
+                            current_provider=api_key_obj.provider,
+                            current_is_omni=api_key_obj.is_omni,
+                            legacy_max_history=settings.AGENT_MAX_HISTORY,
+                            model_config_id=config.default_model_config_id,
+                        )
                     )
             else:
                 new_msg = Message(
