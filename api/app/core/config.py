@@ -347,6 +347,12 @@ class Settings:
     # 实验模式开关（允许通过 API 动态切换本体配置）
     ONTOLOGY_EXPERIMENT_MODE: bool = os.getenv("ONTOLOGY_EXPERIMENT_MODE", "true").lower() == "true"
 
+    # ========================================================================
+    # Context Engine History Configuration
+    # ========================================================================
+    # context engine的agent历史消息条数上限
+    AGENT_MAX_HISTORY: int = int(os.getenv("AGENT_MAX_HISTORY", 20))
+
     def get_memory_output_path(self, filename: str = "") -> str:
         """
         Get the full path for memory module output files.

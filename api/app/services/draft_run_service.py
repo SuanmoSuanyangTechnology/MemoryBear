@@ -872,7 +872,7 @@ class AgentRunService:
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
                     current_is_omni=api_key_config.get("is_omni", False),
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
                 if prepared_input:
@@ -881,7 +881,7 @@ class AgentRunService:
                 else:
                     history = await self._load_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=20,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False)
                     )
@@ -1050,7 +1050,7 @@ class AgentRunService:
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False),
-                        legacy_max_history=6,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=model_config.id,
                     )
 
@@ -1292,7 +1292,7 @@ class AgentRunService:
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
                     current_is_omni=api_key_config.get("is_omni", False),
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
                 if prepared_input:
@@ -1301,7 +1301,7 @@ class AgentRunService:
                 else:
                     history = await self._load_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=20,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False)
                     )
@@ -1516,7 +1516,7 @@ class AgentRunService:
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False),
-                        legacy_max_history=6,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=model_config.id,
                     )
 
