@@ -8,6 +8,7 @@ Classes:
     Neo4jConnector: Neo4j数据库连接器，提供异步查询接口
 """
 
+import logging
 import os
 import threading
 from typing import Any, List, Dict
@@ -17,6 +18,8 @@ from neo4j.time import DateTime as Neo4jDateTime, Date as Neo4jDate, Time as Neo
 
 from app.core.config import settings
 from app.core.utils.datetime_utils import to_iso_z
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_neo4j_types(value: Any) -> Any:
@@ -198,16 +201,24 @@ class Neo4jConnector:
         Example:
             Group group_123 deleted.
         """
-        # 删除节点（DETACH DELETE会同时删除相关的边）
-        await self.driver.execute_query(
-            "MATCH (n) WHERE n.end_user_id = $end_user_id DETACH DELETE n",
-            database="neo4j",
-            end_user_id=end_user_id
-        )
-        # 删除独立的边（如果有的话）
-        await self.driver.execute_query(
+        batch_size = 1000
+        total_deleted = 0
+        while True:
+            records = await self.execute_query(
+                "MATCH (n) WHERE n.end_user_id = $end_user_id "
+                "WITH n LIMIT $batch_size "
+                "DETACH DELETE n "
+                "RETURN count(n) AS deleted",
+                end_user_id=end_user_id,
+                batch_size=batch_size,
+            )
+            count = records[0]["deleted"] if records else 0
+            if count == 0:
+                break
+            total_deleted += count
+
+        await self.execute_query(
             "MATCH ()-[r]->() WHERE r.end_user_id = $end_user_id DELETE r",
-            database="neo4j",
-            end_user_id=end_user_id
+            end_user_id=end_user_id,
         )
-        print(f"Group {end_user_id} deleted.")
+        logger.info(f"Group {end_user_id} deleted ({total_deleted} nodes).")

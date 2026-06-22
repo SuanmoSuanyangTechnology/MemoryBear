@@ -60,7 +60,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 return await self._quick_read(query, limit, includes)
             case SearchStrategy.EXPRESS:
                 return await self._express_read(query, limit, includes)
-            case SearchStrategy.CONV:
+            case SearchStrategy.RECENT:
                 return await self._conv_history()
             case SearchStrategy.META:
                 return await self._user_meta()
