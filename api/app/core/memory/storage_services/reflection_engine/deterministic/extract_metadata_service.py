@@ -98,6 +98,20 @@ def _extract_post_state(
     return {field: list(rec.get(field) or []) for field in allowed_fields}
 
 
+def _build_operations_detail(result: Any) -> List[Dict[str, str]]:
+    """把 operations 转为简洁的变更明细列表，每条包含 op/field/描述。"""
+    details: List[Dict[str, str]] = []
+    for op in result.operations:
+        if op.op == "add":
+            details.append({"op": "add", "field": op.field, "value": op.value})
+        elif op.op == "delete":
+            details.append({"op": "delete", "field": op.field, "value": op.old_value})
+        elif op.op == "update":
+            details.append({"op": "update", "field": op.field,
+                            "old": op.old_value, "new": op.new_value})
+    return details
+
+
 # ── Public API ──
 
 
@@ -182,6 +196,7 @@ async def extract_metadata_for_user(
 
     extracted = 0
     failed = 0
+    details: List[Dict[str, Any]] = []  # 每个实体的详细变更记录
 
     # ── 3. 遍历候选实体 ──
     for entity_dict in candidates:
@@ -202,6 +217,12 @@ async def extract_metadata_for_user(
             )
             if patched:
                 extracted += 1
+                details.append({
+                    "entity_id": entity_id,
+                    "entity_name": entity_name,
+                    "ops": patched.get("operations_detail", []),
+                    "counts": patched.get("counts", {}),
+                })
                 if entity_dict.get("end_user_id") and patched.get("post_state"):
                     _sync_metadata_to_pg(
                         end_user_id=entity_dict["end_user_id"],
@@ -211,7 +232,7 @@ async def extract_metadata_for_user(
             failed += 1
             logger.warning(f"[Metadata] 实体 {entity_id} 元数据提取失败: {e}")
 
-    return {"extracted": extracted, "failed": failed}
+    return {"extracted": extracted, "failed": failed, "details": details}
 
 
 async def _extract_single_entity(
@@ -266,6 +287,9 @@ async def _extract_single_entity(
         logger.info(f"[Metadata] 实体 {entity_name}({entity_id}) 所有 op 均被过滤，跳过 patch")
         return None
 
+    # 构建详细变更列表（在 patch 前记录，因为 patch 后 operations 仍然有效）
+    operations_detail = _build_operations_detail(result)
+
     patch_records = await connector.execute_query(
         metadata_patch,
         **_build_patch_params(
@@ -283,7 +307,11 @@ async def _extract_single_entity(
     )
 
     post_state = _extract_post_state(patch_records, allowed_fields)
-    return {"post_state": post_state}
+    return {
+        "post_state": post_state,
+        "operations_detail": operations_detail,
+        "counts": counts,
+    }
 
 
 def _sync_metadata_to_pg(

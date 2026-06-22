@@ -260,6 +260,22 @@ class Layer2Inspector:
                 language=language,
                 min_fragments=self.desc_config.min_fragments,
             )
+
+            # 输出每个实体的详细变更日志
+            _OP_FMT = {
+                "add": ("新增", lambda o: f'{o["field"]}:「{o["value"]}」'),
+                "delete": ("删除", lambda o: f'{o["field"]}:「{o["value"]}」'),
+                "update": ("更新", lambda o: f'{o["field"]}:「{o["old"]}」→「{o["new"]}」'),
+            }
+            for detail in result.get("details", []):
+                name = detail["entity_name"]
+                ops = detail.get("ops", [])
+                for op_type, (label, fmt) in _OP_FMT.items():
+                    group = [o for o in ops if o["op"] == op_type]
+                    if group:
+                        logger.info(f"[Metadata] {name} {label}({len(group)}): "
+                                    + "; ".join(fmt(o) for o in group))
+
             return {"status": "success", **result}
         except Exception as e:
             logger.warning(
