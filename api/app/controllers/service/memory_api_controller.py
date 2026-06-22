@@ -14,14 +14,14 @@ from starlette.responses import Response
 
 # 包装内部 controller
 from app.controllers import memory_agent_controller
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_db, get_db_read
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, UserInput
 from app.services.memory_agent_service import get_end_user_connected_config as get_config
@@ -77,11 +77,10 @@ async def write_memory_sync(
 
 
 @router.post("/read/sync")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def read_memory_sync(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
 ):
     """
@@ -93,7 +92,8 @@ async def read_memory_sync(
     body = await request.json()
     payload = UserInput(**body)
 
-    validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
+    with get_db_read() as db:
+        validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
 
     logger.info(f"V1 memory read (sync) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
