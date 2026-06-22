@@ -689,12 +689,10 @@ async def check_sliding_window_and_dispatch(
 
     for msg in pending_dicts:
         # 滑动窗口路径只负责派发 user 消息的写入任务，cursor 只推进到 user 消息的 seq。
-        # non-user 消息（assistant）的 cursor 推进不在这里做，
-        # 完全交给 flush 兜底路径处理——flush 扫完所有 pending 后 cursor 才会推进到偶数。
-        # 这样保证：滑动窗口路径 cursor 始终停在奇数（user seq），
-        # 偶数（assistant seq）只在 flush 完成后出现。
+        # non-user 消息（assistant）不推进 cursor，跳过继续往后找第一条待派发的 user 消息。
+        # assistant 的 cursor 推进完全交给 flush 兜底路径处理。
         if msg.get("role") != "user" or not msg.get("should_memorize", True):
-            return
+            continue
 
         target_seq = msg["message_seq"]
 
