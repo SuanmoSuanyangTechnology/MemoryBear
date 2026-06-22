@@ -36,6 +36,22 @@ class KnowledgeRetrievalNode(BaseNode):
             self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
         return self.typed_config
 
+    def _is_cache_enabled(self) -> bool:
+        # auto 模式：过滤条件由 LLM 在 execute 内部动态提取，不进 cache key（_extract_input
+        # 阶段 LLM 尚未运行，无法把提取结果纳入 key）。因此同一 query 的 cache key 恒定，
+        # 二次执行会命中旧缓存、跳过 LLM 提取并返回过时结果。故 auto 模式默认不走节点缓存；
+        # 显式配置 cache.enabled=true 时仍尊重（交由父类判断）。
+        if (
+            self._get_typed_config().metadata_filter_mode == MetadataFilterMode.AUTO
+            and not self.cache_config.get("enabled")
+        ):
+            logger.debug(
+                "node: %s metadata_filter_mode=auto, bypass node cache (LLM dynamic extraction)",
+                self.node_id,
+            )
+            return False
+        return super()._is_cache_enabled()
+
     def _output_types(self) -> dict[str, VariableType]:
         return {
             "output": VariableType.ARRAY_STRING
