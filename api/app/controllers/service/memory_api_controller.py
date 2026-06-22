@@ -156,20 +156,7 @@ async def read_memory_async(
     Requires API Key with 'memory' scope.
     Returns task_id for polling via GET /read/status.
     """
-    body = await request.json()
-    payload = UserInput(**body)
-
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
-
-    logger.info(f"V1 memory read (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
-
-    result = await memory_agent_controller.read_server_async(
-        user_input=payload,
-        db=db,
-        current_user=current_user,
-    )
-    return _encode_result(result)
+    raise Exception("该接口已弃用，请使用同步读取接口/v1/memory/read/sync")
 
 
 @router.get("/write/status")
