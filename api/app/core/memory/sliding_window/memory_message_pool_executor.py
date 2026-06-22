@@ -72,34 +72,43 @@ async def execute_pending_from_pool(
     except Exception as e:
         logger.warning(f"[execute_pending_from_pool] 反查 workspace_id 失败: conv={conversation_id}, err={e}")
 
-    # 加载 config + 查询 pending 消息
+    # 解析 UUID 参数
+    _workspace_id = None
+    _config_id = None
     try:
-        _workspace_id = None
-        _config_id = None
-        try:
-            _workspace_id = _uuid.UUID(workspace_id) if workspace_id else None
-        except (ValueError, AttributeError):
-            pass
-        try:
-            _config_id = _uuid.UUID(config_id) if config_id else None
-        except (ValueError, AttributeError):
-            pass
+        _workspace_id = _uuid.UUID(workspace_id) if workspace_id else None
+    except (ValueError, AttributeError):
+        pass
+    try:
+        _config_id = _uuid.UUID(config_id) if config_id else None
+    except (ValueError, AttributeError):
+        pass
 
+    # 加载 memory_config（独立 Session，查完立即释放）
+    try:
         with get_db_context() as db:
             memory_config = MemoryConfigService(db).load_memory_config(
                 config_id=_config_id,
                 workspace_id=_workspace_id,
                 service_name="execute_pending_from_pool",
             )
+    except Exception as e:
+        logger.error(
+            f"[execute_pending_from_pool] 加载配置失败: conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+        return 0
 
+    # 查询 pending 消息（独立 Session，查完立即释放）
+    try:
+        with get_db_context() as db:
             repo = MemoryMessageRepository(db)
             write_cursor = repo.get_write_cursor(conversation_id) or 0
             pending_orm = repo.get_pending_messages(conversation_id, write_cursor)
             pending = [message_to_dict(m) for m in pending_orm]
-
     except Exception as e:
         logger.error(
-            f"[execute_pending_from_pool] 加载配置/查询数据失败: conv={conversation_id}, err={e}",
+            f"[execute_pending_from_pool] 查询待处理消息失败: conv={conversation_id}, err={e}",
             exc_info=True,
         )
         return 0
