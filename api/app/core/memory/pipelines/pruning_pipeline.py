@@ -137,15 +137,8 @@ class PruningPipeline:
             user_content=user_content,
         )
 
-        # Step 3: 写入 Neo4j（Assistant Pruned 节点）
-        try:
-            await self._write_to_neo4j(conversation_id, message_seq, content, pruned_content)
-        except Exception as e:
-            logger.warning(
-                f"[PruningPipeline] Neo4j 写入失败（不影响主流程）: "
-                f"conv={conversation_id}, seq={message_seq}, err={e}",
-                exc_info=True,
-            )
+        # Step 3: Neo4j 写入已统一移至 graph_build_step（通过 assistant_pruning_records metadata），
+        # 此处不再直接写入，避免产生重复边。
 
         # Step 4: 写入 Redis 缓存（TTL=86400s）
         try:

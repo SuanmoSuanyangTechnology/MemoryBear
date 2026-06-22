@@ -406,8 +406,10 @@ async def build_graph_nodes_and_edges(
 
         for record in pruning_records:
             pair_id = record["pair_id"]
-            original_id = f"ao_{pair_id}"
-            pruned_id = f"ap_{pair_id}"
+            # 节点 ID 基于 pair_id，确保 MERGE 幂等
+            # （pair_id 在 pruning_records 中固定，同一条消息重复处理时 ID 不变）
+            original_id = f"orig_{pair_id}"
+            pruned_id = f"pruned_{pair_id}"
 
             # AssistantOriginal 始终创建（记录原始对话）
             original_node = AssistantOriginalNode(

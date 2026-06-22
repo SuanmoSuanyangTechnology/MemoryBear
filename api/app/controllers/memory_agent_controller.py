@@ -205,7 +205,7 @@ async def write_server(
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
-@router.post("/writer_service_async", response_model=ApiResponse)
+@router.post("/write", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def write_server_async(
         user_input: Write_UserInput,
