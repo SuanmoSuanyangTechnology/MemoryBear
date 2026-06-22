@@ -98,9 +98,9 @@ def _extract_post_state(
     return {field: list(rec.get(field) or []) for field in allowed_fields}
 
 
-def _build_operations_detail(result: Any) -> List[Dict[str, str]]:
+def _build_operations_detail(result: Any) -> List[Dict[str, Any]]:
     """把 operations 转为简洁的变更明细列表，每条包含 op/field/描述。"""
-    details: List[Dict[str, str]] = []
+    details: List[Dict[str, Any]] = []
     for op in result.operations:
         if op.op == "add":
             details.append({"op": "add", "field": op.field, "value": op.value})
