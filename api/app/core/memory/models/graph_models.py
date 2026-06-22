@@ -648,6 +648,9 @@ class ConversationNode(Node):
     The node id equals the conversation_id, so it is stable and reused
     (via MERGE) across multiple sliding-window write tasks.
 
+    All write paths (Agent / Workflow / API Service) use real conversation_id,
+    so the source distinction is no longer needed.
+
     Attributes:
         conversation_id: The conversation/session ID (equals node id)
     """

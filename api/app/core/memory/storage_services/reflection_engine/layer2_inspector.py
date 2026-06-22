@@ -19,7 +19,8 @@ from app.core.memory.storage_services.reflection_engine.llm.description_synthesi
     merge_description,
     summarize_extract_and_rename,
     validate_summary_output,
-    filter_events,
+    apply_event_operations,
+    validate_event_operations,
 )
 from app.core.memory.storage_services.reflection_engine.llm.unresolved_resolver import (
     resolve_unresolved_statement,
@@ -424,11 +425,11 @@ class Layer2Inspector:
         }
 
 
-    async def run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
+    async def run_dedup_full_scan(self, end_user_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重（公共入口）"""
         t0 = time.perf_counter()
         logger.info(f"[Layer2 低频] 全量去重开始 end_user_id={end_user_id}")
-        result = await self._run_dedup_full_scan(end_user_id)
+        result = await self._run_dedup_full_scan(end_user_id, baseline=baseline)
         logger.info(
             f"[Layer2 低频] 全量去重完成 end_user_id={end_user_id}, "
             f"扫描类型={result.get('scanned_types', 0)}, "
@@ -437,7 +438,7 @@ class Layer2Inspector:
         )
         return result
 
-    async def _run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
+    async def _run_dedup_full_scan(self, end_user_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重"""
         from .deterministic.full_scan_dedup import (
             get_entity_types, get_last_scan_time, check_new_entities,
@@ -1263,7 +1264,7 @@ class Layer2Inspector:
 
         tracker.end_step(
             f"summary={len(result.description_summary)}字, "
-            f"events={len(result.events)}, "
+            f"operations={len(result.operations)}, "
             f"rename={result.should_rename_entity}"
         )
 
@@ -1278,27 +1279,14 @@ class Layer2Inspector:
             return False
         tracker.end_step("校验通过")
 
-        # Step 4: 过滤 events
+        # Step 4: 应用事件操作（add/delete/update）
         tracker.start_step("事件过滤", "decide")
-        valid_events = filter_events(result.events)
-
-        # 构建 event_timeline
-        # 单条格式：[valid_at|invalid_at] fact|title|category|category_id
-        # title / category / category_id 已在 filter_events 内兜底为合法值或 "NULL"
-        if valid_events:
-            events_str = '；'.join(
-                f'[{e.valid_at}|{e.invalid_at}] {e.fact}|{e.title}|{e.category}|{e.category_id}'
-                for e in valid_events
-            )
-            if existing_event_timeline:
-                event_timeline = existing_event_timeline + "；" + events_str
-            else:
-                event_timeline = events_str
-        else:
-            event_timeline = existing_event_timeline
-
+        valid_ops = validate_event_operations(result.operations)
+        event_timeline, ev_stats = apply_event_operations(
+            existing_event_timeline, valid_ops
+        )
         tracker.end_step(
-            f"有效事件 {len(valid_events)}/{len(result.events)}"
+            f"事件操作 新增{ev_stats['added']} 更新{ev_stats['updated']} 删除{ev_stats['deleted']}"
         )
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）

@@ -137,7 +137,7 @@ class ReflectionPipeline:
         finally:
             await connector.close()
 
-    async def run_dedup_full_scan(self) -> Dict[str, Any]:
+    async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """方案B：低频全量扫描去重 — 由每天一次的定时任务调用"""
         self._lazy_init()
 
@@ -155,7 +155,7 @@ class ReflectionPipeline:
         )
 
         try:
-            return await inspector.run_dedup_full_scan(self.end_user_id)
+            return await inspector.run_dedup_full_scan(self.end_user_id, baseline=baseline)
         finally:
             await connector.close()
 

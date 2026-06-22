@@ -375,18 +375,15 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                     <Button type="link" onClick={() => setStep(0)}>{t('workflow.goBack')}</Button>
                   }
                 </Flex>
-                {/* 渲染后的内容展示 */}
-                {renderedContent && (
-                  <div className="rb:mt-4">
-                    <RenderedForm
-                      content={renderedContent}
-                      formFields={nodeData?.config?.form_fields?.defaultValue || []}
-                      actions={nodeData?.config?.actions?.defaultValue || []}
-                      variables={inputs}
-                      onActionClick={handleActionClick}
-                    />
-                  </div>
-                )}
+                <div className="rb:mt-4">
+                  <RenderedForm
+                    content={renderedContent || ''}
+                    formFields={nodeData?.config?.form_fields?.defaultValue || []}
+                    actions={nodeData?.config?.actions?.defaultValue || []}
+                    variables={inputs}
+                    onActionClick={handleActionClick}
+                  />
+                </div>
               </>}
 
               {nodeData.type === 'human-intervention' && inputVars.length > 0 && step === 0

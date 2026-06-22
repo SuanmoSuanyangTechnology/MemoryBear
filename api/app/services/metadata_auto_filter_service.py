@@ -53,14 +53,30 @@ class MetadataAutoFilterService:
         "not empty": "not_empty",
         "is not empty": "not_empty",
         "not_empty": "not_empty",
+        "missing": "is_missing",
+        "is missing": "is_missing",
+        "not exists": "is_missing",
+        "not_exist": "is_missing",
+        "not_exists": "is_missing",
+        "is_missing": "is_missing",
+        "exists": "not_missing",
+        "exist": "not_missing",
+        "is exists": "not_missing",
+        "is exist": "not_missing",
+        "not missing": "not_missing",
+        "not_missing": "not_missing",
     }
     _SUPPORTED_OPERATORS = {
         "string": {
             "eq", "ne", "contains", "not_contains",
             "starts_with", "ends_with", "is_empty", "not_empty",
+            "is_missing", "not_missing",
         },
-        "number": {"eq", "ne", "gt", "lt", "gte", "lte", "is_empty", "not_empty"},
-        "time": {"eq", "before", "after", "is_empty", "not_empty"},
+        "number": {
+            "eq", "ne", "gt", "lt", "gte", "lte", "is_empty", "not_empty",
+            "is_missing", "not_missing",
+        },
+        "time": {"eq", "before", "after", "is_empty", "not_empty", "is_missing", "not_missing"},
     }
 
     @classmethod
@@ -143,8 +159,8 @@ class MetadataAutoFilterService:
             "### Task\n"
             "Only extract metadata that exists in the input text from the provided metadata list. "
             "Use one of these operators: [\"contains\", \"not contains\", \"start with\", "
-            "\"end with\", \"is\", \"is not\", \"empty\", \"not empty\", \"=\", \"≠\", "
-            "\">\", \"<\", \"≥\", \"≤\", \"before\", \"after\"].\n"
+            "\"end with\", \"is\", \"is not\", \"empty\", \"not empty\", \"missing\", "
+            "\"exists\", \"=\", \"≠\", \">\", \"<\", \"≥\", \"≤\", \"before\", \"after\"].\n"
             "### Format\n"
             "Return a JSON object with key \"metadata_fields\". The value must be an array of objects. "
             "Each object must contain \"metadata_field_name\", \"metadata_field_value\", "
@@ -234,7 +250,7 @@ class MetadataAutoFilterService:
 
     @classmethod
     def _normalize_value(cls, value: Any, field_type: str, operator: str) -> Any:
-        if operator in ("is_empty", "not_empty"):
+        if operator in ("is_empty", "not_empty", "is_missing", "not_missing"):
             return None
         match field_type:
             case "string":

@@ -96,7 +96,6 @@ class MemoryWriteNode(BaseNode):
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryWriteNodeConfig(**self.config)
         end_user_id = self.get_variable("sys.user_id", variable_pool)
-        conversation_id = self.get_variable("sys.conversation_id", variable_pool) or ""
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
@@ -138,12 +137,18 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        await MemoryService.write_workflow_messages(
-            conversation_id=conversation_id,
+        from app.core.memory.memory_service import MemoryService
+
+        conversation_id = variable_pool.get_value("sys.conversation_id") or ""
+        workspace_id = str(state.get("workspace_id", "") or "")
+
+        await MemoryService.ingest_workflow_messages(
             messages=messages,
-            config_id=str(self.typed_config.config_id),
+            conversation_id=conversation_id,
             end_user_id=end_user_id,
-            workspace_id=str(state.get("workspace_id", "") or ""),
+            config_id=str(self.typed_config.config_id),
+            workspace_id=workspace_id,
+            language="zh",
         )
 
         return "success"

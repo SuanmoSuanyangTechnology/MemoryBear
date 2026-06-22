@@ -10,7 +10,7 @@ from app.core.rag.deepdoc.parser import PdfParser, DocxParser
 from app.core.rag.deepdoc.parser.figure_parser import vision_figure_parser_pdf_wrapper,vision_figure_parser_docx_wrapper
 from docx import Document
 from PIL import Image
-from .naive import by_plaintext, PARSERS
+from app.core.rag.chunk.parser.pdf.selector import PARSERS, by_plaintext
 
 class Pdf(PdfParser):
     def __init__(self):

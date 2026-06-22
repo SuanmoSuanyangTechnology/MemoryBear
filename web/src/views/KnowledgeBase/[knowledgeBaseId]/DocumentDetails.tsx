@@ -125,7 +125,12 @@ const DocumentDetails: FC = () => {
       {
         key: 'file_name',
         label: t('knowledgeBase.fileName') || '文件名',
-        value: doc.file_name ?? '-',
+        value: <span onClick={() => handleCopy(doc.file_name ?? '-')}>
+          {doc.file_name ?? '-'}
+          <span
+            className="rb:cursor-pointer rb:-mb-0.5 rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
+          ></span>
+        </span>,
       },
       {
         key: 'status',
@@ -166,9 +171,8 @@ const DocumentDetails: FC = () => {
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
       const auto_questions = response?.parser_config?.auto_questions || 0
-      const parent_chunk_mode = response?.parser_config?.parent_chunk_mode || false
       setParserMode(auto_questions)
-      setIsParentChildMode(auto_questions === 0 && parent_chunk_mode)
+      setIsParentChildMode(response.parent_child_mode || false)
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
@@ -319,7 +323,11 @@ const DocumentDetails: FC = () => {
         return true;
       } else {
         // Insert mode: Create new chunk
-        await createDocumentChunk(knowledgeBaseId || '', documentId, { content, chunk_type: parentChunkId ? 'child' : undefined, parent_id: parentChunkId });
+        await createDocumentChunk(knowledgeBaseId || '', documentId, {
+          content,
+          chunk_type: parentChunkId ? 'child' : isParentChildMode ? 'parent' : undefined,
+          parent_id: parentChunkId
+        });
         return true;
       }
     } catch (error) {
@@ -495,6 +503,7 @@ const DocumentDetails: FC = () => {
             parserMode={parserMode}
             handleCopy={handleCopy}
             handleInsert={handleInsert}
+            isParentChildMode={isParentChildMode}
           />
         </div>
       </div>

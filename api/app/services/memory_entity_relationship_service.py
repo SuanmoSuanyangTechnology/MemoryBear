@@ -185,13 +185,14 @@ class MemoryEntityService:
             if not fact:
                 continue
 
-            # 时间为空的事件不返回给前端
-            if not valid_at:
+            # valid_at 为空时用 invalid_at 兜底（事件有结束日期但开始不确定）
+            display_at = valid_at or invalid_at
+            if not display_at:
                 continue
 
-            # valid_at 转为 Unix 毫秒时间戳（UTC）；无法解析则跳过
-            valid_at_ms = MemoryEntityService._to_epoch_ms(valid_at)
-            if valid_at_ms is None:
+            # 转为 Unix 毫秒时间戳（UTC）；无法解析则跳过
+            display_at_ms = MemoryEntityService._to_epoch_ms(display_at)
+            if display_at_ms is None:
                 continue
 
             # 不返回 invalid_at / category_id（前端不需要）
@@ -199,7 +200,7 @@ class MemoryEntityService:
                 "title": title,
                 "fact": fact,
                 "category": category,
-                "valid_at": valid_at_ms,
+                "valid_at": display_at_ms,
             })
 
         # 排序：valid_at 降序（最新在前）

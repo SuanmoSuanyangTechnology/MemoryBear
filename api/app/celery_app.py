@@ -113,9 +113,6 @@ celery_app.conf.update(
         # Metadata extraction → memory_tasks queue
         # 'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'}, # NOTE：没有使用地方，可以删除
 
-        # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
-        'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
-
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
@@ -134,7 +131,6 @@ celery_app.conf.update(
         'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
-        'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
         'app.tasks.flush_conversation': {'queue': 'periodic_tasks'},
 
         'app.tasks.draft_data_clean': {'queue': 'memory_tasks'},
@@ -246,6 +242,12 @@ beat_schedule_config = {
     #     "options": {"queue": "periodic_tasks"},
     # },
     # FIXME: Infinite task accumulation
+    "flush-conversation": {
+        # 每分钟扫描空闲对话并派发兜底写入
+        "task": "app.tasks.flush_conversation",
+        "schedule": 60.0,
+        "options": {"queue": "periodic_tasks"},
+    },
 
     "scan-workflow-schedule-triggers": {
         "task": "app.tasks.scan_workflow_schedule_triggers",

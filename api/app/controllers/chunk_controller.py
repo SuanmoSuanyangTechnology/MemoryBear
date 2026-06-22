@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
+from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
@@ -114,12 +115,12 @@ async def get_preview_chunks(
             lang="Chinese",
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
-    from app.core.rag.app.naive import chunk_v2 as chunk
+    from app.core.rag.chunk import chunk_pipeline as chunk
+    from app.core.rag.chunk.context import ChunkOutputMode
     parent_child_mode = db_document.is_parent_child_mode
     api_logger.debug(f"当前文档分块模式：{db_document.is_parent_child_mode}")
     if parent_child_mode:
-        from app.core.rag.app.naive import chunk_parent_child_v2 as chunk_parent_child
-        child_res, parent_res, parent_id_map = chunk_parent_child(
+        child_res, parent_res, parent_id_map = chunk(
             filename=db_file.file_name,
             binary=file_binary,
             from_page=0,
@@ -128,6 +129,7 @@ async def get_preview_chunks(
             vision_model=vision_model,
             parser_config=db_document.parser_config,
             is_root=False,
+            chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
         )
         # Combine parent and child chunks for preview
         parent_id_to_doc_id = {}
@@ -146,7 +148,12 @@ async def get_preview_chunks(
                 "status": 1,
                 "chunk_type": "parent",
             }
-            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+            all_preview.append(
+                DocumentChunk(
+                    page_content=item["content_with_weight"],
+                    metadata=merge_parser_metadata(meta, item),
+                )
+            )
         for idx, item in enumerate(child_res):
             parent_idx = parent_id_map.get(idx)
             meta = {
@@ -161,7 +168,12 @@ async def get_preview_chunks(
                 "chunk_type": "child",
                 "parent_id": parent_id_to_doc_id.get(parent_idx, ""),
             }
-            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+            all_preview.append(
+                DocumentChunk(
+                    page_content=item["content_with_weight"],
+                    metadata=merge_parser_metadata(meta, item),
+                )
+            )
         res = all_preview
     else:
         res = chunk(filename=db_file.file_name,
@@ -193,7 +205,12 @@ async def get_preview_chunks(
                 "sort_id": idx,
                 "status": 1,
             }
-            chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+            chunks.append(
+                DocumentChunk(
+                    page_content=item["content_with_weight"],
+                    metadata=merge_parser_metadata(metadata, item),
+                )
+            )
 
     # 8. Return structured response
     total = len(res)
@@ -282,7 +299,8 @@ async def get_preview_chunks_hierarchy(
         lang="Chinese",
         base_url=db_knowledge.image2text.api_keys[0].api_base
     )
-    from app.core.rag.app.naive import chunk_v2 as chunk, chunk_parent_child_v2 as chunk_parent_child
+    from app.core.rag.chunk import chunk_pipeline as chunk
+    from app.core.rag.chunk.context import ChunkOutputMode
 
     parser_config = dict(db_document.parser_config)
 
@@ -300,7 +318,7 @@ async def get_preview_chunks_hierarchy(
 
     try:
         if chunk_mode == "parent_child":
-            child_res, parent_res, parent_id_map = chunk_parent_child(
+            child_res, parent_res, parent_id_map = chunk(
                 filename=db_file.file_name,
                 binary=file_binary,
                 from_page=0,
@@ -309,6 +327,7 @@ async def get_preview_chunks_hierarchy(
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
             )
             hierarchy = _build_preview_hierarchy(
                 child_res,

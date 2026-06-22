@@ -375,7 +375,7 @@ class ConversationService:
         conversation: Conversation,
         should_memorize: bool = True,
     ) -> None:
-        """触发 MemoryService.sync_message 把消息同步到 memory_messages 表。
+        """触发 dispatch_agent_message 把消息同步到 memory_messages 表。
 
         fire-and-forget：失败仅记录 warning，不影响 messages 表的主写入流程。
         在已有事件循环中走 ensure_future（附加 done_callback 记录异常），
@@ -389,15 +389,15 @@ class ConversationService:
         """
         try:
             import asyncio
-            from app.core.memory.memory_service import MemoryService
 
             workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
             end_user_id = str(conversation.user_id) if conversation.user_id else ""
-            coro = MemoryService.sync_message(
+
+            from app.core.memory.memory_service import MemoryService
+            coro = MemoryService.ingest_agent_message(
                 conversation_id=str(message.conversation_id),
                 message=message,
                 app_id=str(conversation.app_id),
-                is_draft=conversation.is_draft,
                 config_id="",
                 workspace_id=workspace_id,
                 end_user_id=end_user_id,
@@ -411,7 +411,7 @@ class ConversationService:
                 exc = task.exception()
                 if exc is not None:
                     logger.warning(
-                        f"[ConversationService] MemoryService.sync_message 异步执行失败: "
+                        f"[ConversationService] dispatch_agent_message 异步执行失败: "
                         f"conv={message.conversation_id}, err={exc}",
                         exc_info=exc,
                     )
@@ -424,7 +424,7 @@ class ConversationService:
                 loop.run_until_complete(coro)
         except Exception as e:
             logger.warning(
-                f"[ConversationService] MemoryService.sync_message 调度失败（不影响主流程）: "
+                f"[ConversationService] dispatch_agent_message 调度失败（不影响主流程）: "
                 f"conv={message.conversation_id}, err={e}",
                 exc_info=True,
             )

@@ -178,7 +178,7 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
     {
       key: 'qaMode',
       label: t('knowledgeBase.qaMode'),
-      disabled: isParentChildMode || !parentChunkId,
+      disabled: isParentChildMode,
       children: (
         // QA 模式的编辑界面
         <div className='rb:flex rb:flex-col rb:gap-4'>

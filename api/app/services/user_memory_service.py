@@ -29,6 +29,7 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
     assemble_center_per_type_stat,
+    build_unified_edges,
     compute_stat_types,
     resolve_mode_and_type_limits,
     _query_nodes_by_type_limits,
@@ -40,7 +41,7 @@ from app.schemas.graph_data_schema import GraphDataResponse
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
-from app.services.memory_short_service import ShortService
+from app.services.memory_short_service import LongService, ShortService
 
 logger = get_logger(__name__)
 
@@ -1619,19 +1620,27 @@ async def analytics_memory_types(
     #         logger.warning(f"获取行为习惯数量失败，隐性记忆数量设为0: {str(e)}")
     #         implicit_count = 0
     
-    # 获取短期记忆数量（基于 /short_term 接口返回的问答对数量）
+    # 获取短期记忆数量（问答对数）和长期记忆数量
     short_term_count = 0
+    long_term_number = 0
     if end_user_id:
         try:
             short_term_service = ShortService(end_user_id, db)
-            short_term_data = short_term_service.get_short_databasets()
-            # 统计 short_term 数组的长度
-            if short_term_data:
-                short_term_count = len(short_term_data)
+            short_term_count = short_term_service.get_short_count()
             logger.debug(f"短期记忆数量（问答对数）: {short_term_count} (end_user_id={end_user_id})")
         except Exception as e:
             logger.warning(f"获取短期记忆数量失败，短期记忆数量设为0: {str(e)}")
             short_term_count = 0
+
+        try:
+            long_term_service = LongService(end_user_id, db)
+            long_term_data = long_term_service.get_long_databasets()
+            if long_term_data:
+                long_term_number = len(long_term_data)
+            logger.debug(f"长期记忆数量: {long_term_number} (end_user_id={end_user_id})")
+        except Exception as e:
+            logger.warning(f"获取长期记忆数量失败，长期记忆数量设为0: {str(e)}")
+            long_term_number = 0
     
     # 获取用户的遗忘阈值配置
     forgetting_threshold = 0.3  # 默认值
@@ -1666,7 +1675,7 @@ async def analytics_memory_types(
     memory_counts = {
         "PERCEPTUAL_MEMORY": perceptual_count,                    # 感知记忆
         "WORKING_MEMORY": work_count,                             # 工作记忆（基于会话数量）
-        "SHORT_TERM_MEMORY": short_term_count,                    # 短期记忆（基于问答对数量）
+        "SHORT_TERM_MEMORY": short_term_count+long_term_number,   # 短期记忆（基于问答对数量）
         "EXPLICIT_MEMORY": explicit_count,                        # 显性记忆（情景记忆 + 语义记忆）
         "IMPLICIT_MEMORY": implicit_count,                        # 隐性记忆（MemorySummary节点数，需>=MIN_MEMORY_SUMMARY_COUNT）
         "EMOTIONAL_MEMORY": emotion_count,                        # 情绪记忆（使用情绪标签统计）
@@ -1730,6 +1739,8 @@ async def analytics_graph_data(
     Returns:
         ``GraphDataResponse.model_dump()`` 后的字典，顶层键为
         ``nodes / edges / statistics``，必要时附带 ``message``。
+        ``edges`` 为统一边列表，所有边均以 UnifiedEdge 结构表示，
+        通过 ``edge_type`` 区分 SINGLE / UNIDIRECTIONAL_MULTI / BIDIRECTIONAL / MULTI_BIDIRECTIONAL。
     """
     try:
         # 1. 用户校验
@@ -1760,6 +1771,10 @@ async def analytics_graph_data(
         # 6. Q3 边查询（try/except 降级，Requirement 8.4）
         edges, edge_type_counts = await _format_edges(node_ids)
 
+        # 6.1 统一边聚合：EXTRACTED_RELATIONSHIP 按同对节点聚合，
+        # 其他边类型各成独立 SINGLE 边条目。纯逻辑无 IO。
+        unified_edges = build_unified_edges(edges)
+
         # 7. Q4 全量计数 + statistics.per_type 装配
         per_type_stat = await _build_per_type_stat(
             mode=mode,
@@ -1772,7 +1787,7 @@ async def analytics_graph_data(
 
         statistics = {
             "total_nodes": len(nodes),
-            "total_edges": len(edges),
+            "total_edges": len(unified_edges),
             "node_types": node_type_counts,
             "edge_types": edge_type_counts,
             "per_type": per_type_stat,
@@ -1785,14 +1800,15 @@ async def analytics_graph_data(
         )
         logger.info(
             f"图数据查询: end_user_id={end_user_id} mode={mode} "
-            f"nodes={len(nodes)} edges={len(edges)} per_type=[{per_type_log}]"
+            f"nodes={len(nodes)} edges={len(unified_edges)} "
+            f"per_type=[{per_type_log}]"
         )
 
         # 通过 GraphDataResponse 装配响应：拿到 ge=0 / 必填字段校验与向后兼容契约，
         # 再 model_dump() 回 dict 以维持 controller 接口形态。无 message 时不输出该键。
         response = GraphDataResponse(
             nodes=nodes,
-            edges=edges,
+            edges=unified_edges,
             statistics=statistics,
         )
         return response.model_dump(exclude_none=True)
@@ -1921,10 +1937,13 @@ async def _format_edges(
         if source not in node_id_set or target not in node_id_set:
             continue
         rel_type = record.get("rel_type")
+        raw_props = record.get("properties") or {}
         cleaned_edge_props = {
-            key: _clean_neo4j_value(value)
-            for key, value in (record.get("properties") or {}).items()
+            key: _clean_neo4j_value(value) for key, value in raw_props.items()
         }
+        predicate_description = _clean_neo4j_value(
+            raw_props.get("predicate_description")
+        )
         edges.append({
             "id": record.get("id"),
             "source": source,
@@ -1932,6 +1951,7 @@ async def _format_edges(
             "type": rel_type,
             "properties": cleaned_edge_props,
             "caption": _resolve_edge_caption(rel_type, cleaned_edge_props),
+            "predicate_description": predicate_description if predicate_description else None,
         })
         edge_type_counts[rel_type] = edge_type_counts.get(rel_type, 0) + 1
 
@@ -2155,11 +2175,14 @@ async def analytics_community_graph_data(
                 r_props = {k: _clean_neo4j_value(v) for k, v in (row["r_props"] or {}).items()}
                 source = e_id if row.get("r_from_e") else e2_id
                 target = e2_id if row.get("r_from_e") else e_id
-                edges_map[r_id] = {
+                edge_entry: Dict[str, Any] = {
                     "id": r_id,
                     "source": source,
                     "target": target,
+                    "properties": r_props,
+                    "predicate_description": r_props.get("predicate_description"),
                 }
+                edges_map[r_id] = edge_entry
 
         nodes = list(nodes_map.values())
         edges = list(edges_map.values())

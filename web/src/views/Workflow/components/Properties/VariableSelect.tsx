@@ -519,10 +519,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
       {open && createPortal(
         <div
           ref={dropdownRef}
-          className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+          className="rb:w-70 rb:h-57.5 rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
           style={{ top: dropdownPos.top, left: dropdownPos.left, minWidth: dropdownPos.width }}
         >
-          <div className="rb:w-70 rb:h-57.5 rb:overflow-y-auto">
+          <div className="rb:w-full rb:h-54.5 rb:overflow-y-auto">
             {Object.entries(filteredGroups).map(([nodeId, suggestions], index) => {
               const nd = suggestions[0].nodeData;
               return (
@@ -569,14 +569,14 @@ const VariableSelect: FC<VariableSelectProps> = ({
                           }
                         }}
                       >
-                        <div className="rb:font-medium">
+                        <div className="rb:font-medium rb:flex-1 rb:break-all">
                           {multiple && (
                             <Checkbox checked={isSelected} className="rb:mr-2!" />
                           )}
                           <span className="rb:text-[#155EEF]">{`{x}`}</span> {s.label}
                         </div>
 
-                        <Space size={2}>
+                        <Space size={2} className="rb:shrink-0">
                           {s.dataType && <span>{s.dataType}</span>}
                           {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
                         </Space>
@@ -616,7 +616,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
             {/* Breadcrumb header */}
             <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
               <Flex justify="space-between" align="center" gap={8}>
-                <Flex align="center" gap={2}>
+                <Flex align="center" gap={2} className="rb:flex-1! rb:break-all">
                   <span>
                     {expandedPath.slice(0, index + 1).map((item, idx) => (
                       <span key={item.key}>
@@ -626,7 +626,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
                     ))}
                   </span>
                 </Flex>
-                <span>{parent.dataType}</span>
+                <span className="rb:shrink-0">{parent.dataType}</span>
               </Flex>
             </div>
             {parent.children?.map((child, ci) => {
@@ -651,7 +651,6 @@ const VariableSelect: FC<VariableSelectProps> = ({
                     handleSelect(child);
                   }}
                   onMouseEnter={() => {
-                    if (child.disabled) return;
                     if (hasChildren) {
                       calcChildPos(child.key);
                       setExpandedPath([...expandedPath.slice(0, index + 1), child]);
@@ -663,13 +662,13 @@ const VariableSelect: FC<VariableSelectProps> = ({
                     }
                   }}
                 >
-                  <Flex align="center" gap={8}>
+                  <Flex align="center" gap={8} className="rb:flex-1 rb:break-all">
                     {multiple && (
                       <Checkbox checked={isSelected} />
                     )}
                     <span className="rb:font-medium">{child.label}</span>
                   </Flex>
-                  <Space size={2}>
+                  <Space size={2} className="rb:shrink-0">
                     {child.dataType && <span>{child.dataType}</span>}
                     {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
                   </Space>

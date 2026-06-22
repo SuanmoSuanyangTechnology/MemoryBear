@@ -215,7 +215,10 @@ const Neo4j: FC = () => {
           <NodeStatistics highlightKeys={brainMemories} />
           <RelationshipNetwork
             regionId={regionId}
+            setRegionId={setRegionId}
             selectedKey={selectedKey}
+            setSelectedKey={setSelectedKey}
+            setBrainMemories={setBrainMemories}
           />
         </Flex>
       </Flex>
@@ -227,6 +230,7 @@ const Neo4j: FC = () => {
             <PrivateWrap>
               <BrainView
                 ref={brainViewRef}
+                visible={selectedKey === 'Brain'}
                 className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'}
                 onMemoriesChange={handleBrainMemoriesChange}
                 onClose={() => { setSelectedKey(null); setBrainMemories([]); setRegionId(null) }}

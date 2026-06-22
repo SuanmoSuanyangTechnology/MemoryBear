@@ -1,11 +1,13 @@
 from collections import defaultdict
+from copy import deepcopy
 
 from app.core.rag.models.chunk import DocumentChunk, ChildDocumentChunk
 
 
 def _clean_chunk_meta(chunk: dict, chunk_type: str, sort_id: int | None = None) -> dict:
-    """提取 preview 所需的最小 metadata，丢弃原始 chunk 的冗余字段。"""
-    meta = {"chunk_type": chunk_type}
+    """Build preview metadata while preserving parser-provided source context."""
+    meta = deepcopy(chunk.get("metadata", {})) if isinstance(chunk.get("metadata"), dict) else {}
+    meta["chunk_type"] = chunk_type
     if sort_id is not None:
         meta["sort_id"] = sort_id
     return meta

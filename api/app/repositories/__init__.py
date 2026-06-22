@@ -17,6 +17,7 @@ from app.repositories.neo4j.entity_repository import EntityRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.repositories.app_repository import AppRepository
+from app.repositories.memory_message_repository import MemoryMessageRepository
 
 
 class RepositoryFactory:
@@ -168,4 +169,5 @@ class RepositoryFactory:
 
 __all__ = [
     'RepositoryFactory',
+    'MemoryMessageRepository',
 ]

@@ -153,7 +153,7 @@ const cognitiveUpgradingWorkflowNodes: CognitiveUpgradingNode[] = [
   {
     type: 'start',
     icon: 'rb:bg-[url("@/assets/images/workflow/start.svg")]',
-    labelKey: 'workflow.start',
+    labelKey: 'workflow.start_label',
   },
   {
     type: 'memory-read',
@@ -163,12 +163,12 @@ const cognitiveUpgradingWorkflowNodes: CognitiveUpgradingNode[] = [
   {
     type: 'llm',
     icon: 'rb:bg-[url("@/assets/images/workflow/llm.svg")]',
-    labelKey: 'workflow.llm',
+    labelKey: 'workflow.llm_label',
   },
   {
     type: 'end',
     icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
-    labelKey: 'workflow.end',
+    labelKey: 'workflow.end_label',
   },
   {
     type: 'memory-write',
@@ -216,13 +216,13 @@ const CognitiveUpgradingHelp = () => {
       </Flex>
       <div className="rb:bg-[#F9F9F9] rb:rounded-xl rb:py-3 rb:px-3.5">
         <div className="rb:text-center rb:mb-3">{t('workflow.cognitiveUpgrading.recommendedUsage')}</div>
-        <div className="rb:relative rb:grid rb:grid-cols-9 rb:gap-1">
+        <div className="rb:relative rb:grid rb:grid-cols-14">
           <span className="rb:absolute rb:top-3 rb:size-2 rb:rounded-full rb:bg-[#155EEF] dot-move-animation"></span>
           {cognitiveUpgradingWorkflowNodes.map((node, index) => (
             <React.Fragment key={node.type}>
               <Flex 
                 vertical gap={4} align="center"
-                className={`rb:text-[center] rb:transition-[all_.3s] node-highlight-${index + 1} node-hover-highlight`}
+                className={`rb:text-[center] rb:col-span-2 rb:transition-[all_.3s] node-highlight-${index + 1} node-hover-highlight`}
               >
                 <div className={`rb:size-6.5 rb:bg-cover ${node.icon}`}></div>
                 <span className="rb:text-[10px] rb:text-center">{t(node.labelKey)}</span>

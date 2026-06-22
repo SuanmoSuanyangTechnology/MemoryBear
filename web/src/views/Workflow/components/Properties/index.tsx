@@ -28,7 +28,7 @@ import ToolConfig from './ToolConfig'
 import MemoryConfig from './MemoryConfig'
 import VariableList from './VariableList'
 import OutputVariables from './OutputVariables'
-import { useVariableList, getCurrentNodeVariables, getChildNodeVariables } from './hooks/useVariableList'
+import { useVariableList, getCurrentNodeVariables, getChildNodeVariables, filterChildrenWithTypes } from './hooks/useVariableList'
 import { useWorkflowStore } from '@/store/workflow'
 import styles from './properties.module.css'
 import Editor, { type LexicalEditorProps } from "../Editor";
@@ -257,6 +257,7 @@ const Properties: FC<PropertiesProps> = ({
       }
       return filteredList;
     };
+
     if (nodeType === 'llm') {
       // For LLM nodes that are children of iteration or loop nodes, include parent variables
       const parentLoopNode = selectedNode ? (() => {
@@ -346,15 +347,22 @@ const Properties: FC<PropertiesProps> = ({
     if (nodeType === 'knowledge-retrieval') {
       const allList = addParentIterationVars(variableList);
       let filteredList: Suggestion[] = []
+
       allList.forEach(variable => {
         if (variable.dataType === 'string') {
           filteredList.push(variable)
         } else if (variable.dataType === 'file') {
-          filteredList.push({
-            ...variable,
-            disabled: true,
-            children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
-          })
+          // Recursively filter string children from file type
+          const filteredFile = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredFile) {
+            filteredList.push(filteredFile);
+          }
+        } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredVar) {
+            filteredList.push(filteredVar);
+          }
         }
       })
 
@@ -373,6 +381,12 @@ const Properties: FC<PropertiesProps> = ({
             ...variable,
             children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
           })
+        } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredVar) {
+            filteredList.push(filteredVar);
+          }
         }
       })
 
@@ -389,18 +403,37 @@ const Properties: FC<PropertiesProps> = ({
         if (['string', 'number'].includes(variable.dataType)) {
           filteredList.push(variable)
         } else if (variable.dataType === 'file') {
-          filteredList.push({
-            ...variable,
-            disabled: true,
-            children: variable.children.filter((child: Suggestion) => ['string', 'number'].includes(child.dataType))
-          })
+          // Recursively filter string/number children from file type
+          const filteredFile = filterChildrenWithTypes([variable], ['string', 'number'])[0];
+          if (filteredFile) {
+            filteredList.push(filteredFile);
+          }
+        } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['string', 'number'])[0];
+          if (filteredVar) {
+            filteredList.push(filteredVar);
+          }
         }
       })
 
       return filteredList
     }
     if (nodeType === 'memory-read') {
-      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string');
+      const allList = addParentIterationVars(variableList);
+      let filteredList: Suggestion[] = []
+      allList.forEach(variable => {
+        if (variable.dataType === 'string') {
+          filteredList.push(variable)
+        } else if (variable.dataType === 'file') {
+        } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredVar) {
+            filteredList.push(filteredVar);
+          }
+        }
+      })
       return filteredList;
     }
     if (nodeType === 'memory-write') {
@@ -414,6 +447,12 @@ const Properties: FC<PropertiesProps> = ({
             ...variable,
             children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
           })
+        } else if (variable.children && variable.children?.length > 0) {
+          // Recursively handle other types with children
+          const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredVar) {
+            filteredList.push(filteredVar);
+          }
         }
       })
 

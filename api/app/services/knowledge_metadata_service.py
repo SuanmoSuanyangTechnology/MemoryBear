@@ -2,7 +2,11 @@ import uuid
 from typing import Any
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from app.core.utils.datetime_utils import parse_iso_to_utc_naive, utcnow_naive
+from app.core.utils.datetime_utils import (
+    parse_metadata_time_to_utc_naive,
+    to_utc_offset_string,
+    utcnow_naive,
+)
 from app.core.exceptions import (
     BusinessException,
     ResourceNotFoundException,
@@ -349,8 +353,12 @@ class KnowledgeMetadataService:
                 doc_id = item["document_id"]
                 metadata = item["metadata"]
                 doc = doc_map[doc_id]
+                normalized_metadata = KnowledgeMetadataService._normalize_metadata_for_storage(
+                    metadata,
+                    field_defs,
+                )
                 doc.meta_data = doc.meta_data or {}
-                doc.meta_data.update(metadata)
+                doc.meta_data.update(normalized_metadata)
                 flag_modified(doc, "meta_data")
                 doc.updated_at = utcnow_naive()
 
@@ -420,8 +428,12 @@ class KnowledgeMetadataService:
                 )
 
         # 4. 更新 metadata JSON
+        normalized_metadata = KnowledgeMetadataService._normalize_metadata_for_storage(
+            metadata,
+            field_defs,
+        )
         doc.meta_data = doc.meta_data or {}
-        doc.meta_data.update(metadata)
+        doc.meta_data.update(normalized_metadata)
         flag_modified(doc, "meta_data")
         doc.updated_at = utcnow_naive()
 
@@ -464,10 +476,15 @@ class KnowledgeMetadataService:
         # 获取字段定义
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, doc.kb_id)
         field_map = {f.id: f for f in custom_fields}
+        field_defs_by_name = {f.name: f for f in custom_fields}
+        metadata = KnowledgeMetadataService._serialize_metadata_for_response(
+            doc.meta_data or {},
+            field_defs_by_name,
+        )
 
         result = {
             "document_id": str(document_id),
-            "metadata": doc.meta_data or {},
+            "metadata": metadata,
             "fields": [],
         }
 
@@ -478,7 +495,7 @@ class KnowledgeMetadataService:
                     "field_id": str(field_def.id),
                     "name": field_def.name,
                     "type": field_def.type,
-                    "value": doc.meta_data.get(field_def.name) if doc.meta_data else None,
+                    "value": metadata.get(field_def.name),
                 })
 
         return result
@@ -563,14 +580,78 @@ class KnowledgeMetadataService:
             case "number":
                 return isinstance(value, (int, float)) and not isinstance(value, bool)
             case "time":
-                if not isinstance(value, str):
-                    return False
                 try:
-                    return parse_iso_to_utc_naive(value) is not None
-                except ValueError:
+                    return parse_metadata_time_to_utc_naive(value) is not None
+                except (TypeError, ValueError):
                     return False
             case _:
                 return False
+
+    @staticmethod
+    def _normalize_metadata_value_for_storage(field_type: str, value: Any) -> Any:
+        """Normalize metadata values before storing them in Document.meta_data."""
+        if value is None or field_type != "time":
+            return value
+        dt = parse_metadata_time_to_utc_naive(value)
+        if dt is None:
+            return None
+        return dt.isoformat(sep=" ")
+
+    @staticmethod
+    def _normalize_metadata_for_storage(
+        metadata: dict[str, Any],
+        field_defs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize time metadata to naive UTC strings before JSONB storage."""
+        normalized = {}
+        for field_name, value in metadata.items():
+            field_def = field_defs[field_name]
+            normalized[field_name] = KnowledgeMetadataService._normalize_metadata_value_for_storage(
+                field_def.type,
+                value,
+            )
+            if field_def.type == "time":
+                api_logger.debug(
+                    "Normalized document time metadata: "
+                    f"field={field_name}, raw_value={value!r}, raw_type={type(value).__name__}, "
+                    f"stored_value={normalized[field_name]!r}"
+                )
+        return normalized
+
+    @staticmethod
+    def _serialize_metadata_value_for_response(field_type: str, value: Any) -> Any:
+        """Format metadata values for API responses without changing storage."""
+        if value is None or field_type != "time":
+            return value
+        try:
+            dt = parse_metadata_time_to_utc_naive(value)
+        except (TypeError, ValueError):
+            api_logger.warning(
+                "Skipped invalid document time metadata response formatting: "
+                f"raw_value={value!r}, raw_type={type(value).__name__}"
+            )
+            return value
+        if dt is None:
+            return value
+        return to_utc_offset_string(dt)
+
+    @staticmethod
+    def _serialize_metadata_for_response(
+        metadata: dict[str, Any],
+        field_defs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Format typed metadata values for API responses."""
+        serialized = {}
+        for field_name, value in metadata.items():
+            field_def = field_defs.get(field_name)
+            if not field_def:
+                serialized[field_name] = value
+                continue
+            serialized[field_name] = KnowledgeMetadataService._serialize_metadata_value_for_response(
+                field_def.type,
+                value,
+            )
+        return serialized
 
     @staticmethod
     def get_metadata_defs_for_filtering(
@@ -579,7 +660,7 @@ class KnowledgeMetadataService:
     ) -> dict[str, dict]:
         """
         获取用于过滤的字段定义映射
-        Returns: {field_name: {"type": "string", "is_builtin": False}}
+        Returns: {field_name: {"id": uuid, "type": "string", "is_builtin": False}}
         """
         from app.models.knowledge_model import Knowledge
 
@@ -588,7 +669,7 @@ class KnowledgeMetadataService:
         # 自定义字段
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
         for f in custom_fields:
-            result[f.name] = {"type": f.type, "is_builtin": False}
+            result[f.name] = {"id": f.id, "type": f.type, "is_builtin": False}
 
         # 内置字段（如果开启）
         knowledge = db.query(Knowledge).filter(Knowledge.id == knowledge_id).first()

@@ -15,7 +15,6 @@ import json
 import os
 import time
 import uuid
-from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import UUID
@@ -44,12 +43,9 @@ from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas import FileInput
-from app.schemas.memory_agent_schema import Language, MessageItem, StorageType, Write_UserInput, WriteMemoryRequest
+from app.schemas.memory_agent_schema import MessageItem, StorageType, Write_UserInput, WriteMemoryRequest
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_config_service import MemoryConfigService
-from app.services.memory_konwledges_server import (
-    write_rag,
-)
 from app.services.memory_perceptual_service import MemoryPerceptualService
 
 logger = get_logger(__name__)
@@ -286,6 +282,7 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
+    # [DEPRECATED] 下一版本移除：write_memory 同步路径将改为统一走 dispatcher → push_task 异步路径
     async def write_memory(
             self,
             request: WriteMemoryRequest,
@@ -310,93 +307,22 @@ class MemoryAgentService:
         storage_type = request.storage_type
         user_rag_memory_id = request.user_rag_memory_id
         language = request.language
-        conversation_id = request.conversation_id
         start_time = time.time()
 
-        # ── per-end_user 互斥锁 ──
-        # 防止同一 end_user_id 的 API 并发调用和 FlushTask 同时操作同一个 conversation
-        async with self._acquire_per_user_lock(end_user_id):
-            return await self._write_memory_locked(
-                end_user_id=end_user_id,
-                messages=messages,
-                config_id=config_id,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                language=language,
-                conversation_id=conversation_id,
-                db=db,
-                start_time=start_time,
-            )
-
-    @staticmethod
-    @asynccontextmanager
-    async def _acquire_per_user_lock(end_user_id: str):
-        """获取 per-end_user 互斥锁（RedisFairLock）。
-
-        防止同一 end_user_id 的并发 API 调用和 FlushTask 同时操作同一个
-        哨兵会话的 write_cursor 和 pending 消息。
-
-        FlushTask (flush_conversation_task) 也使用同一把锁
-        memory_write:{end_user_id}，保证互斥。
-
-        失败（Redis 不可用）时不阻塞主流程，仅记录 warning 后放行。
-        """
-        if not end_user_id:
-            yield
-            return
-
-        # 重入检测：FlushTask 在 worker 中已持有锁时跳过
-        if _is_holding_write_lock(end_user_id):
-            yield
-            return
-
-        from app.utils.redis_lock import RedisFairLock
-
-        redis_client = None
-        try:
-            redis_client = redis.StrictRedis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB_CELERY_BACKEND,
-                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
-                decode_responses=True,
-            )
-            redis_client.ping()
-        except Exception as e:
-            logger.warning(
-                f"[write_memory] Redis 不可用，跳过锁保护: end_user_id={end_user_id}, err={e}"
-            )
-            yield
-            return
-
-        lock = RedisFairLock(
-            key=f"memory_write:{end_user_id}",
-            redis_client=redis_client,
-            expire=600,
-            timeout=120,
-            auto_renewal=True,
+        # 写入流水线内部不再对存储阶段加锁，仅情绪回写等旁路操作内部自行持锁
+        return await self._do_sync_write(
+            end_user_id=end_user_id,
+            messages=messages,
+            config_id=config_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            language=language,
+            db=db,
+            start_time=start_time,
         )
 
-        import asyncio
-        acquired = await asyncio.to_thread(lock.acquire)
-        if not acquired:
-            logger.warning(
-                f"[write_memory] 获取锁超时，跳过本次写入: end_user_id={end_user_id}"
-            )
-            yield
-            return
-
-        try:
-            yield
-        finally:
-            try:
-                await asyncio.to_thread(lock.release)
-            except Exception as e:
-                logger.warning(
-                    f"[write_memory] 释放锁失败: end_user_id={end_user_id}, err={e}"
-                )
-
-    async def _write_memory_locked(
+    # [DEPRECATED] 下一版本移除：同步写入核心实现，将改为统一走 dispatcher → push_task 异步路径
+    async def _do_sync_write(
             self,
             end_user_id: str,
             messages,
@@ -404,11 +330,14 @@ class MemoryAgentService:
             storage_type,
             user_rag_memory_id,
             language,
-            conversation_id,
-            db: Optional[Session],
+            db: Session,
             start_time: float,
     ) -> str:
-        """write_memory 的核心实现（已持有 per-end_user 锁）。"""
+        """write_memory 的核心实现。
+
+        同步路径：写入 memory_messages 表后同步调用 execute_pending_from_pool 执行写入，
+        写入完成后执行后处理（缓存失效、memory_count 同步）。
+        """
         memory_config = await self._resolve_and_load_config(
             end_user_id, config_id, db, start_time
         )
@@ -423,19 +352,24 @@ class MemoryAgentService:
         # ── Step 3: 写入存储 ── 根据 storage_type 分流到 RAG 或 Neo4j 流水线
         try:
             if storage_type == StorageType.RAG:
-                await write_rag(end_user_id, message_text, user_rag_memory_id)
+                from app.core.memory.memory_service import MemoryService
+                await MemoryService.write_messages_to_rag(
+                    messages=messages,
+                    end_user_id=end_user_id,
+                    user_rag_memory_id=user_rag_memory_id,
+                )
                 return "success"
             else:
-                # ── 滑动窗口写入路径（所有 Neo4j 写入统一入口）──
-                _conversation_id = str(conversation_id) if conversation_id else None
-                if not _conversation_id:
-                    # Service API 路径：按 (workspace_id, end_user_id) 查找/创建虚拟会话
-                    from app.core.memory.sliding_window.window_utils import get_or_create_service_api_conversation
-                    _conversation_id = get_or_create_service_api_conversation(
-                        workspace_id=str(memory_config.workspace_id),
-                        end_user_id=end_user_id,
-                    )
-                await self._write_to_memory_messages_and_dispatch(
+                # ── 候选池消费路径（Neo4j）──
+                # 写入 memory_messages 表 → 同步执行 execute_pending_from_pool
+                from app.core.memory.memory_service import MemoryService as _MS
+
+                _conversation_id = _MS.get_or_create_service_api_conversation(
+                    workspace_id=str(memory_config.workspace_id),
+                    end_user_id=end_user_id,
+                )
+
+                processed = await self._write_to_memory_messages_and_dispatch(
                     conversation_id=_conversation_id,
                     messages=messages,
                     end_user_id=end_user_id,
@@ -444,27 +378,20 @@ class MemoryAgentService:
                     language=str(language),
                 )
 
-                # ── Step 4: 后处理 ── 失效缓存、序列化文件路径、记录审计日志并返回结果
+                # ── Step 4: 后处理 ── 同步路径在当前请求内完成
+                # 失效兴趣分布缓存
                 await self._invalidate_interest_cache(end_user_id)
 
-                # ── Step 5: 同步 memory_count 到 PostgreSQL（仅 neo4j 模式）──
-                _connector = Neo4jConnector()
+                # 同步 end_user 记忆计数
                 try:
-                    await sync_end_user_memory_count_from_neo4j(end_user_id, _connector)
-                except Exception as _sync_e:
-                    logger.warning(f"[MEMORY_COUNT_SYNC] 同步失败（不影响主流程）: end_user_id={end_user_id}, error={_sync_e}")
-                finally:
-                    await _connector.close()
+                    connector = Neo4jConnector()
+                    try:
+                        await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+                    finally:
+                        await connector.close()
+                except Exception as count_e:
+                    logger.warning(f"[write_memory] 同步记忆计数失败: {count_e}")
 
-                for message in messages:
-                    if isinstance(message, dict):
-                        message["file_content"] = [
-                            perceptual[0].file_path for perceptual in (message["file_content"] or [])
-                        ]
-                    else:
-                        message.file_content = [
-                            perceptual[0].file_path for perceptual in (message.file_content or [])
-                        ]
                 return self.writer_messages_deal(
                     "success",
                     start_time,
@@ -472,8 +399,9 @@ class MemoryAgentService:
                     memory_config.config_id,
                     message_text,
                     {
-                        "status": "success",
-                        "data": messages,
+                        "status": "SUCCESS",
+                        "message": "写入成功",
+                        "processed": processed,
                         "config_id": memory_config.config_id,
                         "config_name": memory_config.config_name
                     }
@@ -611,6 +539,7 @@ class MemoryAgentService:
         logger.info(messages)
         return messages
 
+    # [DEPRECATED] 下一版本移除：同步写入路径专用，将改为统一走 dispatcher → push_task
     async def _write_to_memory_messages_and_dispatch(
         self,
         conversation_id: str,
@@ -619,12 +548,13 @@ class MemoryAgentService:
         config_id: str,
         workspace_id: str,
         language: str,
-    ) -> None:
-        """Layer 1 + Layer 2：写入候选池 → 同步执行。
+    ) -> int:
+        """Layer 1 + Layer 2：写入候选池 → 同步执行消费。
 
-        所有 Neo4j 写入任务的统一入口。
-        1. 写入 memory_messages 表（Layer 1）
-        2. 调用 execute_pending_from_pool() 同步执行（Layer 2）
+        同步路径（/writer_service）的 Neo4j 写入入口。
+        1. 确保 conversations 表存在该记录（FK 约束）
+        2. 写入 memory_messages 表（Layer 1）
+        3. 同步调用 execute_pending_from_pool 执行写入（Layer 2）
 
         Args:
             conversation_id: 对话 ID
@@ -633,38 +563,52 @@ class MemoryAgentService:
             config_id: 记忆配置 ID
             workspace_id: 工作空间 ID
             language: 语言
+
+        Returns:
+            处理的消息数
         """
-        from app.core.memory.sliding_window.window_utils import (
-            ensure_conversation_exists,
-            write_batch_to_memory_messages,
-            execute_pending_from_pool,
-        )
+        from app.core.memory.memory_service import MemoryService as _MS
+        from app.core.memory.sliding_window.memory_message_pool_executor import execute_pending_from_pool
+        from app.db import get_db_context
+        from app.repositories.memory_message_repository import MemoryMessageRepository
 
         messages_dict = [
             msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
             for msg in messages
         ]
 
-        await ensure_conversation_exists(
+        await _MS.ensure_conversation_exists(
             conversation_id=conversation_id,
             workspace_id=workspace_id,
         )
 
-        await write_batch_to_memory_messages(
-            conversation_id=conversation_id,
-            messages=messages_dict,
-        )
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            written_mms = repo.write_batch(conversation_id, messages_dict)
+            db.commit()
 
-        await execute_pending_from_pool(
+        if not written_mms:
+            logger.info(f"[write_memory] No valid messages to write: conv={conversation_id}")
+            return 0
+
+        # 同步执行 execute_pending_from_pool
+        # enforce_window=False：同步路径不要求下文凑齐 3 条
+        processed = await execute_pending_from_pool(
             conversation_id=conversation_id,
             end_user_id=end_user_id,
             config_id=config_id,
             workspace_id=workspace_id,
             language=language,
-            enforce_window=False,  # API 同步路径，详见 execute_pending_from_pool docstring
+            enforce_window=False,
         )
 
+        logger.info(
+            f"[write_memory] Sync execution completed: "
+            f"conv={conversation_id}, end_user_id={end_user_id}, "
+            f"written={len(written_mms)}, processed={processed}"
+        )
 
+        return processed
 
     async def _invalidate_interest_cache(self, end_user_id: str) -> None:
         """写入完成后失效兴趣分布缓存。"""
@@ -1462,10 +1406,16 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     logger.debug(f"Found end_user app_id: {app_id}")
 
     # 2. 获取应用以确定 workspace_id
-    app = db.query(App).filter(App.id == app_id).first()
-    if not app:
-        logger.warning(f"App not found: {app_id}")
-        # raise ValueError(f"应用不存在: {app_id}")
+    # app_id 为 None 是合法状态（例如 service-API-key 创建的 end_user），
+    # 后续会通过 end_user.workspace_id 走 workspace 默认 config 兜底。
+    # 仅在 app_id 有值但查不到 App 行时才告警。
+    app = None
+    if app_id:
+        app = db.query(App).filter(App.id == app_id).first()
+        if not app:
+            # 孤儿 end_user（app_id 指向已删除的 App）：降级为 debug，
+            # 不影响主流程，仍会通过 end_user.workspace_id 走 workspace 默认 config 兜底。
+            logger.debug(f"App not found: {app_id}")
     # TODO: temp fix for draft run
     # if not app.current_release_id:
     #     logger.warning(f"No current release for app: {app_id}")

@@ -123,6 +123,7 @@ async def download_log(
             return fail(BizCode.INTERNAL_ERROR, "启动日志流式传输失败", str(e))
 
 
+# [DEPRECATED] 下一版本移除：/writer_service 同步写入端点将改为统一走 dispatcher → push_task 异步路径
 @router.post("/writer_service", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def write_server(
@@ -204,7 +205,7 @@ async def write_server(
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
-@router.post("/writer_service_async", response_model=ApiResponse)
+@router.post("/write", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def write_server_async(
         user_input: Write_UserInput,
@@ -249,16 +250,37 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
-        # 获取标准化的消息列表
+        # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
+        if storage_type and storage_type.lower() == StorageType.RAG.value:
+            from app.core.memory.memory_service import MemoryService
+            messages_list = memory_agent_service.get_messages_list(user_input)
+            await MemoryService.write_messages_to_rag(
+                messages=messages_list,
+                end_user_id=user_input.end_user_id,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            api_logger.info(f"RAG write completed for end_user={user_input.end_user_id}")
+            return success(data={}, msg="RAG 写入完成")
+
+        # ── Neo4j 路径：通过 dispatcher 写入 ──
+        from app.core.memory.memory_service import MemoryService as _MemoryService
+
+        workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
         messages_list = memory_agent_service.get_messages_list(user_input)
 
-        task = celery_app.send_task(
-            "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language]
+        task_ids = await _MemoryService.dispatch_api_service_async(
+            messages=messages_list,
+            end_user_id=user_input.end_user_id,
+            config_id=config_id,
+            workspace_id=workspace_id_str,
+            language=language,
         )
-        api_logger.info(f"Write task queued: {task.id}")
 
-        return success(data={"task_id": task.id}, msg="写入任务已提交")
+        api_logger.info(
+            f"Write tasks queued: {len(task_ids)} tasks, end_user={user_input.end_user_id}"
+        )
+
+        return success(data={"task_ids": task_ids}, msg=f"已提交 {len(task_ids)} 个写入任务")
     except Exception as e:
         api_logger.error(f"Async write operation failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))

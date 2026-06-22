@@ -460,18 +460,46 @@ class NewExtractionOrchestrator:
         # ── Phase 4: Data assignment ──
         logger.debug("Phase 4/4: Data assignment")
 
+        # ── Inline emotion extraction (previously deferred to pipeline layer) ──
+        emotion_results: Dict[str, EmotionStepOutput] = {}
+        if self.config.emotion_enabled:
+            emotion_stmts = self._collect_emotion_statements(all_stmt_results)
+            if emotion_stmts:
+                from .steps.emotion_step import EmotionExtractionStep
+
+                emotion_step = EmotionExtractionStep(self.context)
+                if not emotion_step.should_skip():
+                    async def _extract_emotion(stmt_dict: Dict[str, str]) -> None:
+                        inp = EmotionStepInput(
+                            statement_id=stmt_dict["statement_id"],
+                            statement_text=stmt_dict["statement_text"],
+                            speaker=stmt_dict.get("speaker", "user"),
+                        )
+                        try:
+                            result = await emotion_step.run(inp)
+                            emotion_results[stmt_dict["statement_id"]] = result
+                        except Exception as e:
+                            logger.warning(
+                                "[Emotion] 提取失败 stmt=%s: %s",
+                                stmt_dict["statement_id"], e,
+                            )
+
+                    await asyncio.gather(*[_extract_emotion(s) for s in emotion_stmts])
+                    logger.info(
+                        "[Emotion] 批量情绪提取完成: 成功=%d, 总数=%d",
+                        len(emotion_results), len(emotion_stmts),
+                    )
+
         self._assign_results(
             dialog_data_list,
             all_stmt_results,
             all_triplet_results,
-            emotion_results={},
+            emotion_results=emotion_results,
             embedding_output=merged_emb,
         )
 
-        # ── Fire-and-forget: collect statements for async emotion extraction ──
+        # Keep legacy attribute for backward compat (now empty — extraction done above)
         self._emotion_statements: List[Dict[str, str]] = []
-        if self.config.emotion_enabled:
-            self._emotion_statements = self._collect_emotion_statements(all_stmt_results)
 
         # Store raw step outputs for snapshot/debugging
         self._last_stage_outputs = {
