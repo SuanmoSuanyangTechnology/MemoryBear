@@ -1045,13 +1045,15 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
-                    await context_engine_manager.after_app_turn(
-                        features=features_config,
-                        conversation_id=uuid.UUID(conversation_id),
-                        current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
-                        legacy_max_history=settings.AGENT_MAX_HISTORY,
-                        model_config_id=model_config.id,
+                    asyncio.create_task(
+                        context_engine_manager.after_app_turn(
+                            features=features_config,
+                            conversation_id=uuid.UUID(conversation_id),
+                            current_provider=api_key_config.get("provider"),
+                            current_is_omni=api_key_config.get("is_omni", False),
+                            legacy_max_history=settings.AGENT_MAX_HISTORY,
+                            model_config_id=model_config.id,
+                        )
                     )
 
             # 11. 更新 Agent 执行记录为 completed
@@ -1511,13 +1513,15 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
-                    await context_engine_manager.after_app_turn(
-                        features=features_config,
-                        conversation_id=uuid.UUID(conversation_id),
-                        current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
-                        legacy_max_history=settings.AGENT_MAX_HISTORY,
-                        model_config_id=model_config.id,
+                    asyncio.create_task(
+                        context_engine_manager.after_app_turn(
+                            features=features_config,
+                            conversation_id=uuid.UUID(conversation_id),
+                            current_provider=api_key_config.get("provider"),
+                            current_is_omni=api_key_config.get("is_omni", False),
+                            legacy_max_history=settings.AGENT_MAX_HISTORY,
+                            model_config_id=model_config.id,
+                        )
                     )
 
             # 11.5 更新 Agent 执行记录为 completed
