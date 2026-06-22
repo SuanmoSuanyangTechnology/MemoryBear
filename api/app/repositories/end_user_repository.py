@@ -208,6 +208,17 @@ class EndUserRepository:
                     other_id=user_id
                 )
                 self.db.add(end_user)
+                self.db.flush()  # flush to get end_user.id before creating EndUserInfo
+
+                # Create corresponding EndUserInfo record
+                end_user_info = EndUserInfo(
+                    end_user_id=end_user.id,
+                    other_name="",
+                    aliases=[],
+                    meta_data={}
+                )
+                self.db.add(end_user_info)
+
                 self.db.commit()
                 self.db.refresh(end_user)
                 return end_user.id, end_user.other_id
