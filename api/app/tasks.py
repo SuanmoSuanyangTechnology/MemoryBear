@@ -1663,7 +1663,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 @celery_app.task(name="app.core.memory.agent.read_message", bind=True)
 def read_message_task(self, end_user_id: str, message: str, history: List[Dict[str, Any]], search_switch: str,
                       config_id: str, storage_type: str, user_rag_memory_id: str) -> Dict[str, Any]:
-    """Celery task to process a read message via MemoryAgentService.
+    """Celery task to process a read message via MemoryService.ReadPipeLine.
 
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
@@ -1702,16 +1702,24 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
             pass
 
     async def _run() -> dict:
-        with get_db_context() as db:
-            service = MemoryAgentService()
-            return await service.read_memory(
-                end_user_id,
-                message,
-                history,
-                search_switch,
-                actual_config_id, db,
-                storage_type, user_rag_memory_id
-            )
+        from app.core.memory.memory_service import MemoryService
+        from app.core.memory.enums import SearchStrategy
+
+        service = MemoryService(
+            config_id=str(actual_config_id) if actual_config_id else None,
+            end_user_id=end_user_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+        result = await service.read(
+            query=message,
+            search_switch=SearchStrategy(search_switch),
+            history=history,
+        )
+        return {
+            "answer": result.content,
+            "intermediate_outputs": [_.model_dump() for _ in result.memories],
+        }
 
     try:
         # 尝试获取现有事件循环，如果不存在则创建新的
