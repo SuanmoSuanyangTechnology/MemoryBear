@@ -25,6 +25,7 @@ from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
+from app.core.config import settings
 from app.services.draft_run_service import AgentRunService
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
@@ -232,7 +233,7 @@ class AppChatService:
                 current_input=message,
                 current_provider=api_key_obj.provider,
                 current_is_omni=api_key_obj.is_omni,
-                legacy_max_history=6,
+                legacy_max_history=settings.AGENT_MAX_HISTORY,
                 model_config_id=config.default_model_config_id,
             )
             if prepared_input:
@@ -241,7 +242,7 @@ class AppChatService:
             else:
                 history = await self.conversation_service.get_conversation_history(
                     conversation_id=conversation_id,
-                    max_history=20,
+                    max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
@@ -264,7 +265,7 @@ class AppChatService:
                 # 重新加载历史（包含刚写入的开场白）
                 history = await self.conversation_service.get_conversation_history(
                     conversation_id=conversation_id,
-                    max_history=10,
+                    max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
@@ -479,7 +480,7 @@ class AppChatService:
                     conversation_id=conversation_id,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni,
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
         else:
@@ -652,7 +653,7 @@ class AppChatService:
                     current_input=message,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni,
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
                 if prepared_input:
@@ -661,7 +662,7 @@ class AppChatService:
                 else:
                     history = await self.conversation_service.get_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=20,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni
                     )
@@ -684,7 +685,7 @@ class AppChatService:
                     # 重新加载历史（包含刚写入的开场白）
                     history = await self.conversation_service.get_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=10,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni
                     )
@@ -945,7 +946,7 @@ class AppChatService:
                         conversation_id=conversation_id,
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni,
-                        legacy_max_history=6,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=config.default_model_config_id,
                     )
             else:
