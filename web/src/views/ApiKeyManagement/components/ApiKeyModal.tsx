@@ -189,19 +189,21 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             className="rb:pt-0! rb:pb-4!"
           />
 
-          <div className="rb:mb-4">
-            <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.id')}</div>
-            <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
-              <span className="rb:text-sm">{createdApiKey?.other_id}</span>
- 
-              <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.other_id || '')}>
-                <div
-                  className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]"
-                ></div>
-                {t('common.copy')}
-              </Button>
-            </Flex>
-          </div>
+          {createdApiKey?.other_id &&
+            <div className="rb:mb-4">
+              <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.id')}</div>
+              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
+                <span className="rb:text-sm">{createdApiKey?.other_id}</span>
+  
+                <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.other_id || '')}>
+                  <div
+                    className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]"
+                  ></div>
+                  {t('common.copy')}
+                </Button>
+              </Flex>
+            </div>
+          }
 
           <div className="rb:mb-4">
             <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
