@@ -475,16 +475,19 @@ class AppChatService:
                 should_memorize=memory,
             )
             if used_context_engine:
-                asyncio.create_task(
-                    context_engine_manager.after_app_turn(
-                        features=features_config,
-                        conversation_id=conversation_id,
-                        current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni,
-                        legacy_max_history=settings.AGENT_MAX_HISTORY,
-                        model_config_id=config.default_model_config_id,
-                    )
+                _ctx_kwargs = dict(
+                    features=features_config,
+                    conversation_id=conversation_id,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
+                    model_config_id=config.default_model_config_id,
                 )
+                async def _run_after_turn(kwargs=_ctx_kwargs):
+                    from app.db import get_db_context
+                    with get_db_context() as db2:
+                        await ContextEngineManager(db2).after_app_turn(**kwargs)
+                asyncio.create_task(_run_after_turn())
         else:
             new_msg = Message(
                 id=message_id,
@@ -943,16 +946,19 @@ class AppChatService:
                     should_memorize=memory,
                 )
                 if used_context_engine:
-                    asyncio.create_task(
-                        context_engine_manager.after_app_turn(
-                            features=features_config,
-                            conversation_id=conversation_id,
-                            current_provider=api_key_obj.provider,
-                            current_is_omni=api_key_obj.is_omni,
-                            legacy_max_history=settings.AGENT_MAX_HISTORY,
-                            model_config_id=config.default_model_config_id,
-                        )
+                    _ctx_kwargs = dict(
+                        features=features_config,
+                        conversation_id=conversation_id,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=config.default_model_config_id,
                     )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        from app.db import get_db_context
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
             else:
                 new_msg = Message(
                     id=message_id,
