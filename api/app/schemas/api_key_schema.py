@@ -60,6 +60,11 @@ class ApiKeyCreate(BaseModel):
                 raise ValueError(f"{self.type.value} 类型 API Key 的权限范围必须包含 app")
             if not self.resource_id:
                 raise ValueError(f"{self.type.value} 类型 API Key 必须指定 resource_id（指向应用）")
+
+        # memory scope requires user_id to be non-empty
+        if "memory" in self.scopes:
+            if not self.user_id or not self.user_id.strip():
+                raise ValueError("memory 权限范围必须提供 user_id")
         return self
 
 
