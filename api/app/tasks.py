@@ -1884,6 +1884,14 @@ def write_message_task(
         except Exception as _count_e:
             logger.warning(f"[CELERY WRITE] 同步记忆计数失败: {_count_e}")
 
+        # 刷新「最后写入时间」：用于反思活跃用户判断，覆盖 API/MCP 等不更新 conversations 行的写入
+        try:
+            from app.services.memory_reflection_service import WorkspaceAppService
+            with get_db_context() as db:
+                WorkspaceAppService(db).update_end_user_write_time(end_user_id)
+        except Exception as _wt_e:
+            logger.warning(f"[CELERY WRITE] 更新 write_time 失败: {_wt_e}")
+
         try:
             safe_result = jsonable_encoder(result)
         except Exception:
@@ -1996,45 +2004,16 @@ def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: 
     return (now_utc - last_updated) >= timedelta(hours=inactive_hours)
 
 
-def _get_max_conversation_updated_at(db, end_user_id: str):
-    """取该用户所有会话的最新 updated_at（naive UTC）。无会话或查询异常返回 None。
-
-    与 conversations.updated_at（naive UTC）口径一致；若库内值带 tzinfo 则转 UTC 去 tz。
-    """
-    from sqlalchemy import func
-    from app.models.conversation_model import Conversation
-
-    try:
-        last_updated = (
-            db.query(func.max(Conversation.updated_at))
-            .filter(Conversation.user_id == str(end_user_id))
-            .scalar()
-        )
-    except Exception as e:
-        # 失败先 rollback，避免事务 aborted 拖垮同一 session 后续查询
-        logger.warning(f"反思活跃度查询失败 user={end_user_id}: {e}")
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        return None
-    if last_updated is None:
-        return None
-    # 统一走 datetime 规范工具：naive 当 UTC、aware 转 UTC，再去 tz 得到 naive UTC
-    return as_utc_aware(last_updated).replace(tzinfo=None)
-
-
 def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period: int) -> bool:
     """判断该用户现在是否需要反思。scan 派发前和 do 执行前都用它（保证一致 + 幂等）。
 
-    需要同时满足两个条件才反思：
-      1. 最近还活跃：最后一次对话距今 < REFLECT_LAYER2_INACTIVE_HOURS 小时
-      2. 距上次反思已够久：now - reflection_time >= iteration_period 小时（控制反思频率）
+    需同时满足两个条件才反思：
+      1. 活跃：最后一次写入距今 < REFLECT_LAYER2_INACTIVE_HOURS 小时
+      2. 到周期：距上次反思 >= iteration_period 小时
 
-    注意：不再要求「上次反思后有新对话」。因为反思本身（实体去重 / 描述合并 /
-    未识别实体解析）会改变图谱、且去重有单轮上限（max_merges_per_run），一轮往往
-    合并不完，需要后续周期继续收敛。若用「有新对话」当闸门，没新对话时残留的
-    重复实体就再也合并不掉。故只要活跃 + 到周期就反思，让图谱有机会多轮收敛。
+    活跃口径取 end_user.write_time（write_message_task 写入成功后刷新，覆盖含 API / MCP
+    的全部写入路径）。write_time 为 NULL 表示从未写入、无可反思数据，直接跳过。
+    reflection_time 为 None 表示从未反思，此时只看活跃条件即可放行（首次反思）。
 
     Args:
         reflection_time: 上次反思时间 end_user.reflection_time（naive UTC 或 None=从未反思）
@@ -2042,21 +2021,24 @@ def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period:
     Returns:
         True 需要反思；False 跳过
     """
-    last_conv = _get_max_conversation_updated_at(db, end_user_id)
-    if last_conv is None:
-        return False                      # 从没对话过 → 没有可反思的数据
+    from app.services.memory_reflection_service import WorkspaceAppService
+
+    last_write = WorkspaceAppService(db).get_end_user_write_time(end_user_id)
+    if last_write is None:
+        return False                      # 从未写入记忆且无历史会话 → 无可反思活动
+    last_active = as_utc_aware(last_write).replace(tzinfo=None)  # 统一 naive UTC
 
     now = utcnow_naive()
     inactive_hours = settings.REFLECT_LAYER2_INACTIVE_HOURS
-    is_active = (now - last_conv).total_seconds() / 3600 < inactive_hours  # 条件1：最近活跃
+    is_active = (now - last_active).total_seconds() / 3600 < inactive_hours  # 条件1：最近活跃
 
     if reflection_time is None:
-        # 从未反思过：只要有过对话且最近活跃，就反思（首次）
+        # 从未反思过：只要写过且最近活跃，就反思（首次）
         return is_active
 
     reflection_time = as_utc_aware(reflection_time).replace(tzinfo=None)  # 统一 naive UTC
     period_reached = (now - reflection_time).total_seconds() / 3600 >= iteration_period  # 条件2：够周期
-    # 同时满足「活跃 + 到周期」放行（不再看「上次反思后是否有新对话」）
+    # 同时满足「活跃 + 到周期」放行（不再看「上次反思后是否有新写入」）
     return is_active and period_reached
 
 @celery_app.task(
@@ -2223,17 +2205,29 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             with get_db_context() as db:
                 WorkspaceAppService(db).update_end_user_reflection_time(user_id)
 
+            unresolved_info = r.get("unresolved_entity", {})
+            alias_info = r.get("alias_merge", {})
             dedup_info = r.get("entity_dedup", {})
+            meta_info = r.get("metadata_extraction", {})
             merge_info = r.get("description_merge", {})
             logger.info(
                 f"反思高频do 完成 user={user_id} status=success "
-                f"去重合并={dedup_info.get('merged_count', 0)} "
-                f"描述合并={merge_info.get('merged_count', 0)} "
+                f"未识别解析={unresolved_info.get('resolved', 0)}/{unresolved_info.get('total', 0)} "
+                f"别名归并={alias_info.get('alias_merged', 0)} "
+                f"实体去重={dedup_info.get('merged_count', 0)}(候选{dedup_info.get('candidate_count', 0)}) "
+                f"元数据提取={meta_info.get('extracted', 0)} "
+                f"描述合并={merge_info.get('merged_count', 0)}(候选{merge_info.get('candidate_count', 0)}) "
                 f"耗时={time.time() - start_time:.1f}s"
             )
-            return {"status": "success",
-                    "dedup_merged": dedup_info.get("merged_count", 0),
-                    "desc_merged": merge_info.get("merged_count", 0)}
+            # 返回各步骤关键计数（扁平标量，便于 Flower / 调用方一眼查看）
+            return {
+                "status": "success",
+                "unresolved_resolved": unresolved_info.get("resolved", 0),
+                "alias_merged": alias_info.get("alias_merged", 0),
+                "dedup_merged": dedup_info.get("merged_count", 0),
+                "metadata_extracted": meta_info.get("extracted", 0),
+                "desc_merged": merge_info.get("merged_count", 0),
+            }
         finally:
             # 步骤5 释放写锁（无论成功失败）
             if write_lock is not None:

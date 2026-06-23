@@ -19,6 +19,7 @@ class EndUser(BaseModel):
     other_name: Optional[str] = Field(description="其他名称", default="")
     other_address: Optional[str] = Field(description="其他地址", default="")
     reflection_time: Optional[datetime.datetime] = Field(description="反思时间", default_factory=utcnow_naive)
+    write_time: Optional[datetime.datetime] = Field(description="最后写入时间", default=None)
     created_at: datetime.datetime = Field(description="创建时间", default_factory=utcnow_naive)
     updated_at: datetime.datetime = Field(description="更新时间", default_factory=utcnow_naive)
     
