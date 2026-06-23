@@ -67,7 +67,7 @@ async def fetch_name_candidates(
       2. _row_to_entity 转为 ExtractedEntityNode 对象
       3. _would_merge_cross_role 角色保护过滤
       4. _name_similarity_with_aliases 精确打分
-      5. 保留 sim ≥ 0.7 或别名完全匹配的候选
+      5. 保留 sim ≥ 0.85 或别名完全匹配的候选
     """
     from app.repositories.neo4j.cypher_queries import DEDUP_CANDIDATES_BY_NAME
 
@@ -87,14 +87,12 @@ async def fetch_name_candidates(
 
         # emb_sim 由 Neo4j 侧 vector.similarity.cosine 算好直接传入，避免拉回向量在 Python 重算
         emb_sim = row.get("emb_sim") or 0.0
-        # name_similarity_with_aliases 返回 (综合相似度, 向量相似度, 是否完全匹配)
-        sim, _emb_sim, _has_exact = name_similarity_with_aliases(
-            entity_a, entity_b, emb_sim=emb_sim
-        )
+        sim_result = name_similarity_with_aliases(entity_a, entity_b, emb_sim=emb_sim)
+        sim = sim_result[0]
 
         has_exact = has_exact_alias_match(entity_a, entity_b)
 
-        if sim >= 0.7 or has_exact:
+        if sim >= 0.85 or has_exact:
             # 别名完全匹配时保底 sim_name=0.85，避免被 emb_sim=0 拉低导致丢弃
             if has_exact:
                 sim = max(sim, 0.85)
@@ -118,7 +116,7 @@ async def fetch_embed_candidates(
     connector: Neo4jConnector,
     end_user_id: str,
     top_k: int = 100,
-    theta_embed_floor: float = 0.70,
+    theta_embed_floor: float = 0.85,
     candidate_cap: int = 500,
 ) -> List[DedupCandidatePair]:
     """路径 B：向量相似度候选召回
