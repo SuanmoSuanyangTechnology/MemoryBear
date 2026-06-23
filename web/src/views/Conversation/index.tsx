@@ -698,11 +698,6 @@ const Conversation: FC = () => {
               if (fileId && idToPoll) {
                 startAudioPolling(audio_url, idToPoll)
               }
-            } else {
-              getHistory(true)
-              if (currentConversationId && currentConversationId !== conversation_id) {
-                setConversationId(currentConversationId)
-              }
             }
             if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
               updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)

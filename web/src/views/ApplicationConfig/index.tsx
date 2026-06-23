@@ -126,7 +126,7 @@ const ApplicationConfig: React.FC = () => {
         handleChangeTab={handleChangeTab}
         application={application as Application}
         refresh={getApplicationInfo}
-        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : undefined}
+        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : workflowRef}
       />
       <div className="rb:p-3 rb:flex-1 rb:overflow-auto">
         {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}

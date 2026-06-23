@@ -688,12 +688,10 @@ async def check_sliding_window_and_dispatch(
         all_user_seqs: List[int] = repo.get_user_seqs(conversation_id)
 
     for msg in pending_dicts:
-        # 跳过非 user 或不需记忆的消息，直接推进 cursor
+        # 滑动窗口路径只负责派发 user 消息的写入任务，cursor 只推进到 user 消息的 seq。
+        # non-user 消息（assistant）不推进 cursor，跳过继续往后找第一条待派发的 user 消息。
+        # assistant 的 cursor 推进完全交给 flush 兜底路径处理。
         if msg.get("role") != "user" or not msg.get("should_memorize", True):
-            with get_db_context() as db:
-                repo = MemoryMessageRepository(db)
-                repo.advance_write_cursor(conversation_id, msg["message_seq"])
-                db.commit()
             continue
 
         target_seq = msg["message_seq"]

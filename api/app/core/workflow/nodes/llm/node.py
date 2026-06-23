@@ -4,6 +4,7 @@ LLM 节点实现
 调用 LLM 模型进行文本生成。
 """
 
+import asyncio
 import logging
 import json
 from copy import deepcopy
@@ -804,8 +805,6 @@ class LLMNode(BaseNode):
             dict: {"llm_result": AIMessage, "branch_signal": "SUCCESS"} on success,
                   {"llm_result": None, "branch_signal": "ERROR"} on branch error
         """
-        import asyncio
-        
         llm = await self._prepare_llm(state, variable_pool, False)
         max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
         last_error = None
@@ -853,16 +852,24 @@ class LLMNode(BaseNode):
                 if self.typed_config.memory.enable:
                     conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                     if conversation_id:
-                        with get_db_context() as db:
-                            context_engine_manager = ContextEngineManager(db)
-                            await context_engine_manager.after_workflow_turn(
-                                features=self.workflow_config.get("features", {}),
-                                conversation_id=conversation_id,
-                                scope_key=f"node:{self.node_id}",
-                                workflow_messages=state.get("messages", []),
-                                window_size=self.typed_config.memory.window_size,
-                                model_config_id=self.typed_config.model_id,
-                            )
+                        current_user_msg = next(
+                            (m["content"] for m in reversed(self.messages) if m.get("role") == "user"), ""
+                        )
+                        _kwargs = dict(
+                            features=self.workflow_config.get("features", {}),
+                            conversation_id=conversation_id,
+                            scope_key=f"node:{self.node_id}",
+                            workflow_messages=state.get("messages", []) + [
+                                {"role": "user", "content": current_user_msg},
+                                {"role": "assistant", "content": content},
+                            ],
+                            window_size=self.typed_config.memory.window_size,
+                            model_config_id=self.typed_config.model_id,
+                        )
+                        async def _run_after_workflow_turn(kwargs=_kwargs):
+                            with get_db_context() as db:
+                                await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                        asyncio.create_task(_run_after_workflow_turn())
                 
                 return result
                 
@@ -1005,8 +1012,6 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
-        import asyncio as _asyncio
-
         self.typed_config = LLMNodeConfig(**self.config)
         max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
         last_error = None
@@ -1133,16 +1138,24 @@ class LLMNode(BaseNode):
                 if self.typed_config.memory.enable:
                     conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                     if conversation_id:
-                        with get_db_context() as db:
-                            context_engine_manager = ContextEngineManager(db)
-                            await context_engine_manager.after_workflow_turn(
-                                features=self.workflow_config.get("features", {}),
-                                conversation_id=conversation_id,
-                                scope_key=f"node:{self.node_id}",
-                                workflow_messages=state.get("messages", []),
-                                window_size=self.typed_config.memory.window_size,
-                                model_config_id=self.typed_config.model_id,
-                            )
+                        current_user_msg = next(
+                            (m["content"] for m in reversed(self.messages) if m.get("role") == "user"), ""
+                        )
+                        _kwargs = dict(
+                            features=self.workflow_config.get("features", {}),
+                            conversation_id=conversation_id,
+                            scope_key=f"node:{self.node_id}",
+                            workflow_messages=state.get("messages", []) + [
+                                {"role": "user", "content": current_user_msg},
+                                {"role": "assistant", "content": full_response},
+                            ],
+                            window_size=self.typed_config.memory.window_size,
+                            model_config_id=self.typed_config.model_id,
+                        )
+                        async def _run_after_workflow_turn(kwargs=_kwargs):
+                            with get_db_context() as db:
+                                await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                        asyncio.create_task(_run_after_workflow_turn())
 
                 yield {"__final__": True, "result": result}
                 return
@@ -1152,7 +1165,7 @@ class LLMNode(BaseNode):
                 logger.error(f"节点 {self.node_id} LLM 流式调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
 
                 if attempt < max_attempts - 1 and self.typed_config.retry.enable:
-                    await _asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
+                    await asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
                 else:
                     break
 

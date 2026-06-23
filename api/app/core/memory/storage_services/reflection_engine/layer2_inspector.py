@@ -56,7 +56,7 @@ class EntityDedupConfig(BaseModel):
     candidate_cap_name: int = 200       # 路径A最大候选数
     candidate_cap_embed: int = 200      # 路径B最大候选数
     top_k_embed: int = 60              # 向量索引top-K
-    theta_embed_floor: float = 0.85     # 向量初筛阈值
+    theta_embed_floor: float = 0.70     # 向量初筛阈值
     alpha: float = 0.4                  # 名称权重
     beta: float = 0.6                   # 向量权重
     theta_low: float = 0.70             # 丢弃阈值（P≤此值写Redis缓存）
@@ -260,6 +260,22 @@ class Layer2Inspector:
                 language=language,
                 min_fragments=self.desc_config.min_fragments,
             )
+
+            # 输出每个实体的详细变更日志
+            _OP_FMT = {
+                "add": ("新增", lambda o: f'{o["field"]}:「{o["value"]}」'),
+                "delete": ("删除", lambda o: f'{o["field"]}:「{o["value"]}」'),
+                "update": ("更新", lambda o: f'{o["field"]}:「{o["old"]}」→「{o["new"]}」'),
+            }
+            for detail in result.get("details", []):
+                name = detail["entity_name"]
+                ops = detail.get("ops", [])
+                for op_type, (label, fmt) in _OP_FMT.items():
+                    group = [o for o in ops if o["op"] == op_type]
+                    if group:
+                        logger.info(f"[Metadata] {name} {label}({len(group)}): "
+                                    + "; ".join(fmt(o) for o in group))
+
             return {"status": "success", **result}
         except Exception as e:
             logger.warning(
