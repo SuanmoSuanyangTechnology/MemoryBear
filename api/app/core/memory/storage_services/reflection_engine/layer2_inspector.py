@@ -56,7 +56,7 @@ class EntityDedupConfig(BaseModel):
     candidate_cap_name: int = 200       # 路径A最大候选数
     candidate_cap_embed: int = 200      # 路径B最大候选数
     top_k_embed: int = 60              # 向量索引top-K
-    theta_embed_floor: float = 0.85     # 向量初筛阈值
+    theta_embed_floor: float = 0.70     # 向量初筛阈值
     alpha: float = 0.4                  # 名称权重
     beta: float = 0.6                   # 向量权重
     theta_low: float = 0.70             # 丢弃阈值（P≤此值写Redis缓存）
