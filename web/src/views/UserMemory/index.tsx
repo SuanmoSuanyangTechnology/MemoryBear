@@ -12,7 +12,8 @@
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
-import { Row, Col, Form, Flex, Tooltip } from 'antd';
+import { Row, Col, Form, Flex, Tooltip, App } from 'antd';
+import copy from 'copy-to-clipboard'
 
 import type { Data } from './types'
 import { userMemoryListUrl } from '@/api/memory';
@@ -26,6 +27,7 @@ export default function UserMemory() {
   const { t } = useTranslation();
   const navigate = useNavigate()
   const { storageType } = useUser()
+  const { message } = App.useApp()
 
   const [form] = Form.useForm()
   const keyword = Form.useWatch(['keyword'], form)
@@ -47,6 +49,14 @@ export default function UserMemory() {
     e.preventDefault();
     e.stopPropagation();
     navigate(`/memory`)
+  }
+
+  /** Copy value to clipboard and show success message */
+  const handleCopy = (e: React.MouseEvent, value: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    copy(value)
+    message.success(t('common.copySuccess'))
   }
 
   return (
@@ -77,7 +87,7 @@ export default function UserMemory() {
             <RbCard
               key={item.end_user.id}
               title={() => <Flex gap={4}>
-                <div className="rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:text-white rb:bg-[#155EEF]">{name[0]}</div>
+                <div className="rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:text-white rb:bg-[#155EEF] rb:shrink-0">{name[0]}</div>
 
                 <Tooltip title={name || '-'}><div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap`}>{name || '-'}</div></Tooltip>
               </Flex>}
@@ -87,6 +97,13 @@ export default function UserMemory() {
               className="rb:cursor-pointer"
               onClick={() => handleViewDetail(end_user.id)}
             >
+              <Flex align="center" gap={8} className="rb:mb-3! rb:w-full rb:cursor-pointer" onClick={(e) => handleCopy(e, end_user?.id || '')}>
+                <div className="rb:text-[#5B6167]">ID:</div>
+                <Flex align="center" gap={4}>
+                  {end_user?.id || '-'}
+                  <span className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
+                </Flex>
+              </Flex>
               <Row>
                 <Col span={12}>
                   <RbStatistic title={t('userMemory.capacity')} value={memory_num?.total || 0} suffix={t('userMemory.memoryNum')} />
