@@ -1804,7 +1804,6 @@ LIMIT $limit
 SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
 WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
-OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
 RETURN m.id AS id,
        m.name AS name,
        m.end_user_id AS end_user_id,
