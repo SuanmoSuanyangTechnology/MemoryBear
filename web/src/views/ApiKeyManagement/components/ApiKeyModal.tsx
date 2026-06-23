@@ -185,13 +185,12 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           <Result
             status="success"
             title={t('apiKey.apiKeyCreated')}
-            subTitle={t('apiKey.apiKeyShowOnce')}
             className="rb:pt-0! rb:pb-4!"
           />
 
           {createdApiKey?.other_id &&
             <div className="rb:mb-4">
-              <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.id')}</div>
+              <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.memoryDefaultId')}</div>
               <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
                 <span className="rb:text-sm">{createdApiKey?.other_id}</span>
   
@@ -208,7 +207,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           <div className="rb:mb-4">
             <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
               <span className="rb:text-sm rb:text-gray-500">{t('apiKey.apiKey')}</span>
-              <span className="rb:text-xs rb:text-orange-500">{t('apiKey.showOnce')}</span>
             </div>
             <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
               <span className="rb:text-sm">{createdApiKey?.api_key}</span>
