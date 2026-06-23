@@ -3718,7 +3718,7 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     bind=True,
     ignore_result=False,
     max_retries=2,
-    acks_late=True,
+    acks_late=False,
     time_limit=1800,  # 30分钟硬超时
     soft_time_limit=1700,
 )
