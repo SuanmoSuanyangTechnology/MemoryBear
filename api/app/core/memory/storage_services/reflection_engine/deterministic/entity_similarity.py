@@ -87,8 +87,10 @@ async def fetch_name_candidates(
 
         # emb_sim 由 Neo4j 侧 vector.similarity.cosine 算好直接传入，避免拉回向量在 Python 重算
         emb_sim = row.get("emb_sim") or 0.0
-        sim_result = name_similarity_with_aliases(entity_a, entity_b, emb_sim=emb_sim)
-        sim = sim_result[0]
+        # name_similarity_with_aliases 返回 (综合相似度, 向量相似度, 是否完全匹配)
+        sim, _emb_sim, _has_exact = name_similarity_with_aliases(
+            entity_a, entity_b, emb_sim=emb_sim
+        )
 
         has_exact = has_exact_alias_match(entity_a, entity_b)
 

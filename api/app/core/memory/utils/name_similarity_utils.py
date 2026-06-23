@@ -8,6 +8,15 @@ from typing import List, Optional, Tuple
 
 from app.core.memory.models.graph_models import ExtractedEntityNode
 
+# 名称相似度「路径内」权重：向量相似度 vs 名称文字重叠。
+# 注意：这两个权重与 EntityDedupConfig.alpha/beta 语义不同，不要混淆——
+#   - 本文件的 _W_EMB / _W_TEXT 是「名称这一路内部」融合 embedding 与文字
+#     overlap 的权重（s_name = _W_EMB * emb_sim + _W_TEXT * text_overlap）。
+#   - merge_and_score 里的 alpha/beta 是「名称路 与 向量路 两路之间」融合
+#     sim_name 与 sim_embed 的权重。两者层级不同，取值无需也不应一致。
+_W_EMB = 0.6
+_W_TEXT = 0.4
+
 
 def _normalize_text(s: str) -> str:
     """文本标准化：转小写、去除特殊字符、规范化空格"""
@@ -88,15 +97,12 @@ def _overlap(a_tokens: List[str], b_tokens: List[str]) -> float:
     Returns:
         重叠系数，取值范围 [0, 1]；任一集合为空时返回 0.0。
     """
-    try:
-        set_a, set_b = set(a_tokens), set(b_tokens)
-        if not set_a or not set_b:
-            return 0.0
-        inter = len(set_a & set_b)
-        denom = min(len(set_a), len(set_b))
-        return inter / denom if denom > 0 else 0.0
-    except Exception:
+    set_a, set_b = set(a_tokens), set(b_tokens)
+    if not set_a or not set_b:
         return 0.0
+    inter = len(set_a & set_b)
+    denom = min(len(set_a), len(set_b))
+    return inter / denom
 
 
 def _simple_normalize(s: str) -> str:
@@ -136,6 +142,8 @@ def has_exact_alias_match(e1: ExtractedEntityNode, e2: ExtractedEntityNode) -> b
 def name_similarity_with_aliases(
     e1: ExtractedEntityNode, e2: ExtractedEntityNode,
     emb_sim: Optional[float] = None,
+    w_emb: float = _W_EMB,
+    w_text: float = _W_TEXT,
 ) -> Tuple[float, float, bool]:
     """名称相似度综合评分。
 
@@ -145,9 +153,15 @@ def name_similarity_with_aliases(
     重叠关系。
 
     评分公式：
-        s_name = 0.6 * emb_sim + 0.4 * text_overlap
+        s_name = w_emb * emb_sim + w_text * text_overlap
 
     当存在完全匹配（has_exact_alias_match）时，text_overlap 取 1.0。
+
+    权重说明：w_emb / w_text 默认取模块常量 _W_EMB / _W_TEXT（0.6 / 0.4），
+    是「名称这一路内部」融合 embedding 与文字 overlap 的权重，调用方可按
+    需覆盖（例如由上层配置传入）。它与 merge_and_score 中的 alpha/beta
+    （名称路与向量路「两路之间」的融合权重）语义不同、层级不同，取值无需
+    也不应一致，切勿混淆。
 
     Args:
         e1: 实体节点 1。
@@ -155,6 +169,8 @@ def name_similarity_with_aliases(
         emb_sim: 主名称向量相似度。若调用方已在 Neo4j 侧通过
             vector.similarity.cosine 计算，可直接传入以避免在 Python 侧
             重复计算；为 None 时回退到内部 _cosine 计算。
+        w_emb: 向量相似度权重，默认 _W_EMB。
+        w_text: 名称文字重叠权重，默认 _W_TEXT。
 
     Returns:
         (综合相似度, 向量相似度, 是否完全匹配)。
@@ -187,8 +203,8 @@ def name_similarity_with_aliases(
                     continue
                 text_overlap = max(text_overlap, _overlap(t1, _tokenize_chars(n2)))
 
-    # 4. 综合评分：向量 0.6 + 文字 0.4
-    s_name = 0.6 * emb_sim + 0.4 * text_overlap
+    # 4. 综合评分：向量 w_emb + 文字 w_text
+    s_name = w_emb * emb_sim + w_text * text_overlap
 
     return s_name, emb_sim, has_exact_match
 
