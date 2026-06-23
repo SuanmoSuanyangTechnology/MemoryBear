@@ -8,6 +8,7 @@ LangChain Agent 封装
 - 使用 RedBearLLM 支持多提供商
 """
 
+import functools
 import json
 import time
 import uuid as _uuid
@@ -240,7 +241,8 @@ class LangChainAgent:
             deep_thinking: bool = False,  # 是否启用深度思考模式
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
-            capability: Optional[List[str]] = None  # 模型能力列表，用于校验是否支持深度思考
+            capability: Optional[List[str]] = None,  # 模型能力列表，用于校验是否支持深度思考
+            tool_call_limit: int = 2  # 每个工具的最大调用次数（防止模型陷入工具循环）
     ):
         """初始化 LangChain Agent
 
@@ -254,8 +256,9 @@ class LangChainAgent:
             system_prompt: 系统提示词
             tools: 工具列表（可选，框架自动走 ReAct 循环）
             streaming: 是否启用流式输出
-            max_iterations: 最大迭代次数（None 表示自动计算：基础 5 次 + 每个工具 2 次）
+            max_iterations: 最大迭代次数（None 表示自动计算，参考 LangGraph graph steps）
             strategy: Agent 执行策略（'react' 使用 ReAct 推理循环，'function_calling' 使用原生工具调用）
+            tool_call_limit: 每个工具最大调用次数，第 N+1 次调用会被拒绝并提示模型直接给最终答案
         """
         self.model_name = model_name
         self.provider = provider
@@ -263,6 +266,7 @@ class LangChainAgent:
         self.streaming = streaming
         self.is_omni = is_omni
         self.strategy = strategy
+        self.tool_call_limit = tool_call_limit
 
         # 构建工具名 → 元数据映射（用于执行记录中补充具体资源信息）
         self._tool_meta_map: Dict[str, Dict[str, Any]] = {}
@@ -272,11 +276,23 @@ class LangChainAgent:
             if tool_name and tool_meta:
                 self._tool_meta_map[tool_name] = tool_meta
 
+        # 为每个工具包装调用次数限制（在递归限制触发前，强制限制每个工具只能调用 N 次）
+        # 第 N+1 次调用会返回拒绝消息，引导 LLM 给最终答案，避免陷入循环
+        self._tool_call_counts: Dict[str, int] = {}
+        self._wrap_tools_with_call_limit(self.tool_call_limit)
+
         # 根据工具数量动态调整最大迭代次数
-        # 基础值 + 每个工具额外的调用机会
+        # 注意：LangGraph 的 recursion_limit 统计的是 graph 节点步数，
+        # 每完成一次 LLM→Tool→LLM 循环大约消耗 4 个 graph steps（on_chat_model_start、
+        # on_tool_start、on_tool_end、on_chat_model_end 各算 1 step，外加中间状态）。
+        # 基础 LLM 响应：~2 steps + 每个工具每次调用：~4 steps + 收尾 LLM：~2 steps
         if max_iterations is None:
-            # 自动计算：基础 5 次 + 每个工具 2 次额外机会
-            self.max_iterations = 5 + len(self.tools) * 2
+            base_steps = 5  # 起始和收尾 LLM 的 graph steps
+            steps_per_tool_call = 2  # 每次工具调用对应的 graph steps
+            self.max_iterations = (
+                base_steps
+                + len(self.tools) * self.tool_call_limit * steps_per_tool_call
+            )
         else:
             self.max_iterations = max_iterations
 
@@ -361,7 +377,94 @@ class LangChainAgent:
                 "strategy": self.strategy,
                 "tool_count": len(self.tools),
                 "tool_names": [tool.name for tool in self.tools] if self.tools else [],
+                "tool_call_limit": self.tool_call_limit,
             }
+        )
+
+    def _wrap_tools_with_call_limit(self, max_calls: int) -> None:
+        """为每个工具包裹调用次数限制
+
+        通过覆盖工具的 _run / _arun 方法，在每次执行前自增计数器；
+        当同一工具的累计调用次数超过 max_calls 时，不再真正执行工具，
+        而是返回一段提示消息，引导 LLM 给出最终答案，避免模型陷入
+        "反复调用同一工具"的死循环。
+
+        Args:
+            max_calls: 每个工具允许的最大调用次数
+        """
+        if not self.tools:
+            return
+
+        for tool in self.tools:
+            tool_name = getattr(tool, "name", None) or str(id(tool))
+            original_run = tool._run
+            original_arun = getattr(tool, "_arun", None)
+
+            # 同步路径包装
+            # 注意：必须用 functools.wraps 保留原签名，否则 BaseTool.run 在调用
+            # self._run 前会通过 inspect.signature 检查 "config" / "run_manager"
+            # 参数是否存在；不保留签名会导致 LangChain 不注入 config，从而
+            # StructuredTool._run 报 TypeError: missing 1 required keyword-only argument: 'config'
+            def _make_wrapped_run(t_name: str, orig):
+                @functools.wraps(orig)
+                def wrapped_run(*args, **kwargs):
+                    self._tool_call_counts[t_name] = (
+                        self._tool_call_counts.get(t_name, 0) + 1
+                    )
+                    count = self._tool_call_counts[t_name]
+                    logger.info(
+                        f"工具调用计数: tool={t_name}, count={count}/{max_calls}"
+                    )
+                    if count > max_calls:
+                        logger.warning(
+                            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
+                            f"拒绝第 {count} 次调用，引导 LLM 输出最终答案"
+                        )
+                        return (
+                            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
+                            f"达到最大调用次数限制。请勿再调用此工具，"
+                            f"直接基于已有信息给出最终答案。"
+                        )
+                    return orig(*args, **kwargs)
+
+                return wrapped_run
+
+            # 异步路径包装
+            def _make_wrapped_arun(t_name: str, orig):
+                if orig is None:
+                    return None
+
+                @functools.wraps(orig)
+                async def wrapped_arun(*args, **kwargs):
+                    self._tool_call_counts[t_name] = (
+                        self._tool_call_counts.get(t_name, 0) + 1
+                    )
+                    count = self._tool_call_counts[t_name]
+                    logger.info(
+                        f"工具调用计数: tool={t_name}, count={count}/{max_calls}"
+                    )
+                    if count > max_calls:
+                        logger.warning(
+                            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
+                            f"拒绝第 {count} 次调用，引导 LLM 输出最终答案"
+                        )
+                        return (
+                            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
+                            f"达到最大调用次数限制。请勿再调用此工具，"
+                            f"直接基于已有信息给出最终答案。"
+                        )
+                    return await orig(*args, **kwargs)
+
+                return wrapped_arun
+
+            tool._run = _make_wrapped_run(tool_name, original_run)
+            wrapped_arun = _make_wrapped_arun(tool_name, original_arun)
+            if wrapped_arun is not None:
+                tool._arun = wrapped_arun
+
+        logger.debug(
+            f"工具调用次数限制已启用: max_calls_per_tool={max_calls}, "
+            f"tool_names={[t.name for t in self.tools]}"
         )
 
     def _prepare_messages(
