@@ -26,6 +26,29 @@ class LogicalChunkType(str, Enum):
     IMAGE = "image"
 
 
+class ParsedBlockType(str, Enum):
+    HEADING = "heading"
+    TEXT = "text"
+    LIST = "list"
+    BLOCKQUOTE = "blockquote"
+    CODE = "code"
+    TABLE = "table"
+    IMAGE = "image"
+
+
+@dataclass
+class ParsedBlock:
+    type: ParsedBlockType
+    content: Any = ""
+    raw: str = ""
+    seq: int = 0
+    start_line: int | None = None
+    end_line: int | None = None
+    image: Any = None
+    positions: list | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class LogicalChunk:
     type: LogicalChunkType
@@ -63,6 +86,7 @@ class ParseResult:
     merge_strategy: str = "naive"
     url_res: list | None = None
     append_embed: bool = True
+    blocks: list[ParsedBlock] | None = None
 
 
 @dataclass

@@ -84,7 +84,11 @@ class ChunkPipeline(ABC):
         pass
 
     def merge(self, ctx: ChunkContext, parse_result: ParseResult) -> MergeResult:
+        from ..merger.block import BlockMerger
         from ..merger.naive import DocxMerger, ImageMerger, NaiveMerger
+
+        if parse_result.merge_strategy == "blocks" and parse_result.blocks:
+            return BlockMerger().merge(ctx, parse_result)
 
         if parse_result.merge_strategy == "docx":
             return DocxMerger().merge(ctx, parse_result)
