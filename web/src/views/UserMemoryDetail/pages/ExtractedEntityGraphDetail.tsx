@@ -70,6 +70,7 @@ const ExtractedEntityGraphDetail: FC = () => {
     pagesize: PAGE_SIZE,
   });
   const [total, setTotal] = useState(0);
+  const [totalCount, setTotalCount] = useState(0)
   const nodeId = searchParams.get('nodeId')
   const nodeLabel = searchParams.get('nodeLabel')
   const nodeName = searchParams.get('nodeName')
@@ -126,7 +127,8 @@ const ExtractedEntityGraphDetail: FC = () => {
           page: { hasnext: boolean; pagesize: number; total: number; }
         }
         setTypeStats(response.type_stats || [])
-        setTotal(response.total_count)
+        setTotal(response.page.total)
+        setTotalCount(response.total_count)
         setTimelineMemories(response.items)
       })
       .finally(() => setTimelineLoading(false))
@@ -161,7 +163,7 @@ const ExtractedEntityGraphDetail: FC = () => {
                     {t('userMemory.totalCategoryStats')}
                   </div>
                   <div className="rb:mt-1 rb:font-[MiSans-Bold] rb:font-bold rb:text-[18px] rb:text-[#171719] rb:leading-6.5">
-                    {total || 0}
+                    {totalCount || 0}
                   </div>
                 </div>
                 <div className="rb:grid rb:grid-cols-2 rb:gap-3">
