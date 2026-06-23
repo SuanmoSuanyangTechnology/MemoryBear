@@ -242,7 +242,7 @@ class LangChainAgent:
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
             capability: Optional[List[str]] = None,  # 模型能力列表，用于校验是否支持深度思考
-            tool_call_limit: int = 2  # 每个工具的最大调用次数（防止模型陷入工具循环）
+            tool_call_limit: int = 1  # 每个工具的最大调用次数（防止模型陷入工具循环）
     ):
         """初始化 LangChain Agent
 
