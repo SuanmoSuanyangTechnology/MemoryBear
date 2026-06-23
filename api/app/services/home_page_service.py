@@ -100,19 +100,16 @@ class HomePageService:
         :return: 对应版本的详细介绍
         """
         from copy import deepcopy
-        from app.db import SessionLocal
+        from app.db import get_db_read
         from app.repositories.home_page_repository import HomePageRepository
         
         result = deepcopy(HomePageService.DEFAULT_RETURN_DATA)
         
         try:
-            db = SessionLocal()
-            try:
+            with get_db_read() as db:
                 db_result = HomePageRepository.get_version_introduction(db, version)
                 if db_result:
                     return db_result
-            finally:
-                db.close()
         except Exception as e:
             pass
         

@@ -17,7 +17,7 @@ from typing import Any, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.conversation_model import Message
 
-from app.db import get_db_context
+from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ def unmark_conversation_pending(conversation_id: str) -> None:
 def verify_unmark_safe(conversation_id: str) -> bool:
     """在 unmark 前验证对话确实没有待写入消息。"""
     try:
-        with get_db_context() as db:
+        with get_db_read() as db:
             repo = MemoryMessageRepository(db)
             return repo.verify_cursor_complete(conversation_id)
     except Exception as e:

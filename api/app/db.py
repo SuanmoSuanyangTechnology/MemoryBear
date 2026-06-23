@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 from typing import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
@@ -24,23 +24,19 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-# Dependency to get a DB session
+# Dependency to get a DB session (FastAPI Depends 专用)
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
-        try:
-            if db.in_transaction():
-                db.rollback()
-        finally:
-            db.close()
+        db.close()
 
 
 @contextmanager
 def get_db_context() -> Generator[Session, None, None]:
     """
-    线程安全、池友好的 Session 上下文。
+    线程安全、池友好的 Session 上下文（读写场景）。
     不会自动 commit/rollback，调用方自己决定事务边界。
     用法：
         with get_db_context() as db:
@@ -51,7 +47,6 @@ def get_db_context() -> Generator[Session, None, None]:
     try:
         yield db
     finally:
-        # 如果还有未提交的事务，直接 rollback 防止 idle in transaction
         if db.in_transaction():
             db.rollback()
         db.close()
@@ -59,13 +54,18 @@ def get_db_context() -> Generator[Session, None, None]:
 
 @contextmanager
 def get_db_read() -> Generator[Session, None, None]:
-    """只读场景专用，出上下文强制 rollback，绝不留下 idle in transaction"""
-    db: Session = SessionLocal()
+    """
+    只读场景专用。
+    - 设置 PostgreSQL READ ONLY 事务，PG 跳过 WAL 写入，轻微提升性能
+    - 若误写会由 PG 直接报错，防御 bug
+    - 出上下文永远 rollback，绝不留下 idle in transaction
+    """
+    db: Session = SessionLocal(expire_on_commit=False)
     try:
+        db.execute(text("SET TRANSACTION READ ONLY"))
         yield db
     finally:
-        if db.in_transaction():
-            db.rollback()
+        db.rollback()
         db.close()
 
 

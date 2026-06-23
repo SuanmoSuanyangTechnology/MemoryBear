@@ -27,24 +27,16 @@ logger = logging.getLogger(__name__)
 def _create_log_repo():
     """创建自动 commit + close 的日志仓库，避免 session 泄漏"""
     from app.repositories.reflection_log_repository import ReflectionLogRepository
-    from app.db import SessionLocal
+    from app.db import get_db_context
 
     class _AutoCommitLogRepo:
         """包装 ReflectionLogRepository，create 后自动 commit 并关闭 session"""
-        def __init__(self):
-            self._db = SessionLocal()
-            self._repo = ReflectionLogRepository(self._db)
-
         def create(self, **kwargs):
-            try:
-                result = self._repo.create(**kwargs)
-                self._db.commit()
+            with get_db_context() as db:
+                repo = ReflectionLogRepository(db)
+                result = repo.create(**kwargs)
+                db.commit()
                 return result
-            except Exception:
-                self._db.rollback()
-                raise
-            finally:
-                self._db.close()
 
     return _AutoCommitLogRepo()
 

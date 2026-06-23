@@ -156,14 +156,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
     def _get_workspace_configs(self, workspace_id) -> Optional[Dict[str, Any]]:
         """获取工作空间模型配置（内部方法，便于测试）"""
-        from app.db import SessionLocal
+        from app.db import get_db_read
         from app.repositories.workspace_repository import get_workspace_models_configs
 
-        db_session = SessionLocal()
-        try:
+        with get_db_read() as db_session:
             return get_workspace_models_configs(db_session, workspace_id)
-        finally:
-            db_session.close()
 
     def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
         """根据本体场景ID获取对应的 scene_name，作为语义剪枝场景值
@@ -618,12 +615,12 @@ async def compute_hot_memory_tags(
         limit = 10
     raw_limit = limit * 4
 
-    from app.db import SessionLocal
+    from app.db import get_db_read
     from app.repositories.end_user_repository import EndUserRepository
 
     def _get_end_user_ids_in_thread() -> List[str]:
         """独立线程独立 session，避免跨线程共享连接。"""
-        with SessionLocal() as thread_db:
+        with get_db_read() as thread_db:
             end_users = EndUserRepository(thread_db).get_end_users_by_workspace(workspace_id)
             return [str(eu.id) for eu in end_users]
 
