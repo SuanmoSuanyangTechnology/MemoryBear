@@ -310,7 +310,6 @@ async def pilot_run(
         payload: ConfigPilotRun,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
 ) -> StreamingResponse:
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
@@ -320,8 +319,10 @@ async def pilot_run(
         f"dialogue_text_length={len(payload.dialogue_text)}, "
         f"custom_text_length={len(payload.custom_text) if payload.custom_text else 0}"
     )
-    payload.config_id = resolve_config_id(payload.config_id, db)
-    svc = DataConfigService(db)
+    # resolve_config_id 在 pilot_run_stream 内部的短 session 里执行
+    # controller 层不再注入 db，避免 session 跨越整个流式响应生命周期
+    payload.config_id = resolve_config_id(payload.config_id)
+    svc = DataConfigService()
     return StreamingResponse(
         svc.pilot_run_stream(payload, language=language),
         media_type="text/event-stream",
