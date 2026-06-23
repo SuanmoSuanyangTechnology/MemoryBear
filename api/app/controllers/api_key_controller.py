@@ -52,10 +52,8 @@ def create_api_key(
             data=data
         )
         end_user_id, other_id = None, None
-        if "memory" in data.scopes:
-            if data.user_id:
-                end_user_id, other_id = EndUserRepository(db).get_or_create_end_user_mcp(workspace_id, data.user_id)
-            # user_id 为空时允许不绑定 end_user，后续通过 X-End-User-Other-Id 头指定
+        if "memory" in data.scopes and data.user_id:
+            end_user_id, other_id = EndUserRepository(db).get_or_create_end_user_mcp(workspace_id, data.user_id)
 
         response_data = api_key_schema.ApiKeyResponse.model_validate(api_key_obj)
         response_data.end_user_id = end_user_id
