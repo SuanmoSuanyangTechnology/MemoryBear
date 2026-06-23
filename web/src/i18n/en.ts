@@ -2492,7 +2492,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       trigger: 'Trigger',
       start: 'Start',
       start_label: 'Start',
-      end: 'End',
+      end: 'Answer',
       end_label: 'End',
       output: 'Output',
       answer: 'Answer',

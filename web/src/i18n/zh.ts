@@ -2486,7 +2486,7 @@ export const zh = {
       trigger: '触发器',
       start: '开始（Start）',
       start_label: '开始',
-      end: '结束（End）',
+      end: '回复',
       end_label: '结束',
       output: '输出（Output）',
       answer: '回复（Answer）',
