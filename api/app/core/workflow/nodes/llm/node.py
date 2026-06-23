@@ -852,11 +852,17 @@ class LLMNode(BaseNode):
                 if self.typed_config.memory.enable:
                     conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                     if conversation_id:
+                        current_user_msg = next(
+                            (m["content"] for m in reversed(self.messages) if m.get("role") == "user"), ""
+                        )
                         _kwargs = dict(
                             features=self.workflow_config.get("features", {}),
                             conversation_id=conversation_id,
                             scope_key=f"node:{self.node_id}",
-                            workflow_messages=state.get("messages", []),
+                            workflow_messages=state.get("messages", []) + [
+                                {"role": "user", "content": current_user_msg},
+                                {"role": "assistant", "content": content},
+                            ],
                             window_size=self.typed_config.memory.window_size,
                             model_config_id=self.typed_config.model_id,
                         )
@@ -1132,11 +1138,17 @@ class LLMNode(BaseNode):
                 if self.typed_config.memory.enable:
                     conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                     if conversation_id:
+                        current_user_msg = next(
+                            (m["content"] for m in reversed(self.messages) if m.get("role") == "user"), ""
+                        )
                         _kwargs = dict(
                             features=self.workflow_config.get("features", {}),
                             conversation_id=conversation_id,
                             scope_key=f"node:{self.node_id}",
-                            workflow_messages=state.get("messages", []),
+                            workflow_messages=state.get("messages", []) + [
+                                {"role": "user", "content": current_user_msg},
+                                {"role": "assistant", "content": full_response},
+                            ],
                             window_size=self.typed_config.memory.window_size,
                             model_config_id=self.typed_config.model_id,
                         )
