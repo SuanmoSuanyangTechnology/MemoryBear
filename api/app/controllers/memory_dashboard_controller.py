@@ -189,8 +189,8 @@ def get_workspace_end_users(
     # 构建响应数据（先返回给用户，Redis/Celery 操作放后台）
     items = []
     for index, end_user in enumerate(end_users):
-        end_user_id = str(end_user.id)
-        config_info = memory_configs_map.get(end_user_id, {})
+        user_id = str(end_user.id) # NOTE:此处user_id是end_user_id
+        config_info = memory_configs_map.get(user_id, {})
 
         if current_workspace_type == "rag":
             memory_total = int(raw_items[index].get("memory_count", 0) or 0)
@@ -198,8 +198,9 @@ def get_workspace_end_users(
             memory_total = int(getattr(end_user, "memory_count", 0) or 0)
 
         items.append({
+            "end_user_id": user_id,
             "end_user": {
-                "end_user_id": end_user_id,
+                "id": user_id,
                 "other_name": end_user.other_name,
             },
             "memory_num": {"total": memory_total},
