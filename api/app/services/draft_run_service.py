@@ -1045,16 +1045,18 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
-                    asyncio.create_task(
-                        context_engine_manager.after_app_turn(
-                            features=features_config,
-                            conversation_id=uuid.UUID(conversation_id),
-                            current_provider=api_key_config.get("provider"),
-                            current_is_omni=api_key_config.get("is_omni", False),
-                            legacy_max_history=settings.AGENT_MAX_HISTORY,
-                            model_config_id=model_config.id,
-                        )
+                    _ctx_kwargs = dict(
+                        features=features_config,
+                        conversation_id=uuid.UUID(conversation_id),
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False),
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=model_config.id,
                     )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
@@ -1513,16 +1515,18 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
-                    asyncio.create_task(
-                        context_engine_manager.after_app_turn(
-                            features=features_config,
-                            conversation_id=uuid.UUID(conversation_id),
-                            current_provider=api_key_config.get("provider"),
-                            current_is_omni=api_key_config.get("is_omni", False),
-                            legacy_max_history=settings.AGENT_MAX_HISTORY,
-                            model_config_id=model_config.id,
-                        )
+                    _ctx_kwargs = dict(
+                        features=features_config,
+                        conversation_id=uuid.UUID(conversation_id),
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False),
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=model_config.id,
                     )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
             if not sub_agent:
