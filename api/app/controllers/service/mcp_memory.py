@@ -15,7 +15,6 @@ import warnings
 
 from fastmcp import FastMCP
 
-from app.celery_task_scheduler import scheduler
 from app.controllers.service.mcp_auth_middleware import (
     mcp_config_id,
     mcp_end_user_id,
@@ -71,19 +70,27 @@ async def write_memory(
         from datetime import datetime, timezone
         dialog_at = datetime.now(timezone.utc).isoformat()
 
-        msg_id = scheduler.push_task(
-            "app.core.memory.agent.write_message",
-            end_user_id,
-            {
-                "end_user_id": end_user_id,
-                "messages": [{"role": "user", "content": message, "dialog_at": dialog_at}],
-                "config_id": config_id,
-                "storage_type": storage_type,
-                "user_rag_memory_id": "",
-                "workspace_id": str(workspace_id),
-            },
+        # RAG 存储类型走独立路径
+        if storage_type and storage_type.lower() == "rag":
+            from app.core.memory.pipelines.dispatcher import write_messages_to_rag
+            await write_messages_to_rag(
+                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+                end_user_id=end_user_id,
+                user_rag_memory_id="",
+            )
+            return {"success": True}
+
+        # Neo4j 路径：走 MCP 专用 dispatcher 入口，消息落 memory_messages 表
+        from app.core.memory.pipelines.dispatcher import dispatch_mcp_write
+        msg_id = await dispatch_mcp_write(
+            message=message,
+            end_user_id=end_user_id,
+            config_id=config_id,
+            workspace_id=str(workspace_id),
+            dialog_at=dialog_at,
         )
-        logger.info(f"MCP write_memory queued: msg_id={msg_id}, end_user={end_user_id}")
+
+        logger.info(f"MCP write_memory dispatched: msg_id={msg_id}, end_user={end_user_id}")
         return {"success": True, "msg_id": msg_id}
     except Exception as e:
         logger.error(f"MCP write_memory failed for end_user={end_user_id}: {e}")
