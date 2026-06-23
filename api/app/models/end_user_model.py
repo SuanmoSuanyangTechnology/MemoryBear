@@ -35,6 +35,7 @@ class EndUser(Base):
     other_address = Column(String, default="", nullable=False)
     is_active = Column(Boolean, default=True, server_default="true", nullable=False, comment="是否有效，False 表示已删除")
     reflection_time = Column(DateTime, nullable=True)
+    write_time = Column(DateTime, nullable=True, comment="最后一次记忆写入时间")
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
     
