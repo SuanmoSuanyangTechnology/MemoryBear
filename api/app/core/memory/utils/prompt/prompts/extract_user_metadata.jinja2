@@ -50,6 +50,7 @@ Your goal is not to rebuild the full metadata. Output only patch operations:
 出现了别名信息，也不要为 `aliases` 输出任何 operation。
     {% else %}
     The input JSON contains:
+
 - `description`: an array of strings describing the user
 - `existing_metadata`: an existing metadata object with these fixed fields:
   - `core_facts`
@@ -147,6 +148,7 @@ Input JSON:
 4. 操作值保持字符串形式
 
 - `value`、`old_value`、`new_value` 都必须是字符串
+- `reason` 必须是字符串，用一句简短话说明该 operation 的证据来源和判断依据
 - 不允许输出对象值、嵌套结构或数组值
 - 不允许把 `events` 拆成 event/time/note 对象
 - 不允许把 `relations` 拆成结构化对象
@@ -189,6 +191,7 @@ Input JSON:
 4. Operation values remain strings
 
 - `value`, `old_value`, and `new_value` must be strings
+- `reason` must be a string, with one short sentence explaining the evidence and decision basis for the operation
 - Do not output object values, nested structures, or array values
 - Do not split `events` into event/time/note objects
 - Do not split `relations` into structured objects
@@ -213,15 +216,28 @@ Input JSON:
 - `add`
   - 当 description 支持一条新的长期画像 metadata，且 existing_metadata 中没有等价内容时输出
   - 如果某条信息已经存在、近义存在、或只是轻微改写，不要 add
+  - `reason` 应说明 description 中哪条信息支持新增，以及为什么 existing_metadata 中没有等价旧项
 - `delete`
   - 只有当 description 明确否定、撤销、取消、结束或声明某条已有 metadata 不再成立时才输出
   - `old_value` 必须从 `existing_metadata[field]` 中原样复制，不得改写
+  - description 必须直接指向 `old_value` 所表达的同一对象、兴趣、关系、目标、立场或事实；不能因为某条 existing_metadata 看起来同类、相近或可替代，就删除它
+  - 如果 description 否定的是一个未存在于 `existing_metadata[field]` 的旧项，不要选择同字段里的其他旧值代删
+  - 例如 existing interests 里有 `摄影`，description 只说“用户不再做陶艺”，不能删除 `摄影`，也不要输出任何 interests delete
   - 如果无法唯一定位旧值，不要输出 delete
+  - `reason` 应说明 description 如何明确否定/结束 `old_value`，并说明二者为何是同一个被删除对象
 - `update`
   - 只有当 description 明确表达某条已有 metadata 被新事实替代时才输出
   - `old_value` 必须从 `existing_metadata[field]` 中原样复制，不得改写
   - `new_value` 必须是 description 支持的最小语义完整字符串
+  - description 必须同时支持 `old_value` 的失效/被替代，以及 `new_value` 的成立；不能只因为新信息和某个旧值属于同一字段，就把旧值更新掉
+  - update 不是重新摘要或压缩旧值；`new_value` 应只替换 description 明确改变的部分，并保留 `old_value` 中未被否定、仍然兼容的关键信息
+  - 不要在 update 中丢弃 `old_value` 里仍成立的人物、身份、职业、国籍、地点、时间、年份、持续时间、来源、意义、数量、目标周期、备注等信息
+  - 当 description 使用“今年、下半年、上个月、最近两年”等相对时间，而 `old_value` 或输入上下文中已有可用年份/时间锚点时，`new_value` 应保留或继承该时间锚点，不能退化成无年份的模糊时间
+  - 如果 description 只表达新增信息，或只表达某个不存在旧值的否定，不要用同字段其他旧值凑 update/delete
   - 如果只是更精确表达、轻微补写、风格改写，且不构成明确替代，不要 update
+  - `reason` 应说明 description 如何支持 `old_value` 被 `new_value` 替代，并说明保留或改变了哪些关键信息
+- `delete/update` 的 old_value 证据对齐优先级高于字段分类和语义相近性；宁可少删少改，也不要删改被 description 没有直接指向的旧 metadata
+- 对 `interests`、`goals`、`beliefs_or_stances` 这类列表字段，否定一个具体项目时，只能删除该具体项目或其明确同义旧值；不能把“陶艺”错配到“摄影”，不能把“不再参加环保志愿活动”直接当作“不再认同环保理念”
 - 临时、短期、旅行、出差、暂住、最近几天/几周等信息，不得覆盖长期画像
 - 不确定是否应该 delete/update 时，不要输出 delete/update
 - 先理解 `description` 想表达的含义，再与 `existing_metadata` 做语义去重
@@ -236,15 +252,28 @@ Input JSON:
 - `add`
   - Output when `description` supports a new durable metadata item and no equivalent item exists in `existing_metadata`
   - Do not add if the item already exists, exists as a paraphrase, or is only a light rewording
+  - `reason` should state which description evidence supports the addition and why no equivalent item already exists
 - `delete`
   - Output only when `description` explicitly negates, revokes, cancels, ends, or says an existing metadata item is no longer true
   - `old_value` must be copied exactly from `existing_metadata[field]`; do not rewrite it
+  - The description must directly refer to the same object, interest, relationship, goal, stance, or fact expressed by `old_value`; do not delete an existing item merely because it is in the same field, looks similar, or could be a substitute
+  - If the description negates an item that is not present in `existing_metadata[field]`, do not choose another existing item in that field as a fallback deletion
+  - For example, if existing interests contain `photography` and the description only says the user no longer does pottery, do not delete `photography`, and emit no interests delete
   - If the old item cannot be uniquely located, do not output delete
+  - `reason` should explain how the description explicitly negates/ends `old_value`, and why they are the same target
 - `update`
   - Output only when `description` clearly says an existing metadata item has been replaced by a new fact
   - `old_value` must be copied exactly from `existing_metadata[field]`; do not rewrite it
   - `new_value` must be a minimal semantically complete string supported by `description`
+  - The description must support both that `old_value` is no longer valid or has been replaced, and that `new_value` is now true; do not update just because a new item and an old item belong to the same field
+  - An update is not a fresh summary or compression of the old item; `new_value` should replace only the part explicitly changed by the description and preserve key information from `old_value` that is not negated and remains compatible
+  - Do not drop still-valid people, identities, occupations, nationalities, places, dates, years, durations, sources, meanings, quantities, goal periods, notes, or other important qualifiers from `old_value` during an update
+  - When the description uses relative time such as this year, the second half of the year, last month, or the past two years, and `old_value` or the input context contains an available year/time anchor, preserve or inherit that time anchor in `new_value`; do not degrade it to vague time without a year
+  - If the description only adds new information, or only negates an item that is absent from existing metadata, do not force an update/delete against another existing item in the same field
   - Do not update for mere precision improvements, light expansions, or style rewrites unless they are a clear replacement
+  - `reason` should explain how the description supports replacing `old_value` with `new_value`, including which key details were preserved or changed
+- Evidence alignment for `old_value` in `delete/update` takes priority over field category or semantic similarity; prefer fewer deletions/updates over modifying old metadata that the description does not directly target
+- For list-like fields such as `interests`, `goals`, and `beliefs_or_stances`, when negating one concrete item, delete only that concrete item or a clearly synonymous existing item; do not map `pottery` to `photography`, and do not treat `no longer joins environmental volunteer activities` as direct evidence for `no longer supports environmental values`
 - Temporary, short-term, travel, business-trip, short-stay, or recent-days/weeks information must not overwrite durable profile metadata
 - If unsure whether to delete or update, do not output delete/update
 - First understand the meaning of the description, then deduplicate semantically against `existing_metadata`
@@ -402,11 +431,11 @@ Input JSON:
 - 每个 operation 必须是对象
 - 每个 operation 的 `op` 只能是 `"add"`、`"delete"`、`"update"`
 - 每个 operation 的 `field` 必须是 8 个固定字段之一（不包含 `aliases`）
-- `add` operation 必须包含且只包含：`op`、`field`、`value`
-- `delete` operation 必须包含且只包含：`op`、`field`、`old_value`
-- `update` operation 必须包含且只包含：`op`、`field`、`old_value`、`new_value`
+- `add` operation 必须包含且只包含：`op`、`field`、`value`、`reason`
+- `delete` operation 必须包含且只包含：`op`、`field`、`old_value`、`reason`
+- `update` operation 必须包含且只包含：`op`、`field`、`old_value`、`new_value`、`reason`
 - `old_value` 必须从对应的 `existing_metadata[field]` 中原样复制
-- `value`、`old_value`、`new_value` 都必须是字符串
+- `value`、`old_value`、`new_value`、`reason` 都必须是字符串
 - 不要输出 `null`
 - 不要输出解释文字
 - 不要输出 markdown code fence
@@ -419,11 +448,11 @@ Input JSON:
 - Each operation must be an object
 - Each operation's `op` must be exactly one of `"add"`, `"delete"`, or `"update"`
 - Each operation's `field` must be one of the 8 fixed metadata fields (not `aliases`)
-- An `add` operation must contain exactly: `op`, `field`, `value`
-- A `delete` operation must contain exactly: `op`, `field`, `old_value`
-- An `update` operation must contain exactly: `op`, `field`, `old_value`, `new_value`
+- An `add` operation must contain exactly: `op`, `field`, `value`, `reason`
+- A `delete` operation must contain exactly: `op`, `field`, `old_value`, `reason`
+- An `update` operation must contain exactly: `op`, `field`, `old_value`, `new_value`, `reason`
 - `old_value` must be copied exactly from the corresponding `existing_metadata[field]`
-- `value`, `old_value`, and `new_value` must be strings
+- `value`, `old_value`, `new_value`, and `reason` must be strings
 - Do not output `null`
 - Do not output explanation text
 - Do not wrap the result in markdown code fences
@@ -446,7 +475,8 @@ Output:
     {
       "op": "add",
       "field": "events",
-      "value": "started volunteering for a trans youth hotline"
+      "value": "started volunteering for a trans youth hotline",
+      "reason": "description 明确支持新增这一长期志愿经历，existing_metadata 中没有等价事件"
     }
   ]
 }
@@ -479,7 +509,8 @@ Output:
     {
       "op": "add",
       "field": "relations",
-      "value": "Mia | sister"
+      "value": "Mia | sister",
+      "reason": "description 明确提到 Mia 是她的姐姐，existing_metadata 中没有等价关系"
     }
   ]
 }
@@ -498,7 +529,8 @@ Output:
     {
       "op": "add",
       "field": "anchors",
-      "value": "journal | from first year after moving"
+      "value": "journal | from first year after moving",
+      "reason": "description 明确说明该日记来自搬家后的第一年，具有长期锚点价值"
     }
   ]
 }
@@ -517,7 +549,8 @@ Output:
     {
       "op": "add",
       "field": "events",
-      "value": "attended workshop on trauma-informed care | last month | clarified future direction"
+      "value": "attended workshop on trauma-informed care | last month | clarified future direction",
+      "reason": "description 明确支持新增该工作坊经历，并说明其澄清未来方向的长期意义"
     }
   ]
 }
@@ -536,7 +569,8 @@ Output:
     {
       "op": "add",
       "field": "core_facts",
-      "value": "在上海工作"
+      "value": "在上海工作",
+      "reason": "description 明确说明说话者当前在上海工作，existing_metadata 中没有等价事实"
     }
   ]
 }
@@ -555,7 +589,8 @@ Output:
     {
       "op": "add",
       "field": "core_facts",
-      "value": "来自湖南长沙"
+      "value": "来自湖南长沙",
+      "reason": "description 明确说明说话者老家在湖南长沙，existing_metadata 中没有等价事实"
     }
   ]
 }
@@ -574,7 +609,8 @@ Output:
     {
       "op": "delete",
       "field": "goals",
-      "old_value": "申请英国研究生"
+      "old_value": "申请英国研究生",
+      "reason": "description 明确说用户已经不再申请英国研究生，直接否定该 old_value"
     }
   ]
 }
@@ -594,7 +630,8 @@ Output:
       "op": "update",
       "field": "core_facts",
       "old_value": "住在北京",
-      "new_value": "长期住在上海"
+      "new_value": "长期住在上海",
+      "reason": "description 明确表示用户已搬到上海长期居住，替代原来的住在北京"
     }
   ]
 }
@@ -626,7 +663,8 @@ Output:
     {
       "op": "add",
       "field": "events",
-      "value": "started volunteering for a trans youth hotline"
+      "value": "started volunteering for a trans youth hotline",
+      "reason": "the description explicitly supports adding this durable volunteering experience, and no equivalent event exists"
     }
   ]
 }
@@ -659,7 +697,8 @@ Output:
     {
       "op": "add",
       "field": "relations",
-      "value": "Mia | sister"
+      "value": "Mia | sister",
+      "reason": "the description explicitly identifies Mia as her sister, and no equivalent relation exists"
     }
   ]
 }
@@ -678,7 +717,8 @@ Output:
     {
       "op": "add",
       "field": "anchors",
-      "value": "journal | from first year after moving"
+      "value": "journal | from first year after moving",
+      "reason": "the description identifies the journal as a meaningful object from the first year after moving"
     }
   ]
 }
@@ -697,7 +737,8 @@ Output:
     {
       "op": "add",
       "field": "events",
-      "value": "attended workshop on trauma-informed care | last month | clarified future direction"
+      "value": "attended workshop on trauma-informed care | last month | clarified future direction",
+      "reason": "the description supports adding this workshop event and its durable significance for future direction"
     }
   ]
 }
@@ -716,7 +757,8 @@ Output:
     {
       "op": "add",
       "field": "core_facts",
-      "value": "works in Shanghai"
+      "value": "works in Shanghai",
+      "reason": "the description explicitly says the speaker currently works in Shanghai, and no equivalent fact exists"
     }
   ]
 }
@@ -735,7 +777,8 @@ Output:
     {
       "op": "add",
       "field": "core_facts",
-      "value": "from Hunan Changsha"
+      "value": "from Hunan Changsha",
+      "reason": "the description explicitly says the speaker is originally from Hunan Changsha, and no equivalent fact exists"
     }
   ]
 }
@@ -754,7 +797,8 @@ Output:
     {
       "op": "delete",
       "field": "goals",
-      "old_value": "apply to UK graduate schools"
+      "old_value": "apply to UK graduate schools",
+      "reason": "the description explicitly says the user is no longer applying to UK graduate schools, directly negating old_value"
     }
   ]
 }
@@ -774,7 +818,8 @@ Output:
       "op": "update",
       "field": "core_facts",
       "old_value": "lives in Beijing",
-      "new_value": "lives in Shanghai long-term"
+      "new_value": "lives in Shanghai long-term",
+      "reason": "the description explicitly says the user moved to Shanghai and now lives there long-term, replacing the Beijing residence"
     }
   ]
 }
@@ -822,18 +867,21 @@ Return a strict JSON object with this exact structure:
     {
       "op": "add",
       "field": "core_facts",
-      "value": "string"
+      "value": "string",
+      "reason": "string"
     },
     {
       "op": "delete",
       "field": "goals",
-      "old_value": "string"
+      "old_value": "string",
+      "reason": "string"
     },
     {
       "op": "update",
       "field": "core_facts",
       "old_value": "string",
-      "new_value": "string"
+      "new_value": "string",
+      "reason": "string"
     }
   ]
 }
