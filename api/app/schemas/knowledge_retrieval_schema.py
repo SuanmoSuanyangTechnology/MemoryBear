@@ -22,11 +22,6 @@ class KnowledgeRetrievalRequest(BaseModel):
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
-    metadata_auto_filter_groups: list[Any] | None = Field(
-        default=None,
-        description="节点已用 LLM 提取好的过滤条件（auto 模式由 knowledge 节点产出，"
-                    "类型为 list[EngineFilterGroup]；提供时直接交给 MetadataFilterEngine，跳过 service 的 LLM 调用）",
-    )
 
     @field_validator("query")
     @classmethod

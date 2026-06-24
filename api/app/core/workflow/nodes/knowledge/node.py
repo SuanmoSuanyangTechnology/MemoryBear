@@ -247,7 +247,8 @@ class KnowledgeRetrievalNode(BaseNode):
     ) -> list:
         """auto 模式：用配置好的模型 + 参数，调用 LLM 提取出源数据过滤条件。
 
-        产出 list[EngineFilterGroup]，交给 service 的 MetadataFilterEngine 做真正的过滤。
+        产出 list[FilterGroup]（配置层类型），直接放进 metadata_filters 交给 service；
+        service 再经 _build_common_filter_groups 转成引擎层类型做真正的过滤。
         """
         cfg = self._get_typed_config()
         model_cfg = cfg.metadata_model
@@ -287,16 +288,26 @@ class KnowledgeRetrievalNode(BaseNode):
             llm=llm,
             gen_conf=gen_conf,
         )
+        # generate_filter_groups 返回引擎层 EngineFilterGroup；metadata_filters 字段装的是配置层 FilterGroup，
+        # 这里无损转成配置层类型（引擎层 logic 大写，由 config 校验器统一转小写）。
+        filter_groups = [
+            FilterGroup(
+                conditions=[
+                    FilterCondition(field=c.field, operator=c.operator, value=c.value)
+                    for c in (g.conditions or [])
+                ],
+                logic=g.logic,
+            )
+            for g in (filter_groups or [])
+        ]
         # 打印提取出的过滤条件（即交接给知识库工程师做真正过滤的内容）
-        # EngineFilterGroup/EngineFilterCondition 是 filter_engine 里的简单数据类，
-        # 直接用 vars() 取 __dict__，避免凭空构造属性名。
         logger.info(
             "node: %s auto filter extracted: %s",
             self.node_id,
             [
                 {
                     "logic": group.logic,
-                    "conditions": [vars(cond) for cond in (group.conditions or [])],
+                    "conditions": [cond.model_dump() for cond in (group.conditions or [])],
                 }
                 for group in (filter_groups or [])
             ],
@@ -334,7 +345,7 @@ class KnowledgeRetrievalNode(BaseNode):
             self.typed_config.metadata_filters, variable_pool
         )
 
-        # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[EngineFilterGroup]）
+        # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
         auto_filter_groups: list | None = None
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
             # generate_filter_groups 内部走同步 LLM.chat 网络调用，放到工作线程避免阻塞事件循环
@@ -356,8 +367,7 @@ class KnowledgeRetrievalNode(BaseNode):
             retrieve_type=first_kb.retrieve_type,
             rerank_id=self.typed_config.reranker_id,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,
-            metadata_filters=[rendered_filters] if rendered_filters else [],
-            metadata_auto_filter_groups=auto_filter_groups,
+            metadata_filters=auto_filter_groups or ([rendered_filters] if rendered_filters else []),
         )
 
         # 4. Call unified retrieval service
