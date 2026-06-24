@@ -63,10 +63,12 @@ interface RbMarkdownProps {
   className?: string;
   /** Callback when a form button is clicked, receives form field values */
   onFormSubmit?: (values: Record<string, any>) => void;
+  /** Whether to show copy button (default: true) */
+  isNeedCopy?: boolean;
 }
 
 /** Build stable components map — form submission handled via FormContext */
-const buildComponents = () => ({
+const buildComponents = (isNeedCopy = true) => ({
   h1: ({ children, ...props }: any) => <h1 className="rb:text-2xl rb:font-bold rb:mb-2" {...props}>{children}</h1>,
   h2: ({ children, ...props }: any) => <h2 className="rb:text-xl rb:font-bold rb:mb-2" {...props}>{children}</h2>,
   h3: ({ children, ...props }: any) => <h3 className="rb:text-lg rb:font-bold rb:mb-2" {...props}>{children}</h3>,
@@ -89,7 +91,7 @@ const buildComponents = () => ({
     return <span style={style} {...restProps}>{children}</span>
   },
 
-  code: ({ children, className, ...props }: any) => <Code children={String(children)} className={className || ''} {...props} />,
+  code: ({ children, className, ...props }: any) => <Code children={String(children)} isNeedCopy={isNeedCopy ?? true} className={className || ''} {...props} />,
   img: ({ src, alt, ...props }: any) => <Image src={src} alt={alt} {...props} />,
   video: ({ src, ...props }: any) => <VideoBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   audio: ({ src, ...props }: any) => <AudioBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
@@ -167,11 +169,12 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   onContentChange,
   className,
   onFormSubmit,
+  isNeedCopy = true,
 }) => {
   const [formValues, setFormValues] = useState<Record<string, any>>({})
   const setValue = useCallback((name: string, value: any) => setFormValues(prev => ({ ...prev, [name]: value })), [])
   const formCtx = useMemo(() => ({ values: formValues, setValue, onSubmit: onFormSubmit }), [formValues, setValue, onFormSubmit])
-  const components = useMemo(() => buildComponents(), [])
+  const components = useMemo(() => buildComponents(isNeedCopy), [isNeedCopy])
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
 
