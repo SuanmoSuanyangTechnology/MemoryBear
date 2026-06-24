@@ -270,12 +270,12 @@ class WritePipeline:
             self.language = detected if detected in ("zh", "en") else "en"
             logger.info(f"[LanguageDetect] detected={detected}, language={self.language}, text_len={len(user_content)}")
 
-        # 处理 dialog_at
-        _dialog_at = (
+        # 处理 dialog_at：三级降级，最终由 ensure_dialog_at 用服务端当前时间兜底
+        from app.core.utils.datetime_utils import ensure_dialog_at
+        _dialog_at = ensure_dialog_at(
             target_message.get("dialog_at")
             or dispatch_at
-            or target_message.get("created_at", "")
-            or ""
+            or target_message.get("created_at")
         )
         target_message = {**target_message, "dialog_at": _dialog_at}
 
@@ -875,8 +875,8 @@ class WritePipeline:
         if not assistant_content:
             # 没有配对的 assistant 消息，跳过 User 侧 pruning
             logger.debug(
-                f"[WritePipeline] target_message User 侧 pruning 跳过: "
-                f"context_after 中无 assistant 消息"
+                "[WritePipeline] target_message User 侧 pruning 跳过: "
+                "context_after 中无 assistant 消息"
             )
             return
 

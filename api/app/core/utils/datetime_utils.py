@@ -102,6 +102,23 @@ def parse_iso_to_utc_naive(value: str | None) -> datetime | None:
     return dt.astimezone(UTC).replace(tzinfo=None)
 
 
+def ensure_dialog_at(dialog_at: str | None) -> str:
+    """确保 dialog_at 有值，没有则用服务端当前 UTC 时间兜底。
+
+    各写入入口（write_batch / write_single / write_pipeline）统一调用此函数，
+    保证记忆写入链路上的每条消息都携带有效的对话时间戳。
+
+    Args:
+        dialog_at: 调用方提供的 ISO 8601 字符串，可为 None 或空字符串。
+
+    Returns:
+        有效的 ISO 8601 UTC 字符串。
+    """
+    if dialog_at and dialog_at.strip():
+        return dialog_at
+    return datetime.now(UTC).isoformat()
+
+
 def parse_metadata_time_to_utc_naive(value: str | int | float | datetime | None) -> datetime | None:
     """Parse metadata time values and normalize them to naive UTC.
 

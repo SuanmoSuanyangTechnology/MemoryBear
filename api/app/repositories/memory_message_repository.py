@@ -16,7 +16,7 @@ from typing import List, Optional
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.core.utils.datetime_utils import ensure_dialog_at, to_iso_z, utcnow_naive
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
 
@@ -79,7 +79,7 @@ class MemoryMessageRepository:
                 message_seq=next_seq,
                 should_memorize=msg.get("should_memorize", True),
                 created_at=utcnow_naive(),
-                dialog_at=msg.get("dialog_at") or None,
+                dialog_at=ensure_dialog_at(msg.get("dialog_at")),
                 files=msg.get("files"),
             )
             self.db.add(mm)
@@ -139,7 +139,7 @@ class MemoryMessageRepository:
                 message_seq=next_seq,
                 should_memorize=should_memorize,
                 created_at=created_at,
-                dialog_at=dialog_at,
+                dialog_at=ensure_dialog_at(dialog_at),
                 files=files,
             )
             self.db.add(memory_msg)

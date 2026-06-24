@@ -1767,6 +1767,7 @@ def write_message_task(
         message_seq: int = 0,
         language: str = "zh",
         skip_cursor_advance: bool = False,
+        dispatch_at: str = "", # 任务执行时间
         # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
         messages: Optional[List[dict]] = None,
         storage_type: str = "neo4j",
@@ -1785,6 +1786,7 @@ def write_message_task(
         message_seq: 消息序号
         language: 语言
         skip_cursor_advance: 是否跳过 cursor 推进（MCP 等直接写入路径）
+        dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，由 push_write_task 自动注入
         messages: MCP 入口兼容字段，单条消息列表 [{"role", "content", "dialog_at"}]
         storage_type: MCP 入口兼容字段，存储类型（neo4j / rag）
         user_rag_memory_id: MCP 入口兼容字段，RAG 记忆 ID
@@ -1853,6 +1855,7 @@ def write_message_task(
             message_seq=message_seq,
             language=language,
             skip_cursor_advance=skip_cursor_advance,
+            dispatch_at=dispatch_at,
         )
         return {"status": result.status, "extraction": result.extraction}
 
