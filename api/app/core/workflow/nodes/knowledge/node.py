@@ -244,7 +244,6 @@ class KnowledgeRetrievalNode(BaseNode):
     def _extract_auto_filter_groups(
         self,
         query: str,
-        variable_pool: VariablePool,
     ) -> list:
         """auto 模式：用配置好的模型 + 参数，调用 LLM 提取出源数据过滤条件。
 
@@ -340,7 +339,7 @@ class KnowledgeRetrievalNode(BaseNode):
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
             # generate_filter_groups 内部走同步 LLM.chat 网络调用，放到工作线程避免阻塞事件循环
             auto_filter_groups = await asyncio.to_thread(
-                self._extract_auto_filter_groups, query, variable_pool
+                self._extract_auto_filter_groups, query
             )
 
         # 3. Construct KnowledgeRetrievalRequest
