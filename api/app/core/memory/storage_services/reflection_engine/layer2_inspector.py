@@ -281,11 +281,11 @@ class Layer2Inspector:
                     "description_summary": head["target_description_summary"],
                     "aliases": head["target_aliases"] or [],
                 }
-                existing_lower = {a.lower() for a in canonical["aliases"] if a}
+                existing_lower = {a.strip().lower() for a in canonical["aliases"] if a and a.strip()}
 
                 to_judge: List[Dict[str, Any]] = []
                 for c in group:
-                    # 重复短路：候选名已在 target.aliases（忽略大小写）→ 直接 merge，
+                    # 重复短路：候选名已在 target.aliases（忽略大小写与前后空白）→ 直接 merge，
                     # 不送 LLM，但写反思日志表
                     if (c["alias_name"] or "").strip().lower() in existing_lower:
                         merge_ids.append(c["alias_id"])
@@ -741,11 +741,12 @@ class Layer2Inspector:
         confidence = decided["confidence"]
         reason = decided["reason"]
         shortcut = decided.get("shortcut", False)
+        alias_name = (cand.get("alias_name") or "").strip()
 
         tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
         tracker.steps.append(ExecutionStep(
             name="候选收集", type="prompt", duration_ms=timing.get("recall_ms") or 0,
-            output=f"alias={cand['alias_name']}", success=True,
+            output=f"alias={alias_name}", success=True,
         ))
         if shortcut:
             tracker.steps.append(ExecutionStep(
@@ -772,28 +773,28 @@ class Layer2Inspector:
         entity_a = {"entity_id": cand["target_id"], "name": canonical["name"],
                     "entity_type": canonical.get("entity_type"),
                     "description": canon_desc, "aliases": canon_aliases}
-        entity_b = {"entity_id": cand["alias_id"], "name": cand["alias_name"],
+        entity_b = {"entity_id": cand["alias_id"], "name": alias_name,
                     "entity_type": cand.get("alias_entity_type"),
                     "description": alias_desc, "aliases": cand.get("alias_aliases") or []}
         trigger = {"entity_a": entity_a, "entity_b": entity_b, "reason": reason[:200]}
 
         if is_merge:
-            already = cand["alias_name"].strip().lower() in {a.strip().lower() for a in canon_aliases if a}
-            summary = f'"{cand["alias_name"]}" → "{canonical["name"]}" 合并别名'
+            already = alias_name.lower() in {a.strip().lower() for a in canon_aliases if a and a.strip()}
+            summary = f'"{alias_name}" → "{canonical["name"]}" 合并别名'
             title = "MERGE — 已是现有别名，直接归并" if shortcut else "MERGE — LLM确认别名归并"
             # 别名已存在（无实际新增）时不产出 diff，避免前端展示 old==new 的无意义对比
             changes = [] if already else [{
                 "field": "aliases",
                 "old": ", ".join(canon_aliases),
-                "new": ", ".join(canon_aliases + [cand["alias_name"]]),
+                "new": ", ".join(canon_aliases + [alias_name]),
             }]
             strategy = "MERGE"
         else:
-            summary = f'"{cand["alias_name"]}" ✗ 判定非别名 → 丢弃别名属于边'
+            summary = f'"{alias_name}" ✗ 判定非别名 → 丢弃别名属于边'
             title = "DROP — LLM判定非别名"
             changes = [{
                 "field": "别名属于关系",
-                "old": f'{cand["alias_name"]} →(别名属于) {canonical["name"]}',
+                "old": f'{alias_name} →(别名属于) {canonical["name"]}',
                 "new": "关系已删除（非本人别名）",
             }]
             strategy = "DROP"

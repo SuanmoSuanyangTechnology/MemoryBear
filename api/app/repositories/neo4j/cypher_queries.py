@@ -2380,7 +2380,7 @@ WITH target,
 
 // 1. 合并 aliases：将所有 source.name 追加到 target.aliases（去重，忽略空值与大小写）
 WITH target, tgt_desc, source_names, source_descs, existing_aliases,
-     existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT toLower(n) IN [x IN existing_aliases | toLower(x)]] AS new_aliases
+     existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT toLower(n) IN [x IN existing_aliases WHERE x IS NOT NULL | toLower(x)]] AS new_aliases
 
 // 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
 WITH target, new_aliases, existing_aliases, source_descs,
