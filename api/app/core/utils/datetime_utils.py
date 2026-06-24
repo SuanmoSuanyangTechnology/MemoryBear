@@ -103,19 +103,29 @@ def parse_iso_to_utc_naive(value: str | None) -> datetime | None:
 
 
 def ensure_dialog_at(dialog_at: str | None) -> str:
-    """确保 dialog_at 有值，没有则用服务端当前 UTC 时间兜底。
+    """确保 dialog_at 是合法的 UTC ISO 8601 字符串。
+
+    处理逻辑：
+    1. 若传入值非空，尝试解析为 UTC datetime，成功则规范化输出。
+    2. 解析失败（格式非法）或传入为空，用服务端当前 UTC 时间兜底。
 
     各写入入口（write_batch / write_single / write_pipeline）统一调用此函数，
-    保证记忆写入链路上的每条消息都携带有效的对话时间戳。
+    保证 memory_messages.dialog_at 字段和 pipeline 内始终携带合法的时间戳。
 
     Args:
-        dialog_at: 调用方提供的 ISO 8601 字符串，可为 None 或空字符串。
+        dialog_at: 调用方提供的时间字符串，可为 None、空字符串或任意格式。
 
     Returns:
-        有效的 ISO 8601 UTC 字符串。
+        规范化的 ISO 8601 UTC 字符串（含 +00:00 或 Z 后缀）。
     """
     if dialog_at and dialog_at.strip():
-        return dialog_at
+        try:
+            parsed = parse_iso_to_utc_naive(dialog_at.strip())
+            if parsed is not None:
+                # 转回 aware UTC 再序列化，统一输出格式
+                return parsed.replace(tzinfo=UTC).isoformat()
+        except Exception:
+            pass
     return datetime.now(UTC).isoformat()
 
 
