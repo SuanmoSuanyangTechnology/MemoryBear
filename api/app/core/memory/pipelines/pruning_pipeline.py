@@ -97,6 +97,14 @@ class PruningPipeline:
             - should_process_user_msg: 是否需要对 user 消息做规整
             - processed_user_msg: 规整后的 user 消息文本，不需要处理时为 None
         """
+        # pruning_enabled=False 时直接透传原内容，不做任何 LLM 调用
+        if not self.memory_config.pruning_enabled:
+            logger.debug(
+                f"[PruningPipeline] 剪枝开关已关闭，跳过: "
+                f"conv={conversation_id}, seq={message_seq}"
+            )
+            return content, False, None
+
         cache_key = self._cache_key(conversation_id, message_seq)
 
         # Step 1: 查询 Redis 缓存
@@ -217,7 +225,7 @@ class PruningPipeline:
         self._ensure_llm_client()
 
         pruning_config = PruningConfig(
-            pruning_switch=True,
+            pruning_switch=self.memory_config.pruning_enabled,
             pruning_scene=self.memory_config.pruning_scene or "education",
             pruning_threshold=self.memory_config.pruning_threshold,
             scene_id=(
