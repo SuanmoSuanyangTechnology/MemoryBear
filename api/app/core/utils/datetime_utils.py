@@ -102,6 +102,33 @@ def parse_iso_to_utc_naive(value: str | None) -> datetime | None:
     return dt.astimezone(UTC).replace(tzinfo=None)
 
 
+def ensure_dialog_at(dialog_at: str | None) -> str:
+    """确保 dialog_at 是合法的 UTC ISO 8601 字符串。
+
+    处理逻辑：
+    1. 若传入值非空，尝试解析为 UTC datetime，成功则规范化输出。
+    2. 解析失败（格式非法）或传入为空，用服务端当前 UTC 时间兜底。
+
+    各写入入口（write_batch / write_single / write_pipeline）统一调用此函数，
+    保证 memory_messages.dialog_at 字段和 pipeline 内始终携带合法的时间戳。
+
+    Args:
+        dialog_at: 调用方提供的时间字符串，可为 None、空字符串或任意格式。
+
+    Returns:
+        规范化的 ISO 8601 UTC 字符串（含 +00:00 或 Z 后缀）。
+    """
+    if dialog_at and dialog_at.strip():
+        try:
+            parsed = parse_iso_to_utc_naive(dialog_at.strip())
+            if parsed is not None:
+                # 转回 aware UTC 再序列化，统一输出格式
+                return parsed.replace(tzinfo=UTC).isoformat()
+        except Exception:
+            pass
+    return datetime.now(UTC).isoformat()
+
+
 def parse_metadata_time_to_utc_naive(value: str | int | float | datetime | None) -> datetime | None:
     """Parse metadata time values and normalize them to naive UTC.
 

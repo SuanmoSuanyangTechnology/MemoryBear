@@ -12,6 +12,7 @@ MemoryWriteDispatcher — 记忆写入派发层
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -249,6 +250,9 @@ def push_write_task(
     """
     from app.celery_task_scheduler import scheduler as celery_scheduler
 
+    # 记录任务派发时刻，作为 pipeline 内 dialog_at 的第二级兜底
+    dispatch_at = datetime.now(timezone.utc).isoformat()
+
     msg_id = celery_scheduler.push_task(
         "app.core.memory.agent.write_message",
         end_user_id,
@@ -262,6 +266,7 @@ def push_write_task(
             "conversation_id": conversation_id,
             "message_seq": message_seq,
             "language": language,
+            "dispatch_at": dispatch_at,
         },
     )
     logger.info(
@@ -429,6 +434,16 @@ async def ingest_agent_message(
     if hasattr(message, "meta_data") and message.meta_data:
         files = message.meta_data.get("files")
 
+    # Agent 路径：用 message.created_at 作为 dialog_at，语义上是对话真实发生的时间
+    dialog_at: str | None = None
+    if hasattr(message, "created_at") and message.created_at:
+        _created = message.created_at
+        if isinstance(_created, datetime):
+            _created = _created.replace(tzinfo=timezone.utc) if _created.tzinfo is None else _created
+            dialog_at = _created.isoformat()
+        elif isinstance(_created, str):
+            dialog_at = _created
+
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
         memory_msg = repo.write_single(
@@ -439,6 +454,7 @@ async def ingest_agent_message(
             created_at=message.created_at,
             should_memorize=should_memorize,
             files=files,
+            dialog_at=dialog_at,
         )
         if memory_msg is None:
             return False
