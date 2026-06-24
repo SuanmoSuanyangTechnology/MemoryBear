@@ -43,6 +43,7 @@ from app.services import file_service
 from app.services.file_service import _is_qa_doc
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelConfigService
+from app.services.qa_export_service import iter_qa_csv_chunks, make_qa_export_filename
 from app.core.quota_stub import check_knowledge_capacity_quota
 
 # Obtain a dedicated API logger
@@ -466,6 +467,36 @@ async def update_knowledge(
     api_logger.info(f"Update knowledge base request: knowledge_id={knowledge_id}, username: {current_user.username}")
     db_knowledge = await _update_knowledge(knowledge_id=knowledge_id, update_data=update_data, db=db, current_user=current_user)
     return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base information has been successfully updated")
+
+
+@router.get("/{kb_id}/qa/export")
+async def export_knowledge_qa_csv(
+        kb_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+):
+    """Export all active QA pairs in a knowledge base as a two-column CSV."""
+    api_logger.info(f"KB QA CSV export: kb_id={kb_id}, username={current_user.username}")
+
+    with get_db_context() as db:
+        db_knowledge = knowledge_service.get_knowledge_by_id(
+            db, knowledge_id=kb_id, current_user=current_user
+        )
+        if not db_knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The knowledge base does not exist or you do not have permission to access it",
+            )
+        filename = make_qa_export_filename(db_knowledge.name)
+
+    from urllib.parse import quote
+
+    return StreamingResponse(
+        iter_qa_csv_chunks(kb_id),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        },
+    )
 
 
 @router.post("/{kb_id}/batch-download")
