@@ -128,6 +128,9 @@ async def build_graph_nodes_and_edges(
     total_dialogs = len(dialog_data_list)
     processed_dialogs = 0
 
+    if progress_callback:
+        await progress_callback("creating_nodes_edges", "正在创建节点和边", {"total_dialogs": total_dialogs})
+
     for dialog_data in dialog_data_list:
         processed_dialogs += 1
 # region TODO 乐力齐 重构流水线切换生产环境稳定后修改
