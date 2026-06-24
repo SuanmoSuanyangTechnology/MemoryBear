@@ -70,6 +70,12 @@ class EntityDedupConfig(BaseModel):
     max_pairs_per_run: int = 10         # 单次最多合并对数
 
 
+class AliasMergeConfig(BaseModel):
+    """别名归并 LLM 校验配置"""
+    confidence_threshold: float = 0.9   # merge 阈值，confidence >= 此值才合并
+    max_per_run: int = 20               # 单次反思最多判定/处理的候选别名数
+
+
 class ReflectionConfig(BaseModel):
     """反思引擎统一配置"""
     # === 基础 ===
@@ -82,6 +88,8 @@ class ReflectionConfig(BaseModel):
     entity_dedup: EntityDedupConfig = EntityDedupConfig()
     # 子问题 6 — 描述合并
     description_merge: DescriptionMergeConfig = DescriptionMergeConfig()
+    # 别名归并 LLM 校验
+    alias_merge: AliasMergeConfig = AliasMergeConfig()
     # stale_detection: StaleDetectionConfig = StaleDetectionConfig()        # 待实现
     # fact_contradiction: FactContradictionConfig = ...                     # 待实现
     # metadata_validation: MetadataValidationConfig = ...                   # 待实现
@@ -174,9 +182,16 @@ class Layer2Inspector:
             f"强制入库={unresolved.get('forced', 0)}, 失败={unresolved.get('failed', 0)}"
         )
 
-        # 别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+        # 别名归并：LLM 校验后按 merge/drop 处理 "别名属于" 关系
         # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点
-        results["alias_merge"] = await self._run_alias_merge(end_user_id)
+        alias = await self._run_alias_merge(end_user_id, baseline, language)
+        results["alias_merge"] = alias
+        logger.info(
+            f"[Layer2 高频] 别名归并完成 end_user_id={end_user_id}, "
+            f"合并={alias.get('merge_count', 0)}, 丢弃={alias.get('drop_count', 0)}, "
+            f"边重定向={alias.get('edges_redirected', 0)}, 节点删除={alias.get('alias_nodes_deleted', 0)}, "
+            f"PG同步={alias.get('pg_synced', False)}"
+        )
 
         # 复杂去重消歧：两路召回候选 + LLM 判定后合并重复实体
         dedup = await self._run_entity_dedup(end_user_id, baseline)
@@ -221,16 +236,98 @@ class Layer2Inspector:
         )
         return results
 
-    async def _run_alias_merge(self, end_user_id: str) -> Dict[str, Any]:
-        """别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
+    async def _run_alias_merge(self, end_user_id: str, baseline: str = "HYBRID",
+                               language: str = "zh") -> Dict[str, Any]:
+        """别名归并：LLM 校验后按 merge/drop 处理 "别名属于" 关系。
 
-        将别名节点的 name/description 归并进规范实体，重定向其它边，
-        最后删除别名节点。逻辑迁移自原写入后处理任务。
+        S0 收集候选 → S1 LLM 分组判定（merge/drop/skip）→ S2 删 drop 边 →
+        S3-5 按 merge 集合归并 → S6 PG 同步（在 merge_alias_belongs_to 内）→ 写日志。
+        判定失败的候选 skip（保留边，下次重判）；删边只在明确低置信时发生。
         """
-        from .deterministic.alias_merger import merge_alias_belongs_to
+        from collections import defaultdict
+        from .deterministic.alias_merger import (
+            merge_alias_belongs_to, collect_alias_candidates, drop_alias_edges,
+        )
+        from .llm.alias_belongs_judge import judge_alias_belongs
 
+        cfg = self.config.alias_merge
         try:
-            return await merge_alias_belongs_to(self.connector, end_user_id)
+            t0 = time.perf_counter()
+            candidates = await collect_alias_candidates(self.connector, end_user_id)
+            recall_ms = int((time.perf_counter() - t0) * 1000)
+            if not candidates:
+                # 无候选，仅做 PG 同步（幂等）
+                return await merge_alias_belongs_to(self.connector, end_user_id, alias_ids=[])
+
+            # 每轮限流（处理后候选会减少，超出部分留待下次）
+            candidates = candidates[:cfg.max_per_run]
+
+            # 按 target 分组（一个 canonical 一组判定）
+            groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for c in candidates:
+                groups[c["target_id"]].append(c)
+
+            merge_ids: List[str] = []
+            drop_ids: List[str] = []
+            decided_log: List[tuple] = []   # (canonical, cand, decided) 仅 LLM 判定过的，用于写日志
+
+            llm_t0 = time.perf_counter()
+            for target_id, group in groups.items():
+                head = group[0]
+                canonical = {
+                    "name": head["target_name"],
+                    "entity_type": head["target_entity_type"],
+                    "description": head["target_description"],
+                    "description_summary": head["target_description_summary"],
+                    "aliases": head["target_aliases"] or [],
+                }
+                existing_lower = {a.lower() for a in canonical["aliases"] if a}
+
+                to_judge: List[Dict[str, Any]] = []
+                for c in group:
+                    # 重复短路：候选名已在 target.aliases（忽略大小写）→ 直接 merge，
+                    # 不送 LLM，但写反思日志表
+                    if (c["alias_name"] or "").strip().lower() in existing_lower:
+                        merge_ids.append(c["alias_id"])
+                        decided_log.append((canonical, c, {
+                            "alias_id": c["alias_id"],
+                            "decision": "merge",
+                            "confidence": 1.0,
+                            "reason": "已是现有别名，直接归并",
+                            "shortcut": True,
+                        }))
+                    else:
+                        to_judge.append(c)
+
+                if not to_judge:
+                    continue
+
+                decided = await judge_alias_belongs(
+                    self.llm_client, canonical, to_judge,
+                    threshold=cfg.confidence_threshold, language=language,
+                )
+                decided_by_id = {d["alias_id"]: d for d in decided}
+                for c in to_judge:
+                    d = decided_by_id.get(c["alias_id"])
+                    if d is None:
+                        continue  # skip：保留边，下次重判
+                    (merge_ids if d["decision"] == "merge" else drop_ids).append(c["alias_id"])
+                    decided_log.append((canonical, c, d))
+            llm_ms = int((time.perf_counter() - llm_t0) * 1000)
+
+            # S2 drop（只删边）
+            await drop_alias_edges(self.connector, end_user_id, drop_ids)
+            # S3-5 merge（按 merge 集合）+ S6 PG 同步
+            result = await merge_alias_belongs_to(self.connector, end_user_id, alias_ids=merge_ids)
+
+            # 写日志（含 LLM 判定与重复短路命中的候选；仅 skip 不写）
+            timing = {"recall_ms": recall_ms, "llm_ms": llm_ms}
+            for canonical, cand, d in decided_log:
+                self._write_alias_log(end_user_id, canonical, cand, d, timing, baseline)
+
+            result["merge_count"] = len(merge_ids)
+            result["drop_count"] = len(drop_ids)
+            return result
         except Exception as e:
             logger.warning(f"[AliasMerge] 执行失败 end_user_id={end_user_id}: {e}")
             return {"status": "error", "error": str(e)}
@@ -636,6 +733,87 @@ class Layer2Inspector:
             execution_detail=execution_detail,
         )
         
+    def _write_alias_log(self, end_user_id: str, canonical: Dict[str, Any],
+                         cand: Dict[str, Any], decided: Dict[str, Any],
+                         timing: Dict[str, Any], baseline: str = "HYBRID"):
+        """写别名归并 ReflectionLog（merge / drop 各一条）。"""
+        is_merge = decided["decision"] == "merge"
+        confidence = decided["confidence"]
+        reason = decided["reason"]
+        shortcut = decided.get("shortcut", False)
+
+        tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
+        tracker.steps.append(ExecutionStep(
+            name="候选收集", type="prompt", duration_ms=timing.get("recall_ms") or 0,
+            output=f"alias={cand['alias_name']}", success=True,
+        ))
+        if shortcut:
+            tracker.steps.append(ExecutionStep(
+                name="规则判定", type="decide", duration_ms=0,
+                output="候选名已是现有别名，直接归并", success=True,
+            ))
+        else:
+            tracker.steps.append(ExecutionStep(
+                name="LLM 判定", type="llm", duration_ms=timing.get("llm_ms") or 0,
+                output=f"decision={decided['decision']}, confidence={confidence:.2f}", success=True,
+            ))
+        tracker.steps.append(ExecutionStep(
+            name="归并" if is_merge else "删边", type="write",
+            duration_ms=0,
+            output=(f'已并入 "{canonical["name"]}" 的 aliases' if is_merge else "已删除「别名属于」边"),
+            success=True,
+        ))
+
+        # 有效描述：description_summary 优先，回退 description
+        canon_desc = (canonical.get("description_summary") or "").strip() or (canonical.get("description") or "")
+        alias_desc = (cand.get("alias_description_summary") or "").strip() or (cand.get("alias_description") or "")
+        canon_aliases = canonical.get("aliases") or []
+
+        entity_a = {"entity_id": cand["target_id"], "name": canonical["name"],
+                    "entity_type": canonical.get("entity_type"),
+                    "description": canon_desc, "aliases": canon_aliases}
+        entity_b = {"entity_id": cand["alias_id"], "name": cand["alias_name"],
+                    "entity_type": cand.get("alias_entity_type"),
+                    "description": alias_desc, "aliases": cand.get("alias_aliases") or []}
+        trigger = {"entity_a": entity_a, "entity_b": entity_b, "reason": reason[:200]}
+
+        if is_merge:
+            already = cand["alias_name"].strip().lower() in {a.strip().lower() for a in canon_aliases if a}
+            summary = f'"{cand["alias_name"]}" → "{canonical["name"]}" 合并别名'
+            title = "MERGE — 已是现有别名，直接归并" if shortcut else "MERGE — LLM确认别名归并"
+            # 别名已存在（无实际新增）时不产出 diff，避免前端展示 old==new 的无意义对比
+            changes = [] if already else [{
+                "field": "aliases",
+                "old": ", ".join(canon_aliases),
+                "new": ", ".join(canon_aliases + [cand["alias_name"]]),
+            }]
+            strategy = "MERGE"
+        else:
+            summary = f'"{cand["alias_name"]}" ✗ 判定非别名 → 丢弃别名属于边'
+            title = "DROP — LLM判定非别名"
+            changes = [{
+                "field": "别名属于关系",
+                "old": f'{cand["alias_name"]} →(别名属于) {canonical["name"]}',
+                "new": "关系已删除（非本人别名）",
+            }]
+            strategy = "DROP"
+
+        log_repo = self.log_repo_factory()
+        log_repo.create(
+            end_user_id=end_user_id,
+            sub_problem="alias_merge",
+            trigger_type="scheduled",
+            baseline=baseline,
+            strategy=strategy,
+            confidence=confidence,
+            status="resolved",
+            summary_text=summary[:256],
+            entity_ids=[cand["target_id"], cand["alias_id"]],
+            trigger_detail=trigger,
+            solution_detail={"title": title, "changes": changes},
+            execution_detail=tracker.to_dict(),
+        )
+
     async def _apply_dedup_merge(self, pair, end_user_id: str, baseline: str,
                                 llm_decision=None, step_timing=None) -> bool:
         """执行单对合并 + 写 ReflectionLog"""
