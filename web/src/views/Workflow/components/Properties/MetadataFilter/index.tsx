@@ -15,7 +15,7 @@ interface MetadataFilterProps {
 const modeOptions = [
   'disabled',
   'manual',
-  // 'auto',
+  'auto',
 ]
 
 const MetadataFilter: FC<MetadataFilterProps> = ({
