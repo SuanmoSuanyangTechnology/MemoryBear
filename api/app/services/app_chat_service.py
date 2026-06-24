@@ -797,6 +797,16 @@ class AppChatService:
             agent_exec_repo.create(agent_execution)
             self.db.commit()
 
+
+            # close() 前预读 ORM 属性，防止 close 后触发 DetachedInstanceError
+            _api_key_id = api_key_obj.id
+            _api_key_model_name = api_key_obj.model_name
+            _agent_execution_id = agent_execution.id
+            # LLM 推理期间不需要 db，提前归还连接给连接池
+            # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
+            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
+            self.db.close()
+
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
@@ -850,7 +860,7 @@ class AppChatService:
                 await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+            ModelApiKeyService.record_api_key_usage(self.db, _api_key_id)
 
             # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
             end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
@@ -884,7 +894,7 @@ class AppChatService:
                 "history_files": {}
             }
             assistant_meta = {
-                "model": api_key_obj.model_name,
+                "model": _api_key_model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "audio_url": None,
                 "citations": filtered_citations,
@@ -980,7 +990,7 @@ class AppChatService:
             # 更新 Agent 执行记录为 completed
             all_node_executions = orchestrator_node_executions + node_executions
             agent_exec_repo.update_completed(
-                execution_id=agent_execution.id,
+                    execution_id=_agent_execution_id,
                 steps=all_node_executions,
                 status="completed",
                 elapsed_time=elapsed_time,
@@ -1027,7 +1037,7 @@ class AppChatService:
             try:
                 elapsed_time = time.time() - start_time
                 agent_exec_repo.update_completed(
-                    execution_id=agent_execution.id,
+                    execution_id=_agent_execution_id,
                     steps=node_executions if 'node_executions' in dir() else [],
                     status="failed",
                     elapsed_time=elapsed_time,

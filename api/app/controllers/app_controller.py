@@ -667,6 +667,8 @@ async def draft_run(
         # 流式返回
         if payload.stream:
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+            # 提前提取 current_user 的值，避免闭包持有 ORM 对象引用导致 db 连接不释放
+            _current_user_id = str(current_user.id)
             async def event_generator():
                 with get_db_context() as stream_db:
                     from app.services.draft_run_service import AgentRunService as _AgentRunService
@@ -677,7 +679,7 @@ async def draft_run(
                             message=payload.message,
                             workspace_id=workspace_id,
                             conversation_id=payload.conversation_id,
-                            user_id=payload.user_id or str(current_user.id),
+                            user_id=payload.user_id or _current_user_id,
                             variables=payload.variables,
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
@@ -837,6 +839,13 @@ async def draft_run(
             config = service._workflow_config_from_release(release)
         else:
             config = workflow_service.check_config(app_id)
+            # check_config 完成后立即将 config 从 session 脱离，并关闭连接归还连接池
+            # 避免 workflow_service.db 在整个流式期间处于 idle in transaction 状态
+            _config_id = config.id
+            from sqlalchemy.orm import make_transient
+            make_transient(config)
+            config.id = _config_id
+            workflow_service.db.close()
         # 3. 流式返回
         if payload.stream:
             logger.debug(
@@ -865,7 +874,7 @@ async def draft_run(
                             app_id=app_id,
                             payload=payload,
                             config=config,
-                            workspace_id=current_user.current_workspace_id,
+                            workspace_id=workspace_id,
                             source=source,
                             trigger_payload=payload.trigger_payload
                     ):
