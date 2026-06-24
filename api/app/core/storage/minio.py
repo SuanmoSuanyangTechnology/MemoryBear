@@ -11,14 +11,12 @@ exists/presigned-URL behavior from S3Storage) and only customizes:
     {endpoint_url}/{bucket_name}/{file_key}
 """
 
-import asyncio
 import logging
-from typing import AsyncIterator
 
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ClientError
 
 from app.core.storage.s3 import S3Storage
-from app.core.storage_exceptions import StorageConfigError, StorageDownloadError
+from app.core.storage_exceptions import StorageConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -120,63 +118,3 @@ class MinIOStorage(S3Storage):
             A permanent URL for the file.
         """
         return f"{self.endpoint_url}/{self.bucket_name}/{file_key}"
-
-    async def download_stream(self, file_key: str) -> AsyncIterator[bytes]:
-        """
-        Stream a file from MinIO in chunks (suitable for StreamingResponse)。
-
-        仅 MinIO 需要此方法：MinIO 通常部署在内网，其 presigned URL 指向内网端点
-        （如 http://10.x.x.x:9000），浏览器不可达且不支持 TLS，若走 302 重定向会
-        触发 ERR_SSL_PROTOCOL_ERROR。故 MinIO 的文件下载改为后端代理流式回传，
-        浏览器只与本服务通信。S3/OSS 的 presigned URL 为公网 HTTPS、重定向可用，
-        不需要此方法。
-
-        同步 boto3 调用通过 asyncio.to_thread 卸载，避免阻塞事件循环。
-
-        Args:
-            file_key: Unique identifier for the file in the storage system.
-
-        Yields:
-            Bytes chunks of the file content.
-
-        Raises:
-            FileNotFoundError: If the file does not exist.
-            StorageDownloadError: If the download operation fails.
-        """
-        try:
-            response = await asyncio.to_thread(
-                self.client.get_object,
-                Bucket=self.bucket_name,
-                Key=file_key,
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            if error_code in ("NoSuchKey", "404"):
-                logger.warning(f"File not found in MinIO: {file_key}")
-                raise FileNotFoundError(f"File not found: {file_key}")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            logger.error(f"MinIO ClientError opening stream for {file_key}: {error_message}")
-            raise StorageDownloadError(
-                message=f"Failed to download file from MinIO ({error_code}): {error_message}",
-                file_key=file_key,
-                cause=e,
-            )
-        except BotoCoreError as e:
-            logger.error(f"MinIO BotoCoreError opening stream for {file_key}: {e}")
-            raise StorageDownloadError(
-                message=f"Failed to download file from MinIO: {e}",
-                file_key=file_key,
-                cause=e,
-            )
-
-        body = response["Body"]
-        chunk_iter = body.iter_chunks(chunk_size=64 * 1024)
-        try:
-            while True:
-                chunk = await asyncio.to_thread(next, chunk_iter, None)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            # 释放底层连接（客户端提前断开时尤为重要）
-            await asyncio.to_thread(body.close)

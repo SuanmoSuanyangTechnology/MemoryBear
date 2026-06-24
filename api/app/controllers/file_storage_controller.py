@@ -19,13 +19,13 @@ import mimetypes
 from urllib.parse import urlparse, unquote, quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
-from app.core.storage import LocalStorage, MinIOStorage
+from app.core.storage import LocalStorage
 from app.core.storage.url_signer import generate_signed_url, verify_signed_url
 from app.core.storage_exceptions import (
     StorageDeleteError,
@@ -61,48 +61,6 @@ def _match_scheme(request: Request, url: str) -> str:
     if url.startswith("https://") and incoming_scheme == "http":
         return "http://" + url[8:]
     return url
-
-
-async def _stream_remote_file(
-    storage: MinIOStorage,
-    file_metadata: FileMetadata,
-    file_key: str,
-) -> StreamingResponse:
-    """
-    通过 API 流式回传 MinIO 上的文件内容。
-
-    仅用于 MinIO：其 presigned URL 指向内网端点（如 http://10.x.x.x:9000），
-    浏览器不可达且不支持 TLS，走 302 重定向会触发 ERR_SSL_PROTOCOL_ERROR。
-    故改为后端代理流式回传，浏览器只与本服务通信。S3/OSS 的 presigned URL
-    为公网 HTTPS，仍走重定向，不走此方法。
-
-    先预取首个 chunk：MinIO 上文件缺失时能在响应发出前抛出 404，而不是
-    发出 200 后再中断流。
-    """
-    content_type = (
-        file_metadata.content_type
-        or mimetypes.guess_type(file_metadata.file_name)[0]
-        or "application/octet-stream"
-    )
-    encoded_filename = quote(file_metadata.file_name)
-
-    stream = storage.download_stream(file_key)
-    try:
-        first_chunk = await stream.__anext__()
-    except StopAsyncIteration:
-        first_chunk = None  # 空对象
-
-    async def _body():
-        if first_chunk is not None:
-            yield first_chunk
-        async for chunk in stream:
-            yield chunk
-
-    return StreamingResponse(
-        _body(),
-        media_type=content_type,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
-    )
 
 
 @router.post("/files", response_model=ApiResponse)
@@ -478,25 +436,7 @@ async def download_file(
             media_type=file_metadata.content_type or "application/octet-stream",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
-    elif isinstance(storage, MinIOStorage):
-        # MinIO 部署在内网，presigned URL 指向内网端点，浏览器不可达且不支持 TLS；
-        # 改为后端代理流式回传，浏览器只与本服务通信。
-        try:
-            return await _stream_remote_file(storage, file_metadata, file_key)
-        except FileNotFoundError:
-            api_logger.warning(f"File not found in MinIO: file_key={file_key}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found in storage"
-            )
-        except Exception as e:
-            api_logger.error(f"Failed to stream file from MinIO: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to retrieve file: {str(e)}"
-            )
     else:
-        # S3/OSS：presigned URL 为公网 HTTPS，保留 302 重定向（浏览器直连对象存储）
         try:
             presigned_url = await storage_service.get_file_url(file_key, expires=3600)
             presigned_url = _match_scheme(request, presigned_url)
@@ -777,25 +717,8 @@ async def public_download_file(
             media_type=file_metadata.content_type or "application/octet-stream",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
-    elif isinstance(storage, MinIOStorage):
-        # MinIO 部署在内网，presigned URL 指向内网端点，浏览器不可达且不支持 TLS；
-        # 改为后端代理流式回传，浏览器只与本服务通信。
-        try:
-            return await _stream_remote_file(storage, file_metadata, file_key)
-        except FileNotFoundError:
-            api_logger.warning(f"File not found in MinIO: file_key={file_key}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found in storage"
-            )
-        except Exception as e:
-            api_logger.error(f"Failed to stream file from MinIO: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to retrieve file: {str(e)}"
-            )
     else:
-        # S3/OSS：presigned URL 为公网 HTTPS，保留 302 重定向（浏览器直连对象存储）
+        # For remote storage, redirect to presigned URL
         try:
             presigned_url = await storage_service.get_file_url(file_key, expires=3600)
             presigned_url = _match_scheme(request, presigned_url)
@@ -866,25 +789,8 @@ async def permanent_download_file(
             media_type=file_metadata.content_type or "application/octet-stream",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
-    elif isinstance(storage, MinIOStorage):
-        # MinIO 部署在内网，presigned URL 指向内网端点，浏览器不可达且不支持 TLS；
-        # 改为后端代理流式回传，浏览器只与本服务通信。
-        try:
-            return await _stream_remote_file(storage, file_metadata, file_key)
-        except FileNotFoundError:
-            api_logger.warning(f"File not found in MinIO: file_key={file_key}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found in storage"
-            )
-        except Exception as e:
-            api_logger.error(f"Failed to stream file from MinIO: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to retrieve file: {str(e)}"
-            )
     else:
-        # S3/OSS：presigned URL 为公网 HTTPS，保留 302 重定向（浏览器直连对象存储）
+        # For remote storage, redirect to presigned URL with long expiration
         try:
             # Use a very long expiration (7 days max for most cloud providers)
             presigned_url = await storage_service.get_file_url(file_key, expires=604800, file_name=file_metadata.file_name)
