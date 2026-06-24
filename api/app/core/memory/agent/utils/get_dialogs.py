@@ -159,6 +159,8 @@ async def get_chunked_dialogs(
     logger.info(f"DialogData created with {len(extracted_chunks)} chunks")
 
 # step4: 注入结构化上下文（滑动窗口写入场景）
+    # 当 context_before/after 均为空时也显式注入空结构，避免萃取阶段走 fallback
+    # 将 dialog.content 错误地当成上文重复放入 before_msgs。
     if context_before or context_after:
         from app.core.memory.storage_services.extraction_engine.steps.schema.extraction_step_schema import MessageItem
         before_msgs = [
@@ -179,5 +181,13 @@ async def get_chunked_dialogs(
             f"[SupportingContext] 注入上下文消息: "
             f"before={len(before_msgs)}, after={len(after_msgs)}"
         )
+    else:
+        # 无上下文（MCP 单条写入路径）：注入空结构，防止萃取阶段走 fallback
+        from app.core.memory.storage_services.extraction_engine.steps.schema.extraction_step_schema import MessageItem
+        dialog_data.metadata["supporting_context"] = {
+            "before_msgs": [],
+            "after_msgs": [],
+        }
+        logger.info("[SupportingContext] 无上下文，注入空结构")
 
     return [dialog_data]

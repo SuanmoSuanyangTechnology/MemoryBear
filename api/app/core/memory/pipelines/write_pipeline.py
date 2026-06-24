@@ -875,8 +875,8 @@ class WritePipeline:
         if not assistant_content:
             # 没有配对的 assistant 消息，跳过 User 侧 pruning
             logger.debug(
-                f"[WritePipeline] target_message User 侧 pruning 跳过: "
-                f"context_after 中无 assistant 消息"
+                "[WritePipeline] target_message User 侧 pruning 跳过: "
+                "context_after 中无 assistant 消息"
             )
             return
 
