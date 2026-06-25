@@ -42,9 +42,12 @@ const ChatContent: FC<ChatContentProps> = ({
   isEnded = true,
   deleteMsg,
   reportMsg,
+  regenerateMaxCount,
   regenerateMessages,
   handleVersionChange,
   handleInterventionActionClick,
+  handleFavorite,
+  isAlwaysShowAssistantTools = false,
 }) => {
   const { t } = useTranslation()
   // Scroll container reference for controlling auto-scroll to bottom
@@ -85,8 +88,8 @@ const ChatContent: FC<ChatContentProps> = ({
 
   const isReasoningExpanded = (index: number) => {
     if (manualToggledReasoning.has(index)) return expandedReasoning.has(index)
-    const item = Array.isArray(data[index]) ? data[index].find(item => item.is_current) : data[index]
-    return !item?.content
+    const item = Array.isArray(data[index]) ? (data[index] as ChatItem[]).find(item => item.is_current) : data[index]
+    return !(item as ChatItem)?.content
   }
   const [playingIndex, setPlayingIndex] = useState<string | null>(null)
 
@@ -201,13 +204,19 @@ const ChatContent: FC<ChatContentProps> = ({
   const onActionClick = (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
     handleInterventionActionClick?.(actionId, fieldValues, execution_id, node_id)
   }
+  const handleRegenerateMessages = (item: ChatItem, isNotSupportRegenerate: boolean) => {
+    if (isNotSupportRegenerate) {
+      return
+    }
+    regenerateMessages?.(item)
+  }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
         ? empty // Display empty state
         : data.map((vo, index) => {
           const item: ChatItem | undefined = Array.isArray(vo) ? vo?.find(v => v.is_current) : vo;
-
+          const isNotSupportRegenerate = typeof regenerateMaxCount === 'number' && regenerateMaxCount <= (Array.isArray(vo) ? vo.length : 1)
           if (!item) return null
           return (
             <div key={index} className={clsx("rb:relative", {
@@ -326,7 +335,7 @@ const ChatContent: FC<ChatContentProps> = ({
                         }
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
-                      {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools) &&
+                      {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools || isAlwaysShowAssistantTools) &&
                         <Flex gap={12} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
                           {labelPosition === 'bottom' &&
                             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
@@ -347,8 +356,8 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
-                            {index === data.length - 1 && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
+                          {(isSupportTools || isAlwaysShowAssistantTools) && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
+                            {(index === data.length - 1 || typeof regenerateMaxCount === 'number') && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
                                 size="small"
@@ -378,15 +387,27 @@ const ChatContent: FC<ChatContentProps> = ({
                                 ></div>
                               </Tooltip>
                             </>}
-                            {index === data.length - 1 && !item.is_hidden_refresh && regenerateMessages &&
+                            {handleFavorite && <>
+                              <Tooltip title={item.is_favorited ? t('memoryConversation.unfavorite') : t('memoryConversation.favorite')}>
+                                <div
+                                  className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/favorite.svg')]", {
+                                    "rb:bg-[url('@/assets/images/conversation/unfavorite.svg')]": item.is_favorited,
+                                  })}
+                                  onClick={() => handleFavorite?.(item?.id)}
+                                ></div>
+                              </Tooltip>
+                            </>}
+                            {(index === data.length - 1 || isAlwaysShowAssistantTools) && !item.is_hidden_refresh && regenerateMessages &&
                               <Tooltip title={t('memoryConversation.refresh')}>
                                 <div
-                                  className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh_gray.svg')]"
-                                  onClick={() => regenerateMessages(item)}
+                                  className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/refresh_gray.svg')]", {
+                                    'rb:cursor-pointer': !isNotSupportRegenerate,
+                                    'rb:cursor-not-allowed rb:opacity-65': isNotSupportRegenerate
+                                  })}
+                                  onClick={() => handleRegenerateMessages(item, isNotSupportRegenerate)}
                                 ></div>
                               </Tooltip>
                             }
-
                             {moreDropdownItems(item).length > 0
                               ? <MoreDropdown
                                 items={moreDropdownItems(item)}
