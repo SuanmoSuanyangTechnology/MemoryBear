@@ -17,8 +17,8 @@ from app.core.logging_config import get_api_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
-from app.db import get_db
-from app.dependencies import cur_workspace_access_guard, get_current_user
+from app.db import get_db, get_db_read
+from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user
 from app.models.user_model import User
 from app.repositories import knowledge_repository
 from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput
@@ -116,10 +116,9 @@ async def write_server_async(
 
 
 @router.post("/read/sync", response_model=ApiResponse)
-@cur_workspace_access_guard()
+@cur_workspace_access_guard_self_db()
 async def read_server(
         user_input: UserInput,
-        db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
     """
@@ -133,22 +132,24 @@ async def read_server(
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
 
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
-    if storage_type is None: storage_type = 'neo4j'
-    user_rag_memory_id = ''
-    if workspace_id:
-
-        knowledge = knowledge_repository.get_knowledge_by_name(
+    with get_db_read() as db:
+        storage_type = workspace_service.get_workspace_storage_type(
             db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            user=current_user
         )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
+        if storage_type is None:
+            storage_type = 'neo4j'
+        user_rag_memory_id = ''
+        if workspace_id:
+
+            knowledge = knowledge_repository.get_knowledge_by_name(
+                db=db,
+                name="USER_RAG_MERORY",
+                workspace_id=workspace_id
+            )
+            if knowledge:
+                user_rag_memory_id = str(knowledge.id)
 
     session_id = user_input.session_id.hex
 
@@ -211,7 +212,6 @@ async def read_server(
             history=[],
             query=user_input.message,
             config_id=config_id,
-            db=db
         )
         await session_cache.append_many(
             [

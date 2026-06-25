@@ -852,6 +852,13 @@ class WritePipeline:
         if not messages:
             return
 
+        # 剪枝开关关闭时跳过 User 侧规整
+        if not self.memory_config.pruning_enabled:
+            logger.debug(
+                "[WritePipeline] target_message User 侧 pruning 跳过: 剪枝开关已关闭"
+            )
+            return
+
         target_msg = messages[0]
         target_content = target_msg.get("content", "")
 

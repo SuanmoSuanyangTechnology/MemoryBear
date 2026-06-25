@@ -1,4 +1,5 @@
 import uuid
+from contextlib import closing
 from functools import wraps
 
 from fastapi import Depends, HTTPException, status, Request
@@ -6,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
-from app.db import get_db, SessionLocal
+from app.db import get_db, get_db_read, SessionLocal
 from app.models import App
 from app.schemas import token_schema
 from app.core.config import settings
@@ -448,6 +449,51 @@ def cur_workspace_access_guard():
                 if workspace_id is None:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
                 _check_workspace_access_sync(db, user, workspace_id)
+                return func(*args, **kwargs)
+
+            return _sync_wrapper
+
+    return _decorator
+
+
+def cur_workspace_access_guard_self_db():
+    """
+    @ 装饰器：在端点进入前执行工作空间访问校验（自带 db session 版本）。
+
+    与 cur_workspace_access_guard 的区别：
+      - 不从 kwargs 中获取 db，而是通过 get_db_read 自己创建只读 session
+      - 端点函数不再需要 db: Session = Depends(get_db) 参数
+
+    要求端点函数签名包含：
+      - current_user: User = Depends(get_current_user)
+
+    支持同步和异步函数。
+    """
+    import asyncio
+    import inspect
+
+    def _decorator(func):
+        if asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            async def _async_wrapper(*args, **kwargs):
+                user: User = kwargs.get("current_user")
+                workspace_id = user.current_workspace_id
+                if workspace_id is None:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                with get_db_read() as db:
+                    _check_workspace_access_sync(db, user, workspace_id)
+                return await func(*args, **kwargs)
+
+            return _async_wrapper
+        else:
+            @wraps(func)
+            def _sync_wrapper(*args, **kwargs):
+                user: User = kwargs.get("current_user")
+                workspace_id = user.current_workspace_id
+                if workspace_id is None:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                with get_db_read() as db:
+                    _check_workspace_access_sync(db, user, workspace_id)
                 return func(*args, **kwargs)
 
             return _sync_wrapper
