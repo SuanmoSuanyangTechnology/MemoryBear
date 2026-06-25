@@ -20,7 +20,8 @@ import dayjs from 'dayjs'
 
 import {
   getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig,
-  feedbackMessage, deleteConversationMessage, regenerateMessage, switchMessageVersion, accessShareConversation, interventionsSubmit, interventionsResumeSubmit,
+  feedbackMessage, deleteConversationMessage, regenerateMessage, switchMessageVersion, accessShareConversation,
+  interventionsSubmit, interventionsResumeSubmit, favoriteMessage,
 } from '@/api/application'
 import type { HistoryItem, ShareModalRef, ReportModalRef } from './types'
 import Empty from '@/components/Empty'
@@ -1349,9 +1350,63 @@ const Conversation: FC = () => {
         })
       })
   }
+  const handleFavorite = (id?: string) => {
+    if (!shareToken || shareToken === '' || !conversation_id || !id) return
+    favoriteMessage(shareToken, id)
+      .then((res) => {
+        const { is_favorited } = res as { is_favorited: boolean; }
+        messageApi.success(t('common.operateSuccess'))
+        setChatList(prev => {
+          const lastList = [...prev]
+          const filterIndex = lastList.findIndex(item => Array.isArray(item) ? item.filter(msg => msg.id === id).length > 0 : item.id === id)
+          if (filterIndex === -1) return lastList
+          const filterItem = lastList[filterIndex]
+          if (Array.isArray(filterItem)) {
+            filterItem.forEach(msg => {
+              if (msg.id === id) {
+                msg.is_favorited = is_favorited
+              }
+            })
+          } else {
+            filterItem.is_favorited = is_favorited
+          }
+          lastList[filterIndex] = filterItem
+          return [...lastList]
+        })
+      })
+  }
 
   const [showHistory, setShowHistory] = useState(false)
   const isFloatBtn = windowType === 'floatBtn'
+
+  const chatProps = {
+    contentClassName: clsx({
+      'rb:h-full rb:w-full': isShare,
+      'rb:h-[calc(100%-144px)] rb:w-full': !fileList.length && !isShare,
+      'rb:h-[calc(100%-208px)] rb:w-full': fileList.length && !isShare,
+    }),
+    data: chatList,
+    streamLoading: streamLoadingRef.current,
+    loading,
+    onChange: setMessage,
+    onSend: handleSend,
+    conversationId: conversation_id,
+    fileList,
+    fileChange: (list: File[]) => {
+      setFileList(list || [])
+      toolbarRef.current?.setFiles(list || [])
+    },
+    isSupportTools: config.app_type === 'agent' && !isShare,
+    handleFeedback, 
+    handleFavorite,
+    isEnded: chatIsEnded.current,
+    readOnly: isShare,
+    deleteMsg: deleteMessage,
+    reportMsg,
+    regenerateMessages: config.app_type === 'agent' ? regenerateMessages : undefined,
+    handleVersionChange: config.app_type === 'agent' ? handleVersionChange : undefined,
+    handleInterventionActionClick: handleInterventionActionClick,
+  }
 
   const chatTitle = useMemo(() => {
     const conversation = historyList.find(item => item.id === conversation_id)
@@ -1426,33 +1481,9 @@ const Conversation: FC = () => {
             'rb:h-full': isShare,
           })}>
             <Chat
-              empty={isShare ? null : <Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')}subTitle={t('memoryConversation.emptyDesc')} />}
-              contentClassName={clsx({
-                'rb:h-full rb:w-full': isShare,
-                'rb:h-[calc(100%-144px)] rb:w-full': !fileList.length && !isShare,
-                'rb:h-[calc(100%-208px)] rb:w-full': fileList.length && !isShare,
-              })}
-              data={chatList}
-              streamLoading={streamLoadingRef.current}
-              loading={loading}
-              onChange={setMessage}
-              onSend={handleSend}
+              empty={isShare ? null : <Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
               labelFormat={(item) => isFloatBtn ? dayjs(item.created_at).format('HH:mm') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-              conversationId={conversation_id}
-              fileList={fileList}
-              fileChange={(list) => {
-                setFileList(list || [])
-                toolbarRef.current?.setFiles(list || [])
-              }}
-              isSupportTools={config.app_type === 'agent' && !isShare}
-              handleFeedback={handleFeedback}
-              isEnded={chatIsEnded.current}
-              readOnly={isShare}
-              deleteMsg={deleteMessage}
-              reportMsg={reportMsg}
-              regenerateMessages={config.app_type === 'agent' ? regenerateMessages : undefined}
-              handleVersionChange={config.app_type === 'agent' ? handleVersionChange : undefined}
-              handleInterventionActionClick={handleInterventionActionClick}
+              {...chatProps}
             >
               <ChatToolbar
                 ref={toolbarRef}
@@ -1669,32 +1700,8 @@ const Conversation: FC = () => {
         })}>
           <Chat
             empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-            contentClassName={clsx({
-              'rb:h-full rb:w-full': isShare,
-              'rb:h-[calc(100%-144px)] rb:w-full': !fileList.length && !isShare,
-              'rb:h-[calc(100%-208px)] rb:w-full': fileList.length && !isShare,
-            })}
-            data={chatList}
-            streamLoading={streamLoadingRef.current}
-            loading={loading}
-            onChange={setMessage}
-            onSend={handleSend}
             labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-            conversationId={conversation_id}
-            fileList={fileList}
-            fileChange={(list) => {
-              setFileList(list || [])
-              toolbarRef.current?.setFiles(list || [])
-            }}
-            isSupportTools={config.app_type === 'agent' && !isShare}
-            handleFeedback={handleFeedback}
-            isEnded={chatIsEnded.current}
-            readOnly={isShare}
-            deleteMsg={deleteMessage}
-            reportMsg={reportMsg}
-            regenerateMessages={config.app_type === 'agent' ? regenerateMessages : undefined}
-            handleVersionChange={config.app_type === 'agent' ? handleVersionChange : undefined}
-            handleInterventionActionClick={handleInterventionActionClick}
+            {...chatProps}
           >
           <ChatToolbar
             ref={toolbarRef}

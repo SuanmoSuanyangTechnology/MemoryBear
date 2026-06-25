@@ -2146,7 +2146,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       dislike: 'Dislike',
       triggeredAction: 'Triggered Action',
       timeout_at: 'Operation will expire {{timeout_at}} expires',
-      collect: 'Collect',
+      favorite: 'Favorite',
+      unfavorite: 'Unfavorite',
+      regenerateMaxCountLessThanMessageCount: 'Regenerate count cannot exceed {{length}} times',
     },
     login: {
       title: 'Red Bear Memory Science',
