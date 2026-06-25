@@ -6,7 +6,7 @@
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { Spin, Flex, Button, Pagination, Tooltip, App } from 'antd'
+import { Spin, Flex, Button, Pagination, Tooltip } from 'antd'
 import { SoundOutlined, WarningOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
@@ -50,7 +50,6 @@ const ChatContent: FC<ChatContentProps> = ({
   isAlwaysShowAssistantTools = false,
 }) => {
   const { t } = useTranslation()
-  const { message: messageApi } = App.useApp()
   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
   const prevDataLengthRef = useRef(data.length);
@@ -207,7 +206,6 @@ const ChatContent: FC<ChatContentProps> = ({
   }
   const handleRegenerateMessages = (item: ChatItem, isNotSupportRegenerate: boolean) => {
     if (isNotSupportRegenerate) {
-      messageApi.warning(t('memoryConversation.regenerateMaxCountLessThanMessageCount', { length }))
       return
     }
     regenerateMessages?.(item)

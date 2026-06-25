@@ -1378,7 +1378,7 @@ const Conversation: FC = () => {
 
   const [showHistory, setShowHistory] = useState(false)
   const isFloatBtn = windowType === 'floatBtn'
-
+  const isAgent = config.app_type === 'agent';
   const chatProps = {
     contentClassName: clsx({
       'rb:h-full rb:w-full': isShare,
@@ -1396,15 +1396,15 @@ const Conversation: FC = () => {
       setFileList(list || [])
       toolbarRef.current?.setFiles(list || [])
     },
-    isSupportTools: config.app_type === 'agent' && !isShare,
-    handleFeedback, 
+    isSupportTools: (isAgent || config.app_type === 'workflow') && !isShare,
+    handleFeedback: isAgent ? handleFeedback : undefined, 
     handleFavorite,
     isEnded: chatIsEnded.current,
     readOnly: isShare,
-    deleteMsg: deleteMessage,
-    reportMsg,
-    regenerateMessages: config.app_type === 'agent' ? regenerateMessages : undefined,
-    handleVersionChange: config.app_type === 'agent' ? handleVersionChange : undefined,
+    deleteMsg: isAgent ? deleteMessage : undefined,
+    reportMsg: isAgent ? reportMsg : undefined,
+    regenerateMessages: isAgent ? regenerateMessages : undefined,
+    handleVersionChange: isAgent ? handleVersionChange : undefined,
     handleInterventionActionClick: handleInterventionActionClick,
   }
 

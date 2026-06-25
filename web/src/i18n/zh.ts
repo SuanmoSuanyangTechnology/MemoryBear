@@ -2142,7 +2142,6 @@ export const zh = {
       timeout_at: '此操作将在 {{timeout_at}} 过期',
       favorite: '收藏',
       unfavorite: '取消收藏',
-      regenerateMaxCountLessThanMessageCount: '重新生成次数不能超过{{length}}次',
     },
     login: {
       title: '红熊记忆科学',
