@@ -6,10 +6,8 @@ from typing import Dict, Any
 
 from sqlalchemy.orm import Session
 
-from app.core.error_codes import BizCode
-from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.models import MessageFavorite, Message
+from app.models import MessageFavorite
 
 logger = get_business_logger()
 
@@ -33,6 +31,8 @@ class FavoriteService:
         - 若已收藏则取消收藏
         - 若未收藏则新增收藏
 
+        Note: 调用方需保证 message 已存在并传入正确的 conversation_id（controller 已做存在性校验）。
+
         Args:
             message_id: 消息ID
             conversation_id: 会话ID
@@ -43,10 +43,6 @@ class FavoriteService:
         Returns:
             Dict: {"action": "created" | "cancelled", "is_favorited": bool}
         """
-        message = self.db.get(Message, message_id)
-        if not message:
-            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
-
         existing = self.db.query(MessageFavorite).filter(
             MessageFavorite.message_id == message_id,
             MessageFavorite.user_id == user_id,
