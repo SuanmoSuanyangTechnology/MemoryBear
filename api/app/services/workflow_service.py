@@ -3870,6 +3870,7 @@ class WorkflowService:
         """
         from app.models import Message, Conversation
 
+        self._assert_regenerate_quota(message_id)
         original_msg = self.db.get(Message, message_id)
         if not original_msg or original_msg.role != "assistant":
             raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
@@ -4006,6 +4007,7 @@ class WorkflowService:
         """
         from app.models import Message, Conversation
 
+        self._assert_regenerate_quota(message_id)
         original_msg = self.db.get(Message, message_id)
         if not original_msg or original_msg.role != "assistant":
             raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
