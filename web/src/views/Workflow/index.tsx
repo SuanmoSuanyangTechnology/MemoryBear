@@ -62,7 +62,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
     event.preventDefault();
   };
   const handleRun = () => {
-    handleSave()
+    handleSave(false)
       .then(() => {
         blankClick()
         setRunOpen(true)
@@ -125,20 +125,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
       >
         {/* 操作按钮 */}
         <Operations
-          selectedNode={selectedNode}
-          miniMapRef={miniMapRef}
           graphRef={graphRef}
-          isHandMode={isHandMode}
-          setIsHandMode={setIsHandMode}
-          zoomLevel={zoomLevel}
-          addNotes={handleAddNotes}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onUndo={undo}
-          onRedo={redo}
-          config={config}
-          collapsed={collapsed}
-          runOpen={runOpen}
           appType={appType}
           appId={config?.app_id}
           workflowRef={ref as React.RefObject<WorkflowRef>}

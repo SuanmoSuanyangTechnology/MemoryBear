@@ -2140,7 +2140,8 @@ export const zh = {
       dislike: '不喜欢',
       triggeredAction: '已触发',
       timeout_at: '此操作将在 {{timeout_at}} 过期',
-      collect: '收藏',
+      favorite: '收藏',
+      unfavorite: '取消收藏',
     },
     login: {
       title: '红熊记忆科学',
