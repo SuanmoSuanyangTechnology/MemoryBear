@@ -40,7 +40,7 @@ config_logger = get_config_logger()
 
 # Load environment variables for Neo4j connector
 load_dotenv()
-_neo4j_connector = Neo4jConnector()
+_neo4j_connector = Neo4jConnector(shared_driver=True)
 
 
 class MemoryStorageService:
