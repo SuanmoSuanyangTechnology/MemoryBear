@@ -650,36 +650,42 @@ class WritePipeline:
         注意：ExtractionResult.entity_nodes 已经是经过 _extract() 中
         两阶段去重消歧（_run_dedup_and_write_summary）后的结果，
         聚类直接基于去重后的实体 ID 执行。
+
+        P6 修复：改用 scheduler.push_task 替代 apply_async 直接投递，
+        利用 scheduler 内置 lock_key = f"{task_name}:{user_id}" 保证同用户
+        聚类任务串行排队执行，消除同用户多任务并行导致的 Neo4j 死锁问题。
         """
         if not result.entity_nodes:
             return
 
         try:
-            from app.tasks import run_incremental_clustering
+            from app.celery_task_scheduler import scheduler
 
             new_entity_ids = [e.id for e in result.entity_nodes]
-            task = run_incremental_clustering.apply_async(
-                kwargs={
-                    "end_user_id": self.end_user_id,
-                    "new_entity_ids": new_entity_ids,
-                    "llm_model_id": (
-                        str(self.memory_config.llm_model_id)
-                        if self.memory_config.llm_model_id
-                        else None
-                    ),
-                    "embedding_model_id": (
-                        str(self.memory_config.embedding_model_id)
-                        if self.memory_config.embedding_model_id
-                        else None
-                    ),
-                    "language": self.language,
-                },
-                priority=3,
+            params = {
+                "end_user_id": self.end_user_id,
+                "new_entity_ids": new_entity_ids,
+                "llm_model_id": (
+                    str(self.memory_config.llm_model_id)
+                    if self.memory_config.llm_model_id
+                    else None
+                ),
+                "embedding_model_id": (
+                    str(self.memory_config.embedding_model_id)
+                    if self.memory_config.embedding_model_id
+                    else None
+                ),
+                "language": self.language,
+            }
+            msg_id = scheduler.push_task(
+                task_name="app.tasks.run_incremental_clustering",
+                user_id=self.end_user_id,
+                params=params,
             )
             logger.info(
-                f"[Clustering] 增量聚类任务已提交 - "
-                f"task_id = {task.id}, "
-                f"entity_count = {len(new_entity_ids)}, "
+                f"[Clustering] 增量聚类任务已入队（scheduler） - "
+                f"msg_id={msg_id}, "
+                f"entity_count={len(new_entity_ids)}, "
                 f"source=dedup"
             )
         except Exception as e:

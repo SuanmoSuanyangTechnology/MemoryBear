@@ -1339,7 +1339,7 @@ RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description,
        e.example AS example
-ORDER BY coalesce(e.activation_value, 0) DESC
+ORDER BY coalesce(e.importance_score, 0) DESC
 """
 
 GET_COMMUNITY_RELATIONSHIPS = """
@@ -1358,7 +1358,41 @@ RETURN c.community_id AS community_id,
        e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description
-ORDER BY c.community_id, coalesce(e.activation_value, 0) DESC
+ORDER BY c.community_id, coalesce(e.importance_score, 0) DESC
+"""
+
+# P0 修复：批量将实体分配到社区（UNWIND），替换逐实体循环的 assign_entity_to_community
+BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES = """
+UNWIND $assignments AS row
+MATCH (e:ExtractedEntity {id: row.entity_id, end_user_id: $end_user_id})
+OPTIONAL MATCH (e)-[old_r:BELONGS_TO_COMMUNITY]->(:Community)
+DELETE old_r
+WITH e, row
+MATCH (c:Community {community_id: row.community_id, end_user_id: $end_user_id})
+MERGE (e)-[:BELONGS_TO_COMMUNITY]->(c)
+SET c.updated_at = datetime()
+RETURN count(e) AS assigned_count
+"""
+
+# P7 修复：批量计算各社区的平均 embedding，利用 APOC apoc.coll.zip 做逐元素加法
+# 返回每个社区的成员数和平均向量，避免将全量成员数据拉取到 Python 侧
+GET_COMMUNITY_AVG_EMBEDDINGS_BATCH = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+      -[:BELONGS_TO_COMMUNITY]->(c:Community)
+WHERE c.community_id IN $community_ids
+  AND e.name_embedding IS NOT NULL
+WITH c.community_id AS cid,
+     count(e) AS member_count,
+     collect(e.name_embedding) AS all_embeddings
+WITH cid, member_count,
+     reduce(
+       acc = head(all_embeddings),
+       emb IN tail(all_embeddings) |
+       [pair IN apoc.coll.zip(acc, emb) | pair[0] + pair[1]]
+     ) AS sum_vec
+RETURN cid,
+       member_count,
+       [v IN sum_vec | v / member_count] AS avg_embedding
 """
 
 CHECK_USER_HAS_COMMUNITIES = """
