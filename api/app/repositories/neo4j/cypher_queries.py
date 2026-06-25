@@ -1308,7 +1308,6 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1318,7 +1317,6 @@ OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
        e.name_embedding AS name_embedding,
-       COALESCE(e.activation_value, 0.5) AS activation_value,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1335,7 +1333,7 @@ RETURN e.id AS id
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
+       e.importance_score AS importance_score,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description,
        e.example AS example
@@ -1355,7 +1353,7 @@ GET_ALL_COMMUNITY_MEMBERS_BATCH = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN c.community_id AS community_id,
        e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
+       e.importance_score AS importance_score,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description
 ORDER BY c.community_id, coalesce(e.importance_score, 0) DESC
@@ -1374,7 +1372,7 @@ SET c.updated_at = datetime()
 RETURN count(e) AS assigned_count
 """
 
-# P7 修复：批量计算各社区的平均 embedding，利用 APOC apoc.coll.zip 做逐元素加法
+# P7 修复：批量计算各社区的平均 embedding，纯 Cypher 逐元素向量加法（不依赖 APOC）
 # 返回每个社区的成员数和平均向量，避免将全量成员数据拉取到 Python 侧
 GET_COMMUNITY_AVG_EMBEDDINGS_BATCH = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
@@ -1388,7 +1386,7 @@ WITH cid, member_count,
      reduce(
        acc = head(all_embeddings),
        emb IN tail(all_embeddings) |
-       [pair IN apoc.coll.zip(acc, emb) | pair[0] + pair[1]]
+       [i IN range(0, size(acc) - 1) | acc[i] + emb[i]]
      ) AS sum_vec
 RETURN cid,
        member_count,
@@ -1436,7 +1434,6 @@ OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
        e.name_embedding AS name_embedding,
-       COALESCE(e.activation_value, 0.5) AS activation_value,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 ORDER BY e.id
 SKIP $skip LIMIT $limit
@@ -1459,7 +1456,6 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1484,7 +1480,6 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
