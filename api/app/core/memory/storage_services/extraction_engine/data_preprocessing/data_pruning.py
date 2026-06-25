@@ -499,7 +499,7 @@ class SemanticPruner:
             self._log(f"[剪枝] 保存统计日志失败：{e}")
 
     def _save_snapshot(self) -> None:
-        """将剪枝结果保存到 PipelineSnapshot（1_assistant_pruning.json）。
+        """将剪枝结果保存到 PipelineSnapshot（1_user_assistant_pruning.json）。
 
         输出格式：每个 User-Assistant 消息对一条记录，包含：
         - input.msgs: 原始消息对 [{role, msg}, {role, msg}]
@@ -510,10 +510,10 @@ class SemanticPruner:
             return
 
         try:
-            self._snapshot.save_stage("1_assistant_pruning", self._snapshot_records)
+            self._snapshot.save_stage("1_user_assistant_pruning", self._snapshot_records)
             self._log(
                 f"[剪枝-快照] 已保存 {len(self._snapshot_records)} 条记录 "
-                f"到 1_assistant_pruning.json"
+                f"到 1_user_assistant_pruning.json"
             )
         except Exception as e:
             self._log(f"[剪枝-快照] 保存失败: {e}")

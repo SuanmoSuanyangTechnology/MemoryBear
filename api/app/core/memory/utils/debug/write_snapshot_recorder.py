@@ -77,7 +77,7 @@ class WriteSnapshotRecorder:
         """
         if not pruning_records:
             return
-        self._snapshot.save_stage("1_assistant_pruning", pruning_records)
+        self._snapshot.save_stage("1_user_assistant_pruning", pruning_records)
 
     # ── Stage 2-5: 萃取阶段各步骤输出 ──
 

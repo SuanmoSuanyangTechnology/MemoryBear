@@ -24,7 +24,6 @@ from app.controllers.service.mcp_auth_middleware import (
 from app.core.logging_config import get_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
-from app.db import get_db_context
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="scipy")
 
@@ -70,23 +69,12 @@ async def write_memory(
         from datetime import datetime, timezone
         dialog_at = datetime.now(timezone.utc).isoformat()
 
-        # RAG 存储类型走独立路径
-        if storage_type and storage_type.lower() == "rag":
-            from app.core.memory.pipelines.dispatcher import write_messages_to_rag
-            await write_messages_to_rag(
-                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
-                end_user_id=end_user_id,
-                user_rag_memory_id="",
-            )
-            return {"success": True}
-
-        # Neo4j 路径：走 MCP 专用 dispatcher 入口，消息落 memory_messages 表
-        from app.core.memory.pipelines.dispatcher import dispatch_mcp_write
-        msg_id = await dispatch_mcp_write(
+        msg_id = await MemoryService.dispatch_mcp_write(
             message=message,
             end_user_id=end_user_id,
             config_id=config_id,
             workspace_id=str(workspace_id),
+            storage_type=storage_type,
             dialog_at=dialog_at,
         )
 
