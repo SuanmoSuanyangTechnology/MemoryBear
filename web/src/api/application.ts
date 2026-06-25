@@ -61,6 +61,18 @@ export const runCompare = (app_id: string, values: Record<string, unknown>, onMe
 export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage, undefined, onAbort)
 }
+// Re-run the draft and regenerate the assistant response
+export const draftRunRegenerate = (app_id: string, message_id: string, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+  return handleSSE(`/apps/${app_id}/workflow/messages/${message_id}/regenerate`, { stream: true }, onMessage, undefined, onAbort)
+}
+// Switch to another version of a message via the version switcher
+export const draftRunSwitchMessageVersion = (app_id: string, message_id: string, version: number) => {
+  return request.post(`/apps/${app_id}/messages/${message_id}/switch-version/${version}/branch`)
+}
+// Favorite - Trial Run
+export const draftRunFavoriteMessage = (app_id: string, message_id: string) => {
+  return request.post(`/apps/${app_id}/messages/${message_id}/favorite`)
+}
 // Delete application
 export const deleteApplication = (app_id: string) => {
   return request.delete(`/apps/${app_id}`)
@@ -132,6 +144,14 @@ export const interventionsSubmit = (share_token: string, execution_id: string, d
 // Restore SSE stream + Submit action
 export const interventionsResumeSubmit = (share_token: string, execution_id: string, data: { node_id: string; action_id: string; }, onMessage?: (data: SSEMessage[]) => void) => {
   return handleSSE(`/public/share/workflow/interventions/${execution_id}/resume-submit`, data, onMessage, {
+    headers: {
+      'Authorization': `Bearer ${share_token}`
+    }
+  })
+}
+// Favorite session
+export const favoriteMessage = (share_token: string, message_id: string) => {
+  return request.post(`/public/share/messages/${message_id}/favorite`, {}, {
     headers: {
       'Authorization': `Bearer ${share_token}`
     }

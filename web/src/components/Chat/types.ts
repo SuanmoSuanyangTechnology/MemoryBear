@@ -25,6 +25,7 @@ export interface ChatItem {
   subContent?: Record<string, any>[];
   error?: string;
   feedback_type?: 'like' | 'dislike' | null;
+  is_favorited?: boolean;
   meta_data?: {
     audio_url?: string | null;
     audio_status?: string;
@@ -140,11 +141,14 @@ export interface ChatContentProps {
   userIcon?: ReactNode;
   assistantIcon?: ReactNode;
   isSupportTools?: boolean;
+  isAlwaysShowAssistantTools?: boolean;
   handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
   isEnded?: boolean;
   deleteMsg?: (vo: ChatItem) => void;
   reportMsg?: (vo: ChatItem) => void;
+  regenerateMaxCount?: number;
   regenerateMessages?: (vo: ChatItem) => void;
   handleVersionChange?: (page: number, item: ChatItem) => void;
   handleInterventionActionClick?: (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => void;
+  handleFavorite?: (id?: string) => void;
 }

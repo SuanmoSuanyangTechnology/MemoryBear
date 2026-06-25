@@ -27,10 +27,10 @@ import { App, Flex, Button, type ButtonProps } from 'antd'
 import clsx from 'clsx'
 
 import ChatIcon from '@/assets/images/application/chat.png'
-import { draftRun, appInterventionsSubmit } from '@/api/application';
+import { draftRun, appInterventionsSubmit, draftRunRegenerate, draftRunSwitchMessageVersion, draftRunFavoriteMessage } from '@/api/application';
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
-import type { ChatItem } from '@/components/Chat/types'
+import type { ChatItem, Intervention } from '@/components/Chat/types'
 import dayjs from 'dayjs'
 import type { ChatRef, GraphRef, WorkflowConfig } from '../../types'
 import { type SSEMessage } from '@/utils/stream'
@@ -47,7 +47,11 @@ import type { VariableConfigModalRef } from '@/views/Workflow/types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import { triggerParams } from '../Properties/hooks/useVariableList'
 import RbCard from '@/components/RbCard/Card'
+import type { LogItem } from '@/views/ApplicationConfig/types'
 
+type Data = LogItem & {
+  messages: Array<ChatItem | ChatItem[]>;
+}
 
 interface ChatProps {
   appId: string;
@@ -61,6 +65,72 @@ interface ChatProps {
   handleSave: (flag?: boolean) => Promise<unknown>;
   refreshCache: () => void;
 }
+
+/**
+ * Typed payload carried by a workflow SSE message
+ */
+type StreamEventData = {
+  content: string;
+  message_id?: string;
+  execution_id?: string;
+  conversation_id: string | null;
+  cycle_id: string;
+  cycle_idx: number;
+  node_id: string;
+  node_name?: string;
+  node_type?: string;
+  process?: any;
+  input?: any;
+  output?: any;
+  elapsed_time?: string;
+  error?: any;
+  state: Record<string, any>;
+  status?: 'completed' | 'failed' | 'running' | 'waiting_human';
+  citations?: {
+    document_id: string;
+    file_name: string;
+    knowledge_id: string;
+    score: string;
+  }[];
+  rendered_content?: string;
+  form_fields?: {
+    id: string;
+    default_value?: string;
+  }[];
+  actions?: {
+    id: string;
+    label: string;
+    variant: ButtonProps['type'];
+  }[];
+  timeout_at?: number;
+  agent_log?: Record<string, any>;
+};
+
+/**
+ * Apply an updater to the latest version of the last chat entry, preserving the
+ * single-message / version-array structure.
+ */
+const mapLastVersion = (
+  list: Array<ChatItem | ChatItem[]>,
+  updater: (item: ChatItem) => ChatItem
+): Array<ChatItem | ChatItem[]> => {
+  if (list.length === 0) return list
+  const lastIndex = list.length - 1
+  const lastEntry = list[lastIndex]
+  if (Array.isArray(lastEntry)) {
+    const newVersions = [...lastEntry]
+    newVersions[newVersions.length - 1] = updater(lastEntry[lastEntry.length - 1])
+    return [...list.slice(0, lastIndex), newVersions]
+  }
+  return [...list.slice(0, lastIndex), updater(lastEntry)]
+}
+
+/**
+ * Flatten a chat list into a single array of messages, expanding version arrays.
+ */
+const flattenChatList = (list: Array<ChatItem | ChatItem[]>): ChatItem[] =>
+  list.flatMap((item) => (Array.isArray(item) ? item : [item]))
+
 const Chat = forwardRef<ChatRef, ChatProps>(({
   appId, graphRef, features, appType, open, onOpenChange, handleSave, refreshCache
 }, ref) => {
@@ -75,7 +145,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     setToolbarReady(!!node)
   }, [])
   const [loading, setLoading] = useState(false)
-  const [chatList, setChatList] = useState<ChatItem[]>([])
+  const [chatList, setChatList] = useState<Array<ChatItem | ChatItem[]>>([])
   const [variables, setVariables] = useState<Variable[]>([])
   const [streamLoading, setStreamLoading] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -84,6 +154,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
   const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
   const [executionId, setExecutionId] = useState<string | null>(null)
   const executionIdRef = useRef<string>('draft')
+  const chatIsEnded = useRef(true)
 
   /**
    * Initializes chat with opening statement if configured
@@ -105,7 +176,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
   }, [open])
 
   useEffect(() => {
-    if (toolbarReady || appType === 'pure_workflow') {
+    if (toolbarReady || !isWorkflow) {
       getVariables()
     }
   }, [toolbarReady, appType])
@@ -165,7 +236,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
     }
-    console.log('startNodes', allVariables)
     setVariables([...allVariables])
     toolbarRef.current?.setVariables([...allVariables])
   }
@@ -173,7 +243,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
    * Closes the drawer and resets all state
    */
   const handleClose = (flag: boolean = true) => {
-    setChatHistory(executionIdRef.current, chatList.map((item: ChatItem) => ({
+    setChatHistory(executionIdRef.current, flattenChatList(chatList).map((item: ChatItem) => ({
       ...item,
       subContent: item.subContent?.map(sub => ({
         ...sub,
@@ -206,6 +276,255 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         handleSendMsg(msg)
       })
   }
+  /**
+   * Resolves a node's display metadata (name, icon, type) from the graph
+   */
+  const getNodeContext = useCallback((node_id: string) => {
+    const node = graphRef.current?.getNodes().find(n => n.id === node_id)
+    const { name, icon, type } = node?.getData() || {}
+    return { name, icon, type }
+  }, [graphRef])
+
+  /**
+   * Appends a streaming text chunk to the last assistant message
+   */
+  const appendStreamContent = useCallback((content: string) => {
+    setChatList(prev => mapLastVersion(prev, (current) => ({
+      ...current,
+      content: (current.content || '') + content,
+    })))
+  }, [])
+
+  /**
+   * Replaces the last assistant message content
+   */
+  const replaceStreamContent = useCallback((content: string) => {
+    setChatList(prev => mapLastVersion(prev, (current) => ({
+      ...current,
+      content,
+    })))
+  }, [])
+
+  /**
+   * Routes each SSE message to the matching per-event logic.
+   *
+   * Events:
+   * - workflow_start: capture message_id onto the last assistant message
+   * - message / message_replace: streaming text for the final output
+   * - intervention_required / intervention_timeout: human-in-the-loop lifecycle
+   * - node_start / node_end / node_error: per-node execution tracking
+   * - cycle_item: appends a finished item to its parent cycle node
+   * - agent_log: merges agent iteration logs
+   * - workflow_end: finalises the assistant message
+   */
+  const handleStreamMessage = useCallback((data: SSEMessage[]) => {
+    data.forEach(item => {
+      const payload = item.data as StreamEventData
+      const { event } = item
+      const { conversation_id, message_id } = payload
+      const ctx = getNodeContext(payload.node_id)
+
+      switch (event) {
+        case 'workflow_start':
+          if (!message_id) break
+          setChatList(prev => mapLastVersion(prev, (current) => ({
+            ...current,
+            id: message_id,
+          })))
+          break
+        case 'message':
+          appendStreamContent(payload.content)
+          break
+        case 'message_replace':
+          replaceStreamContent(payload.content)
+          break
+        case 'intervention_required': {
+          const { name, icon, type } = ctx
+          const { node_id } = payload
+          const {
+            execution_id, node_name, rendered_content, form_fields, actions, timeout_at,
+          } = payload
+          setChatList(prev => mapLastVersion(prev, (current) => {
+            const subContent = [...(current.subContent || [])]
+            const filterIndex = subContent.findIndex(vo => vo.id === node_id)
+            const baseNode = {
+              node_id,
+              node_name: name,
+              node_type: type,
+              icon,
+              status: 'waiting_human' as const,
+              content: {},
+            }
+            if (filterIndex > -1) {
+              subContent[filterIndex] = { ...subContent[filterIndex], ...baseNode }
+            } else {
+              subContent.push({ ...baseNode, id: node_id, meta_data: { waiting_human: true } })
+            }
+            return {
+              ...current,
+              status: 'waiting_human',
+              subContent,
+              meta_data: { ...current.meta_data, waiting_human: true },
+              interventions: [
+                ...(current.interventions || []),
+                {
+                  execution_id,
+                  node_id,
+                  node_name: node_name || name,
+                  rendered_content,
+                  form_fields: form_fields || [],
+                  actions: actions || [],
+                  timeout_at,
+                },
+              ],
+            }
+          }))
+          break
+        }
+        case 'intervention_timeout':
+          setChatList(prev => mapLastVersion(prev, (current) => {
+            const interventions = current.interventions || []
+            const filterIndex = interventions.findIndex((it: Intervention) => it.node_id === payload.node_id)
+            if (filterIndex < 0) return current
+            return {
+              ...current,
+              interventions: interventions.map((it: Intervention, idx: number) =>
+                idx === filterIndex
+                  ? { ...it, resolved_action_id: '__timeout__', resolved_kind: 'timeout' }
+                  : it
+              ),
+            }
+          }))
+          break
+        case 'node_start': {
+          const { name, icon, type } = ctx
+          const { execution_id, node_id } = payload
+          setChatList(prev => mapLastVersion(prev, (current) => {
+            const subContent = [...(current.subContent || [])]
+            const filterIndex = subContent.findIndex(vo => vo.id === node_id)
+            const baseNode = {
+              execution_id,
+              node_id,
+              node_name: name,
+              node_type: type,
+              icon,
+              status: 'running' as const,
+              content: {},
+            }
+            if (filterIndex > -1) {
+              subContent[filterIndex] = { ...subContent[filterIndex], ...baseNode }
+            } else {
+              subContent.push({ ...baseNode, id: node_id })
+            }
+            return { ...current, status: 'running', subContent }
+          }))
+          break
+        }
+        case 'node_end':
+        case 'node_error':
+          setChatList(prev => mapLastVersion(prev, (current) => {
+            const subContent = [...(current.subContent || [])]
+            const filterIndex = subContent.findIndex(vo => vo.node_id === payload.node_id)
+            if (filterIndex < 0 || !subContent[filterIndex].content) {
+              return { ...current, subContent }
+            }
+            subContent[filterIndex] = {
+              ...subContent[filterIndex],
+              content: {
+                input: payload.input,
+                output: payload.output,
+                process: payload.process,
+                error: payload.error,
+              },
+              status: payload.status || 'completed',
+              elapsed_time: payload.elapsed_time,
+            }
+            return { ...current, subContent }
+          }))
+          break
+        case 'cycle_item': {
+          const { name, icon, type } = ctx
+          const {
+            cycle_id, cycle_idx, node_id,
+            input, output, process, error, status, elapsed_time,
+          } = payload
+          setChatList(prev => mapLastVersion(prev, (current) => {
+            const subContent = [...(current.subContent || [])]
+            const filterIndex = subContent.findIndex(vo => vo.id === cycle_id)
+            if (filterIndex < 0) return current
+            const items = [...(subContent[filterIndex].subContent || [])]
+            items.push({
+              cycle_id,
+              cycle_idx,
+              node_id,
+              node_name: type === 'cycle-start' ? t('workflow.cycle-start') : name,
+              node_type: type,
+              icon,
+              content: { cycle_idx, input, output, process, error },
+              status: status || 'completed',
+              elapsed_time,
+            })
+            subContent[filterIndex] = { ...subContent[filterIndex], subContent: items }
+            return { ...current, subContent }
+          }))
+          break
+        }
+        case 'agent_log':
+          setChatList(prev => mapLastVersion(prev, (current) => {
+            const subContent = [...(current.subContent || [])]
+            const filterIndex = subContent.findIndex(vo => vo.node_id === payload.node_id)
+            if (filterIndex < 0) return { ...current, subContent }
+            const lastAgentLog = subContent[filterIndex].agent_log || {}
+            const lastIterations = lastAgentLog?.iterations || []
+            const newIterations = payload.agent_log?.iterations || []
+            const indexMap = new Map<number, any>()
+            lastIterations.forEach((item: any) => indexMap.set(item.index, item))
+            newIterations.forEach((item: any) => indexMap.set(item.index, item))
+            const mergedIterations = Array.from(indexMap.values()).sort((a, b) => a.index - b.index)
+            subContent[filterIndex] = {
+              ...subContent[filterIndex],
+              agent_log: {
+                ...lastAgentLog,
+                meta: payload.agent_log?.meta || {},
+                iterations: mergedIterations,
+              },
+            }
+            return { ...current, subContent }
+          }))
+          break
+        case 'workflow_end': {
+          const { execution_id, status, error, citations } = payload
+          setChatList(prev => mapLastVersion(prev, (current) => ({
+            ...current,
+            status,
+            error,
+            content: current.content === '' ? null : current.content,
+            meta_data: { ...(current.meta_data || {}), citations },
+          })))
+          setStreamLoading(false)
+          setLoading(false)
+          if (execution_id && executionId !== execution_id) {
+            executionIdRef.current = execution_id
+            setExecutionId(execution_id)
+          }
+          chatIsEnded.current = true
+          break
+        }
+      }
+
+      if (conversation_id && conversationId !== conversation_id) {
+        setConversationId(conversation_id)
+      }
+    })
+  }, [
+    conversationId,
+    executionId,
+    getNodeContext,
+    appendStreamContent,
+    replaceStreamContent,
+    t,
+  ])
+
   /**
    * Sends a message to execute the workflow
    * 
@@ -255,353 +574,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     const message = msg
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
 
-    /**
-     * Handles SSE stream messages from workflow execution
-     * 
-     * Events:
-     * - message: Streaming text chunks for final output
-     * - node_start: Node execution begins
-     * - node_end: Node execution completes successfully
-     * - node_error: Node execution fails
-     * - workflow_end: Entire workflow completes
-     */
-    const handleStreamMessage = (data: SSEMessage[]) => {
-      data.forEach(item => {
-        const {
-          execution_id, content, conversation_id, node_id, node_name, cycle_id, cycle_idx,
-          input, output, process, error, elapsed_time, status, citations,
-          rendered_content, form_fields, actions, timeout_at,
-          agent_log
-        } = item.data as {
-          content: string;
-          execution_id?: string;
-          conversation_id: string | null;
-          cycle_id: string;
-          cycle_idx: number;
-          node_id: string;
-          node_name?: string;
-          node_type?: string;
-          process?: any;
-          input?: any;
-          output?: any;
-          elapsed_time?: string;
-          error?: any;
-          state: Record<string, any>;
-          status?: 'completed' | 'failed' | 'running' | 'waiting_human',
-          citations?: {
-            document_id: string;
-            file_name: string;
-            knowledge_id: string;
-            score: string;
-          }[];
-          rendered_content?: string;
-          form_fields?: {
-            id: string;
-            default_value?: string;
-          }[]
-          actions?: {
-            id: string;
-            label: string;
-            variant: ButtonProps['type'];
-          }[];
-          timeout_at?: number;
-          agent_log?: Record<string, any>;
-        };
-
-        const node = graphRef.current?.getNodes().find(n => n.id === node_id);
-        const { name, icon, type } = node?.getData() || {}
-
-        switch(item.event) {
-          // Append streaming text chunks to assistant message
-          case 'message':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                newList[lastIndex] = {
-                  ...newList[lastIndex],
-                  content: newList[lastIndex].content + content
-                }
-              }
-              return newList
-            })
-            break
-          case 'message_replace':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                newList[lastIndex] = {
-                  ...newList[lastIndex],
-                  content: content
-                }
-              }
-              return newList
-            })
-            break;
-          case 'intervention_required':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                const newSubContent = newList[lastIndex].subContent || []
-                const filterIndex = newSubContent.findIndex(vo => vo.id === node_id)
-                if (filterIndex > -1) {
-                  newSubContent[filterIndex] = {
-                    ...newSubContent[filterIndex],
-                    node_id: node_id,
-                    node_name: name,
-                    node_type: type,
-                    icon,
-                    status: 'waiting_human',
-                    content: {},
-                  }
-                } else {
-                  newSubContent.push({
-                    id: node_id,
-                    node_id: node_id,
-                    node_name: name,
-                    node_type: type,
-                    icon,
-                    status: 'waiting_human',
-                    content: {},
-                    meta_data: {
-                      waiting_human: true,
-                    },
-                  })
-                }
-                newList[lastIndex] = {
-                  ...newList[lastIndex],
-                  status: 'waiting_human',
-                  subContent: newSubContent,
-                  meta_data: {
-                    ...newList[lastIndex].meta_data,
-                    waiting_human: true
-                  },
-                  interventions: [
-                    ...(newList[lastIndex].interventions || []),
-                    {
-                      execution_id,
-                      node_id: node_id,
-                      node_name: node_name || name,
-                      rendered_content,
-                      form_fields: form_fields || [],
-                      actions: actions || [],
-                      timeout_at,
-                    }
-                  ]
-                }
-              }
-              return newList
-            })
-            break;
-          case 'intervention_timeout':
-            setChatList(prev => {
-              const lastMsg = prev[prev.length - 1]
-              if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
-                return prev
-              }
-
-              const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
-              lastMsg.interventions[filterIndex] = {
-                ...lastMsg.interventions[filterIndex],
-                resolved_action_id: '__timeout__',
-                resolved_kind: 'timeout'
-              }
-              
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...lastMsg,
-                }
-              ]
-            })
-            break
-          // Track node execution start
-          case 'node_start':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                const newSubContent = newList[lastIndex].subContent || []
-                const filterIndex = newSubContent.findIndex(vo => vo.id === node_id)
-                if (filterIndex > -1) {
-                  newSubContent[filterIndex] = {
-                    ...newSubContent[filterIndex],
-                    execution_id,
-                    node_id: node_id,
-                    node_name: name,
-                    node_type: type,
-                    icon,
-                    status: 'running',
-                    content: {},
-                  }
-                } else {
-                  newSubContent.push({
-                    execution_id,
-                    id: node_id,
-                    node_id: node_id,
-                    node_name: name,
-                    node_type: type,
-                    icon,
-                    status: 'running',
-                    content: {},
-                  })
-                }
-                newList[lastIndex] = {
-                  ...newList[lastIndex],
-                  status: 'running',
-                  subContent: newSubContent
-                }
-              }
-              return newList
-            })
-            break
-          // Update node with execution results or errors
-          case 'node_end':
-          case 'node_error':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                const newSubContent = newList[lastIndex].subContent || []
-                const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
-                if (filterIndex > -1 && newSubContent[filterIndex].content) {
-                  newSubContent[filterIndex] = {
-                    ...newSubContent[filterIndex],
-                    content: {
-                      input,
-                      output,
-                      process,
-                      error,
-                    },
-                    status: status || 'completed',
-                    elapsed_time
-                  }
-                }
-                newList[lastIndex] = {
-                  ...newList[lastIndex],
-                  subContent: newSubContent
-                }
-              }
-              return newList
-            })
-            break
-          // Update node with subContent
-          case 'cycle_item':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                const newSubContent = newList[lastIndex].subContent || []
-                const filterIndex = newSubContent.findIndex(vo => vo.id === cycle_id)
-                if (filterIndex > -1) {
-                  const items = newSubContent[filterIndex].subContent || []
-                  items.push({
-                    cycle_id,
-                    cycle_idx,
-                    node_id,
-                    node_name: type === 'cycle-start' ? t('workflow.cycle-start') : name,
-                    node_type: type,
-                    icon,
-                    content: {
-                      cycle_idx,
-                      input,
-                      output,
-                      process,
-                      error,
-                    },
-                    status: status || 'completed',
-                    elapsed_time
-                  })
-                  newSubContent[filterIndex] = {
-                    ...newSubContent[filterIndex],
-                    subContent: [...items]
-                  }
-                  newList[lastIndex] = {
-                    ...newList[lastIndex],
-                    subContent: newSubContent
-                  }
-                }
-              }
-              return newList
-            })
-            break
-          case 'agent_log':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                const newSubContent = newList[lastIndex].subContent || []
-                const filterIndex = newSubContent.findIndex(vo => vo.node_id === node_id)
-                if (filterIndex > -1) {
-                  const lastAgentLog = newSubContent[filterIndex].agent_log || {}
-                  const lastIterations: {
-                    index: number;
-                    [key: string]: any;
-                  }[] = lastAgentLog?.iterations || []
-                  const newIterations: {
-                    index: number;
-                    [key: string]: any;
-                  }[] = agent_log?.iterations || []
-
-                  const indexMap = new Map<number, typeof lastIterations[0]>()
-                  
-                  lastIterations.forEach(item => {
-                    indexMap.set(item.index, item)
-                  })
-                  
-                  newIterations.forEach(item => {
-                    indexMap.set(item.index, item)
-                  })
-                  
-                  const mergedIterations = Array.from(indexMap.values()).sort((a, b) => a.index - b.index)
-
-                  newSubContent[filterIndex].agent_log = {
-                    ...lastAgentLog,
-                    meta: agent_log?.meta || {},
-                    iterations: mergedIterations,
-                  }
-                }
-              }
-              return newList
-            })
-            break
-          // Mark workflow as complete
-          case 'workflow_end':
-            setChatList(prev => {
-              const newList = [...prev]
-              const lastIndex = newList.length - 1
-              if (lastIndex >= 0) {
-                newList[lastIndex] = {
-                  ...newList[lastIndex],
-                  status,
-                  error,
-                  content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
-                  meta_data: {
-                    ...newList[lastIndex].meta_data || {},
-                    citations
-                  }
-                }
-              }
-              return newList
-            })
-            setStreamLoading(false)
-            setLoading(false)
-            console.log('execution_id', execution_id, executionId)
-            if (execution_id && executionId !== execution_id) {
-              executionIdRef.current = execution_id
-              setExecutionId(execution_id)
-            }
-            break
-        }
-
-        if (conversation_id && conversationId !== conversation_id) {
-          setConversationId(conversation_id)
-        }
-      })
-    }
-
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     setFileList([])
@@ -623,7 +595,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       })
     }
-    if (appType === 'pure_workflow') {
+    if (!isWorkflow) {
       setChatList([
         {
           role: 'assistant',
@@ -648,31 +620,29 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
           content: '',
           created_at: Date.now(),
           subContent: [],
+          is_current: true,
+          version: 1,
         }
       ])
     }
     setLoading(true)
     setStreamLoading(true)
+    chatIsEnded.current = false
     draftRun(appId, data, handleStreamMessage, abort => { abortRef.current = abort })
       .catch((error) => {
         const errorInfo = JSON.parse(error.message)
-        setChatList(prev => {
-          const newList = [...prev]
-          const lastIndex = newList.length - 1
-          if (lastIndex >= 0) {
-            newList[lastIndex] = {
-              ...newList[lastIndex],
-              status: 'failed',
-              content: null,
-              subContent: errorInfo.error
-            }
-          }
-          return newList
-        })
+        setChatList(prev => mapLastVersion(prev, (current) => ({
+          ...current,
+          status: 'failed',
+          content: null,
+          subContent: errorInfo.error,
+        })))
+        chatIsEnded.current = true
       }).finally(() => {
         setLoading(false)
         setStreamLoading(false)
         refreshCache()
+        chatIsEnded.current = true
       })
   }
 
@@ -699,26 +669,20 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     }
     appInterventionsSubmit(appId, execution_id, data)
       .then(() => {
-        setChatList(prev => {
-          const lastMsg = prev[prev.length - 1]
-          if (!lastMsg?.interventions || lastMsg.interventions.length === 0) {
-            return prev
+        setChatList(prev => mapLastVersion(prev, (current) => {
+          const interventions = current.interventions || []
+          if (interventions.length === 0) return current
+          const filterIndex = interventions.findIndex((item: Intervention) => item.node_id === node_id)
+          if (filterIndex < 0) return current
+          return {
+            ...current,
+            interventions: interventions.map((it: Intervention, idx: number) =>
+              idx === filterIndex
+                ? { ...it, resolved_form_data: fieldValues, resolved_action_id: actionId }
+                : it
+            ),
           }
-
-          const filterIndex = lastMsg.interventions.findIndex(item => item.node_id === node_id)
-          lastMsg.interventions[filterIndex] = {
-            ...lastMsg.interventions[filterIndex],
-            resolved_form_data: fieldValues,
-            resolved_action_id: actionId,
-          }
-          
-          return [
-            ...prev.slice(0, -1),
-            {
-              ...lastMsg,
-            }
-          ]
-        })
+        }))
       })
   }
 
@@ -739,7 +703,8 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }
       }
       setChatList(prev => {
-        if (prev[0]?.role === 'assistant') {
+        const first = prev[0]
+        if (first && !Array.isArray(first) && first.role === 'assistant') {
           prev[0] = assistantMsg
         }
         return [...prev]
@@ -749,18 +714,199 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
 
   useEffect(() => {
     if (chatList.length < 1) return
-    setChatHistory(executionIdRef.current, chatList)
+    setChatHistory(executionIdRef.current, flattenChatList(chatList))
   }, [chatList])
 
   // True when any required variable is missing a value, used to highlight the config button
   const isNeedVariableConfig = variables?.some(
     vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === '')
   )
+  const regenerateMessages = (vo: ChatItem) => {
+    if (!vo.id || !appId) return
+    // Validate required variables before sending
+    let isCanSend = true
+    const params: Record<string, any> = {}
+    const trigger_payload: Record<string, any> = {}
+    if (variables.length > 0) {
+      const needRequired: string[] = []
+      const normalVariables = variables.filter(item => !item.nodeType)
+      const webhookTriggerVariables = variables.filter(item => item.nodeType === 'webhook')
+      normalVariables.forEach(v => {
+        params[v.name] = v.value ?? v.defaultValue
+        if (v.required && (params[v.name] === null || params[v.name] === undefined || params[v.name] === '')) {
+          isCanSend = false
+          needRequired.push(v.name)
+        }
+      })
+      webhookTriggerVariables.forEach(v => {
+        const nameList = v.name.split('.')
+        if (!trigger_payload[nameList[0]]) {
+          trigger_payload[nameList[0]] = {}
+        }
+        trigger_payload[nameList[0]][nameList[1]] = v.value
+      })
+      if (needRequired.length) {
+        messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
+      }
+    }
+    if (!isCanSend) return
 
+    // Append a new version of the assistant message to the chat list
+    // and drop everything that originally followed it.
+    setChatList(prev => {
+      const filterIndex = prev.findIndex((item) =>
+        Array.isArray(item)
+          ? item.some((v) => v.id === vo.id)
+          : item.id === vo.id
+      )
+      if (filterIndex === -1) return prev
+      const newList = prev.slice(0, filterIndex + 1)
+      const existingEntry = newList[filterIndex]
+      const newVersion: ChatItem = {
+        role: 'assistant',
+        content: '',
+        created_at: Date.now(),
+        subContent: [],
+        is_current: true,
+      }
+      if (Array.isArray(existingEntry)) {
+        const nextVersion = existingEntry.length + 1
+        newList[filterIndex] = [
+          ...existingEntry.map((v) => ({ ...v, is_current: false })),
+          { ...newVersion, version: nextVersion },
+        ]
+      } else {
+        newList[filterIndex] = [
+          { ...existingEntry, is_current: false, version: 1 },
+          { ...newVersion, version: 2 },
+        ]
+      }
+      return newList
+    })
+
+    setLoading(true)
+    setStreamLoading(true)
+    chatIsEnded.current = false
+    draftRunRegenerate(appId, vo.id, handleStreamMessage, abort => { abortRef.current = abort })
+      .catch(() => {
+        setChatList(prev => {
+          const lastEntry = prev[prev.length - 1]
+          if (!lastEntry || !Array.isArray(lastEntry)) return prev
+          return mapLastVersion(prev, (current) => ({
+            ...current,
+            status: 'failed',
+            content: null,
+          }))
+        })
+        chatIsEnded.current = true
+      })
+      .finally(() => {
+        setLoading(false)
+        setStreamLoading(false)
+        refreshCache()
+        chatIsEnded.current = true
+      })
+  }
+  const handleVersionChange = (page: number, item: ChatItem) => {
+    if (!page || !item.id || !appId) return
+    draftRunSwitchMessageVersion(appId, item.id, page)
+      .then((res) => {
+        const { node_executions_map, messages = [], pending_intervention } = res as Data
+        const enrichMessage = (msg: any) => {
+          const base = { ...msg, status: msg.role === 'user' ? null : msg.status }
+          if (!msg.id || !(node_executions_map?.[msg.id] || pending_intervention?.[msg.id])) {
+            return base
+          }
+          const executions = node_executions_map?.[msg.id] || []
+          const interventions = pending_intervention?.[msg.id]?.interventions || []
+          const lastExecution = executions?.[executions.length - 1]
+          const meta = lastExecution?.meta
+          let sourceList: any[] = []
+
+          if (meta?.sources?.length > 0 && (meta?.tool_type === 'knowledge_retrieval' || meta?.tool_type === 'skill')) {
+            const groupedSources = meta?.sources.reduce((acc: any, source: any) => {
+              const key = source.knowledge_name || source.knowledge_id || source.name || source.id || 'default';
+              if (!acc[key]) {
+                acc[key] = { ...source, name: source.knowledge_name || source.name, contentList: [source.content] };
+              } else {
+                acc[key].contentList.push(source.content);
+              }
+              return acc;
+            }, {});
+            sourceList = Object.values(groupedSources).map((group: any) => ({
+              ...lastExecution,
+              icon: getNodeContext(lastExecution?.node_id).icon,
+              node_name: group.name,
+              content: {
+                input: lastExecution?.input || '',
+                output: group.contentList.join('\n') || lastExecution?.output,
+                error: lastExecution?.error
+              }
+            }));
+          } else if (meta?.sources?.length > 0) {
+            sourceList = meta?.sources?.map((source: any) => ({
+              ...lastExecution,
+              icon: getNodeContext(lastExecution?.node_id).icon,
+              name: source.name || 'default',
+              content: {
+                input: lastExecution?.input || '',
+                output: source.content || lastExecution?.output,
+                error: lastExecution?.error
+              }
+            }));
+          } else {
+            sourceList = executions.map(({ input, output, cycle_items = [], error, process, ...node }: any) => {
+              const converted: any = { ...node, icon: getNodeContext(node?.node_id).icon, content: { input, output, process, error } }
+              if (node.node_type === 'loop' && Array.isArray(cycle_items) && cycle_items.length > 0) {
+                converted.subContent = cycle_items.map(({ input: cInput, output: cOutput, error: cError, process: cProcess, ...cNode }: any) => ({
+                  ...cNode,
+                  icon: getNodeContext(cNode?.node_id).icon,
+                  content: { input: cInput, output: cOutput, process: cProcess, error: cError }
+                }))
+              }
+              return converted
+            })
+          }
+          return { ...base, subContent: sourceList, interventions }
+        }
+        const hasSubContentMessages = messages.map((item: any) =>
+          Array.isArray(item) ? item.map(enrichMessage) : enrichMessage(item)
+        )
+        setChatList(hasSubContentMessages)
+        messageApi.success(t('common.operateSuccess'))
+      })
+  }
+  const handleFavorite = (id?: string) => {
+    if (!appId || !id) return
+    draftRunFavoriteMessage(appId, id)
+      .then((res) => {
+        const { is_favorited } = res as { is_favorited: boolean; }
+        messageApi.success(t('common.operateSuccess'))
+        setChatList(prev => {
+          const lastList = [...prev]
+          const filterIndex = lastList.findIndex(item => Array.isArray(item) ? item.filter(msg => msg.id === id).length > 0 : item.id === id)
+          if (filterIndex === -1) return lastList
+          const filterItem = lastList[filterIndex]
+          if (Array.isArray(filterItem)) {
+            filterItem.forEach(msg => {
+              if (msg.id === id) {
+                msg.is_favorited = is_favorited
+              }
+            })
+          } else {
+            filterItem.is_favorited = is_favorited
+          }
+          lastList[filterIndex] = filterItem
+          return [...lastList]
+        })
+      })
+  }
+
+  const isWorkflow = appType === 'workflow'
   if (!open) return null
 
   return (
-    <div className="rb:w-150 rb:fixed rb:right-2.5 rb:top-30 rb:bottom-2.5">
+    <div className="rb:w-150 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5">
       <RbCard
         title={t('workflow.run')}
         extra={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]" onClick={() => handleClose()}></div>}
@@ -783,9 +929,15 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         }}
         onSend={handleSend}
         handleInterventionActionClick={handleInterventionActionClick}
+        isEnded={chatIsEnded.current}
+        isSupportTools={isWorkflow}
+        isAlwaysShowAssistantTools={isWorkflow}
+        handleFavorite={isWorkflow ? handleFavorite : undefined}
+        regenerateMaxCount={5}
+        regenerateMessages={isWorkflow ? regenerateMessages : undefined}
+        handleVersionChange={isWorkflow ? handleVersionChange : undefined}
       />
-
-        {appType === 'workflow' &&
+        {isWorkflow &&
           <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
             <ChatInput
               message={message}
@@ -805,7 +957,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
             </ChatInput>
           </Flex>
         }
-        {appType === 'pure_workflow' &&
+        {!isWorkflow &&
           <Flex align="center" justify="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
             {variables.length > 0 &&
               <Button
