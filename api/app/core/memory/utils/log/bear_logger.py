@@ -119,7 +119,7 @@ class BearLogger:
         token = _trace_id.set(trace_id)
         start = time.time()
 
-        ctx_parts = [f"{k}={str(v)}" for k, v in context_kv.items()]
+        ctx_parts = [f"{k}={v}" for k, v in context_kv.items()]
         ctx_str = ", ".join(ctx_parts)
 
         self._logger.info(
