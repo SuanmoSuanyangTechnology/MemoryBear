@@ -195,6 +195,7 @@ class ConversationService:
             status: str = "completed",
             sync_memory: bool = True,
             should_memorize: bool = True,
+            parent_message_id: Optional[uuid.UUID] = None,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -215,6 +216,10 @@ class ConversationService:
         Returns:
             Message: Newly created Message instance.
         """
+        # 重新生成场景：由 WorkflowService.regenerate 统一保存版本化消息，
+        # 跳过 run/run_stream 内部对 user/assistant/开场白/失败消息的重复保存。
+        if getattr(self, "_suppress_message_save", False):
+            return None
         try:
             conversation = self.conversation_repo.get_conversation_by_conversation_id(
                 conversation_id
@@ -227,6 +232,7 @@ class ConversationService:
                 content=content,
                 meta_data=meta_data,
                 status=status,
+                parent_message_id=parent_message_id,
             )
 
             self.message_repo.add_message(message)
