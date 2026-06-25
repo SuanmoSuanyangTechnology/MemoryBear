@@ -14,7 +14,7 @@
  */
 
 import { type FC, useRef, useState } from 'react';
-import { Layout, Dropdown, Breadcrumb, Flex, Tooltip } from 'antd';
+import { Layout, Dropdown, Breadcrumb, Flex, Tooltip, Button } from 'antd';
 import type { MenuProps, BreadcrumbProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
@@ -110,16 +110,6 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
       },
     },
     {
-      key: '7',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question_bold.svg')]"></div>,
-      label: <Flex justify="space-between" align="center">
-        {t('quickActions.helpCenter')}
-        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
-      </Flex>,
-      className: 'rb:text-[#212332]!',
-      onClick: gotoHelpCenter,
-    },
-    {
       key: '4',
       icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/settings.svg')]"></div>,
       label: <Flex justify="space-between" align="center">
@@ -185,30 +175,41 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
   const handleOpenChange = (open: boolean) => {
     setOpen(open);
   }
+
   return (
     <Header className={styles.header}>
       {/* Breadcrumb navigation */}
       <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium!" />
-      {/* User info dropdown menu */}
-      {user.username && (
-        <Dropdown
-          menu={{
-            items: userMenuItems
-          }}
-          onOpenChange={handleOpenChange}
-          overlayClassName={styles.userDropdown}
+
+      <Flex gap={12} align="center">
+        <Button
+          icon={<div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>}
+          className="rb:px-2! rb:rounded-[10px]!"
+          onClick={gotoHelpCenter}
         >
-          <Flex align="center" className="rb:cursor-pointer rb:font-medium">
-            {user.username && <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
-              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
-            </Flex>}
-            <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
-            <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
-              'rb:rotate-180': !open,
-            })}></div>
-          </Flex>
-        </Dropdown>
-      )}
+          {t('quickActions.helpCenter')}
+        </Button>
+        {/* User info dropdown menu */}
+        {user.username && (
+          <Dropdown
+            menu={{
+              items: userMenuItems
+            }}
+            onOpenChange={handleOpenChange}
+            overlayClassName={styles.userDropdown}
+          >
+            <Flex align="center" className="rb:cursor-pointer rb:font-medium">
+              {user.username && <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
+                {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
+              </Flex>}
+              <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
+              <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+                'rb:rotate-180': !open,
+              })}></div>
+            </Flex>
+          </Dropdown>
+        )}
+      </Flex>
       <SettingModal
         ref={settingModalRef}
       />

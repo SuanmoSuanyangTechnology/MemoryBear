@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from app.controllers import user_memory_controllers
+from app.controllers import user_memory_controllers, memory_analytics_controller
 from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -217,7 +217,7 @@ async def get_end_user_info(
     Delegates to the manager-side controller for shared logic.
     """
     current_user = _get_current_user(api_key_auth, db)
-    return await user_memory_controllers.get_end_user_info(
+    return await memory_analytics_controller.get_end_user_info(
         end_user_id=end_user_id,
         current_user=current_user,
         db=db,

@@ -17,14 +17,45 @@ from app.repositories.neo4j.cypher_queries import (
     REDIRECT_ALIAS_EDGES,
     DELETE_ALIAS_NODES,
     GET_USER_ENTITY_ALIASES,
+    GET_ALIAS_BELONGS_CANDIDATES,
+    DROP_ALIAS_BELONGS_EDGES,
 )
 
 logger = logging.getLogger(__name__)
 
 
+async def collect_alias_candidates(
+    connector: Neo4jConnector,
+    end_user_id: str,
+) -> List[Dict[str, Any]]:
+    """收集该 user 全部 "别名属于" 候选（含两端节点上下文）。"""
+    records = await connector.execute_query(
+        GET_ALIAS_BELONGS_CANDIDATES,
+        end_user_id=end_user_id,
+    )
+    return list(records or [])
+
+
+async def drop_alias_edges(
+    connector: Neo4jConnector,
+    end_user_id: str,
+    drop_alias_ids: List[str],
+) -> int:
+    """删除被判 drop 的 "别名属于" 边（只删边，不删节点）。返回删除条数。"""
+    if not drop_alias_ids:
+        return 0
+    records = await connector.execute_query(
+        DROP_ALIAS_BELONGS_EDGES,
+        end_user_id=end_user_id,
+        drop_alias_ids=drop_alias_ids,
+    )
+    return records[0].get("dropped_count", 0) if records else 0
+
+
 async def merge_alias_belongs_to(
     connector: Neo4jConnector,
     end_user_id: str,
+    alias_ids: List[str],
 ) -> Dict[str, Any]:
     """按 end_user_id 全量处理 "别名属于" 关系。
 
@@ -51,58 +82,65 @@ async def merge_alias_belongs_to(
         "errors": {},
     }
 
-    # ── 1. 别名归并（name 进 aliases，description 拼接） ──
-    try:
-        records = await connector.execute_query(
-            MERGE_ALIAS_BELONGS_TO,
-            end_user_id=end_user_id,
-        )
-        result["alias_merged"] = len(records) if records else 0
-        logger.info(
-            f"[AliasMerge] 别名归并完成 end_user_id={end_user_id}, "
-            f"影响 target={result['alias_merged']}"
-        )
-    except Exception as e:
-        logger.warning(f"[AliasMerge] 别名归并失败 end_user_id={end_user_id}: {e}")
-        result["errors"]["merge"] = str(e)
-
-    # ── 2. 边重定向（别名节点其它边 → 规范实体） ──
-    try:
-        redirect_records = await connector.execute_query(
-            REDIRECT_ALIAS_EDGES,
-            end_user_id=end_user_id,
-        )
-        if redirect_records:
-            row = redirect_records[0]
-            result["edges_redirected"] = (
-                (row.get("redirected_incoming") or 0)
-                + (row.get("redirected_outgoing") or 0)
-                + (row.get("redirected_stmt") or 0)
+    # ── 1~3 步仅在有 merge 候选时执行（按 alias_ids 筛选）──
+    if not alias_ids:
+        logger.debug(f"[AliasMerge] merge 集合为空，跳过归并三步 end_user_id={end_user_id}")
+    else:
+        # ── 1. 别名归并（name 进 aliases，description 拼接） ──
+        try:
+            records = await connector.execute_query(
+                MERGE_ALIAS_BELONGS_TO,
+                end_user_id=end_user_id,
+                alias_ids=alias_ids,
             )
-        logger.info(
-            f"[AliasMerge] 边重定向完成 end_user_id={end_user_id}, "
-            f"汇总={result['edges_redirected']}"
-        )
-    except Exception as e:
-        logger.warning(f"[AliasMerge] 边重定向失败 end_user_id={end_user_id}: {e}")
-        result["errors"]["redirect"] = str(e)
+            result["alias_merged"] = len(records) if records else 0
+            logger.info(
+                f"[AliasMerge] 别名归并完成 end_user_id={end_user_id}, "
+                f"影响 target={result['alias_merged']}"
+            )
+        except Exception as e:
+            logger.warning(f"[AliasMerge] 别名归并失败 end_user_id={end_user_id}: {e}")
+            result["errors"]["merge"] = str(e)
 
-    # ── 3. 删除别名节点（DETACH DELETE） ──
-    try:
-        delete_records = await connector.execute_query(
-            DELETE_ALIAS_NODES,
-            end_user_id=end_user_id,
-        )
-        result["alias_nodes_deleted"] = (
-            delete_records[0].get("deleted_count", 0) if delete_records else 0
-        )
-        logger.info(
-            f"[AliasMerge] 别名节点删除完成 end_user_id={end_user_id}, "
-            f"删除={result['alias_nodes_deleted']}"
-        )
-    except Exception as e:
-        logger.warning(f"[AliasMerge] 别名节点删除失败 end_user_id={end_user_id}: {e}")
-        result["errors"]["delete"] = str(e)
+        # ── 2. 边重定向（别名节点其它边 → 规范实体） ──
+        try:
+            redirect_records = await connector.execute_query(
+                REDIRECT_ALIAS_EDGES,
+                end_user_id=end_user_id,
+                alias_ids=alias_ids,
+            )
+            if redirect_records:
+                row = redirect_records[0]
+                result["edges_redirected"] = (
+                    (row.get("redirected_incoming") or 0)
+                    + (row.get("redirected_outgoing") or 0)
+                    + (row.get("redirected_stmt") or 0)
+                )
+            logger.info(
+                f"[AliasMerge] 边重定向完成 end_user_id={end_user_id}, "
+                f"汇总={result['edges_redirected']}"
+            )
+        except Exception as e:
+            logger.warning(f"[AliasMerge] 边重定向失败 end_user_id={end_user_id}: {e}")
+            result["errors"]["redirect"] = str(e)
+
+        # ── 3. 删除别名节点（DETACH DELETE） ──
+        try:
+            delete_records = await connector.execute_query(
+                DELETE_ALIAS_NODES,
+                end_user_id=end_user_id,
+                alias_ids=alias_ids,
+            )
+            result["alias_nodes_deleted"] = (
+                delete_records[0].get("deleted_count", 0) if delete_records else 0
+            )
+            logger.info(
+                f"[AliasMerge] 别名节点删除完成 end_user_id={end_user_id}, "
+                f"删除={result['alias_nodes_deleted']}"
+            )
+        except Exception as e:
+            logger.warning(f"[AliasMerge] 别名节点删除失败 end_user_id={end_user_id}: {e}")
+            result["errors"]["delete"] = str(e)
 
     # ── 4. 同步用户实体最新 aliases 到 PostgreSQL end_user_info ──
     try:

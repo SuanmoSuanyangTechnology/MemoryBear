@@ -211,7 +211,7 @@
           "id": 12,
           "parent": 1,
           "code": "application",
-          "label": "应用管理",
+          "label": "Agent 管理",
           "i18nKey": "menu.applicationManagement",
           "path": "/application",
           "enable": true,

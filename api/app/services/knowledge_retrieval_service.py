@@ -475,6 +475,14 @@ class KnowledgeRetrievalService:
             )
 
         if request.metadata_filter_mode == MetadataFilterMode.AUTO:
+            # 节点（knowledge node）在 auto 模式下已用配置好的模型提取出过滤条件，
+            # 直接采用，跳过 service 用 knowledge.llm_id 的重复提取。
+            if request.metadata_filters:
+                return cls._build_common_filter_groups(
+                    request.metadata_filters,
+                    set(common_metadata_defs.keys()),
+                )
+
             if not common_metadata_defs:
                 return []
             llm = cls._build_metadata_auto_filter_llm(

@@ -15,6 +15,8 @@ from app.core.utils.datetime_utils import to_iso_z
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_logger
+from app.core.memory.enums import SearchStrategy
+from app.core.memory.memory_service import MemoryService
 from app.models import EndUser
 from app.models.app_model import App
 from app.repositories.end_user_repository import EndUserRepository
@@ -343,7 +345,7 @@ class MemoryAPIService:
     ) -> Dict[str, Any]:
         """Read memory synchronously (inline, no Celery).
 
-        Validates end_user, then calls MemoryAgentService.read_memory directly.
+        Validates end_user, then calls MemoryService.read (via ReadPipeLine) directly.
         Blocks until the read completes. Use for cases where the caller needs
         the answer immediately.
 
@@ -369,22 +371,24 @@ class MemoryAPIService:
         self._update_end_user_config(end_user_id, config_id)
 
         try:
-            result = await MemoryAgentService().read_memory(
-                end_user_id=end_user_id,
-                message=message,
-                history=[],
-                search_switch=search_switch,
+            service = MemoryService(
                 config_id=config_id,
-                db=self.db,
+                end_user_id=end_user_id,
+                workspace_id=str(workspace_id),
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id or ""
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            result = await service.read(
+                query=message,
+                search_switch=SearchStrategy(search_switch),
+                history=[],
             )
 
             logger.info(f"Memory read (sync) successful for end_user: {end_user_id}")
 
             return {
-                "answer": result.get("answer", ""),
-                "intermediate_outputs": result.get("intermediate_outputs", []),
+                "answer": result.content,
+                "intermediate_outputs": [_.model_dump() for _ in result.memories],
                 "end_user_id": end_user_id
             }
 

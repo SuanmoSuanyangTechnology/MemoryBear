@@ -180,6 +180,161 @@ def extract_api_key_from_request(request: Request) -> Optional[str]:
         return None
 
 
+def require_api_key_self_db(
+        scopes: Optional[List[str]] = None
+):
+    """
+    API Key 鉴权装饰器（自动管理 DB 会话）
+
+    与 require_api_key 功能相同，但自行管理 DB 会话生命周期，
+    端点函数不再需要声明 db: Session = Depends(get_db) 参数。
+
+    Args:
+        scopes: 所需的权限范围列表["app", "rag", "memory"]
+
+    Usage:
+        @router.post("/read/sync")
+        @require_api_key_self_db(scopes=["memory"])
+        async def read_memory_sync(
+            request: Request,
+            api_key_auth: ApiKeyAuth = None,
+        ):
+            # 不需要 db 参数，装饰器内部自行管理
+            pass
+    """
+
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            request: Request = kwargs.get("request")
+
+            api_key = extract_api_key_from_request(request)
+            if not api_key:
+                logger.warning("API Key 缺失", extra={
+                    "endpoint": str(request.url),
+                    "method": request.method,
+                    "ip_address": request.client.host if request.client else None
+                })
+                raise BusinessException("API Key 不存在", BizCode.API_KEY_NOT_FOUND)
+
+            from app.db import get_db_context
+
+            with get_db_context() as db:
+                api_key_obj = ApiKeyAuthService.validate_api_key(db, api_key)
+                if not api_key_obj:
+                    logger.warning("API Key 无效或已过期", extra={
+                        "key_prefix": api_key[:10] + "..." if len(api_key) > 10 else api_key,
+                        "endpoint": str(request.url),
+                        "method": request.method,
+                        "ip_address": request.client.host if request.client else None
+                    })
+                    raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID)
+
+                ApiKeyAuthService.check_app_published(db, api_key_obj)
+
+                if scopes:
+                    missing_scopes = []
+                    for scope in scopes:
+                        if not ApiKeyAuthService.check_scope(api_key_obj, scope):
+                            missing_scopes.append(scope)
+                    if missing_scopes:
+                        logger.warning("API Key 权限不足", extra={
+                            "api_key_id": str(api_key_obj.id),
+                            "missing_scopes": missing_scopes,
+                            "available_scopes": api_key_obj.scopes,
+                            "endpoint": str(request.url)
+                        })
+                        raise BusinessException(
+                            f"缺少必须的权限范围：{','.join(missing_scopes)}",
+                            BizCode.API_KEY_INVALID_SCOPE,
+                            context={"required_scopes": scopes, "missing_scopes": missing_scopes}
+                        )
+
+                rate_limiter = RateLimiterService()
+                is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj, db=db)
+                if not is_allowed:
+                    logger.warning("API Key 限流触发", extra={
+                        "api_key_id": str(api_key_obj.id),
+                        "endpoint": str(request.url),
+                        "method": request.method,
+                        "error_msg": error_msg
+                    })
+                    if "Daily" in error_msg:
+                        code = BizCode.API_KEY_DAILY_LIMIT_EXCEEDED
+                    elif "Tenant" in error_msg:
+                        code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
+                    elif "QPS" in error_msg:
+                        code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
+                    else:
+                        code = BizCode.API_KEY_QUOTA_EXCEEDED
+                    raise RateLimitException(
+                        error_msg,
+                        code,
+                        rate_headers=rate_headers
+                    )
+
+                db.commit()
+
+                _api_key_id = api_key_obj.id
+                _api_key_auth = ApiKeyAuth(
+                    api_key_id=api_key_obj.id,
+                    workspace_id=api_key_obj.workspace_id,
+                    type=api_key_obj.type,
+                    scopes=api_key_obj.scopes,
+                    resource_id=api_key_obj.resource_id,
+                )
+
+            kwargs["api_key_auth"] = _api_key_auth
+
+            start_time = time.perf_counter()
+            response = await func(*args, **kwargs)
+            end_time = time.perf_counter()
+            response_time = (end_time - start_time) * 1000
+
+            if not isinstance(response, Response):
+                response = JSONResponse(content=response)
+            response = add_rate_limit_headers(response, rate_headers)
+
+            asyncio.create_task(_log_api_key_usage_self_db(
+                _api_key_id, request, response, response_time
+            ))
+            return response
+
+        return wrapper
+
+    return decorator
+
+
+async def _log_api_key_usage_self_db(
+        api_key_id: uuid.UUID,
+        request: Request,
+        response: Response,
+        response_time: float
+):
+    """记录 API Key 使用日志（自行管理 DB 会话，用于 require_api_key_self_db）"""
+    from app.db import get_db_context
+
+    try:
+        with get_db_context() as db:
+            log_data = {
+                "id": uuid.uuid4(),
+                "api_key_id": api_key_id,
+                "endpoint": str(request.url.path),
+                "method": request.method,
+                "ip_address": request.client.host if request.client else None,
+                "user_agent": request.headers.get("User-Agent"),
+                "status_code": response.status_code if hasattr(response, "status_code") else None,
+                "response_time": round(response_time),
+                "tokens_used": None,
+                "created_at": utcnow_naive()
+            }
+            ApiKeyLogRepository.create(db, log_data)
+            ApiKeyRepository.update_usage(db, api_key_id)
+            db.commit()
+    except Exception as e:
+        logger.error(f"未能记录API密钥的使用情况: {e}")
+
+
 async def log_api_key_usage(
         db: Session,
         api_key_id: uuid.UUID,

@@ -16,10 +16,10 @@ class SearchStrategy(StrEnum):
     DEEP = "0"
     NORMAL = "1"
     QUICK = "2"
-
-    CONV = "3"
-    META = "4"
     EXPRESS = "5"
+
+    RECENT = "3"
+    META = "4"
 
     @classmethod
     def _missing_(cls, value: str):
@@ -27,9 +27,10 @@ class SearchStrategy(StrEnum):
             "deep": cls.DEEP,
             "normal": cls.NORMAL,
             "quick": cls.QUICK,
-            "conv": cls.CONV,
+            "recent": cls.RECENT,
             "meta": cls.META,
             "express": cls.EXPRESS,
+            "conv": cls.RECENT  # NOTE: 兼容
         }
         method = aliases.get(str(value).lower())
         if not method:

@@ -121,50 +121,16 @@ def get_workspace_end_users_paginated(
     business_logger.info(f"获取工作空间宿主列表（分页）: workspace_id={workspace_id}, keyword={keyword}, page={page}, pagesize={pagesize}, 操作者: {current_user.username}")
 
     try:
-        # 构建基础查询 — 只加载接口需要的列，避免加载大 Text 字段
-        _dashboard_columns = load_only(
-            EndUserModel.id,
-            EndUserModel.other_name,
-            EndUserModel.memory_count,
-            EndUserModel.app_id,
-            EndUserModel.memory_config_id,
-            EndUserModel.created_at,
-            EndUserModel.workspace_id,
-        )
-        base_query = db.query(EndUserModel).options(_dashboard_columns).filter(
-            EndUserModel.workspace_id == workspace_id,
-            EndUserModel.memory_count > 0,  # 只查询有记忆的宿主
-            EndUserModel.is_active == True,
+        from app.repositories.end_user_repository import EndUserRepository
+
+        repo = EndUserRepository(db)
+        end_users_orm, total = repo.get_paginated_with_memory(
+            workspace_id=workspace_id,
+            page=page,
+            pagesize=pagesize,
+            keyword=keyword,
         )
 
-        # 构建搜索条件（过滤空字符串和None）
-        keyword = keyword.strip() if keyword else None
-
-        if keyword:
-            keyword_pattern = f"%{keyword}%"
-            base_query = base_query.filter(
-                or_(
-                    EndUserModel.other_name.ilike(keyword_pattern),
-                    cast(EndUserModel.id, String).ilike(keyword_pattern),
-                )
-            )
-            business_logger.info(f"应用模糊搜索: keyword={keyword}（匹配 other_name 或 id）")
-
-        # 获取总记录数
-        total = base_query.count()
-
-        if total == 0:
-            business_logger.info("工作空间下没有宿主")
-            return {"items": [], "total": 0}
-
-        # 分页查询
-        # 按 created_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
-        end_users_orm = base_query.order_by(
-            nullslast(desc(EndUserModel.created_at)),
-            desc(EndUserModel.id)
-        ).offset((page - 1) * pagesize).limit(pagesize).all()
-
-        # 直接返回 ORM 对象，controller 只需要 id/other_name/memory_count
         business_logger.info(f"成功获取 {len(end_users_orm)} 个宿主记录，总计 {total} 条")
         return {"items": end_users_orm, "total": total}
 
@@ -195,76 +161,15 @@ def get_workspace_end_users_paginated_rag(
     )
 
     try:
-        from app.models.document_model import Document
-        from app.models.knowledge_model import Knowledge
+        from app.repositories.end_user_repository import EndUserRepository
 
-        chunk_subquery = (
-            db.query(
-                Document.file_name.label("file_name"),
-                func.coalesce(func.sum(Document.chunk_num), 0).label("memory_count"),
-            )
-            .join(Knowledge, Document.kb_id == Knowledge.id)
-            .filter(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-                Knowledge.permission_id == "Memory",
-                Document.status == 1,
-            )
-            .group_by(Document.file_name)
-            .subquery()
+        repo = EndUserRepository(db)
+        items, total = repo.get_paginated_with_memory_rag(
+            workspace_id=workspace_id,
+            page=page,
+            pagesize=pagesize,
+            keyword=keyword,
         )
-
-        base_query = (
-            db.query(
-                EndUserModel,
-                chunk_subquery.c.memory_count.label("memory_count"),
-            )
-            .options(load_only(
-                EndUserModel.id,
-                EndUserModel.other_name,
-                EndUserModel.memory_count,
-                EndUserModel.app_id,
-                EndUserModel.memory_config_id,
-                EndUserModel.created_at,
-                EndUserModel.workspace_id,
-            ))
-            .join(
-                chunk_subquery,
-                chunk_subquery.c.file_name == func.concat(cast(EndUserModel.id, String), ".txt"),
-            )
-            .filter(
-                EndUserModel.workspace_id == workspace_id,
-                chunk_subquery.c.memory_count > 0,
-                EndUserModel.is_active == True,
-            )
-        )
-
-        keyword = keyword.strip() if keyword else None
-        if keyword:
-            keyword_pattern = f"%{keyword}%"
-            base_query = base_query.filter(
-                or_(
-                    EndUserModel.other_name.ilike(keyword_pattern),
-                    cast(EndUserModel.id, String).ilike(keyword_pattern),
-                )
-            )
-
-        total = base_query.count()
-        if total == 0:
-            business_logger.info("RAG 模式下没有符合条件的宿主")
-            return {"items": [], "total": 0}
-
-        rows = base_query.order_by(
-            nullslast(desc(EndUserModel.created_at)),
-            desc(EndUserModel.id),
-        ).offset((page - 1) * pagesize).limit(pagesize).all()
-
-        items = []
-        for end_user_orm, memory_count in rows:
-            items.append({
-                "end_user": end_user_orm,
-                "memory_count": int(memory_count or 0),
-            })
 
         business_logger.info(f"成功获取 RAG 宿主记录 {len(items)} 条，总计 {total} 条")
         return {"items": items, "total": total}

@@ -30,14 +30,14 @@ import MermaidChart from './MermaidChart'
 type ICodeProps = {
   children: string;
   className: string;
+  isNeedCopy?: boolean;
 }
 
 /** Code block component that renders syntax-highlighted code or special visualizations */
 const Code: FC<ICodeProps> = (props) => {
-  const { children, className } = props;
+  const { children, className, isNeedCopy = true } = props;
   /** Extract language from className (e.g., 'language-javascript' -> 'javascript') */
   const language = className?.split('-')[1]
-  console.log('Code', props)
 
   // Parse ECharts configuration from code content
   const charData = useMemo(() => {
@@ -97,14 +97,16 @@ const Code: FC<ICodeProps> = (props) => {
         >
           {children}
         </SyntaxHighlighter>
-        <CopyBtn
-          value={children}
-          style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-        }}
-      />
+        {isNeedCopy &&
+          <CopyBtn
+            value={children}
+            style={{
+              position: 'absolute',
+              top: 20,
+              right: 20,
+            }}
+          />
+        }
     </div>
     )
   }

@@ -460,13 +460,13 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'metadata',
             defaultValue: 'disabled'
           },
-          // metadata_model: {
-          //   type: 'define',
-          //   defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
-          //     acc[key] = value.defaultValue;
-          //     return acc;
-          //   }, {} as Record<string, any>),
-          // },
+          metadata_model: {
+            type: 'define',
+            defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
+              acc[key] = value.defaultValue;
+              return acc;
+            }, {} as Record<string, any>),
+          },
           metadata_filters: {
             type: 'define',
             defaultValue: {

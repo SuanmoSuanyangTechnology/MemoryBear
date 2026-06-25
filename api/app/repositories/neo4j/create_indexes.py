@@ -34,15 +34,29 @@ VECTOR_DEFS: List[Tuple[str, str, str, int]] = [
 # Range 索引 (end_user_id): (name, label) — property 固定为 end_user_id
 RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_dialogue", "Dialogue"),
-    ("user_chunk", "Chunk"),
-    ("user_statement", "Statement"),
-    ("user_extracted_entity", "ExtractedEntity"),
-    ("user_memory_summary", "MemorySummary"),
-    ("user_perceptual", "Perceptual"),
     ("user_assistant_original", "AssistantOriginal"),
     ("user_assistant_pruned", "AssistantPruned"),
     ("user_conversation", "Conversation"),
 ]
+
+# 复合索引 (end_user_id, id)
+COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
+    ("user_statement_id", "Statement", "id"),
+    ("user_entity_id", "ExtractedEntity", "id"),
+    ("user_chunk_id", "Chunk", "id"),
+    ("user_summary_id", "MemorySummary", "id"),
+    ("user_perceptual_id", "Perceptual", "id"),
+    ("user_community_id", "Community", "community_id"),
+]
+
+# 旧的单列 end_user_id 索引名称（已被复合索引替代，创建复合索引前需先删除）
+_LEGACY_RANGE_NAMES: set[str] = {
+    "user_chunk",
+    "user_statement",
+    "user_extracted_entity",
+    "user_memory_summary",
+    "user_perceptual",
+}
 
 # Uniqueness 约束: (name, label, property)
 CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
@@ -70,6 +84,7 @@ _DIFF_KEYS = {
     "fulltext index": ("label", "properties", "analyzer"),
     "vector index": ("label", "property", "dimensions", "similarity_function"),
     "range index": ("label", "property"),
+    "composite index": ("label", "property"),
     "constraint": ("label", "property"),
 }
 
@@ -334,6 +349,69 @@ async def create_end_user_id_indexes():
         await connector.close()
 
 
+async def create_composite_indexes():
+    """Smart Upsert composite indexes on (end_user_id, id_property).
+
+    加速 search_by_embedding 游标批查询：
+        WHERE end_user_id = $x AND id > $last ORDER BY id
+
+    复合索引的前缀列覆盖 end_user_id 单列查询，创建前会先删除旧的
+    单列 end_user_id 索引以避 Neo4j 的等价索引冲突。
+    """
+    connector = Neo4jConnector()
+    try:
+        # 1. 删除旧的单列 end_user_id 索引（已被复合索引替代）
+        existing_rows = await connector.execute_query(
+            "SHOW INDEXES YIELD name, labelsOrTypes, properties, type "
+            "WHERE type = 'RANGE' "
+            "  AND size(properties) = 1 "
+            "  AND properties[0] = 'end_user_id' "
+            "RETURN name, labelsOrTypes[0] AS label"
+        )
+        for row in (existing_rows or []):
+            name = row.get("name", "")
+            if name in _LEGACY_RANGE_NAMES:
+                try:
+                    await connector.execute_query(f"DROP INDEX {name}")
+                    logger.info(f"[Index] 删除旧单列索引: {name}")
+                except Exception as e:
+                    logger.warning(f"[Index] 删除旧单列索引失败 {name}: {e}")
+
+        # 2. Smart upsert 复合索引
+        desired: List[Dict[str, Any]] = []
+        for name, label, id_prop in COMPOSITE_DEFS:
+            desired.append({
+                "name": name,
+                "label": label,
+                "property": f"end_user_id,{id_prop}",
+                "drop_query": f"DROP INDEX {name}",
+                "create_query": (
+                    f"CREATE INDEX {name} "
+                    f"FOR (n:{label}) ON (n.end_user_id, n.{id_prop})"
+                ),
+            })
+
+        await _smart_upsert(
+            connector,
+            desired=desired,
+            show_query="""
+                SHOW INDEXES
+                YIELD name, labelsOrTypes, properties, type
+                WHERE type = 'RANGE'
+                  AND size(properties) = 2
+                  AND properties[0] = 'end_user_id'
+                RETURN name,
+                       labelsOrTypes[0] AS label,
+                       reduce(s='', p IN properties | s + CASE WHEN s='' THEN '' ELSE ',' END + p)
+                         AS property,
+                       labelsOrTypes[0] + '|end_user_id,' + properties[1] AS def_key
+            """,
+            category="composite index",
+        )
+    finally:
+        await connector.close()
+
+
 async def create_user_indexes():
     """Deprecated: 历史保留入口；新代码请直接调用 :func:`create_end_user_id_indexes`。"""
     await create_end_user_id_indexes()
@@ -379,4 +457,5 @@ async def create_all_indexes():
     await create_fulltext_indexes()
     await create_vector_indexes()
     await create_end_user_id_indexes()
+    await create_composite_indexes()
     await create_unique_constraints()

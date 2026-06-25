@@ -104,7 +104,7 @@ const RecallTestResult = ({
       }
       
       // Fallback to Markdown rendering
-      return <RbMarkdown content={content} showHtmlComments={true} />;
+      return <RbMarkdown content={content} showHtmlComments={true} isNeedCopy={false} />;
     };
   }, []);
 
