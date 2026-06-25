@@ -6,9 +6,10 @@
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { Spin, Flex, Button, Pagination, Tooltip } from 'antd'
+import { Spin, Flex, Button, Pagination, Tooltip, App } from 'antd'
 import { SoundOutlined, WarningOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import copy from 'copy-to-clipboard'
 
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps, ChatItem, CitationItem } from './types'
@@ -50,6 +51,7 @@ const ChatContent: FC<ChatContentProps> = ({
   isAlwaysShowAssistantTools = false,
 }) => {
   const { t } = useTranslation()
+  const { message: messageApi } = App.useApp()
   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
   const prevDataLengthRef = useRef(data.length);
@@ -209,6 +211,10 @@ const ChatContent: FC<ChatContentProps> = ({
       return
     }
     regenerateMessages?.(item)
+  }
+  const handleCopy = (item: ChatItem) => {
+    copy(formatContent(item))
+    messageApi.success(t('common.copySuccess'))
   }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
@@ -387,10 +393,16 @@ const ChatContent: FC<ChatContentProps> = ({
                                 ></div>
                               </Tooltip>
                             </>}
+                            <Tooltip title={t('common.copy')}>
+                              <div
+                                className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/copy.svg')]"
+                                onClick={() => handleCopy(item)}
+                              ></div>
+                            </Tooltip>
                             {handleFavorite && <>
                               <Tooltip title={item.is_favorited ? t('memoryConversation.unfavorite') : t('memoryConversation.favorite')}>
                                 <div
-                                  className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/favorite.svg')]", {
+                                  className={clsx("rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/favorite.svg')]", {
                                     "rb:bg-[url('@/assets/images/conversation/unfavorite.svg')]": item.is_favorited,
                                   })}
                                   onClick={() => handleFavorite?.(item?.id)}
@@ -415,12 +427,21 @@ const ChatContent: FC<ChatContentProps> = ({
                               : null
                             }
                           </>}
-
+                          {isSupportTools &&item.role === 'user' &&
+                            <Tooltip title={t('common.copy')}>
+                              <div
+                                className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/copy.svg')]"
+                                onClick={() => handleCopy(item)}
+                              ></div>
+                            </Tooltip>
+                          }
                           {isSupportTools && item.role === 'user' && deleteMsg &&
-                            <div
-                              className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete_big.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red_big.svg')]"
-                              onClick={() => deleteMsg(item)}
-                            ></div>
+                            <Tooltip title={t('common.delete')}>
+                              <div
+                                className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete_big.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red_big.svg')]"
+                                onClick={() => deleteMsg(item)}
+                              ></div>
+                            </Tooltip>
                           }
                         </Flex>
                       }
