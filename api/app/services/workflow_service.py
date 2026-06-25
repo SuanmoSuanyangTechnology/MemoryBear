@@ -4330,7 +4330,7 @@ class WorkflowService:
         siblings.sort(key=lambda s: (s.version or 0))
         return siblings
 
-    def _build_branch_view(self, message_id) -> dict:
+    def _build_branch_view(self, message_id, user_id: str | None = None) -> dict:
         """构建分支视图：message_id 所在分支的完整链 + 各 assistant 版本的节点执行明细。
 
         返回 {
@@ -4344,7 +4344,7 @@ class WorkflowService:
                     AppLogService.build_pending_intervention_map），供前端切版本后回填 HITL 节点状态。
         }
         """
-        from app.models import Message as MessageModel, WorkflowExecution
+        from app.models import Message as MessageModel, WorkflowExecution, MessageFavorite
         from app.services.app_log_service import AppLogService, _build_nodes_from_output_data
         chain = self._load_branch_chain(message_id)
         if not chain:
@@ -4361,6 +4361,7 @@ class WorkflowService:
                 "meta_data": m.meta_data,
                 "status": m.status,
                 "parent_message_id": str(m.parent_message_id) if m.parent_message_id else None,
+                "is_favorited": m.id in favorited_ids,
             }
 
         # 预加载该会话所有 execution，供 meta_data.execution_id 缺失时按完成时间就近兜底匹配
@@ -4397,15 +4398,40 @@ class WorkflowService:
             nodes = _build_nodes_from_output_data(execution.output_data)
             return [n.model_dump() for n in nodes] if nodes else []
 
-        items: list[Any] = []
-        node_executions_map: dict[str, list[dict]] = {}
+        # 先解析每轮结构（assistant 取出全部兄弟版本），收集所有消息 id，批量查当前用户收藏状态
+        turns: list[tuple[str, Any]] = []
+        all_ids: set = set()
         for m in chain:
             if m.role == "user":
-                items.append(serialize(m))
+                turns.append(("user", m))
+                all_ids.add(m.id)
             elif m.role == "assistant":
+                siblings = self._resolve_sibling_versions(m)
+                turns.append(("assistant", siblings))
+                for s in siblings:
+                    all_ids.add(s.id)
+
+        favorited_ids: set = set()
+        if user_id and all_ids:
+            favorited_ids = {
+                row[0]
+                for row in self.db.query(MessageFavorite.message_id)
+                .filter(
+                    MessageFavorite.message_id.in_(all_ids),
+                    MessageFavorite.user_id == user_id,
+                )
+                .all()
+            }
+
+        items: list[Any] = []
+        node_executions_map: dict[str, list[dict]] = {}
+        for role, payload in turns:
+            if role == "user":
+                items.append(serialize(payload))
+            else:
                 # 同轮的所有 assistant 版本（供版本切换器）：按父 user 聚合,
                 # 兼容人工介入暂停路径 parent 缺失的存量首轮（详见 _resolve_sibling_versions）
-                siblings = self._resolve_sibling_versions(m)
+                siblings = payload
                 serialized = [serialize(s) for s in siblings]
                 # 单版本拍平为对象，多版本保留为数组——与前端 chatList 约定一致
                 items.append(serialized[0] if len(serialized) == 1 else serialized)

@@ -873,6 +873,12 @@ class MessageFeedbackResponse(BaseModel):
     feedback_type: Optional[str] = Field(None, description="当前反馈类型")
 
 
+class MessageFavoriteResponse(BaseModel):
+    """消息收藏响应"""
+    action: str = Field(..., description="操作: created/cancelled")
+    is_favorited: bool = Field(..., description="是否已收藏")
+
+
 class MessageReportRequest(BaseModel):
     """消息举报请求（含选中反馈）"""
     report_type: str = Field(

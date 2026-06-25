@@ -22,6 +22,7 @@ from app.models.message_report_model import MessageReportType
 from app.schemas import app_schema
 from app.schemas.memory_storage_schema import ApiResponse
 from app.services.conversation_service import ConversationService
+from app.services.message_favorite_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
 from app.services.message_report_service import ReportService
 from app.services.conversation_share_service import ConversationShareService
@@ -198,7 +199,7 @@ async def switch_message_version_with_branch(
 
     # 以 switch 返回的目标版本 id 为锚点取分支：即使入参 message_id 是非目标兄弟也能正确取到目标分支
     workflow_service = WorkflowService(db)
-    branch = workflow_service._build_branch_view(result["message_id"])
+    branch = workflow_service._build_branch_view(result["message_id"], user_id=str(current_user.id))
     return success(data=branch)
 
 
@@ -276,6 +277,40 @@ async def submit_message_feedback(
     )
 
     return success(data=app_schema.MessageFeedbackResponse(**result))
+
+
+# ========== 消息收藏 ==========
+
+@router.post("/{app_id}/messages/{message_id}/favorite", summary="收藏/取消收藏消息")
+@cur_workspace_access_guard()
+async def toggle_message_favorite(
+        app_id: uuid.UUID,
+        message_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """切换消息收藏状态（试运行界面，已登录用户）
+
+    幂等：已收藏则取消，未收藏则新增。
+    """
+    workspace_id = current_user.current_workspace_id
+
+    message = db.get(Message, message_id)
+    if not message:
+        from app.core.exceptions import BusinessException
+        from app.core.error_codes import BizCode
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    favorite_service = FavoriteService(db)
+    result = favorite_service.toggle_favorite(
+        message_id=message_id,
+        conversation_id=message.conversation_id,
+        workspace_id=workspace_id,
+        user_id=str(current_user.id),
+        source="pilot_run",
+    )
+
+    return success(data=app_schema.MessageFavoriteResponse(**result))
 
 
 @router.get("/{app_id}/messages/{message_id}/feedback", summary="获取用户对消息的反馈")

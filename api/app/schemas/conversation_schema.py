@@ -52,6 +52,8 @@ class Message(BaseModel):
     # 反馈信息（仅助手消息有效，由 controller 注入）
     feedback_type: Optional[str] = Field(None, description="反馈类型: like/dislike")
     feedback_content: Optional[str] = Field(None, description="反馈内容")
+    # 收藏状态（仅助手消息有效，由 controller 注入）
+    is_favorited: Optional[bool] = Field(None, description="是否已收藏")
     # 多版本支持
     version: Optional[int] = Field(1, description="消息版本号")
     is_current: Optional[bool] = Field(True, description="是否当前版本")

@@ -44,6 +44,7 @@ from .reflection_log_model import MemoryReflectionLog
 from .knowledge_metadata_model import KnowledgeMetadata, KnowledgeMetadataBinding
 from .message_feedback_model import MessageFeedback
 from .message_report_model import MessageReport
+from .message_favorite_model import MessageFavorite
 from .conversation_share_model import ConversationShare
 from .memory_message_model import MemoryMessage
 
@@ -78,6 +79,7 @@ __all__ = [
     "ConversationContextState",
     "MessageFeedback",
     "MessageReport",
+    "MessageFavorite",
     "ConversationShare",
     "ApiKey",
     "ApiKeyLog",
