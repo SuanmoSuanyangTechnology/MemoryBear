@@ -33,7 +33,7 @@ from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.audit_logger import audit_logger
 from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
-from app.db import get_db_context
+from app.db import get_db_context, get_db_read
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas import FileInput
@@ -694,7 +694,6 @@ class MemoryAgentService:
             history: List[Dict],
             query: str,
             config_id: str,
-            db: Session
     ) -> str:
         """
         基于检索信息、历史对话和查询生成最终答案
@@ -706,65 +705,71 @@ class MemoryAgentService:
             history: 历史对话记录
             query: 用户查询
             config_id: 配置ID
-            db: 数据库会话
             
         Returns:
             生成的答案文本
         """
         # Always get workspace_id from end_user for fallback, even if config_id is provided
-        workspace_id = None
-        try:
-            connected_config = get_end_user_connected_config(end_user_id, db)
-            workspace_id = connected_config.get('workspace_id')
-            if config_id is None:
-                config_id = connected_config.get('memory_config_id')
-            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
-            if config_id is None and workspace_id is None:
-                raise ValueError(
-                    f"No memory configuration found for end_user_id {end_user_id}. Please ensure the user has a connected memory configuration.")
-        except Exception as e:
-            if "No memory configuration found" in str(e):
-                raise  # Re-raise our specific error
-            logger.error(f"Failed to get connected config for end_user_id {end_user_id}: {e}")
-            if config_id is None:
-                raise ValueError(f"Unable to determine memory configuration for end_user_id {end_user_id}: {e}")
-            # If config_id was provided, continue without workspace_id fallback
+        with get_db_read() as db:
+            try:
+
+                connected_config = get_end_user_connected_config(end_user_id, db)
+                workspace_id = connected_config.get('workspace_id')
+                if config_id is None:
+                    config_id = connected_config.get('memory_config_id')
+                logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
+                if config_id is None and workspace_id is None:
+                    raise ValueError(
+                        f"No memory configuration found for end_user_id {end_user_id}. Please ensure the user has a connected memory configuration.")
+                config_service = MemoryConfigService(db)
+                memory_config = config_service.load_memory_config(
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    service_name="MemoryAgentService"
+                )
+                model_config = config_service.get_model_config(str(memory_config.llm_model_id))
+            except Exception as e:
+                if "No memory configuration found" in str(e):
+                    raise  # Re-raise our specific error
+                logger.error(f"Failed to get connected config for end_user_id {end_user_id}: {e}")
+                if config_id is None:
+                    raise ValueError(f"Unable to determine memory configuration for end_user_id {end_user_id}: {e}")
+                # If config_id was provided, continue without workspace_id fallback
+                raise e
 
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
 
         try:
-            # 加载配置
-            config_service = MemoryConfigService(db)
-            memory_config = config_service.load_memory_config(
-                config_id=config_id,
-                workspace_id=workspace_id,
-                service_name="MemoryAgentService"
+            from app.core.models import RedBearLLM, RedBearModelConfig
+            from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
+            from app.core.memory.agent.utils.template_tools import TemplateService
+            from app.models.models_model import ModelType
+
+            llm = RedBearLLM(
+                RedBearModelConfig(
+                    model_name=model_config["model_name"],
+                    provider=model_config["provider"],
+                    api_key=model_config["api_key"],
+                    base_url=model_config["base_url"],
+                ),
+                type=ModelType.CHAT
             )
 
-            # 导入必要的模块
-            from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import (
-                summary_llm,
-            )
-            from app.core.memory.agent.models.summary_models import (
-                RetrieveSummaryResponse,
-            )
-
-            # 构建状态对象
-            state = {
-                "data": query,
-                "memory_config": memory_config
-            }
-
-            # 直接调用 summary_llm 函数
-            answer = await summary_llm(
-                state=state,
-                history=history,
-                retrieve_info=retrieve_info,
+            template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
+            template_service = TemplateService(template_root)
+            system_prompt = await template_service.render_template(
                 template_name='direct_summary_prompt.jinja2',
                 operation_name='retrieve_summary',
-                response_model=RetrieveSummaryResponse,
-                search_mode="1"
+                query=query,
+                history=history,
+                retrieve_info=retrieve_info
             )
+
+            from langchain_core.prompts import ChatPromptTemplate
+            prompt = ChatPromptTemplate.from_template("{input}")
+            chain = prompt | llm
+            response = await chain.ainvoke({"input": system_prompt})
+            answer = response.content if hasattr(response, 'content') else str(response)
 
             logger.info(f"Successfully generated summary: {answer[:100] if answer else 'None'}...")
             return answer if answer else "信息不足，无法回答。"
