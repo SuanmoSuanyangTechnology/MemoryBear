@@ -16,7 +16,7 @@ from app.core.memory.memory_service import MemoryService
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.response_utils import fail, success
 from app.db import get_db, get_db_read
-from app.dependencies import cur_workspace_access_guard, get_current_user
+from app.dependencies import cur_workspace_access_guard, get_current_user, cur_workspace_access_guard_self_db
 from app.models import ModelApiKey
 from app.models.user_model import User
 from app.repositories import knowledge_repository
@@ -285,7 +285,7 @@ async def write_server_async(
 
 
 @router.post("/read_service", response_model=ApiResponse)
-@cur_workspace_access_guard()
+@cur_workspace_access_guard_self_db()
 async def read_server(
         user_input: UserInput,
         current_user: User = Depends(get_current_user)
