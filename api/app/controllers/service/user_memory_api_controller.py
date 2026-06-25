@@ -31,7 +31,7 @@ from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 
 # 包装内部服务 controller
-from app.controllers import user_memory_controllers, memory_agent_controller
+from app.controllers import memory_analytics_controller
 
 router = APIRouter(prefix="/memory", tags=["V1 - User Memory API"])
 logger = get_business_logger()
@@ -56,7 +56,7 @@ async def get_graph_data(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.get_graph_data_api(
+    return await memory_analytics_controller.get_graph_data_api(
         end_user_id=end_user_id,
         node_types=node_types,
         limit=limit,
@@ -79,7 +79,7 @@ async def get_community_graph(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.get_community_graph_data_api(
+    return await memory_analytics_controller.get_community_graph_data_api(
         end_user_id=end_user_id,
         current_user=current_user,
         db=db,
@@ -101,7 +101,7 @@ async def get_node_statistics(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.get_node_statistics_api(
+    return await memory_analytics_controller.get_node_statistics_api(
         end_user_id=end_user_id,
         current_user=current_user,
         db=db,
@@ -124,7 +124,7 @@ async def get_user_summary(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.get_user_summary_api(
+    return await memory_analytics_controller.get_user_summary_api(
         end_user_id=end_user_id,
         language_type=language_type,
         current_user=current_user,
@@ -144,7 +144,7 @@ async def get_memory_insight(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.get_memory_insight_report_api(
+    return await memory_analytics_controller.get_memory_insight_report_api(
         end_user_id=end_user_id,
         current_user=current_user,
         db=db,
@@ -168,7 +168,7 @@ async def get_interest_distribution(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await memory_agent_controller.get_interest_distribution_by_user_api(
+    return await memory_analytics_controller.get_interest_distribution_by_user_api(
         end_user_id=end_user_id,
         limit=limit,
         language_type=language_type,
@@ -192,7 +192,7 @@ async def get_end_user_info(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.get_end_user_info(
+    return await memory_analytics_controller.get_end_user_info(
         end_user_id=end_user_id,
         current_user=current_user,
         db=db,
@@ -220,7 +220,7 @@ async def generate_cache(
     if cache_request.end_user_id:
         validate_end_user_in_workspace(db, cache_request.end_user_id, api_key_auth.workspace_id)
 
-    return await user_memory_controllers.generate_cache_api(
+    return await memory_analytics_controller.generate_cache_api(
         request=cache_request,
         language_type=language_type,
         current_user=current_user,
