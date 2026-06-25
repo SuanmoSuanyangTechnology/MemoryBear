@@ -27,6 +27,8 @@ from . import (
     mcp_market_controller,
     mcp_market_config_controller,
     memory_agent_controller,
+    memory_analytics_controller,
+    memory_controller,
     memory_dashboard_controller,
     memory_episodic_controller,
     memory_explicit_controller,
@@ -81,6 +83,8 @@ manager_router.include_router(app_log_controller.router)
 manager_router.include_router(annotation_controller.router)
 manager_router.include_router(upload_controller.router)
 manager_router.include_router(memory_agent_controller.router)
+manager_router.include_router(memory_controller.router)
+manager_router.include_router(memory_analytics_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)
 manager_router.include_router(memory_storage_controller.router)
 manager_router.include_router(user_memory_controllers.router)

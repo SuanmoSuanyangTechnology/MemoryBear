@@ -1759,7 +1759,7 @@ class AppService:
                 template_data = {
                     'nodes': [
                         {'id': 'start', 'type': 'start', 'name': '开始'},
-                        {'id': 'end', 'type': 'end', 'name': '结束'}
+                        {'id': 'end', 'type': 'end', 'name': '回复'}
                     ],
                     'edges': [
                         {'source': 'start', 'target': 'end'}
