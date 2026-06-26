@@ -87,6 +87,7 @@ class MemoryMessageRepository:
                 "role": role,
                 "message_seq": next_seq,
                 "content": content,
+                "dialog_at": mm.dialog_at,
             })
             logger.debug(
                 f"[MemoryMessageRepository] 写入 memory_messages: "

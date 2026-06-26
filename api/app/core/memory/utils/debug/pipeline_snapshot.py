@@ -9,19 +9,14 @@ Usage:
 Output structure (OSS):
 
     Sliding-window 写入（推荐路径，含完整定位上下文）:
-        redbear-files/snapshot/
+        redbear-files/extract_snapshot/
             {end_user_id}/
                 {conversation_id}/
                     seq_{message_seq:06d}_{YYYYmmdd_HHMMSS}/
                         0_summary.json
-                        1_assistant_pruning.json
+                        1_user_assistant_pruning.json
                         2_statement_outputs.json
                         ...
-
-    旧的整轮写入（无 conversation/seq 时的兼容路径）:
-        redbear-files/snapshot/
-            {end_user_id}_{YYYYmmdd_HHMMSS}/
-                ...
 
 Controlled by env var PIPELINE_SNAPSHOT_ENABLED (default: false).
 """
@@ -41,7 +36,7 @@ _ENABLED: Optional[bool] = None
 _OSS_BUCKET: Optional[Any] = None
 
 # OSS 上快照文件的根前缀（对应 bucket 内的 "目录"）
-_OSS_SNAPSHOT_PREFIX = "snapshot"
+_OSS_SNAPSHOT_PREFIX = "extract_snapshot"
 
 
 def _is_enabled() -> bool:

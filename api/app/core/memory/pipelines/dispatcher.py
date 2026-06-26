@@ -807,3 +807,75 @@ def dispatch_single_message(
     )
 
     return True
+
+
+# ──────────────────────────────────────────────
+# 入口5: MCP 写入
+# ──────────────────────────────────────────────
+
+
+async def dispatch_mcp_write(
+    message: str,
+    end_user_id: str,
+    config_id: str,
+    workspace_id: str,
+    dialog_at: str = "",
+) -> str:
+    """MCP 写入入口。
+
+    MCP 每次仅写入单条 user message，不需要上下文窗口。
+    流程：
+    1. 获取/创建虚拟 conversation（复用哨兵 App）
+    2. 写入 memory_messages 表
+    3. 立即推进 write_cursor
+    4. 直接派发写入任务（context_before=[], context_after=[]）
+
+    Args:
+        message: 用户消息内容
+        end_user_id: 终端用户 ID
+        config_id: 记忆配置 ID
+        workspace_id: 工作空间 ID
+        dialog_at: 对话发生时间（ISO 8601）
+
+    Returns:
+        派发的任务 msg_id
+    """
+    # 1. 获取/创建虚拟 conversation
+    conversation_id = get_or_create_service_api_conversation(
+        workspace_id=workspace_id,
+        end_user_id=end_user_id,
+    )
+
+    # 2. 写入 memory_messages 表
+    messages = [{"role": "user", "content": message, "dialog_at": dialog_at}]
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        written_mms = repo.write_batch(conversation_id, messages)
+        db.commit()
+
+    target_msg = written_mms[0]
+    target_seq = target_msg["message_seq"]
+
+    # 3. 推进 write_cursor
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        repo.advance_write_cursor(conversation_id, target_seq)
+        db.commit()
+
+    # 4. 直接派发写入任务（无上下文）
+    msg_id = push_write_task(
+        end_user_id=end_user_id,
+        target_message=target_msg,
+        context_before=[],
+        context_after=[],
+        config_id=config_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        message_seq=target_seq,
+    )
+
+    logger.info(
+        f"[Dispatcher] MCP 写入任务已推送: end_user={end_user_id}, "
+        f"conv={conversation_id}, seq={target_seq}, msg_id={msg_id}"
+    )
+    return msg_id
