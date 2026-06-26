@@ -74,6 +74,8 @@ import toolIcon from '@/assets/images/menuNew/tool.svg';
 import toolActiveIcon from '@/assets/images/menuNew/tool_active.svg';
 import userIcon from '@/assets/images/menuNew/user.svg';
 import userActiveIcon from '@/assets/images/menuNew/user_active.svg';
+import accountIcon from '@/assets/images/menuNew/account.svg';
+import accountActiveIcon from '@/assets/images/menuNew/account_active.svg';
 
 export interface PackagePlan {
   id: string
@@ -156,6 +158,8 @@ const iconPathMap: Record<string, string> = {
   'promptActive': promptActiveIcon,
   'skills': skillsIcon,
   'skillsActive': skillsActiveIcon,
+  'account': accountIcon,
+  'accountActive': accountActiveIcon,
 };
 
 const { Sider } = Layout;

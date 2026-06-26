@@ -83,12 +83,14 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
                 </Flex>}
                 isNeedTooltip={false}
                 footer={<Row gutter={9} className="rb:pt-2!">
-                  <Col span={12}>
+                  <Col span={item.provider !== 'speedbear' ? 12 : 24}>
                     <Button className="rb:h-9!" block onClick={() => handleShowModel(item)}>{t('modelNew.showModel')}</Button>
                   </Col>
-                  <Col span={12}>
-                    <Button className="rb:h-9!" type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
-                  </Col>
+                  {item.provider !== 'speedbear' &&
+                    <Col span={12}>
+                      <Button className="rb:h-9!" type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
+                    </Col>
+                  }
                 </Row>}
               >
               </RbCard>

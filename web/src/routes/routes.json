@@ -12,6 +12,7 @@
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
       { "path": "/skills", "element": "Skills" },
+      { "path": "/account", "element": "Account" },
       { "path": "/no-permission", "element": "NoPermission" }
     ]
   },

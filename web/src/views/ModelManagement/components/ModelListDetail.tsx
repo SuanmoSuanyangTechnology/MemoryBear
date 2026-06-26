@@ -160,18 +160,20 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               <Tooltip title={item.description}>
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
-              <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
-                <Row gutter={12}>
-                  {!item.model_id && 
-                    <Col span={12}>
-                      <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+              {item.provider !== 'speedbear' &&
+                <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
+                  <Row gutter={12}>
+                    {!item.model_id && 
+                      <Col span={12}>
+                        <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                      </Col>
+                    }
+                    <Col span={!item.model_id ? 12 : 24}>
+                      <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
                     </Col>
-                  }
-                  <Col span={!item.model_id ? 12 : 24}>
-                    <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
-                  </Col>
-                </Row>
-              </div>
+                  </Row>
+                </div>
+              }
             </RbCard>
           ))}
           </div>
