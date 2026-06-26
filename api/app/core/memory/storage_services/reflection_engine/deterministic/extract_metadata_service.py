@@ -25,10 +25,12 @@ def _filter_invalid_old_values(
     existing_metadata: Dict[str, List[str]],
     entity_name: str,
     entity_id: str,
+    skipped_sink: "List[dict] | None" = None,
 ) -> int:
     """过滤 old_value 不在 Neo4j 当前列表的 delete/update op，就地移除。
 
     防止 Cypher 列表推导静默失败：匹配不到 old_value 时不会报错也不会改值。
+    skipped_sink 非空时，把被丢弃的 op 逐条记入（{field, op, old_value}），供快照采集。
     """
     valid_ops: List[Any] = []
     skipped = 0
@@ -37,6 +39,9 @@ def _filter_invalid_old_values(
             cur_list = existing_metadata.get(op.field) or []
             if op.old_value not in cur_list:
                 skipped += 1
+                if skipped_sink is not None:
+                    skipped_sink.append({"field": op.field, "op": op.op,
+                                         "old_value": op.old_value})
                 logger.warning(
                     f"[Metadata] 实体 {entity_name}({entity_id}) "
                     f"丢弃 {op.op} op：old_value 在当前 {op.field} 中不存在: "
@@ -57,10 +62,12 @@ def _build_patch_params(
     entity_name: str,
     allowed_fields: Tuple[str, ...],
     max_list_len_per_field: int,
+    truncated_sink: "List[dict] | None" = None,
 ) -> Dict[str, Any]:
     """按字段把 add / delete / update 拼成 ENTITY_METADATA_PATCH 的参数。
 
-    对 add 路径做长度保护。
+    对 add 路径做长度保护。truncated_sink 非空时，把被截断的 add 值逐条记入
+    （{field, value}），供快照采集。
     """
     adds = result.adds_by_field()
     deletes = result.deletes_by_field()
@@ -77,6 +84,9 @@ def _build_patch_params(
         capacity = max(0, max_list_len_per_field - current_len)
         if len(field_adds) > capacity:
             overflow = len(field_adds) - capacity
+            if truncated_sink is not None:
+                for v in field_adds[capacity:]:
+                    truncated_sink.append({"field": field, "value": v})
             field_adds = field_adds[:capacity]
             logger.warning(
                 f"[Metadata] 实体 {entity_name}({entity_id}) "
@@ -112,6 +122,50 @@ def _build_operations_detail(result: Any) -> List[Dict[str, Any]]:
     return details
 
 
+def _build_meta_trace(
+    entity_id: str,
+    entity_name: str,
+    descriptions: List[str],
+    existing: Dict[str, List[str]],
+    result: Any,
+    applied_ops: List[Any],
+    skipped_recs: List[dict],
+    truncated_recs: List[dict],
+) -> Dict[str, Any]:
+    """组装单个 User 实体的快照 trace 片段（input / llm_raw / changes），供 Pipeline 聚合落盘。"""
+    act_map = {"add": "add_field", "update": "update_field", "delete": "delete_field"}
+    changes: List[dict] = []
+    for op in applied_ops:
+        if op.op == "add":
+            fc = {"field": op.field, "old": None, "new": op.value}
+        elif op.op == "update":
+            fc = {"field": op.field, "old": op.old_value, "new": op.new_value}
+        else:  # delete
+            fc = {"field": op.field, "old": op.old_value, "new": None}
+        changes.append({"target_type": "metadata_field", "target_id": entity_id,
+                        "target_name": entity_name, "action": act_map.get(op.op, "update_field"),
+                        "field_changes": [fc], "status": "applied", "reason": None, "extra": {}})
+    for r in skipped_recs:
+        changes.append({"target_type": "metadata_field", "target_id": entity_id,
+                        "target_name": entity_name, "action": act_map.get(r["op"], "update_field"),
+                        "field_changes": [{"field": r["field"], "old": r["old_value"], "new": None}],
+                        "status": "skipped", "reason": "old_value_not_found", "extra": {}})
+    for r in truncated_recs:
+        changes.append({"target_type": "metadata_field", "target_id": entity_id,
+                        "target_name": entity_name, "action": "add_field",
+                        "field_changes": [{"field": r["field"], "old": None, "new": r["value"]}],
+                        "status": "truncated", "reason": "max_list_len", "extra": {}})
+    return {
+        "input": {"entity_id": entity_id, "entity_name": entity_name,
+                  "fragment_count": len(descriptions), "descriptions": descriptions,
+                  "existing_metadata": existing},
+        "llm_raw": {"entity_id": entity_id,
+                    "operations": [o.model_dump() for o in applied_ops],
+                    "dropped_ops_count": getattr(result, "dropped_ops_count", 0)},
+        "changes": changes,
+    }
+
+
 # ── Public API ──
 
 
@@ -122,6 +176,7 @@ async def extract_metadata_for_user(
     language: str = "zh",
     min_fragments: int = 5,
     max_list_len_per_field: int = 200,
+    collect_trace: bool = False,
 ) -> Dict[str, Any]:
     """对指定用户的 User 实体执行元数据提取 + Neo4j 回写 + PostgreSQL 同步。
 
@@ -197,6 +252,9 @@ async def extract_metadata_for_user(
     extracted = 0
     failed = 0
     details: List[Dict[str, Any]] = []  # 每个实体的详细变更记录
+    trace_entities: List[dict] = []
+    trace_llm: List[dict] = []
+    trace_changes: List[dict] = []
 
     # ── 3. 遍历候选实体 ──
     for entity_dict in candidates:
@@ -214,6 +272,7 @@ async def extract_metadata_for_user(
                 metadata_query=ENTITY_METADATA_QUERY,
                 metadata_patch=ENTITY_METADATA_PATCH,
                 max_list_len_per_field=max_list_len_per_field,
+                collect_trace=collect_trace,
             )
             if patched:
                 extracted += 1
@@ -223,16 +282,36 @@ async def extract_metadata_for_user(
                     "ops": patched.get("operations_detail", []),
                     "counts": patched.get("counts", {}),
                 })
+                if collect_trace and patched.get("_trace"):
+                    tr = patched["_trace"]
+                    trace_entities.append(tr["input"])
+                    trace_llm.append(tr["llm_raw"])
+                    trace_changes.extend(tr["changes"])
                 if entity_dict.get("end_user_id") and patched.get("post_state"):
                     _sync_metadata_to_pg(
                         end_user_id=entity_dict["end_user_id"],
                         metadata=patched["post_state"],
                     )
+                    # PG 同步作为一次副作用单列（仅在确有 post_state 时）
+                    if collect_trace:
+                        trace_changes.append({
+                            "target_type": "metadata_field", "target_id": entity_id,
+                            "target_name": entity_name, "action": "sync_pg",
+                            "field_changes": [], "status": "applied", "reason": None,
+                            "extra": {"synced_fields": list((patched["post_state"] or {}).keys())},
+                        })
         except Exception as e:
             failed += 1
             logger.warning(f"[Metadata] 实体 {entity_id} 元数据提取失败: {e}")
 
-    return {"extracted": extracted, "failed": failed, "details": details}
+    out: Dict[str, Any] = {"extracted": extracted, "failed": failed, "details": details}
+    if collect_trace:
+        out["_trace"] = {
+            "input": {"entities": trace_entities},
+            "llm_raw": {"items": trace_llm},
+            "changes": trace_changes,
+        }
+    return out
 
 
 async def _extract_single_entity(
@@ -245,11 +324,13 @@ async def _extract_single_entity(
     metadata_query: str,
     metadata_patch: str,
     max_list_len_per_field: int,
+    collect_trace: bool = False,
 ) -> Dict[str, Any] | None:
     """对单个 User 实体执行：读取已有元数据 → LLM 提取 → patch 回写。
 
     Returns:
         成功时返回 {"post_state": {...}}，跳过或无变更时返回 None。
+        collect_trace=True 时额外带 "_trace"（input/llm_raw/changes 片段）。
     """
     from app.core.memory.storage_services.extraction_engine.steps.schema import (
         MetadataStepInput,
@@ -279,12 +360,20 @@ async def _extract_single_entity(
         logger.debug(f"[Metadata] 实体 {entity_name}({entity_id}) 无新增元数据")
         return None
 
+    skipped_recs: List[dict] = []
+    truncated_recs: List[dict] = []
     skipped_ops_count = _filter_invalid_old_values(
-        result.operations, existing, entity_name, entity_id
+        result.operations, existing, entity_name, entity_id,
+        skipped_sink=skipped_recs if collect_trace else None,
     )
 
     if not result.has_any():
         logger.info(f"[Metadata] 实体 {entity_name}({entity_id}) 所有 op 均被过滤，跳过 patch")
+        # 全被过滤也产出 trace（只含 skipped），便于核对
+        if collect_trace:
+            return {"post_state": {}, "_trace": _build_meta_trace(
+                entity_id, entity_name, descriptions, existing, result,
+                applied_ops=[], skipped_recs=skipped_recs, truncated_recs=[])}
         return None
 
     # 构建详细变更列表（在 patch 前记录，因为 patch 后 operations 仍然有效）
@@ -295,6 +384,7 @@ async def _extract_single_entity(
         **_build_patch_params(
             result, entity_id, existing, entity_name,
             allowed_fields, max_list_len_per_field,
+            truncated_sink=truncated_recs if collect_trace else None,
         ),
     )
 
@@ -307,11 +397,17 @@ async def _extract_single_entity(
     )
 
     post_state = _extract_post_state(patch_records, allowed_fields)
-    return {
+    out: Dict[str, Any] = {
         "post_state": post_state,
         "operations_detail": operations_detail,
         "counts": counts,
     }
+    if collect_trace:
+        out["_trace"] = _build_meta_trace(
+            entity_id, entity_name, descriptions, existing, result,
+            applied_ops=list(result.operations),
+            skipped_recs=skipped_recs, truncated_recs=truncated_recs)
+    return out
 
 
 def _sync_metadata_to_pg(
