@@ -4024,6 +4024,14 @@ class WorkflowService:
 
         conversation_id = original_msg.conversation_id
         parent_msg = self._locate_parent_user_message(original_msg)
+        # run_stream 执行期间会调用 self.db.close() 归还连接池（见 run_stream 内
+        # “工作流引擎执行期间不需要 db” 处）。SQLAlchemy 的 Session.close() 会 expunge
+        # 所有关联对象，使 parent_msg/original_msg 变为 detached；而 run_stream 在 close
+        # 之前的若干次 commit 又因 expire_on_commit=True 把它们的属性标记为过期。
+        # 此后再访问这些已过期属性（如 parent_msg.id）会抛 DetachedInstanceError。
+        # 故在 close 之前先把后续落库所需的主键与内容快照到局部变量，不再依赖 ORM 懒加载。
+        parent_msg_id = parent_msg.id
+        parent_msg_content = parent_msg.content or ""
         original_execution = self._locate_execution_for_message(original_msg, conversation_id)
 
         input_snapshot = self._reconstruct_input(original_execution, parent_msg)
@@ -4042,7 +4050,7 @@ class WorkflowService:
         new_message_id = uuid.uuid4()
 
         payload = DraftRunRequest(
-            message=parent_msg.content or "",
+            message=parent_msg_content,
             conversation_id=str(conversation_id),
             user_id=user_id,
             stream=True,
@@ -4120,7 +4128,10 @@ class WorkflowService:
 
         # 失败回滚：run_stream 抛异常 或 status 非 completed
         if stream_failed or stream_status != "completed":
-            original_msg.is_current = True
+            # original_msg 已被 run_stream 内 self.db.close() expunge 而脱离会话，
+            # 直接改对象属性再 commit 不会落库（静默失效）→ 改用按主键的批量 UPDATE 还原 is_current，
+            # 避免回滚失败后原版本停留在 is_current=False、本轮无当前回复的脏状态。
+            self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
             self.db.commit()
             yield {
                 "event": "error",
@@ -4135,7 +4146,7 @@ class WorkflowService:
             content=full_content,
             version=new_version,
             is_current=True,
-            parent_message_id=parent_msg.id,
+            parent_message_id=parent_msg_id,
             meta_data={
                 "usage": token_usage,
                 "audio_url": None,
