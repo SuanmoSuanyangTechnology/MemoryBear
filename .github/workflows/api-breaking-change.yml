@@ -1,44 +1,69 @@
 name: API Breaking Change Check
 on:
   pull_request:
-    paths:
-      - 'api/app/**'
-      - 'api/openapi-baseline.json'
 
 jobs:
   openapi-diff:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if API files changed
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'api/app/' 'api/openapi-baseline.json' | head -1)
+          if [ -z "$CHANGED" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if no API changes
+        if: steps.filter.outputs.skip == 'true'
+        run: echo "No API files changed, skipping check."
 
       - name: Setup Python
+        if: steps.filter.outputs.skip == 'false'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: steps.filter.outputs.skip == 'false'
         run: |
-          pip install uv
+          pip install uv==0.7.12
           cd api && uv sync
 
       - name: Export current OpenAPI schema
+        if: steps.filter.outputs.skip == 'false'
         run: |
           cd api
           uv run python scripts/export_openapi.py --v1-only -o openapi-current.json
 
+      - name: Get baseline from target branch
+        if: steps.filter.outputs.skip == 'false'
+        run: |
+          cd api
+          git show origin/${{ github.base_ref }}:api/openapi-baseline.json > openapi-target-baseline.json
+
       - name: Install oasdiff
+        if: steps.filter.outputs.skip == 'false'
         run: |
           curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sudo sh
 
       - name: Run oasdiff
-        id: oasdiff
+        if: steps.filter.outputs.skip == 'false'
         run: |
           cd api
           echo "## 🔍 API Breaking Change Report" > oasdiff-report.md
           echo "" >> oasdiff-report.md
+          echo "Comparing against \`${{ github.base_ref }}\` baseline." >> oasdiff-report.md
+          echo "" >> oasdiff-report.md
 
           echo "### oasdiff" >> oasdiff-report.md
-          OUTPUT=$(oasdiff breaking openapi-baseline.json openapi-current.json 2>&1) || true
+          OUTPUT=$(oasdiff breaking openapi-target-baseline.json openapi-current.json 2>&1) || true
           if [ -z "$OUTPUT" ]; then
             echo "✅ No breaking changes detected." >> oasdiff-report.md
           else
@@ -50,21 +75,20 @@ jobs:
 
           echo "" >> oasdiff-report.md
           echo "### openapi-diff" >> oasdiff-report.md
-
           ODIFF=$(docker run --rm \
             -v ${{ github.workspace }}/api:/work \
-            openapitools/openapi-diff:latest \
-            /work/openapi-baseline.json \
+            openapitools/openapi-diff:2.1.0-beta.11 \
+            /work/openapi-target-baseline.json \
             /work/openapi-current.json 2>&1) || true
           echo '```' >> oasdiff-report.md
           echo "$ODIFF" >> oasdiff-report.md
           echo '```' >> oasdiff-report.md
 
           # Fail if oasdiff detects breaking changes
-          oasdiff breaking openapi-baseline.json openapi-current.json --fail-on ERR
+          oasdiff breaking openapi-target-baseline.json openapi-current.json --fail-on ERR
 
       - name: Comment PR
-        if: always()
+        if: always() && steps.filter.outputs.skip == 'false'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: oasdiff
