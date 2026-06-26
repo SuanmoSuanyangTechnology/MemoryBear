@@ -2,6 +2,10 @@ name: API Breaking Change Check
 on:
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   openapi-diff:
     runs-on: ubuntu-latest
@@ -13,11 +17,11 @@ jobs:
       - name: Check if API files changed
         id: filter
         run: |
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'api/app/' 'api/openapi-baseline.json' | head -1)
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...HEAD -- 'api/app/' 'api/openapi-baseline.json' | head -1)
           if [ -z "$CHANGED" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Skip if no API changes
@@ -46,7 +50,7 @@ jobs:
         if: steps.filter.outputs.skip == 'false'
         run: |
           cd api
-          git show origin/${{ github.base_ref }}:api/openapi-baseline.json > openapi-target-baseline.json
+          git show ${{ github.event.pull_request.base.sha }}:api/openapi-baseline.json > openapi-target-baseline.json
 
       - name: Install oasdiff
         if: steps.filter.outputs.skip == 'false'
@@ -85,9 +89,9 @@ jobs:
           OPENAPI_DIFF_OUTPUT=$(docker run --rm \
             -v "${{ github.workspace }}/api:/work" \
             openapitools/openapi-diff:2.1.0-beta.11 \
-            --fail-on-incompatible \
             /work/"$BASELINE" \
-            /work/"$CURRENT" 2>&1)
+            /work/"$CURRENT" \
+            --fail-on-incompatible 2>&1)
           OPENAPI_DIFF_EXIT=$?
 
           if [ "$OPENAPI_DIFF_EXIT" -eq 0 ]; then
