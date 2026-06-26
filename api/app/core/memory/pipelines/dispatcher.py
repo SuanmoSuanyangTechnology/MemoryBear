@@ -839,9 +839,6 @@ async def dispatch_mcp_write(
         written_mms = repo.write_batch(conversation_id, messages)
         db.commit()
 
-    if not written_mms:
-        raise ValueError("MCP write: 消息内容为空，写入失败")
-
     target_msg = written_mms[0]
     target_seq = target_msg["message_seq"]
 
