@@ -4024,6 +4024,14 @@ class WorkflowService:
 
         conversation_id = original_msg.conversation_id
         parent_msg = self._locate_parent_user_message(original_msg)
+        # run_stream 执行期间会调用 self.db.close() 归还连接池（见 run_stream 内
+        # “工作流引擎执行期间不需要 db” 处）。SQLAlchemy 的 Session.close() 会 expunge
+        # 所有关联对象，使 parent_msg/original_msg 变为 detached；而 run_stream 在 close
+        # 之前的若干次 commit 又因 expire_on_commit=True 把它们的属性标记为过期。
+        # 此后再访问这些已过期属性（如 parent_msg.id）会抛 DetachedInstanceError。
+        # 故在 close 之前先把后续落库所需的主键与内容快照到局部变量，不再依赖 ORM 懒加载。
+        parent_msg_id = parent_msg.id
+        parent_msg_content = parent_msg.content or ""
         original_execution = self._locate_execution_for_message(original_msg, conversation_id)
 
         input_snapshot = self._reconstruct_input(original_execution, parent_msg)
@@ -4042,7 +4050,7 @@ class WorkflowService:
         new_message_id = uuid.uuid4()
 
         payload = DraftRunRequest(
-            message=parent_msg.content or "",
+            message=parent_msg_content,
             conversation_id=str(conversation_id),
             user_id=user_id,
             stream=True,
@@ -4120,7 +4128,10 @@ class WorkflowService:
 
         # 失败回滚：run_stream 抛异常 或 status 非 completed
         if stream_failed or stream_status != "completed":
-            original_msg.is_current = True
+            # original_msg 已被 run_stream 内 self.db.close() expunge 而脱离会话，
+            # 直接改对象属性再 commit 不会落库（静默失效）→ 改用按主键的批量 UPDATE 还原 is_current，
+            # 避免回滚失败后原版本停留在 is_current=False、本轮无当前回复的脏状态。
+            self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
             self.db.commit()
             yield {
                 "event": "error",
@@ -4135,7 +4146,7 @@ class WorkflowService:
             content=full_content,
             version=new_version,
             is_current=True,
-            parent_message_id=parent_msg.id,
+            parent_message_id=parent_msg_id,
             meta_data={
                 "usage": token_usage,
                 "audio_url": None,
@@ -4338,7 +4349,7 @@ class WorkflowService:
         siblings.sort(key=lambda s: (s.version or 0))
         return siblings
 
-    def _build_branch_view(self, message_id) -> dict:
+    def _build_branch_view(self, message_id, user_id: str | None = None) -> dict:
         """构建分支视图：message_id 所在分支的完整链 + 各 assistant 版本的节点执行明细。
 
         返回 {
@@ -4352,7 +4363,7 @@ class WorkflowService:
                     AppLogService.build_pending_intervention_map），供前端切版本后回填 HITL 节点状态。
         }
         """
-        from app.models import Message as MessageModel, WorkflowExecution
+        from app.models import Message as MessageModel, WorkflowExecution, MessageFeedback
         from app.services.app_log_service import AppLogService, _build_nodes_from_output_data
         chain = self._load_branch_chain(message_id)
         if not chain:
@@ -4369,6 +4380,7 @@ class WorkflowService:
                 "meta_data": m.meta_data,
                 "status": m.status,
                 "parent_message_id": str(m.parent_message_id) if m.parent_message_id else None,
+                "is_favorited": m.id in favorited_ids,
             }
 
         # 预加载该会话所有 execution，供 meta_data.execution_id 缺失时按完成时间就近兜底匹配
@@ -4405,15 +4417,41 @@ class WorkflowService:
             nodes = _build_nodes_from_output_data(execution.output_data)
             return [n.model_dump() for n in nodes] if nodes else []
 
-        items: list[Any] = []
-        node_executions_map: dict[str, list[dict]] = {}
+        # 先解析每轮结构（assistant 取出全部兄弟版本），收集所有消息 id，批量查当前用户收藏状态
+        turns: list[tuple[str, Any]] = []
+        all_ids: set = set()
         for m in chain:
             if m.role == "user":
-                items.append(serialize(m))
+                turns.append(("user", m))
+                all_ids.add(m.id)
             elif m.role == "assistant":
+                siblings = self._resolve_sibling_versions(m)
+                turns.append(("assistant", siblings))
+                for s in siblings:
+                    all_ids.add(s.id)
+
+        favorited_ids: set = set()
+        if user_id and all_ids:
+            favorited_ids = {
+                row[0]
+                for row in self.db.query(MessageFeedback.message_id)
+                .filter(
+                    MessageFeedback.message_id.in_(all_ids),
+                    MessageFeedback.user_id == user_id,
+                    MessageFeedback.is_favorite.is_(True),
+                )
+                .all()
+            }
+
+        items: list[Any] = []
+        node_executions_map: dict[str, list[dict]] = {}
+        for role, payload in turns:
+            if role == "user":
+                items.append(serialize(payload))
+            else:
                 # 同轮的所有 assistant 版本（供版本切换器）：按父 user 聚合,
                 # 兼容人工介入暂停路径 parent 缺失的存量首轮（详见 _resolve_sibling_versions）
-                siblings = self._resolve_sibling_versions(m)
+                siblings = payload
                 serialized = [serialize(s) for s in siblings]
                 # 单版本拍平为对象，多版本保留为数组——与前端 chatList 约定一致
                 items.append(serialized[0] if len(serialized) == 1 else serialized)

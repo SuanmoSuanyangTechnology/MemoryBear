@@ -36,8 +36,9 @@ from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
+from app.services.message_feedback_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
-from app.models import Message
+from app.models import Message, MessageFeedback
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
@@ -343,6 +344,29 @@ def get_conversation(
             # 单条消息
             messages[idx].meta_data["audio_status"] = status
 
+    # 收集所有消息ID，批量查询当前用户的收藏状态
+    message_ids: set[uuid.UUID] = set()
+    for m in messages:
+        if isinstance(m, list):
+            for ver_msg in m:
+                if ver_msg.id:
+                    message_ids.add(ver_msg.id)
+        else:
+            if m.id:
+                message_ids.add(m.id)
+    favorited_ids: set[uuid.UUID] = set()
+    if message_ids:
+        favorited_rows = (
+            db.query(MessageFeedback.message_id)
+            .filter(
+                MessageFeedback.message_id.in_(message_ids),
+                MessageFeedback.user_id == share_data.user_id,
+                MessageFeedback.is_favorite.is_(True),
+            )
+            .all()
+        )
+        favorited_ids = {row[0] for row in favorited_rows}
+
     # 构建消息响应列表
     message_responses = []
     for m in messages:
@@ -360,6 +384,7 @@ def get_conversation(
                     created_at=ver_msg.created_at,
                     feedback_type=ver_msg.feedbacks[0].feedback_type if ver_msg.feedbacks else None,
                     feedback_content=ver_msg.feedbacks[0].feedback_content if ver_msg.feedbacks else None,
+                    is_favorited=ver_msg.id in favorited_ids,
                     version=ver_msg.version,
                     is_current=ver_msg.is_current,
                     parent_message_id=ver_msg.parent_message_id,
@@ -377,6 +402,7 @@ def get_conversation(
                 created_at=m.created_at,
                 feedback_type=m.feedbacks[0].feedback_type if m.feedbacks else None,
                 feedback_content=m.feedbacks[0].feedback_content if m.feedbacks else None,
+                is_favorited=m.id in favorited_ids,
                 version=m.version,
                 is_current=m.is_current,
                 parent_message_id=m.parent_message_id,
@@ -1037,6 +1063,40 @@ async def get_user_feedback(
     result = feedback_service.get_user_feedback(message_id, share_data.user_id)
 
     return success(data=result)
+
+
+# ---------- 消息收藏接口 ----------
+
+@router.post(
+    "/messages/{message_id}/favorite",
+    summary="收藏/取消收藏消息（体验分享场景）"
+)
+async def toggle_message_favorite(
+        message_id: uuid.UUID,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """切换消息收藏状态（体验分享场景）
+
+    幂等：已收藏则取消，未收藏则新增。
+    """
+    message = db.get(Message, message_id)
+    if not message:
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    favorite_service = FavoriteService(db)
+    result = favorite_service.toggle_favorite(
+        message_id=message_id,
+        conversation_id=message.conversation_id,
+        workspace_id=workspace_id,
+        user_id=share_data.user_id,
+    )
+
+    return success(data=app_schema.MessageFavoriteResponse(**result))
 
 
 @router.post("/conversations/{conversation_id}/share", summary="分享会话")
