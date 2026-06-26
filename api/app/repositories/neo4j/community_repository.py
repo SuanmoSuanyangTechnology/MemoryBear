@@ -18,10 +18,8 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ENTITIES_PAGE,
     GET_COMMUNITY_MEMBERS,
     GET_COMMUNITY_RELATIONSHIPS,
-    GET_ALL_COMMUNITY_MEMBERS_BATCH,
     BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
     GET_COMMUNITY_AVG_EMBEDDINGS_BATCH,
-    GET_ALL_ENTITY_NEIGHBORS_BATCH,
     GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
@@ -90,26 +88,6 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"get_entity_neighbors failed: {e}")
             return []
-
-    async def get_all_entity_neighbors_batch(
-        self, end_user_id: str
-    ) -> Dict[str, List[Dict]]:
-        """一次性批量拉取该用户下所有实体的邻居，返回 {entity_id: [neighbors]} 字典。
-        用于全量聚类预加载，避免每个实体单独查询。"""
-        try:
-            rows = await self.connector.execute_query(
-                GET_ALL_ENTITY_NEIGHBORS_BATCH,
-                end_user_id=end_user_id,
-            )
-            result: Dict[str, List[Dict]] = {}
-            for row in rows:
-                eid = row["entity_id"]
-                neighbor = {k: v for k, v in row.items() if k != "entity_id"}
-                result.setdefault(eid, []).append(neighbor)
-            return result
-        except Exception as e:
-            logger.error(f"get_all_entity_neighbors_batch failed: {e}")
-            return {}
 
     async def get_all_entities(self, end_user_id: str) -> List[Dict]:
         """拉取某用户下所有实体及其当前社区归属。"""
@@ -208,25 +186,6 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"get_community_relationships failed: {e}")
             return []
-
-    async def get_all_community_members_batch(
-        self, community_ids: List[str], end_user_id: str
-    ) -> Dict[str, List[Dict]]:
-        """批量查询多个社区的成员，返回 {community_id: [members]} 字典。"""
-        try:
-            rows = await self.connector.execute_query(
-                GET_ALL_COMMUNITY_MEMBERS_BATCH,
-                community_ids=community_ids,
-                end_user_id=end_user_id,
-            )
-            result: Dict[str, List[Dict]] = {}
-            for row in rows:
-                cid = row["community_id"]
-                result.setdefault(cid, []).append(row)
-            return result
-        except Exception as e:
-            logger.error(f"get_all_community_members_batch failed: {e}")
-            return {}
 
     async def batch_assign_entities_to_communities(
         self, assignments: List[Dict], end_user_id: str

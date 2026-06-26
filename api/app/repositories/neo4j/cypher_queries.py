@@ -1349,16 +1349,6 @@ ORDER BY e1.name, r.predicate, e2.name
 LIMIT 20
 """
 
-GET_ALL_COMMUNITY_MEMBERS_BATCH = """
-MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
-RETURN c.community_id AS community_id,
-       e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score,
-       e.name_embedding AS name_embedding,
-       e.aliases AS aliases, e.description AS description
-ORDER BY c.community_id, coalesce(e.importance_score, 0) DESC
-"""
-
 # P0 修复：批量将实体分配到社区（UNWIND），替换逐实体循环的 assign_entity_to_community
 BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES = """
 UNWIND $assignments AS row
@@ -1459,30 +1449,6 @@ RETURN DISTINCT
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
-GET_ALL_ENTITY_NEIGHBORS_BATCH = """
-// 批量拉取某用户下所有实体的邻居（用于全量聚类预加载）
-MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
-
-// 来源一：直接关系邻居
-OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
-
-// 来源二：同 Statement 共现邻居
-OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
-OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
-WHERE nb2.id <> e.id
-
-WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
-UNWIND all_neighbors AS nb
-WITH e, nb WHERE nb IS NOT NULL
-OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
-RETURN DISTINCT
-    e.id                AS entity_id,
-    nb.id               AS id,
-    nb.name             AS name,
-    nb.name_embedding   AS name_embedding,
-    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
-"""
-
 GET_COMMUNITY_GRAPH_DATA = """
 MATCH (c:Community {end_user_id: $end_user_id})
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[b:BELONGS_TO_COMMUNITY]->(c)
@@ -1534,25 +1500,6 @@ WHERE c.name IS NULL OR c.name = ''
    OR c.core_entities IS NULL
    OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
 RETURN c.community_id AS community_id
-"""
-
-# Community 向量检索 ──────────────────────────────────────────────────
-# Community embedding-based search: cosine similarity on Community.summary_embedding
-COMMUNITY_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('community_summary_embedding_index', $limit * 100, $embedding)
-YIELD node AS c, score
-WHERE c.summary_embedding IS NOT NULL
-  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-RETURN c.community_id AS id,
-       c.name AS name,
-       c.summary AS content,
-       c.core_entities AS core_entities,
-       c.member_count AS member_count,
-       c.end_user_id AS end_user_id,
-       c.updated_at AS updated_at,
-       score
-ORDER BY score DESC
-LIMIT $limit
 """
 
 # Community 展开检索 ──────────────────────────────────────────────────
