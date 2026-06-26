@@ -32,6 +32,7 @@ from app.schemas.memory_storage_schema import GenerateCacheRequest
 
 # 包装内部服务 controller
 from app.controllers import memory_analytics_controller
+from app.schemas.v1_response import NodeStatisticsResponse
 
 router = APIRouter(prefix="/memory", tags=["V1 - User Memory API"])
 logger = get_business_logger()
@@ -89,7 +90,7 @@ async def get_community_graph(
 # ==================== 节点统计 ====================
 
 
-@router.get("/analytics/node_statistics")
+@router.get("/analytics/node_statistics", response_model=NodeStatisticsResponse)
 @require_api_key(scopes=["memory"])
 async def get_node_statistics(
     request: Request,
