@@ -1308,7 +1308,6 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1318,7 +1317,6 @@ OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
        e.name_embedding AS name_embedding,
-       COALESCE(e.activation_value, 0.5) AS activation_value,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1335,11 +1333,11 @@ RETURN e.id AS id
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
+       e.importance_score AS importance_score,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description,
        e.example AS example
-ORDER BY coalesce(e.activation_value, 0) DESC
+ORDER BY coalesce(e.importance_score, 0) DESC
 """
 
 GET_COMMUNITY_RELATIONSHIPS = """
@@ -1351,14 +1349,38 @@ ORDER BY e1.name, r.predicate, e2.name
 LIMIT 20
 """
 
-GET_ALL_COMMUNITY_MEMBERS_BATCH = """
-MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
-RETURN c.community_id AS community_id,
-       e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
-       e.name_embedding AS name_embedding,
-       e.aliases AS aliases, e.description AS description
-ORDER BY c.community_id, coalesce(e.activation_value, 0) DESC
+# P0 修复：批量将实体分配到社区（UNWIND），替换逐实体循环的 assign_entity_to_community
+BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES = """
+UNWIND $assignments AS row
+MATCH (e:ExtractedEntity {id: row.entity_id, end_user_id: $end_user_id})
+OPTIONAL MATCH (e)-[old_r:BELONGS_TO_COMMUNITY]->(:Community)
+DELETE old_r
+WITH e, row
+MATCH (c:Community {community_id: row.community_id, end_user_id: $end_user_id})
+MERGE (e)-[:BELONGS_TO_COMMUNITY]->(c)
+SET c.updated_at = datetime()
+RETURN count(e) AS assigned_count
+"""
+
+# P7 修复：批量计算各社区的平均 embedding，纯 Cypher 逐元素向量加法（不依赖 APOC）
+# 返回每个社区的成员数和平均向量，避免将全量成员数据拉取到 Python 侧
+GET_COMMUNITY_AVG_EMBEDDINGS_BATCH = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+      -[:BELONGS_TO_COMMUNITY]->(c:Community)
+WHERE c.community_id IN $community_ids
+  AND e.name_embedding IS NOT NULL
+WITH c.community_id AS cid,
+     count(e) AS member_count,
+     collect(e.name_embedding) AS all_embeddings
+WITH cid, member_count,
+     reduce(
+       acc = head(all_embeddings),
+       emb IN tail(all_embeddings) |
+       [i IN range(0, size(acc) - 1) | acc[i] + emb[i]]
+     ) AS sum_vec
+RETURN cid,
+       member_count,
+       [v IN sum_vec | v / member_count] AS avg_embedding
 """
 
 CHECK_USER_HAS_COMMUNITIES = """
@@ -1402,7 +1424,6 @@ OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
        e.name_embedding AS name_embedding,
-       COALESCE(e.activation_value, 0.5) AS activation_value,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 ORDER BY e.id
 SKIP $skip LIMIT $limit
@@ -1425,32 +1446,6 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    COALESCE(nb.activation_value, 0.5) AS activation_value,
-    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
-"""
-
-GET_ALL_ENTITY_NEIGHBORS_BATCH = """
-// 批量拉取某用户下所有实体的邻居（用于全量聚类预加载）
-MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
-
-// 来源一：直接关系邻居
-OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
-
-// 来源二：同 Statement 共现邻居
-OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
-OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
-WHERE nb2.id <> e.id
-
-WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
-UNWIND all_neighbors AS nb
-WITH e, nb WHERE nb IS NOT NULL
-OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
-RETURN DISTINCT
-    e.id                AS entity_id,
-    nb.id               AS id,
-    nb.name             AS name,
-    nb.name_embedding   AS name_embedding,
-    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1505,25 +1500,6 @@ WHERE c.name IS NULL OR c.name = ''
    OR c.core_entities IS NULL
    OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
 RETURN c.community_id AS community_id
-"""
-
-# Community 向量检索 ──────────────────────────────────────────────────
-# Community embedding-based search: cosine similarity on Community.summary_embedding
-COMMUNITY_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('community_summary_embedding_index', $limit * 100, $embedding)
-YIELD node AS c, score
-WHERE c.summary_embedding IS NOT NULL
-  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-RETURN c.community_id AS id,
-       c.name AS name,
-       c.summary AS content,
-       c.core_entities AS core_entities,
-       c.member_count AS member_count,
-       c.end_user_id AS end_user_id,
-       c.updated_at AS updated_at,
-       score
-ORDER BY score DESC
-LIMIT $limit
 """
 
 # Community 展开检索 ──────────────────────────────────────────────────

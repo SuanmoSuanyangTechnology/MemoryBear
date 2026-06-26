@@ -650,6 +650,11 @@ class WritePipeline:
         注意：ExtractionResult.entity_nodes 已经是经过 _extract() 中
         两阶段去重消歧（_run_dedup_and_write_summary）后的结果，
         聚类直接基于去重后的实体 ID 执行。
+
+        派发方式：直接使用 run_incremental_clustering.apply_async 投递到
+        memory_heavy_tasks 队列（不再经 scheduler.push_task）。
+        同用户聚类并发导致的 Neo4j 锁竞争，由 P0 批量 UNWIND（事务毫秒级）
+        + Neo4j 死锁自动重试两层防御兜底。
         """
         if not result.entity_nodes:
             return
@@ -678,8 +683,8 @@ class WritePipeline:
             )
             logger.info(
                 f"[Clustering] 增量聚类任务已提交 - "
-                f"task_id = {task.id}, "
-                f"entity_count = {len(new_entity_ids)}, "
+                f"task_id={task.id}, "
+                f"entity_count={len(new_entity_ids)}, "
                 f"source=dedup"
             )
         except Exception as e:
