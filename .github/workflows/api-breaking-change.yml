@@ -30,28 +30,37 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sudo sh
 
-      - name: Check breaking changes
+      - name: Run oasdiff
         id: oasdiff
         run: |
           cd api
-          # Generate report
           echo "## 🔍 API Breaking Change Report" > oasdiff-report.md
           echo "" >> oasdiff-report.md
 
+          echo "### oasdiff" >> oasdiff-report.md
           OUTPUT=$(oasdiff breaking openapi-baseline.json openapi-current.json 2>&1) || true
-          EXIT_CODE=$(oasdiff breaking openapi-baseline.json openapi-current.json > /dev/null 2>&1; echo $?)
-
-          if [ "$EXIT_CODE" = "0" ]; then
+          if [ -z "$OUTPUT" ]; then
             echo "✅ No breaking changes detected." >> oasdiff-report.md
           else
             echo "❌ **Breaking changes detected:**" >> oasdiff-report.md
-            echo "" >> oasdiff-report.md
             echo '```' >> oasdiff-report.md
             echo "$OUTPUT" >> oasdiff-report.md
             echo '```' >> oasdiff-report.md
           fi
 
-          # Fail the step if breaking
+          echo "" >> oasdiff-report.md
+          echo "### openapi-diff" >> oasdiff-report.md
+
+          ODIFF=$(docker run --rm \
+            -v ${{ github.workspace }}/api:/work \
+            openapitools/openapi-diff:latest \
+            /work/openapi-baseline.json \
+            /work/openapi-current.json 2>&1) || true
+          echo '```' >> oasdiff-report.md
+          echo "$ODIFF" >> oasdiff-report.md
+          echo '```' >> oasdiff-report.md
+
+          # Fail if oasdiff detects breaking changes
           oasdiff breaking openapi-baseline.json openapi-current.json --fail-on ERR
 
       - name: Comment PR
