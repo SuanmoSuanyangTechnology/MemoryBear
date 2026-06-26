@@ -7,7 +7,7 @@
 认证方式: API Key (@require_api_key)
 """
 
-from fastapi import APIRouter, Body, Depends, Header, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from starlette.responses import Response
@@ -16,15 +16,17 @@ from starlette.responses import Response
 from app.controllers import memory_controller
 from app.core.api_key_auth import require_api_key, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace
+from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
-from app.core.response_utils import success
+from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, UserInput
 from app.services.memory_agent_service import get_end_user_connected_config as get_config
+
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
 logger = get_business_logger()

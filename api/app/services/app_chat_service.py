@@ -25,6 +25,7 @@ from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
+from app.core.config import settings
 from app.services.draft_run_service import AgentRunService
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
@@ -232,7 +233,7 @@ class AppChatService:
                 current_input=message,
                 current_provider=api_key_obj.provider,
                 current_is_omni=api_key_obj.is_omni,
-                legacy_max_history=6,
+                legacy_max_history=settings.AGENT_MAX_HISTORY,
                 model_config_id=config.default_model_config_id,
             )
             if prepared_input:
@@ -241,7 +242,7 @@ class AppChatService:
             else:
                 history = await self.conversation_service.get_conversation_history(
                     conversation_id=conversation_id,
-                    max_history=20,
+                    max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
@@ -264,7 +265,7 @@ class AppChatService:
                 # 重新加载历史（包含刚写入的开场白）
                 history = await self.conversation_service.get_conversation_history(
                     conversation_id=conversation_id,
-                    max_history=10,
+                    max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
@@ -474,14 +475,19 @@ class AppChatService:
                 should_memorize=memory,
             )
             if used_context_engine:
-                await context_engine_manager.after_app_turn(
+                _ctx_kwargs = dict(
                     features=features_config,
                     conversation_id=conversation_id,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni,
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
+                async def _run_after_turn(kwargs=_ctx_kwargs):
+                    from app.db import get_db_context
+                    with get_db_context() as db2:
+                        await ContextEngineManager(db2).after_app_turn(**kwargs)
+                asyncio.create_task(_run_after_turn())
         else:
             new_msg = Message(
                 id=message_id,
@@ -652,7 +658,7 @@ class AppChatService:
                     current_input=message,
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni,
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
                 if prepared_input:
@@ -661,7 +667,7 @@ class AppChatService:
                 else:
                     history = await self.conversation_service.get_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=20,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni
                     )
@@ -684,7 +690,7 @@ class AppChatService:
                     # 重新加载历史（包含刚写入的开场白）
                     history = await self.conversation_service.get_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=10,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni
                     )
@@ -791,6 +797,16 @@ class AppChatService:
             agent_exec_repo.create(agent_execution)
             self.db.commit()
 
+
+            # close() 前预读 ORM 属性，防止 close 后触发 DetachedInstanceError
+            _api_key_id = api_key_obj.id
+            _api_key_model_name = api_key_obj.model_name
+            _agent_execution_id = agent_execution.id
+            # LLM 推理期间不需要 db，提前归还连接给连接池
+            # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
+            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
+            self.db.close()
+
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
@@ -844,7 +860,7 @@ class AppChatService:
                 await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+            ModelApiKeyService.record_api_key_usage(self.db, _api_key_id)
 
             # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
             end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
@@ -878,7 +894,7 @@ class AppChatService:
                 "history_files": {}
             }
             assistant_meta = {
-                "model": api_key_obj.model_name,
+                "model": _api_key_model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "audio_url": None,
                 "citations": filtered_citations,
@@ -940,14 +956,19 @@ class AppChatService:
                     should_memorize=memory,
                 )
                 if used_context_engine:
-                    await context_engine_manager.after_app_turn(
+                    _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=conversation_id,
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni,
-                        legacy_max_history=6,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=config.default_model_config_id,
                     )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        from app.db import get_db_context
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
             else:
                 new_msg = Message(
                     id=message_id,
@@ -969,7 +990,7 @@ class AppChatService:
             # 更新 Agent 执行记录为 completed
             all_node_executions = orchestrator_node_executions + node_executions
             agent_exec_repo.update_completed(
-                execution_id=agent_execution.id,
+                    execution_id=_agent_execution_id,
                 steps=all_node_executions,
                 status="completed",
                 elapsed_time=elapsed_time,
@@ -1016,7 +1037,7 @@ class AppChatService:
             try:
                 elapsed_time = time.time() - start_time
                 agent_exec_repo.update_completed(
-                    execution_id=agent_execution.id,
+                    execution_id=_agent_execution_id,
                     steps=node_executions if 'node_executions' in dir() else [],
                     status="failed",
                     elapsed_time=elapsed_time,

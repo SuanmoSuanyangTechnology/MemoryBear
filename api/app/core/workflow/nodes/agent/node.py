@@ -8,6 +8,7 @@ Agent 节点实现
 （error_handle / memory / thinking）。
 """
 
+import asyncio
 import logging
 import json
 from copy import deepcopy
@@ -402,16 +403,21 @@ class AgentNode(BaseNode):
             if self.typed_config.memory.enable:
                 conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                 if conversation_id:
-                    with get_db_context() as db:
-                        context_engine_manager = ContextEngineManager(db)
-                        await context_engine_manager.after_workflow_turn(
-                            features=self.workflow_config.get("features", {}),
-                            conversation_id=conversation_id,
-                            scope_key=f"node:{self.node_id}",
-                            workflow_messages=state.get("messages", []),
-                            window_size=self.typed_config.memory.window_size,
-                            model_config_id=self.typed_config.model.model_id,
-                        )
+                    _kwargs = dict(
+                        features=self.workflow_config.get("features", {}),
+                        conversation_id=conversation_id,
+                        scope_key=f"node:{self.node_id}",
+                        workflow_messages=state.get("messages", []) + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": content},
+                        ],
+                        window_size=self.typed_config.memory.window_size,
+                        model_config_id=self.typed_config.model.model_id,
+                    )
+                    async def _run_after_workflow_turn(kwargs=_kwargs):
+                        with get_db_context() as db:
+                            await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                    asyncio.create_task(_run_after_workflow_turn())
 
             return {
                 "llm_result": AIMessage(
@@ -494,16 +500,21 @@ class AgentNode(BaseNode):
             if self.typed_config.memory.enable:
                 conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                 if conversation_id:
-                    with get_db_context() as db:
-                        context_engine_manager = ContextEngineManager(db)
-                        await context_engine_manager.after_workflow_turn(
-                            features=self.workflow_config.get("features", {}),
-                            conversation_id=conversation_id,
-                            scope_key=f"node:{self.node_id}",
-                            workflow_messages=state.get("messages", []),
-                            window_size=self.typed_config.memory.window_size,
-                            model_config_id=self.typed_config.model.model_id,
-                        )
+                    _kwargs = dict(
+                        features=self.workflow_config.get("features", {}),
+                        conversation_id=conversation_id,
+                        scope_key=f"node:{self.node_id}",
+                        workflow_messages=state.get("messages", []) + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": full_response},
+                        ],
+                        window_size=self.typed_config.memory.window_size,
+                        model_config_id=self.typed_config.model.model_id,
+                    )
+                    async def _run_after_workflow_turn(kwargs=_kwargs):
+                        with get_db_context() as db:
+                            await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                    asyncio.create_task(_run_after_workflow_turn())
 
             final_message = AIMessage(
                 content=full_response,

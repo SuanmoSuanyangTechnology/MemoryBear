@@ -2727,8 +2727,8 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
     ignore_result=True,
     max_retries=0,
     acks_late=False,
-    time_limit=3600,
-    soft_time_limit=3300,
+    time_limit=7500,       # 2小时5分钟硬超时
+    soft_time_limit=7200,  # 2小时软超时
 )
 def refresh_memory_insight_and_summary_cache(self) -> Dict[str, Any]:
     """定时任务：为所有用户重新生成记忆洞察和用户摘要缓存
@@ -3723,7 +3723,7 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     bind=True,
     ignore_result=False,
     max_retries=2,
-    acks_late=True,
+    acks_late=False,
     time_limit=1800,  # 30分钟硬超时
     soft_time_limit=1700,
 )

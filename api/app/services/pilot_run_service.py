@@ -12,7 +12,6 @@ Pilot Run Service - 试运行服务
 import os
 import re
 import time
-from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -28,7 +27,7 @@ from app.core.memory.storage_services.extraction_engine.pipeline_help import (
     export_test_input_doc,
 )
 from app.schemas.memory_config_schema import MemoryConfig
-from sqlalchemy.orm import Session
+from app.core.memory.llm_tools.openai_client import OpenAIClient
 
 logger = get_memory_logger(__name__)
 
@@ -72,7 +71,7 @@ def _save_triplets_from_dialogs(dialog_data_list: list[DialogData], output_path:
 async def run_pilot_extraction(
     memory_config: MemoryConfig,
     dialogue_text: str,
-    db: Session,
+    llm_client: OpenAIClient,
     progress_callback: Optional[Callable[[str, str, Optional[dict]], Awaitable[None]]] = None,
     language: str = "zh",
 ) -> None:
@@ -86,7 +85,7 @@ async def run_pilot_extraction(
     Args:
         memory_config: 从数据库加载的内存配置对象
         dialogue_text: 输入的对话文本
-        db: 数据库会话（用于初始化预处理所需的 LLM 客户端）
+        llm_client: 预先初始化的 LLM 客户端（调用方负责在 db session 关闭前完成初始化）
         progress_callback: 可选的进度回调 (stage, message, data)
         language: 语言类型 ("zh" | "en")
     """
@@ -99,12 +98,8 @@ async def run_pilot_extraction(
     pipeline_start = time.time()
 
     try:
-        # ── 步骤 1: 初始化预处理所需的 LLM 客户端 ──────────────────────────
-        # 只用于语义剪枝和分块，PilotWritePipeline 内部会自行初始化萃取客户端
+        # ── 步骤 1: llm_client 已由调用方在 db session 关闭前初始化传入 ──────
         step_start = time.time()
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
         log_time("Client Initialization", time.time() - step_start, log_file)
 
         # ── 步骤 2: 文本解析 ────────────────────────────────────────────────
