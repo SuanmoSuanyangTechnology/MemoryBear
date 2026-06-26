@@ -47,6 +47,16 @@ from app.repositories.neo4j.cypher_queries import (
 
 logger = logging.getLogger(__name__)
 
+# 快照体积控制（仅调试用、不影响写库）：低频 1_input 逐实体存 description，超长会让快照过大、
+# 上传慢，故截断；aliases 是短词不限长。
+_SNAP_DESC_MAXLEN = 200
+
+
+def _snap_trunc_text(s: Optional[str], limit: int = _SNAP_DESC_MAXLEN) -> str:
+    """快照用：超长文本截断到 limit 字符，并标注省略了多少，避免快照体积失控。"""
+    s = s or ""
+    return s if len(s) <= limit else s[:limit] + f"…(+{len(s) - limit} chars)"
+
 
 class DescriptionMergeConfig(BaseModel):
     """子问题 6 实体描述合并配置"""
@@ -781,13 +791,14 @@ class Layer2Inspector:
             scanned_types += 1
             entities = await fetch_entities_by_type(self.connector, end_user_id, entity_type)
 
-            # 快照：1_input（按类型分组的实体）
+            # 快照：1_input（按类型分组的实体）；description 截断、aliases 限长以控体积
             snap_input.append({
                 "scanned_type": entity_type,
                 "entity_count": len(entities),
                 "entities": [
                     {"entity_id": e.get("entity_id"), "name": e.get("name"),
-                     "entity_type": e.get("entity_type"), "description": e.get("description"),
+                     "entity_type": e.get("entity_type"),
+                     "description": _snap_trunc_text(e.get("description")),
                      "aliases": e.get("aliases") or []}
                     for e in entities
                 ],

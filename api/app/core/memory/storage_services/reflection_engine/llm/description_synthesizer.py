@@ -310,6 +310,11 @@ def apply_event_operations(
     stats = {"added": 0, "updated": 0, "deleted": 0}
     trace: List[dict] = []
 
+    def _tr(op_kind: str, status: str, reason: Optional[str]) -> None:
+        # 仅在 collect_trace 时才构建 trace 记录，关闭时零额外开销（不分配 dict、不 append）
+        if collect_trace:
+            trace.append({"op": op_kind, "status": status, "reason": reason})
+
     # 无有效操作时直接返回原串，避免纯解析→序列化造成格式微变
     if not operations:
         return (existing_event_timeline or "", stats, trace) if collect_trace \
@@ -324,43 +329,41 @@ def apply_event_operations(
         if kind == "add":
             cleaned = _clean_event_item(op.value)
             if not cleaned["fact"]:
-                trace.append({"op": "add", "status": "skipped", "reason": "empty_fact"})
+                _tr("add", "skipped", "empty_fact")
                 continue
             if "的说话者" in cleaned["fact"]:
-                trace.append({"op": "add", "status": "skipped", "reason": "speaker_filtered"})
+                _tr("add", "skipped", "speaker_filtered")
                 continue
             key = _norm_match_key(cleaned["fact"])
             if key in seen_facts:
-                trace.append({"op": "add", "status": "skipped", "reason": "dup_fact"})
+                _tr("add", "skipped", "dup_fact")
                 continue
             seen_facts.add(key)
             events.append(cleaned)
             stats["added"] += 1
-            trace.append({"op": "add", "status": "applied", "reason": None})
+            _tr("add", "applied", None)
 
         elif kind == "delete":
             idxs = _find_matches(events, op.old_value)
             if len(idxs) != 1:
-                trace.append({"op": "delete", "status": "skipped",
-                              "reason": "no_match" if not idxs else "multi_match"})
+                _tr("delete", "skipped", "no_match" if not idxs else "multi_match")
                 continue
             events.pop(idxs[0])
             stats["deleted"] += 1
-            trace.append({"op": "delete", "status": "applied", "reason": None})
+            _tr("delete", "applied", None)
 
         elif kind == "update":
             idxs = _find_matches(events, op.old_value)
             if len(idxs) != 1:
-                trace.append({"op": "update", "status": "skipped",
-                              "reason": "no_match" if not idxs else "multi_match"})
+                _tr("update", "skipped", "no_match" if not idxs else "multi_match")
                 continue
             cleaned = _clean_event_item(op.new_value)
             if not cleaned["fact"]:
-                trace.append({"op": "update", "status": "skipped", "reason": "empty_fact"})
+                _tr("update", "skipped", "empty_fact")
                 continue
             events[idxs[0]] = cleaned
             stats["updated"] += 1
-            trace.append({"op": "update", "status": "applied", "reason": None})
+            _tr("update", "applied", None)
 
     new_timeline = _serialize_timeline(events)
     return (new_timeline, stats, trace) if collect_trace else (new_timeline, stats)
