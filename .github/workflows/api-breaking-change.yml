@@ -28,8 +28,7 @@ jobs:
 
       - name: Install oasdiff
         run: |
-          curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sh
-          sudo mv ./oasdiff /usr/local/bin/
+          curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sudo sh
 
       - name: Check breaking changes
         run: |
