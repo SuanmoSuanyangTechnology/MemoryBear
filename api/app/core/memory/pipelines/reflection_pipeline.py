@@ -81,8 +81,11 @@ class ReflectionPipeline:
 
             with get_db_context() as db:
                 if llm_id:
-                    factory = MemoryClientFactory(db)
-                    self._llm_client = factory.get_llm_client(llm_id)
+                    factory = MemoryClientFactory(db, tenant_id=getattr(self.memory_config, "tenant_id", None))
+                    self._llm_client = factory.get_llm_client(
+                        llm_id,
+                        tenant_id=getattr(self.memory_config, "tenant_id", None),
+                    )
 
         # 构建 embedding_client（用于更名后重新生成 name_embedding）
         if not hasattr(self, '_embedding_client'):
@@ -94,7 +97,9 @@ class ReflectionPipeline:
                     from app.db import get_db_context
                     with get_db_context() as db:
                         self._embedding_client = ModelClientMixin.get_embedding_client(
-                            db, embedding_id
+                            db,
+                            embedding_id,
+                            tenant_id=getattr(self.memory_config, "tenant_id", None),
                         )
                 except Exception as e:
                     logger.warning(f"构建 embedding_client 失败: {e}")

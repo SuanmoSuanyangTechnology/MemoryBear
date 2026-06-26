@@ -28,10 +28,17 @@ from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
+from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_tenant_id(db: Session, workspace_id: str | uuid.UUID | None) -> uuid.UUID | None:
+    if not workspace_id:
+        return None
+    return ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
 
 def knowledge_retrieval(
         query: str,
@@ -199,15 +206,17 @@ def _retrieve_for_knowledge(
     if str(db_knowledge.workspace_id) not in workspace_ids:
         workspace_ids.append(str(db_knowledge.workspace_id))
 
+    tenant_id = _resolve_tenant_id(db, db_knowledge.workspace_id)
+
     if not chat_model:
-        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id)
+        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id, tenant_id=tenant_id)
         chat_model = Base(
             key=llm_key.api_key,
             model_name=llm_key.model_name,
             base_url=llm_key.api_base,
         )
     if not embedding_model:
-        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id)
+        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id, tenant_id=tenant_id)
         embedding_model = OpenAIEmbed(
             key=emb_key.api_key,
             model_name=emb_key.model_name,
@@ -286,7 +295,14 @@ def _retrieve_for_knowledge(
     return results, chat_model, embedding_model
 
 
-def rerank(db: Session, reranker_id: uuid, query: str, docs: list[DocumentChunk], top_k: int) -> list[DocumentChunk]:
+def rerank(
+        db: Session,
+        reranker_id: uuid,
+        query: str,
+        docs: list[DocumentChunk],
+        top_k: int,
+        tenant_id: uuid.UUID | None = None,
+) -> list[DocumentChunk]:
     """
     Reorder the list of document blocks and return the top_k results most relevant to the query
     Args:
@@ -310,8 +326,9 @@ def rerank(db: Session, reranker_id: uuid, query: str, docs: list[DocumentChunk]
         raise ValueError("top_k must be a positive integer")
     try:
         # initialize reranker
-        config = ModelConfigService.get_model_by_id(db=db, model_id=reranker_id)
-        apiConfig: ModelApiKey = config.api_keys[0]
+        apiConfig = ModelApiKeyService.get_available_api_key(db, reranker_id, tenant_id=tenant_id)
+        if not apiConfig:
+            raise ValueError("模型配置缺少 API Key")
         reranker = RedBearRerank(RedBearModelConfig(
             model_name=apiConfig.model_name,
             provider=apiConfig.provider,

@@ -128,7 +128,11 @@ def _get_ontology_service(
         # 通过 Repository 获取可用的 API Key（负载均衡逻辑由 Repository 处理）
         # from app.repositories.model_repository import ModelApiKeyRepository
         from app.services.model_service import ModelApiKeyService
-        api_key_config = ModelApiKeyService.get_available_api_key(db, model_config.id)
+        api_key_config = ModelApiKeyService.get_available_api_key(
+            db,
+            model_config.id,
+            tenant_id=current_user.tenant_id,
+        )
         if not api_key_config:
             logger.error(f"Model {llm_id} has no active API key")
             raise HTTPException(

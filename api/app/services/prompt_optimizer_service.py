@@ -179,7 +179,11 @@ class PromptOptimizerService:
         # Create LLM instance
         # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
         # api_config: ModelApiKey = api_keys[0] if api_keys else None
-        api_config: ModelApiKey = ModelApiKeyService.get_available_api_key(self.db, model_config.id)
+        api_config: ModelApiKey = ModelApiKeyService.get_available_api_key(
+            self.db,
+            model_config.id,
+            tenant_id=tenant_id,
+        )
         llm = RedBearLLM(RedBearModelConfig(
             model_name=api_config.model_name,
             provider=api_config.provider,

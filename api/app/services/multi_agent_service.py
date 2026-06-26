@@ -267,7 +267,14 @@ class MultiAgentService:
 
         # 2. 验证模型配置（如果提供了）
         if data.default_model_config_id:
-            model_api_key = ModelApiKeyService.get_available_api_key(self.db, data.default_model_config_id)
+            from app.repositories.tool_repository import ToolRepository
+
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+            model_api_key = ModelApiKeyService.get_available_api_key(
+                self.db,
+                data.default_model_config_id,
+                tenant_id=tenant_id,
+            )
             if not model_api_key:
                 raise ResourceNotFoundException("模型配置", str(data.default_model_config_id))
 

@@ -79,6 +79,13 @@ class WorkflowService:
 
         self.registry = PlatformAdapterRegistry
 
+    def _resolve_app_tenant_id(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        app = self.db.get(App, app_id)
+        if not app:
+            return None
+        from app.repositories.tool_repository import ToolRepository
+        return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+
     @staticmethod
     def _build_runtime_workflow_config_from_release(
         release: AppRelease,
@@ -588,7 +595,12 @@ class WorkflowService:
             if not model_cfg:
                 return None
 
-            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            tenant_id = self._resolve_app_tenant_id(app_id)
+            api_key_obj = ModelApiKeyService.get_available_api_key(
+                self.db,
+                setting.model_config_id,
+                tenant_id=tenant_id,
+            )
             if not api_key_obj:
                 return None
 

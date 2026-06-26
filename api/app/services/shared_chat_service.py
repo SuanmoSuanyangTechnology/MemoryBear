@@ -14,6 +14,7 @@ from app.core.logging_config import get_business_logger
 from app.models import MultiAgentConfig
 from app.models import ReleaseShare, AppRelease, Conversation
 from app.repositories import knowledge_repository
+from app.repositories.tool_repository import ToolRepository
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_web_search_tool
 from app.services.model_service import ModelApiKeyService
@@ -30,6 +31,11 @@ class SharedChatService:
         self.db = db
         self.conversation_service = ConversationService(db)
         self.share_service = ReleaseShareService(db)
+
+    def _resolve_tenant_id(self, workspace_id: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
+        if not workspace_id:
+            return None
+        return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
     def _build_kb_names(self, kb_ids: list[str]) -> list[dict]:
         from app.models import Knowledge
@@ -205,7 +211,12 @@ class SharedChatService:
         # api_key_obj = self.db.scalars(stmt).first()
         # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
         # api_key_obj = api_keys[0] if api_keys else None
-        api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
+        tenant_id = self._resolve_tenant_id(release.app.workspace_id if release.app else None)
+        api_key_obj = ModelApiKeyService.get_available_api_key(
+            self.db,
+            model_config_id,
+            tenant_id=tenant_id,
+        )
         if not api_key_obj:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
 
@@ -410,7 +421,12 @@ class SharedChatService:
             # api_key_obj = self.db.scalars(stmt).first()
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
             # api_key_obj = api_keys[0] if api_keys else None
-            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
+            tenant_id = self._resolve_tenant_id(release.app.workspace_id if release.app else None)
+            api_key_obj = ModelApiKeyService.get_available_api_key(
+                self.db,
+                model_config_id,
+                tenant_id=tenant_id,
+            )
             if not api_key_obj:
                 raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
 

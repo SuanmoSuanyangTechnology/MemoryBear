@@ -15,6 +15,7 @@ from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.db import get_db
 from app.models import (
+    App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
     ModelCapability, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
@@ -45,6 +46,17 @@ class AppChatService:
         self.conversation_service = ConversationService(db)
         self.agent_service = AgentRunService(db)
         self.workflow_service = WorkflowService(db)
+
+    def _resolve_tenant_id(self, workspace_id: Optional[str]) -> Optional[uuid.UUID]:
+        if not workspace_id:
+            return None
+        return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
+
+    def _resolve_app_tenant_id(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        app = self.db.get(App, app_id)
+        if not app:
+            return None
+        return self._resolve_tenant_id(str(app.workspace_id))
 
     def _check_annotation_match(self, app_id: uuid.UUID, message: str, source: str = "") -> Optional[dict]:
         """检查是否命中标注
@@ -77,7 +89,12 @@ class AppChatService:
             if not model_cfg:
                 return None
 
-            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            tenant_id = self._resolve_app_tenant_id(app_id)
+            api_key_obj = ModelApiKeyService.get_available_api_key(
+                self.db,
+                setting.model_config_id,
+                tenant_id=tenant_id,
+            )
             if not api_key_obj:
                 return None
 
@@ -178,7 +195,12 @@ class AppChatService:
 
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
-        api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
+        tenant_id = self._resolve_tenant_id(workspace_id)
+        api_key_obj = ModelApiKeyService.get_available_api_key(
+            self.db,
+            model_config_id,
+            tenant_id=tenant_id,
+        )
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -193,8 +215,6 @@ class AppChatService:
         tools = []
 
         # 获取工具服务
-        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
-
         tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id))
         skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
         tools.extend(skill_tools)
@@ -601,7 +621,12 @@ class AppChatService:
             variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
-            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
+            tenant_id = self._resolve_tenant_id(workspace_id)
+            api_key_obj = ModelApiKeyService.get_available_api_key(
+                self.db,
+                model_config_id,
+                tenant_id=tenant_id,
+            )
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -616,8 +641,6 @@ class AppChatService:
             tools = []
 
             # 获取工具服务
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
-
             tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id))
 
             skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)

@@ -524,11 +524,8 @@ class LLMNode(BaseNode):
             if not config:
                 raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
 
-            if not config.api_keys or len(config.api_keys) == 0:
-                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-
             # 在 Session 关闭前提取所有需要的数据
-            api_config = self.model_balance(config)
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
             model_info = ModelInfo(
                 model_name=api_config.model_name,
                 model_type=ModelType(config.type),

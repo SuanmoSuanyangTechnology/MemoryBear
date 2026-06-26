@@ -33,6 +33,14 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
 
+    # Speed Bear Service Configuration
+    SPEEDBEAR_BASE_URL: str = os.getenv("SPEEDBEAR_BASE_URL", "https://testspeedbear.redbearai.com")
+    SPEEDBEAR_AUTH_KEY: str = os.getenv("SPEEDBEAR_AUTH_KEY", "")
+    SPEEDBEAR_TIMEOUT: float = float(os.getenv("SPEEDBEAR_TIMEOUT", "30"))
+    SPEEDBEAR_SYSTEM_TENANT_ID: str = os.getenv(
+        "SPEEDBEAR_SYSTEM_TENANT_ID", "00000000-0000-0000-0000-000000000000"
+    )
+
     # Neo4j Configuration (记忆系统数据库)
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://1.94.111.67:7687")
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")

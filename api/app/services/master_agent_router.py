@@ -36,6 +36,7 @@ class MasterAgentRouter:
         model_parameters: ModelParameters,
         sub_agents: Dict[str, Any],
         state_manager: ConversationStateManager,
+        tenant_id: uuid.UUID | None = None,
         enable_rule_fast_path: bool = True
     ):
         """初始化 Master Agent 路由器
@@ -52,6 +53,7 @@ class MasterAgentRouter:
         self.model_parameters = model_parameters
         self.sub_agents = sub_agents
         self.state_manager = state_manager
+        self.tenant_id = tenant_id
         self.enable_rule_fast_path = enable_rule_fast_path
 
         logger.info(
@@ -349,7 +351,11 @@ class MasterAgentRouter:
             from app.models import ModelApiKey, ModelType
 
             # 获取 API Key 配置
-            api_key_config = ModelApiKeyService.get_available_api_key(self.db, self.master_model_config.id)
+            api_key_config = ModelApiKeyService.get_available_api_key(
+                self.db,
+                self.master_model_config.id,
+                tenant_id=self.tenant_id,
+            )
 
             if not api_key_config:
                 raise Exception("Master Agent 模型没有可用的 API Key")

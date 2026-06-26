@@ -11,7 +11,7 @@ from app.core.models import RedBearModelConfig, RedBearImageGenerator, RedBearVi
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.models.models_model import ModelType
-from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository
+from app.repositories.model_repository import ModelConfigRepository
 from app.services.model_service import ModelApiKeyService
 
 
@@ -26,6 +26,7 @@ class GenerationService:
         model_config_id: str,
         prompt: str,
         size: Optional[str] = "2k",
+        tenant_id: uuid.UUID | None = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -52,7 +53,11 @@ class GenerationService:
             )
         
         # 获取 API Key
-        api_key_info = ModelApiKeyService.get_available_api_key(self.db, uuid.UUID(model_config_id))
+        api_key_info = ModelApiKeyService.get_available_api_key(
+            self.db,
+            uuid.UUID(model_config_id),
+            tenant_id=tenant_id,
+        )
         if not api_key_info:
             raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
         
@@ -76,6 +81,7 @@ class GenerationService:
         model_config_id: str,
         prompt: str,
         duration: Optional[int] = None,
+        tenant_id: uuid.UUID | None = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -102,7 +108,11 @@ class GenerationService:
             )
         
         # 获取 API Key
-        api_key_info = ModelApiKeyService.get_available_api_key(self.db, uuid.UUID(model_config_id))
+        api_key_info = ModelApiKeyService.get_available_api_key(
+            self.db,
+            uuid.UUID(model_config_id),
+            tenant_id=tenant_id,
+        )
         if not api_key_info:
             raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
         
@@ -124,7 +134,8 @@ class GenerationService:
     async def get_video_task_status(
         self,
         model_config_id: str,
-        task_id: str
+        task_id: str,
+        tenant_id: uuid.UUID | None = None,
     ) -> Dict[str, Any]:
         """
         查询视频生成任务状态
@@ -142,7 +153,11 @@ class GenerationService:
             raise BusinessException("模型配置不存在", code=BizCode.NOT_FOUND)
         
         # 获取 API Key
-        api_key_info = ModelApiKeyService.get_available_api_key(self.db, uuid.UUID(model_config_id))
+        api_key_info = ModelApiKeyService.get_available_api_key(
+            self.db,
+            uuid.UUID(model_config_id),
+            tenant_id=tenant_id,
+        )
         if not api_key_info:
             raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
         

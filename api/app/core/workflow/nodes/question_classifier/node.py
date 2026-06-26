@@ -60,7 +60,7 @@ class QuestionClassifierNode(BaseNode):
             "output": VariableType.STRING
         }
 
-    def _get_llm_instance(self) -> RedBearLLM:
+    def _get_llm_instance(self, variable_pool: VariablePool) -> RedBearLLM:
         """获取LLM实例"""
         with get_db_read() as db:
             config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
@@ -68,10 +68,7 @@ class QuestionClassifierNode(BaseNode):
             if not config:
                 raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
 
-            if not config.api_keys or len(config.api_keys) == 0:
-                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-
-            api_config = self.model_balance(config)
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
             model_name = api_config.model_name
             provider = api_config.provider
             api_key = api_config.api_key
@@ -104,14 +101,14 @@ class QuestionClassifierNode(BaseNode):
             category_map[category_name] = case_tag
         return category_map
 
-    def _get_model_info(self) -> ModelInfo:
+    def _get_model_info(self, variable_pool: VariablePool) -> ModelInfo:
         """获取模型信息（用于视觉处理）"""
         with get_db_read() as db:
             config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
             if not config:
                 raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
             
-            api_config = self.model_balance(config)
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
             return ModelInfo(
                 model_name=api_config.model_name,
                 model_type=ModelType(config.type),
@@ -184,8 +181,8 @@ class QuestionClassifierNode(BaseNode):
             }
 
         try:
-            llm = self._get_llm_instance()
-            model_info = self._get_model_info()
+            llm = self._get_llm_instance(variable_pool)
+            model_info = self._get_model_info(variable_pool)
 
             # 渲染用户提示词模板，支持工作流变量
             user_prompt = self._render_template(
