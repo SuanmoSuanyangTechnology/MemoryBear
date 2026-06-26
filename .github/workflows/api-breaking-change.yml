@@ -26,28 +26,12 @@ jobs:
           cd api
           uv run python scripts/export_openapi.py --v1-only -o openapi-current.json
 
-      - name: Run openapi-diff
-        id: diff
+      - name: Install oasdiff
         run: |
-          # Generate markdown report (always succeeds)
-          docker run --rm \
-            -v ${{ github.workspace }}/api:/work \
-            openapitools/openapi-diff:latest \
-            /work/openapi-baseline.json \
-            /work/openapi-current.json \
-            --markdown /work/openapi-diff-report.md || true
+          curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sh
+          sudo mv ./oasdiff /usr/local/bin/
 
-          # Run again with --fail-on-incompatible for exit code
-          docker run --rm \
-            -v ${{ github.workspace }}/api:/work \
-            openapitools/openapi-diff:latest \
-            /work/openapi-baseline.json \
-            /work/openapi-current.json \
-            --fail-on-incompatible
-
-      - name: Comment PR with diff
-        if: always() && hashFiles('api/openapi-diff-report.md') != ''
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: openapi-diff
-          path: api/openapi-diff-report.md
+      - name: Check breaking changes
+        run: |
+          cd api
+          oasdiff breaking openapi-baseline.json openapi-current.json --fail-on ERR
