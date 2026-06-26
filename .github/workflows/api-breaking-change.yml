@@ -1,53 +1,145 @@
 name: API Breaking Change Check
 on:
   pull_request:
-    paths:
-      - 'api/app/**'
-      - 'api/openapi-baseline.json'
 
 jobs:
   openapi-diff:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if API files changed
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'api/app/' 'api/openapi-baseline.json' | head -1)
+          if [ -z "$CHANGED" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if no API changes
+        if: steps.filter.outputs.skip == 'true'
+        run: echo "No API files changed, skipping check."
 
       - name: Setup Python
+        if: steps.filter.outputs.skip == 'false'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: steps.filter.outputs.skip == 'false'
         run: |
-          pip install uv
+          pip install uv==0.7.12
           cd api && uv sync
 
       - name: Export current OpenAPI schema
+        if: steps.filter.outputs.skip == 'false'
         run: |
           cd api
           uv run python scripts/export_openapi.py --v1-only -o openapi-current.json
 
-      - name: Run openapi-diff
-        id: diff
+      - name: Get baseline from target branch
+        if: steps.filter.outputs.skip == 'false'
         run: |
-          # Generate markdown report (always succeeds)
-          docker run --rm \
-            -v ${{ github.workspace }}/api:/work \
-            openapitools/openapi-diff:latest \
-            /work/openapi-baseline.json \
-            /work/openapi-current.json \
-            --markdown /work/openapi-diff-report.md || true
+          cd api
+          git show origin/${{ github.base_ref }}:api/openapi-baseline.json > openapi-target-baseline.json
 
-          # Run again with --fail-on-incompatible for exit code
-          docker run --rm \
-            -v ${{ github.workspace }}/api:/work \
-            openapitools/openapi-diff:latest \
-            /work/openapi-baseline.json \
-            /work/openapi-current.json \
-            --fail-on-incompatible
+      - name: Install oasdiff
+        if: steps.filter.outputs.skip == 'false'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sudo sh
 
-      - name: Comment PR with diff
-        if: always() && hashFiles('api/openapi-diff-report.md') != ''
+      - name: Run OpenAPI breaking change checks
+        if: steps.filter.outputs.skip == 'false'
+        id: api_diff
+        run: |
+          cd api
+          set +e
+
+          REPORT="oasdiff-report.md"
+          BASELINE="openapi-target-baseline.json"
+          CURRENT="openapi-current.json"
+
+          {
+            echo "# API Breaking Change Report"
+            echo ""
+            echo "Comparing against \`${{ github.base_ref }}\` baseline."
+            echo ""
+            echo "| Tool | Result |"
+            echo "| --- | --- |"
+          } > "$REPORT"
+
+          OASDIFF_OUTPUT=$(oasdiff breaking "$BASELINE" "$CURRENT" --fail-on ERR 2>&1)
+          OASDIFF_EXIT=$?
+
+          if [ "$OASDIFF_EXIT" -eq 0 ]; then
+            echo "| oasdiff | ✅ PASS |" >> "$REPORT"
+          else
+            echo "| oasdiff | ❌ FAIL |" >> "$REPORT"
+          fi
+
+          OPENAPI_DIFF_OUTPUT=$(docker run --rm \
+            -v "${{ github.workspace }}/api:/work" \
+            openapitools/openapi-diff:2.1.0-beta.11 \
+            --fail-on-incompatible \
+            /work/"$BASELINE" \
+            /work/"$CURRENT" 2>&1)
+          OPENAPI_DIFF_EXIT=$?
+
+          if [ "$OPENAPI_DIFF_EXIT" -eq 0 ]; then
+            echo "| openapi-diff | ✅ PASS |" >> "$REPORT"
+          else
+            echo "| openapi-diff | ❌ FAIL |" >> "$REPORT"
+          fi
+
+          {
+            echo ""
+            echo "## oasdiff"
+            echo ""
+            echo "<details open>"
+            echo "<summary>Output</summary>"
+            echo ""
+            echo '```text'
+            if [ -n "$OASDIFF_OUTPUT" ]; then
+              echo "$OASDIFF_OUTPUT"
+            else
+              echo "No breaking changes detected."
+            fi
+            echo '```'
+            echo ""
+            echo "</details>"
+
+            echo ""
+            echo "## openapi-diff"
+            echo ""
+            echo "<details open>"
+            echo "<summary>Output</summary>"
+            echo ""
+            echo '```text'
+            if [ -n "$OPENAPI_DIFF_OUTPUT" ]; then
+              echo "$OPENAPI_DIFF_OUTPUT"
+            else
+              echo "No incompatible changes detected."
+            fi
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$REPORT"
+
+          echo "oasdiff_exit=$OASDIFF_EXIT" >> "$GITHUB_OUTPUT"
+          echo "openapi_diff_exit=$OPENAPI_DIFF_EXIT" >> "$GITHUB_OUTPUT"
+
+          if [ "$OASDIFF_EXIT" -ne 0 ] || [ "$OPENAPI_DIFF_EXIT" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Comment PR
+        if: always() && steps.filter.outputs.skip == 'false'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: openapi-diff
-          path: api/openapi-diff-report.md
+          header: oasdiff
+          path: api/oasdiff-report.md
