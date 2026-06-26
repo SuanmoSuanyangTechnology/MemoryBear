@@ -43,6 +43,7 @@ class LLMRouter:
         routing_rules: List[Dict[str, Any]],
         sub_agents: Dict[str, Any],
         routing_model_config: Optional[ModelConfig] = None,
+        tenant_id: uuid.UUID | None = None,
         use_llm: bool = True
     ):
         """初始化 LLM 路由器
@@ -60,6 +61,7 @@ class LLMRouter:
         self.routing_rules = routing_rules
         self.sub_agents = sub_agents
         self.routing_model_config = routing_model_config
+        self.tenant_id = tenant_id
         self.use_llm = use_llm and routing_model_config is not None
         
         # 配置参数
@@ -392,7 +394,11 @@ class LLMRouter:
             # ).first()
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, self.routing_model_config.id)
             # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = ModelApiKeyService.get_available_api_key(self.db, self.routing_model_config.id)
+            api_key_config = ModelApiKeyService.get_available_api_key(
+                self.db,
+                self.routing_model_config.id,
+                tenant_id=self.tenant_id,
+            )
             
             if not api_key_config:
                 raise Exception("路由模型没有可用的 API Key")

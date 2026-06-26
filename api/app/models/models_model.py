@@ -47,6 +47,7 @@ class ModelCapability(StrEnum):
 class ModelProvider(StrEnum):
     """模型提供商枚举"""
     OPENAI = "openai"
+    SPEEDBEAR = "speedbear"
     # ANTHROPIC = "anthropic"
     # GOOGLE = "google"
     # BAIDU = "baidu"

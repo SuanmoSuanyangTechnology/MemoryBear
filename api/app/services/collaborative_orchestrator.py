@@ -23,7 +23,8 @@ from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.models import RedBearLLM
 from app.core.models.base import RedBearModelConfig
-from app.models import ModelType
+from app.models import App, ModelType
+from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
@@ -52,6 +53,11 @@ class CollaborativeOrchestrator:
         # 解析配置
         self.sub_agents = self._parse_sub_agents(config.sub_agents)
         self.execution_config = config.execution_config or {}
+        self.tenant_id = None
+        if getattr(config, "app_id", None):
+            app = db.get(App, config.app_id)
+            if app:
+                self.tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, str(app.workspace_id))
         
         # 协作模式
         self.enable_handoffs = self.execution_config.get("enable_handoffs", True)
@@ -430,7 +436,11 @@ class CollaborativeOrchestrator:
                 )
             
             # 获取 API Key
-            api_key_config = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
+            api_key_config = ModelApiKeyService.get_available_api_key(
+                self.db,
+                model_config_id,
+                tenant_id=self.tenant_id,
+            )
             if not api_key_config:
                 raise BusinessException(
                     f"Agent 模型没有可用的 API Key: {agent_id}",

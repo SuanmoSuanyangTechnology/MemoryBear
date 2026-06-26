@@ -481,6 +481,19 @@ def route_after_agent(state: HandoffState) -> str:
 
 # ==================== 配置转换 ====================
 
+def _resolve_release_tenant_id(db: Session, release: Any) -> uuid.UUID | None:
+    from app.models import App
+    from app.repositories.tool_repository import ToolRepository
+
+    app_id = getattr(release, "app_id", None)
+    if not app_id:
+        return None
+    app = db.get(App, app_id)
+    if not app:
+        return None
+    return ToolRepository.get_tenant_id_by_workspace_id(db, str(app.workspace_id))
+
+
 def convert_multi_agent_config_to_handoffs(
     multi_agent_config: Dict,
     db: Session
@@ -537,7 +550,12 @@ def convert_multi_agent_config_to_handoffs(
                     
                     # 获取该 Agent 的模型配置
                     if release.default_model_config_id:
-                        model_api_key = ModelApiKeyService.get_available_api_key(db, release.default_model_config_id)
+                        tenant_id = _resolve_release_tenant_id(db, release)
+                        model_api_key = ModelApiKeyService.get_available_api_key(
+                            db,
+                            release.default_model_config_id,
+                            tenant_id=tenant_id,
+                        )
                         if model_api_key:
                             model_config = RedBearModelConfig(
                                 model_name=model_api_key.model_name,
@@ -845,7 +863,8 @@ class HandoffsService:
                         response_meta = output_message.response_metadata if hasattr(output_message, 'response_metadata') else None
                         total_tokens = response_meta.get("token_usage", {}).get("total_tokens",
                                                                                 0) if response_meta else 0
-                        yield f"event: sub_usage\ndata: {json.dumps({"total_tokens": total_tokens}, ensure_ascii=False)}\n\n"
+                        usage_payload = json.dumps({"total_tokens": total_tokens}, ensure_ascii=False)
+                        yield f"event: sub_usage\ndata: {usage_payload}\n\n"
                     if collected_tool_calls:
                         # 找到参数最完整的 transfer 工具调用
                         best_tc = None

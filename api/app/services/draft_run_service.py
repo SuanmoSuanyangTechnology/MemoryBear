@@ -26,7 +26,7 @@ from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_db_context
-from app.models import AgentConfig, ModelConfig, Message
+from app.models import App, AgentConfig, ModelConfig, Message
 from app.models.agent_execution_model import AgentExecution
 from app.models.models_model import ModelCapability, ModelType
 from app.repositories.agent_execution_repository import AgentExecutionRepository
@@ -66,6 +66,7 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     Returns:
         网络搜索工具
     """
+    _ = web_search_config
     logger.info("创建网络搜索工具")
 
     @tool(args_schema=WebSearchInput)
@@ -257,6 +258,12 @@ class AgentRunService:
         """
         self.db = db
 
+    def _resolve_app_tenant_id(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        app = self.db.get(App, app_id)
+        if not app:
+            return None
+        return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+
     def _build_debug_id(self) -> str:
         """生成可用于日志和 SSE 对齐的错误追踪 ID。"""
         return f"err_{uuid.uuid4().hex[:12]}"
@@ -404,7 +411,12 @@ class AgentRunService:
             if not model_cfg:
                 return None
 
-            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            tenant_id = self._resolve_app_tenant_id(app_id)
+            api_key_obj = ModelApiKeyService.get_available_api_key(
+                self.db,
+                setting.model_config_id,
+                tenant_id=tenant_id,
+            )
             if not api_key_obj:
                 return None
 
@@ -744,10 +756,11 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
+        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
         try:
             # 1. 获取 API Key 配置
-            api_key_config = await self._get_api_key(model_config.id)
+            api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
             logger.debug(
                 "API Key 配置获取成功",
                 extra={
@@ -781,8 +794,6 @@ class AgentRunService:
             # 4. 准备工具列表
             tools = []
 
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
-
             # 从配置中获取启用的工具
             tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
             skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
@@ -792,9 +803,8 @@ class AgentRunService:
             kb_tools, citations_collector = self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
             tools.extend(kb_tools)
             # 添加长期记忆工具
-            memory_flag = False
             if memory:
-                memory_tools, memory_flag = self.load_memory_config(
+                memory_tools, _ = self.load_memory_config(
                     memory_config, user_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
@@ -968,9 +978,6 @@ class AgentRunService:
                     "has_files": bool(processed_files)
                 }
             )
-
-            memory_config_ = agent_config.memory
-            config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
             # 创建 Agent 执行记录（running 状态）
             if not sub_agent and not skip_save:
@@ -1165,12 +1172,13 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
+        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
         start_time = time.time()
 
         try:
             # 1. 获取 API Key 配置
-            api_key_config = await self._get_api_key(model_config.id)
+            api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
             if not sub_agent:
                 variables = self.prepare_variables(variables, agent_config.variables)
             else:
@@ -1197,8 +1205,6 @@ class AgentRunService:
             # 4. 准备工具列表
             tools = []
 
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
-
             # 从配置中获取启用的工具
             tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
             skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
@@ -1209,10 +1215,10 @@ class AgentRunService:
             tools.extend(kb_tools)
 
             # 添加长期记忆工具
-            memory_flag = False
             if memory:
-                memory_tools, memory_flag = self.load_memory_config(memory_config, user_id, storage_type,
-                                                                    user_rag_memory_id)
+                memory_tools, _ = self.load_memory_config(
+                    memory_config, user_id, storage_type, user_rag_memory_id
+                )
                 tools.extend(memory_tools)
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
@@ -1406,10 +1412,6 @@ class AgentRunService:
                     "error": step.get("error"),
                     "meta": step.get("meta"),
                 })
-
-            memory_config_ = agent_config.memory
-            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
-            config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
             # 创建 Agent 执行记录（running 状态）
             if not sub_agent and not skip_save:
@@ -1647,7 +1649,7 @@ class AgentRunService:
         """
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    async def _get_api_key(self, model_config_id: uuid.UUID) -> Dict:
+    async def _get_api_key(self, model_config_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Dict:
         """获取模型的 API Key
 
         Args:
@@ -1674,7 +1676,11 @@ class AgentRunService:
         #
         # api_key = self.db.scalars(stmt).first()
         # api_key = api_keys[0] if api_keys else None
-        api_key = ModelApiKeyService.get_available_api_key(self.db, model_config_id)
+        api_key = ModelApiKeyService.get_available_api_key(
+            self.db,
+            model_config_id,
+            tenant_id=tenant_id,
+        )
 
         if not api_key:
             raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
@@ -1954,6 +1960,7 @@ class AgentRunService:
         Returns:
             Optional[str]: 助手消息ID
         """
+        _ = (app_id, user_id)
         try:
             from app.services.conversation_service import ConversationService
 
@@ -2112,6 +2119,7 @@ class AgentRunService:
             effective_params: Dict[str, Any]
     ) -> List[str]:
         """根据 suggested_questions_after_answer 配置生成下一步建议问题"""
+        _ = effective_params
         sq_config = features_config.get("suggested_questions_after_answer", {})
         if not isinstance(sq_config, dict) or not sq_config.get("enabled"):
             return []
@@ -2739,8 +2747,7 @@ class AgentRunService:
         if not usage:
             return None
 
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
+        _ = model_config
 
         # 简化成本估算：暂时返回 None
         # TODO: 实现基于模型名称或配置的成本估算

@@ -244,10 +244,8 @@ class AgentNode(BaseNode):
             config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
             if not config:
                 raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-            if not config.api_keys or len(config.api_keys) == 0:
-                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
-            api_config = self.model_balance(config)
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
             model_info = ModelInfo(
                 model_name=api_config.model_name,
                 model_type=ModelType(config.type),

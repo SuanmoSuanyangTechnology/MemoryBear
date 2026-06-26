@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.models import MultiAgentConfig, AgentConfig, ModelConfig
 from app.models.multi_agent_model import AggregationStrategy, OrchestrationMode
-from app.repositories.model_repository import ModelApiKeyRepository
 from app.services.agent_registry import AgentRegistry
 from app.services.master_agent_router import MasterAgentRouter
 from app.services.conversation_state_manager import ConversationStateManager
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
+from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
@@ -42,6 +42,9 @@ class MultiAgentOrchestrator:
         # self. config.d
         self.default_model_config_id = config.default_model_config_id
         self.model_parameters = config.model_parameters
+        self.tenant_id = None
+        if getattr(config, "app", None) and getattr(config.app, "workspace_id", None):
+            self.tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, str(config.app.workspace_id))
 
         # 加载子 Agent
         self.sub_agents = {}
@@ -76,6 +79,7 @@ class MultiAgentOrchestrator:
                 model_parameters=self.model_parameters,
                 sub_agents=self.sub_agents,
                 state_manager=self.state_manager,
+                tenant_id=self.tenant_id,
                 enable_rule_fast_path=config.execution_config.get("enable_rule_fast_path", True)
             )
 
@@ -2577,7 +2581,7 @@ class MultiAgentOrchestrator:
             # 调用 Master Agent 的 LLM 进行整合
             from app.core.models import RedBearLLM
             from app.core.models.base import RedBearModelConfig
-            from app.models import ModelApiKey, ModelType
+            from app.models import ModelType
 
             # 获取 Master Agent 的模型配置
             default_model_config_id = self.config.default_model_config_id
@@ -2594,7 +2598,11 @@ class MultiAgentOrchestrator:
             # ).first()
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
             # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = ModelApiKeyService.get_available_api_key(self.db, default_model_config_id)
+            api_key_config = ModelApiKeyService.get_available_api_key(
+                self.db,
+                default_model_config_id,
+                tenant_id=self.tenant_id,
+            )
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
@@ -2755,7 +2763,7 @@ class MultiAgentOrchestrator:
         try:
             from app.core.models import RedBearLLM
             from app.core.models.base import RedBearModelConfig
-            from app.models import ModelApiKey, ModelType
+            from app.models import ModelType
 
             # 获取 Master Agent 的模型配置
             default_model_config_id = self.config.default_model_config_id
@@ -2774,7 +2782,11 @@ class MultiAgentOrchestrator:
             # ).first()
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
             # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = ModelApiKeyService.get_available_api_key(self.db, default_model_config_id)
+            api_key_config = ModelApiKeyService.get_available_api_key(
+                self.db,
+                default_model_config_id,
+                tenant_id=self.tenant_id,
+            )
 
             if not api_key_config:
                 logger.warning("Master Agent 没有可用的 API Key，使用简单整合")

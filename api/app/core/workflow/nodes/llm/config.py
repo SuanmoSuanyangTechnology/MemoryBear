@@ -449,6 +449,7 @@ _PARAM_CAPABILITY_WARNINGS: dict[str, str] = {
 
 _OPENAI_COMPATIBLE_PROVIDERS = frozenset({
     ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.VOLCANO,
+    ModelProvider.SPEEDBEAR,
 })
 
 _PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
@@ -457,15 +458,16 @@ _PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
     "seed": frozenset({
         ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
         ModelProvider.OLLAMA, ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+        ModelProvider.SPEEDBEAR,
         ModelProvider.BEDROCK,
     }),
     "frequency_penalty": frozenset({
         ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE, ModelProvider.SPEEDBEAR,
     }),
     "presence_penalty": frozenset({
         ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE, ModelProvider.SPEEDBEAR,
     }),
     "enable_search": frozenset({ModelProvider.DASHSCOPE}),
 }
@@ -484,7 +486,7 @@ _PARAM_PROVIDER_WARNINGS: dict[str, str] = {
 # DashScope non-Omni (ChatTongyi) uses its own format and rejects OpenAI-style lists.
 _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
     ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-    ModelProvider.VOLCANO,
+    ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
     ModelProvider.OLLAMA,
     ModelProvider.BEDROCK,
 })
@@ -524,7 +526,6 @@ def strip_unsupported_llm_params(
     # frequency_penalty / presence_penalty are only safe for Omni.
     # Other params (top_k, seed, enable_search, repetition_penalty) are
     # supported by ChatTongyi via model_kwargs routing in RedBearModelFactory.
-    effective_provider = provider_enum
     if provider_enum == ModelProvider.DASHSCOPE and not is_omni:
         # Map DashScope non-Omni to a virtual "dashscope_native" so that
         # OpenAI-only params (frequency_penalty, presence_penalty) are
@@ -645,5 +646,3 @@ def validate_llm_param_constraints(
             warnings.append(_PARAM_PROVIDER_WARNINGS["enable_search"])
 
     return warnings
-
-

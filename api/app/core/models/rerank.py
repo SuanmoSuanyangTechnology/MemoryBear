@@ -1,8 +1,6 @@
-from typing import Any, Dict, List, Optional, Sequence, Type, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 from copy import deepcopy
-from urllib.parse import urlparse
 from langchain_core.documents import BaseDocumentCompressor, Document
-from langchain_core.runnables import RunnableSerializable
 from langchain_core.callbacks import Callbacks
 from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, RedBearModelFactory
 from app.models import ModelProvider
@@ -62,7 +60,7 @@ class RedBearRerank(BaseDocumentCompressor):
             top_n: Optional[int] = -1,
     ) -> List[Dict[str, Any]]:
         provider = self._config.provider.lower()
-        if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+        if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.SPEEDBEAR]:
             import langchain_community.document_compressors.jina_rerank as jina_mod
 
             # 规范化：如果不以 /v1/rerank 结尾，则补齐；若已以 /v1 结尾，则补 /rerank

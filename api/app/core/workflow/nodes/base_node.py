@@ -13,6 +13,8 @@ from langgraph.config import get_stream_writer
 from langgraph.errors import GraphInterrupt
 
 from app.core.config import settings
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES, WorkflowNodeCacheManager
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
@@ -20,8 +22,10 @@ from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.db import get_db_read
 from app.models import ModelConfig, ModelApiKey, LoadBalanceStrategy
+from app.repositories.tool_repository import ToolRepository
 from app.schemas import FileInput
 from app.schemas.model_schema import ModelInfo
+from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
@@ -922,3 +926,29 @@ class BaseNode(ABC):
         if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
             return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
         return api_keys[0]
+
+    def resolve_tenant_id(self, variable_pool: VariablePool) -> uuid.UUID | None:
+        # tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        # if tenant_id:
+        #     return uuid.UUID(str(tenant_id))
+
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        if not workspace_id:
+            return None
+
+        with get_db_read() as db:
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
+        if tenant_id:
+            return uuid.UUID(str(tenant_id))
+        return None
+
+    def get_runtime_api_config(self, db, model_config: ModelConfig, variable_pool: VariablePool) -> ModelApiKey:
+        tenant_id = self.resolve_tenant_id(variable_pool)
+        api_config = ModelApiKeyService.get_available_api_key(
+            db,
+            model_config.id,
+            tenant_id=tenant_id,
+        )
+        if not api_config:
+            raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
+        return api_config
