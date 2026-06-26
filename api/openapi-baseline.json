@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "MemoryBear",
-    "description": "MemoryBear",
+    "title": "redbera-mem",
+    "description": "redbera-mem",
     "version": "1.0.0"
   },
   "paths": {
@@ -3825,9 +3825,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeStatisticsResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -12230,7 +12228,6 @@
         "type": "string",
         "enum": [
           "openai",
-          "speedbear",
           "dashscope",
           "ollama",
           "xinference",
@@ -12759,78 +12756,6 @@
         "type": "object",
         "title": "NodeRunRequest",
         "description": "单节点试运行请求"
-      },
-      "NodeStatItem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "title": "Type",
-            "description": "记忆节点类型"
-          },
-          "count": {
-            "type": "integer",
-            "title": "Count",
-            "description": "数量"
-          },
-          "percentage": {
-            "type": "number",
-            "title": "Percentage",
-            "description": "占比"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "count",
-          "percentage"
-        ],
-        "title": "NodeStatItem",
-        "description": "单个记忆类型统计项。"
-      },
-      "NodeStatisticsResponse": {
-        "properties": {
-          "code": {
-            "type": "integer",
-            "title": "Code",
-            "description": "业务状态码，0=成功",
-            "default": 0
-          },
-          "msg": {
-            "type": "string",
-            "title": "Msg",
-            "description": "简短提示",
-            "default": "OK"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/NodeStatItem"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Data",
-            "description": "业务数据"
-          },
-          "error": {
-            "type": "string",
-            "title": "Error",
-            "description": "错误详情",
-            "default": ""
-          },
-          "time": {
-            "type": "integer",
-            "title": "Time",
-            "description": "毫秒时间戳"
-          }
-        },
-        "type": "object",
-        "title": "NodeStatisticsResponse",
-        "description": "GET /v1/memory/analytics/node_statistics 响应。"
       },
       "OpeningStatementConfig": {
         "properties": {
