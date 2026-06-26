@@ -4,6 +4,7 @@ LLM 节点实现
 调用 LLM 模型进行文本生成。
 """
 
+import asyncio
 import logging
 import json
 from copy import deepcopy
@@ -30,6 +31,7 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
+from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
 from app.models.models_model import ModelCapability, ModelProvider
 
@@ -449,6 +451,25 @@ class LLMNode(BaseNode):
         cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL).strip()
         return cleaned_content, reasoning_content
 
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text" or "text" in item:
+                        text_parts.append(str(item.get("text") or ""))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+            return "".join(text_parts)
+        if isinstance(content, dict):
+            return str(content.get("text") or "")
+        return str(content)
+
     def _is_inside_reasoning_block(self, text: str, pos: int) -> bool:
         import re
         think_ranges = [(m.start(), m.end()) for m in re.finditer(r' thinking(.*?) response', text, re.DOTALL)]
@@ -708,7 +729,24 @@ class LLMNode(BaseNode):
 
             if self.typed_config.memory.enable:
                 history_message = []
-                history_messages = deepcopy(state["messages"][-self.typed_config.memory.window_size:])
+                conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                history_prefix = None
+                if conversation_id:
+                    with get_db_context() as db:
+                        context_engine_manager = ContextEngineManager(db)
+                        history_prefix = await context_engine_manager.prepare_workflow_history_prefix(
+                            features=self.workflow_config.get("features", {}),
+                            conversation_id=conversation_id,
+                            scope_key=f"node:{self.node_id}",
+                            current_input=self._content_to_text(messages[-1]["content"]) if messages else "",
+                            workflow_messages=state.get("messages", []),
+                            window_size=self.typed_config.memory.window_size,
+                            model_config_id=self.typed_config.model_id,
+                        )
+
+                history_messages = deepcopy(history_prefix) if history_prefix is not None else deepcopy(
+                    state["messages"][-self.typed_config.memory.window_size:]
+                )
                 for message in history_messages:
                     if isinstance(message["content"], list):
                         file_content = []
@@ -720,11 +758,12 @@ class LLMNode(BaseNode):
                             {"role": message["role"], "content": file_content}
                         )
                     else:
-                        message["content"] = await self.process_message(
-                            model_info,
-                            message["content"],
-                            effective_vision
-                        )
+                        if history_prefix is None:
+                            message["content"] = await self.process_message(
+                                model_info,
+                                message["content"],
+                                effective_vision
+                            )
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
                 self.history_messages = history_message
@@ -766,8 +805,6 @@ class LLMNode(BaseNode):
             dict: {"llm_result": AIMessage, "branch_signal": "SUCCESS"} on success,
                   {"llm_result": None, "branch_signal": "ERROR"} on branch error
         """
-        import asyncio
-        
         llm = await self._prepare_llm(state, variable_pool, False)
         max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
         last_error = None
@@ -811,6 +848,28 @@ class LLMNode(BaseNode):
                 
                 if hasattr(self, '_param_warnings') and self._param_warnings:
                     result["param_warnings"] = self._param_warnings
+
+                if self.typed_config.memory.enable:
+                    conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                    if conversation_id:
+                        current_user_msg = next(
+                            (m["content"] for m in reversed(self.messages) if m.get("role") == "user"), ""
+                        )
+                        _kwargs = dict(
+                            features=self.workflow_config.get("features", {}),
+                            conversation_id=conversation_id,
+                            scope_key=f"node:{self.node_id}",
+                            workflow_messages=state.get("messages", []) + [
+                                {"role": "user", "content": current_user_msg},
+                                {"role": "assistant", "content": content},
+                            ],
+                            window_size=self.typed_config.memory.window_size,
+                            model_config_id=self.typed_config.model_id,
+                        )
+                        async def _run_after_workflow_turn(kwargs=_kwargs):
+                            with get_db_context() as db:
+                                await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                        asyncio.create_task(_run_after_workflow_turn())
                 
                 return result
                 
@@ -953,8 +1012,6 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
-        import asyncio as _asyncio
-
         self.typed_config = LLMNodeConfig(**self.config)
         max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
         last_error = None
@@ -1078,6 +1135,28 @@ class LLMNode(BaseNode):
                 if hasattr(self, '_param_warnings') and self._param_warnings:
                     result["param_warnings"] = self._param_warnings
 
+                if self.typed_config.memory.enable:
+                    conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                    if conversation_id:
+                        current_user_msg = next(
+                            (m["content"] for m in reversed(self.messages) if m.get("role") == "user"), ""
+                        )
+                        _kwargs = dict(
+                            features=self.workflow_config.get("features", {}),
+                            conversation_id=conversation_id,
+                            scope_key=f"node:{self.node_id}",
+                            workflow_messages=state.get("messages", []) + [
+                                {"role": "user", "content": current_user_msg},
+                                {"role": "assistant", "content": full_response},
+                            ],
+                            window_size=self.typed_config.memory.window_size,
+                            model_config_id=self.typed_config.model_id,
+                        )
+                        async def _run_after_workflow_turn(kwargs=_kwargs):
+                            with get_db_context() as db:
+                                await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                        asyncio.create_task(_run_after_workflow_turn())
+
                 yield {"__final__": True, "result": result}
                 return
 
@@ -1086,7 +1165,7 @@ class LLMNode(BaseNode):
                 logger.error(f"节点 {self.node_id} LLM 流式调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
 
                 if attempt < max_attempts - 1 and self.typed_config.retry.enable:
-                    await _asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
+                    await asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
                 else:
                     break
 

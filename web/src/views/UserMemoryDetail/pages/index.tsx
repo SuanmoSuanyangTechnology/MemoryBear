@@ -19,8 +19,11 @@ import EpisodicDetail from './EpisodicDetail'
 import ExplicitDetail from './ExplicitDetail'
 import WorkingDetail from './WorkingDetail'
 import GraphDetail from './GraphDetail'
-import ReflectLogs from './ReflectLogs'
+import { ReflectLogList } from '@redbear/memory-brick'
+import { request } from '@/utils/request';
 
+
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 /**
  * Detail page for user memory - renders different memory type views
  * based on the `type` route param
@@ -73,8 +76,10 @@ const Detail: FC = () => {
     }
   }
 
-  if (type === 'REFLECT_LOGS') {
-    return <ReflectLogs />
+  if (type === 'REFLECT_LOGS' && isSaas && ReflectLogList) {
+    return <ReflectLogList request={request} />
+  } else if (type === 'REFLECT_LOGS') {
+    return null;
   }
 
   if (type === 'GRAPH') {

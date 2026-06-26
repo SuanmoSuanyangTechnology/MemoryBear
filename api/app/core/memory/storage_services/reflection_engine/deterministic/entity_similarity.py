@@ -30,7 +30,7 @@ def _prefixed_row(row: dict, prefix: str, end_user_id: str) -> dict:
         "entity_type": row["entity_type"],
         "description": row.get(f"{prefix}_desc", ""),
         "aliases": row.get(f"{prefix}_aliases") or [],
-        "name_embedding": row.get(f"{prefix}_embed") or [],
+        "name_embedding": [],
         "end_user_id": end_user_id,
         **_ENTITY_DEFAULTS,
     }
@@ -45,6 +45,8 @@ class DedupCandidatePair(BaseModel):
     entity_type: str = ""
     a_desc: str = ""
     b_desc: str = ""
+    a_desc_summary: str = ""
+    b_desc_summary: str = ""
     a_aliases: List[str] = Field(default_factory=list)
     b_aliases: List[str] = Field(default_factory=list)
     sim_name: float = 0.0       # 路径A：名称相似度（0~1）
@@ -65,7 +67,7 @@ async def fetch_name_candidates(
       2. _row_to_entity 转为 ExtractedEntityNode 对象
       3. _would_merge_cross_role 角色保护过滤
       4. _name_similarity_with_aliases 精确打分
-      5. 保留 sim ≥ 0.85 或别名完全匹配的候选
+      5. 保留 sim ≥ 0.7 或别名完全匹配的候选
     """
     from app.repositories.neo4j.cypher_queries import DEDUP_CANDIDATES_BY_NAME
 
@@ -83,12 +85,16 @@ async def fetch_name_candidates(
         if _would_merge_cross_role(entity_a, entity_b):
             continue
 
-        sim_result = name_similarity_with_aliases(entity_a, entity_b)
-        sim = sim_result[0]
+        # emb_sim 由 Neo4j 侧 vector.similarity.cosine 算好直接传入，避免拉回向量在 Python 重算
+        emb_sim = row.get("emb_sim") or 0.0
+        # name_similarity_with_aliases 返回 (综合相似度, 向量相似度, 是否完全匹配)
+        sim, _emb_sim, _has_exact = name_similarity_with_aliases(
+            entity_a, entity_b, emb_sim=emb_sim
+        )
 
         has_exact = has_exact_alias_match(entity_a, entity_b)
 
-        if sim >= 0.85 or has_exact:
+        if sim >= 0.7 or has_exact:
             # 别名完全匹配时保底 sim_name=0.85，避免被 emb_sim=0 拉低导致丢弃
             if has_exact:
                 sim = max(sim, 0.85)
@@ -98,6 +104,8 @@ async def fetch_name_candidates(
                 entity_type=row["entity_type"],
                 a_desc=row.get("a_desc", ""),
                 b_desc=row.get("b_desc", ""),
+                a_desc_summary=row.get("a_desc_summary") or "",
+                b_desc_summary=row.get("b_desc_summary") or "",
                 a_aliases=row.get("a_aliases") or [],
                 b_aliases=row.get("b_aliases") or [],
                 sim_name=sim,
@@ -110,7 +118,7 @@ async def fetch_embed_candidates(
     connector: Neo4jConnector,
     end_user_id: str,
     top_k: int = 100,
-    theta_embed_floor: float = 0.85,
+    theta_embed_floor: float = 0.70,
     candidate_cap: int = 500,
 ) -> List[DedupCandidatePair]:
     """路径 B：向量相似度候选召回
@@ -140,6 +148,8 @@ async def fetch_embed_candidates(
             entity_type=row["entity_type"],
             a_desc=row.get("a_desc", ""),
             b_desc=row.get("b_desc", ""),
+            a_desc_summary=row.get("a_desc_summary") or "",
+            b_desc_summary=row.get("b_desc_summary") or "",
             a_aliases=row.get("a_aliases") or [],
             b_aliases=row.get("b_aliases") or [],
             sim_embed=row["sim_embed"],

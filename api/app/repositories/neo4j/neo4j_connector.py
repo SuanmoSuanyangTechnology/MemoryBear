@@ -8,9 +8,11 @@ Classes:
     Neo4jConnector: Neo4j数据库连接器，提供异步查询接口
 """
 
+import os
+import threading
 from typing import Any, List, Dict
 
-from neo4j import AsyncGraphDatabase, basic_auth
+from neo4j import AsyncDriver, AsyncGraphDatabase, basic_auth
 from neo4j.time import DateTime as Neo4jDateTime, Date as Neo4jDate, Time as Neo4jTime, Duration as Neo4jDuration
 
 from app.core.config import settings
@@ -49,7 +51,11 @@ class Neo4jConnector:
         delete_group: 删除指定组的所有数据
     """
     
-    def __init__(self):
+    _shared_driver: AsyncDriver | None = None
+    _shared_driver_pid: int | None = None
+    _shared_driver_lock = threading.Lock()
+
+    def __init__(self, shared_driver: bool = False):
         """初始化Neo4j连接器
         
         从配置文件和环境变量中读取连接信息。
@@ -57,19 +63,42 @@ class Neo4jConnector:
         Raises:
             RuntimeError: 如果NEO4J_PASSWORD环境变量未设置
         """
-        # 从全局配置和环境变量获取 Neo4j 配置
+        self._shared_driver_enabled = shared_driver
+        self.driver = self._create_or_get_driver()
+
+    @classmethod
+    def _build_driver(cls) -> AsyncDriver:
+        """创建新的 Neo4j driver。"""
         uri = settings.NEO4J_URI
         username = settings.NEO4J_USERNAME
         password = settings.NEO4J_PASSWORD
-        
+
         if not password:
             raise RuntimeError(
                 "NEO4J_PASSWORD is not set. Create a .env with NEO4J_PASSWORD or export it before running."
             )
-        self.driver = AsyncGraphDatabase.driver(
+        return AsyncGraphDatabase.driver(
             uri,
             auth=basic_auth(username, password)
         )
+
+    def _create_or_get_driver(self) -> AsyncDriver:
+        """按配置返回独占或进程级共享的 driver。"""
+        if not self._shared_driver_enabled:
+            return self._build_driver()
+
+        current_pid = os.getpid()
+        driver = self.__class__._shared_driver
+        if driver is not None and self.__class__._shared_driver_pid == current_pid:
+            return driver
+
+        with self.__class__._shared_driver_lock:
+            driver = self.__class__._shared_driver
+            if driver is None or self.__class__._shared_driver_pid != current_pid:
+                driver = self._build_driver()
+                self.__class__._shared_driver = driver
+                self.__class__._shared_driver_pid = current_pid
+            return driver
 
     async def __aenter__(self):
         return self
@@ -79,10 +108,21 @@ class Neo4jConnector:
 
     async def close(self):
         """关闭数据库连接
-        
+
         释放数据库连接资源。应在应用程序关闭时调用。
         """
+        if self._shared_driver_enabled:
+            return
         await self.driver.close()
+
+    @classmethod
+    async def shutdown(cls):
+        """关闭进程级共享 driver，由应用 shutdown 生命周期调用。"""
+        driver = cls._shared_driver
+        if driver is not None:
+            cls._shared_driver = None
+            cls._shared_driver_pid = None
+            await driver.close()
 
     async def execute_query(self, cypher: str, json_format=False, **kwargs: Any) -> List[Dict[str, Any]]:
         """执行Cypher查询

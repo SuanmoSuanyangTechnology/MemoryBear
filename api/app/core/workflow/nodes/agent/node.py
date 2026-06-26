@@ -8,6 +8,7 @@ Agent 节点实现
 （error_handle / memory / thinking）。
 """
 
+import asyncio
 import logging
 import json
 from copy import deepcopy
@@ -26,9 +27,10 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, validate_llm_param_constraints
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read
+from app.db import get_db_read, get_db_context
 from app.models import ModelCapability, ModelType
 from app.schemas.model_schema import ModelInfo
+from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
 from app.services.tool_service import ToolService
 
@@ -141,6 +143,23 @@ class AgentNode(BaseNode):
             if role in ("user", "assistant") and isinstance(content, str):
                 history.append({"role": role, "content": content})
         return history
+
+    @staticmethod
+    def _merge_context_prefix_into_agent(
+            system_prompt: str,
+            history_prefix: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, str]]]:
+        merged_system_parts = [system_prompt] if system_prompt else []
+        history: list[dict[str, str]] = []
+        for message in history_prefix or []:
+            role = message.get("role")
+            content = message.get("content")
+            if role == "system":
+                merged_system_parts.append(str(content or ""))
+            elif role in ("user", "assistant") and isinstance(content, str):
+                history.append({"role": role, "content": content})
+        merged_system_prompt = "\n\n".join(part for part in merged_system_parts if part).strip()
+        return merged_system_prompt, history
 
     @staticmethod
     def _selector_to_literal(selector: Any) -> str | None:
@@ -259,6 +278,22 @@ class AgentNode(BaseNode):
 
         # 4. 构建历史
         history = self._build_history(state)
+        if self.typed_config.memory.enable:
+            conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+            if conversation_id:
+                with get_db_context() as db:
+                    context_engine_manager = ContextEngineManager(db)
+                    history_prefix = await context_engine_manager.prepare_workflow_history_prefix(
+                        features=self.workflow_config.get("features", {}),
+                        conversation_id=conversation_id,
+                        scope_key=f"node:{self.node_id}",
+                        current_input=message,
+                        workflow_messages=state.get("messages", []),
+                        window_size=self.typed_config.memory.window_size,
+                        model_config_id=model_id,
+                    )
+                if history_prefix is not None:
+                    system_prompt, history = self._merge_context_prefix_into_agent(system_prompt, history_prefix)
 
         # 5. 思考模式参数
         deep_thinking = params.thinking.enable
@@ -365,6 +400,25 @@ class AgentNode(BaseNode):
 
             logger.info(f"节点 {self.node_id} Agent 执行完成，输出长度: {len(content)}")
 
+            if self.typed_config.memory.enable:
+                conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                if conversation_id:
+                    _kwargs = dict(
+                        features=self.workflow_config.get("features", {}),
+                        conversation_id=conversation_id,
+                        scope_key=f"node:{self.node_id}",
+                        workflow_messages=state.get("messages", []) + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": content},
+                        ],
+                        window_size=self.typed_config.memory.window_size,
+                        model_config_id=self.typed_config.model.model_id,
+                    )
+                    async def _run_after_workflow_turn(kwargs=_kwargs):
+                        with get_db_context() as db:
+                            await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                    asyncio.create_task(_run_after_workflow_turn())
+
             return {
                 "llm_result": AIMessage(
                     content=content,
@@ -442,6 +496,25 @@ class AgentNode(BaseNode):
             yield {"__final__": False, "chunk": "", "done": True, "field": "output"}
 
             logger.info(f"节点 {self.node_id} Agent 流式执行完成，输出长度: {len(full_response)}")
+
+            if self.typed_config.memory.enable:
+                conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
+                if conversation_id:
+                    _kwargs = dict(
+                        features=self.workflow_config.get("features", {}),
+                        conversation_id=conversation_id,
+                        scope_key=f"node:{self.node_id}",
+                        workflow_messages=state.get("messages", []) + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": full_response},
+                        ],
+                        window_size=self.typed_config.memory.window_size,
+                        model_config_id=self.typed_config.model.model_id,
+                    )
+                    async def _run_after_workflow_turn(kwargs=_kwargs):
+                        with get_db_context() as db:
+                            await ContextEngineManager(db).after_workflow_turn(**kwargs)
+                    asyncio.create_task(_run_after_workflow_turn())
 
             final_message = AIMessage(
                 content=full_response,

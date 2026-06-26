@@ -8,6 +8,7 @@
  * User Memory Detail Types
  * Type definitions for user memory detail views including nodes, edges, and statistics
  */
+import type { Edge } from '@/components/Charts/GraphNetworkChart'
 
 /**
  * User memory data structure
@@ -153,24 +154,6 @@ export interface ExtractedEdge {
   predicate_id: number;
   predicate_surface: string;
   statement_id: string;
-}
-/**
- * Graph edge
- */
-export interface Edge {
-  id: string;
-  source: string;
-  target: string;
-  type: 'REFERENCES_ENTITY' | 'EXTRACTED_RELATIONSHIP';
-  properties: {
-    run_id: string;
-    end_user_id: string;
-    pair_id: string;
-    created_at: number | string;
-  } | ExtractedEdge
-  caption: string;
-  weight: number;
-  value: number;
 }
 /**
  * Graph data structure

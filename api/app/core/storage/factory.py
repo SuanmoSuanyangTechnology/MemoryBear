@@ -88,6 +88,19 @@ class StorageFactory:
                 endpoint_url=settings.S3_ENDPOINT_URL,
             )
 
+        elif storage_type == "minio":
+            from app.core.storage.minio import MinIOStorage
+
+            # MinIO is S3-compatible; MinIOStorage handles endpoint,
+            # bucket auto-creation and path-style permanent URLs.
+            return MinIOStorage(
+                region=settings.MINIO_REGION,
+                access_key_id=settings.MINIO_ACCESS_KEY_ID,
+                secret_access_key=settings.MINIO_SECRET_ACCESS_KEY,
+                bucket_name=settings.MINIO_BUCKET_NAME,
+                endpoint_url=settings.MINIO_ENDPOINT_URL,
+            )
+
         else:
             logger.error(f"Unsupported storage type: {storage_type}")
             raise ValueError(f"Unsupported storage type: {storage_type}")

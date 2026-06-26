@@ -1,65 +1,21 @@
 import io
-import re
 
-import numpy as np
-from PIL import Image
-
-from app.core.rag.deepdoc.vision import OCR
-from app.core.rag.nlp import rag_tokenizer, tokenize
 from app.core.rag.common.string_utils import clean_markdown_block
 
-ocr = OCR()
-
-# Gemini supported MIME types
 VIDEO_EXTS = [".mp4", ".mov", ".avi", ".flv", ".mpeg", ".mpg", ".webm", ".wmv", ".3gp", ".3gpp", ".mkv"]
 
 
 def chunk(filename, binary, lang, callback=None, vision_model=None, **kwargs):
-    doc = {
-        "docnm_kwd": filename,
-        "title_tks": rag_tokenizer.tokenize(re.sub(r"\.[a-zA-Z]+$", "", filename)),
-    }
-    eng = lang.lower() == "english"
+    from app.core.rag.chunk import chunk_pipeline
 
-    if any(filename.lower().endswith(ext) for ext in VIDEO_EXTS):
-        try:
-            doc.update({"doc_type_kwd": "video"})
-            ans, ans_num_tokens = vision_model.chat(system="", history=[], gen_conf={}, video_bytes=binary, filename=filename)
-            callback(0.8, "CV LLM respond: %s ..." % ans[:32])
-            tokenize(doc, ans, eng)
-            return [doc]
-        except Exception as e:
-            callback(prog=-1, msg=str(e))
-    else:
-        img = Image.open(io.BytesIO(binary)).convert("RGB")
-        doc.update(
-            {
-                "image": img,
-                "doc_type_kwd": "image",
-            }
-        )
-        bxs = ocr(np.array(img))
-        txt = "\n".join([t[0] for _, t in bxs if t[0]])
-        callback(0.4, "Finish OCR: (%s ...)" % txt[:12])
-        if (eng and len(txt.split()) > 32) or len(txt) > 32:
-            tokenize(doc, txt, eng)
-            callback(0.8, "OCR results is too long to use CV LLM.")
-            return [doc]
-
-        try:
-            callback(0.4, "Use CV LLM to describe the picture.")
-            img_binary = io.BytesIO()
-            img.save(img_binary, format="JPEG")
-            img_binary.seek(0)
-            ans, ans_num_tokens = vision_model.describe(img_binary.read())
-            callback(0.8, "CV LLM respond: %s ..." % ans[:32])
-            txt += "\n" + ans
-            tokenize(doc, txt, eng)
-            return [doc]
-        except Exception as e:
-            callback(prog=-1, msg=str(e))
-
-    return []
+    return chunk_pipeline(
+        filename,
+        binary=binary,
+        lang=lang,
+        callback=callback,
+        vision_model=vision_model,
+        **kwargs,
+    )
 
 
 def vision_llm_chunk(binary, vision_model, prompt=None, callback=None):
@@ -71,25 +27,25 @@ def vision_llm_chunk(binary, vision_model, prompt=None, callback=None):
     """
     callback = callback or (lambda prog, msg: None)
 
-    img = binary
-    txt = ""
+    image = binary
+    text = ""
 
     try:
         with io.BytesIO() as img_binary:
             try:
-                img.save(img_binary, format="JPEG")
+                image.save(img_binary, format="JPEG")
             except Exception:
                 img_binary.seek(0)
                 img_binary.truncate()
-                img.save(img_binary, format="PNG")
-                
-            img_binary.seek(0)
-            description, token_count = vision_model.describe_with_prompt(img_binary.read(), prompt)
-            ans = clean_markdown_block(description)
-            txt += "\n" + ans
-            return txt
+                image.save(img_binary, format="PNG")
 
-    except Exception as e:
-        callback(-1, str(e))
+            img_binary.seek(0)
+            description, _ = vision_model.describe_with_prompt(img_binary.read(), prompt)
+            answer = clean_markdown_block(description)
+            text += "\n" + answer
+            return text
+
+    except Exception as error:
+        callback(-1, str(error))
 
     return ""

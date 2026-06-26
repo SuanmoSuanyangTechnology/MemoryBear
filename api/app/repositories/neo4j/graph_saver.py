@@ -1,18 +1,15 @@
-import asyncio
 import os
 from typing import List, Optional
 
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.add_nodes import add_dialogue_nodes, add_statement_nodes, add_chunk_nodes
+from app.repositories.neo4j.add_nodes import add_chunk_nodes
 from app.repositories.neo4j.cypher_queries import (
     STATEMENT_ENTITY_EDGE_SAVE,
     ENTITY_RELATIONSHIP_SAVE,
     EXTRACTED_ENTITY_NODE_SAVE,
     CHUNK_STATEMENT_EDGE_SAVE,
-    STATEMENT_ENTITY_EDGE_SAVE,
-    ENTITY_RELATIONSHIP_SAVE,
-    EXTRACTED_ENTITY_NODE_SAVE,
+    SPECIAL_ENTITY_QUERY,
 )
 from app.core.memory.models.graph_models import (
     DialogueNode,
@@ -27,7 +24,8 @@ from app.core.memory.models.graph_models import (
     AssistantOriginalNode,
     AssistantPrunedNode,
     AssistantPrunedEdge,
-    AssistantDialogEdge,
+    ConversationNode,
+    AssistantConversationEdge,
 )
 from app.core.utils.datetime_utils import to_iso_z
 import logging
@@ -173,7 +171,8 @@ async def save_dialog_and_statements_to_neo4j(
         assistant_original_nodes: Optional[List[AssistantOriginalNode]] = None,
         assistant_pruned_nodes: Optional[List[AssistantPrunedNode]] = None,
         assistant_pruned_edges: Optional[List[AssistantPrunedEdge]] = None,
-        assistant_dialog_edges: Optional[List[AssistantDialogEdge]] = None,
+        conversation_nodes: Optional[List[ConversationNode]] = None,
+        assistant_conversation_edges: Optional[List[AssistantConversationEdge]] = None,
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
@@ -204,13 +203,8 @@ async def save_dialog_and_statements_to_neo4j(
         if end_user_id:
             try:
                 # 查询已有的特殊实体
-                cypher = """
-                MATCH (e:ExtractedEntity)
-                WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
-                RETURN e.id AS id, e.name AS name
-                """
                 existing = await connector.execute_query(
-                    cypher,
+                    SPECIAL_ENTITY_QUERY,
                     end_user_id=end_user_id,
                     names=list(_SPECIAL_NAMES),
                 )
@@ -409,20 +403,36 @@ async def save_dialog_and_statements_to_neo4j(
             results['assistant_pruned_edges'] = pruned_edge_uuids
             logger.debug(f"Successfully saved {len(pruned_edge_uuids)} PRUNED_TO edges to Neo4j")
 
-        # 11. Save BELONGS_TO_DIALOG edges (Original → Dialogue)
-        if assistant_dialog_edges:
-            from app.repositories.neo4j.cypher_queries import ASSISTANT_DIALOG_EDGE_SAVE
+        # 11. Save Conversation hub nodes (MERGE by conversation_id)
+        if conversation_nodes:
+            from app.repositories.neo4j.cypher_queries import CONVERSATION_NODE_SAVE
+            conv_data = [{
+                "id": node.id,
+                "name": node.name,
+                "end_user_id": node.end_user_id,
+                "conversation_id": node.conversation_id,
+                "run_id": node.run_id,
+                "created_at": to_iso_z(node.created_at),
+            } for node in conversation_nodes]
+            result = await tx.run(CONVERSATION_NODE_SAVE, conversations=conv_data)
+            conv_uuids = [record["uuid"] async for record in result]
+            results['conversation_nodes'] = conv_uuids
+            logger.debug(f"Successfully saved {len(conv_uuids)} Conversation nodes to Neo4j")
+
+        # 12. Save BELONGS_TO_CONVERSATION edges (Original → Conversation)
+        if assistant_conversation_edges:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_CONVERSATION_EDGE_SAVE
             edge_data = [{
                 "source": edge.source,
                 "target": edge.target,
                 "end_user_id": edge.end_user_id,
                 "run_id": edge.run_id,
                 "created_at": to_iso_z(edge.created_at),
-            } for edge in assistant_dialog_edges]
-            result = await tx.run(ASSISTANT_DIALOG_EDGE_SAVE, edges=edge_data)
-            dialog_edge_uuids = [record["uuid"] async for record in result]
-            results['assistant_dialog_edges'] = dialog_edge_uuids
-            logger.debug(f"Successfully saved {len(dialog_edge_uuids)} BELONGS_TO_DIALOG edges to Neo4j")
+            } for edge in assistant_conversation_edges]
+            result = await tx.run(ASSISTANT_CONVERSATION_EDGE_SAVE, edges=edge_data)
+            conv_edge_uuids = [record["uuid"] async for record in result]
+            results['assistant_conversation_edges'] = conv_edge_uuids
+            logger.debug(f"Successfully saved {len(conv_edge_uuids)} BELONGS_TO_CONVERSATION edges to Neo4j")
 
         return results
 

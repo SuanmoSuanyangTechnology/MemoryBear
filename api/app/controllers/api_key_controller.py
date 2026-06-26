@@ -11,6 +11,7 @@ from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import ApiKeyType
 from app.models.user_model import User
 from app.core.response_utils import success
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import api_key_schema
 from app.schemas.response_schema import ApiResponse
 from app.services.api_key_service import ApiKeyService
@@ -50,8 +51,13 @@ def create_api_key(
             user_id=current_user.id,
             data=data
         )
+        end_user_id, other_id = None, None
+        if "memory" in data.scopes and data.user_id:
+            end_user_id, other_id = EndUserRepository(db).get_or_create_end_user_mcp(workspace_id, data.user_id)
 
         response_data = api_key_schema.ApiKeyResponse.model_validate(api_key_obj)
+        response_data.end_user_id = end_user_id
+        response_data.other_id = other_id
 
         return success(data=response_data, msg="API Key 创建成功")
     except BusinessException:

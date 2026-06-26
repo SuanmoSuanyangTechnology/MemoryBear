@@ -1,7 +1,7 @@
 import logging
 from email import policy
 from email.parser import BytesParser
-from .naive import chunk as naive_chunk
+from app.core.rag.chunk import chunk_pipeline
 import re
 from app.core.rag.nlp import rag_tokenizer, naive_merge, tokenize_chunks
 from app.core.rag.deepdoc.parser import HtmlParser, TxtParser
@@ -97,7 +97,7 @@ def chunk(
                 payload = part.get_payload(decode=True)
                 try:
                     attachment_res.extend(
-                        naive_chunk(filename, payload, callback=callback, **kwargs)
+                        chunk_pipeline(filename, payload, callback=callback, **kwargs)
                     )
                 except Exception:
                     pass

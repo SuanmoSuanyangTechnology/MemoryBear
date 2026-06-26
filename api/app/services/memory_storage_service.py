@@ -75,11 +75,13 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     使用 SQLAlchemy ORM 进行数据库操作。
     """
 
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Optional[Session] = None) -> None:
         """初始化服务
 
         Args:
-            db: SQLAlchemy 数据库会话
+            db: SQLAlchemy 数据库会话。
+                CRUD 操作（create/update/delete/get_*）必须传入。
+                pilot_run_stream 不需要传入（内部自行开短 session）。
         """
         self.db = db
 
@@ -156,14 +158,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
     def _get_workspace_configs(self, workspace_id) -> Optional[Dict[str, Any]]:
         """获取工作空间模型配置（内部方法，便于测试）"""
-        from app.db import SessionLocal
+        from app.db import get_db_read
         from app.repositories.workspace_repository import get_workspace_models_configs
 
-        db_session = SessionLocal()
-        try:
+        with get_db_read() as db_session:
             return get_workspace_models_configs(db_session, workspace_id)
-        finally:
-            db_session.close()
 
     def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
         """根据本体场景ID获取对应的 scene_name，作为语义剪枝场景值
@@ -287,23 +286,31 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     async def pilot_run_stream(self, payload: ConfigPilotRun, language: str = "zh") -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
-        
+
+        db session 生命周期策略：
+        - 阶段1（短 session）：用 get_db_read() 查配置、初始化 llm_client，with 块结束立即归还连接
+        - 阶段2（无 session）：LLM 调用可能耗时数十秒，完全不持有 db 连接
+        - 本方法不依赖 FastAPI Depends(get_db)，自行管理 session 生命周期
+
         Args:
-            payload: 试运行配置和对话文本
+            payload: 试运行配置和对话文本（config_id 已由 controller 解析为 UUID）
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
-            
+
         Yields:
             SSE 格式的字符串，包含以下事件类型：
             - 各种阶段名称: 进度更新 (如 starting, knowledge_extraction_complete 等)
             - result: 最终结果
             - error: 错误信息
             - done: 完成标记
-            
+
         Raises:
             ValueError: 当配置无效或参数缺失时
             RuntimeError: 当管线执行失败时
         """
         from pathlib import Path
+        from app.db import get_db_read
+        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+
         project_root = str(Path(__file__).resolve().parents[2])
 
         try:
@@ -313,57 +320,64 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "time": int(time.time() * 1000)
             })
 
-            # 步骤 1: 配置加载和验证（数据库优先）
+            # ── 阶段1：短 session，只读查询，with 块结束立即归还连接 ──────────
             payload_cid = str(getattr(payload, "config_id", "") or "").strip()
             cid: Optional[str] = payload_cid if payload_cid else None
 
             if not cid:
                 raise ValueError("未提供 payload.config_id，禁止启动试运行")
 
-            # Load configuration from database only using centralized manager
-            try:
-                config_service = MemoryConfigService(self.db)
-                memory_config = config_service.load_memory_config(
-                    config_id=str(cid),
-                    service_name="MemoryStorageService.pilot_run_stream"
-                )
-                logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
-            except ConfigurationError as e:
-                raise RuntimeError(f"Configuration loading failed: {e}")
+            with get_db_read() as db:
+                # 1a. 加载记忆配置
+                try:
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(
+                        config_id=str(cid),
+                        service_name="DataConfigService.pilot_run_stream"
+                    )
+                    logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+                except ConfigurationError as e:
+                    raise RuntimeError(f"Configuration loading failed: {e}")
 
-            # 根据是否关联本体场景选择使用的文本
-            # 如果配置关联了本体场景（scene_id 不为空），使用 custom_text（如果提供）
-            # 否则使用 dialogue_text
-            if memory_config.scene_id:
-                # 关联了本体场景，优先使用 custom_text
-                if hasattr(payload, 'custom_text') and payload.custom_text:
-                    dialogue_text = payload.custom_text.strip()
-                    logger.info(
-                        f"[PILOT_RUN_STREAM] Using custom_text for scene_id={memory_config.scene_id}, length: {len(dialogue_text)}")
+                # 1b. 确定使用的文本
+                if memory_config.scene_id:
+                    if hasattr(payload, 'custom_text') and payload.custom_text:
+                        dialogue_text = payload.custom_text.strip()
+                        logger.info(
+                            f"[PILOT_RUN_STREAM] Using custom_text for scene_id={memory_config.scene_id}, "
+                            f"length: {len(dialogue_text)}")
+                    else:
+                        dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
+                        logger.info(
+                            f"[PILOT_RUN_STREAM] No custom_text provided, using dialogue_text "
+                            f"for scene_id={memory_config.scene_id}")
                 else:
-                    # 如果没有提供 custom_text，回退到 dialogue_text
                     dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
-                    logger.info(
-                        f"[PILOT_RUN_STREAM] No custom_text provided, using dialogue_text for scene_id={memory_config.scene_id}")
-            else:
-                # 没有关联本体场景，使用 dialogue_text
-                dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
-                logger.info(f"[PILOT_RUN_STREAM] No scene_id, using dialogue_text, length: {len(dialogue_text)}")
+                    logger.info(f"[PILOT_RUN_STREAM] No scene_id, using dialogue_text, length: {len(dialogue_text)}")
 
-            # 验证最终使用的文本不为空
-            if not dialogue_text:
-                raise ValueError("试运行模式必须提供有效的文本内容（dialogue_text 或 custom_text）")
+                if not dialogue_text:
+                    raise ValueError("试运行模式必须提供有效的文本内容（dialogue_text 或 custom_text）")
 
-            logger.info(f"[PILOT_RUN_STREAM] Final text preview: {dialogue_text[:100]}")
+                logger.info(f"[PILOT_RUN_STREAM] Final text preview: {dialogue_text[:100]}")
 
-            # 步骤 2: 创建进度回调函数捕获管线进度
+                # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
+                try:
+                    factory = MemoryClientFactory(db)
+                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+                    logger.info("[PILOT_RUN_STREAM] LLM client initialized")
+                except Exception as e:
+                    raise RuntimeError(f"LLM client initialization failed: {e}")
+            # ── with 块结束，db 连接立即归还连接池 ───────────────────────────
+            logger.info("[PILOT_RUN_STREAM] db session closed, starting LLM pipeline")
+
+            # ── 阶段2：无 session，LLM 管线执行 ──────────────────────────────
             # 使用队列在回调和生成器之间传递进度事件
             progress_queue: asyncio.Queue = asyncio.Queue()
 
             async def progress_callback(stage: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
                 """
                 进度回调函数，将进度事件放入队列
-                
+
                 Args:
                     stage: 阶段标识
                     message: 进度消息
@@ -371,7 +385,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 """
                 await progress_queue.put((stage, message, data))
 
-            # 步骤 3: 在后台任务中执行管线
+            # 步骤 3: 在后台任务中执行管线（无 db 依赖）
             async def run_pipeline():
                 """在后台执行管线并捕获异常"""
                 try:
@@ -382,7 +396,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     await run_pilot_extraction(
                         memory_config=memory_config,
                         dialogue_text=dialogue_text,
-                        db=self.db,
+                        llm_client=llm_client,
                         progress_callback=progress_callback,
                         language=language,
                     )
@@ -618,16 +632,14 @@ async def compute_hot_memory_tags(
         limit = 10
     raw_limit = limit * 4
 
-    from app.db import SessionLocal
-    from app.models.end_user_model import EndUser
+    from app.db import get_db_read
+    from app.repositories.end_user_repository import EndUserRepository
 
     def _get_end_user_ids_in_thread() -> List[str]:
         """独立线程独立 session，避免跨线程共享连接。"""
-        with SessionLocal() as thread_db:
-            rows = thread_db.query(EndUser.id).filter(
-                EndUser.workspace_id == workspace_id
-            ).distinct().all()
-            return [str(eid) for (eid,) in rows]
+        with get_db_read() as thread_db:
+            end_users = EndUserRepository(thread_db).get_end_users_by_workspace(workspace_id)
+            return [str(eu.id) for eu in end_users]
 
     end_user_ids = await asyncio.to_thread(_get_end_user_ids_in_thread)
     if not end_user_ids:

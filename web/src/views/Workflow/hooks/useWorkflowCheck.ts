@@ -1,26 +1,10 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-04-09 18:58:21 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-02 16:12:54
- */
-import { useState, useCallback, useEffect, useRef, type FC } from 'react'
-import { Popover, Flex } from 'antd'
-import { WarningFilled } from '@ant-design/icons'
-import { useTranslation } from 'react-i18next'
-import { Node } from '@antv/x6';
-
-import type { WorkflowRef } from '@/views/ApplicationConfig/types'
-import { nodeLibrary } from '../../constant'
-import { isSubExprSet } from '../../utils'
-import { getToolMethods } from '@/api/tools'
-import RbDrawer from '@/components/RbDrawer'
-import { useWorkflowStore } from '@/store/workflow'
-
-interface CheckListProps {
-  workflowRef: React.RefObject<WorkflowRef>
-  appId: string
-}
+import { useCallback, useRef, useEffect } from 'react';
+import { Edge } from '@antv/x6';
+import { useTranslation } from 'react-i18next';
+import { useWorkflowStore } from '@/store/workflow';
+import { nodeLibrary } from '../constant';
+import { isSubExprSet } from '../utils';
+import { getToolMethods } from '@/api/tools';
 
 export interface CheckError {
   key: string
@@ -33,6 +17,17 @@ export interface NodeCheckResult {
   type: string
   icon: string
   errors: CheckError[]
+}
+
+export interface GraphRef {
+  current: any
+}
+
+export interface UseWorkflowCheckReturn {
+  runCheck: () => Promise<NodeCheckResult[]>
+  scheduleCheck: () => void
+  results: NodeCheckResult[]
+  errorCount: number
 }
 
 const allNodes = nodeLibrary.flatMap(c => c.nodes)
@@ -63,7 +58,6 @@ const specialValidators: Record<string, (val: any) => boolean> = {
   // vision.vision_input: if vision is true, vision_input must be non-empty array
   'question-classifier.vision_input': (val: any) => {
     console.log('vision_input',val)
-    
     return false
   },
   // question-classifier.categories: every category must have a value
@@ -89,9 +83,6 @@ const specialValidators: Record<string, (val: any) => boolean> = {
   'code.output_variables': (val: any[]) => !Array.isArray(val) || !val.length,
   // jinja-render.mapping: if non-empty, every item must have a name
   'jinja-render.mapping': (val: any[]) => Array.isArray(val) && val.length > 0 && val.some(v => !v?.name || !v?.value),
-  'agent.model': (val: any) => !val?.model_id,
-  'human-intervention.actions': (val: any[]) => !Array.isArray(val) || !val.length || val.some(v => !v?.id || !v?.label),
-  'human-intervention.delivery_method': (val: Record<string, { enabled: boolean; }>) => Object.values(val).every(v => !v.enabled),
 }
 
 function isEmpty(val: any): boolean {
@@ -167,20 +158,24 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
     }
   }
 
-  // console.log('nodeConfig', nodeConfigMap, nodeConfig, errors)
   return errors
 }
 
-const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
+export function useWorkflowCheck(
+  graphRef: React.RefObject<any>,
+  appId?: string
+): UseWorkflowCheckReturn {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
   const { setCheckResults, getCheckResults } = useWorkflowStore()
   const results = getCheckResults(appId)
+  const errorCount = results.reduce((sum, n) => sum + n.errors.length, 0)
+
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
   const toolMethodsCacheRef = useRef<Record<string, Array<{ name: string; parameters: Array<{ name: string; required: boolean }> }>>>({})
+  const scheduleCheckRef = useRef<() => void>()
 
   const runCheck = useCallback(async () => {
-    const graph = workflowRef.current?.graphRef?.current
+    const graph = graphRef?.current
     if (!graph) return []
 
     const nodes = graph.getNodes()
@@ -189,7 +184,7 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
     const targetIds = new Set<string>()
     // child-to-child edges within same parent (cycle)
     const childTargetIds = new Set<string>()
-    edges.forEach(e => {
+    edges.forEach((e: Edge) => {
       sourceIds.add(e.getSourceCellId())
       targetIds.add(e.getTargetCellId())
       const srcData = graph.getCellById(e.getSourceCellId())?.getData()
@@ -255,22 +250,19 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
     }
 
     return checked
-  }, [workflowRef.current?.graphRef?.current, t])
-
-  const scheduleCheckRef = useRef<() => void>()
+  }, [graphRef?.current, t])
 
   const scheduleCheck = useCallback(() => {
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(async () => {
-      setCheckResults(appId, await runCheck())
+      setCheckResults(await runCheck(), appId)
     }, 300)
-  }, [runCheck])
+  }, [runCheck, appId])
 
   scheduleCheckRef.current = scheduleCheck
 
   useEffect(() => {
-    const graph = workflowRef.current?.graphRef?.current
-    console.log('graph')
+    const graph = graphRef?.current
     if (!graph) return
     const handler = () => scheduleCheckRef.current?.()
     const events = ['node:added', 'node:removed', 'node:change:data', 'edge:added', 'edge:removed', 'edge:connected', 'edge:changed']
@@ -280,77 +272,12 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
       events.forEach(e => graph.off(e, handler))
       clearTimeout(timerRef.current)
     }
-  }, [workflowRef.current?.graphRef?.current])
+  }, [graphRef?.current])
 
-const handleOpen = () => {
-    setOpen(true)
+  return {
+    runCheck,
+    scheduleCheck,
+    results,
+    errorCount,
   }
-
-  const focusNode = (id: string) => {
-    const graph = workflowRef.current?.graphRef?.current
-    if (!graph) return
-    const node = graph.getCellById(id)
-    if (node) {
-      workflowRef.current?.nodeClick({node} as { node: Node })
-    }
-    setOpen(false)
-  }
-
-  return (
-    <>
-      <Popover content={t('workflow.checkList')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-        <div className="rb:relative rb:cursor-pointer rb:size-7.5" onClick={handleOpen}>
-          <div className="rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/checkList.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat" />
-          {results.length > 0 && (
-            <span className="rb:absolute rb:-top-1 rb:-right-1 rb:min-w-3.5 rb:h-3.5 rb:px-0.5 rb:bg-[#F04438] rb:text-white rb:text-[9px] rb:leading-3.5 rb:rounded-full rb:flex rb:items-center rb:justify-center">
-              {results.reduce((sum, n) => sum + n.errors.length, 0)}
-            </span>
-          )}
-        </div>
-      </Popover>
-      <RbDrawer
-        title={
-          <span className="rb:text-[16px] rb:font-semibold">
-            {t('workflow.checkList')}{results.length > 0 ? `(${results.reduce((sum, n) => sum + n.errors.length, 0)})` : ''}
-          </span>
-        }
-        open={open}
-        onClose={() => setOpen(false)}
-        width={360}
-        styles={{ body: { padding: '12px 16px' } }}
-      >
-        <p className="rb:text-[12px] rb:text-[#5B6167] rb:mb-3">{t('workflow.checkListDesc')}</p>
-        {results.length === 0
-          ? <div className="rb:text-center rb:text-[#5B6167] rb:text-[13px] rb:py-8">{t('workflow.checkListEmpty')}</div>
-          : <Flex vertical gap={8} className="rb:pb-3!">
-            {results.map(node => (
-              <div key={node.id} className="rb-border rb:rounded-lg">
-                <Flex align="center" gap={8} className="rb:px-3! rb:py-2.5! rb-border-b">
-                  <div className={`rb:size-5 rb:rounded-md rb:bg-size-[14px_14px] rb:bg-center rb:bg-no-repeat ${node.icon}`} />
-                  <span className="rb:text-[13px] rb:font-medium rb:flex-1 rb:truncate">{node.name}</span>
-                  <span
-                    className="rb:text-[12px] rb:text-[#155EEF] rb:cursor-pointer rb:whitespace-nowrap"
-                    onClick={() => focusNode(node.id)}
-                  >
-                    {t('workflow.goto')} →
-                  </span>
-                </Flex>
-
-                <Flex vertical gap={4} className="rb:px-3! rb:py-2!">
-                  {node.errors.map((err, i) => (
-                    <Flex key={i} align="center" gap={6}>
-                      <WarningFilled className="rb:text-[#FF5D34]! rb:text-[12px] rb:shrink-0" />
-                      <span className="rb:text-[12px] rb:text-[#5B6167]">{err.message}</span>
-                    </Flex>
-                  ))}
-                </Flex>
-              </div>
-            ))}
-          </Flex>
-        }
-      </RbDrawer>
-    </>
-  )
 }
-
-export default CheckList

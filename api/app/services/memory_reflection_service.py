@@ -2,15 +2,14 @@
 记忆反思服务
 处理反思引擎的调用和执行
 """
+import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
-from fastapi import Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
-from app.db import get_db
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.reflection_engine import ReflectionConfig, ReflectionEngine
 from app.core.memory.storage_services.reflection_engine.self_reflexion import ReflectionRange, ReflectionBaseline
@@ -18,7 +17,7 @@ from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.models.app_model import App
 from app.models.app_release_model import AppRelease
-from app.models.end_user_model import EndUser
+from app.repositories.end_user_repository import EndUserRepository
 from app.utils.config_utils import resolve_config_id
 
 api_logger = get_api_logger()
@@ -179,7 +178,7 @@ class WorkspaceAppService:
 
     def _process_end_users(self, app: App, app_info: Dict[str, Any]) -> None:
         """Processing end-user information for applications"""
-        end_users = self.db.query(EndUser).filter(EndUser.app_id == app.id).all()
+        end_users = EndUserRepository(self.db).get_end_users_by_app_id(app.id)
 
         for end_user in end_users:
             end_user_info = {
@@ -201,12 +200,17 @@ class WorkspaceAppService:
             Reflection time or None
         """
         try:
-            end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
+            end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
             if end_user:
                 return end_user.reflection_time
             return None
         except Exception as e:
             api_logger.error(f"读取用户反思时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
+            # 失败先 rollback，避免事务 aborted 拖垮同一 session 后续查询
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             return None
 
     def update_end_user_reflection_time(self, end_user_id: str) -> bool:
@@ -222,7 +226,7 @@ class WorkspaceAppService:
         try:
             from datetime import datetime
 
-            end_user = self.db.query(EndUser).filter(EndUser.id == end_user_id).first()
+            end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
             if end_user:
                 end_user.reflection_time = utcnow_naive()
                 self.db.commit()
@@ -240,8 +244,8 @@ class WorkspaceAppService:
 class MemoryReflectionService:
     """Memory reflection service category"""
 
-    def __init__(self,db: Session = Depends(get_db)):
-        self.db=db
+    def __init__(self, db: Session):
+        self.db = db
 
     async def start_text_reflection(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         try:

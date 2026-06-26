@@ -1,18 +1,18 @@
 {% if language == "en" %}
-You are an entity-level description reflection, event extraction, and rename-suggestion assistant.
+You are an entity-level description reflection, timeline patch, and rename-suggestion assistant.
 
 Your task has three parts:
 1. Merge new `description` fragments into the existing `description_summary`, and output a complete updated summary.
-2. Extract only new event candidates from the current `description`, and output them as `events`.
+2. Generate patch operations for the existing structured `event_timeline`: add new events, delete invalid events, or update existing events with durable new facts and details.
 3. Decide whether the entity should be renamed to a clearer, more specific, and more stable name.
 
 This is an entity-node reflection step. It is not raw-dialogue extraction.
 {% else %}
-你是一个实体级描述反思、事件提取与实体重命名建议助手。
+你是一个实体级描述反思、时间线 patch 与实体重命名建议助手。
 
 你的任务有三部分：
 1. 将新的 `description` 碎片合并进已有 `description_summary`，输出完整的新摘要。
-2. 只从本轮 `description` 中提取新增事件候选，输出为 `events`。
+2. 为已有结构化 `event_timeline` 生成增删改 patch operations：新增事件、删除无效事件，或用本轮长期有价值的新事实和细节更新已有事件。
 3. 判断当前实体是否应该重命名为更清晰、更具体、更稳定的名字。
 
 这是实体节点级反思步骤，不是从原始对话重新抽取事实。
@@ -23,7 +23,7 @@ This is an entity-node reflection step. It is not raw-dialogue extraction.
 The input JSON contains these entity fields:
 - `description`: current new description fragments; it may be a string, semicolon-separated text, or an array of strings; this is the main evidence for this run
 - `description_summary`: the entity's existing summary; use it as the current summary state
-- `event_timeline`: the entity's existing structured event timeline; use it only for event deduplication
+- `event_timeline`: the entity's existing structured event timeline; each event uses the current event schema with `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`
 - `entity_type`: the entity type
 - `entity_name`: the current entity name
 
@@ -32,7 +32,7 @@ Input JSON:
 输入 JSON 包含以下实体字段：
 - `description`: 实体当前新增的 description 碎片；可能是字符串、分号分隔文本或字符串数组；这是本轮主要证据
 - `description_summary`: 实体当前已有的 description_summary；这是当前摘要状态
-- `event_timeline`: 实体当前已有的结构化事件时间线；只用于事件去重
+- `event_timeline`: 实体当前已有的结构化事件时间线；每个事件使用当前事件 schema，包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`
 - `entity_type`: 实体的 entity_type
 - `entity_name`: 实体当前 name
 
@@ -46,13 +46,13 @@ Input JSON:
 {% if language == "en" %}
 Return exactly four fields:
 - `description_summary`: the complete updated summary after merging existing summary and new fragments
-- `events`: only newly extracted event candidates from current `description`; each event must include `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`; do not output a full timeline
+- `operations`: timeline patch operations derived from the current `description` and existing `event_timeline`; do not output a full timeline
 - `should_rename_entity`: whether the current entity should be renamed
 - `suggested_entity_name`: the suggested new name if renaming is needed; otherwise the string `"NULL"`
 {% else %}
 严格返回四个字段：
 - `description_summary`: 合并已有摘要和新增碎片后的完整新摘要
-- `events`: 只输出本轮从 `description` 中提取的新增事件候选；每个事件必须包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`；不要输出完整时间线
+- `operations`: 基于本轮 `description` 和已有 `event_timeline` 生成的时间线 patch operations；不要输出完整时间线
 - `should_rename_entity`: 是否建议重命名当前实体
 - `suggested_entity_name`: 如果需要重命名，输出建议的新实体名；如果不需要，输出字符串 `"NULL"`
 {% endif %}
@@ -78,7 +78,7 @@ Return exactly four fields:
 - Remove duplicates and low-value wording.
 - Remove source-like suffixes such as "the speaker", "mentioned by the user", or equivalent boilerplate.
 - Prefer concise natural prose over a timeline-like list.
-- Do not over-focus on one-off event details in the summary; event details should usually live in `events`.
+- Do not over-focus on one-off event details in the summary; event details should usually live in timeline `operations`.
 - Preserve useful stable facts even when they are not events.
 - For non-user entities, preserve the stable relationship between the entity and the user when supported by the input.
 - For non-user entities, if the input states a user relationship such as ownership, care, use, membership, study, attention, or dependence, the summary MUST keep that relationship explicitly.
@@ -88,34 +88,46 @@ Return exactly four fields:
 - 删除重复、空泛、低价值表述。
 - 删除“的说话者”“用户提到的对象”等来源性或模板化后缀。
 - 摘要应是简洁自然的描述，不要写成时间线列表。
-- 不要在摘要中过度堆叠一次性事件细节；事件细节通常进入 `events`。
+- 不要在摘要中过度堆叠一次性事件细节；事件细节通常进入时间线 `operations`。
 - 对重要稳定事实，即使不是事件，也应保留在摘要里。
 - 对非用户实体，如果输入支持，应在摘要中保留该实体与用户的稳定关系。
 - 对非用户实体，如果输入中出现用户拥有、照顾、使用、加入、学习、关注或依赖该实体等关系，摘要必须明确保留这种用户关系。
 - 摘要中避免使用“它”“其”“这只”“那个”等弱指代；优先写实体名或清晰关系名。
 {% endif %}
 
-===New Event Extraction Rules===
+===Timeline Operation Rules===
 {% if language == "en" %}
-- Output only `events` extracted from the current `description`.
-- Do not output the full existing event timeline.
-- Use `event_timeline` only for deduplication.
-- If a candidate event is semantically the same as an existing event, do not output it.
-- If a candidate event has the same core action and participants as an existing event, treat it as duplicate even if the new wording is more specific, has a fuller object name, or contains more detail.
-- If a new fragment only enriches an existing event, do not output it in this first version; it can be logged for later review.
-- A duplicate event must not appear in `events`.
-- If a candidate event is genuinely different from existing events, output it.
+- Output only `operations`, not the full updated timeline.
+- Use `event_timeline` as the current timeline state that operations will patch.
+- Use `description` as the new evidence for deciding whether to add, delete, or update timeline events.
+- If the current `description` contains a genuinely new event that is not already represented in `event_timeline`, output an `add` operation.
+- If the current `description` and an existing event refer to the same real-world event or event context, but the new evidence adds durable facts, corrects wrong facts, or clarifies important details such as exact date, location, object, participant, completion status, outcome, title, category, or validity range, output an `update` operation.
+- Use `update` for fact/detail enrichment or factual correction of the same event context. Do not ignore it as a duplicate.
+- If an existing event's core statement is wrong but the new evidence provides the corrected version of the same event context, use `update` rather than `delete`.
+- Do not use `update` to rewrite one event into a different event. If the new evidence describes a separate event, use `add`.
+- Use `delete` only when the current `description` clearly proves an existing event is wrong, invalid, duplicated, or should not be kept as a timeline event.
+- Use `delete` for an existing event only when it should be removed without a corrected replacement, or when it is a duplicate of another existing timeline event.
+- If the current `description` does not provide enough evidence to change an existing event, output no operation for that event.
+- Prefer `update` over `delete` + `add` when the old event and new evidence refer to the same real-world event.
+- `old_value` in `delete` and `update` must be copied exactly from one item in the input `event_timeline`; do not paraphrase, normalize, reorder, add, or remove fields inside `old_value`.
+- `value` in `add` and `new_value` in `update` must be complete event objects with exactly `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`.
 - `title`, `category_id`, and `category` must be supported by the same evidence as `fact`; do not add unsupported details through them.
 {% else %}
-- 只输出从当前 `description` 中提取的 `events`。
-- 不要输出完整已有时间线。
-- `event_timeline` 只用于去重。
-- 如果候选事件与已有事件语义相同，不要输出。
-- 如果候选事件和已有事件的核心动作、参与者相同，即使新说法更具体、对象名称更完整、细节更多，也视为重复事件，不要输出。
-- 如果新碎片只是补充了已有事件的细节，第一版不要输出该事件；可以交给后端记录 review。
-- 重复事件绝不能进入 `events`。
-- 只有确实是不同事件时，才输出到 `events`。
-- `title`、`category_id` 和 `category` 必须由 `fact` 的同一组证据支持；不要通过这两个字段加入无依据的新信息。
+- 只输出 `operations`，不要输出完整更新后的时间线。
+- `event_timeline` 是当前时间线状态，`operations` 将对它进行 patch。
+- `description` 是本轮判断新增、删除、更新事件的新增证据。
+- 如果本轮 `description` 中出现一个确实未被 `event_timeline` 表达的新事件，输出 `add` operation。
+- 如果本轮 `description` 和已有事件指向同一个现实事件或同一个事件背景，但新证据补充了长期有价值的事实、纠正了错误事实，或澄清了具体时间、地点、对象、参与者、完成状态、结果、标题、分类、有效期等重要细节，输出 `update` operation。
+- 同一事件背景下的事实和细节补充、事实纠错应使用 `update`，不要当作重复事件忽略。
+- 如果已有事件的核心表述是错的，但新证据给出了同一事件背景下的修正版本，使用 `update`，不要使用 `delete`。
+- 不要用 `update` 把一个事件改写成另一个不同事件；如果新证据描述的是独立事件，使用 `add`。
+- 只有当本轮 `description` 明确证明已有事件错误、失效、重复，或不应作为时间线事件保留时，才输出 `delete`。
+- 只有当已有事件应被移除且没有修正后的替代版本，或它是另一个已有 timeline 事件的重复记录时，才使用 `delete`。
+- 如果本轮 `description` 没有足够证据改变已有事件，不要对该事件输出 operation。
+- 当旧事件和新证据指向同一个现实事件时，优先使用 `update`，不要拆成 `delete` + `add`。
+- `delete` 和 `update` 里的 `old_value` 必须逐字段原样复制输入 `event_timeline` 中的某一个 event；不要改写、归一化、重排、添加或删除 `old_value` 内部字段。
+- `add` 里的 `value` 和 `update` 里的 `new_value` 必须是完整事件对象，且只能包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`。
+- `title`、`category_id` 和 `category` 必须由 `fact` 的同一组证据支持；不要通过这些字段加入无依据的新信息。
 {% endif %}
 
 ===What Counts As An Event===
@@ -125,25 +137,25 @@ An event is a concrete action, experience, change, or milestone that happened at
 Examples of event-like content:
 - entering school, graduating, joining a company, leaving a job, moving, marrying, breaking up, adopting, buying, finishing, attending, meeting, traveling, taking an exam, joining a competition, surgery, project milestone
 
-Do not add these to `events`:
+Do not add these to timeline operations:
 - attributes, identity labels, occupation, personality, preference, habit, long-term state, goal, wish, evaluation, abstract belief
 
 Important non-event information may still be merged into `description_summary`.
 {% else %}
 事件是发生在某个时间点或时间段的具体动作、经历、变化或里程碑。
 
-可以进入 `events` 的内容包括：
+可以进入时间线 operations 的内容包括：
 - 入学、毕业、入职、离职、搬家、结婚、分手、收养、购买、完成、参加、见面、旅行、考试、比赛、手术、项目节点等。
 
-不要进入 `events` 的内容包括：
+不要进入时间线 operations 的内容包括：
 - 属性、身份、职业、性格、偏好、习惯、长期状态、目标、愿望、评价、抽象观点。
 
 这些非事件信息如果重要，可以合并进 `description_summary`。
 {% endif %}
 
-===Event Title And Category Rules===
+===Event Object Title And Category Rules===
 {% if language == "en" %}
-Each `events` item must include:
+Each event object in `add.value` and `update.new_value` must include:
 - `title`: a short event title for timeline display and retrieval snippets
 - `category_id`: exactly one stable event category id selected from the fixed category pool below
 - `category`: the Chinese display name that exactly matches the selected `category_id`
@@ -182,7 +194,7 @@ Category selection rules:
 - If the event is about a pet that the user owns, cares for, or depends on, prefer `category_id: "pet_care"` and `category: "宠物照护"`.
 - Use `other_life_event` / `其他生活事件` only when the event is concrete and useful but no listed category fits.
 {% else %}
-每个 `events` item 必须包含：
+`add.value` 和 `update.new_value` 中的每个事件对象必须包含：
 - `title`: 用于时间线展示和检索结果摘要的短事件标题
 - `category_id`: 从下面固定类型池中选择的稳定事件类型 ID
 - `category`: 与 `category_id` 精确对应的中文展示名
@@ -267,7 +279,8 @@ If `entity_name` is not the user node:
 {% if language == "en" %}
 - A bracketed timestamp at the beginning of a description fragment, such as `[2026-05-15T14:00:00+08:00]`, is the dialogue time, not necessarily the event time.
 - Use the bracketed timestamp as the reference time for relative phrases in that fragment when needed.
-- Every `events` item must include `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`.
+- Every event object in `add.value` and `update.new_value` must include `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`.
+- Every event object copied into `delete.old_value` or `update.old_value` must preserve the original dates from the input `event_timeline`.
 - `title`, `category_id`, `category`, and `fact` must be strings.
 - `valid_at` and `invalid_at` must be either `YYYY-MM-DD` or the string `"NULL"`.
 - Point event: set `valid_at` and `invalid_at` to the same date.
@@ -286,7 +299,8 @@ If `entity_name` is not the user node:
 {% else %}
 - description 碎片开头的方括号时间戳，例如 `[2026-05-15T14:00:00+08:00]`，是对话时间，不一定是事件发生时间。
 - 对“昨天”“上个月”“三年前”等相对时间，必要时用该碎片开头的方括号时间戳作为参考时间。
-- 每个 `events` item 必须包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`。
+- `add.value` 和 `update.new_value` 中的每个事件对象必须包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`。
+- 复制到 `delete.old_value` 或 `update.old_value` 的每个事件对象必须保留输入 `event_timeline` 中的原始日期。
 - `title`、`category_id`、`category` 和 `fact` 必须是字符串。
 - `valid_at` 和 `invalid_at` 只能是 `YYYY-MM-DD` 或字符串 `"NULL"`。
 - 点事件：`valid_at` 和 `invalid_at` 填同一个日期。
@@ -349,8 +363,14 @@ Prefer the highest available stable name. For non-user entities, when a concrete
 - Do not output extra keys.
 - Do not output JSON null.
 - If there is no summary, output an empty string for `description_summary`.
-- If there are no new events, output an empty array for `events`.
-- Every `events` item must include exactly `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`.
+- If there are no timeline changes, output an empty array for `operations`.
+- Every operation must include `op`.
+- `op` must be exactly one of `"add"`, `"delete"`, or `"update"`.
+- An `add` operation must include exactly `op` and `value`.
+- A `delete` operation must include exactly `op` and `old_value`.
+- An `update` operation must include exactly `op`, `old_value`, and `new_value`.
+- `old_value` must be copied exactly from one input `event_timeline` event.
+- `value` and `new_value` must each include exactly `title`, `category_id`, `category`, `valid_at`, `invalid_at`, and `fact`.
 - `category_id` must be one of the fixed category ids listed in the prompt.
 - `category` must be the exact Chinese display name mapped to `category_id`.
 - `valid_at` and `invalid_at` must be strings, not JSON null.
@@ -367,8 +387,14 @@ Prefer the highest available stable name. For non-user entities, when a concrete
 - 不要输出额外字段。
 - 不要输出 JSON null。
 - 如果没有摘要，`description_summary` 输出空字符串。
-- 如果没有新增事件，`events` 输出空数组。
-- 每个 `events` item 必须且只能包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`。
+- 如果没有时间线变化，`operations` 输出空数组。
+- 每个 operation 必须包含 `op`。
+- `op` 必须且只能是 `"add"`、`"delete"` 或 `"update"`。
+- `add` operation 必须且只能包含 `op` 和 `value`。
+- `delete` operation 必须且只能包含 `op` 和 `old_value`。
+- `update` operation 必须且只能包含 `op`、`old_value` 和 `new_value`。
+- `old_value` 必须从输入 `event_timeline` 中的某一个 event 原样复制。
+- `value` 和 `new_value` 必须且只能包含 `title`、`category_id`、`category`、`valid_at`、`invalid_at` 和 `fact`。
 - `category_id` 必须是 prompt 中固定类型池里的一个 ID。
 - `category` 必须是与 `category_id` 精确对应的中文展示名。
 - `valid_at` 和 `invalid_at` 必须是字符串，不能是 JSON null。
@@ -381,22 +407,80 @@ Prefer the highest available stable name. For non-user entities, when a concrete
 {% endif %}
 
 {% if language == "en" %}
-Return exactly this JSON shape:
+Return exactly this top-level JSON shape. The `operations` array may be empty, or may contain any number of operation objects using the allowed shapes below:
 {% else %}
-严格返回以下 JSON 结构：
+严格返回以下顶层 JSON 结构。`operations` 数组可以为空，也可以包含任意数量的 operation object；operation object 只能使用下面允许的形状：
 {% endif %}
 {
   "description_summary": "string",
-  "events": [
+  "operations": [
     {
-      "title": "string",
-      "category_id": "education_learning | career_work | project_milestone | residence_relocation | relationship_family | pet_care | health_medical | travel_visit | purchase_asset | creation_publication | achievement_award | finance_legal_admin | other_life_event",
-      "category": "教育学习 | 职业工作 | 项目里程碑 | 居住迁移 | 关系家庭 | 宠物照护 | 健康医疗 | 旅行到访 | 购买资产 | 创作发布 | 成就荣誉 | 财务法务行政 | 其他生活事件",
-      "valid_at": "YYYY-MM-DD | NULL",
-      "invalid_at": "YYYY-MM-DD | NULL",
-      "fact": "string"
+      "op": "add",
+      "value": {
+        "title": "string",
+        "category_id": "education_learning | career_work | project_milestone | residence_relocation | relationship_family | pet_care | health_medical | travel_visit | purchase_asset | creation_publication | achievement_award | finance_legal_admin | other_life_event",
+        "category": "教育学习 | 职业工作 | 项目里程碑 | 居住迁移 | 关系家庭 | 宠物照护 | 健康医疗 | 旅行到访 | 购买资产 | 创作发布 | 成就荣誉 | 财务法务行政 | 其他生活事件",
+        "valid_at": "YYYY-MM-DD | NULL",
+        "invalid_at": "YYYY-MM-DD | NULL",
+        "fact": "string"
+      }
+    },
+    {
+      "op": "delete",
+      "old_value": {
+        "title": "string copied exactly from event_timeline",
+        "category_id": "category_id copied exactly from event_timeline",
+        "category": "category copied exactly from event_timeline",
+        "valid_at": "valid_at copied exactly from event_timeline",
+        "invalid_at": "invalid_at copied exactly from event_timeline",
+        "fact": "fact copied exactly from event_timeline"
+      }
+    },
+    {
+      "op": "update",
+      "old_value": {
+        "title": "string copied exactly from event_timeline",
+        "category_id": "category_id copied exactly from event_timeline",
+        "category": "category copied exactly from event_timeline",
+        "valid_at": "valid_at copied exactly from event_timeline",
+        "invalid_at": "invalid_at copied exactly from event_timeline",
+        "fact": "fact copied exactly from event_timeline"
+      },
+      "new_value": {
+        "title": "string",
+        "category_id": "education_learning | career_work | project_milestone | residence_relocation | relationship_family | pet_care | health_medical | travel_visit | purchase_asset | creation_publication | achievement_award | finance_legal_admin | other_life_event",
+        "category": "教育学习 | 职业工作 | 项目里程碑 | 居住迁移 | 关系家庭 | 宠物照护 | 健康医疗 | 旅行到访 | 购买资产 | 创作发布 | 成就荣誉 | 财务法务行政 | 其他生活事件",
+        "valid_at": "YYYY-MM-DD | NULL",
+        "invalid_at": "YYYY-MM-DD | NULL",
+        "fact": "string"
+      }
     }
   ],
   "should_rename_entity": false,
   "suggested_entity_name": "NULL"
+}
+
+{% if language == "en" %}
+Example `update` for enriching the same real-world event:
+{% else %}
+同一现实事件补充事实和细节时的 `update` 示例：
+{% endif %}
+{
+  "op": "update",
+  "old_value": {
+    "title": "搬到深圳",
+    "category_id": "residence_relocation",
+    "category": "居住迁移",
+    "valid_at": "2026-05-19",
+    "invalid_at": "2026-05-19",
+    "fact": "用户从上海搬到深圳"
+  },
+  "new_value": {
+    "title": "搬到深圳南山区",
+    "category_id": "residence_relocation",
+    "category": "居住迁移",
+    "valid_at": "2026-05-19",
+    "invalid_at": "2026-05-19",
+    "fact": "用户在2026年5月19日从上海搬到深圳南山区，开始在深圳长期居住"
+  }
 }

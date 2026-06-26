@@ -11,7 +11,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 from langchain_core.documents import Document
 
-from app.db import get_db
+from app.db import get_db_read
 from app.core.models.base import RedBearModelConfig
 from app.core.models import RedBearLLM, RedBearRerank
 from app.models.models_model import ModelApiKey
@@ -58,93 +58,92 @@ def knowledge_retrieval(
     Returns:
         Rearranged document block list (in descending order of relevance)
     """
-    db = next(get_db())  # Manually call the generator
-    try:
-        # parse configuration
-        knowledge_bases = config.get("knowledge_bases", [])
-        merge_strategy = config.get("merge_strategy", "weight")
-        reranker_id = config.get("reranker_id")
-        reranker_top_k = config.get("reranker_top_k", 1024)
-        # use_graph = config.get("use_graph", "false").lower() == "true"
+    with get_db_read() as db:
+        try:
+            # parse configuration
+            knowledge_bases = config.get("knowledge_bases", [])
+            merge_strategy = config.get("merge_strategy", "weight")
+            reranker_id = config.get("reranker_id")
+            reranker_top_k = config.get("reranker_top_k", 1024)
+            # use_graph = config.get("use_graph", "false").lower() == "true"
 
-        use_graph_value = config.get("use_graph", False)
-        if isinstance(use_graph_value, bool):
-            use_graph = use_graph_value
-        elif isinstance(use_graph_value, str):
-            use_graph = use_graph_value.lower() in ("true", "1", "yes")
-        else:
-            use_graph = False
+            use_graph_value = config.get("use_graph", False)
+            if isinstance(use_graph_value, bool):
+                use_graph = use_graph_value
+            elif isinstance(use_graph_value, str):
+                use_graph = use_graph_value.lower() in ("true", "1", "yes")
+            else:
+                use_graph = False
 
-        file_names_filter = []
-        if user_ids:
-            file_names_filter.extend([f"{user_id}.txt" for user_id in user_ids])
+            file_names_filter = []
+            if user_ids:
+                file_names_filter.extend([f"{user_id}.txt" for user_id in user_ids])
 
-        if not knowledge_bases:
-            return []
+            if not knowledge_bases:
+                return []
 
-        kb_ids = []
-        workspace_ids = []
-        chat_model = None
-        embedding_model = None
-        all_results = []
-        # Search each knowledge base
-        for kb_config in knowledge_bases:
-            kb_id = kb_config["kb_id"]
-            try:
-                # Check whether the knowledge base exists and is available
-                db_knowledge = knowledge_repository.get_knowledge_by_id(db, knowledge_id=kb_id)
-                if db_knowledge and db_knowledge.chunk_num > 0 and db_knowledge.status == 1:
-                    # Process shared knowledge base
-                    rs, chat_model, embedding_model = _retrieve_for_knowledge(
-                        db=db,
-                        db_knowledge=db_knowledge,
-                        kb_config={**kb_config, "query": query},  # 或改为单独参数
-                        file_names_filter=file_names_filter,
-                        chat_model=chat_model,
-                        embedding_model=embedding_model,
-                        kb_ids=kb_ids,
-                        workspace_ids=workspace_ids,
+            kb_ids = []
+            workspace_ids = []
+            chat_model = None
+            embedding_model = None
+            all_results = []
+            # Search each knowledge base
+            for kb_config in knowledge_bases:
+                kb_id = kb_config["kb_id"]
+                try:
+                    # Check whether the knowledge base exists and is available
+                    db_knowledge = knowledge_repository.get_knowledge_by_id(db, knowledge_id=kb_id)
+                    if db_knowledge and db_knowledge.chunk_num > 0 and db_knowledge.status == 1:
+                        # Process shared knowledge base
+                        rs, chat_model, embedding_model = _retrieve_for_knowledge(
+                            db=db,
+                            db_knowledge=db_knowledge,
+                            kb_config={**kb_config, "query": query},  # 或改为单独参数
+                            file_names_filter=file_names_filter,
+                            chat_model=chat_model,
+                            embedding_model=embedding_model,
+                            kb_ids=kb_ids,
+                            workspace_ids=workspace_ids,
+                        )
+
+                        all_results.extend(rs)
+                except Exception as e:
+                    # Failure of retrieval in a single knowledge base does not affect other knowledge bases
+                    print(f"retrieval knowledge({kb_id}) failed: {str(e)}")
+                    continue
+
+            # Use the specified reranker for re-ranking
+            if reranker_id and all_results:
+                try:
+                    all_results = rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
+                except Exception as rerank_error:
+                    logger.warning(
+                        "Reranker failed, falling back to original results",
+                        extra={
+                            "reranker_id": reranker_id,
+                            "query": query,
+                            "doc_count": len(all_results),
+                            "error": str(rerank_error),
+                        },
                     )
 
-                    all_results.extend(rs)
-            except Exception as e:
-                # Failure of retrieval in a single knowledge base does not affect other knowledge bases
-                print(f"retrieval knowledge({kb_id}) failed: {str(e)}")
-                continue
+            if use_graph:
+                try:
+                    from app.core.rag.common.settings import kg_retriever
+                    doc = kg_retriever.retrieval(question=query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
+                    if doc:
+                        all_results.insert(0, DocumentChunk(
+                            page_content=doc.get("page_content", ""),
+                            metadata=doc.get("metadata", {})
+                        ))
+                except Exception as graph_error:
+                    print(f"Failed to retrieve from knowledge graph: {str(graph_error)}")
+            
+            return all_results
 
-        # Use the specified reranker for re-ranking
-        if reranker_id and all_results:
-            try:
-                all_results = rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
-            except Exception as rerank_error:
-                logger.warning(
-                    "Reranker failed, falling back to original results",
-                    extra={
-                        "reranker_id": reranker_id,
-                        "query": query,
-                        "doc_count": len(all_results),
-                        "error": str(rerank_error),
-                    },
-                )
-
-        if use_graph:
-            try:
-                from app.core.rag.common.settings import kg_retriever
-                doc = kg_retriever.retrieval(question=query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
-                if doc:
-                    all_results.insert(0, DocumentChunk(
-                        page_content=doc.get("page_content", ""),
-                        metadata=doc.get("metadata", {})
-                    ))
-            except Exception as graph_error:
-                print(f"Failed to retrieve from knowledge graph: {str(graph_error)}")
-        
-        return all_results
-
-    except Exception as e:
-        print(f"retrieval knowledge failed: {str(e)}")
-    finally:
-        db.close()
+        except Exception as e:
+            print(f"retrieval knowledge failed: {str(e)}")
+            return []
 
 def _retrieve_for_knowledge(
     db: Session,

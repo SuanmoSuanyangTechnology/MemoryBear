@@ -19,6 +19,7 @@ class SearchStrategy(StrEnum):
 
     CONV = "3"
     META = "4"
+    EXPRESS = "5"
 
     @classmethod
     def _missing_(cls, value: str):
@@ -28,8 +29,12 @@ class SearchStrategy(StrEnum):
             "quick": cls.QUICK,
             "conv": cls.CONV,
             "meta": cls.META,
+            "express": cls.EXPRESS,
         }
-        return aliases.get(str(value).lower(), cls.QUICK)
+        method = aliases.get(str(value).lower())
+        if not method:
+            raise Exception(f"Unknown storage strategy {value}")
+        return method
 
 
 class Neo4jNodeType(StrEnum):

@@ -4,9 +4,18 @@
 供 extraction_engine 和 reflection_engine 共用。
 """
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from app.core.memory.models.graph_models import ExtractedEntityNode
+
+# 名称相似度「路径内」权重：向量相似度 vs 名称文字重叠。
+# 注意：这两个权重与 EntityDedupConfig.alpha/beta 语义不同，不要混淆——
+#   - 本文件的 _W_EMB / _W_TEXT 是「名称这一路内部」融合 embedding 与文字
+#     overlap 的权重（s_name = _W_EMB * emb_sim + _W_TEXT * text_overlap）。
+#   - merge_and_score 里的 alpha/beta 是「名称路 与 向量路 两路之间」融合
+#     sim_name 与 sim_embed 的权重。两者层级不同，取值无需也不应一致。
+_W_EMB = 0.6
+_W_TEXT = 0.4
 
 
 def _normalize_text(s: str) -> str:
@@ -51,6 +60,51 @@ def _cosine(a: List[float], b: List[float]) -> float:
         return 0.0
 
 
+def _tokenize_chars(s: str) -> List[str]:
+    """中文逐字分词：中文字符按单字切分，英文与数字按连续串切分。
+
+    与 _tokenize 的差异在于中文处理粒度。_tokenize 将连续中文整体作为
+    一个 token，使得名称之间的包含或部分重叠无法被识别。本函数将中文
+    逐字拆分，从而保留字符级别的重叠信息。
+
+    Args:
+        s: 待分词字符串。
+
+    Returns:
+        token 列表，中文为单字，英文与数字为连续串。
+    """
+    norm = _normalize_text(s)
+    tokens: List[str] = []
+    for seg in re.findall(r"[\u4e00-\u9fff]+|[a-z0-9]+", norm):
+        if "\u4e00" <= seg[0] <= "\u9fff":
+            tokens.extend(list(seg))
+        else:
+            tokens.append(seg)
+    return tokens
+
+
+def _overlap(a_tokens: List[str], b_tokens: List[str]) -> float:
+    """重叠系数：两个 token 集合的交集大小除以较短集合的大小。
+
+    相比 Jaccard 以并集为分母，重叠系数以较短集合为分母，因此当较短
+    集合被较长集合完全包含时返回 1.0，不会因较长集合的额外 token 而
+    被稀释，更适合度量名称之间的包含关系。
+
+    Args:
+        a_tokens: 第一个 token 列表。
+        b_tokens: 第二个 token 列表。
+
+    Returns:
+        重叠系数，取值范围 [0, 1]；任一集合为空时返回 0.0。
+    """
+    set_a, set_b = set(a_tokens), set(b_tokens)
+    if not set_a or not set_b:
+        return 0.0
+    inter = len(set_a & set_b)
+    denom = min(len(set_a), len(set_b))
+    return inter / denom
+
+
 def _simple_normalize(s: str) -> str:
     """简单归一化：strip + lower"""
     return (s or "").strip().lower()
@@ -86,9 +140,80 @@ def has_exact_alias_match(e1: ExtractedEntityNode, e2: ExtractedEntityNode) -> b
 
 
 def name_similarity_with_aliases(
-    e1: ExtractedEntityNode, e2: ExtractedEntityNode
+    e1: ExtractedEntityNode, e2: ExtractedEntityNode,
+    emb_sim: Optional[float] = None,
+    w_emb: float = _W_EMB,
+    w_text: float = _W_TEXT,
+) -> Tuple[float, float, bool]:
+    """名称相似度综合评分。
+
+    综合主名称向量相似度与名称文字重叠度，给出两个实体的名称相似度评分。
+    文字重叠采用中文逐字分词（_tokenize_chars）配合重叠系数（_overlap），
+    在主名称与别名的全集上两两比较取最大值，以识别名称之间的包含与部分
+    重叠关系。
+
+    评分公式：
+        s_name = w_emb * emb_sim + w_text * text_overlap
+
+    当存在完全匹配（has_exact_alias_match）时，text_overlap 取 1.0。
+
+    权重说明：w_emb / w_text 默认取模块常量 _W_EMB / _W_TEXT（0.6 / 0.4），
+    是「名称这一路内部」融合 embedding 与文字 overlap 的权重，调用方可按
+    需覆盖（例如由上层配置传入）。它与 merge_and_score 中的 alpha/beta
+    （名称路与向量路「两路之间」的融合权重）语义不同、层级不同，取值无需
+    也不应一致，切勿混淆。
+
+    Args:
+        e1: 实体节点 1。
+        e2: 实体节点 2。
+        emb_sim: 主名称向量相似度。若调用方已在 Neo4j 侧通过
+            vector.similarity.cosine 计算，可直接传入以避免在 Python 侧
+            重复计算；为 None 时回退到内部 _cosine 计算。
+        w_emb: 向量相似度权重，默认 _W_EMB。
+        w_text: 名称文字重叠权重，默认 _W_TEXT。
+
+    Returns:
+        (综合相似度, 向量相似度, 是否完全匹配)。
+    """
+    # 1. 主名称向量相似度：优先用外部传入（Neo4j 已算），否则 Python 兜底
+    if emb_sim is None:
+        emb_sim = _cosine(
+            getattr(e1, "name_embedding", []) or [],
+            getattr(e2, "name_embedding", []) or [],
+        )
+
+    # 2. 完全匹配检测（name/alias 完全相等，case-insensitive）
+    has_exact_match = has_exact_alias_match(e1, e2)
+
+    # 3. 文字重叠：单字切 + overlap，在 name + aliases 全集上取最佳
+    if has_exact_match:
+        text_overlap = 1.0
+    else:
+        aliases1 = getattr(e1, "aliases", []) or []
+        aliases2 = getattr(e2, "aliases", []) or []
+        all_names1 = [getattr(e1, "name", "") or "", *aliases1]
+        all_names2 = [getattr(e2, "name", "") or "", *aliases2]
+        text_overlap = 0.0
+        for n1 in all_names1:
+            if not n1:
+                continue
+            t1 = _tokenize_chars(n1)
+            for n2 in all_names2:
+                if not n2:
+                    continue
+                text_overlap = max(text_overlap, _overlap(t1, _tokenize_chars(n2)))
+
+    # 4. 综合评分：向量 w_emb + 文字 w_text
+    s_name = w_emb * emb_sim + w_text * text_overlap
+
+    return s_name, emb_sim, has_exact_match
+
+
+def _name_similarity_with_aliases_legacy(
+    e1: ExtractedEntityNode, e2: ExtractedEntityNode,
+    emb_sim: Optional[float] = None,
 ) -> Tuple[float, float, float, float, float, bool]:
-    """名称相似度综合评分
+    """[已弃用] 旧版名称相似度综合评分（整段中文分词 + Jaccard）
 
     综合考虑主名称和别名，计算两个实体的相似度。
 
@@ -102,15 +227,23 @@ def name_similarity_with_aliases(
     - 有完全匹配：embedding(40%) + primary_jaccard(20%) + max_alias_sim(40%)
     - 无完全匹配：embedding(60%) + primary_jaccard(20%) + max_alias_sim(20%)
 
+    Args:
+        e1, e2: 实体节点
+        emb_sim: 主名称向量相似度。若调用方已在 Neo4j 侧用
+            vector.similarity.cosine 算好则直接传入，避免在 Python 侧用
+            name_embedding 重新计算（省向量传输与内存）；为 None 时回退到
+            Python 内部用 _cosine 计算。
+
     Returns:
         (综合相似度, 向量相似度, 主名称Jaccard, 别名Jaccard,
          最佳别名匹配度, 是否完全匹配)
     """
-    # 1. 主名称向量相似度
-    emb_sim = _cosine(
-        getattr(e1, "name_embedding", []) or [],
-        getattr(e2, "name_embedding", []) or [],
-    )
+    # 1. 主名称向量相似度：优先用外部传入（Neo4j 已算），否则 Python 兜底计算
+    if emb_sim is None:
+        emb_sim = _cosine(
+            getattr(e1, "name_embedding", []) or [],
+            getattr(e2, "name_embedding", []) or [],
+        )
 
     # 2. 主名称 token 相似度
     tokens1 = set(_tokenize(getattr(e1, "name", "") or ""))

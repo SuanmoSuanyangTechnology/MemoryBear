@@ -27,24 +27,16 @@ logger = logging.getLogger(__name__)
 def _create_log_repo():
     """创建自动 commit + close 的日志仓库，避免 session 泄漏"""
     from app.repositories.reflection_log_repository import ReflectionLogRepository
-    from app.db import SessionLocal
+    from app.db import get_db_context
 
     class _AutoCommitLogRepo:
         """包装 ReflectionLogRepository，create 后自动 commit 并关闭 session"""
-        def __init__(self):
-            self._db = SessionLocal()
-            self._repo = ReflectionLogRepository(self._db)
-
         def create(self, **kwargs):
-            try:
-                result = self._repo.create(**kwargs)
-                self._db.commit()
+            with get_db_context() as db:
+                repo = ReflectionLogRepository(db)
+                result = repo.create(**kwargs)
+                db.commit()
                 return result
-            except Exception:
-                self._db.rollback()
-                raise
-            finally:
-                self._db.close()
 
     return _AutoCommitLogRepo()
 
@@ -95,7 +87,7 @@ class ReflectionPipeline:
         # 构建 embedding_client（用于更名后重新生成 name_embedding）
         if not hasattr(self, '_embedding_client'):
             self._embedding_client = None
-            embedding_id = getattr(self.memory_config, 'embedding_id', None)
+            embedding_id = getattr(self.memory_config, 'embedding_model_id', None)
             if embedding_id:
                 try:
                     from app.core.memory.pipelines.base_pipeline import ModelClientMixin
@@ -137,7 +129,7 @@ class ReflectionPipeline:
         finally:
             await connector.close()
 
-    async def run_dedup_full_scan(self) -> Dict[str, Any]:
+    async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """方案B：低频全量扫描去重 — 由每天一次的定时任务调用"""
         self._lazy_init()
 
@@ -155,7 +147,7 @@ class ReflectionPipeline:
         )
 
         try:
-            return await inspector.run_dedup_full_scan(self.end_user_id)
+            return await inspector.run_dedup_full_scan(self.end_user_id, baseline=baseline)
         finally:
             await connector.close()
 

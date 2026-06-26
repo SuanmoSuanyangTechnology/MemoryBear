@@ -1354,8 +1354,9 @@ class WorkflowService:
             execution: WorkflowExecution,
             node_executions: list[WorkflowNodeExecution],
             output_data: dict[str, Any],
+            workflow_config: "WorkflowConfig | None" = None,
     ) -> dict[str, Any]:
-        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        workflow_config = workflow_config or execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         type_maps = self._build_snapshot_type_maps(workflow_config)
         raw_groups = self._extract_execution_snapshot_raw_groups(
             output_data=output_data,
@@ -1686,9 +1687,16 @@ class WorkflowService:
             source=source,
         )
 
-    def _refresh_workflow_debug_state_from_execution(self, execution: WorkflowExecution) -> None:
-        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
-        snapshot = self._build_public_execution_snapshot_from_record(execution)
+    def _refresh_workflow_debug_state_from_execution(self, execution: WorkflowExecution, workflow_config: WorkflowConfig | None = None) -> None:
+        workflow_config = workflow_config or execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        snapshot = self._build_public_execution_snapshot_record(
+            execution=execution,
+            node_executions=node_executions,
+            output_data=output_data if isinstance(output_data, dict) else {},
+            workflow_config=workflow_config,
+        )
         self._write_workflow_debug_state(
             app_id=execution.app_id,
             workflow_config=workflow_config,
@@ -4438,6 +4446,11 @@ class WorkflowService:
             moderation_flagged = False
             active_llm_nodes: set[str] = set()  # 已 node_start 但尚未 node_end 的 LLM 节点
 
+            # 工作流引擎执行期间不需要 db，提前归还连接给连接池
+            # execution 对象保持内存状态，事件处理时通过 self.db 懒重连写入
+            # 写完后再调用 self.db.close() 归还连接
+            self.db.close()
+
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
@@ -4540,7 +4553,7 @@ class WorkflowService:
                             execution = self.get_execution(execution.execution_id)
                             if execution and execution.output_data:
                                 self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                self._refresh_workflow_debug_state_from_execution(execution)
+                                self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                         except Exception as persist_err:
                             logger.warning(f"Failed to persist node executions on moderation: {persist_err}")
                         break
@@ -4645,7 +4658,7 @@ class WorkflowService:
                             execution = self.get_execution(execution.execution_id)
                             if execution and execution.output_data:
                                 self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                self._refresh_workflow_debug_state_from_execution(execution)
+                                self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                         except Exception as persist_err:
                             logger.warning(f"Failed to persist node executions on stream failed: {persist_err}")
                     elif status == "waiting_human":
@@ -4744,7 +4757,7 @@ class WorkflowService:
                             },
                         }
                         self.db.commit()
-                        self.db.refresh(execution)
+                        self.db.close()
 
                         # Save the user message so that the conversation title
                         # gets updated from the first user message, rather than
@@ -4836,9 +4849,10 @@ class WorkflowService:
                                 node_outputs[cycle_node_id] = {"cycle_items": items}
                         execution.output_data = new_output_data
                         self.db.commit()
+                        self.db.close()
                     if status in {"completed", "failed"} and execution.output_data:
                         self._persist_workflow_node_executions(execution, config, execution.output_data)
-                        self._refresh_workflow_debug_state_from_execution(execution)
+                        self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                 # 记录活跃 LLM 节点：node_start 加入，node_end 移除，合成时只为活跃节点补发
@@ -4902,6 +4916,7 @@ class WorkflowService:
                             },
                         }
                         self.db.commit()
+                        self.db.close()
 
                     # Handle timeout signal from the background scheduler
                     # Resume the workflow via the timeout branch (TIMEOUT) instead of terminating
@@ -4994,6 +5009,7 @@ class WorkflowService:
                                     backlog_interventions=clean_remaining,
                                 )
                                 self.db.commit()
+                                self.db.close()
 
                                 register_intervention(execution.execution_id, new_map)
                                 if new_pending:
@@ -5072,10 +5088,11 @@ class WorkflowService:
                                 # is durable across requests. update_message()
                                 # only flushes; it relies on the caller to commit.
                                 self.db.commit()
+                                self.db.close()
 
                                 try:
                                     self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                    self._refresh_workflow_debug_state_from_execution(execution)
+                                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                                 except Exception as persist_err:
                                     logger.warning(f"Failed to persist node executions on intervention resolved: {persist_err}")
 
@@ -5160,10 +5177,11 @@ class WorkflowService:
                                 # is durable across requests. update_message()
                                 # only flushes; it relies on the caller to commit.
                                 self.db.commit()
+                                self.db.close()
 
                                 try:
                                     self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                    self._refresh_workflow_debug_state_from_execution(execution)
+                                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                                 except Exception as persist_err:
                                     logger.warning(f"Failed to persist node executions on intervention complete: {persist_err}")
 
@@ -5198,10 +5216,11 @@ class WorkflowService:
                                     meta_data=_resolved_meta,
                                 )
                                 self.db.commit()
+                                self.db.close()
 
                                 try:
                                     self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                    self._refresh_workflow_debug_state_from_execution(execution)
+                                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                                 except Exception as persist_err:
                                     logger.warning(f"Failed to persist node executions on intervention failed: {persist_err}")
                             emitted = self._emit(public, resume_event)
@@ -5259,6 +5278,7 @@ class WorkflowService:
                                 commit_context = True
                             if commit_context:
                                 self.db.commit()
+                                self.db.close()
                             yield next_evt
                             break
 
@@ -5272,7 +5292,7 @@ class WorkflowService:
                 execution = self.get_execution(execution.execution_id)
                 if execution and execution.output_data:
                     self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution)
+                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on stream error: {persist_err}")
             # Clean up registry on failure to avoid leaks.

@@ -51,6 +51,63 @@ bear = BearLogger("memory.pipeline")
 # ──────────────────────────────────────────────
 
 
+def _convert_pruning_records(raw_records: list) -> List[dict]:
+    """将 PruningPipeline 收集的剪枝记录转换为 graph_build_step 期望的格式。
+
+    PruningPipeline.prune() 产生的记录格式（用于快照/日志）：
+      {
+        "conversation_id": str,
+        "message_seq": int,
+        "source": "cache"|"llm",
+        "input": {"msgs": [{"role": "User"/"Assistant", "msg": str}, ...]},
+        "output"|"gold": {
+            "assistant_memory_hint": str,
+            "assistant_memory_type": str,
+            ...
+        },
+      }
+
+    graph_build_step 期望的格式（= AssistantPruningRecord.model_dump()）：
+      {
+        "pair_id": str,
+        "original_text": str,
+        "pruned_text": str,   # "NULL" 表示无记忆价值
+        "memory_type": str,
+        "created_at": str,
+      }
+    """
+    from datetime import timezone as _tz
+
+    result: List[dict] = []
+    _now = datetime.now(_tz.utc).isoformat()
+    for idx, r in enumerate(raw_records):
+        conv_id = r.get("conversation_id", "")
+        seq = r.get("message_seq", 0)
+        # pair_id 基于 conversation_id + message_seq 确定性生成，
+        # graph_build_step 用它构造 Neo4j 节点 ID（orig_{pair_id} / pruned_{pair_id}），确保 MERGE 幂等。
+        pair_id = f"{conv_id}_{seq}" if (conv_id and seq) else f"orphan_{uuid.uuid4().hex[:8]}_{idx}"
+
+        # Assistant 消息是 input.msgs 中最后一条
+        msgs = r.get("input", {}).get("msgs", [])
+        assistant_msg = msgs[-1] if msgs else {}
+        original_text = assistant_msg.get("msg", "")
+
+        # 剪枝结果在 "output"（cache）或 "gold"（llm）键下
+        prune_result = r.get("output") or r.get("gold") or {}
+        pruned_text = prune_result.get("assistant_memory_hint", "")
+        memory_type = prune_result.get("assistant_memory_type", "NULL")
+
+        result.append({
+            "pair_id": pair_id,
+            "original_text": original_text,
+            "pruned_text": pruned_text or "NULL",
+            "memory_type": memory_type or "NULL",
+            "created_at": _now,
+        })
+
+    return result
+
+
 class ExtractionResult(BaseModel):
     """萃取 + 图构建 + 去重消歧后的结构化输出。
 
@@ -84,7 +141,8 @@ class ExtractionResult(BaseModel):
     assistant_original_nodes: List[Any] = Field(default_factory=list)
     assistant_pruned_nodes: List[Any] = Field(default_factory=list)
     assistant_pruned_edges: List[Any] = Field(default_factory=list)
-    assistant_dialog_edges: List[Any] = Field(default_factory=list)
+    conversation_nodes: List[Any] = Field(default_factory=list)
+    assistant_conversation_edges: List[Any] = Field(default_factory=list)
     dialog_data_list: List[Any] = Field(
         default_factory=list,
         description="原始 DialogData 列表，类型为 Any 以避免循环依赖",
@@ -150,36 +208,61 @@ class WritePipeline:
         self._embedder_client = None
         self._neo4j_connector = None
 
+        # 存储阶段锁（延迟初始化）
+        self._store_lock = None
+        self._redis_client = None
+
     # ──────────────────────────────────────────────
-    # 公开接口
+    # 执行写入
     # ──────────────────────────────────────────────
 
     async def run(
         self,
-        messages: List[dict],
+        target_message: dict,
+        context_before: List[dict] = None,
+        context_after: List[dict] = None,
+        conversation_id: str = "",
+        message_seq: int = 0,
         ref_id: str = "",
         is_pilot_run: bool = False,
+        skip_cursor_advance: bool = False,
+        dispatch_at: str = "",
     ) -> WriteResult:
         """
-        执行完整的写入流水线。
+        执行写入流水线（滑动窗口模式）。
+
+        统一入口，处理单条 target_message 及其上下文窗口。
 
         Args:
-            messages: 结构化消息 [{"role": "user"/"assistant", "content": "..."}]
+            target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+            context_before: 上文消息列表（按 message_seq 升序）
+            context_after: 下文消息列表（按 message_seq 升序）
+            conversation_id: 对话 ID
+            message_seq: 目标消息的 message_seq
             ref_id: 引用 ID，为空则自动生成
             is_pilot_run: 试运行模式（只萃取不写入）
+            skip_cursor_advance: 直接写入路径设为 True，跳过 write_cursor 推进
+            dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
 
         Returns:
             WriteResult 包含状态和统计信息
         """
+        if context_before is None:
+            context_before = []
+        if context_after is None:
+            context_after = []
+
         if not ref_id:
             ref_id = uuid.uuid4().hex
 
         # 根据用户消息内容自动检测语言，确保输出语言与输入语言一致
         import re
         import langid
+        # 从目标消息和上下文中提取 user 内容进行语言检测
+        all_messages = context_before + [target_message] + context_after
         user_content = " ".join(
             re.sub(r"<input-file-summary>.*?</input-file-summary>", "", msg.get("content", ""), flags=re.DOTALL).strip()
-            for msg in messages
+            for msg in all_messages
             if isinstance(msg, dict) and msg.get("role") == "user" and msg.get("content")
         )
         if user_content:
@@ -187,7 +270,16 @@ class WritePipeline:
             self.language = detected if detected in ("zh", "en") else "en"
             logger.info(f"[LanguageDetect] detected={detected}, language={self.language}, text_len={len(user_content)}")
 
-        mode = "试运行" if is_pilot_run else "正式"
+        # 处理 dialog_at
+        _dialog_at = (
+            target_message.get("dialog_at")
+            or dispatch_at
+            or target_message.get("created_at", "")
+            or ""
+        )
+        target_message = {**target_message, "dialog_at": _dialog_at}
+
+        mode = "试运行" if is_pilot_run else "滑动窗口"
         extraction_result = None
 
         try:
@@ -196,39 +288,117 @@ class WritePipeline:
                 mode=mode,
                 config_name=self.memory_config.config_name,
                 end_user_id=self.end_user_id,
+                conversation_id=conversation_id,
+                message_seq=message_seq,
             ):
                 # 初始化客户端和连接
                 self._init_clients()
                 self._init_neo4j_connector()
 
-                # 初始化快照记录器（提前创建，供预处理阶段的剪枝使用）
+                # 初始化快照记录器
                 from app.core.memory.utils.debug.write_snapshot_recorder import (
                     WriteSnapshotRecorder,
                 )
 
-                # 整轮写入路径：仅按 end_user_id + 时间戳分目录（兼容旧行为），
-                # 但仍把 ref_id / language / mode 写到 0_summary.json 以便辨识。
+                _target_content = target_message.get("content", "") or ""
+                _preview = _target_content[:200]
                 self._recorder = WriteSnapshotRecorder(
                     end_user_id=self.end_user_id,
+                    conversation_id=conversation_id,
+                    message_seq=message_seq,
                     extra_metadata={
-                        "mode": "legacy_full_messages",
+                        "mode": "sliding_window",
                         "ref_id": ref_id,
+                        "dispatch_at": dispatch_at,
+                        "dialog_at": _dialog_at,
                         "language": self.language,
+                        "target_content_preview": _preview,
+                        "target_content_length": len(_target_content),
+                        "context_before_count": len(context_before),
+                        "context_after_count": len(context_after),
                     },
                 )
 
-                # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
-                async with bear.step(1, 5, "预处理", "消息分块") as s:
-                    chunked_dialogs = await self._preprocess(messages, ref_id)
+                from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
+                pruning_pipeline = PruningPipeline(
+                    memory_config=self.memory_config,
+                    end_user_id=self.end_user_id,
+                    language=self.language,
+                )
+
+                # Step 1: 剪枝 - 构建 Pruned_Context
+                async with bear.step(1, 6, "剪枝", "构建 Pruned_Context") as s:
+                    pruning_records: list = []
+                    context_before_pruned = await self._build_pruned_context(
+                        messages=context_before,
+                        conversation_id=conversation_id,
+                        pruning_pipeline=pruning_pipeline,
+                        pruning_records=pruning_records,
+                    )
+                    context_after_pruned = await self._build_pruned_context(
+                        messages=context_after,
+                        conversation_id=conversation_id,
+                        pruning_pipeline=pruning_pipeline,
+                        pruning_records=pruning_records,
+                        preceding_user_content=target_message.get("content", ""),
+                    )
+                    s.metadata(
+                        before_count=len(context_before_pruned),
+                        after_count=len(context_after_pruned),
+                        pruned_count=len(pruning_records),
+                    )
+                    recorder = getattr(self, "_recorder", None)
+                    if recorder is not None:
+                        recorder.record_pruning_results(pruning_records)
+
+                messages = [target_message]
+
+                # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
+                await self._preprocess_files(messages)
+                await self._preprocess_files(context_before_pruned)
+                await self._preprocess_files(context_after_pruned)
+
+                # target_message User 侧 pruning
+                await self._prune_target_message_user_side(
+                    messages=messages,
+                    context_after_original=context_after,
+                    conversation_id=conversation_id,
+                    pruning_pipeline=pruning_pipeline,
+                )
+
+                # Step 2: 预处理 - 消息分块
+                async with bear.step(2, 6, "预处理", "消息分块") as s:
+                    from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
+                    recorder = getattr(self, "_recorder", None)
+                    snapshot = recorder.snapshot if recorder else None
+                    chunked_dialogs = await get_chunked_dialogs(
+                        chunker_strategy=self.memory_config.chunker_strategy,
+                        end_user_id=self.end_user_id,
+                        messages=messages,
+                        ref_id=ref_id,
+                        config_id=str(self.memory_config.config_id),
+                        workspace_id=self.memory_config.workspace_id,
+                        snapshot=snapshot,
+                        context_before=context_before_pruned,
+                        context_after=context_after_pruned,
+                    )
+                    # 注入剪枝记录到 dialog_data.metadata
+                    if pruning_records:
+                        converted = _convert_pruning_records(pruning_records)
+                        for dd in chunked_dialogs:
+                            existing = dd.metadata.get("assistant_pruning_records", [])
+                            dd.metadata["assistant_pruning_records"] = existing + converted
+
+                    # 注入 conversation_id 到 metadata
+                    _conv_id = conversation_id or f"batch_{self.end_user_id}_{ref_id}"
+                    for dd in chunked_dialogs:
+                        dd.metadata["conversation_id"] = _conv_id
+
                     s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
-                # Step 2: 萃取 - 知识提取 + 第一层去重（仅精确匹配）
-                async with bear.step(2, 5, "萃取", "知识提取") as s:
-                    extraction_result = await self._extract(
-                        chunked_dialogs, is_pilot_run
-                    )
-                    # 别名归并已移除：写入阶段不再处理 "别名属于" 关系，
-                    # 别名合并与节点去重统一延迟到反思阶段执行
+                # Step 3: 萃取 - 知识提取
+                async with bear.step(3, 6, "萃取", "知识提取") as s:
+                    extraction_result = await self._extract(chunked_dialogs, is_pilot_run)
                     stats = extraction_result.stats
                     s.metadata(
                         entities=stats["entity_count"],
@@ -244,21 +414,17 @@ class WritePipeline:
                         elapsed_seconds=0.0,
                     )
 
-                # Step 3: 存储 - 写入 Neo4j
-                async with bear.step(3, 5, "存储", "写入 Neo4j"):
+                async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
-                # Step 3.5: 异步后处理（别名归并 Neo4j 侧 + 第二层去重 + 情绪 + 元数据）
-                await self._post_store_async_tasks(extraction_result)
+                # Step 6: 摘要 - 生成情景记忆摘要
+                async with bear.step(6, 6, "摘要", "生成情景记忆"):
+                    await self._summarize(chunked_dialogs)
 
-                # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
-                async with bear.step(4, 5, "聚类", "增量更新社区") as s:
+                # Step 5: 聚类 - 增量更新社区（Celery 异步任务，无需持锁）
+                async with bear.step(5, 6, "聚类", "增量更新社区") as s:
                     await self._cluster(extraction_result)
                     s.metadata(mode="async")
-
-                # Step 5: 摘要 - 生成情景记忆摘要
-                async with bear.step(5, 5, "摘要", "生成情景记忆"):
-                    await self._summarize(chunked_dialogs)
 
                 # 更新活动统计缓存
                 await self._update_stats_cache(extraction_result)
@@ -361,10 +527,6 @@ class WritePipeline:
         # step1: 执行知识提取
         dialog_data_list = await new_orchestrator.run(chunked_dialogs)
 
-        # 收集需要异步情绪提取的 statements（由编排器在 Phase 4 后收集）
-        # 注意：实际 dispatch 在 _store 之后，确保 Statement 节点已写入 Neo4j
-        self._emotion_statements = new_orchestrator.emotion_statements
-
         # ── Snapshot: 各阶段萃取结果 ──
         recorder.record_stage_outputs(new_orchestrator.last_stage_outputs)
 
@@ -409,7 +571,8 @@ class WritePipeline:
             assistant_original_nodes=graph.assistant_original_nodes,
             assistant_pruned_nodes=graph.assistant_pruned_nodes,
             assistant_pruned_edges=graph.assistant_pruned_edges,
-            assistant_dialog_edges=graph.assistant_dialog_edges,
+            conversation_nodes=graph.conversation_nodes,
+            assistant_conversation_edges=graph.assistant_conversation_edges,
             dialog_data_list=dialog_data_list,
         )
 
@@ -426,8 +589,6 @@ class WritePipeline:
 
         错误策略：
         - 别名清洗失败 → 警告日志，继续写入
-        - Neo4j 写入死锁 → 指数退避重试 3 次
-        - Neo4j 写入非死锁异常 → 直接抛出，中断流程
         """
         from app.repositories.neo4j.graph_saver import (
             save_dialog_and_statements_to_neo4j,
@@ -436,7 +597,7 @@ class WritePipeline:
         # 1. 写入前别名清洗（失败不中断）
         await self._clean_cross_role_aliases(result.entity_nodes)
 
-        # 2. Neo4j 写入（含死锁重试）
+        # 2. Neo4j 写入
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -454,7 +615,8 @@ class WritePipeline:
                     assistant_original_nodes=result.assistant_original_nodes,
                     assistant_pruned_nodes=result.assistant_pruned_nodes,
                     assistant_pruned_edges=result.assistant_pruned_edges,
-                    assistant_dialog_edges=result.assistant_dialog_edges,
+                    conversation_nodes=result.conversation_nodes,
+                    assistant_conversation_edges=result.assistant_conversation_edges,
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
@@ -473,75 +635,6 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     raise
-
-    # ──────────────────────────────────────────────
-    # Step 3.5: 异步后处理（情绪提取 + 元数据提取）
-    # ──────────────────────────────────────────────
-
-    async def _post_store_async_tasks(self, result: ExtractionResult) -> None:
-        """提交写入后的异步 Celery 任务（全部 fire-and-forget，失败不影响主流程）：
-
-        1. 异步情绪提取
-        2. 异步元数据提取
-        """
-        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import (
-            collect_user_entities_for_metadata,
-        )
-
-        llm_model_id = (
-            str(self.memory_config.llm_model_id)
-            if self.memory_config.llm_model_id
-            else None
-        )
-        recorder = getattr(self, "_recorder", None)
-        snapshot_dir = (
-            recorder.snapshot_dir
-            if recorder is not None and recorder.enabled
-            else None
-        )
-
-        # ── 1. 异步情绪提取 ──
-        emotion_statements = getattr(self, "_emotion_statements", [])
-        if emotion_statements and llm_model_id:
-            self._submit_celery_task(
-                "Emotion",
-                "app.tasks.extract_emotion_batch",
-                {
-                    "statements": emotion_statements,
-                    "llm_model_id": llm_model_id,
-                    "language": self.language,
-                    "snapshot_dir": snapshot_dir,
-                },
-            )
-
-        # ── 2. 异步元数据提取 ──
-        user_entities = collect_user_entities_for_metadata(result.entity_nodes)
-        if user_entities and llm_model_id:
-            self._submit_celery_task(
-                "Metadata",
-                "app.tasks.extract_metadata_batch",
-                {
-                    "user_entities": user_entities,
-                    "llm_model_id": llm_model_id,
-                    "language": self.language,
-                    "snapshot_dir": snapshot_dir,
-                },
-            )
-
-    def _submit_celery_task(
-        self, label: str, task_name: str, kwargs: dict
-    ) -> None:
-        """提交 Celery 异步任务的通用方法。失败只记日志，不抛异常。"""
-        try:
-            from app.celery_app import celery_app
-
-            task_result = celery_app.send_task(task_name, kwargs=kwargs)
-            logger.info(f"[{label}] 异步任务已提交 - task_id={task_result.id}")
-        except Exception as e:
-            logger.error(
-                f"[{label}] 提交异步任务失败（不影响主流程）: {e}",
-                exc_info=True,
-            )
 
     # ──────────────────────────────────────────────
     # Step 4: 聚类
@@ -828,7 +921,12 @@ class WritePipeline:
 
         使用 MemoryClientFactory 工厂模式，需要短暂的 DB session 来
         查询模型配置（API key、base_url 等），查询完毕立即释放。
+
+        幂等：若已初始化则跳过，避免重复 DB 查询。
         """
+        if self._llm_client is not None and self._embedder_client is not None:
+            return
+
         from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
         from app.db import get_db_context
 
@@ -841,9 +939,11 @@ class WritePipeline:
         logger.info("LLM and embedding clients constructed")
 
     def _init_neo4j_connector(self) -> None:
-        """初始化 Neo4j 连接器。"""
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        """初始化 Neo4j 连接器（幂等：若已存在则跳过）。"""
+        if self._neo4j_connector is not None:
+            return
 
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         self._neo4j_connector = Neo4jConnector()
 
     def _load_ontology_types(self):
@@ -949,209 +1049,6 @@ class WritePipeline:
             logger.warning(f"写入活动统计缓存失败（不影响主流程）: {e}")
 
     # ──────────────────────────────────────────────
-    # 滑动窗口写入：公开入口
-    # ──────────────────────────────────────────────
-
-    async def run_with_window(
-        self,
-        target_message: dict,
-        context_before: List[dict],
-        context_after: List[dict],
-        conversation_id: str,
-        message_seq: int,
-        ref_id: str = "",
-        dispatch_at: str = "",
-    ) -> WriteResult:
-        """滑动窗口写入入口。
-
-        Args:
-            target_message: 目标 user 消息 {"role": "user", "content": "...", ...}
-            context_before: 上文消息列表（按 message_seq 升序）
-            context_after: 下文消息列表（按 message_seq 升序）
-            conversation_id: 对话 ID
-            message_seq: 目标消息的 message_seq
-            ref_id: 引用 ID，为空则自动生成
-            dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
-
-        Returns:
-            WriteResult 包含状态和统计信息
-        """
-        if not ref_id:
-            ref_id = uuid.uuid4().hex
-
-        # 根据用户消息内容自动检测语言，确保输出语言与输入语言一致
-        import re
-        import langid
-        # 从目标消息和上下文中提取 user 内容进行语言检测
-        all_messages = (context_before or []) + [target_message] + (context_after or [])
-        user_content = " ".join(
-            re.sub(r"<input-file-summary>.*?</input-file-summary>", "", msg.get("content", ""), flags=re.DOTALL).strip()
-            for msg in all_messages
-            if isinstance(msg, dict) and msg.get("role") == "user" and msg.get("content")
-        )
-        if user_content:
-            detected = langid.classify(user_content)[0]
-            self.language = detected if detected in ("zh", "en") else "en"
-            logger.info(f"[LanguageDetect][run_with_window] detected={detected}, language={self.language}, text_len={len(user_content)}")
-
-        _dialog_at = (
-            target_message.get("dialog_at")
-            or dispatch_at
-            or target_message.get("created_at", "")
-            or ""
-        )
-        target_message = {**target_message, "dialog_at": _dialog_at}
-
-        extraction_result = None
-
-        try:
-            async with bear.pipeline(
-                "WritePipeline.run_with_window",
-                mode="滑动窗口",
-                config_name=self.memory_config.config_name,
-                end_user_id=self.end_user_id,
-                conversation_id=conversation_id,
-                message_seq=message_seq,
-            ):
-                self._init_clients()
-                self._init_neo4j_connector()
-
-                from app.core.memory.utils.debug.write_snapshot_recorder import (
-                    WriteSnapshotRecorder,
-                )
-                # 滑动窗口写入：按 end_user / conversation / seq 三级组织 OSS 前缀，
-                # 并把定位元信息（ref_id / dispatch_at / dialog_at / 目标消息预览
-                # 等）写入 0_summary.json，便于在大量数据中精确定位本次快照。
-                _target_content = target_message.get("content", "") or ""
-                _preview = _target_content[:200]
-                self._recorder = WriteSnapshotRecorder(
-                    end_user_id=self.end_user_id,
-                    conversation_id=conversation_id,
-                    message_seq=message_seq,
-                    extra_metadata={
-                        "mode": "sliding_window",
-                        "ref_id": ref_id,
-                        "dispatch_at": dispatch_at,
-                        "dialog_at": _dialog_at,
-                        "language": self.language,
-                        "target_content_preview": _preview,
-                        "target_content_length": len(_target_content),
-                        "context_before_count": len(context_before or []),
-                        "context_after_count": len(context_after or []),
-                    },
-                )
-
-                from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
-                pruning_pipeline = PruningPipeline(
-                    memory_config=self.memory_config,
-                    end_user_id=self.end_user_id,
-                    language=self.language,
-                )
-
-                async with bear.step(1, 6, "剪枝", "构建 Pruned_Context") as s:
-                    pruning_records: list = []
-                    _before = context_before or []
-                    _after = context_after or []
-                    context_before_pruned = await self._build_pruned_context(
-                        messages=_before,
-                        conversation_id=conversation_id,
-                        pruning_pipeline=pruning_pipeline,
-                        pruning_records=pruning_records,
-                    )
-                    context_after_pruned = await self._build_pruned_context(
-                        messages=_after,
-                        conversation_id=conversation_id,
-                        pruning_pipeline=pruning_pipeline,
-                        pruning_records=pruning_records,
-                        preceding_user_content=target_message.get("content", ""),
-                    )
-                    s.metadata(
-                        before_count=len(context_before_pruned),
-                        after_count=len(context_after_pruned),
-                        pruned_count=len(pruning_records),
-                    )
-                    recorder = getattr(self, "_recorder", None)
-                    if recorder is not None:
-                        recorder.record_pruning_results(pruning_records)
-
-                messages = [target_message]
-
-                # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
-                # 与旧路径 memory_agent_service._preprocess_files 逻辑一致
-                await self._preprocess_files(messages)
-                await self._preprocess_files(context_before_pruned)
-                await self._preprocess_files(context_after_pruned)
-
-                # target_message User 侧 pruning：
-                # 如果 target_message 的 content 包含 <input-file-summary> 或长文复制内容，
-                # 使用 context_after 中紧邻的第一条原始 assistant 消息作为配对进行 User 侧规整。
-                # 规整后用 processed_user_msg 替换 target_message 的 content。
-                await self._prune_target_message_user_side(
-                    messages=messages,
-                    context_after_original=_after,
-                    conversation_id=conversation_id,
-                    pruning_pipeline=pruning_pipeline,
-                )
-
-                async with bear.step(2, 6, "预处理", "消息分块") as s:
-                    from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
-                    recorder = getattr(self, "_recorder", None)
-                    snapshot = recorder.snapshot if recorder else None
-                    chunked_dialogs = await get_chunked_dialogs(
-                        chunker_strategy=self.memory_config.chunker_strategy,
-                        end_user_id=self.end_user_id,
-                        messages=messages,
-                        ref_id=ref_id,
-                        config_id=str(self.memory_config.config_id),
-                        workspace_id=self.memory_config.workspace_id,
-                        snapshot=snapshot,
-                        context_before=context_before_pruned,
-                        context_after=context_after_pruned,
-                    )
-                    s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
-
-                async with bear.step(3, 6, "萃取", "知识提取") as s:
-                    extraction_result = await self._extract(chunked_dialogs, is_pilot_run=False)
-                    stats = extraction_result.stats
-                    s.metadata(
-                        entities=stats["entity_count"],
-                        statements=stats["statement_count"],
-                        relations=stats["relation_count"],
-                    )
-
-                async with bear.step(4, 6, "存储", "写入 Neo4j"):
-                    await self._store(extraction_result)
-
-                await self._post_store_async_tasks(extraction_result)
-
-                async with bear.step(5, 6, "聚类", "增量更新社区") as s:
-                    await self._cluster(extraction_result)
-                    s.metadata(mode="async")
-
-                # Step 6: 摘要 - 生成情景记忆摘要
-                async with bear.step(6, 6, "摘要", "生成情景记忆"):
-                    await self._summarize(chunked_dialogs)
-
-                await self._advance_write_cursor(
-                    conversation_id=conversation_id,
-                    message_seq=message_seq,
-                )
-
-                await self._update_stats_cache(extraction_result)
-
-                return WriteResult(
-                    status="success",
-                    extraction=extraction_result.stats,
-                    elapsed_seconds=0.0,
-                )
-
-        except Exception:
-            raise
-
-        finally:
-            await self._cleanup()
-
-    # ──────────────────────────────────────────────
     # 滑动窗口写入：辅助方法
     # ──────────────────────────────────────────────
 
@@ -1236,65 +1133,12 @@ class WritePipeline:
 
         return [m for m in result if m is not None]
 
-    async def _advance_write_cursor(
-        self,
-        conversation_id: str,
-        message_seq: int,
-    ) -> None:
-        """原子性推进对话的 write_cursor。
-
-        执行原子性 UPDATE conversations SET write_cursor = :new_seq
-        WHERE id = :conv_id AND write_cursor < :new_seq，
-        确保 write_cursor 只能单调递增，防止并发任务乱序覆盖。
-
-        更新失败时记录警告日志，不抛出异常（fire-and-forget 语义）。
-
-        Args:
-            conversation_id: 对话 ID
-            message_seq: 目标 user 消息的 message_seq，作为新的 write_cursor 值
-
-        Requirements: 3.2
-        """
-        try:
-            from sqlalchemy import update
-            from app.models.conversation_model import Conversation
-            from app.db import get_db_context
-
-            with get_db_context() as db:
-                result = db.execute(
-                    update(Conversation)
-                    .where(
-                        Conversation.id == conversation_id,
-                        Conversation.write_cursor < message_seq,
-                    )
-                    .values(write_cursor=message_seq)
-                )
-                db.commit()
-
-                if result.rowcount == 0:
-                    logger.warning(
-                        f"[WritePipeline] write_cursor 未更新（可能已被更大的 seq 覆盖）: "
-                        f"conv={conversation_id}, seq={message_seq}"
-                    )
-                else:
-                    logger.info(
-                        f"[WritePipeline] write_cursor 已推进: "
-                        f"conv={conversation_id}, new_cursor={message_seq}"
-                    )
-        except Exception as e:
-            logger.warning(
-                f"[WritePipeline] _advance_write_cursor 失败（不影响主流程）: "
-                f"conv={conversation_id}, seq={message_seq}, err={e}",
-                exc_info=True,
-            )
-
     async def _cleanup(self) -> None:
         """
-        清理资源：关闭 Neo4j 连接器，断开客户端引用。
+        清理资源：关闭 Neo4j 连接器。
 
-        不再尝试反射关闭 httpx 内部 client——由 tasks.py 的
-        _shutdown_loop_gracefully 中 set_exception_handler 兜底，
-        抑制 GC 阶段 'Event loop is closed' 的噪音日志。
+        LLM/Embedding 客户端不在此处清理——它们在 WritePipeline 生命周期内
+        跨多次 run_with_window 调用复用，由 GC 最终回收。
         """
         if self._neo4j_connector:
             try:
@@ -1302,7 +1146,4 @@ class WritePipeline:
             except Exception as e:
                 logger.error(f"Error closing Neo4j connector: {e}")
 
-        # 断开引用链，让 GC 尽早回收（减少 loop 关闭后残留对象的概率）
         self._neo4j_connector = None
-        self._llm_client = None
-        self._embedder_client = None

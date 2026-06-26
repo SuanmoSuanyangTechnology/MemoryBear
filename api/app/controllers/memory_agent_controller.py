@@ -123,6 +123,7 @@ async def download_log(
             return fail(BizCode.INTERNAL_ERROR, "启动日志流式传输失败", str(e))
 
 
+# [DEPRECATED] 下一版本移除：/writer_service 同步写入端点将改为统一走 dispatcher → push_task 异步路径
 @router.post("/writer_service", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def write_server(
@@ -131,80 +132,73 @@ async def write_server(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """
-    Write service endpoint - processes write operations synchronously
+    """[DEPRECATED] 此同步写入接口已废弃，请使用 /write 异步写入接口。"""
+    return fail(BizCode.INTERNAL_ERROR, "此同步写入接口已废弃，请使用 /write 异步写入接口")
 
-    Args:
-        user_input: Write request containing message and end_user_id
-        language_type: 语言类型 ("zh" 中文, "en" 英文)，通过 X-Language-Type Header 传递
-
-    Returns:
-        Response with write operation status
-    """
-    # 使用集中化的语言校验
-    language = get_language_from_header(language_type)
-
-    config_id = user_input.config_id
-    workspace_id = current_user.current_workspace_id
-    api_logger.info(f"Write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
-
-    # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
-    if storage_type is None: storage_type = 'neo4j'
-    user_rag_memory_id = ''
-
-    # 如果 storage_type 是 rag，必须确保有有效的 user_rag_memory_id
-    if storage_type == 'rag':
-        if workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db,
-                name="USER_RAG_MERORY",
-                workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-            else:
-                api_logger.warning(
-                    f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储")
-                storage_type = 'neo4j'
-        else:
-            api_logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
-            storage_type = 'neo4j'
-
-    api_logger.info(
-        f"Write service requested for group {user_input.end_user_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
-    try:
-        messages_list = memory_agent_service.get_messages_list(user_input)
-        result = await memory_agent_service.write_memory(
-            WriteMemoryRequest(
-                end_user_id=user_input.end_user_id,
-                messages=messages_list,
-                config_id=config_id,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                language=language,
-                conversation_id=user_input.conversation_id,
-            ),
-            db,
-        )
-
-        return success(data=result, msg="写入成功")
-    except BaseException as e:
-        # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
-        if hasattr(e, 'exceptions'):
-            error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
-            detailed_error = "; ".join(error_messages)
-            api_logger.error(f"Write operation error (TaskGroup): {detailed_error}", exc_info=True)
-            return fail(BizCode.INTERNAL_ERROR, "写入失败", detailed_error)
-        api_logger.error(f"Write operation error: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
+    # # 使用集中化的语言校验
+    # language = get_language_from_header(language_type)
+    #
+    # config_id = user_input.config_id
+    # workspace_id = current_user.current_workspace_id
+    # api_logger.info(f"Write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
+    #
+    # # 获取 storage_type，如果为 None 则使用默认值
+    # storage_type = workspace_service.get_workspace_storage_type(
+    #     db=db,
+    #     workspace_id=workspace_id,
+    #     user=current_user
+    # )
+    # if storage_type is None: storage_type = 'neo4j'
+    # user_rag_memory_id = ''
+    #
+    # # 如果 storage_type 是 rag，必须确保有有效的 user_rag_memory_id
+    # if storage_type == 'rag':
+    #     if workspace_id:
+    #         knowledge = knowledge_repository.get_knowledge_by_name(
+    #             db=db,
+    #             name="USER_RAG_MERORY",
+    #             workspace_id=workspace_id
+    #         )
+    #         if knowledge:
+    #             user_rag_memory_id = str(knowledge.id)
+    #         else:
+    #             api_logger.warning(
+    #                 f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储")
+    #             storage_type = 'neo4j'
+    #     else:
+    #         api_logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
+    #         storage_type = 'neo4j'
+    #
+    # api_logger.info(
+    #     f"Write service requested for group {user_input.end_user_id}, storage_type: {storage_type}, user_rag_memory_id: {user_rag_memory_id}")
+    # try:
+    #     messages_list = memory_agent_service.get_messages_list(user_input)
+    #     result = await memory_agent_service.write_memory(
+    #         WriteMemoryRequest(
+    #             end_user_id=user_input.end_user_id,
+    #             messages=messages_list,
+    #             config_id=config_id,
+    #             storage_type=storage_type,
+    #             user_rag_memory_id=user_rag_memory_id,
+    #             language=language,
+    #             conversation_id=user_input.conversation_id,
+    #         ),
+    #         db,
+    #     )
+    #
+    #     return success(data=result, msg="写入成功")
+    # except BaseException as e:
+    #     # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
+    #     if hasattr(e, 'exceptions'):
+    #         error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
+    #         detailed_error = "; ".join(error_messages)
+    #         api_logger.error(f"Write operation error (TaskGroup): {detailed_error}", exc_info=True)
+    #         return fail(BizCode.INTERNAL_ERROR, "写入失败", detailed_error)
+    #     api_logger.error(f"Write operation error: {str(e)}", exc_info=True)
+    #     return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
-@router.post("/writer_service_async", response_model=ApiResponse)
+@router.post("/write", response_model=ApiResponse)
 @cur_workspace_access_guard()
 async def write_server_async(
         user_input: Write_UserInput,
@@ -249,16 +243,37 @@ async def write_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
-        # 获取标准化的消息列表
+        # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
+        if storage_type and storage_type.lower() == StorageType.RAG.value:
+            from app.core.memory.memory_service import MemoryService
+            messages_list = memory_agent_service.get_messages_list(user_input)
+            await MemoryService.write_messages_to_rag(
+                messages=messages_list,
+                end_user_id=user_input.end_user_id,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            api_logger.info(f"RAG write completed for end_user={user_input.end_user_id}")
+            return success(data={}, msg="RAG 写入完成")
+
+        # ── Neo4j 路径：通过 dispatcher 写入 ──
+        from app.core.memory.memory_service import MemoryService as _MemoryService
+
+        workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
         messages_list = memory_agent_service.get_messages_list(user_input)
 
-        task = celery_app.send_task(
-            "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language]
+        task_ids = await _MemoryService.dispatch_api_service_async(
+            messages=messages_list,
+            end_user_id=user_input.end_user_id,
+            config_id=config_id,
+            workspace_id=workspace_id_str,
+            language=language,
         )
-        api_logger.info(f"Write task queued: {task.id}")
 
-        return success(data={"task_id": task.id}, msg="写入任务已提交")
+        api_logger.info(
+            f"Write tasks queued: {len(task_ids)} tasks, end_user={user_input.end_user_id}"
+        )
+
+        return success(data={"task_ids": task_ids}, msg=f"已提交 {len(task_ids)} 个写入任务")
     except Exception as e:
         api_logger.error(f"Async write operation failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))

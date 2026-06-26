@@ -1,30 +1,52 @@
-import datetime
 import uuid
+from contextlib import contextmanager
 from typing import List, Optional
 
+import sqlalchemy as sa
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
-from app.models.app_model import App
-from app.models.end_user_model import EndUser
+from app.core.utils.datetime_utils import utcnow_naive
+from app.models import User
 from app.models.end_user_info_model import EndUserInfo
+from app.models.end_user_model import EndUser
 from app.models.workspace_model import Workspace
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 
 
+def is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
 class EndUserRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    @contextmanager
+    def _acquire_eu_lock(self, workspace_id, other_id):
+        """获取 EndUser 创建/查找的排他锁，防止并发重复创建。
+
+        使用 pg_advisory_xact_lock，锁在事务提交/回滚时自动释放，
+        无需显式 unlock。
+        """
+        self.db.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"{workspace_id}|{other_id}"},
+        )
+        yield
 
     def get_end_users_by_app_id(self, app_id: uuid.UUID) -> List[EndUser]:
         """根据应用ID查询宿主"""
         try:
             end_users = (
                 self.db.query(EndUser)
-                .filter(EndUser.app_id == app_id)
+                .filter(EndUser.app_id == app_id, EndUser.is_active == True)
                 .all()
             )
             db_logger.info(f"成功查询应用 {app_id} 下的 {len(end_users)} 个宿主")
@@ -39,7 +61,7 @@ class EndUserRepository:
         try:
             end_users = (
                 self.db.query(EndUser)
-                .filter(EndUser.workspace_id == workspace_id)
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
                 .all()
             )
             db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
@@ -54,7 +76,7 @@ class EndUserRepository:
         try:
             end_user = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .first()
             )
             if end_user:
@@ -73,8 +95,9 @@ class EndUserRepository:
             self.db.query(EndUser)
             .filter(
                 EndUser.workspace_id == workspace_id,
-                EndUser.other_id == other_id
-            )
+                EndUser.other_id == other_id,
+                EndUser.is_active == True,
+            ).order_by(EndUser.created_at.asc())
             .first()
         )
 
@@ -96,44 +119,46 @@ class EndUserRepository:
             other_name: 用户名称（用于创建 EndUserInfo）
         """
         try:
-            # 尝试查找现有用户
-            end_user = (
-                self.db.query(EndUser)
-                .filter(
-                    EndUser.workspace_id == workspace_id,
-                    EndUser.other_id == other_id
+            with self._acquire_eu_lock(workspace_id, other_id):
+                # 尝试查找现有用户
+                end_user = (
+                    self.db.query(EndUser)
+                    .filter(
+                        EndUser.workspace_id == workspace_id,
+                        EndUser.other_id == other_id,
+                        EndUser.is_active == True,
+                    )
+                    .order_by(EndUser.created_at.asc())
+                    .first()
                 )
-                .order_by(EndUser.created_at.asc())
-                .first()
-            )
-            
-            if end_user:
-                db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
-                end_user.app_id=app_id
+
+                if end_user:
+                    db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
+                    end_user.app_id = app_id
+                    self.db.commit()
+                    self.db.refresh(end_user)
+                    return end_user
+
+                # 创建新用户
+                end_user = EndUser(
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    other_id=other_id
+                )
+                self.db.add(end_user)
+                self.db.flush()  # 刷新以获取 end_user.id，但不提交事务
+
+                # 创建对应的 EndUserInfo 记录
+                end_user_info = EndUserInfo(
+                    end_user_id=end_user.id,
+                    other_name=other_name or "",  # 如果没有提供 other_name，使用空字符串
+                    aliases=[],
+                    meta_data={}
+                )
+                self.db.add(end_user_info)
+
+                # 一起提交
                 self.db.commit()
-                self.db.refresh(end_user)
-                return end_user
-            
-            # 创建新用户
-            end_user = EndUser(
-                app_id=app_id,
-                workspace_id=workspace_id,
-                other_id=other_id
-            )
-            self.db.add(end_user)
-            self.db.flush()  # 刷新以获取 end_user.id，但不提交事务
-            
-            # 创建对应的 EndUserInfo 记录
-            end_user_info = EndUserInfo(
-                end_user_id=end_user.id,
-                other_name=other_name or "",  # 如果没有提供 other_name，使用空字符串
-                aliases=[],
-                meta_data={}  
-            )
-            self.db.add(end_user_info)
-            
-            # 一起提交
-            self.db.commit()
             self.db.refresh(end_user)
             
             db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
@@ -142,6 +167,65 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
+            raise
+
+    def get_or_create_end_user_mcp(
+            self,
+            workspace_id: uuid.UUID,
+            user_id: str
+    ):
+        try:
+            with self._acquire_eu_lock(workspace_id, user_id):
+                if is_uuid(user_id):
+                    user_stmt = select(User.id).where(
+                        User.is_active == True,
+                        User.id == user_id
+                    )
+                    if self.db.scalar(user_stmt):
+                        raise Exception("不可对草稿运行用户创建mcp user")
+
+                    end_user_stmt = select(EndUser).where(
+                        EndUser.is_active == True,
+                        EndUser.workspace_id == workspace_id,
+                        or_(
+                            EndUser.id == user_id,
+                            EndUser.other_id == user_id,
+                        )
+                    ).order_by(EndUser.created_at.asc()).limit(1)
+                else:
+                    end_user_stmt = select(EndUser).where(
+                        EndUser.is_active == True,
+                        EndUser.workspace_id == workspace_id,
+                        EndUser.other_id == user_id,
+                    ).order_by(EndUser.created_at.asc()).limit(1)
+
+                existing: EndUser | None = self.db.scalar(end_user_stmt)
+                if existing:
+                    return existing.id, existing.other_id
+
+                end_user = EndUser(
+                    workspace_id=workspace_id,
+                    other_id=user_id
+                )
+                self.db.add(end_user)
+                self.db.flush()  # flush to get end_user.id before creating EndUserInfo
+
+                # Create corresponding EndUserInfo record
+                end_user_info = EndUserInfo(
+                    end_user_id=end_user.id,
+                    other_name="",
+                    aliases=[],
+                    meta_data={}
+                )
+                self.db.add(end_user_info)
+
+                self.db.commit()
+                self.db.refresh(end_user)
+                return end_user.id, end_user.other_id
+
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"获取或创建终端用户出错: {str(e)}")
             raise
 
     def get_or_create_end_user_with_config(
@@ -172,7 +256,8 @@ class EndUserRepository:
                 self.db.query(EndUser)
                 .filter(
                     EndUser.workspace_id == workspace_id,
-                    EndUser.other_id == other_id
+                    EndUser.other_id == other_id,
+                    EndUser.is_active == True,
                 )
                 .order_by(EndUser.created_at.asc())
                 .first()
@@ -188,7 +273,7 @@ class EndUserRepository:
                 self.db.refresh(end_user)
                 return end_user
 
-            # 创建新用户
+            # 创建新用户（is_active 默认为 True）
             end_user = EndUser(
                 app_id=app_id,
                 workspace_id=workspace_id,
@@ -232,7 +317,7 @@ class EndUserRepository:
         try:
             end_user = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .first()
             )
             if end_user:
@@ -268,7 +353,7 @@ class EndUserRepository:
         try:
             updated_count = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .update(
                     {
                         EndUser.memory_insight: memory_insight,  # 总体概述存储在 memory_insight
@@ -318,7 +403,7 @@ class EndUserRepository:
         try:
             updated_count = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .update(
                     {
                         EndUser.user_summary: user_summary,  # 基本介绍存储在 user_summary
@@ -366,7 +451,7 @@ class EndUserRepository:
         try:
             updated_count = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .update(
                     {
                         EndUser.user_summary: user_summary,
@@ -406,7 +491,7 @@ class EndUserRepository:
         try:
             updated_count = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .update(
                     {
                         EndUser.memory_insight: memory_insight,
@@ -439,10 +524,10 @@ class EndUserRepository:
         try:
             end_users = (
                 self.db.query(EndUser)
-                .filter(EndUser.workspace_id == workspace_id)
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
                 .all()
             )
-            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
+            db_logger.debug(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
             return end_users
         except Exception as e:
             self.db.rollback()
@@ -474,7 +559,10 @@ class EndUserRepository:
             tuple[List[EndUser], int]: (匹配的终端用户列表, 总数量)
         """
         try:
-            base_query = self.db.query(EndUser).filter(EndUser.workspace_id == workspace_id)
+            base_query = self.db.query(EndUser).filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active == True,
+            )
 
             if end_user_id is not None:
                 base_query = base_query.filter(EndUser.id == end_user_id)
@@ -533,7 +621,7 @@ class EndUserRepository:
         try:
             updated_count = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .update(
                     {EndUser.memory_config_id: memory_config_id},
                     synchronize_session=False
@@ -564,7 +652,7 @@ class EndUserRepository:
         try:
             end_user = (
                 self.db.query(EndUser)
-                .filter(EndUser.id == end_user_id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
                 .first()
             )
             if end_user and end_user.memory_config_id:
@@ -630,7 +718,7 @@ class EndUserRepository:
             
             stmt = (
                 update(EndUser)
-                .where(EndUser.workspace_id == workspace_id)
+                .where(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
                 .values(memory_config_id=memory_config_id)
             )
 
@@ -675,7 +763,7 @@ class EndUserRepository:
             
             stmt = (
                 update(EndUser)
-                .where(EndUser.app_id == app_id)
+                .where(EndUser.app_id == app_id, EndUser.is_active == True)
                 .values(memory_config_id=memory_config_id)
             )
 
@@ -715,7 +803,7 @@ class EndUserRepository:
             
             stmt = (
                 select(func.count(EndUser.id))
-                .where(EndUser.memory_config_id == memory_config_id)
+                .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
             )
             
             count = self.db.execute(stmt).scalar() or 0
@@ -748,7 +836,7 @@ class EndUserRepository:
 
             stmt = (
                 update(EndUser)
-                .where(EndUser.memory_config_id == memory_config_id)
+                .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
                 .values(memory_config_id=None)
             )
             
@@ -770,6 +858,107 @@ class EndUserRepository:
                 f"清除终端用户记忆配置引用时出错: memory_config_id={memory_config_id}, "
                 f"error={str(e)}"
             )
+            raise
+
+    def soft_delete_by_user_id(self, user_id: uuid.UUID) -> int:
+        """软删除指定 User（通过 other_id 关联）的所有 EndUser。
+
+        设置 is_active=False，数据保留，查询时通过 is_active=True 过滤。
+
+        Args:
+            user_id: users 表中的用户 ID
+
+        Returns:
+            int: 软删除的记录数
+        """
+        try:
+            user_id_str = str(user_id)
+            updated = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.other_id == user_id_str,
+                    EndUser.is_active == True,
+                )
+                .update(
+                    {"is_active": False},
+                    synchronize_session=False,
+                )
+            )
+            self.db.commit()
+            db_logger.info(f"软删除终端用户: user_id={user_id_str}, count={updated}")
+            return updated
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"软删除终端用户失败: user_id={user_id}, error={str(e)}")
+            raise
+
+    def get_all_active(self) -> List[EndUser]:
+        """获取所有活跃的 EndUser 记录"""
+        try:
+            end_users = (
+                self.db.query(EndUser)
+                .filter(EndUser.is_active == True)
+                .all()
+            )
+            db_logger.info(f"查询所有活跃终端用户: {len(end_users)} 个")
+            return end_users
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询所有活跃终端用户时出错: {str(e)}")
+            raise
+
+    def get_ids_by_app_workspace(self, workspace_id: uuid.UUID) -> List[str]:
+        """通过 App 关联查询指定 workspace 下的所有活跃 end_user ID"""
+        from app.models.app_model import App
+        try:
+            rows = (
+                self.db.query(EndUser.id)
+                .join(App, EndUser.app_id == App.id)
+                .filter(
+                    App.workspace_id == workspace_id,
+                    EndUser.is_active == True,
+                )
+                .all()
+            )
+            return [str(eid) for (eid,) in rows]
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询 workspace {workspace_id} 下的终端用户ID时出错: {str(e)}")
+            raise
+
+    def get_config_batch_by_ids(self, end_user_ids: List[uuid.UUID]):
+        """批量查询 end_user 配置信息（连 App 表获取 workspace_id），返回原始 SQLAlchemy 行"""
+        from app.models.app_model import App
+        try:
+            return (
+                self.db.query(
+                    EndUser.id.label("end_user_id"),
+                    EndUser.memory_config_id.label("memory_config_id"),
+                    EndUser.workspace_id.label("end_user_workspace_id"),
+                    App.workspace_id.label("app_workspace_id"),
+                )
+                .outerjoin(App, App.id == EndUser.app_id)
+                .filter(EndUser.id.in_(end_user_ids), EndUser.is_active == True)
+                .all()
+            )
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"批量查询配置信息时出错: {str(e)}")
+            raise
+
+    def update_memory_count(self, end_user_id: uuid.UUID, node_count: int) -> bool:
+        """更新终端用户的记忆节点计数（仅活跃用户）"""
+        try:
+            updated = (
+                self.db.query(EndUser)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
+                .update({"memory_count": node_count}, synchronize_session=False)
+            )
+            self.db.commit()
+            return updated > 0
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"更新记忆计数失败: end_user_id={end_user_id}, error={str(e)}")
             raise
 
 # def get_end_users_by_app_id(db: Session, app_id: uuid.UUID) -> List[EndUser]:

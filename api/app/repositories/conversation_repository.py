@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select, desc, func
@@ -516,6 +517,37 @@ class MessageRepository:
                 "conversation_id": str(conversation_id),
                 "returned": len(messages),
                 "current_only": current_only
+            }
+        )
+        return messages
+
+    def get_messages_since(
+            self,
+            conversation_id: uuid.UUID,
+            since_at: Optional[datetime] = None,
+            current_only: bool = True,
+    ) -> list[Message]:
+        """按时间边界读取会话消息，结果按时间正序返回。"""
+        stmt = select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_not(True),
+        )
+
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+
+        if since_at is not None:
+            stmt = stmt.where(Message.created_at >= since_at)
+
+        stmt = stmt.order_by(Message.created_at)
+        messages = list(self.db.scalars(stmt).all())
+        logger.info(
+            "Fetched messages since boundary",
+            extra={
+                "conversation_id": str(conversation_id),
+                "since_at": since_at.isoformat() if since_at else None,
+                "returned": len(messages),
+                "current_only": current_only,
             }
         )
         return messages

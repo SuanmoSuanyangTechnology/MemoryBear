@@ -3,8 +3,8 @@ import re
 from io import BytesIO
 
 from app.core.rag.deepdoc.parser.utils import get_text
-from . import naive
-from .naive import by_plaintext, PARSERS
+from app.core.rag.chunk.parser.docx import DocxParser
+from app.core.rag.chunk.parser.pdf.selector import PARSERS, by_plaintext
 from app.core.rag.nlp import bullets_category, is_english,remove_contents_table, \
     hierarchical_merge, make_colon_as_title, naive_merge, random_choices, tokenize_table, \
     tokenize_chunks
@@ -68,7 +68,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     sections, tbls = [], []
     if re.search(r"\.docx$", filename, re.IGNORECASE):
         callback(0.1, "Start to parse.")
-        doc_parser = naive.Docx()
+        doc_parser = DocxParser()
         # TODO: table of contents need to be removed
         sections, tbls = doc_parser(
             filename, binary=binary, from_page=from_page, to_page=to_page)

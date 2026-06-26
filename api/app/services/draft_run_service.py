@@ -22,7 +22,9 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.rag.nlp.search import knowledge_retrieval
+from app.schemas.chunk_schema import RetrieveType
+from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig, Message
 from app.models.agent_execution_model import AgentExecution
@@ -32,6 +34,7 @@ from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.langchain_tool_server import Search
@@ -97,6 +100,62 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
+def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
+    """标准化知识库检索：走 KnowledgeRetrievalService + KnowledgeRetrievalRequest。
+
+    读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
+    vector_similarity_weight / retrieve_type / reranker_id）。由于
+    KnowledgeRetrievalRequest 只携带一组检索参数，这里沿用工作流知识库节点的约定，
+    用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
+    """
+    knowledge_bases = (kb_config or {}).get("knowledge_bases", []) or []
+    kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
+    if not kb_ids:
+        return []
+
+    first_kb = knowledge_bases[0] or {}
+
+    def _as_float(value: Any, default: float) -> float:
+        try:
+            return float(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            return int(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    retrieve_type_str = str(first_kb.get("retrieve_type") or "hybrid").strip().lower()
+    try:
+        retrieve_type = RetrieveType(retrieve_type_str)
+    except ValueError:
+        retrieve_type = RetrieveType.HYBRID
+
+    rerank_id = None
+    if kb_config.get("reranker_id"):
+        try:
+            rerank_id = uuid.UUID(str(kb_config.get("reranker_id")))
+        except (ValueError, AttributeError):
+            rerank_id = None
+
+    request = KnowledgeRetrievalRequest(
+        query=query,
+        kb_ids=[uuid.UUID(kid) for kid in kb_ids],
+        top_k=_as_int(first_kb.get("top_k"), 3),
+        similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
+        vector_similarity_weight=_as_float(first_kb.get("vector_similarity_weight"), 0.5),
+        retrieve_type=retrieve_type,
+        rerank_id=rerank_id,
+    )
+
+    with get_db_context() as db:
+        result = KnowledgeRetrievalService.retrieve(db=db, request=request, current_user=None)
+
+    return result.chunks
+
+
 def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None, kb_names: Optional[List[Dict]] = None):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
@@ -125,7 +184,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 
         try:
 
-            retrieve_chunks_result = knowledge_retrieval(query, kb_config)
+            retrieve_chunks_result = _retrieve_chunks_via_standard(query, kb_config)
             if retrieve_chunks_result:
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)
@@ -803,14 +862,29 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息（包含开场白）
+            used_context_engine = False
             if history is None:
-                # 没有外部传入的历史，从数据库加载
-                history = await self._load_conversation_history(
-                    conversation_id=conversation_id,
-                    max_history=10,
+                context_engine_manager = ContextEngineManager(self.db)
+                prepared_input = await context_engine_manager.prepare_app_agent_input(
+                    features=features_config,
+                    conversation_id=uuid.UUID(conversation_id),
+                    system_prompt=system_prompt,
+                    current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False)
+                    current_is_omni=api_key_config.get("is_omni", False),
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
+                    model_config_id=model_config.id,
                 )
+                if prepared_input:
+                    system_prompt, history = prepared_input
+                    used_context_engine = True
+                else:
+                    history = await self._load_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=settings.AGENT_MAX_HISTORY,
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False)
+                    )
             # 否则使用外部传入的历史（用于重新生成场景）
 
             # 6. 处理多模态文件
@@ -970,6 +1044,19 @@ class AgentRunService:
                     provider=api_key_config.get("provider"),
                     is_omni=api_key_config.get("is_omni", False)
                 )
+                if used_context_engine and not skip_save:
+                    _ctx_kwargs = dict(
+                        features=features_config,
+                        conversation_id=uuid.UUID(conversation_id),
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False),
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=model_config.id,
+                    )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
@@ -1199,16 +1286,29 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息
+            used_context_engine = False
             if history is None:
-                max_history = 10
-                if isinstance(memory_config, dict):
-                    max_history = memory_config.get("max_history", 10)
-                history = await self._load_conversation_history(
-                    conversation_id=conversation_id,
-                    max_history=max_history,
+                context_engine_manager = ContextEngineManager(self.db)
+                prepared_input = await context_engine_manager.prepare_app_agent_input(
+                    features=features_config,
+                    conversation_id=uuid.UUID(conversation_id),
+                    system_prompt=system_prompt,
+                    current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False)
+                    current_is_omni=api_key_config.get("is_omni", False),
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
+                    model_config_id=model_config.id,
                 )
+                if prepared_input:
+                    system_prompt, history = prepared_input
+                    used_context_engine = True
+                else:
+                    history = await self._load_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=settings.AGENT_MAX_HISTORY,
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False)
+                    )
 
             # 6. 处理多模态文件
             processed_files = None
@@ -1332,6 +1432,17 @@ class AgentRunService:
                 agent_exec_repo.create(agent_execution)
                 self.db.commit()
 
+            # close() 前把后续还会用到的 ORM 属性读成普通值，防止 close 后触发 DetachedInstanceError
+            _app_id = agent_config.app_id
+            _model_config_id = model_config.id
+            _model_config_name = model_config.name
+            _agent_execution_id = agent_execution.id if (not sub_agent and not skip_save) else None
+
+            # LLM 推理期间不需要 db，提前归还连接给连接池
+            # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
+            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
+            self.db.close()
+
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
@@ -1400,7 +1511,7 @@ class AgentRunService:
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=full_content,
-                    app_id=agent_config.app_id,
+                    app_id=_app_id,
                     user_id=user_id,
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
@@ -1414,11 +1525,24 @@ class AgentRunService:
                     provider=api_key_config.get("provider"),
                     is_omni=api_key_config.get("is_omni", False)
                 )
+                if used_context_engine and not skip_save:
+                    _ctx_kwargs = dict(
+                        features=features_config,
+                        conversation_id=uuid.UUID(conversation_id),
+                        current_provider=api_key_config.get("provider"),
+                        current_is_omni=api_key_config.get("is_omni", False),
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=_model_config_id,
+                    )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
             if not sub_agent:
                 agent_exec_repo.update_completed(
-                    execution_id=agent_execution.id,
+                    execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
@@ -1452,7 +1576,7 @@ class AgentRunService:
             logger.info(
                 "流式试运行完成",
                 extra={
-                    "model": model_config.name,
+                    "model": _model_config_name,
                     "elapsed_time": elapsed_time,
                     "message_length": len(full_content)
                 }
@@ -1497,7 +1621,7 @@ class AgentRunService:
                 try:
                     elapsed_time = time.time() - start_time
                     agent_exec_repo.update_completed(
-                        execution_id=agent_execution.id,
+                        execution_id=_agent_execution_id,
                         steps=node_executions if 'node_executions' in dir() else [],
                         status="failed",
                         elapsed_time=elapsed_time,

@@ -3,11 +3,11 @@ from io import BytesIO
 import re
 
 from app.core.rag.deepdoc.parser.utils import get_text
-from . import naive
 from app.core.rag.nlp import rag_tokenizer, tokenize
 from app.core.rag.deepdoc.parser import PdfParser, ExcelParser, HtmlParser
 from app.core.rag.deepdoc.parser.figure_parser import vision_figure_parser_docx_wrapper
-from app.core.rag.app.naive import by_plaintext, PARSERS
+from app.core.rag.chunk.parser.docx import DocxParser
+from app.core.rag.chunk.parser.pdf.selector import PARSERS, by_plaintext
 
 class Pdf(PdfParser):
     def __call__(self, filename, binary=None, from_page=0,
@@ -58,7 +58,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
 
     if re.search(r"\.docx$", filename, re.IGNORECASE):
         callback(0.1, "Start to parse.")
-        sections, tbls = naive.Docx()(filename, binary)
+        sections, tbls = DocxParser()(filename, binary)
         tbls=vision_figure_parser_docx_wrapper(sections=sections,tbls=tbls,callback=callback,**kwargs)
         sections = [s for s, _ in sections if s]
         for (_, html), _ in tbls:

@@ -232,6 +232,11 @@ class WebSearchConfig(BaseModel):
     search_engine: Optional[str] = Field(default=None, description="搜索引擎")
 
 
+class ContextEngineFeatureConfig(BaseModel):
+    """上下文引擎功能配置。"""
+    enabled: bool = Field(default=False, description="是否启用上下文引擎")
+
+
 class AppFeatures(BaseModel):
     """应用功能特性配置"""
     file_upload: FileUploadConfig = Field(default_factory=FileUploadConfig)
@@ -240,6 +245,7 @@ class AppFeatures(BaseModel):
     text_to_speech: TextToSpeechConfig = Field(default_factory=TextToSpeechConfig)
     citation: CitationConfig = Field(default_factory=CitationConfig)
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    context_engine: Optional[ContextEngineFeatureConfig] = Field(default=None, description="上下文引擎配置")
 
 
 class ToolOldConfig(BaseModel):
