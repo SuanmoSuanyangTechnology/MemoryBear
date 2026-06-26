@@ -1918,6 +1918,12 @@ def write_message_task(
             "task_id": self.request.id,
         }
     except BaseException as e:
+        from app.schemas.memory_config_schema import (
+            ModelNotFoundError,
+            ModelInactiveError,
+            InvalidConfigError,
+        )
+
         elapsed_time = time.time() - start_time
         if hasattr(e, 'exceptions'):
             error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
@@ -1927,14 +1933,16 @@ def write_message_task(
 
         logger.error(f"[CELERY WRITE] Task failed - elapsed_time={elapsed_time:.2f}s, error={detailed_error}", exc_info=True)
 
-        return {
-            "status": "FAILURE",
-            "error": detailed_error,
-            "end_user_id": end_user_id,
-            "config_id": str(config_id) if config_id else None,
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id,
-        }
+        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE，不触发重试
+        if isinstance(e, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
+            logger.error(
+                f"[CELERY WRITE] Configuration error detected, task will not be retried - "
+                f"error_type={type(e).__name__}, error={detailed_error}"
+            )
+            raise
+
+        # 瞬时错误（网络超时、Neo4j 死锁等）：交由 Celery 按 max_retries 自动重试
+        raise self.retry(exc=e)
     finally:
         if loop:
             _shutdown_loop_gracefully(loop)
