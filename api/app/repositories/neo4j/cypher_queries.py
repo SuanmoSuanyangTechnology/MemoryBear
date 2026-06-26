@@ -2231,6 +2231,8 @@ MERGE (e:ExtractedEntity {
 ON CREATE SET
   e.id = randomUUID(),
   e.description = $description,
+  e.example = "",
+  e.statement_id = $statement_id,
   e.aliases = [],
   e.connect_strength = "weak",
   e.source = "reflection_unresolved",
