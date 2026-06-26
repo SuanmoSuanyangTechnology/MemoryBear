@@ -6,6 +6,8 @@ on:
       - '**'
     tags:
       - '**'
+  schedule:
+    - cron: '0 18 * * *'  # UTC 18:00 = 北京时间凌晨 2:00，每日全量同步
 
 jobs:
   sync:
@@ -22,7 +24,15 @@ jobs:
           GITEE_URL="https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/hangzhou-hongxiong-intelligent_1/MemoryBear.git"
           git remote add gitee "$GITEE_URL"
 
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Full sync (scheduled)"
+            for branch in $(git branch -r | grep -v HEAD | sed 's/origin\///'); do
+              echo "Syncing branch: $branch"
+              git push -f gitee "origin/$branch:refs/heads/$branch"
+            done
+            echo "Syncing tags..."
+            git push gitee --tags --force
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             echo "Syncing tag: ${{ github.ref_name }}"
             git push -f gitee "${{ github.ref }}"
           else
