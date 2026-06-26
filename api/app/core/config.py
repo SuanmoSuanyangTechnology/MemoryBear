@@ -37,6 +37,12 @@ class Settings:
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://1.94.111.67:7687")
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "")
+    # Neo4j 连接池参数（通过环境变量可配）
+    # 默认值参考文档建议值，兼顾资源占用与并发需求
+    NEO4J_MAX_POOL_SIZE: int = int(os.getenv("NEO4J_MAX_POOL_SIZE", "30"))
+    NEO4J_ACQ_TIMEOUT: float = float(os.getenv("NEO4J_ACQ_TIMEOUT", "30.0"))
+    NEO4J_MAX_CONN_LIFETIME: int = int(os.getenv("NEO4J_MAX_CONN_LIFETIME", "3600"))
+    NEO4J_CONN_TIMEOUT: float = float(os.getenv("NEO4J_CONN_TIMEOUT", "30.0"))
 
     # Database configuration (Postgres)
     DB_HOST: str = os.getenv("DB_HOST", "127.0.0.1")
@@ -346,6 +352,12 @@ class Settings:
 
     # 实验模式开关（允许通过 API 动态切换本体配置）
     ONTOLOGY_EXPERIMENT_MODE: bool = os.getenv("ONTOLOGY_EXPERIMENT_MODE", "true").lower() == "true"
+
+    # ========================================================================
+    # Context Engine History Configuration
+    # ========================================================================
+    # context engine的agent历史消息条数上限
+    AGENT_MAX_HISTORY: int = int(os.getenv("AGENT_MAX_HISTORY", 20))
 
     def get_memory_output_path(self, filename: str = "") -> str:
         """

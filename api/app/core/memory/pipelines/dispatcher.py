@@ -18,7 +18,7 @@ from typing import Any, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.conversation_model import Message
 
-from app.db import get_db_context
+from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ def unmark_conversation_pending(conversation_id: str) -> None:
 def verify_unmark_safe(conversation_id: str) -> bool:
     """在 unmark 前验证对话确实没有待写入消息。"""
     try:
-        with get_db_context() as db:
+        with get_db_read() as db:
             repo = MemoryMessageRepository(db)
             return repo.verify_cursor_complete(conversation_id)
     except Exception as e:
@@ -704,12 +704,10 @@ async def check_sliding_window_and_dispatch(
         all_user_seqs: List[int] = repo.get_user_seqs(conversation_id)
 
     for msg in pending_dicts:
-        # 跳过非 user 或不需记忆的消息，直接推进 cursor
+        # 滑动窗口路径只负责派发 user 消息的写入任务，cursor 只推进到 user 消息的 seq。
+        # non-user 消息（assistant）不推进 cursor，跳过继续往后找第一条待派发的 user 消息。
+        # assistant 的 cursor 推进完全交给 flush 兜底路径处理。
         if msg.get("role") != "user" or not msg.get("should_memorize", True):
-            with get_db_context() as db:
-                repo = MemoryMessageRepository(db)
-                repo.advance_write_cursor(conversation_id, msg["message_seq"])
-                db.commit()
             continue
 
         target_seq = msg["message_seq"]

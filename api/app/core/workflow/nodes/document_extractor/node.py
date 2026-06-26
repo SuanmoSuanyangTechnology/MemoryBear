@@ -8,7 +8,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.document_extractor.config import DocExtractorNodeConfig
 from app.core.workflow.variable.base_variable import VariableType, FileObject
-from app.db import get_db_read
+from app.db import get_db_read, get_db_context
 from app.models.file_metadata_model import FileMetadata
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 
@@ -78,7 +78,7 @@ async def _save_image_to_storage(
     storage_svc = FileStorageService()
     await storage_svc.storage.upload(file_key, img_bytes, content_type)
 
-    with get_db_read() as db:
+    with get_db_context() as db:
         meta = FileMetadata(
             id=file_id,
             tenant_id=tenant_id,

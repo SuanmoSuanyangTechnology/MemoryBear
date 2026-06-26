@@ -35,6 +35,7 @@ def _reinit_db_pool(**kwargs):
     fork() 后子进程继承了父进程的：
     1. SQLAlchemy 连接池 — 多进程共享 TCP socket 导致 DB 连接损坏
     2. ThreadPoolExecutor — fork 后线程状态不确定，第二个任务会死锁
+    3. Neo4j shared driver — fork 后 socket 和 event loop 失效
     """
     # 重建 DB 连接池
     from app.db import engine
@@ -59,6 +60,18 @@ def _reinit_db_pool(**kwargs):
         logger.info("libre_office.executor recreated")
     except Exception as e:
         logger.warning(f"Failed to recreate libre_office.executor: {e}")
+
+    # 重置进程级共享 Neo4j driver（fork 后子进程继承了失效的 socket 和 event loop）
+    # 子进程首次执行 Neo4j 查询时，_create_or_get_driver() 会检测到 _shared_driver is None
+    # 并自动重建全新 driver（新 socket + 新 event loop）。
+    # 依赖 P0-a：模块级单例必须使用 shared_driver=True，才会走此 PID 自愈路径。
+    try:
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        Neo4jConnector._shared_driver = None
+        Neo4jConnector._shared_driver_pid = None
+        logger.info("Neo4j shared driver reset for forked worker process")
+    except Exception as e:
+        logger.warning(f"Failed to reset Neo4j shared driver: {e}")
 
 
 __all__ = ['celery_app']

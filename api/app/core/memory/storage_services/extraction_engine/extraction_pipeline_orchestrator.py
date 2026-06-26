@@ -573,6 +573,10 @@ class NewExtractionOrchestrator:
         # Organise into nested dict;同时记录每个 chunk 的输入上下文，供 snapshot 落盘核查。
         stmt_map: Dict[str, Dict[str, List[StatementStepOutput]]] = {}
         stmt_inputs_map: Dict[str, Dict[str, StatementStepInput]] = {}
+        # statement_temporal_step 是 critical step：任一 chunk 抽取失败都必须中断整个写入
+        # 流程并向上抛出。否则异常会在此被静默吞掉（设为 []），导致 WriteResult.status
+        # 仍为 "success"，最终 Celery 任务被错误标记为 SUCCESS（Flower 显示成功）。
+        first_error: BaseException | None = None
         for i, result in enumerate(results):
             dialog_id, chunk_id, speaker, _, inp = task_meta[i]
             if dialog_id not in stmt_map:
@@ -582,6 +586,8 @@ class NewExtractionOrchestrator:
             if isinstance(result, BaseException):
                 logger.error("Statement extraction failed for chunk %s: %s", chunk_id, result)
                 stmt_map[dialog_id][chunk_id] = []
+                if first_error is None:
+                    first_error = result
             else:
                 # Override speaker from chunk metadata
                 stmts: List[StatementStepOutput] = result if isinstance(result, list) else []
@@ -601,6 +607,12 @@ class NewExtractionOrchestrator:
         # Stash the inputs map so the orchestrator can attach it to
         # ``_last_stage_outputs`` for snapshot/debugging.
         self._last_statement_inputs = stmt_inputs_map
+
+        # critical step 失败 → 中断 pipeline，让上层（WritePipeline → MemoryService.write
+        # → write_message_task）感知失败并将 Celery 任务标记为 FAILURE / 触发重试。
+        if first_error is not None:
+            raise first_error
+
         return stmt_map
 
     async def _extract_all_triplets(

@@ -46,7 +46,7 @@ from app.services.memory_short_service import LongService, ShortService
 logger = get_logger(__name__)
 
 # Neo4j connector instance for analytics functions
-_neo4j_connector = Neo4jConnector()
+_neo4j_connector = Neo4jConnector(shared_driver=True)
 
 # Default LLM ID for fallback
 DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")

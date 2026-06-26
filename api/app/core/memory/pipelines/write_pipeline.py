@@ -698,7 +698,7 @@ class WritePipeline:
         摘要：生成情景记忆摘要 → 写入 Neo4j。
 
         摘要生成失败不影响主流程（try/except 吞掉异常）。
-        使用独立的 Neo4j 连接器，避免与主连接器的事务冲突。
+        直接复用 self._neo4j_connector，避免每次写入额外创建一个 driver。
         """
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
             memory_summary_generation,
@@ -707,7 +707,6 @@ class WritePipeline:
             add_memory_summary_statement_edges,
         )
         from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
         try:
             summaries = await memory_summary_generation(
@@ -716,15 +715,8 @@ class WritePipeline:
                 embedder_client=self._embedder_client,
                 language=self.language,
             )
-            ms_connector = Neo4jConnector()
-            try:
-                await add_memory_summary_nodes(summaries, ms_connector)
-                await add_memory_summary_statement_edges(summaries, ms_connector)
-            finally:
-                try:
-                    await ms_connector.close()
-                except Exception:
-                    pass
+            await add_memory_summary_nodes(summaries, self._neo4j_connector)
+            await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
         except Exception as e:
             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 

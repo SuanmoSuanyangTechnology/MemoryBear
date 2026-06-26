@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.response_utils import success
-from app.db import get_db, SessionLocal
+from app.db import get_db, get_db_read
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.repositories.home_page_repository import HomePageRepository
@@ -38,11 +38,8 @@ def get_system_version():
     
     # 1️⃣ 优先从数据库获取最新已发布的版本
     try:
-        db = SessionLocal()
-        try:
+        with get_db_read() as db:
             current_version, version_info = HomePageRepository.get_latest_version_introduction(db)
-        finally:
-            db.close()
     except Exception as e:
         pass
     

@@ -1918,6 +1918,12 @@ def write_message_task(
             "task_id": self.request.id,
         }
     except BaseException as e:
+        from app.schemas.memory_config_schema import (
+            ModelNotFoundError,
+            ModelInactiveError,
+            InvalidConfigError,
+        )
+
         elapsed_time = time.time() - start_time
         if hasattr(e, 'exceptions'):
             error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
@@ -1927,14 +1933,16 @@ def write_message_task(
 
         logger.error(f"[CELERY WRITE] Task failed - elapsed_time={elapsed_time:.2f}s, error={detailed_error}", exc_info=True)
 
-        return {
-            "status": "FAILURE",
-            "error": detailed_error,
-            "end_user_id": end_user_id,
-            "config_id": str(config_id) if config_id else None,
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id,
-        }
+        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE，不触发重试
+        if isinstance(e, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
+            logger.error(
+                f"[CELERY WRITE] Configuration error detected, task will not be retried - "
+                f"error_type={type(e).__name__}, error={detailed_error}"
+            )
+            raise
+
+        # 瞬时错误（网络超时、Neo4j 死锁等）：交由 Celery 按 max_retries 自动重试
+        raise self.retry(exc=e)
     finally:
         if loop:
             _shutdown_loop_gracefully(loop)
@@ -2727,8 +2735,8 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
     ignore_result=True,
     max_retries=0,
     acks_late=False,
-    time_limit=3600,
-    soft_time_limit=3300,
+    time_limit=7500,       # 2小时5分钟硬超时
+    soft_time_limit=7200,  # 2小时软超时
 )
 def refresh_memory_insight_and_summary_cache(self) -> Dict[str, Any]:
     """定时任务：为所有用户重新生成记忆洞察和用户摘要缓存
@@ -3723,7 +3731,7 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     bind=True,
     ignore_result=False,
     max_retries=2,
-    acks_late=True,
+    acks_late=False,
     time_limit=1800,  # 30分钟硬超时
     soft_time_limit=1700,
 )

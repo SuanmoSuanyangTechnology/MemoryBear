@@ -872,7 +872,7 @@ class AgentRunService:
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
                     current_is_omni=api_key_config.get("is_omni", False),
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
                 if prepared_input:
@@ -881,7 +881,7 @@ class AgentRunService:
                 else:
                     history = await self._load_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=20,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False)
                     )
@@ -1045,14 +1045,18 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
-                    await context_engine_manager.after_app_turn(
+                    _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False),
-                        legacy_max_history=6,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=model_config.id,
                     )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
@@ -1292,7 +1296,7 @@ class AgentRunService:
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
                     current_is_omni=api_key_config.get("is_omni", False),
-                    legacy_max_history=6,
+                    legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
                 if prepared_input:
@@ -1301,7 +1305,7 @@ class AgentRunService:
                 else:
                     history = await self._load_conversation_history(
                         conversation_id=conversation_id,
-                        max_history=20,
+                        max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False)
                     )
@@ -1428,6 +1432,17 @@ class AgentRunService:
                 agent_exec_repo.create(agent_execution)
                 self.db.commit()
 
+            # close() 前把后续还会用到的 ORM 属性读成普通值，防止 close 后触发 DetachedInstanceError
+            _app_id = agent_config.app_id
+            _model_config_id = model_config.id
+            _model_config_name = model_config.name
+            _agent_execution_id = agent_execution.id if (not sub_agent and not skip_save) else None
+
+            # LLM 推理期间不需要 db，提前归还连接给连接池
+            # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
+            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
+            self.db.close()
+
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
@@ -1496,7 +1511,7 @@ class AgentRunService:
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=full_content,
-                    app_id=agent_config.app_id,
+                    app_id=_app_id,
                     user_id=user_id,
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
@@ -1511,19 +1526,23 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
-                    await context_engine_manager.after_app_turn(
+                    _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
                         current_is_omni=api_key_config.get("is_omni", False),
-                        legacy_max_history=6,
-                        model_config_id=model_config.id,
+                        legacy_max_history=settings.AGENT_MAX_HISTORY,
+                        model_config_id=_model_config_id,
                     )
+                    async def _run_after_turn(kwargs=_ctx_kwargs):
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
             if not sub_agent:
                 agent_exec_repo.update_completed(
-                    execution_id=agent_execution.id,
+                    execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
@@ -1557,7 +1576,7 @@ class AgentRunService:
             logger.info(
                 "流式试运行完成",
                 extra={
-                    "model": model_config.name,
+                    "model": _model_config_name,
                     "elapsed_time": elapsed_time,
                     "message_length": len(full_content)
                 }
@@ -1602,7 +1621,7 @@ class AgentRunService:
                 try:
                     elapsed_time = time.time() - start_time
                     agent_exec_repo.update_completed(
-                        execution_id=agent_execution.id,
+                        execution_id=_agent_execution_id,
                         steps=node_executions if 'node_executions' in dir() else [],
                         status="failed",
                         elapsed_time=elapsed_time,

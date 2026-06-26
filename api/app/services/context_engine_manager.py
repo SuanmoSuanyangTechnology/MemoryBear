@@ -423,6 +423,12 @@ class ContextEngineManager:
                 self._serialize_history_message(msg, current_provider, current_is_omni)
                 for msg in recent_records
             ]
+            # close() 前预读 boundary_message 属性，防止 close 后 DetachedInstanceError
+            boundary_message = recent_records[-window_size - 1]
+            _boundary_id = boundary_message.id
+            _boundary_at = boundary_message.created_at
+            # LLM 调用期间不需要 db，提前归还连接给连接池
+            self.db.close()
             summary_text = await provider.warm_up_summary(
                 session_id=self._build_session_id(conversation_id, scope_key),
                 full_history=recent_messages,
@@ -432,14 +438,13 @@ class ContextEngineManager:
             if not summary_text:
                 return False
 
-            boundary_message = recent_records[-window_size - 1]
             await self._upsert_state(
                 conversation_id=conversation_id,
                 scope_key=scope_key,
                 source_type="conversation",
                 summary_text=summary_text,
-                summarized_until_message_id=boundary_message.id,
-                summarized_until_at=boundary_message.created_at,
+                summarized_until_message_id=_boundary_id,
+                summarized_until_at=_boundary_at,
             )
             await provider.prime_summary(
                 session_id=self._build_session_id(conversation_id, scope_key),
@@ -454,7 +459,7 @@ class ContextEngineManager:
                     "provider": provider_name,
                     "window_size": window_size,
                     "recent_count": len(recent_messages),
-                    "boundary_message_id": str(boundary_message.id),
+                    "boundary_message_id": str(_boundary_id),
                 }
             )
             return True
