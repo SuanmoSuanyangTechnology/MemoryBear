@@ -95,8 +95,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="redbera-mem",
-    description="redbera-mem",
+    title="MemoryBear",
+    description="MemoryBear",
     version="1.0.0",
     lifespan=lifespan,
 )
