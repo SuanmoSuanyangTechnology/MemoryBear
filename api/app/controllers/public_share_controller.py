@@ -36,10 +36,9 @@ from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
-from app.services.message_favorite_service import FavoriteService
+from app.services.message_feedback_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
-from app.models import Message
-from app.models.message_favorite_model import MessageFavorite
+from app.models import Message, MessageFeedback
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
@@ -358,10 +357,11 @@ def get_conversation(
     favorited_ids: set[uuid.UUID] = set()
     if message_ids:
         favorited_rows = (
-            db.query(MessageFavorite.message_id)
+            db.query(MessageFeedback.message_id)
             .filter(
-                MessageFavorite.message_id.in_(message_ids),
-                MessageFavorite.user_id == share_data.user_id,
+                MessageFeedback.message_id.in_(message_ids),
+                MessageFeedback.user_id == share_data.user_id,
+                MessageFeedback.is_favorite.is_(True),
             )
             .all()
         )
@@ -1094,7 +1094,6 @@ async def toggle_message_favorite(
         conversation_id=message.conversation_id,
         workspace_id=workspace_id,
         user_id=share_data.user_id,
-        source="share",
     )
 
     return success(data=app_schema.MessageFavoriteResponse(**result))

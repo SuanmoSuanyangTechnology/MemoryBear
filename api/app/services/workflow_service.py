@@ -4363,7 +4363,7 @@ class WorkflowService:
                     AppLogService.build_pending_intervention_map），供前端切版本后回填 HITL 节点状态。
         }
         """
-        from app.models import Message as MessageModel, WorkflowExecution, MessageFavorite
+        from app.models import Message as MessageModel, WorkflowExecution, MessageFeedback
         from app.services.app_log_service import AppLogService, _build_nodes_from_output_data
         chain = self._load_branch_chain(message_id)
         if not chain:
@@ -4434,10 +4434,11 @@ class WorkflowService:
         if user_id and all_ids:
             favorited_ids = {
                 row[0]
-                for row in self.db.query(MessageFavorite.message_id)
+                for row in self.db.query(MessageFeedback.message_id)
                 .filter(
-                    MessageFavorite.message_id.in_(all_ids),
-                    MessageFavorite.user_id == user_id,
+                    MessageFeedback.message_id.in_(all_ids),
+                    MessageFeedback.user_id == user_id,
+                    MessageFeedback.is_favorite.is_(True),
                 )
                 .all()
             }

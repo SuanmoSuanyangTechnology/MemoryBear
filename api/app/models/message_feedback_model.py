@@ -4,7 +4,7 @@
 import uuid
 import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, Boolean, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -29,8 +29,10 @@ class MessageFeedback(Base):
     user_id = Column(String, nullable=False, comment="用户ID（EndUser 或 User）")
 
     # 反馈内容
-    feedback_type = Column(String(20), nullable=False, comment="反馈类型: like/dislike")
+    feedback_type = Column(String(20), nullable=True, comment="反馈类型: like/dislike；仅收藏行为 NULL")
     feedback_content = Column(Text, comment="反馈原因（点踩时填写）")
+    # 收藏标记：与 like/dislike 共存于同一行（一个用户对一条消息最多一行）
+    is_favorite = Column(Boolean, nullable=False, default=False, server_default="false", comment="是否收藏")
 
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 

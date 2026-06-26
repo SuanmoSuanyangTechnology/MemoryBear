@@ -22,7 +22,7 @@ from app.models.message_report_model import MessageReportType
 from app.schemas import app_schema
 from app.schemas.memory_storage_schema import ApiResponse
 from app.services.conversation_service import ConversationService
-from app.services.message_favorite_service import FavoriteService
+from app.services.message_feedback_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
 from app.services.message_report_service import ReportService
 from app.services.conversation_share_service import ConversationShareService
@@ -307,7 +307,6 @@ async def toggle_message_favorite(
         conversation_id=message.conversation_id,
         workspace_id=workspace_id,
         user_id=str(current_user.id),
-        source="pilot_run",
     )
 
     return success(data=app_schema.MessageFavoriteResponse(**result))
