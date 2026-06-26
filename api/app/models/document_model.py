@@ -42,7 +42,7 @@ class Document(Base):
                                "html4excel": False,
                                "parent_child_mode": False,
                                "parent_chunk_token_num": 1024,
-                               "parent_delimiter": "\n",
+                               "parent_chunk_delimiter": "\n\n",
                                "graphrag": {
                                    "use_graphrag": False,
                                    "scene_name": "",
