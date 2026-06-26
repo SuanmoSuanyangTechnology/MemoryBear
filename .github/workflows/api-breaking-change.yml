@@ -27,23 +27,27 @@ jobs:
           uv run python scripts/export_openapi.py --v1-only -o openapi-current.json
 
       - name: Run openapi-diff
-        uses: docker://openapitools/openapi-diff:latest
-        with:
-          args: >
-            /github/workspace/api/openapi-baseline.json
-            /github/workspace/api/openapi-current.json
-            --fail-on-incompatible
-            --markdown /github/workspace/api/openapi-diff-report.md
+        id: diff
+        run: |
+          # Generate markdown report (always succeeds)
+          docker run --rm \
+            -v ${{ github.workspace }}/api:/work \
+            openapitools/openapi-diff:latest \
+            /work/openapi-baseline.json \
+            /work/openapi-current.json \
+            --markdown /work/openapi-diff-report.md || true
 
-      - name: Upload diff report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openapi-diff-report
-          path: api/openapi-diff-report.md
+          # Run again with --fail-on-incompatible for exit code
+          docker run --rm \
+            -v ${{ github.workspace }}/api:/work \
+            openapitools/openapi-diff:latest \
+            /work/openapi-baseline.json \
+            /work/openapi-current.json \
+            --fail-on-incompatible
 
       - name: Comment PR with diff
-        if: failure()
+        if: always() && hashFiles('api/openapi-diff-report.md') != ''
         uses: marocchino/sticky-pull-request-comment@v2
         with:
+          header: openapi-diff
           path: api/openapi-diff-report.md
