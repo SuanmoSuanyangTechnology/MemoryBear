@@ -1,0 +1,49 @@
+name: API Breaking Change Check
+on:
+  pull_request:
+    paths:
+      - 'api/app/**'
+      - 'api/openapi-baseline.json'
+
+jobs:
+  openapi-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          cd api && uv sync
+
+      - name: Export current OpenAPI schema
+        run: |
+          cd api
+          uv run python scripts/export_openapi.py --v1-only -o openapi-current.json
+
+      - name: Run openapi-diff
+        uses: docker://openapitools/openapi-diff:latest
+        with:
+          args: >
+            /github/workspace/api/openapi-baseline.json
+            /github/workspace/api/openapi-current.json
+            --fail-on-incompatible
+            --markdown /github/workspace/api/openapi-diff-report.md
+
+      - name: Upload diff report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-diff-report
+          path: api/openapi-diff-report.md
+
+      - name: Comment PR with diff
+        if: failure()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: api/openapi-diff-report.md
