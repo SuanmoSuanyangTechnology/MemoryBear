@@ -53,39 +53,89 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sudo sh
 
-      - name: Run oasdiff
+      - name: Run OpenAPI breaking change checks
         if: steps.filter.outputs.skip == 'false'
+        id: api_diff
         run: |
           cd api
-          echo "## 🔍 API Breaking Change Report" > oasdiff-report.md
-          echo "" >> oasdiff-report.md
-          echo "Comparing against \`${{ github.base_ref }}\` baseline." >> oasdiff-report.md
-          echo "" >> oasdiff-report.md
+          set +e
 
-          echo "### oasdiff" >> oasdiff-report.md
-          OUTPUT=$(oasdiff breaking openapi-target-baseline.json openapi-current.json 2>&1) || true
-          if [ -z "$OUTPUT" ]; then
-            echo "✅ No breaking changes detected." >> oasdiff-report.md
+          REPORT="oasdiff-report.md"
+          BASELINE="openapi-target-baseline.json"
+          CURRENT="openapi-current.json"
+
+          {
+            echo "# API Breaking Change Report"
+            echo ""
+            echo "Comparing against \`${{ github.base_ref }}\` baseline."
+            echo ""
+            echo "| Tool | Result |"
+            echo "| --- | --- |"
+          } > "$REPORT"
+
+          OASDIFF_OUTPUT=$(oasdiff breaking "$BASELINE" "$CURRENT" --fail-on ERR 2>&1)
+          OASDIFF_EXIT=$?
+
+          if [ "$OASDIFF_EXIT" -eq 0 ]; then
+            echo "| oasdiff | ✅ PASS |" >> "$REPORT"
           else
-            echo "❌ **Breaking changes detected:**" >> oasdiff-report.md
-            echo '```' >> oasdiff-report.md
-            echo "$OUTPUT" >> oasdiff-report.md
-            echo '```' >> oasdiff-report.md
+            echo "| oasdiff | ❌ FAIL |" >> "$REPORT"
           fi
 
-          echo "" >> oasdiff-report.md
-          echo "### openapi-diff" >> oasdiff-report.md
-          ODIFF=$(docker run --rm \
-            -v ${{ github.workspace }}/api:/work \
+          OPENAPI_DIFF_OUTPUT=$(docker run --rm \
+            -v "${{ github.workspace }}/api:/work" \
             openapitools/openapi-diff:2.1.0-beta.11 \
-            /work/openapi-target-baseline.json \
-            /work/openapi-current.json 2>&1) || true
-          echo '```' >> oasdiff-report.md
-          echo "$ODIFF" >> oasdiff-report.md
-          echo '```' >> oasdiff-report.md
+            --fail-on-incompatible \
+            /work/"$BASELINE" \
+            /work/"$CURRENT" 2>&1)
+          OPENAPI_DIFF_EXIT=$?
 
-          # Fail if oasdiff detects breaking changes
-          oasdiff breaking openapi-target-baseline.json openapi-current.json --fail-on ERR
+          if [ "$OPENAPI_DIFF_EXIT" -eq 0 ]; then
+            echo "| openapi-diff | ✅ PASS |" >> "$REPORT"
+          else
+            echo "| openapi-diff | ❌ FAIL |" >> "$REPORT"
+          fi
+
+          {
+            echo ""
+            echo "## oasdiff"
+            echo ""
+            echo "<details open>"
+            echo "<summary>Output</summary>"
+            echo ""
+            echo '```text'
+            if [ -n "$OASDIFF_OUTPUT" ]; then
+              echo "$OASDIFF_OUTPUT"
+            else
+              echo "No breaking changes detected."
+            fi
+            echo '```'
+            echo ""
+            echo "</details>"
+
+            echo ""
+            echo "## openapi-diff"
+            echo ""
+            echo "<details open>"
+            echo "<summary>Output</summary>"
+            echo ""
+            echo '```text'
+            if [ -n "$OPENAPI_DIFF_OUTPUT" ]; then
+              echo "$OPENAPI_DIFF_OUTPUT"
+            else
+              echo "No incompatible changes detected."
+            fi
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$REPORT"
+
+          echo "oasdiff_exit=$OASDIFF_EXIT" >> "$GITHUB_OUTPUT"
+          echo "openapi_diff_exit=$OPENAPI_DIFF_EXIT" >> "$GITHUB_OUTPUT"
+
+          if [ "$OASDIFF_EXIT" -ne 0 ] || [ "$OPENAPI_DIFF_EXIT" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Comment PR
         if: always() && steps.filter.outputs.skip == 'false'
