@@ -73,7 +73,7 @@ async def read_memory_sync(
     )
     memory = await service.read(payload.message, search_switch=SearchStrategy(payload.search_switch))
     return success(data={
-        "answer": memory.content,
+        "response": memory.content,
         "intermediate_outputs": [_.model_dump() for _ in memory.memories]
     })
 
@@ -86,7 +86,7 @@ async def write_memory_async(
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
-        language_type: str = Header(..., alias="X-Language-Type"),
+        language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """
     Write memory asynchronously (Celery task).
