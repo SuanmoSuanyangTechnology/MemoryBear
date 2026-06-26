@@ -18,7 +18,7 @@ class ApiResponse(BaseModel, Generic[T]):
 class NodeStatItem(BaseModel):
     """单个记忆类型统计项。"""
     type: str = Field(..., description="记忆节点类型")
-    count: int = Field(..., description="数量")
+    counts: List[int] = Field(..., description="数量列表")
     percentage: float = Field(..., description="占比")
 
 
