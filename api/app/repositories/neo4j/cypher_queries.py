@@ -1308,7 +1308,7 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    nb.activation_value AS activation_value,
+    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1318,7 +1318,7 @@ OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
        e.name_embedding AS name_embedding,
-       e.activation_value AS activation_value,
+       COALESCE(e.activation_value, 0.5) AS activation_value,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1335,7 +1335,7 @@ RETURN e.id AS id
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score, e.activation_value AS activation_value,
+       e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description,
        e.example AS example
@@ -1355,7 +1355,7 @@ GET_ALL_COMMUNITY_MEMBERS_BATCH = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN c.community_id AS community_id,
        e.id AS id, e.name AS name, e.entity_type AS entity_type,
-       e.importance_score AS importance_score, e.activation_value AS activation_value,
+       e.importance_score AS importance_score, COALESCE(e.activation_value, 0.5) AS activation_value,
        e.name_embedding AS name_embedding,
        e.aliases AS aliases, e.description AS description
 ORDER BY c.community_id, coalesce(e.activation_value, 0) DESC
@@ -1402,7 +1402,7 @@ OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
        e.name_embedding AS name_embedding,
-       e.activation_value AS activation_value,
+       COALESCE(e.activation_value, 0.5) AS activation_value,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 ORDER BY e.id
 SKIP $skip LIMIT $limit
@@ -1425,7 +1425,7 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    nb.activation_value AS activation_value,
+    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
@@ -1450,7 +1450,7 @@ RETURN DISTINCT
     nb.id               AS id,
     nb.name             AS name,
     nb.name_embedding   AS name_embedding,
-    nb.activation_value AS activation_value,
+    COALESCE(nb.activation_value, 0.5) AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 

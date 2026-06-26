@@ -46,7 +46,7 @@ logger = get_logger(__name__)
 config_logger = get_config_logger()
 
 # Initialize Neo4j connector for analytics functions
-_neo4j_connector = Neo4jConnector()
+_neo4j_connector = Neo4jConnector(shared_driver=True)
 
 # 标记当前 task/coroutine 已持有 per-end_user 写入锁（避免重入死锁）
 # 由 flush_conversation_task 在 worker 上下文中设置，防止下游重复加锁
