@@ -205,30 +205,6 @@ class MemoryService:
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
         return dispatch_flush_conversation(conversation_id)
 
-    @staticmethod # 同步写入 下一个版本移除
-    def get_or_create_service_api_conversation(workspace_id: str, end_user_id: str) -> str:
-        """获取或创建 Service API 虚拟会话。"""
-        from app.core.memory.pipelines.dispatcher import get_or_create_service_api_conversation
-        return get_or_create_service_api_conversation(workspace_id, end_user_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    async def ensure_conversation_exists(conversation_id: str, workspace_id: str = "") -> None:
-        """确保 conversations 表中存在该记录。"""
-        from app.core.memory.pipelines.dispatcher import ensure_conversation_exists
-        await ensure_conversation_exists(conversation_id, workspace_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    def verify_unmark_safe(conversation_id: str) -> bool:
-        """验证对话是否可以安全 unmark。"""
-        from app.core.memory.pipelines.dispatcher import verify_unmark_safe
-        return verify_unmark_safe(conversation_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    def unmark_conversation_pending(conversation_id: str) -> None:
-        """将对话从 pending set 中移除。"""
-        from app.core.memory.pipelines.dispatcher import unmark_conversation_pending
-        unmark_conversation_pending(conversation_id)
-
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）
     # ──────────────────────────────────────────────

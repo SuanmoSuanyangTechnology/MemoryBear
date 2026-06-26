@@ -65,21 +65,6 @@ class Write_UserInput(BaseModel):
     )
 
 
-class WriteMemoryRequest(BaseModel):
-    """write_memory() 的参数封装"""
-    end_user_id: str
-    messages: list[MessageItem]
-    config_id: Optional[Any] = None
-    storage_type: StorageType = StorageType.NEO4J
-    user_rag_memory_id: str = ""
-    language: Language = Language.ZH
-    conversation_id: Optional[str] = Field(
-        None,
-        description="对话 ID（可选）。传入时使用该会话存储消息；"
-                    "不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。",
-    )
-
-
 class AgentMemoryDataset(ABC):
     PRONOUN = ['我', '本人', '在下', '自己', '咱', '鄙人', '吴', '余']
     NAME = '用户'
