@@ -126,6 +126,7 @@ export const zh = {
       platformManagement: '平台管理',
       systemSettings: '系统设置',
       upgradePackage: '套餐升级',
+      account: '账户',
     },
     knowledgeBase: {
       home: '首页',

@@ -174,7 +174,21 @@
           "display": true,
           "level": 2,
           "sort": 2,
-          "menuDesc": "管理系统用户信息",
+          "menuDesc": "用户管理",
+          "subs": null
+        },
+        {
+          "id": 32,
+          "parent": 3,
+          "code": "account",
+          "label": "账户",
+          "i18nKey": "menu.account",
+          "path": "/account",
+          "enable": true,
+          "display": true,
+          "level": 2,
+          "sort": 2,
+          "menuDesc": "账户",
           "subs": null
         }
       ]

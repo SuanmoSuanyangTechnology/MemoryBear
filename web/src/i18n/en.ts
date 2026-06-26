@@ -126,6 +126,7 @@ export const en = {
       platformManagement: 'Platform Management',
       systemSettings: 'System Settings',
       upgradePackage: 'Upgrade Package',
+      account: 'Account',
     },
     dashboard: {
       total_models: 'Available Models',
