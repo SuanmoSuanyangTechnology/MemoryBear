@@ -1,6 +1,7 @@
 name: API Breaking Change Check
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -60,6 +61,8 @@ jobs:
       - name: Run OpenAPI breaking change checks
         if: steps.filter.outputs.skip == 'false'
         id: api_diff
+        env:
+          API_BREAKING_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'api-breaking-approved') }}
         run: |
           cd api
           set +e
@@ -72,6 +75,8 @@ jobs:
             echo "# API Breaking Change Report"
             echo ""
             echo "Comparing against \`${{ github.base_ref }}\` baseline."
+            echo ""
+            echo "Breaking change approval label: \`api-breaking-approved\` = \`$API_BREAKING_APPROVED\`."
             echo ""
             echo "| Tool | Result |"
             echo "| --- | --- |"
@@ -138,8 +143,30 @@ jobs:
           echo "openapi_diff_exit=$OPENAPI_DIFF_EXIT" >> "$GITHUB_OUTPUT"
 
           if [ "$OASDIFF_EXIT" -ne 0 ] || [ "$OPENAPI_DIFF_EXIT" -ne 0 ]; then
-            exit 1
+            {
+              echo ""
+              echo "## Gate decision"
+              echo ""
+              if [ "$API_BREAKING_APPROVED" = "true" ]; then
+                echo "Breaking changes were detected, but this PR has the \`api-breaking-approved\` label. The check is allowed to pass."
+              else
+                echo "Breaking changes were detected. Add the \`api-breaking-approved\` label only after the breaking API change has been reviewed and approved."
+              fi
+            } >> "$REPORT"
+
+            if [ "$API_BREAKING_APPROVED" = "true" ]; then
+              exit 0
+            else
+              exit 1
+            fi
           fi
+
+          {
+            echo ""
+            echo "## Gate decision"
+            echo ""
+            echo "No breaking changes detected. The check passed without approval override."
+          } >> "$REPORT"
 
       - name: Comment PR
         if: always() && steps.filter.outputs.skip == 'false'
