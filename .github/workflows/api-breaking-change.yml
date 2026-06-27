@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
   pull-requests: write
 
 jobs:
@@ -53,6 +54,19 @@ jobs:
           cd api
           git show ${{ github.event.pull_request.base.sha }}:api/openapi-baseline.json > openapi-target-baseline.json
 
+      - name: Check breaking approval label
+        if: steps.filter.outputs.skip == 'false'
+        id: approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels \
+            --jq '.[].name' | grep -Fxq 'api-breaking-approved'; then
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "approved=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install oasdiff
         if: steps.filter.outputs.skip == 'false'
         run: |
@@ -62,7 +76,7 @@ jobs:
         if: steps.filter.outputs.skip == 'false'
         id: api_diff
         env:
-          API_BREAKING_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'api-breaking-approved') }}
+          API_BREAKING_APPROVED: ${{ steps.approval.outputs.approved }}
         run: |
           cd api
           set +e
