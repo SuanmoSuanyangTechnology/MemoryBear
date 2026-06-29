@@ -7,10 +7,15 @@ and error handling.
 """
 
 import logging
+import os
 import time
 import uuid
 from typing import AsyncIterator, Optional
 
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.core.storage import StorageFactory, StorageBackend
 from app.core.storage_exceptions import (
     StorageError,
@@ -19,6 +24,7 @@ from app.core.storage_exceptions import (
     StorageDeleteError,
 )
 from app.core.logging_config import get_business_logger
+from app.models.file_metadata_model import FileMetadata
 
 # Obtain a dedicated logger for business logic
 logger = get_business_logger()
@@ -363,3 +369,72 @@ def get_file_storage_service() -> FileStorageService:
     if _default_service is None:
         _default_service = FileStorageService()
     return _default_service
+
+
+async def upload_v1_app_file(
+    *,
+    db: Session,
+    tenant_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    file: UploadFile,
+    storage_service: FileStorageService,
+) -> dict[str, str]:
+    """Upload file for `/v1/app/files` without changing legacy upload endpoints."""
+    contents = await file.read()
+    file_size = len(contents)
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The file is empty.",
+        )
+    if file_size > settings.MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit",
+        )
+
+    _, file_extension = os.path.splitext(file.filename)
+    file_ext = file_extension.lower()
+    file_id = uuid.uuid4()
+    file_key = generate_file_key(
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
+        file_id=file_id,
+        file_ext=file_ext,
+    )
+
+    file_metadata = FileMetadata(
+        id=file_id,
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
+        file_key=file_key,
+        file_name=file.filename,
+        file_ext=file_ext,
+        file_size=file_size,
+        content_type=file.content_type,
+        status="pending",
+    )
+    db.add(file_metadata)
+    db.commit()
+    db.refresh(file_metadata)
+
+    try:
+        await storage_service.upload_file(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            file_id=file_id,
+            file_ext=file_ext,
+            content=contents,
+            content_type=file.content_type,
+        )
+        file_metadata.status = "completed"
+        db.commit()
+    except StorageUploadError as exc:
+        file_metadata.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"File storage failed: {str(exc)}",
+        )
+
+    return {"file_id": str(file_id), "file_key": file_key}
