@@ -2461,3 +2461,10 @@ MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
 RETURN e.id AS id, e.name AS name
 """
+
+DELETE_NODE_BY_ELEMENT_ID = """
+MATCH (n)
+WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id
+DETACH DELETE n
+RETURN count(n) AS deleted
+"""

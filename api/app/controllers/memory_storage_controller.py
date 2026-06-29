@@ -9,7 +9,7 @@ from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
-from app.db import get_db
+from app.db import get_db, get_db_context
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.memory_storage_schema import (
@@ -559,3 +559,67 @@ async def get_recent_activity_stats_api(
     except Exception as e:
         api_logger.error(f"Recent activity stats failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "最近活动统计失败", str(e))
+
+
+@router.delete("/end-users/{end_user_id}", response_model=ApiResponse)
+async def delete_end_user(
+        end_user_id: UUID,
+        current_user: User = Depends(get_current_user),
+) -> dict:
+    """删除终端用户的全部记忆数据（Neo4j 节点 + PostgreSQL 记录）。
+
+    1. DETACH DELETE 清除 Neo4j 中该用户所有节点和边
+    2. memory_count 归零
+    3. 软删除 end_user 记录（is_active=False）
+
+    这是一个危险操作，不可撤销。
+    """
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试删除终端用户但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    end_user_id_str = str(end_user_id)
+
+    api_logger.info(
+        f"删除终端用户请求: end_user_id={end_user_id_str}, "
+        f"user={current_user.username}, workspace={workspace_id}"
+    )
+
+    try:
+        from app.repositories.end_user_repository import EndUserRepository
+
+        with get_db_context() as db:
+            end_user = EndUserRepository(db).get_end_user_by_id(end_user_id)
+            if not end_user:
+                api_logger.warning(f"终端用户不存在或已删除: end_user_id={end_user_id_str}")
+                return fail(BizCode.NOT_FOUND, "终端用户不存在或已删除", f"end_user_id={end_user_id_str}")
+            if str(end_user.workspace_id) != str(workspace_id):
+                api_logger.warning(
+                    f"用户 {current_user.username} 尝试删除不属于工作空间 {workspace_id} 的终端用户 {end_user_id_str}"
+                )
+                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
+
+        from app.core.memory.memory_service import MemoryService
+
+        total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id_str)
+
+        try:
+            with get_db_context() as db:
+                repo = EndUserRepository(db)
+                repo.update_memory_count(end_user_id, 0)
+                repo.soft_delete_by_end_user_id(end_user_id)
+        except Exception as sync_err:
+            api_logger.warning(f"同步 end_user 失败（不影响 Neo4j 删除结果）: {sync_err}")
+
+        api_logger.info(
+            f"终端用户删除完成: end_user_id={end_user_id_str}, total_deleted={total_deleted}"
+        )
+        return success(
+            data={"deleted": True, "end_user_id": end_user_id_str, "total_deleted": total_deleted},
+            msg=f"删除用户{end_user_id_str}记忆库成功"
+        )
+
+    except Exception as e:
+        api_logger.error(f"删除终端用户失败: end_user_id={end_user_id_str}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "删除终端用户失败", str(e))
