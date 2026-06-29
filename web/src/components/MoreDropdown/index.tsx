@@ -16,7 +16,17 @@ interface MoreDropdownProps {
  */
 const MoreDropdown: FC<MoreDropdownProps> = ({ items, placement = 'bottomRight', onClick, iconClassName = '', variant = 'borderless' }) => {
   return (
-    <Dropdown menu={{ items }} placement={placement}>
+    <Dropdown 
+      menu={{ 
+        items,
+        onClick: (e) => {
+          if (e.domEvent) {
+            e.domEvent.stopPropagation();
+          }
+        }
+      }} 
+      placement={placement}
+    >
       {variant === 'outline'
         ? <Flex align="center" justify="center" className="rb:cursor-pointer rb:border rb:border-[#EBEBEB] rb:rounded-lg rb:size-6! rb:hover:border-[#171719]">
           <div

@@ -21,7 +21,9 @@ import { useUser } from '@/store/user'
 import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput';
 import RbStatistic from '@/components/RbStatistic';
+import MoreDropdown from '@/components/MoreDropdown'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
+import DeleteConfirmModal, { type DeleteConfirmModalRef } from './components/DeleteConfirmModal';
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -33,6 +35,7 @@ export default function UserMemory() {
   const keyword = Form.useWatch(['keyword'], form)
 
   const scrollListRef = useRef<PageScrollListRef>(null)
+  const deleteConfirmModalRef = useRef<DeleteConfirmModalRef>(null)
 
   /** Navigate to user memory detail */
   const handleViewDetail = (id: string | number) => {
@@ -59,6 +62,18 @@ export default function UserMemory() {
     message.success(t('common.copySuccess'))
   }
 
+  /** Open delete confirmation modal */
+  const handleDelete = (item: Data) => {
+    deleteConfirmModalRef.current?.handleOpen(item);
+  }
+
+  // 获取用户显示名称
+  const getUserName = (item: Data) => {
+    return item?.end_user?.other_name && item?.end_user?.other_name !== '' 
+      ? item?.end_user?.other_name 
+      : item?.end_user?.id || ''
+  }
+
   return (
     <div>
       <Form form={form}>
@@ -74,7 +89,7 @@ export default function UserMemory() {
         </Row>
       </Form>
 
-      
+    
       <PageScrollList<Data, { keyword: string; }>
         ref={scrollListRef}
         url={userMemoryListUrl}
@@ -82,20 +97,34 @@ export default function UserMemory() {
         column={3}
         renderItem={(item) => {
           const { end_user, memory_num, memory_config } = item as Data;
-          const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
+          const name = getUserName(item)
           return (
             <RbCard
-              key={item.end_user.id}
+              key={item.end_user?.id}
               title={() => <Flex gap={4}>
                 <div className="rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:text-white rb:bg-[#155EEF] rb:shrink-0">{name[0]}</div>
 
                 <Tooltip title={name || '-'}><div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap`}>{name || '-'}</div></Tooltip>
               </Flex>}
+              extra={<MoreDropdown
+                items={[
+                  {
+                    key: 'delete',
+                    danger: true,
+                    icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
+                    label: t('common.delete'),
+                    onClick: (info) => {
+                      info.domEvent?.stopPropagation();
+                      handleDelete(item);
+                    },
+                  },
+                ]}
+              />}
               headerType="border"
               headerClassName="rb:h-[48px]! rb:mx-4!"
               bodyClassName="rb:py-3! rb:px-4!"
               className="rb:cursor-pointer"
-              onClick={() => handleViewDetail(end_user.id)}
+              onClick={() => handleViewDetail(end_user?.id)}
             >
               <Flex align="center" gap={8} className="rb:mb-3! rb:w-full rb:cursor-pointer" onClick={(e) => handleCopy(e, end_user?.id || '')}>
                 <div className="rb:text-[#5B6167]">ID:</div>
@@ -125,6 +154,12 @@ export default function UserMemory() {
             </RbCard>
           )
         }}
+      />
+
+      {/* 删除确认弹窗 */}
+      <DeleteConfirmModal
+        ref={deleteConfirmModalRef}
+        refreshTable={() => scrollListRef.current?.refresh()}
       />
     </div>
   );

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 10:20:26
+ * @Last Modified time: 2026-06-29 15:02:13
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -65,6 +65,10 @@ export const getDashboardData = () => {
 export const userMemoryListUrl = '/dashboard/end_users'
 export const getUserMemoryList = (query?: { keyword?: string }) => {
   return request.get(userMemoryListUrl, query)
+}
+// User Memory - Delete end user
+export const deleteEndUser = (end_user_id: string) => {
+  return request.delete(`/memory-storage/end-users/${end_user_id}`)
 }
 // User Memory - Total end users
 export const getTotalEndUsers = () => {
