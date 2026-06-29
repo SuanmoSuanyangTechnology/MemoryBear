@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 10:20:26
+ * @Last Modified time: 2026-06-29 14:53:58
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -93,7 +93,7 @@ export const getEndUserInfo = (end_user_id: string) => {
 }
 // Update user alias and info
 export const updatedEndUserInfo = (values: EndUser) => {
-  return request.post(`/memory/analytics/end_user_info/updated`, values)
+  return request.post(`/memory-storage/end_user_info/updated`, values)
 }
 // User Memory - Relationship network
 export const getMemorySearchEdges = (end_user_id: string, config?: AxiosRequestConfig) => {
