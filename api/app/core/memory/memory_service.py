@@ -205,6 +205,31 @@ class MemoryService:
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
         return dispatch_flush_conversation(conversation_id)
 
+    @staticmethod
+    async def delete_node_by_element_id(element_id: str, end_user_id: str) -> bool:
+        """通过 elementId 删除 Neo4j 图节点（同时 DETACH DELETE 关联边）。"""
+        from app.core.memory.models.service_models import MemoryContext
+        from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
+
+        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+        return await pipeline.delete_node_by_element_id(
+            element_id=element_id,
+            end_user_id=end_user_id,
+        )
+
+    @staticmethod
+    async def delete_all_nodes_by_end_user_id(end_user_id: str) -> int:
+        """删除指定用户的所有 Neo4j 记忆节点和边。
+
+        Returns:
+            删除的节点总数
+        """
+        from app.core.memory.models.service_models import MemoryContext
+        from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
+
+        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+        return await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
+
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）
     # ──────────────────────────────────────────────

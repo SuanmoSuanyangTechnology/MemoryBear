@@ -67,7 +67,7 @@ class Neo4jConnector:
             shared_driver: 是否使用进程级共享 driver。
                 True  → 所有实例共用一个 driver，通过 PID 检测 fork 后自动重建。
                 False → 每次实例化创建独立 driver（调用方需自行管理生命周期）。
-        
+
         Raises:
             RuntimeError: 如果NEO4J_PASSWORD环境变量未设置
         """
@@ -96,7 +96,7 @@ class Neo4jConnector:
 
     def _create_or_get_driver(self) -> AsyncDriver:
         """按配置返回独占或进程级共享的 driver。
-        
+
         shared_driver=True 时：
         - 检测当前 PID 是否与 _shared_driver_pid 一致
         - PID 变化（fork 后）或首次调用时自动重建
@@ -153,8 +153,6 @@ class Neo4jConnector:
             
         Returns:
             List[Dict[str, Any]]: 查询结果列表，每个元素是一个字典
-            
-
 
         """
         result = await self.driver.execute_query(
@@ -180,7 +178,6 @@ class Neo4jConnector:
             
         Returns:
             Any: 事务函数的返回值
-            
 
 
         """
@@ -198,21 +195,22 @@ class Neo4jConnector:
             
         Returns:
             Any: 事务函数的返回值
-            
-
 
         """
         async with self.driver.session(database="neo4j") as session:
             return await session.execute_read(transaction_func, **kwargs)
     
-    async def delete_group(self, end_user_id: str):
+    async def delete_group(self, end_user_id: str) -> int:
         """删除指定组的所有数据
-        
+
         删除所有属于指定end_user_id的节点和边。
         这是一个危险操作，会永久删除数据。
-        
+
         Args:
             end_user_id: 要删除的组ID
+
+        Returns:
+            删除的节点总数
         """
         batch_size = 1000
         total_deleted = 0
@@ -235,3 +233,4 @@ class Neo4jConnector:
             end_user_id=end_user_id,
         )
         logger.info(f"Group {end_user_id} deleted ({total_deleted} nodes).")
+        return total_deleted

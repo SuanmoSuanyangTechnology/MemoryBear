@@ -1144,6 +1144,18 @@ def get_end_user_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]
     end_user = repo.get_end_user_by_id(end_user_id)
     return end_user
 
+
+def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """根据 end_user_id 查询对应的 tenant_id，单次 JOIN 查询，不加载 ORM 对象"""
+    from app.models.workspace_model import Workspace
+
+    return (
+        db.query(Workspace.tenant_id)
+        .join(EndUser, EndUser.workspace_id == Workspace.id)
+        .filter(EndUser.id == end_user_id, EndUser.is_active == True)
+        .scalar()
+    )
+
 # 新增的缓存操作函数（保持与类方法一致的接口）
 def get_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:
     """根据ID获取终端用户（用于缓存操作）"""
