@@ -78,7 +78,7 @@ async def read_memory_sync(
     })
 
 
-@router.post("/write")
+@router.post("/submit")
 @require_api_key(scopes=["memory"])
 @check_end_user_quota
 async def write_memory_async(
