@@ -53,7 +53,8 @@ export default defineConfig({
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'http://localhost:5175',
+        // Use 127.0.0.1 instead of 0.0.0.0 — Node proxy cannot reliably connect to 0.0.0.0
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token

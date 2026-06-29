@@ -5,7 +5,10 @@ from typing import Annotated, Optional
 from dotenv import load_dotenv
 from pydantic import Field, TypeAdapter
 
-load_dotenv()
+# Always load `.env` from the `api/` directory (repo_root/api/.env).
+# This makes settings robust even when the process is started from a different CWD.
+_API_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(_API_DIR / ".env")
 
 
 class Settings:
@@ -73,7 +76,8 @@ class Settings:
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
     # ElasticSearch configuration
-    ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "https://127.0.0.1")
+    # Default to http for local dev to avoid TLS/self-signed issues.
+    ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "http://127.0.0.1")
     ELASTICSEARCH_PORT: int = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
     ELASTICSEARCH_USERNAME: str = os.getenv("ELASTICSEARCH_USERNAME", "elastic")
     ELASTICSEARCH_PASSWORD: str = os.getenv("ELASTICSEARCH_PASSWORD", "")
