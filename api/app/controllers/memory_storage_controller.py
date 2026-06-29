@@ -594,6 +594,11 @@ async def delete_end_user(
             if not end_user:
                 api_logger.warning(f"终端用户不存在或已删除: end_user_id={end_user_id_str}")
                 return fail(BizCode.NOT_FOUND, "终端用户不存在或已删除", f"end_user_id={end_user_id_str}")
+            if str(end_user.workspace_id) != str(workspace_id):
+                api_logger.warning(
+                    f"用户 {current_user.username} 尝试删除不属于工作空间 {workspace_id} 的终端用户 {end_user_id_str}"
+                )
+                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
 
         from app.core.memory.memory_service import MemoryService
 
