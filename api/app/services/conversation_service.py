@@ -641,6 +641,41 @@ class ConversationService:
             "limit": limit,
         }
 
+    def get_v1_message_suggested_questions(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            message_id: uuid.UUID,
+    ) -> list[str]:
+        """获取指定 assistant 消息的预制问题（meta_data.suggested_questions）。"""
+        message = self.db.get(Message, message_id)
+        if not message or message.is_deleted:
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+        try:
+            conversation = self.conversation_repo.get_conversation_by_conversation_id(
+                message.conversation_id,
+                workspace_id,
+            )
+        except ResourceNotFoundException as e:
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND, cause=e) from e
+
+        if (
+            conversation.app_id != app_id
+            or conversation.workspace_id != workspace_id
+            or conversation.is_active is not True
+        ):
+            raise BusinessException("无权访问该消息", BizCode.FORBIDDEN)
+
+        meta_data = message.meta_data
+        if not isinstance(meta_data, dict):
+            return []
+        raw = meta_data.get("suggested_questions")
+        if not isinstance(raw, list):
+            return []
+        return [str(q) for q in raw if q]
+
     def get_conversation_with_messages(
             self,
             conversation_id: uuid.UUID

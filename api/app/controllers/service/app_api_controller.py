@@ -3,10 +3,15 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Body, Query
+from fastapi import APIRouter, Depends, Request, Body, Query, File, UploadFile, HTTPException, status
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from app.services.file_storage_service import (
+    FileStorageService,
+    get_file_storage_service,
+    upload_workspace_file,
+)
 from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -14,15 +19,17 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db, get_db_context
 from app.models.app_model import AppType
+from app.models.workspace_model import Workspace
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas import AppChatRequest, conversation_schema
+from app.schemas import AppChatRequest, app_schema, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
+from app.schemas.response_schema import ApiResponse
 from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
-from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
+from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import get_app_service, AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
@@ -66,6 +73,12 @@ async def list_apps():
 #     return success(data={"received": True}, msg="消息已接收")
 
 
+def _get_app_id(api_key_auth: ApiKeyAuth) -> uuid.UUID:
+    if not api_key_auth.resource_id:
+        raise BusinessException("API Key 未绑定应用", BizCode.BAD_REQUEST)
+    return api_key_auth.resource_id
+
+
 def _checkAppConfig(release: AppRelease):
     if release.type == AppType.AGENT:
         if not release.config:
@@ -78,6 +91,24 @@ def _checkAppConfig(release: AppRelease):
             raise BusinessException("工作流应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
     else:
         raise BusinessException("不支持的应用类型", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.get("/variable", summary="获取 Agent 变量配置")
+@require_api_key(scopes=["app"])
+async def get_agent_variables(
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        app_service: Annotated[AppService, Depends(get_app_service)] = None,
+):
+    """获取 API Key 绑定应用的 Agent 变量定义列表（与内部 /config 接口的 variables 字段一致）。"""
+    app_id = _get_app_id(api_key_auth)
+    workspace_id = api_key_auth.workspace_id
+
+    cfg = app_service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
+    cfg = enrich_agent_config(cfg)
+    variables = app_schema.AgentConfig.model_validate(cfg).variables
+    return success(data=[v.model_dump(mode="json") for v in variables])
 
 
 @router.post("/chat")
@@ -348,60 +379,6 @@ async def chat(
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
 
 
-@router.get("/conversations")
-@require_api_key(scopes=["app"])
-async def list_v1_conversations(
-        request: Request,
-        api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
-        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
-        user_id: str = Query("", description="外部系统用户 ID"),
-        page: int = Query(1, description="页码，从 1 开始"),
-        page_size: int = Query(20, description="每页数量，最大 100"),
-):
-    """获取当前应用下指定外部用户的会话列表。"""
-    result = conversation_service.list_v1_conversations(
-        app_id=api_key_auth.resource_id,
-        workspace_id=api_key_auth.workspace_id,
-        external_user_id=user_id,
-        page=page,
-        page_size=page_size,
-    )
-    items = [
-        conversation_schema.V1ConversationListItem(**item)
-        for item in result["items"]
-    ]
-    page_meta = PageMeta(
-        page=result["page"],
-        pagesize=result["page_size"],
-        total=result["total"],
-        hasnext=result["hasnext"],
-    )
-    return success(data=PageData(page=page_meta, items=items).model_dump(mode="json"))
-
-
-@router.get("/conversations/{conversation_id}/messages")
-@require_api_key(scopes=["app"])
-async def list_v1_conversation_messages(
-        request: Request,
-        conversation_id: uuid.UUID,
-        api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
-        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
-        user_id: str = Query("", description="外部系统用户 ID"),
-        limit: int = Query(20, description="返回消息数量，最大 200"),
-):
-    """获取当前应用下指定会话的历史消息。"""
-    result = conversation_service.list_v1_conversation_messages(
-        app_id=api_key_auth.resource_id,
-        workspace_id=api_key_auth.workspace_id,
-        external_user_id=user_id,
-        conversation_id=conversation_id,
-        limit=limit,
-    )
-    return success(data=conversation_schema.V1ConversationMessageListResponse(**result).model_dump(mode="json"))
-
-
 @router.post(
     "/workflow/interventions/{execution_id}/submit",
     summary="提交人工介入响应（API Key 认证，通知 SSE 流继续执行）",
@@ -451,3 +428,95 @@ async def submit_human_intervention_api(
         "action_id": action_id,
         "form_data": form_data,
     })
+
+
+@router.post("/files", response_model=ApiResponse, summary="AI 对话文件上传")
+@require_api_key(scopes=["app"])
+async def upload_chat_file(
+        request: Request,
+        file: UploadFile = File(...),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """
+    上传文件到存储后端，供 /chat 接口多模态对话使用。
+
+    - 入参: multipart/form-data，字段 file
+    - 出参: {"file_id": "...", "file_key": "..."}
+    - 在 /chat 请求中通过 files 字段引用，例如:
+      {"type": "image", "transfer_method": "local_file", "upload_file_id": "<file_id>"}
+    """
+    app_id = _get_app_id(api_key_auth)
+
+    workspace = db.query(Workspace).filter(Workspace.id == api_key_auth.workspace_id).first()
+    if not workspace:
+        raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+
+    logger.info(
+        f"V1 app file upload: app_id={app_id}, "
+        f"workspace_id={api_key_auth.workspace_id}, filename={file.filename}"
+    )
+
+    try:
+        upload_result = await upload_workspace_file(
+            db=db,
+            tenant_id=workspace.tenant_id,
+            workspace_id=api_key_auth.workspace_id,
+            file=file,
+            storage_service=storage_service,
+        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR:
+            logger.error(f"Storage upload failed: {exc.detail}")
+        raise
+
+    logger.info(f"File uploaded to storage: file_key={upload_result['file_key']}")
+    logger.info(
+        f"File upload successful: {file.filename} (file_id: {upload_result['file_id']})"
+    )
+
+    return success(data=upload_result, msg="File upload successful")
+
+
+@router.get("/messages/{message_id}/suggested", summary="获取消息预制问题")
+@require_api_key(scopes=["app"])
+async def get_message_suggested_questions_v1(
+        message_id: uuid.UUID,
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+):
+    """获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。"""
+    app_id = _get_app_id(api_key_auth)
+    logger.info(
+        f"V1 get message suggested questions - message_id: {message_id}, "
+        f"app_id: {app_id}, workspace: {api_key_auth.workspace_id}"
+    )
+
+    suggested_questions = conversation_service.get_v1_message_suggested_questions(
+        app_id=app_id,
+        workspace_id=api_key_auth.workspace_id,
+        message_id=message_id,
+    )
+    return {"result": "success", "data": suggested_questions}
+
+
+@router.get("/info", summary="获取应用基本信息")
+@require_api_key(scopes=["app"])
+async def get_app_basic_info_v1(
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        app_service: Annotated[AppService, Depends(get_app_service)] = None,
+):
+    """获取 API Key 绑定应用的详细信息，业务逻辑与 GET /api/apps/{app_id} 一致。"""
+    app_id = _get_app_id(api_key_auth)
+    workspace_id = api_key_auth.workspace_id
+
+    logger.info(f"V1 get app basic info - app_id: {app_id}, workspace: {workspace_id}")
+
+    app = app_service.get_app(app_id, workspace_id)
+    app_schema_obj = app_service._convert_to_schema(app, workspace_id)
+    return success(data=app_schema_obj.model_dump(mode="json"))

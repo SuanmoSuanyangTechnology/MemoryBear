@@ -29,7 +29,6 @@ from app.core.storage import LocalStorage, MinIOStorage
 from app.core.storage.url_signer import generate_signed_url, verify_signed_url
 from app.core.storage_exceptions import (
     StorageDeleteError,
-    StorageUploadError,
 )
 from app.db import get_db
 from app.dependencies import get_current_user, get_share_user_id, ShareTokenData
@@ -38,8 +37,8 @@ from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse
 from app.services.file_storage_service import (
     FileStorageService,
-    generate_file_key,
     get_file_storage_service,
+    upload_workspace_file,
 )
 
 api_logger = get_api_logger()
@@ -123,80 +122,26 @@ async def upload_file(
         f"filename={file.filename}, username={current_user.username}"
     )
 
-    # Read file contents
-    contents = await file.read()
-    file_size = len(contents)
-
-    # Validate file size
-    if file_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The file is empty."
-        )
-
-    if file_size > settings.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit"
-        )
-
-    # Extract file extension
-    _, file_extension = os.path.splitext(file.filename)
-    file_ext = file_extension.lower()
-
-    # Generate file_id and file_key
-    file_id = uuid.uuid4()
-    file_key = generate_file_key(
-        tenant_id=tenant_id,
-        workspace_id=workspace_id,
-        file_id=file_id,
-        file_ext=file_ext,
-    )
-
-    # Create file metadata record with pending status
-    file_metadata = FileMetadata(
-        id=file_id,
-        tenant_id=tenant_id,
-        workspace_id=workspace_id,
-        file_key=file_key,
-        file_name=file.filename,
-        file_ext=file_ext,
-        file_size=file_size,
-        content_type=file.content_type,
-        status="pending",
-    )
-    db.add(file_metadata)
-    db.commit()
-    db.refresh(file_metadata)
-
-    # Upload file to storage backend
     try:
-        await storage_service.upload_file(
+        upload_result = await upload_workspace_file(
+            db=db,
             tenant_id=tenant_id,
             workspace_id=workspace_id,
-            file_id=file_id,
-            file_ext=file_ext,
-            content=contents,
-            content_type=file.content_type,
+            file=file,
+            storage_service=storage_service,
         )
-        # Update status to completed
-        file_metadata.status = "completed"
-        db.commit()
-        api_logger.info(f"File uploaded to storage: file_key={file_key}")
-    except StorageUploadError as e:
-        # Update status to failed
-        file_metadata.status = "failed"
-        db.commit()
-        api_logger.error(f"Storage upload failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"File storage failed: {str(e)}"
-        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR:
+            api_logger.error(f"Storage upload failed: {exc.detail}")
+        raise
 
-    api_logger.info(f"File upload successful: {file.filename} (file_id: {file_id})")
+    api_logger.info(f"File uploaded to storage: file_key={upload_result['file_key']}")
+    api_logger.info(
+        f"File upload successful: {file.filename} (file_id: {upload_result['file_id']})"
+    )
 
     return success(
-        data={"file_id": str(file_id), "file_key": file_key},
+        data=upload_result,
         msg="File upload successful"
     )
 
@@ -257,80 +202,27 @@ async def upload_file_with_share_token(
         f"filename={file.filename}, share_token={share_data.share_token}"
     )
 
-    # Read file contents
-    contents = await file.read()
-    file_size = len(contents)
-
-    # Validate file size
-    if file_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The file is empty."
-        )
-
-    if file_size > settings.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit"
-        )
-
-    # Extract file extension
-    _, file_extension = os.path.splitext(file.filename)
-    file_ext = file_extension.lower()
-
-    # Generate file_id and file_key
-    file_id = uuid.uuid4()
-    file_key = generate_file_key(
-        tenant_id=tenant_id,
-        workspace_id=workspace_id,
-        file_id=file_id,
-        file_ext=file_ext,
-    )
-
-    # Create file metadata record with pending status
-    file_metadata = FileMetadata(
-        id=file_id,
-        tenant_id=tenant_id,
-        workspace_id=workspace_id,
-        file_key=file_key,
-        file_name=file.filename,
-        file_ext=file_ext,
-        file_size=file_size,
-        content_type=file.content_type,
-        status="pending",
-    )
-    db.add(file_metadata)
-    db.commit()
-    db.refresh(file_metadata)
-
-    # Upload file to storage backend
     try:
-        await storage_service.upload_file(
+        upload_result = await upload_workspace_file(
+            db=db,
             tenant_id=tenant_id,
             workspace_id=workspace_id,
-            file_id=file_id,
-            file_ext=file_ext,
-            content=contents,
-            content_type=file.content_type,
+            file=file,
+            storage_service=storage_service,
+            file_too_large_status=status.HTTP_400_BAD_REQUEST,
         )
-        # Update status to completed
-        file_metadata.status = "completed"
-        db.commit()
-        api_logger.info(f"File uploaded to storage (share): file_key={file_key}")
-    except StorageUploadError as e:
-        # Update status to failed
-        file_metadata.status = "failed"
-        db.commit()
-        api_logger.error(f"Storage upload failed (share): {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"File storage failed: {str(e)}"
-        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR:
+            api_logger.error(f"Storage upload failed (share): {exc.detail}")
+        raise
 
-    api_logger.info(f"File upload successful (share): {file.filename} (file_id: {file_id})")
+    api_logger.info(f"File uploaded to storage (share): file_key={upload_result['file_key']}")
+    api_logger.info(
+        f"File upload successful (share): {file.filename} (file_id: {upload_result['file_id']})"
+    )
 
     return success(
-        data={"file_id": str(file_id), "file_key": file_key},
+        data=upload_result,
         msg="File upload successful"
     )
 
