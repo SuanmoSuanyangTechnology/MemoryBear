@@ -18,7 +18,7 @@ from app.repositories.workspace_repository import WorkspaceRepository
 from app.schemas.end_user_info_schema import (
     EndUserInfoUpdate,
 )
-from app.schemas.memory_storage_schema import DeleteNodeRequest, DeleteAllNodesRequest
+from app.schemas.memory_storage_schema import DeleteNodeRequest
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction
 from app.services.user_memory_service import UserMemoryService
@@ -267,49 +267,3 @@ async def delete_node_api(
         api_logger.error(f"节点删除失败: element_id={element_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "节点删除失败", str(e))
 
-
-@router.post("/nodes/delete-all", response_model=ApiResponse)
-async def delete_all_nodes_api(
-        request: DeleteAllNodesRequest,
-        current_user: User = Depends(get_current_user),
-) -> dict:
-    """删除指定用户的所有 Neo4j 记忆节点和边。
-
-    分批 DETACH DELETE + 清理残留边，完成后同步 memory_count 到 PostgreSQL。
-    这是一个危险操作，会永久删除该用户的所有记忆图数据。
-    """
-    workspace_id = current_user.current_workspace_id
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试删除所有节点但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    end_user_id = request.end_user_id
-
-    api_logger.info(
-        f"批量删除节点请求: end_user_id={end_user_id}, "
-        f"user={current_user.username}, workspace={workspace_id}"
-    )
-
-    try:
-        from app.core.memory.memory_service import MemoryService
-
-        total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id)
-
-        try:
-            from app.repositories.end_user_repository import EndUserRepository
-            from app.db import get_db_context
-            from uuid import UUID
-            with get_db_context() as db:
-                EndUserRepository(db).update_memory_count(UUID(end_user_id), 0)
-        except Exception as sync_err:
-            api_logger.warning(f"同步 memory_count 失败（不影响删除结果）: {sync_err}")
-
-        api_logger.info(f"批量删除完成: end_user_id={end_user_id}, total_deleted={total_deleted}")
-        return success(
-            data={"deleted": True, "end_user_id": end_user_id, "total_deleted": total_deleted},
-            msg=f"成功删除 {total_deleted} 个节点"
-        )
-
-    except Exception as e:
-        api_logger.error(f"批量删除节点失败: end_user_id={end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "批量删除节点失败", str(e))
