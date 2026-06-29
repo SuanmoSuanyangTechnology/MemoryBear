@@ -587,13 +587,19 @@ async def delete_end_user(
     )
 
     try:
+        from app.repositories.end_user_repository import EndUserRepository
+
+        with get_db_context() as db:
+            end_user = EndUserRepository(db).get_end_user_by_id(end_user_id)
+            if not end_user:
+                api_logger.warning(f"终端用户不存在或已删除: end_user_id={end_user_id_str}")
+                return fail(BizCode.NOT_FOUND, "终端用户不存在或已删除", f"end_user_id={end_user_id_str}")
+
         from app.core.memory.memory_service import MemoryService
 
         total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id_str)
 
         try:
-            from app.repositories.end_user_repository import EndUserRepository
-
             with get_db_context() as db:
                 repo = EndUserRepository(db)
                 repo.update_memory_count(end_user_id, 0)
