@@ -139,6 +139,7 @@ class MetadataAutoFilterService:
             gen_conf=gen_conf or {"temperature": 0},
         )
         content = response[0] if isinstance(response, tuple) else response
+        logger.info("[MetadataAutoFilter] LLM raw output: %s", content)
         if not content or str(content).startswith(ERROR_PREFIX):
             logger.warning("[MetadataAutoFilter] LLM returned no usable content")
             return []
