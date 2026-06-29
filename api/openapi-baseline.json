@@ -2704,8 +2704,32 @@
                 "schema": {}
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "include_metadata",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Optional demo flag for non-breaking API change",
+              "default": false,
+              "title": "Include Metadata"
+            },
+            "description": "Optional demo flag for non-breaking API change"
+          }
+        ]
       }
     },
     "/v1/memory/read/sync": {

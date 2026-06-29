@@ -40,7 +40,9 @@ def _encode_result(result):
 
 
 @router.get("")
-async def get_memory_info():
+async def get_memory_info(
+        include_metadata: bool = Query(False, description="Optional demo flag for non-breaking API change"),
+):
     """获取记忆服务信息（占位）"""
     return success(data={}, msg="Memory API - Coming Soon")
 
