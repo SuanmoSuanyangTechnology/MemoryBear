@@ -2,6 +2,7 @@ import json
 import os
 import csv
 import io
+import re
 import time
 from typing import Any, Optional
 import uuid
@@ -32,6 +33,8 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
+
+MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 router = APIRouter(
     prefix="/chunks",
@@ -66,10 +69,26 @@ def _expand_chunk_image_download_url(chunk: Any, base_url: str) -> None:
         if isinstance(image_download_url, str):
             metadata["image_download_url"] = _join_file_base_url(image_download_url, base_url)
 
+    page_content = chunk.get("page_content") if isinstance(chunk, dict) else getattr(chunk, "page_content", None)
+    if isinstance(page_content, str):
+        expanded_page_content = _expand_markdown_image_urls(page_content, base_url)
+        if isinstance(chunk, dict):
+            chunk["page_content"] = expanded_page_content
+        else:
+            chunk.page_content = expanded_page_content
+
     children = chunk.get("children") if isinstance(chunk, dict) else getattr(chunk, "children", None)
     if children:
         for child in children:
             _expand_chunk_image_download_url(child, base_url)
+
+
+def _expand_markdown_image_urls(content: str, base_url: str) -> str:
+    def replace(match: re.Match) -> str:
+        alt, src = match.group(1), match.group(2)
+        return f"![{alt}]({_join_file_base_url(src, base_url)})"
+
+    return MARKDOWN_IMAGE_PATTERN.sub(replace, content)
 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
