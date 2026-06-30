@@ -1,17 +1,14 @@
-import asyncio
-import json
 import logging
-import os
 from typing import List, Tuple
 
-from app.core.config import settings
+from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_config_service import MemoryConfigService
-from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 # 定义用于LLM结构化输出的Pydantic模型
@@ -19,9 +16,11 @@ class FilteredTags(BaseModel):
     """用于接收LLM筛选后的核心标签列表的模型。"""
     meaningful_tags: List[str] = Field(..., description="从原始列表中筛选出的具有核心代表意义的名词列表。")
 
+
 class InterestTags(BaseModel):
     """用于接收LLM筛选后的兴趣活动标签列表的模型。"""
     interest_tags: List[str] = Field(..., description="从原始列表中筛选出的代表用户兴趣活动的标签列表。")
+
 
 async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
     """
@@ -40,35 +39,29 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
     try:
         # Get config_id using get_end_user_connected_config
         with get_db_context() as db:
-            from app.services.memory_agent_service import (
-                get_end_user_connected_config,
-            )
-            
-            connected_config = get_end_user_connected_config(end_user_id, db)
-            config_id = connected_config.get("memory_config_id")
-            workspace_id = connected_config.get("workspace_id")
-            
-            if not config_id and not workspace_id:
+            config_service = MemoryConfigService(db)
+            config_id = config_service.get_config_id_by_end_user(end_user_id)
+
+            if not config_id:
                 raise ValueError(
                     f"No memory_config_id found for end_user_id: {end_user_id}. "
                     "Please ensure the user has a valid memory configuration."
                 )
-            
+
             # Use the config_id to get the proper LLM client with workspace fallback
-            config_service = MemoryConfigService(db)
+
             memory_config = config_service.load_memory_config(
-                config_id=config_id,
-                workspace_id=workspace_id
+                config_id=config_id
             )
-            
+
             if not memory_config.llm_model_id:
                 raise ValueError(
                     f"No llm_model_id found in memory config {config_id}. "
                     "Please configure a valid LLM model."
                 )
-            
+
             factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(memory_config.llm_model_id)
+            llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
 
         # 3. 构建Prompt
         tag_list_str = ", ".join(tags)
@@ -97,6 +90,7 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
         logger.warning(f"LLM筛选不可用，降级使用原始标签: {e}")
         return tags
 
+
 async def filter_interests_with_llm(tags: List[str], end_user_id: str, language: str = "zh") -> List[str]:
     """
     使用LLM从标签列表中筛选出代表用户兴趣活动的标签。
@@ -113,22 +107,15 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
     """
     try:
         with get_db_context() as db:
-            from app.services.memory_agent_service import (
-                get_end_user_connected_config,
-            )
-            connected_config = get_end_user_connected_config(end_user_id, db)
-            config_id = connected_config.get("memory_config_id")
-            workspace_id = connected_config.get("workspace_id")
-
-            if not config_id and not workspace_id:
+            config_service = MemoryConfigService(db)
+            config_id = config_service.get_config_id_by_end_user(end_user_id)
+            if not config_id:
                 raise ValueError(
                     f"No memory_config_id found for end_user_id: {end_user_id}."
                 )
 
-            config_service = MemoryConfigService(db)
             memory_config = config_service.load_memory_config(
                 config_id=config_id,
-                workspace_id=workspace_id
             )
 
             if not memory_config.llm_model_id:
@@ -137,7 +124,7 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
                 )
 
             factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(memory_config.llm_model_id)
+            llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
 
         tag_list_str = ", ".join(tags)
         from app.core.memory.utils.prompt.prompt_utils import render_interest_filter_prompt
@@ -162,10 +149,10 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
 
 
 async def get_raw_tags_from_db(
-    connector: Neo4jConnector,
-    end_user_id: str,
-    limit: int,
-    by_user: bool = False
+        connector: Neo4jConnector,
+        end_user_id: str,
+        limit: int,
+        by_user: bool = False
 ) -> List[Tuple[str, int]]:
     """
     TODO: not accurate tag extraction
@@ -208,13 +195,14 @@ async def get_raw_tags_from_db(
         limit=limit,
         names_to_exclude=names_to_exclude
     )
-    
+
     return [(record["name"], record["frequency"]) for record in results]
 
+
 async def get_raw_tags_batch(
-    connector: Neo4jConnector,
-    end_user_ids: List[str],
-    limit: int
+        connector: Neo4jConnector,
+        end_user_ids: List[str],
+        limit: int
 ) -> List[Tuple[str, int]]:
     """
     批量查询多个用户的实体标签频率（单次 Cypher 查询替代 N 次循环）。
@@ -251,6 +239,7 @@ async def get_raw_tags_batch(
 
     return [(record["name"], record["frequency"]) for record in results]
 
+
 async def get_hot_memory_tags(end_user_id: str, limit: int = 10, by_user: bool = False) -> List[Tuple[str, int]]:
     """
     获取原始标签，然后使用LLM进行筛选，返回最终的热门标签列表。
@@ -269,7 +258,7 @@ async def get_hot_memory_tags(end_user_id: str, limit: int = 10, by_user: bool =
         raise ValueError(
             "end_user_id is required. Please provide a valid end_user_id or user_id."
         )
-    
+
     # 使用项目的Neo4jConnector
     connector = Neo4jConnector()
     try:
@@ -296,7 +285,9 @@ async def get_hot_memory_tags(end_user_id: str, limit: int = 10, by_user: bool =
         # 确保关闭连接
         await connector.close()
 
-async def get_interest_distribution(end_user_id: str, limit: int = 10, by_user: bool = False, language: str = "zh") -> List[Tuple[str, int]]:
+
+async def get_interest_distribution(end_user_id: str, limit: int = 10, by_user: bool = False, language: str = "zh") -> \
+List[Tuple[str, int]]:
     """
     获取用户的兴趣分布标签。
     

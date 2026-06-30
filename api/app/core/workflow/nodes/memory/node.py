@@ -9,7 +9,6 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.memory.config import MemoryReadNodeConfig, MemoryWriteNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
-from app.db import get_db_context
 from app.schemas import FileInput
 
 
@@ -37,7 +36,7 @@ class MemoryReadNode(BaseNode):
 
         memory_service = MemoryService(
             storage_type=state["memory_storage_type"],
-            config_id=str(self.typed_config.config_id),
+            config_id=self.typed_config.config_id,
             end_user_id=end_user_id,
             user_rag_memory_id=state["user_rag_memory_id"],
             conversation_id=variable_pool.get_value("sys.conversation_id"),
@@ -124,8 +123,6 @@ class MemoryWriteNode(BaseNode):
                 "content": self._render_template(content, variable_pool),
                 "files": file_info
             })
-
-        from app.core.memory.memory_service import MemoryService
 
         conversation_id = variable_pool.get_value("sys.conversation_id") or ""
         workspace_id = str(state.get("workspace_id", "") or "")

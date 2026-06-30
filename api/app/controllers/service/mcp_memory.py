@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 mcp = FastMCP("记忆服务")
 
 
-def _resolve_context() -> tuple[uuid.UUID, str, str, str]:
+def _resolve_context() -> tuple[uuid.UUID, str, uuid.UUID, str]:
     """Return (workspace_id, end_user_id, config_id, storage_type) from the middleware."""
     ws_id = mcp_workspace_id.get()
     eu_id = mcp_end_user_id.get()
