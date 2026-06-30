@@ -1,12 +1,16 @@
+import base64
+import binascii
 import logging
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import requests
+from PIL import Image
 
 
 LOGGER = logging.getLogger(__name__)
@@ -14,6 +18,12 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_MINERU_V3_APISERVER = "http://183.147.142.122:18000"
 COMPLETED_STATUSES = {"completed", "complete", "success", "succeeded", "done", "finished"}
 FAILED_STATUSES = {"failed", "fail", "error", "errored", "canceled", "cancelled"}
+
+
+@dataclass
+class MinerUV3Result:
+    markdown: str
+    images: dict[str, Image.Image]
 
 
 def _env_float(name: str, default: float | int) -> float:
@@ -63,6 +73,16 @@ class MinerUV3Client:
         end_page_id: int,
         callback: Callable | None = None,
     ) -> str:
+        return self.parse(file_name, binary, start_page_id, end_page_id, callback).markdown
+
+    def parse(
+        self,
+        file_name: str,
+        binary: bytes,
+        start_page_id: int,
+        end_page_id: int,
+        callback: Callable | None = None,
+    ) -> MinerUV3Result:
         if not self.api_server:
             raise RuntimeError("[MinerUV3] service unavailable: MINERU_V3_APISERVER is not configured")
         if binary is None:
@@ -72,11 +92,13 @@ class MinerUV3Client:
         task_id = self._submit_task(file_name, binary, start_page_id, end_page_id, callback)
         self._poll_task(task_id, callback)
         result_payload = self._fetch_result(task_id)
-        markdown = self._extract_markdown(result_payload, file_name)
+        file_result = self._extract_file_result(result_payload, file_name)
+        markdown = self._extract_markdown(file_result, file_name)
+        images = self._extract_images(file_result)
         LOGGER.info("[MinerUV3] markdown extracted: chars=%s", len(markdown))
         if callback:
             callback(0.70, "MinerU V3 markdown extracted.")
-        return markdown
+        return MinerUV3Result(markdown=markdown, images=images)
 
     def _submit_task(
         self,
@@ -166,7 +188,7 @@ class MinerUV3Client:
             "return_middle_json": "false",
             "return_model_output": "false",
             "return_content_list": "false",
-            "return_images": "false",
+            "return_images": "true",
             "response_format_zip": "false",
             "return_original_file": "false",
             "client_side_output_generation": "false",
@@ -180,7 +202,7 @@ class MinerUV3Client:
             raise RuntimeError(f"[MinerUV3] missing task_id in task response: keys={list(payload.keys())}")
         return str(task_id)
 
-    def _extract_markdown(self, payload: dict[str, Any], file_name: str) -> str:
+    def _extract_file_result(self, payload: dict[str, Any], file_name: str) -> dict[str, Any]:
         file_stem = Path(file_name).stem
         results = payload.get("results")
         if not isinstance(results, dict):
@@ -188,9 +210,38 @@ class MinerUV3Client:
         file_result = results.get(file_stem)
         if not isinstance(file_result, dict):
             raise RuntimeError(f"[MinerUV3] missing markdown content in parse result: results.{file_stem} missing")
+        return file_result
+
+    def _extract_markdown(self, file_result: dict[str, Any], file_name: str) -> str:
+        file_stem = Path(file_name).stem
         markdown = file_result.get("md_content")
         if markdown is None:
             raise RuntimeError(f"[MinerUV3] missing markdown content in parse result: results.{file_stem}.md_content missing")
         if not isinstance(markdown, str) or not markdown.strip():
             raise RuntimeError("[MinerUV3] empty markdown content")
         return markdown
+
+    def _extract_images(self, file_result: dict[str, Any]) -> dict[str, Image.Image]:
+        raw_images = file_result.get("images") or {}
+        if not isinstance(raw_images, dict):
+            LOGGER.warning("[MinerUV3] images field is not a dict, skipping image payloads")
+            return {}
+
+        images: dict[str, Image.Image] = {}
+        for name, payload in raw_images.items():
+            image = self._decode_image_payload(str(name), payload)
+            if image is not None:
+                images[Path(str(name)).name] = image
+        return images
+
+    def _decode_image_payload(self, name: str, payload: Any) -> Image.Image | None:
+        if not isinstance(payload, str) or not payload:
+            LOGGER.warning("[MinerUV3] image payload skipped: name=%s reason=non-string", name)
+            return None
+        encoded = payload.split(",", 1)[1] if payload.startswith("data:") and "," in payload else payload
+        try:
+            binary = base64.b64decode(encoded, validate=True)
+            return Image.open(BytesIO(binary)).convert("RGB")
+        except (binascii.Error, OSError, ValueError) as exc:
+            LOGGER.warning("[MinerUV3] image payload skipped: name=%s error=%s", name, exc)
+            return None
