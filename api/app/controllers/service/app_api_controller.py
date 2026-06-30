@@ -581,7 +581,7 @@ async def get_message_suggested_questions_v1(
         workspace_id=api_key_auth.workspace_id,
         message_id=message_id,
     )
-    return {"result": "success", "data": suggested_questions}
+    return success(data=suggested_questions)
 
 
 @router.get("/info", summary="获取应用基本信息")
