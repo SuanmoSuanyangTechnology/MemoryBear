@@ -2240,6 +2240,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       pleaseSave: 'Displayed only once, please save it properly',
       basicInfo: 'Basic Information',
       regenerate: 'Regenerate',
+      endpointConfig: 'Endpoint Configuration',
     },
     tool: {
       mcp: 'MCP Services',
