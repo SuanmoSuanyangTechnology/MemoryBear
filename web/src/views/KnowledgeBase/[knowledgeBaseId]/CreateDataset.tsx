@@ -614,8 +614,6 @@ const CreateDataset = () => {
   const handleChangeProcessingMethod = (method: ProcessingMethod) => {
     if (method === 'directBlock') {
       setBlockSize(512)
-    } else {
-      setBlockSize(130)
     }
     setProcessingMethod(method)
   }
