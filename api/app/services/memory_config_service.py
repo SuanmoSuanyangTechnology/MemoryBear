@@ -637,7 +637,7 @@ class MemoryConfigService:
             self,
             workspace: Workspace,
             scene_id: uuid.UUID | None = None,
-            pruing_sence_name: str | None = None,
+            pruing_scene_name: str | None = None,
     ):
         from app.models.memory_config_model import MemoryConfig as DBMemoryConfig
         config_id = uuid.uuid4()
@@ -651,7 +651,7 @@ class MemoryConfigService:
             embedding_id=str(workspace.embedding) if workspace.embedding else None,
             rerank_id=str(workspace.rerank) if workspace.rerank else None,
             scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
-            pruning_scene=pruing_sence_name,  # 语义剪枝场景直接使用 scene_name
+            pruning_scene=pruing_scene_name,  # 语义剪枝场景直接使用 scene_name
             state=True,  # Active by default
             is_default=True,  # Mark as workspace default
         )
