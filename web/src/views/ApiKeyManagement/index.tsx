@@ -2,11 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:50 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 12:07:40
+ * @Last Modified time: 2026-06-30 16:00:54
  */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, App, Flex } from 'antd';
+import { Button, App, Flex, Space } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
 import clsx from 'clsx';
 import copy from 'copy-to-clipboard'
 
@@ -29,7 +30,7 @@ import RbDescriptions from '@/components/RbDescriptions';
  */
 const ApiKeyManagement: React.FC = () => {
   // Hooks
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { message } = App.useApp();
   const deleteConfirm = useDeleteConfirm();
   
@@ -79,12 +80,21 @@ const ApiKeyManagement: React.FC = () => {
     copy(content)
     message.success(t('common.copySuccess'))
   }
+  const handleGotoEndpointConfig = () => {
+    window.open(`/docs/?lang=${i18n.language}`, '_blank')
+  }
   return (
     <>
       <Flex justify="flex-end" className="rb:mb-3!">
-        <Button type="primary" onClick={() => handleEdit()}>
-          {t('apiKey.createApiKey')}
-        </Button>
+        <Space>
+          <Button onClick={() => handleGotoEndpointConfig()}>
+            {t('apiKey.endpointConfig')}
+            <ExportOutlined />
+          </Button>
+          <Button type="primary" onClick={() => handleEdit()}>
+            {t('apiKey.createApiKey')}
+          </Button>
+        </Space>
       </Flex>
 
       <PageScrollList<ApiKey, { is_active: boolean; type: string }>
