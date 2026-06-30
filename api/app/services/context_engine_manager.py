@@ -264,6 +264,38 @@ class ContextEngineManager:
         return {"role": msg.role, "content": content}
 
     @staticmethod
+    def _get_cross_session_recent_limit(context_config: dict[str, Any]) -> int:
+        if not context_config.get("cross_session_recent_enabled"):
+            return 0
+        try:
+            return max(int(context_config.get("cross_session_recent_limit") or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _get_cross_session_recent_records(
+            self,
+            *,
+            conversation_id: uuid.UUID,
+            context_config: dict[str, Any],
+    ) -> list[Any]:
+        limit = self._get_cross_session_recent_limit(context_config)
+        if limit <= 0:
+            return []
+
+        conversation = self.conversation_service.conversation_repo.get_conversation_by_conversation_id(
+            conversation_id
+        )
+        if not conversation or not getattr(conversation, "user_id", None):
+            return []
+
+        return self.conversation_service.message_repo.get_recent_messages_from_other_conversations(
+            app_id=conversation.app_id,
+            user_id=conversation.user_id,
+            exclude_conversation_id=conversation_id,
+            limit=limit,
+        )
+
+    @staticmethod
     def _trim_messages_after_boundary(messages: list[Any], state: Optional[dict[str, Any]]) -> list[Any]:
         if not state:
             return list(messages)
@@ -342,11 +374,19 @@ class ContextEngineManager:
                 conversation_id=conversation_id,
                 since_at=state.get("summarized_until_at") if state else None,
             )
+            cross_session_records = self._get_cross_session_recent_records(
+                conversation_id=conversation_id,
+                context_config=context_config,
+            )
             recent_records = self._trim_messages_after_boundary(messages, state)
             recent_messages = [
                 self._serialize_history_message(msg, current_provider, current_is_omni)
-                for msg in recent_records
+                for msg in cross_session_records
             ]
+            recent_messages.extend([
+                self._serialize_history_message(msg, current_provider, current_is_omni)
+                for msg in recent_records
+            ])
             options = self._build_options(
                 context_config,
                 window_size=legacy_max_history,
@@ -367,6 +407,7 @@ class ContextEngineManager:
                     "conversation_id": str(conversation_id),
                     "scope_key": scope_key,
                     "provider": provider_name,
+                    "cross_session_count": len(cross_session_records),
                     "recent_count": len(recent_messages),
                     "prepared_count": len(normalized),
                 }
@@ -495,15 +536,24 @@ class ContextEngineManager:
         try:
             state = await self._get_state(conversation_uuid, scope_key)
             normalized_messages = self._normalize_workflow_messages(workflow_messages)
+            cross_session_records = self._get_cross_session_recent_records(
+                conversation_id=conversation_uuid,
+                context_config=context_config,
+            )
             recent_messages = self._trim_workflow_messages_after_seq(
                 normalized_messages,
                 state.get("summarized_until_seq") if state else None,
             )
+            provider_recent_messages = [
+                self._serialize_history_message(msg, None, None)
+                for msg in cross_session_records
+            ]
+            provider_recent_messages.extend(self._strip_workflow_seq(recent_messages))
             prepared = await provider.prepare_messages(
                 session_id=self._build_session_id(conversation_uuid, scope_key),
                 system_prompt=None,
                 current_input=current_input,
-                recent_messages=self._strip_workflow_seq(recent_messages),
+                recent_messages=provider_recent_messages,
                 summary_text=state.get("summary_text") if state else None,
                 options=self._build_options(
                     context_config,
@@ -521,7 +571,8 @@ class ContextEngineManager:
                     "conversation_id": str(conversation_uuid),
                     "scope_key": scope_key,
                     "provider": provider_name,
-                    "recent_count": len(recent_messages),
+                    "cross_session_count": len(cross_session_records),
+                    "recent_count": len(provider_recent_messages),
                     "prepared_count": len(normalized),
                 }
             )
