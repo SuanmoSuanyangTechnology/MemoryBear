@@ -34,6 +34,7 @@ from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import get_app_service, AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
 from app.services.intervention_registry import submit_intervention
+from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 
@@ -93,22 +94,49 @@ def _checkAppConfig(release: AppRelease):
         raise BusinessException("不支持的应用类型", BizCode.APP_TYPE_NOT_SUPPORTED)
 
 
-@router.get("/variable", summary="获取 Agent 变量配置")
+def _parse_release_config(release: AppRelease) -> dict:
+    config = release.config or {}
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            config = {}
+    return config if isinstance(config, dict) else {}
+
+
+def _variables_from_release(release: AppRelease) -> list:
+    """从当前发布版本快照提取应用变量定义（与公开分享 /config 接口逻辑一致）。"""
+    config = _parse_release_config(release)
+    if release.type == AppType.AGENT:
+        cfg = agent_config_4_app_release(release)
+        cfg = enrich_agent_config(cfg)
+        variables = app_schema.AgentConfig.model_validate(cfg).variables
+        return [v.model_dump(mode="json") for v in variables]
+    if release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        return WorkflowService.get_start_node_variables(config)
+    if release.type == AppType.MULTI_AGENT:
+        return config.get("variables") or []
+    raise BusinessException(f"不支持的应用类型: {release.type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+@router.get("/variable", summary="获取应用变量配置")
 @require_api_key(scopes=["app"])
-async def get_agent_variables(
+async def get_app_variables(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
         app_service: Annotated[AppService, Depends(get_app_service)] = None,
 ):
-    """获取 API Key 绑定应用的 Agent 变量定义列表（与内部 /config 接口的 variables 字段一致）。"""
+    """获取 API Key 绑定应用的变量定义列表（来自当前发布版本的 config 快照）。"""
     app_id = _get_app_id(api_key_auth)
     workspace_id = api_key_auth.workspace_id
 
-    cfg = app_service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
-    cfg = enrich_agent_config(cfg)
-    variables = app_schema.AgentConfig.model_validate(cfg).variables
-    return success(data=[v.model_dump(mode="json") for v in variables])
+    app_service.get_app(app_id, workspace_id)
+    release = app_service.get_current_release(app_id=app_id, workspace_id=workspace_id)
+    if not release:
+        raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
+
+    return success(data=_variables_from_release(release))
 
 
 @router.post("/chat")
@@ -564,12 +592,14 @@ async def get_app_basic_info_v1(
         db: Session = Depends(get_db),
         app_service: Annotated[AppService, Depends(get_app_service)] = None,
 ):
-    """获取 API Key 绑定应用的详细信息，业务逻辑与 GET /api/apps/{app_id} 一致。"""
+    """获取 API Key 绑定应用的当前发布版本信息（数据来自 app_releases 快照，含 config）。"""
     app_id = _get_app_id(api_key_auth)
     workspace_id = api_key_auth.workspace_id
 
     logger.info(f"V1 get app basic info - app_id: {app_id}, workspace: {workspace_id}")
 
-    app = app_service.get_app(app_id, workspace_id)
-    app_schema_obj = app_service._convert_to_schema(app, workspace_id)
-    return success(data=app_schema_obj.model_dump(mode="json"))
+    app_service.get_app(app_id, workspace_id)
+    release = app_service.get_current_release(app_id=app_id, workspace_id=workspace_id)
+    if not release:
+        raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
+    return success(data=app_schema.AppRelease.model_validate(release).model_dump(mode="json"))
