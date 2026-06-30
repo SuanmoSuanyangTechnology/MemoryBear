@@ -7,7 +7,7 @@
 认证方式: API Key (@require_api_key)
 """
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from starlette.responses import Response
@@ -16,17 +16,15 @@ from starlette.responses import Response
 from app.controllers import memory_controller
 from app.core.api_key_auth import require_api_key, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace
-from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
-from app.core.response_utils import success, fail
+from app.core.response_utils import success
 from app.db import get_db, get_db_read
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, UserInput
-from app.services.memory_agent_service import get_end_user_connected_config as get_config
-
+from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
 logger = get_business_logger()
@@ -65,10 +63,9 @@ async def read_memory_sync(
         validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
 
     logger.info(f"V1 memory read (sync) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
-
-    memory_config = get_config(payload.end_user_id, db)
+    config_id = MemoryConfigService(db).get_config_id_by_end_user(payload.end_user_id)
     service = MemoryService(
-        memory_config["memory_config_id"],
+        config_id,
         end_user_id=payload.end_user_id,
     )
     memory = await service.read(payload.message, search_switch=SearchStrategy(payload.search_switch))

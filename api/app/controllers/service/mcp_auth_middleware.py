@@ -25,6 +25,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.api_key_auth import extract_api_key_from_request
 from app.core.error_codes import BizCode
 from app.db import get_db_context
+from app.services.memory_config_service import MemoryConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ mcp_workspace_id: ContextVar[uuid.UUID | None] = ContextVar(
 mcp_end_user_id: ContextVar[str | None] = ContextVar(
     "mcp_end_user_id", default=None
 )
-mcp_config_id: ContextVar[str | None] = ContextVar(
+mcp_config_id: ContextVar[uuid.UUID | None] = ContextVar(
     "mcp_config_id", default=None
 )
 mcp_storage_type: ContextVar[str | None] = ContextVar(
@@ -104,7 +105,7 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             end_user_id = str(end_user.id)
 
             # 4. Resolve config_id: end_user → workspace default
-            config_id = self._resolve_config_id(db, end_user, workspace_id)
+            config_id = self._resolve_config_id(db, workspace_id)
             if config_id is None:
                 return self._unauthorized(
                     "未找到可用的记忆配置，请先为 workspace 设置默认配置",
@@ -128,18 +129,8 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
         return EndUserRepository(db).get_end_user_by_other_id(workspace_id, other_id)
 
     @staticmethod
-    def _resolve_config_id(db, end_user, workspace_id: uuid.UUID) -> str | None:
-        if end_user.memory_config_id is not None:
-            return str(end_user.memory_config_id)
-
-        from app.services.memory_config_service import MemoryConfigService
-
-        config_service = MemoryConfigService(db)
-        default_config = config_service.get_workspace_default_config(workspace_id)
-        if default_config is not None:
-            return str(default_config.config_id)
-
-        return None
+    def _resolve_config_id(db, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        return MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
 
     @staticmethod
     def _resolve_storage_type(db, workspace_id: uuid.UUID) -> str:
