@@ -548,8 +548,9 @@ class KnowledgeRetrievalService:
         if not knowledge or not knowledge.llm_id:
             return None
 
-        config = ModelConfigService.get_model_by_id(db=db, model_id=knowledge.llm_id)
-        if not config:
+        try:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=knowledge.llm_id)
+        except BusinessException:
             return None
 
         api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id, tenant_id=tenant_id)
