@@ -319,8 +319,13 @@ class AppService:
                 multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
             from app.repositories.tool_repository import ToolRepository
+            from app.models import App
 
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+            db_app = self.db.get(App, app_id)
+            if not db_app:
+                raise BusinessException("应用不存在", BizCode.NOT_FOUND)
+
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(db_app.workspace_id))
             model_api_key = ModelApiKeyService.get_available_api_key(
                 self.db,
                 multi_agent_config.default_model_config_id,
