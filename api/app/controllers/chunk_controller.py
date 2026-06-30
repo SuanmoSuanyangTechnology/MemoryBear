@@ -53,7 +53,7 @@ def _join_file_base_url(url: str, base_url: str) -> str:
 
 
 def _expand_chunk_image_download_urls(result: dict, base_url: str | None = None) -> dict:
-    file_base_url = base_url if base_url is not None else settings.FILE_LOCAL_SERVER_URL
+    file_base_url = base_url if base_url is not None else settings.BASE_URL
     for item in result.get("items", []):
         _expand_chunk_image_download_url(item, file_base_url)
     return result
