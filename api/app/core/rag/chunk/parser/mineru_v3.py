@@ -86,6 +86,7 @@ class MinerUV3Parser(DocumentParser):
                 continue
             if asset_metadata:
                 block.metadata.update(asset_metadata)
+                self._replace_image_markdown_url(block, asset_metadata.get("image_download_url"))
                 stored_count += 1
                 LOGGER.info(
                     "[MinerUV3] image stored: index=%s total=%s file_id=%s content_type=%s size=%s",
@@ -99,6 +100,12 @@ class MinerUV3Parser(DocumentParser):
 
         LOGGER.info("[MinerUV3] image storage summary: total=%s stored=%s failed=%s", total, stored_count, failed_count)
         self._callback(ctx, 0.77, f"MinerU V3 images stored: stored={stored_count}, failed={failed_count}.")
+
+    def _replace_image_markdown_url(self, block, image_url: str | None) -> None:
+        if not image_url:
+            return
+        alt = str(block.metadata.get("alt") or "")
+        block.content = f"![{alt}]({image_url})"
 
     def _enhance_image_blocks(self, blocks, ctx) -> None:
         enhance_image_blocks_with_vision(
