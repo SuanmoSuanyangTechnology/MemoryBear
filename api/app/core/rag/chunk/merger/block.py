@@ -97,11 +97,10 @@ class BlockMerger(ChunkMerger):
                 continue
 
             if block.type is ParsedBlockType.IMAGE:
-                content = block.metadata.get("vision_text") or block.content
                 logical_chunks.append(
                     LogicalChunk(
                         type=LogicalChunkType.IMAGE,
-                        content=content,
+                        content=block.content,
                         image=block.image,
                         positions=deepcopy(block.positions),
                         metadata=self._metadata_for_block(block),

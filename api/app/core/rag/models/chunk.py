@@ -29,6 +29,19 @@ class DocumentChunk(BaseModel):
     children: list[ChildDocumentChunk] | None = None
 
 
+def chunk_retrieval_content(chunk: DocumentChunk) -> str:
+    metadata = chunk.metadata or {}
+    chunk_type = metadata.get("chunk_type")
+    if chunk_type == "qa":
+        return metadata.get("question") or chunk.page_content
+
+    vision_text = metadata.get("vision_text")
+    if isinstance(vision_text, str) and vision_text.strip():
+        return vision_text
+
+    return chunk.page_content
+
+
 class GeneralStructureChunk(BaseModel):
     """
     General Structure Chunk.
