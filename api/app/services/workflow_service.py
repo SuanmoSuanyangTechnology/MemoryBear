@@ -5693,8 +5693,7 @@ class WorkflowService:
                                     intervention_list, first_node_id, timeout_at
                                 )
 
-                        execution.status = "waiting_human"
-                        execution.context = {
+                        _hitl_context = {
                             **(execution.context or {}),
                             "human_intervention": {
                                 "message_id": str(message_id),
@@ -5704,7 +5703,15 @@ class WorkflowService:
                                 "intervention_backlog": intervention_list,
                             },
                         }
+                        self.db.query(WorkflowExecution).filter(
+                            WorkflowExecution.execution_id == execution.execution_id
+                        ).update(
+                            {"status": "waiting_human", "context": _hitl_context},
+                            synchronize_session=False,
+                        )
                         self.db.commit()
+                        execution.status = "waiting_human"
+                        execution.context = _hitl_context
                         self.db.close()
 
                         # Save the user message so that the conversation title
@@ -5862,7 +5869,7 @@ class WorkflowService:
                             "resolved_at": to_iso_z(utcnow_naive()),
                             "resolved_kind": kind,
                         }
-                        execution.context = {
+                        _resolved_context = {
                             **(execution.context or {}),
                             "human_intervention": {
                                 **intx_ctx,
@@ -5872,7 +5879,14 @@ class WorkflowService:
                                 ],
                             },
                         }
+                        self.db.query(WorkflowExecution).filter(
+                            WorkflowExecution.execution_id == execution.execution_id
+                        ).update(
+                            {"context": _resolved_context},
+                            synchronize_session=False,
+                        )
                         self.db.commit()
+                        execution.context = _resolved_context
                         self.db.close()
 
                     # Handle timeout signal from the background scheduler
