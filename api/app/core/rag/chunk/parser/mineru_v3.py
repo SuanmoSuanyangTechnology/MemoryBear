@@ -1,14 +1,12 @@
 import logging
-import time
 from pathlib import Path
 
-from app.core.rag.app.picture import vision_llm_chunk
 from app.core.rag.chunk.context import ParsedBlockType, ParseResult
 from app.core.rag.chunk.parser.base import DocumentParser
+from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.image_storage import store_mineru_v3_image
 from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Client
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
-from app.core.rag.prompts.generator import vision_llm_figure_describe_prompt
 
 
 LOGGER = logging.getLogger(__name__)
@@ -103,85 +101,14 @@ class MinerUV3Parser(DocumentParser):
         self._callback(ctx, 0.77, f"MinerU V3 images stored: stored={stored_count}, failed={failed_count}.")
 
     def _enhance_image_blocks(self, blocks, ctx) -> None:
-        prompt = vision_llm_figure_describe_prompt(lang=getattr(ctx.vision_model, "lang", ctx.lang))
-        image_blocks = [block for block in blocks if block.type is ParsedBlockType.IMAGE and block.image is not None]
-        total = len(image_blocks)
-        if total == 0:
-            LOGGER.info("[MinerUV3] no markdown images available for vision enhancement")
-            return
-
-        started_at = time.monotonic()
-        success_count = 0
-        empty_count = 0
-        failure_count = 0
-        LOGGER.info("[MinerUV3] image vision enhancement start: total=%s", total)
-        self._callback(ctx, 0.71, f"MinerU V3 image vision enhancement start: total={total}.")
-
-        for index, block in enumerate(image_blocks, start=1):
-            src = str(block.metadata.get("src", ""))
-            image_started_at = time.monotonic()
-            progress = 0.71 + (0.07 * (index - 1) / total)
-            LOGGER.info(
-                "[MinerUV3] image vision enhancement processing: index=%s total=%s src=%s",
-                index,
-                total,
-                src,
-            )
-            self._callback(ctx, progress, f"MinerU V3 image vision enhancement: {index}/{total}.")
-            try:
-                vision_text = vision_llm_chunk(
-                    binary=block.image,
-                    vision_model=ctx.vision_model,
-                    prompt=prompt,
-                    callback=ctx.callback,
-                )
-            except Exception as exc:
-                failure_count += 1
-                elapsed = time.monotonic() - image_started_at
-                LOGGER.warning(
-                    "[MinerUV3] image vision enhancement failed: index=%s total=%s src=%s elapsed=%.2fs error=%s",
-                    index,
-                    total,
-                    src,
-                    elapsed,
-                    exc,
-                )
-                self._callback(ctx, progress, f"MinerU V3 image vision enhancement failed: {index}/{total}.")
-                continue
-            if vision_text:
-                block.metadata["vision_text"] = vision_text
-                success_count += 1
-            else:
-                empty_count += 1
-            elapsed = time.monotonic() - image_started_at
-            LOGGER.info(
-                "[MinerUV3] image vision enhancement finished: index=%s total=%s src=%s elapsed=%.2fs text_chars=%s",
-                index,
-                total,
-                src,
-                elapsed,
-                len(vision_text or ""),
-            )
-            self._callback(
-                ctx,
-                0.71 + (0.07 * index / total),
-                f"MinerU V3 image vision enhancement finished: {index}/{total}.",
-            )
-
-        total_elapsed = time.monotonic() - started_at
-        LOGGER.info(
-            "[MinerUV3] image vision enhancement summary: total=%s success=%s empty=%s failed=%s elapsed=%.2fs",
-            total,
-            success_count,
-            empty_count,
-            failure_count,
-            total_elapsed,
-        )
-        self._callback(
-            ctx,
-            0.79,
-            "MinerU V3 image vision enhancement finished: "
-            f"success={success_count}, empty={empty_count}, failed={failure_count}.",
+        enhance_image_blocks_with_vision(
+            blocks,
+            vision_model=ctx.vision_model,
+            callback=ctx.callback,
+            log_prefix="MinerUV3",
+            lang=ctx.lang,
+            progress_start=0.77,
+            progress_span=0.02,
         )
 
     def _callback(self, ctx, progress, message: str) -> None:
