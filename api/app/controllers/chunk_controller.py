@@ -2,7 +2,6 @@ import json
 import os
 import csv
 import io
-import re
 import time
 from typing import Any, Optional
 import uuid
@@ -34,61 +33,11 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
 
-MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-
 router = APIRouter(
     prefix="/chunks",
     tags=["chunks"],
     dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
 )
-
-
-def _join_file_base_url(url: str, base_url: str) -> str:
-    if not isinstance(url, str) or not url.startswith("/") or url.startswith("//"):
-        return url
-    base = (base_url or "").rstrip("/")
-    if not base:
-        return url
-    path = url
-    if base.endswith("/api") and path.startswith("/api/"):
-        path = path[len("/api"):]
-    return f"{base}{path}"
-
-
-def _expand_chunk_image_download_urls(result: dict, base_url: str | None = None) -> dict:
-    file_base_url = base_url if base_url is not None else settings.BASE_URL
-    for item in result.get("items", []):
-        _expand_chunk_image_download_url(item, file_base_url)
-    return result
-
-
-def _expand_chunk_image_download_url(chunk: Any, base_url: str) -> None:
-    metadata = chunk.get("metadata") if isinstance(chunk, dict) else getattr(chunk, "metadata", None)
-    if isinstance(metadata, dict):
-        image_download_url = metadata.get("image_download_url")
-        if isinstance(image_download_url, str):
-            metadata["image_download_url"] = _join_file_base_url(image_download_url, base_url)
-
-    page_content = chunk.get("page_content") if isinstance(chunk, dict) else getattr(chunk, "page_content", None)
-    if isinstance(page_content, str):
-        expanded_page_content = _expand_markdown_image_urls(page_content, base_url)
-        if isinstance(chunk, dict):
-            chunk["page_content"] = expanded_page_content
-        else:
-            chunk.page_content = expanded_page_content
-
-    children = chunk.get("children") if isinstance(chunk, dict) else getattr(chunk, "children", None)
-    if children:
-        for child in children:
-            _expand_chunk_image_download_url(child, base_url)
-
-
-def _expand_markdown_image_urls(content: str, base_url: str) -> str:
-    def replace(match: re.Match) -> str:
-        alt, src = match.group(1), match.group(2)
-        return f"![{alt}]({_join_file_base_url(src, base_url)})"
-
-    return MARKDOWN_IMAGE_PATTERN.sub(replace, content)
 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
@@ -574,7 +523,6 @@ async def get_chunks(
                             "has_next": page * pagesize < total_all,
                         },
                     }
-                    _expand_chunk_image_download_urls(result)
                     return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
 
                 # 内存分页 + 组装
@@ -582,7 +530,6 @@ async def get_chunks(
                 result = _build_nested_result(
                     paginated_parents, child_items_fallback, page, pagesize, total_parents
                 )
-                _expand_chunk_image_download_urls(result)
                 return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
 
             parent_doc_ids = [p.metadata["doc_id"] for p in parent_items]
@@ -618,7 +565,6 @@ async def get_chunks(
                 }
             }
 
-        _expand_chunk_image_download_urls(result)
         api_logger.info(f"Document chunk query successful: returned={len(result['items'])} records")
     except Exception as e:
         api_logger.error(f"Document chunk query failed: {str(e)}")

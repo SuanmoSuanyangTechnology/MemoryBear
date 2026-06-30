@@ -6,6 +6,7 @@ from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
+from app.core.config import settings
 from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Image
 from app.db import get_db_context
 from app.models.file_metadata_model import FileMetadata
@@ -90,8 +91,18 @@ def store_mineru_v3_image(
     )
     return {
         "image_file_id": str(file_id),
-        "image_download_url": f"/api/storage/permanent/{file_id}",
+        "image_download_url": _build_image_download_url(file_id),
     }
+
+
+def _build_image_download_url(file_id: uuid.UUID) -> str:
+    path = f"/api/storage/permanent/{file_id}"
+    base_url = (settings.BASE_URL or "").rstrip("/")
+    if not base_url:
+        return path
+    if base_url.endswith("/api") and path.startswith("/api/"):
+        path = path[len("/api"):]
+    return f"{base_url}{path}"
 
 
 def _parse_uuid(value: Any) -> uuid.UUID | None:
