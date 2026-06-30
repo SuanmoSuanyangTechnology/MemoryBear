@@ -301,8 +301,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 try:
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=str(cid),
-                        service_name="DataConfigService.pilot_run_stream"
+                        config_id=str(cid)
                     )
                     logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
                 except ConfigurationError as e:

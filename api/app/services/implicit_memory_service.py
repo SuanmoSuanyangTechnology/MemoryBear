@@ -6,12 +6,13 @@ profile building, data extraction, and provides high-level methods for analyzing
 user profiles from memory summaries.
 """
 
-import logging
 import asyncio
+import logging
 from datetime import datetime
 from typing import List, Optional
 
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from sqlalchemy.orm import Session
+
 from app.core.memory.analytics.implicit_memory.analyzers.dimension_analyzer import (
     DimensionAnalyzer,
 )
@@ -23,6 +24,7 @@ from app.core.memory.analytics.implicit_memory.analyzers.preference_analyzer imp
 )
 from app.core.memory.analytics.implicit_memory.data_source import MemoryDataSource
 from app.core.memory.analytics.implicit_memory.habit_detector import HabitDetector
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.implicit_memory_schema import (
     BehaviorHabit,
@@ -36,7 +38,6 @@ from app.schemas.implicit_memory_schema import (
 )
 from app.schemas.memory_config_schema import MemoryConfig
 from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -86,22 +87,13 @@ class ImplicitMemoryService:
             ValueError: If no memory configuration found for user
         """
         try:
-            from app.services.memory_agent_service import get_end_user_connected_config
             from app.services.memory_config_service import MemoryConfigService
-            
-            # Get user's connected config
-            connected_config = get_end_user_connected_config(self.end_user_id, self.db)
-            config_id = connected_config.get("memory_config_id")
-            workspace_id = connected_config.get("workspace_id")
-            
-            if config_id is None and workspace_id is None:
-                raise ValueError(f"No memory configuration found for end_user: {self.end_user_id}")
             
             # Load the memory configuration with workspace fallback
             config_service = MemoryConfigService(self.db)
+            config_id = config_service.get_config_id_by_end_user(self.end_user_id)
             memory_config = config_service.load_memory_config(
-                config_id=config_id,
-                workspace_id=workspace_id
+                config_id=config_id
             )
             
             logger.info(f"Loaded memory config {config_id} for end_user: {self.end_user_id}")

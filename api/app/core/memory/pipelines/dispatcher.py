@@ -817,7 +817,7 @@ def dispatch_single_message(
 async def dispatch_mcp_write(
     message: str,
     end_user_id: str,
-    config_id: str,
+    config_id: uuid.UUID,
     workspace_id: str,
     dialog_at: str = "",
 ) -> str:

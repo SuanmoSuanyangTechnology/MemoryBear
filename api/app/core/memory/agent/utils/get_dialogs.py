@@ -91,9 +91,7 @@ async def get_chunked_dialogs(
                 with get_db_context() as db:
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=config_id,
-                        workspace_id=workspace_id,
-                        service_name="semantic_pruning"
+                        config_id=config_id
                     )
                     
                     if memory_config:

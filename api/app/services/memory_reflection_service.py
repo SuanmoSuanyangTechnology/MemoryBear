@@ -156,7 +156,7 @@ class WorkspaceAppService:
         """
         try:
             memory_content = resolve_config_id(memory_content, self.db)
-            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, (memory_content))
+            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, memory_content)
 
             if memory_config_result:
                 return {
