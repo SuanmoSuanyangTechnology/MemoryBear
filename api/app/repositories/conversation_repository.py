@@ -541,7 +541,7 @@ class MessageRepository:
 
         stmt = stmt.order_by(Message.created_at)
         messages = list(self.db.scalars(stmt).all())
-        logger.info(
+        logger.debug(
             "Fetched messages since boundary",
             extra={
                 "conversation_id": str(conversation_id),
