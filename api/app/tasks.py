@@ -51,7 +51,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
 from app.db import get_db_context, get_db_read
-from app.models import App, AppRelease, Document, File, Knowledge, User
+from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
@@ -404,6 +404,9 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
             if db_knowledge is None:
                 raise ValueError(f"Knowledge {db_document.kb_id} not found")
+            db_workspace = db.query(Workspace).filter(Workspace.id == db_knowledge.workspace_id).first()
+            if db_workspace is None:
+                raise ValueError(f"Workspace {db_knowledge.workspace_id} not found")
 
             if not file_name:
                 file_name = db_document.file_name
@@ -418,6 +421,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 "file_name": db_document.file_name,
                 "file_created_at": to_timestamp_ms(db_document.created_at),
                 "knowledge_id": str(db_document.kb_id),
+                "tenant_id": str(db_workspace.tenant_id),
+                "workspace_id": str(db_knowledge.workspace_id),
                 "parent_child_mode": bool(db_document.is_parent_child_mode),
             }
             llm_config = None
@@ -494,6 +499,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 parser_config=parser_config,
                 is_root=False,
                 chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
+                tenant_id=document_info["tenant_id"],
+                workspace_id=document_info["workspace_id"],
+                knowledge_id=document_info["knowledge_id"],
+                document_id=document_info["id"],
+                source_file_id=document_info["file_id"],
+                source_file_name=document_info["file_name"],
             )
         else:
             res = chunk(
@@ -505,6 +516,12 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                tenant_id=document_info["tenant_id"],
+                workspace_id=document_info["workspace_id"],
+                knowledge_id=document_info["knowledge_id"],
+                document_id=document_info["id"],
+                source_file_id=document_info["file_id"],
+                source_file_name=document_info["file_name"],
             )
 
         progress_lines.append(f"{_progress_ts()} Finish parsing.")

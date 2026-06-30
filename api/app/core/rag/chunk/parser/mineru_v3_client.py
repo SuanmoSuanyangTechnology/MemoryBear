@@ -1,6 +1,7 @@
 import base64
 import binascii
 import logging
+import mimetypes
 import os
 import time
 from collections.abc import Callable
@@ -21,9 +22,18 @@ FAILED_STATUSES = {"failed", "fail", "error", "errored", "canceled", "cancelled"
 
 
 @dataclass
+class MinerUV3Image:
+    name: str
+    image: Image.Image
+    binary: bytes
+    content_type: str
+    file_ext: str
+
+
+@dataclass
 class MinerUV3Result:
     markdown: str
-    images: dict[str, Image.Image]
+    images: dict[str, MinerUV3Image]
 
 
 def _env_float(name: str, default: float | int) -> float:
@@ -221,27 +231,51 @@ class MinerUV3Client:
             raise RuntimeError("[MinerUV3] empty markdown content")
         return markdown
 
-    def _extract_images(self, file_result: dict[str, Any]) -> dict[str, Image.Image]:
+    def _extract_images(self, file_result: dict[str, Any]) -> dict[str, MinerUV3Image]:
         raw_images = file_result.get("images") or {}
         if not isinstance(raw_images, dict):
             LOGGER.warning("[MinerUV3] images field is not a dict, skipping image payloads")
             return {}
 
-        images: dict[str, Image.Image] = {}
+        images: dict[str, MinerUV3Image] = {}
         for name, payload in raw_images.items():
             image = self._decode_image_payload(str(name), payload)
             if image is not None:
                 images[Path(str(name)).name] = image
         return images
 
-    def _decode_image_payload(self, name: str, payload: Any) -> Image.Image | None:
+    def _decode_image_payload(self, name: str, payload: Any) -> MinerUV3Image | None:
         if not isinstance(payload, str) or not payload:
             LOGGER.warning("[MinerUV3] image payload skipped: name=%s reason=non-string", name)
             return None
+        content_type = self._extract_data_uri_content_type(payload) or mimetypes.guess_type(name)[0]
         encoded = payload.split(",", 1)[1] if payload.startswith("data:") and "," in payload else payload
         try:
             binary = base64.b64decode(encoded, validate=True)
-            return Image.open(BytesIO(binary)).convert("RGB")
+            raw_image = Image.open(BytesIO(binary))
+            image_format = raw_image.format
+            image = raw_image.convert("RGB")
         except (binascii.Error, OSError, ValueError) as exc:
             LOGGER.warning("[MinerUV3] image payload skipped: name=%s error=%s", name, exc)
             return None
+        if not content_type:
+            content_type = Image.MIME.get(image_format or "") or "application/octet-stream"
+        file_ext = Path(name).suffix.lower()
+        if not file_ext:
+            file_ext = mimetypes.guess_extension(content_type) or (f".{image_format.lower()}" if image_format else ".png")
+        if file_ext == ".jpe":
+            file_ext = ".jpg"
+        return MinerUV3Image(
+            name=Path(name).name,
+            image=image,
+            binary=binary,
+            content_type=content_type,
+            file_ext=file_ext,
+        )
+
+    def _extract_data_uri_content_type(self, payload: str) -> str | None:
+        if not payload.startswith("data:") or "," not in payload:
+            return None
+        metadata = payload.split(",", 1)[0]
+        content_type = metadata[5:].split(";", 1)[0].strip()
+        return content_type or None
