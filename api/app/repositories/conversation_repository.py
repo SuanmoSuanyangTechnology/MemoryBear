@@ -551,3 +551,46 @@ class MessageRepository:
             }
         )
         return messages
+
+    def get_recent_messages_from_other_conversations(
+            self,
+            *,
+            app_id: uuid.UUID,
+            user_id: str,
+            exclude_conversation_id: uuid.UUID,
+            limit: int,
+            current_only: bool = True,
+    ) -> list[Message]:
+        """读取同应用同用户其他会话的最近消息，结果按时间正序返回。"""
+        if not user_id or limit <= 0:
+            return []
+
+        stmt = (
+            select(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.app_id == app_id,
+                Conversation.user_id == user_id,
+                Conversation.id != exclude_conversation_id,
+                Message.is_deleted.is_not(True),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+
+        messages = list(self.db.scalars(stmt).all())
+        messages.reverse()
+        logger.info(
+            "Fetched recent messages from other conversations",
+            extra={
+                "app_id": str(app_id),
+                "user_id": user_id,
+                "exclude_conversation_id": str(exclude_conversation_id),
+                "returned": len(messages),
+                "current_only": current_only,
+            }
+        )
+        return messages
