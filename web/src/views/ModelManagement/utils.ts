@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:22 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 18:35:13
+ * @Last Modified time: 2026-06-30 15:10:52
  */
 /**
  * Utility functions for Model Management
@@ -15,6 +15,7 @@ import ollamaIcon from '@/assets/images/model/ollama.png'
 import openaiIcon from '@/assets/images/model/openai.png'
 import xinferenceIcon from '@/assets/images/model/xinference.png'
 import volcanoIcon from '@/assets/images/model/volcano.png'
+import speedbearIcon from '@/assets/images/logo.png'
 
 /**
  * Provider icon mapping
@@ -27,6 +28,7 @@ export const ICONS = {
   openai: openaiIcon,
   xinference: xinferenceIcon,
   volcano: volcanoIcon,
+  speedbear: speedbearIcon,
 }
 
 /**

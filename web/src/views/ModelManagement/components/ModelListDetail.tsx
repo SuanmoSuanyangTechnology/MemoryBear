@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 10:24:32
+ * @Last Modified time: 2026-06-30 15:23:02
  */
 /**
  * Model List Detail Drawer
@@ -13,6 +13,7 @@
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Switch, Row, Col, Tooltip } from 'antd'
+import clsx from 'clsx';
 
 import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConfigModalRef } from '../types';
 import RbDrawer from '@/components/RbDrawer';
@@ -143,9 +144,9 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                 <OverflowTags
                   items={[
                     <Tag>{t(`modelNew.${item.type}`)}</Tag>,
-                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>,
+                    item.provider !== 'speedbear' ? <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag> : null,
                     ...(item.capability ?? []).map(vo => <Tag>{t(`modelNew.${vo}`)}</Tag>)
-                  ]}
+                  ].filter(Boolean)}
                 />}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
@@ -153,8 +154,11 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                   {item.name[0]}
                 </div>
               }
-              extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
-              bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
+              extra={item.provider !== 'speedbear' && <Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
+              bodyClassName={clsx("rb:relative rb:h-[calc(100%-64px)]!", {
+                "rb:pb-0!": item.provider === 'speedbear',
+                "rb:pb-[64px]!": item.provider !== 'speedbear',
+              })}
               variant="outlined"
             >
               <Tooltip title={item.description}>
