@@ -485,7 +485,7 @@ class MemoryConfigService:
         from app.services.model_service import ModelConfigService as ModelSvc
         from app.services.model_service import ModelApiKeyService
 
-        config = ModelSvc.get_model_by_id(db=self.db, model_id=model_id)
+        config = ModelSvc.get_model_by_id(db=self.db, model_id=model_id, tenant_id=tenant_id)
         if not config:
             logger.warning(f"Model ID {model_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")

@@ -48,10 +48,12 @@ if not _root_logger.handlers:
 else:
     _root_logger.setLevel(logging.INFO)
 
+
 class TranslationResponse(BaseModel):
     """Translation response model for language conversion"""
     data: str
-    
+
+
 class ReflectionRange(str, Enum):
     """
     Reflection range enumeration
@@ -166,7 +168,8 @@ class ReflectionEngine:
             render_reflexion_prompt_func: Optional[Any] = None,
             conflict_schema: Optional[Any] = None,
             reflexion_schema: Optional[Any] = None,
-            update_query: Optional[str] = None
+            update_query: Optional[str] = None,
+            tenant_id: Optional[uuid.UUID] = None,
     ):
         """
         Initialize reflection engine
@@ -195,7 +198,7 @@ class ReflectionEngine:
         self.reflexion_schema = reflexion_schema
         self.update_query = update_query
         self._semaphore = asyncio.Semaphore(5)  # Default concurrency limit of 5
-
+        self.tenant_id = tenant_id
 
         # Lazy import to avoid circular dependencies
         self._lazy_init_done = False
@@ -219,7 +222,7 @@ class ReflectionEngine:
             from app.db import get_db_context
             with get_db_context() as db:
                 factory = MemoryClientFactory(db)
-                self.llm_client = factory.get_llm_client(self.config.model_id)
+                self.llm_client = factory.get_llm_client(self.config.model_id, self.tenant_id)
         elif isinstance(self.llm_client, str):
             # If llm_client is a string (model_id), use it to initialize the client
             from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -229,19 +232,19 @@ class ReflectionEngine:
             with get_db_context() as db:
                 factory = MemoryClientFactory(db)
                 # self.llm_client = factory.get_llm_client(model_id)
-                
+
                 # Use MemoryConfigService to get model config
                 config_service = MemoryConfigService(db)
-                model_config = config_service.get_model_config(model_id)
-                
-            extra_params={
-                    "temperature": 0.2,  # Lower temperature for faster response and consistency
-                    "max_tokens": 600,  # Limit maximum token count
-                    "top_p": 0.8,  # Optimize sampling parameters
-                    "stream": False,  # Ensure non-streaming output for fastest response
-                }
+                model_config = config_service.get_model_config(model_id, self.tenant_id)
 
-            self.llm_client  = OpenAIClient(RedBearModelConfig(
+            extra_params = {
+                "temperature": 0.2,  # Lower temperature for faster response and consistency
+                "max_tokens": 600,  # Limit maximum token count
+                "top_p": 0.8,  # Optimize sampling parameters
+                "stream": False,  # Ensure non-streaming output for fastest response
+            }
+
+            self.llm_client = OpenAIClient(RedBearModelConfig(
                 model_name=model_config.get("model_name"),
                 provider=model_config.get("provider"),
                 api_key=model_config.get("api_key"),
@@ -324,13 +327,11 @@ class ReflectionEngine:
 
             # 2. Detect conflicts (fact-based reflection)
             conflict_data = await self._detect_conflicts(reflexion_data, statement_databasets)
-            conflict_list=[]
-            for i  in conflict_data:
+            conflict_list = []
+            for i in conflict_data:
                 conflict_list.append(i['data'])
 
-
-
-            conflicts_found=0
+            conflicts_found = 0
             # 3. Resolve conflicts
             solved_data = await self._resolve_conflicts(conflict_list, statement_databasets)
 
@@ -345,9 +346,8 @@ class ReflectionEngine:
             conflicts_resolved = len(solved_data)
             logging.info(f"解决了 {conflicts_resolved} 个冲突")
 
-
             # 4. Apply reflection results (update memory database)
-            memories_updated=await self._apply_reflection_results(solved_data)
+            memories_updated = await self._apply_reflection_results(solved_data)
 
             execution_time = asyncio.get_event_loop().time() - start_time
 
@@ -397,7 +397,8 @@ class ReflectionEngine:
             response_model=TranslationResponse
         )
         return response.data
-    async def extract_translation(self,data):
+
+    async def extract_translation(self, data):
         """
         Extract and translate reflection data to English
         
@@ -411,28 +412,28 @@ class ReflectionEngine:
         Returns:
             dict: Translated data structure with English content
         """
-        end_datas={}
-        end_datas['source_data']=await self.Translate(data['source_data'])
+        end_datas = {}
+        end_datas['source_data'] = await self.Translate(data['source_data'])
         quality_assessments = []
         memory_verifies = []
-        reflexion_data=[]
-        if data['memory_verifies']!=[]:
+        reflexion_data = []
+        if data['memory_verifies'] != []:
             for i in data['memory_verifies']:
-                end_data={}
+                end_data = {}
                 end_data['has_privacy'] = i['has_privacy']
-                privacy=i['privacy_types']
-                privacy_types_=[]
+                privacy = i['privacy_types']
+                privacy_types_ = []
                 for pri in privacy:
                     privacy_types_.append(await self.Translate(pri))
-                end_data['privacy_types']=privacy_types_
-                end_data['summary']=await self.Translate(i['summary'])
+                end_data['privacy_types'] = privacy_types_
+                end_data['summary'] = await self.Translate(i['summary'])
                 memory_verifies.append(end_data)
-        end_datas['memory_verifies']=memory_verifies
+        end_datas['memory_verifies'] = memory_verifies
 
-        if data['quality_assessments']!=[]:
+        if data['quality_assessments'] != []:
             for i in data['quality_assessments']:
                 end_data = {}
-                end_data['score']=i['score']
+                end_data['score'] = i['score']
                 end_data['summary'] = await self.Translate(i['summary'])
                 quality_assessments.append(end_data)
         end_datas['quality_assessments'] = quality_assessments
@@ -460,8 +461,8 @@ class ReflectionEngine:
         self._lazy_init()
         start_time = time.time()
         memory_verifies_flag = self.config.memory_verify
-        quality_assessment=self.config.quality_assessment
-        language_type=self.config.language_type
+        quality_assessment = self.config.quality_assessment
+        language_type = self.config.language_type
 
         asyncio.get_event_loop().time()
         logging.info("====== 自我反思流程开始 ======")
@@ -483,7 +484,8 @@ class ReflectionEngine:
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
         conflicts_found = 0  # Initialize as integer 0 instead of empty string
-        REMOVE_KEYS = {"created_at","relationship","predicate","statement_id","id","statement_id","relationship_statement_id"}
+        REMOVE_KEYS = {"created_at", "relationship", "predicate", "statement_id", "id", "statement_id",
+                       "relationship_statement_id"}
         # Clean conflict_data, and memory_verify and quality_assessment
         cleaned_conflict_data = []
         for item in conflict_data:
@@ -492,7 +494,7 @@ class ReflectionEngine:
                 'conflict': item['conflict']
             }
             cleaned_conflict_data.append(cleaned_item)
-        cleaned_conflict_data_=[]
+        cleaned_conflict_data_ = []
         for item in conflict_data:
             cleaned_data = []
             for row in item.get("data", []):
@@ -526,16 +528,15 @@ class ReflectionEngine:
                 for result in item['results']:
                     reflexion_data.append(result['reflexion'])
         result_data['reflexion_data'] = reflexion_data
-        if memory_verifies_flag==False:
-            result_data['memory_verifies']=[]
-        if quality_assessment==False:
-            result_data['quality_assessments']=[]
+        if memory_verifies_flag == False:
+            result_data['memory_verifies'] = []
+        if quality_assessment == False:
+            result_data['quality_assessments'] = []
 
-        if language_type=='en':
-            result_data=await self.extract_translation(result_data)
-        print(time.time()-start_time,'----------')
+        if language_type == 'en':
+            result_data = await self.extract_translation(result_data)
+        print(time.time() - start_time, '----------')
         return result_data
-
 
     async def extract_fields_from_json(self):
         """
@@ -630,7 +631,7 @@ class ReflectionEngine:
         logging.info("====== 冲突检测开始 ======")
         start_time = asyncio.get_event_loop().time()
         quality_assessment = self.config.quality_assessment
-        language_type=self.config.language_type
+        language_type = self.config.language_type
 
         try:
             # Render conflict detection prompt
@@ -764,8 +765,6 @@ class ReflectionEngine:
         success_count = await neo4j_data(changes)
         return success_count
 
-
-
     # Time-based reflection methods
     async def time_based_reflection(
             self,
@@ -857,4 +856,3 @@ class ReflectionEngine:
         else:
 
             raise ValueError(f"未知的反思基线: {self.config.baseline}")
-
