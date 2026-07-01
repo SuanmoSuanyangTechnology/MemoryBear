@@ -90,7 +90,7 @@ class QueueController:
         if not self._running:
             self.start()
 
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         self._queue.put_nowait((future, coro_factory))
         return await future
 

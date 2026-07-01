@@ -128,7 +128,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 params.embedding_id = configs.get('embedding')
             if not params.rerank_id:
                 params.rerank_id = configs.get('rerank')
-            if not params.video_id:
+            if not params.vision_id:
                 params.vision_id = configs.get('vision')
             if not params.audio_id:
                 params.audio_id = configs.get('audio')
