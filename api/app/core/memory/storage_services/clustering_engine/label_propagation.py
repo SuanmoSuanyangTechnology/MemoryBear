@@ -113,12 +113,17 @@ class LabelPropagationEngine:
         if not has_communities:
             logger.info(f"[Clustering] 用户 {end_user_id} 首次聚类，执行全量初始化")
             await self.full_clustering(end_user_id)
+            # 全量聚类后做全量对账（None = 重算全部社区 member_count）
+            await self.repo.reconcile_after_clustering(end_user_id, refresh_community_ids=None)
         else:
-            if new_entity_ids:
-                logger.info(
-                    f"[Clustering] 增量更新，新实体数: {len(new_entity_ids)}"
-                )
-                await self.incremental_update(new_entity_ids, end_user_id)
+            if not new_entity_ids:
+                return
+            logger.info(
+                f"[Clustering] 增量更新，新实体数: {len(new_entity_ids)}"
+            )
+            affected = await self.incremental_update(new_entity_ids, end_user_id)
+            # 增量后只对本轮触达的社区重算 member_count（删空社区仍全量，覆盖合并解散/并发去重清空）
+            await self.repo.reconcile_after_clustering(end_user_id, refresh_community_ids=affected)
 
     async def full_clustering(self, end_user_id: str) -> None:
         """
@@ -223,7 +228,7 @@ class LabelPropagationEngine:
 
     async def incremental_update(
         self, new_entity_ids: List[str], end_user_id: str
-    ) -> None:
+    ) -> List[str]:
         """
         增量更新：只处理新实体及其邻居，不重跑全图。
 
@@ -234,6 +239,10 @@ class LabelPropagationEngine:
 
         P2 修复：改为按批（每批 CONCURRENT_BATCH 个）并发处理，
         避免大批量新实体时串行积压导致连接池长时间占用。
+
+        Returns:
+            本轮触达（新建 / 加入）的社区 ID 列表，供收尾对账限定 member_count
+            重算范围，避免对全用户社区写放大。
         """
         communities_to_update = set()
 
@@ -253,6 +262,8 @@ class LabelPropagationEngine:
         # 批量生成所有社区的元数据
         if communities_to_update:
             await self._generate_community_metadata(list(communities_to_update), end_user_id, force=True)
+
+        return list(communities_to_update)
 
     # ──────────────────────────────────────────────────────────────────────────
     # 内部方法

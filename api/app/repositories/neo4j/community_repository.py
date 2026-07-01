@@ -29,6 +29,9 @@ from app.repositories.neo4j.cypher_queries import (
     CHECK_COMMUNITY_IS_COMPLETE,
     CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING,
     BATCH_UPDATE_COMMUNITY_METADATA,
+    RECONCILE_DELETE_EMPTY_COMMUNITIES,
+    RECONCILE_REFRESH_ALL_MEMBER_COUNTS,
+    RECONCILE_REFRESH_MEMBER_COUNTS_SCOPED,
 )
 
 logger = logging.getLogger(__name__)
@@ -338,3 +341,56 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"batch_update_community_metadata failed: {e}")
             return False
+
+    async def reconcile_after_clustering(
+        self, end_user_id: str, refresh_community_ids: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        """聚类收尾对账：删空社区 + 重算成员数。幂等、低成本。
+
+        兜底去重/反思在聚类期间并发 DETACH DELETE 实体留下的脏数据。
+
+        两步策略（针对性能：增量聚类高频触发，避免对全用户社区写放大）：
+        - 删空社区：**始终全量**。读多写少（仅真正空社区才 DETACH DELETE），
+          覆盖合并解散的社区 + 并发去重清空的任意社区（这些都不在本轮 touched 集合里）。
+        - 重算 member_count：按 ``refresh_community_ids`` 限定范围——
+            * None  → 全量重算（全量聚类后使用）
+            * [...] → 仅重算这些社区（增量聚类后，消除每轮对全用户社区的写放大）
+            * []    → 跳过重算（本轮未触达任何社区）
+
+        Args:
+            end_user_id: 用户 ID
+            refresh_community_ids: member_count 重算范围；None 表示全量。
+
+        Returns:
+            {"deleted": 删除的空社区数, "refreshed": 重算 member_count 的社区数}
+        """
+        try:
+            # Step 1: 删除该用户下所有无成员边的空社区（始终全量）
+            # 覆盖：合并解散的社区、去重/反思并发删实体后清空的社区
+            d = await self.connector.execute_query(
+                RECONCILE_DELETE_EMPTY_COMMUNITIES, end_user_id=end_user_id
+            )
+            deleted = d[0]["deleted"] if d else 0
+
+            refreshed = 0
+            if refresh_community_ids is None:
+                # Step 2a: 全量重算该用户所有存活社区的 member_count（全量聚类后使用）
+                r = await self.connector.execute_query(
+                    RECONCILE_REFRESH_ALL_MEMBER_COUNTS, end_user_id=end_user_id
+                )
+                refreshed = r[0]["refreshed"] if r else 0
+            elif len(refresh_community_ids) > 0:
+                # Step 2b: 仅重算本轮触达的社区的 member_count（增量聚类后使用，避免全用户写放大）
+                r = await self.connector.execute_query(
+                    RECONCILE_REFRESH_MEMBER_COUNTS_SCOPED,
+                    end_user_id=end_user_id,
+                    community_ids=refresh_community_ids,
+                )
+                refreshed = r[0]["refreshed"] if r else 0
+            # else: refresh_community_ids == [] → 本轮未触达任何社区，跳过重算
+
+            logger.info(f"[Reconcile] 删除空社区={deleted}，刷新成员数社区={refreshed}")
+            return {"deleted": deleted, "refreshed": refreshed}
+        except Exception as e:
+            logger.error(f"reconcile_after_clustering failed: {e}")
+            return {"deleted": 0, "refreshed": 0}
