@@ -534,6 +534,40 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
             raise
 
+    def get_cache_refresh_fields_by_workspace(
+        self, workspace_id: uuid.UUID
+    ) -> List[tuple]:
+        """获取工作空间下所有活跃终端用户的「缓存刷新判定」所需字段（列裁剪）。
+
+        仅取 id / write_time / memory_insight_updated_at / user_summary_updated_at 四列，
+        返回普通元组而非 ORM 对象：
+          - 不受 session 关闭后 detach/expire 影响（调用方可在会话外安全遍历）
+          - 不加载整行，万级用户时显著降低内存
+
+        Returns:
+            List[tuple]: 每个元素为
+                (id, write_time, memory_insight_updated_at, user_summary_updated_at)
+        """
+        try:
+            rows = (
+                self.db.query(
+                    EndUser.id,
+                    EndUser.write_time,
+                    EndUser.memory_insight_updated_at,
+                    EndUser.user_summary_updated_at,
+                )
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
+                .all()
+            )
+            db_logger.debug(
+                f"成功查询工作空间 {workspace_id} 下 {len(rows)} 个终端用户的缓存刷新字段"
+            )
+            return rows
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 缓存刷新字段时出错: {str(e)}")
+            raise
+
     def get_filtered_by_workspace(
         self,
         workspace_id: uuid.UUID,
