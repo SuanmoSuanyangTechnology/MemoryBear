@@ -593,7 +593,7 @@ class ConversationService:
             raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
 
         if internal_user_id is None:
-            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+            raise BusinessException("会话不存在", BizCode.NOT_FOUND)
 
         if (
             conversation.app_id != app_id
@@ -602,7 +602,8 @@ class ConversationService:
             or conversation.is_active is not True
             or conversation.is_draft is not False
         ):
-            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+            # 为避免根据错误码推断会话是否存在，这里与上方保持同样的 NOT_FOUND 返回
+            raise BusinessException("会话不存在", BizCode.NOT_FOUND)
 
         try:
             messages = self.message_repo.get_message_by_conversation_id(
@@ -666,7 +667,8 @@ class ConversationService:
             or conversation.workspace_id != workspace_id
             or conversation.is_active is not True
         ):
-            raise BusinessException("无权访问该消息", BizCode.FORBIDDEN)
+            # 为避免根据错误码推断会话/消息是否存在，这里与上方保持同样的 NOT_FOUND 返回
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
 
         if message.role != "assistant":
             raise BusinessException("仅支持 assistant 消息", BizCode.BAD_REQUEST)
