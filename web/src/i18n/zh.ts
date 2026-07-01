@@ -2241,6 +2241,7 @@ export const zh = {
       pleaseSave: '仅展示一次，请妥善保存',
       basicInfo: '基础信息',
       regenerate: '重新生成',
+      endpointConfig: '端点配置',
     },
     tool: {
       mcp: 'MCP 服务',
