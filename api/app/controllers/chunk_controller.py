@@ -2,7 +2,6 @@ import json
 import os
 import csv
 import io
-import time
 from typing import Any, Optional
 import uuid
 
@@ -32,6 +31,7 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
+
 
 router = APIRouter(
     prefix="/chunks",
@@ -950,26 +950,34 @@ def get_retrieve_types():
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-@router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
-async def retrieve_chunks(
+async def retrieve_chunks_with_caller(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: Session,
+        current_user: User,
+        caller: chunk_schema.KnowledgeRetrievalCaller,
 ):
     """
     retrieve chunk
     """
-    api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
+    api_logger.info(
+        "retrieve chunk request received: username=%s, caller=%s, query_len=%s, kb_count=%s, "
+        "ex_id_count=%s, retrieve_type=%s, top_k=%s, "
+        "metadata_mode=%s, metadata_filter_groups=%s",
+        current_user.username,
+        caller,
+        len(retrieve_data.query or ""),
+        len(retrieve_data.kb_ids or []),
+        len(retrieve_data.ex_ids or []),
+        retrieve_data.retrieve_type,
+        retrieve_data.top_k,
+        retrieve_data.metadata_filter_mode,
+        len(retrieve_data.metadata_filters or []),
+    )
 
     try:
         retrieval_payload = retrieve_data.model_dump(exclude_none=True)
-        if retrieve_data.knowledge_bases:
-            retrieval_payload["knowledge_bases"] = [
-                kb_config.model_dump(exclude_none=True, exclude_unset=True)
-                for kb_config in retrieve_data.knowledge_bases
-            ]
+        retrieval_payload["caller"] = caller
         request = KnowledgeRetrievalRequest(**retrieval_payload)
-        api_logger.info(f"retrieve chunk: request={request}")
         result = KnowledgeRetrievalService.retrieve(
             db=db,
             request=request,
@@ -982,3 +990,17 @@ async def retrieve_chunks(
         ) from exc
 
     return success(data=jsonable_encoder(result.chunks), msg="retrieval successful")
+
+
+@router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
+async def retrieve_chunks(
+        retrieve_data: chunk_schema.ChunkRetrieve,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    return await retrieve_chunks_with_caller(
+        retrieve_data=retrieve_data,
+        db=db,
+        current_user=current_user,
+        caller=chunk_schema.KnowledgeRetrievalCaller.IN_API,
+    )

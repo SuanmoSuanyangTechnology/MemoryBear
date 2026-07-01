@@ -654,8 +654,13 @@ class ElasticSearchVector(BaseVector):
         filters = self._build_vector_filter_clauses(file_names_filter, document_ids_include)
 
         logger.info(
-            f"[ES search_by_vector] filter_summary file_name_count={len(file_names_filter or [])} "
-            f"included_document_id_count={len(document_ids_include or [])}"
+            "[ES vector_search] indices=%s top_k=%s score_threshold=%s "
+            "file_filter_count=%s document_filter_count=%s",
+            indices,
+            top_k,
+            score_threshold,
+            len(file_names_filter or []),
+            len(document_ids_include or []),
         )
 
         if self._resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
@@ -762,9 +767,24 @@ class ElasticSearchVector(BaseVector):
             query_str["bool"]["filter"].append({
                 "terms": {Field.DOCUMENT_ID.value: document_ids_include}
             })
-            logger.info(f"[ES search_by_full_text] including document_ids: {document_ids_include}")
+            logger.info(
+                "[ES full_text_search] indices=%s top_k=%s score_threshold=%s "
+                "file_filter_count=%s document_filter_count=%s",
+                indices,
+                top_k,
+                score_threshold,
+                len(file_names_filter or []),
+                len(document_ids_include),
+            )
         else:
-            logger.info("[ES search_by_full_text] no document_ids_include")
+            logger.info(
+                "[ES full_text_search] indices=%s top_k=%s score_threshold=%s "
+                "file_filter_count=%s document_filter_count=0",
+                indices,
+                top_k,
+                score_threshold,
+                len(file_names_filter or []),
+            )
 
         logger.debug(f"[ES search_by_full_text] query DSL: {query_str}")
 
@@ -810,6 +830,12 @@ class ElasticSearchVector(BaseVector):
                     doc.metadata["score"] = score
                     docs.append(doc)
 
+        logger.debug(
+            "[ES full_text_search] hits=%s returned_docs=%s score_threshold=%s",
+            len(result.get("hits", {}).get("hits", [])),
+            len(docs),
+            score_threshold,
+        )
         return self.resolve_parent_chunks(docs, indices=indices) if resolve_parents else docs
 
     def resolve_parent_chunks(self, chunks: list[DocumentChunk], indices: str | None = None) -> list[DocumentChunk]:

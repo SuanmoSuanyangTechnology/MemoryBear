@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import uuid
 from enum import StrEnum
 from app.core.rag.models.chunk import QAChunk
@@ -16,6 +16,8 @@ class RetrieveType(StrEnum):
 
 class KnowledgeRetrievalCaller(StrEnum):
     GENERAL = "general"
+    EX_API = "ex_api"
+    IN_API = "in_api"
     AGENT = "agent"
     WORKFLOW = "workflow"
 
@@ -103,16 +105,17 @@ class ChunkUpdate(BaseModel):
 
 
 class ChunkRetrieve(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    caller: KnowledgeRetrievalCaller = Field(KnowledgeRetrievalCaller.GENERAL)
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = Field(None)
-    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = Field(None)
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
-    caller: KnowledgeRetrievalCaller = Field(KnowledgeRetrievalCaller.GENERAL)
     retrieve_type: RetrieveType | None = Field(None)
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
@@ -120,8 +123,8 @@ class ChunkRetrieve(BaseModel):
 
     @model_validator(mode="after")
     def resolve_top_n(self):
-        if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
-            raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
+        if not self.kb_ids and not self.ex_ids:
+            raise ValueError("kb_ids and ex_ids cannot both be empty")
         top_k = self.top_k or 20
         if self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(top_k, 20)
