@@ -3,6 +3,7 @@
 管理 Neo4j 中 Community 节点及 BELONGS_TO_COMMUNITY 边的 CRUD 操作。
 """
 
+import asyncio
 import logging
 from typing import Dict, List, Optional
 
@@ -32,6 +33,13 @@ from app.repositories.neo4j.cypher_queries import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 批量分配实体到社区时的单事务分片大小。
+# 控制单个 UNWIND 事务最多锁住的实体节点数，避免与同用户写入流水线
+# 形成大事务锁竞争 / 死锁。500 兼顾往返削减与锁粒度，锁竞争严重时不应调大。
+COMMUNITY_ASSIGN_CHUNK_SIZE = 500
+# 单个分片命中 Neo4j 死锁时的最大重试次数。
+_DEADLOCK_MAX_RETRY = 3
 
 
 class CommunityRepository:
@@ -188,29 +196,56 @@ class CommunityRepository:
             return []
 
     async def batch_assign_entities_to_communities(
-        self, assignments: List[Dict], end_user_id: str
+        self, assignments: List[Dict], end_user_id: str,
+        chunk_size: int = COMMUNITY_ASSIGN_CHUNK_SIZE,
     ) -> bool:
-        """批量将实体分配到社区（UNWIND，一次 Cypher 替代 N×2 次串行查询）。
+        """批量将实体分配到社区（UNWIND + chunk 分片提交）。
+
+        分片提交：单事务最多锁 chunk_size 个实体节点，提交后立即释放，
+        避免与同用户写入流水线形成大事务锁竞争 / 死锁。单个分片命中死锁时
+        退避重试，失败只影响该分片，不会让整批回滚重来。
 
         Args:
             assignments: [{"entity_id": str, "community_id": str}, ...]
             end_user_id: 用户 ID
+            chunk_size: 单批写入实体数（默认 COMMUNITY_ASSIGN_CHUNK_SIZE）
 
         Returns:
-            True 表示执行成功（即使部分实体未匹配到也不抛出异常）。
+            True 表示全部分片成功；任一分片最终失败返回 False（不抛出异常）。
         """
         if not assignments:
             return True
-        try:
-            await self.connector.execute_query(
-                BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
-                assignments=assignments,
-                end_user_id=end_user_id,
-            )
-            return True
-        except Exception as e:
-            logger.error(f"batch_assign_entities_to_communities failed: {e}")
-            return False
+
+        ok = True
+        for start in range(0, len(assignments), chunk_size):
+            chunk = assignments[start:start + chunk_size]
+            label = f"chunk=[{start}:{start + len(chunk)}]"
+
+            # 分片级重试：默认只跑一次（末尾的 break），
+            # 仅在"死锁 + 还有重试次数"时通过 continue 再来一轮。
+            for attempt in range(1, _DEADLOCK_MAX_RETRY + 1):
+                try:
+                    await self.connector.execute_query(
+                        BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
+                        assignments=chunk,
+                        end_user_id=end_user_id,
+                    )
+                except Exception as e:
+                    # 唯一可重试路径：死锁 & 未耗尽次数 → 退避后进入下一轮
+                    if "deadlock" in str(e).lower() and attempt < _DEADLOCK_MAX_RETRY:
+                        logger.warning(
+                            f"batch_assign {label} 死锁重试 "
+                            f"({attempt + 1}/{_DEADLOCK_MAX_RETRY})"
+                        )
+                    # 退避等待对方事务释放锁，避免立刻重试再次撞进同一个死锁    
+                        await asyncio.sleep(0.2 * attempt) # 
+                        continue
+                    # 终态失败（非死锁 或 重试耗尽）：只影响本分片，继续下一片
+                    logger.error(f"batch_assign {label} 失败: {e}")
+                    ok = False
+                # 成功 或 终态失败 都到这里跳出重试循环
+                break
+        return ok
 
     async def get_community_avg_embeddings_batch(
         self, community_ids: List[str], end_user_id: str
