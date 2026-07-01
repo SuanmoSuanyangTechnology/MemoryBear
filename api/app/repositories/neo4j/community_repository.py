@@ -7,6 +7,8 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
+from neo4j.exceptions import Neo4jError
+
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.cypher_queries import (
     COMMUNITY_NODE_UPSERT,
@@ -232,7 +234,11 @@ class CommunityRepository:
                     )
                 except Exception as e:
                     # 唯一可重试路径：死锁 & 未耗尽次数 → 退避后进入下一轮
-                    if "deadlock" in str(e).lower() and attempt < _DEADLOCK_MAX_RETRY:
+                    if (
+                        isinstance(e, Neo4jError)
+                        and e.code == "Neo.TransientError.Transaction.DeadlockDetected"
+                        and attempt < _DEADLOCK_MAX_RETRY
+                    ):
                         logger.warning(
                             f"batch_assign {label} 死锁重试 "
                             f"({attempt + 1}/{_DEADLOCK_MAX_RETRY})"
