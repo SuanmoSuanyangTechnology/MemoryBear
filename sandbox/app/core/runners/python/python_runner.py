@@ -109,8 +109,6 @@ class PythonRunner(CodeExecutor):
                 env["ALLOWED_SYSCALLS"] = ",".join(map(str, config.allowed_syscalls))
 
             # Execute with Python interpreter
-            logger.info(encoded_key)
-
             process = await asyncio.create_subprocess_exec(
                 config.python_path,
                 script_path,

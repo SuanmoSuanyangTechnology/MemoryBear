@@ -5,6 +5,7 @@ Centralized configuration loading and management for memory services.
 This service eliminates code duplication between MemoryAgentService and MemoryStorageService.
 """
 
+import asyncio
 import time
 import uuid
 from typing import TYPE_CHECKING, Optional
@@ -28,6 +29,8 @@ from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
     MemoryConfig,
+    ModelInactiveError,
+    ModelNotFoundError,
 )
 
 if TYPE_CHECKING:
@@ -164,6 +167,165 @@ class MemoryConfigService:
             db: SQLAlchemy database session
         """
         self.db = db
+
+    async def _validate_model_connectivity(
+        self,
+        model_id: str,
+        model_type_label: str,
+        tenant_id: UUID | None,
+        config_id: UUID,
+        workspace_id: UUID | None,
+    ) -> None:
+        """解析模型凭证并调用 validate_model_config 验证 API 连通性。
+
+        Args:
+            model_id: 模型配置 ID
+            model_type_label: 模型类型标签（llm / embedding / rerank）
+            tenant_id: 租户 ID
+            config_id: 记忆配置 ID（用于错误上下文）
+            workspace_id: 工作空间 ID（用于错误上下文）
+
+        Raises:
+            ModelNotFoundError: 模型不存在或没有可用 API 密钥
+            ModelInactiveError: API 连通性验证失败
+        """
+        from app.services.model_service import ModelConfigService as ModelSvc
+        from app.services.model_service import ModelApiKeyService
+
+        # 1. 获取模型配置
+        try:
+            model_config = ModelSvc.get_model_by_id(self.db, uuid.UUID(model_id), tenant_id)
+        except Exception as e:
+            raise ModelNotFoundError(
+                model_id=model_id,
+                model_type=model_type_label,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type_label} 模型 {model_id} 不存在: {e}",
+            )
+
+        # 2. 获取可用 API Key
+        api_key_config = ModelApiKeyService.get_available_api_key(
+            self.db, model_config.id, tenant_id
+        )
+        if not api_key_config:
+            raise ModelInactiveError(
+                model_id=model_id,
+                model_name=model_config.name,
+                model_type=model_type_label,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type_label} 模型 {model_config.name} 没有可用的 API 密钥",
+            )
+
+        # 3. 实际 API 连通性验证
+        result = await ModelSvc.validate_model_config(
+            self.db,
+            model_name=api_key_config.model_name,
+            provider=api_key_config.provider,
+            api_key=api_key_config.api_key,
+            api_base=api_key_config.api_base,
+            model_type=model_type_label,
+            is_omni=api_key_config.is_omni,
+            capability=api_key_config.capability,
+        )
+
+        if not result.get("valid"):
+            raise ModelInactiveError(
+                model_id=model_id,
+                model_name=api_key_config.model_name,
+                model_type=model_type_label,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type_label} 模型 {api_key_config.model_name} API 验证失败: {result.get('error', '未知错误')}",
+            )
+
+    async def valid_config(self, config_id: uuid.UUID) -> dict:
+        """验证配置是否存在且关联模型 API 可用。
+
+        所有模型验证失败均不阻断，统一收集到 warnings 返回前端告警。
+
+        Args:
+            config_id: 配置 UUID
+
+        Returns:
+            dict: {
+                "valid": True,
+                "config_id": str,
+                "config_name": str,
+                "warnings": [{"model_type": str, "model_id": str, "message": str}, ...]
+            }
+
+        Raises:
+            InvalidConfigError: 配置不存在
+        """
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+        # 1. 验证配置是否存在
+        config = self.db.get(MemoryConfigModel, config_id)
+        if not config:
+            raise InvalidConfigError(
+                f"配置不存在: config_id={config_id}",
+                field_name="config_id",
+                invalid_value=config_id,
+            )
+
+        # 2. 获取 workspace 以确定 tenant_id
+        workspace = self.db.get(Workspace, config.workspace_id) if config.workspace_id else None
+        tenant_id = workspace.tenant_id if workspace else None
+        workspace_id = workspace.id if workspace else None
+
+        # 3. 检查缺失 + 并行验证已配置模型，全部收集告警
+        all_models = [
+            ("llm", config.llm_id),
+            ("embedding", config.embedding_id),
+            ("rerank", config.rerank_id),
+            ("vision", config.vision_id),
+            ("video", config.video_id),
+            ("audio", config.audio_id),
+        ]
+
+        warnings: list[dict] = []
+
+        # 3a. 未配置的模型记录缺失告警
+        for model_type, model_id in all_models:
+            if not model_id:
+                warnings.append({
+                    "model_type": model_type,
+                    "model_id": None,
+                    "message": f"{model_type} 模型未配置",
+                })
+
+        # 3b. 已配置的模型并行验证 API 连通性
+        async def _validate_one(model_type: str, model_id: str) -> dict | None:
+            try:
+                await self._validate_model_connectivity(model_id, model_type, tenant_id, config_id, workspace_id)
+                return None
+            except ConfigurationError as e:
+                logger.warning(
+                    f"模型 {model_type} API 验证失败: {e}",
+                    extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
+                )
+                return {"model_type": model_type, "model_id": str(model_id), "message": str(e)}
+
+        tasks = [
+            _validate_one(model_type, model_id)
+            for model_type, model_id in all_models
+            if model_id
+        ]
+        if tasks:
+            results = await asyncio.gather(*tasks)
+            warnings += [w for w in results if w is not None]
+
+        result: dict = {
+            "valid": True,
+            "config_id": str(config_id),
+            "config_name": config.config_name,
+        }
+        if warnings:
+            result["warnings"] = warnings
+
+        return result
 
     def load_memory_config(
             self,

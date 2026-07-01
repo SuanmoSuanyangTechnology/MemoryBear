@@ -8,18 +8,22 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
-from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.memory.analytics.hot_memory_tags import (
     filter_tags_with_llm,
     get_raw_tags_batch,
 )
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
+from app.core.utils.datetime_utils import to_timestamp_ms
+from app.models import Workspace
 from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -85,6 +89,19 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         """
         self.db = db
 
+    async def active(self, workspace_id: uuid.UUID, config_id: uuid.UUID) -> Dict[str, Any]:
+        stmt = select(Workspace).where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True)
+        )
+        workspace = self.db.scalar(stmt)
+        if not workspace:
+            raise BusinessException("空间不存在")
+        await MemoryConfigService(self.db).valid_config(config_id)
+        workspace.memory_config = config_id
+        self.db.commit()
+        return {"affected": 1}
+
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（仅名称与描述）
         # 业务层检查同一工作空间下是否已存在同名配置
@@ -111,6 +128,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 params.embedding_id = configs.get('embedding')
             if not params.rerank_id:
                 params.rerank_id = configs.get('rerank')
+            if not params.video_id:
+                params.vision_id = configs.get('vision')
+            if not params.audio_id:
+                params.audio_id = configs.get('audio')
+            if not params.video_id:
+                params.video_id = configs.get('video')
 
         # reflection_model_id 和 emotion_model_id 默认与 llm_id 一致
         if not params.reflection_model_id:
@@ -452,6 +475,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "time": int(time.time() * 1000)
             })
 
+
 # -------------------- Neo4j Search & Analytics (fused from data_search_service.py) --------------------
 # Ensure env for connector (e.g., NEO4J_PASSWORD)
 
@@ -629,6 +653,7 @@ async def compute_hot_memory_tags(
         return [{"name": t, "frequency": f} for t, f in top_tags]
     finally:
         await connector.close()
+
 
 async def analytics_hot_memory_tags(
         db: Session,

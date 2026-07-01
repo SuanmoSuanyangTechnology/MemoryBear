@@ -1,10 +1,10 @@
 """
-Concurrency control middleware
+Queue-based concurrency control
+
+N persistent worker coroutines consume tasks from an unbounded
+FIFO queue, replacing the semaphore model.
 """
 import asyncio
-from contextlib import asynccontextmanager
-
-from fastapi import HTTPException, status
 
 from app.config import get_config
 from app.logger import get_logger
@@ -12,55 +12,96 @@ from app.logger import get_logger
 logger = get_logger()
 
 
-class ConcurrencyController:
+class QueueController:
+    """Unbounded queue + persistent worker pool."""
+
     def __init__(self):
-        self._worker_semaphore: asyncio.Semaphore | None = None
-        self._request_counter = 0
-        self._lock = asyncio.Lock()
+        self._queue: asyncio.Queue | None = None
+        self._workers: list[asyncio.Task] = []
+        self._running = False
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    def start(self):
+        if self._running:
+            return
 
         config = get_config()
-        self.max_requests = config.max_requests
+        max_workers = config.max_workers
 
-    def init(self):
-        config = get_config()
-        self._worker_semaphore = asyncio.Semaphore(config.max_workers)
+        self._queue = asyncio.Queue()          # unbounded
+        self._running = True
 
-    async def _acquire_worker(self):
-        if self._worker_semaphore is None:
-            self.init()
-        async with self._worker_semaphore:
-            yield
+        for i in range(max_workers):
+            task = asyncio.create_task(self._worker(i))
+            self._workers.append(task)
 
-    async def _limit_requests(self):
-        async with self._lock:
-            logger.info(f"Current requests: {self._request_counter}/{self.max_requests}")
-            if self._request_counter >= self.max_requests:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "code": 503,
-                        "message": "Too many requests",
-                        "data": None,
-                    }
-                )
-            self._request_counter += 1
-        try:
-            yield
-        finally:
-            async with self._lock:
-                self._request_counter -= 1
+        logger.info("QueueController started: workers=%d", max_workers)
 
-    def acquire_worker(self):
-        return asynccontextmanager(self._acquire_worker)()
+    async def stop(self):
+        self._running = False
 
-    def limit_requests(self):
-        return asynccontextmanager(self._limit_requests)()
+        for w in self._workers:
+            w.cancel()
+        if self._workers:
+            await asyncio.gather(*self._workers, return_exceptions=True)
+        self._workers.clear()
+
+        # Reject any futures still waiting
+        if self._queue:
+            while not self._queue.empty():
+                try:
+                    future, _ = self._queue.get_nowait()
+                    if not future.done():
+                        future.set_exception(RuntimeError("QueueController shutting down"))
+                    self._queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+
+        logger.info("QueueController stopped")
+
+    # ------------------------------------------------------------------
+    # Worker
+    # ------------------------------------------------------------------
+    async def _worker(self, worker_id: int):
+        while self._running:
+            try:
+                future, coro_factory = await self._queue.get()
+                try:
+                    result = await coro_factory()
+                    if not future.done():
+                        future.set_result(result)
+                except Exception as exc:
+                    if not future.done():
+                        future.set_exception(exc)
+                finally:
+                    self._queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Worker %d unexpected error", worker_id)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    async def submit(self, coro_factory):
+        """Enqueue a task and wait for its result."""
+        if not self._running:
+            self.start()
+
+        future = asyncio.get_event_loop().create_future()
+        self._queue.put_nowait((future, coro_factory))
+        return await future
+
+    @property
+    def stats(self) -> dict:
+        q = self._queue
+        return {
+            "queue_size": q.qsize() if q else 0,
+            "workers": len(self._workers),
+        }
 
 
-concurrency = ConcurrencyController()
-
-
-async def concurrency_guard():
-    async with concurrency.limit_requests():
-        async with concurrency.acquire_worker():
-            yield
+# Module-level singleton
+queue_controller = QueueController()
