@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-30 15:23:02
+ * @Last Modified time: 2026-07-01 10:20:14
  */
 /**
  * Model List Detail Drawer
@@ -25,6 +25,7 @@ import MultiKeyConfigModal from './MultiKeyConfigModal'
 import { getModelNewList, updateModelStatus, modelTypeUrl } from '@/api/models'
 import { getLogoUrl } from '../utils'
 import CustomSelect from '@/components/CustomSelect'
+import { formatModelType } from '../utils'
 
 /**
  * Component props
@@ -125,7 +126,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             value={type}
             url={modelTypeUrl}
             hasAll={false}
-            format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+            format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
             onChange={handleTypeChange}
             className="rb:w-full"
             allowClear={true}
@@ -143,7 +144,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               subTitle={
                 <OverflowTags
                   items={[
-                    <Tag>{t(`modelNew.${item.type}`)}</Tag>,
+                    <Tag>{formatModelType(item.type)}</Tag>,
                     item.provider !== 'speedbear' ? <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag> : null,
                     ...(item.capability ?? []).map(vo => <Tag>{t(`modelNew.${vo}`)}</Tag>)
                   ].filter(Boolean)}

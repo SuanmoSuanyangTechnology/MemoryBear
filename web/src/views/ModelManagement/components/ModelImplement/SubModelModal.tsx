@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 14:07:08
+ * @Last Modified time: 2026-07-01 10:20:56
  */
 /**
  * Sub-Model Modal
@@ -20,6 +20,7 @@ import CustomSelect from '@/components/CustomSelect'
 import { modelProviderUrl, getModelNewList } from '@/api/models'
 import type { ProviderModelItem } from '../../types'
 import Tag from '@/components/Tag';
+import { formatModelType } from '../../utils'
 
 const { SHOW_CHILD } = Cascader;
 
@@ -119,7 +120,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
               ...vo,
               label: <Space>
                 {vo.name}
-                <Tag>{t(`modelNew.${vo.type}`)}</Tag>
+                <Tag>{formatModelType(vo.type)}</Tag>
                 {vo.capability?.filter(item => item !== 'video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
               </Space>,
               value: vo.id,
