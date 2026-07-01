@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 18:50:41
+ * @Last Modified time: 2026-07-01 10:18:39
  */
 /**
  * Group Model View
@@ -21,6 +21,7 @@ import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import { formatDateTime } from '@/utils/format';
 import Tag from '@/components/Tag'
+import { formatModelType } from './utils'
 
 /**
  * Group model list component
@@ -49,7 +50,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
       {
         key: 'type',
         label: t(`modelNew.type`),
-        children: data.type ? t(`modelNew.${data.type}`) : '-',
+        children: data.type ? formatModelType(data.type) : '-',
       },
       {
         key: 'created_at',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 16:32:45
+ * @Last Modified time: 2026-07-01 10:13:47
  */
 /**
  * Custom Model Modal
@@ -21,6 +21,7 @@ import UploadImages from '@/components/Upload/UploadImages'
 import { updateCustomModel, addCustomModel, modelTypeUrl, modelProviderUrl } from '@/api/models'
 import { getFileLink } from '@/api/fileStorage'
 import { validateSquareImage, stringRegExp } from '@/utils/validator'
+import { formatModelType } from '../utils'
 
 /**
  * Custom model modal component
@@ -215,7 +216,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             url={modelTypeUrl}
             hasAll={false}
             disabled={isEdit}
-            format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+            format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
           />
         </Form.Item>
 

@@ -2,11 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:22 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-30 15:10:52
+ * @Last Modified time: 2026-07-01 10:15:54
  */
 /**
  * Utility functions for Model Management
  */
+import type { OptionType } from '@/components/CustomSelect'
 
 import bedrockIcon from '@/assets/images/model/bedrock.png'
 import dashscopeIcon from '@/assets/images/model/dashscope.png'
@@ -66,4 +67,11 @@ export const getListLogoUrl = (provider?: string, logo?: string) => {
   }
 
   return ICONS[logo as keyof typeof ICONS] || undefined
+}
+
+export const formatModelType = (type: OptionType['value']) => {
+  if (type === 'llm') {
+    return 'LLM'
+  }
+  return type.charAt(0).toUpperCase() + type.slice(1)
 }
