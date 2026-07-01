@@ -332,7 +332,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
                 try:
                     factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id), tenant_id=memory_config.tenant_id)
                     logger.info("[PILOT_RUN_STREAM] LLM client initialized")
                 except Exception as e:
                     raise RuntimeError(f"LLM client initialization failed: {e}")
