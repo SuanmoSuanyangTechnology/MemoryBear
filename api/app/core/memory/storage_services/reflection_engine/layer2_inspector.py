@@ -19,8 +19,6 @@ from app.core.memory.storage_services.reflection_engine.llm.description_synthesi
     merge_description,
     summarize_extract_and_rename,
     validate_summary_output,
-    apply_event_operations,
-    validate_event_operations,
     _parse_timeline_full,
 )
 from app.core.memory.storage_services.reflection_engine.llm.unresolved_resolver import (
@@ -1783,8 +1781,18 @@ class Layer2Inspector:
             timeline = description
         tracker.end_step(f"{len(fragments)} 条碎片")
 
-        # Step 2: LLM 合并 + 事件提取 + 更名判断
-        tracker.start_step("LLM 合并+事件提取+更名", "llm")
+        # 企业版事件能力探测（一次性）：决定是否提取/落库事件，并影响 Step 2/Step 4 日志措辞。
+        # 事件落库是企业版增值能力（premium）；社区版无 premium 时整条事件链路跳过、日志不提事件。
+        try:
+            from premium.memory.reflection import enterprise_apply_event_operations
+            has_event_capability = True
+        except (ModuleNotFoundError, ImportError):
+            enterprise_apply_event_operations = None
+            has_event_capability = False
+
+        # Step 2: LLM 合并 + （企业版）事件提取 + 更名判断
+        tracker.start_step(
+            "LLM 合并+事件提取+更名" if has_event_capability else "LLM 合并+更名", "llm")
         result = await summarize_extract_and_rename(
             llm_client=self.llm_client,
             entity_name=entity["name"],
@@ -1799,11 +1807,17 @@ class Layer2Inspector:
             tracker.end_step("LLM 调用失败", success=False)
             return False
 
-        tracker.end_step(
-            f"summary={len(result.description_summary)}字, "
-            f"operations={len(result.operations)}, "
-            f"rename={result.should_rename_entity}"
-        )
+        if has_event_capability:
+            tracker.end_step(
+                f"summary={len(result.description_summary)}字, "
+                f"operations={len(result.operations)}, "
+                f"rename={result.should_rename_entity}"
+            )
+        else:
+            tracker.end_step(
+                f"summary={len(result.description_summary)}字, "
+                f"rename={result.should_rename_entity}"
+            )
 
         # 快照：1_input（碎片 + 已有 summary/timeline/event_timeline）+ 2_llm_raw（LLM 原始输出）
         self._snap("description_merge", "1_input", {
@@ -1833,31 +1847,27 @@ class Layer2Inspector:
             return False
         tracker.end_step("校验通过")
 
-        # Step 4: 应用事件操作（add/delete/update）
-        tracker.start_step("事件过滤", "decide")
-        valid_ops = validate_event_operations(result.operations)
-        # 被 validator 丢弃的 op（filtered）：result.operations 里不在 valid_ops 的
-        valid_ids = {id(o) for o in valid_ops}
-        filtered_ops = [
-            {"op": (o.op or ""), "status": "filtered", "reason": "validator_invalid"}
-            for o in result.operations if id(o) not in valid_ids
-        ]
-        before_events = _parse_timeline_full(existing_event_timeline)
-        event_timeline, ev_stats, op_trace = apply_event_operations(
-            existing_event_timeline, valid_ops, collect_trace=True
-        )
-        tracker.end_step(
-            f"事件操作 新增{ev_stats['added']} 更新{ev_stats['updated']} 删除{ev_stats['deleted']}"
-        )
-
-        # 快照：事件时间线 before/after 全文 + 逐 op 命运（最关键的核对项）
-        self._snap("description_merge", "4_event_timeline_diff", {
-            "entity_id": entity["entity_id"],
-            "before": before_events,
-            "after": _parse_timeline_full(event_timeline),
-            "stats": ev_stats,
-            "operations": filtered_ops + op_trace,
-        })
+        # Step 4: 应用事件操作（企业版能力；社区版跳过，不记 tracker/快照）
+        if has_event_capability:
+            tracker.start_step("事件应用", "decide")
+            before_events = _parse_timeline_full(existing_event_timeline)
+            event_timeline, ev_stats, op_trace, filtered_ops = enterprise_apply_event_operations(
+                existing_event_timeline, result.operations, collect_trace=True
+            )
+            tracker.end_step(
+                f"事件操作 新增{ev_stats['added']} 更新{ev_stats['updated']} 删除{ev_stats['deleted']}"
+            )
+            # 快照：事件时间线 before/after + 逐 op 命运（仅企业版输出）
+            self._snap("description_merge", "4_event_timeline_diff", {
+                "entity_id": entity["entity_id"],
+                "before": before_events,
+                "after": _parse_timeline_full(event_timeline),
+                "stats": ev_stats,
+                "operations": filtered_ops + op_trace,
+            })
+        else:
+            # 社区版：不消费事件产出，event_timeline 原样保留
+            event_timeline = existing_event_timeline
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）
         tracker.start_step("写入", "write")
