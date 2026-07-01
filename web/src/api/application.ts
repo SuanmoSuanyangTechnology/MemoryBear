@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 11:40:21
+ * @Last Modified time: 2026-07-01 16:41:14
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -61,6 +61,10 @@ export const runCompare = (app_id: string, values: Record<string, unknown>, onMe
 export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage, undefined, onAbort)
 }
+// Agent re-run the draft and regenerate the assistant response
+export const agentDraftRunRegenerate = (app_id: string, message_id: string, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+  return handleSSE(`/apps/${app_id}/messages/${message_id}/regenerate`, { stream: true }, onMessage, undefined, onAbort)
+}
 // Re-run the draft and regenerate the assistant response
 export const draftRunRegenerate = (app_id: string, message_id: string, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE(`/apps/${app_id}/workflow/messages/${message_id}/regenerate`, { stream: true }, onMessage, undefined, onAbort)
@@ -72,6 +76,18 @@ export const draftRunSwitchMessageVersion = (app_id: string, message_id: string,
 // Favorite - Trial Run
 export const draftRunFavoriteMessage = (app_id: string, message_id: string) => {
   return request.post(`/apps/${app_id}/messages/${message_id}/favorite`)
+}
+// Like/Dislike AI response - Trial Run
+export const draftRunFeedbackMessage = (app_id: string, message_id: string, data: { feedback_type: 'like' | 'dislike' }) => {
+  return request.post(`/apps/${app_id}/messages/${message_id}/feedback`, data)
+}
+// Delete single message - Trial Run
+export const draftRunDeleteMessage = (app_id: string, message_id: string) => {
+  return request.delete(`/apps/${app_id}/messages/${message_id}`)
+}
+// Report content in message - Trial Run
+export const draftRunReportMessage = (app_id: string, message_id: string, data: ReportMessageData) => {
+  return request.post(`/apps/${app_id}/messages/${message_id}/report`, data)
 }
 // Delete application
 export const deleteApplication = (app_id: string) => {

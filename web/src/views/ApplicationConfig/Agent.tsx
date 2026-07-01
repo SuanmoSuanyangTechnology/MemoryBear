@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 17:12:37
+ * @Last Modified time: 2026-07-01 16:45:11
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -176,6 +176,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
           model_parameters: {...reset},
           list: []
         };
+        if (prev.some(item => item.model_config_id === default_model_config_id)) return prev
         return [
           ...(prev || []).map(item => ({
             ...item,
@@ -408,7 +409,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         return prev.map(vo => {
           if (vo.list?.length === 0) {
             return { ...vo, list: [assistantMsg] }
-          } else if (vo.list && vo.list[0].role === 'assistant') {
+          } else if (vo.list && !Array.isArray(vo.list[0]) && vo.list[0].role === 'assistant') {
             vo.list[0] = assistantMsg
             return { ...vo, list: [...vo.list] }
           } else {
