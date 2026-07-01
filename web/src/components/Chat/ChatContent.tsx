@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:12:26
+ * @Last Modified time: 2026-07-01 16:42:28
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -342,7 +342,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
                       {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools || isAlwaysShowAssistantTools) &&
-                        <Flex gap={12} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                        <Flex gap={12} wrap align="center" justify={item.role === 'user' ? 'end' : 'start'}>
                           {labelPosition === 'bottom' &&
                             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                               {labelFormat(item)}
