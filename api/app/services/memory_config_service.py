@@ -261,7 +261,6 @@ class MemoryConfigService:
         """
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 
-        # 1. 验证配置是否存在
         config = self.db.get(MemoryConfigModel, config_id)
         if not config:
             raise InvalidConfigError(
@@ -270,12 +269,10 @@ class MemoryConfigService:
                 invalid_value=config_id,
             )
 
-        # 2. 获取 workspace 以确定 tenant_id
         workspace = self.db.get(Workspace, config.workspace_id) if config.workspace_id else None
         tenant_id = workspace.tenant_id if workspace else None
         workspace_id = workspace.id if workspace else None
 
-        # 3. 检查缺失 + 并行验证已配置模型，全部收集告警
         all_models = [
             ("llm", config.llm_id),
             ("embedding", config.embedding_id),
@@ -287,7 +284,6 @@ class MemoryConfigService:
 
         warnings: list[dict] = []
 
-        # 3a. 未配置的模型记录缺失告警
         for model_type, model_id in all_models:
             if not model_id:
                 warnings.append({
@@ -296,10 +292,12 @@ class MemoryConfigService:
                     "message": f"{model_type} 模型未配置",
                 })
 
-        # 3b. 已配置的模型并行验证 API 连通性
+        _VALIDATE_AS_LLM = {"vision", "video", "audio"}
+
         async def _validate_one(model_type: str, model_id: str) -> dict | None:
+            validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                await self._validate_model_connectivity(model_id, model_type, tenant_id, config_id, workspace_id)
+                await self._validate_model_connectivity(model_id, validate_type, tenant_id, config_id, workspace_id)
                 return None
             except ConfigurationError as e:
                 logger.warning(
@@ -318,7 +316,7 @@ class MemoryConfigService:
             warnings += [w for w in results if w is not None]
 
         result: dict = {
-            "valid": True,
+            "valid": not bool(warnings),
             "config_id": str(config_id),
             "config_name": config.config_name,
         }

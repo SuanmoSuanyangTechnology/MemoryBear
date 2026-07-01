@@ -97,10 +97,18 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         workspace = self.db.scalar(stmt)
         if not workspace:
             raise BusinessException("空间不存在")
-        await MemoryConfigService(self.db).valid_config(config_id)
-        workspace.memory_config = config_id
+        validation_result = await MemoryConfigService(self.db).valid_config(config_id)
+        warnings = validation_result.get("warnings", [])
+        success = False
+        if not warnings:
+            workspace.memory_config = config_id
+            success = True
         self.db.commit()
-        return {"affected": 1}
+        return {
+            "config_id": config_id,
+            "warnings": validation_result.get("warnings", []),
+            "success": success,
+        }
 
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（仅名称与描述）
@@ -206,7 +214,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return result
 
     # --- Read All ---
-    def get_all(self, workspace_id=None) -> List[Dict[str, Any]]:  # 获取所有配置参数
+    def get_all(self, workspace_id) -> List[Dict[str, Any]]:  # 获取所有配置参数
         results = MemoryConfigRepository.get_all(self.db, workspace_id)
 
         # 检查并修正 pruning_scene 与 scene_name 不一致的记录
@@ -221,6 +229,8 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 needs_commit = True
         if needs_commit:
             self.db.commit()
+
+        activate_config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
 
         # 将 ORM 对象转换为字典列表，时间字段统一转为 UTC 毫秒时间戳
         data_list = []
@@ -270,6 +280,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "offset": config.offset,
                 "created_at": to_timestamp_ms(config.created_at),
                 "updated_at": to_timestamp_ms(config.updated_at),
+                "is_active": str(config.config_id) == str(activate_config_id),
             }
             data_list.append(config_dict)
 

@@ -39,7 +39,7 @@ class Workspace(Base):
     video = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
-    is_default_config = Column(Boolean, default=False)
+    is_default_config = Column(Boolean, default=False, server_default="false", nullable=False)
     memory_config = Column(UUID(as_uuid=True), nullable=True)
     is_active = Column(Boolean, default=True)
 
