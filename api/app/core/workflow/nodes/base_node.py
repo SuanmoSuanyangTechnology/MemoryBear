@@ -635,8 +635,19 @@ class BaseNode(ABC):
         # # Check if the node has an error edge defined
         # error_edge = self._find_error_edge()
 
-        # Extract input data (for logging or audit purposes)
-        input_data = self._extract_input(state, variable_pool)
+        # Extract input data (for logging or audit purposes).
+        # This runs in the error-handling path, so it must never mask the
+        # original error: if input extraction itself fails (e.g. a template
+        # references an undefined variable), fall back to a placeholder so
+        # the original error_message is preserved and NodeExecutionError is
+        # raised as designed.
+        try:
+            input_data = self._extract_input(state, variable_pool)
+        except Exception as extract_err:
+            logger.warning(
+                f"Node {self.node_id} failed to extract input during error wrapping: {extract_err}"
+            )
+            input_data = {"_extract_error": str(extract_err)}
 
         # Construct the standardized node output for the error
         node_output = {
