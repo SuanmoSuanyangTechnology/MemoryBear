@@ -35,7 +35,7 @@ import type { Variable } from '@/views/Workflow/components/Properties/VariableLi
 import type { TestChatProps } from './type'
 import type { SSEMessage } from '@/utils/stream'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
-import { replaceVariables } from '@/views/ApplicationConfig/Agent'
+import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
 import {
   formatParams,
   collectVariableParams,
@@ -100,15 +100,9 @@ const TestChat: FC<TestChatProps> = ({
 
     setFeatures(config?.features || {} as FeaturesConfigForm)
 
-    if (config?.features?.opening_statement?.enabled && config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
-      setChatList(prev => [...prev, {
-        role: 'assistant',
-        created_at: Date.now(),
-        content: config?.features?.opening_statement?.statement,
-        meta_data: {
-          suggested_questions: config?.features?.opening_statement?.suggested_questions || []
-        }
-      }])
+    const openingMsg = buildOpeningStatementMessage(config?.features?.opening_statement, { withTimestamp: true })
+    if (openingMsg) {
+      setChatList(prev => [...prev, openingMsg])
     }
 
     const initVariables = computeInitVariables(application.type, config)
@@ -292,7 +286,11 @@ const TestChat: FC<TestChatProps> = ({
     if (!page || !item.id || !application?.id) return
     draftRunSwitchMessageVersion(application.id, item.id, page)
       .then((res) => {
-        setChatList(buildVersionMessages(res, getNodeContext))
+        const rebuilt = buildVersionMessages(res, getNodeContext)
+        // The switch response omits the opening statement, so re-insert it at the
+        // top when configured to keep the greeting visible after switching.
+        const assistantMsg = buildOpeningStatementMessage(features?.opening_statement, { variables })
+        setChatList(assistantMsg ? [assistantMsg, ...rebuilt] : rebuilt)
         messageApi.success(t('common.operateSuccess'))
       })
   }
@@ -344,16 +342,8 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   useEffect(() => {
-    const opening_statement = features?.opening_statement
-
-    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
-      const assistantMsg: ChatItem = {
-        role: 'assistant',
-        content: replaceVariables(opening_statement.statement, variables as any),
-        meta_data: {
-          suggested_questions: opening_statement?.suggested_questions
-        }
-      }
+    const assistantMsg = buildOpeningStatementMessage(features?.opening_statement, { variables })
+    if (assistantMsg) {
       setChatList(prev => {
         const first = prev[0]
         if (first && !Array.isArray(first) && first.role === 'assistant') {

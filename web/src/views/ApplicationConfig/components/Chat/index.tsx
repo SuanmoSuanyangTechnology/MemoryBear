@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-02-03 16:27:39
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 16:45:52
+ * @Last Modified time: 2026-07-01 19:48:04
  */
 /**
  * Chat debugging component for application testing
@@ -55,6 +55,7 @@ import {
   applyVersionMessages,
 } from './messageReducers'
 import { createCompareStreamHandler, createClusterStreamHandler, createRegenerateStreamHandler } from './streamHandlers'
+import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
 
 /**
  * Component props
@@ -301,7 +302,8 @@ const Chat: FC<ChatProps> = ({
     if (!page || !item.id || !id) return
     draftRunSwitchMessageVersion(id, item.id, page)
       .then((res) => {
-        updateChatList(prev => applyVersionMessages(prev, item.id as string, res, getNodeContext))
+        const openingMessage = buildOpeningStatementMessage(features?.opening_statement, { variables: chatVariables })
+        updateChatList(prev => applyVersionMessages(prev, item.id as string, res, getNodeContext, openingMessage))
         messageApi.success(t('common.operateSuccess'))
       })
   }
@@ -351,7 +353,7 @@ const Chat: FC<ChatProps> = ({
   const reportMsg = (vo: ChatItem) => {
     reportModalRef.current?.handleOpen(vo)
   }
-
+  console.log('chatList', chatList)
   const isHasLabel = useMemo(() => chatList.some(item => item.label), [chatList])
   const isNeedVariableConfig = useMemo(() => chatVariables?.some(vo => vo.required && !vo.value), [chatVariables])
   return (

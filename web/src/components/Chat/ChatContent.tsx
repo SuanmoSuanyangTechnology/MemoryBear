@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 16:42:28
+ * @Last Modified time: 2026-07-01 18:19:07
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -362,7 +362,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {(isSupportTools || isAlwaysShowAssistantTools) && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
+                          {(isSupportTools || isAlwaysShowAssistantTools) && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && item.id && <>
                             {(index === data.length - 1 || typeof regenerateMaxCount === 'number') && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}

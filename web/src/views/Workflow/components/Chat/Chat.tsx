@@ -40,7 +40,7 @@ import ChatToolbar from '@/components/Chat/ChatToolbar'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
-import { replaceVariables } from '@/views/ApplicationConfig/Agent';
+import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement';
 import { useWorkflowStore } from '@/store/workflow';
 import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfigModal'
 import type { VariableConfigModalRef } from '@/views/Workflow/types'
@@ -109,15 +109,11 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
    * Initializes chat with opening statement if configured
    */
   useEffect(() => {
-    if (open && features?.opening_statement?.enabled && features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
-      setChatList([{
-        role: 'assistant',
-        created_at: Date.now(),
-        content: features?.opening_statement?.statement,
-        meta_data: {
-          suggested_questions: features?.opening_statement?.suggested_questions || []
-        }
-      }])
+    const openingMsg = open
+      ? buildOpeningStatementMessage(features?.opening_statement, { withTimestamp: true })
+      : null
+    if (openingMsg) {
+      setChatList([openingMsg])
     } else {
       handleClose(false)
     }
@@ -377,16 +373,8 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
   }));
 
   useEffect(() => {
-    const opening_statement = features?.opening_statement
-
-    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
-      const assistantMsg: ChatItem = {
-        role: 'assistant',
-        content: replaceVariables(opening_statement.statement, variables as any),
-        meta_data: {
-          suggested_questions: opening_statement?.suggested_questions
-        }
-      }
+    const assistantMsg = buildOpeningStatementMessage(features?.opening_statement, { variables })
+    if (assistantMsg) {
       setChatList(prev => {
         const first = prev[0]
         if (first && !Array.isArray(first) && first.role === 'assistant') {
@@ -446,7 +434,9 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     if (!page || !item.id || !appId) return
     draftRunSwitchMessageVersion(appId, item.id, page)
       .then((res) => {
-        setChatList(buildVersionMessages(res as Data, getNodeContext))
+        const rebuilt = buildVersionMessages(res as Data, getNodeContext)
+        const assistantMsg = buildOpeningStatementMessage(features?.opening_statement, { variables })
+        setChatList(assistantMsg ? [assistantMsg, ...rebuilt] : rebuilt)
         messageApi.success(t('common.operateSuccess'))
       })
   }

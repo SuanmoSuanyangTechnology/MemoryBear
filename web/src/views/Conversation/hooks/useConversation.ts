@@ -20,7 +20,7 @@ import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
 import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
-import { replaceVariables } from '@/views/ApplicationConfig/Agent'
+import { replaceVariables, buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
 
 import type { HistoryItem, ShareModalRef, ReportModalRef } from '../types'
 import { useChatMessages } from './useChatMessages'
@@ -236,20 +236,13 @@ export function useConversation() {
     if (conversation_id) {
       getChatDetail()
     } else {
-      if (features?.opening_statement?.enabled && features?.opening_statement?.statement) {
-        const variables = toolbarRef.current?.getVariables() || []
-        setChatList([{
-          role: 'assistant',
-          content: replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[]),
-          created_at: Date.now(),
-          meta_data: {
-            suggested_questions: features.opening_statement?.suggested_questions
-          },
-          is_hidden_refresh: true
-        }])
-      } else {
-        setChatList([])
-      }
+      const variables = toolbarRef.current?.getVariables() || []
+      const openingMsg = buildOpeningStatementMessage(features?.opening_statement, {
+        variables,
+        withTimestamp: true,
+        extra: { is_hidden_refresh: true },
+      })
+      setChatList(openingMsg ? [openingMsg] : [])
     }
   }, [conversation_id, features?.opening_statement?.statement])
 

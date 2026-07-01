@@ -190,12 +190,12 @@ export const updateErrorAssistantMessage = (
 
 /** Adds a tool-run start placeholder to the targeted model's last assistant message. */
 export const addRunStartMessage = (prev: ChatData[], data: any): ChatData[] => {
-  const { model_config_id, conversation_id, name, input } = data
+  const { model_config_id, conversation_id, name, step_id, input } = data
   return mapModelLastVersion(prev, model_config_id, lastMsg =>
     lastMsg.role === 'assistant'
       ? {
         ...lastMsg,
-        subContent: [
+        subContent: step_id ?[
           ...(lastMsg.subContent || []),
           {
             node_id: `${name}`,
@@ -204,7 +204,7 @@ export const addRunStartMessage = (prev: ChatData[], data: any): ChatData[] => {
             status: 'pending',
             content: { input },
           },
-        ],
+        ] : lastMsg.subContent || [],
       }
       : lastMsg,
     conversation_id,

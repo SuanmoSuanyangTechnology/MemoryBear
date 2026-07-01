@@ -50,7 +50,6 @@ export const appendRegenerateVersion = (prev: ChatList, voId: string): ChatList 
     role: 'assistant',
     content: '',
     created_at: Date.now(),
-    subContent: [],
     is_current: true,
   }
   if (Array.isArray(existingEntry)) {

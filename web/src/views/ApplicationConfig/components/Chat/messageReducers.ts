@@ -37,7 +37,6 @@ export const appendRegenerateVersion = (prev: ChatData[], voId: string): ChatDat
     role: 'assistant',
     content: '',
     created_at: Date.now(),
-    subContent: [],
     is_current: true,
   }
   if (Array.isArray(existingEntry)) {
@@ -118,10 +117,17 @@ export const applyVersionMessages = (
   id: string,
   res: any,
   getNodeContext: (node_id: string) => { icon?: any },
+  openingMessage?: ChatItem | null,
 ): ChatData[] => {
   const colIndex = findColumnIndexById(prev, id)
   if (colIndex === -1) return prev
+  // The switch response omits the opening statement, so re-insert it at the top of
+  // the column when provided to keep the greeting visible after switching.
+  const rebuilt = buildVersionMessages(res, getNodeContext)
   const next = [...prev]
-  next[colIndex] = { ...next[colIndex], list: buildVersionMessages(res, getNodeContext) }
+  next[colIndex] = {
+    ...next[colIndex],
+    list: openingMessage ? [openingMessage, ...rebuilt] : rebuilt,
+  }
   return next
 }
