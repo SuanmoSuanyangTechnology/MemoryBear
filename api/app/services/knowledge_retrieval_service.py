@@ -801,13 +801,7 @@ class KnowledgeRetrievalService:
                 )
             return []
 
-        has_rerankable_target = any(
-            target.params.retrieve_type in (RetrieveType.HYBRID, RetrieveType.Graph)
-            for target in targets
-        )
-        # is required rerank ？
         needs_global_rerank = request.rerank_id is not None or len(targets) > 1
-        # must rerank
         if request.rerank_id:
             ranked_chunks = cls.rerank_documents(
                 db=db,
@@ -817,7 +811,6 @@ class KnowledgeRetrievalService:
                 top_k=request.top_k,
                 tenant_id=tenant_id,
             )
-        # should rerank
         elif needs_global_rerank:
             first_target = targets[0]
             vector_service = ElasticSearchVectorFactory.init_vector_from_configs(
@@ -830,7 +823,6 @@ class KnowledgeRetrievalService:
                 docs=unique_chunks,
                 top_k=request.top_k,
             )
-        # not rerank
         else:
             ranked_chunks = sorted(
                 unique_chunks,
@@ -838,7 +830,7 @@ class KnowledgeRetrievalService:
                 reverse=True,
             )
 
-        # global threshold filter
+        # Apply the final global score threshold after optional cross-KB rerank.
         threshold = cls._resolve_global_score_threshold(
             request=request,
             targets=targets,
