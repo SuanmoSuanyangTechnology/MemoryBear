@@ -354,16 +354,16 @@ class KnowledgeRetrievalNode(BaseNode):
             )
 
         # 3. Construct KnowledgeRetrievalRequest
-        #    Use first KB's config as global defaults (user confirmed: accept global params)
         first_kb = self.typed_config.knowledge_bases[0]
         kb_ids = [kb.kb_id for kb in self.typed_config.knowledge_bases]
 
         request = KnowledgeRetrievalRequest(
             query=query,
             kb_ids=kb_ids,
+            knowledge_bases=self.typed_config.knowledge_bases,
             similarity_threshold=first_kb.similarity_threshold,
             vector_similarity_weight=first_kb.vector_similarity_weight,
-            top_k=first_kb.top_k,
+            top_k=self.typed_config.reranker_top_k or first_kb.top_k,
             retrieve_type=first_kb.retrieve_type,
             rerank_id=self.typed_config.reranker_id,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,

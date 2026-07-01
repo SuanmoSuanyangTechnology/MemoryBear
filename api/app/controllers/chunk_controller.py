@@ -962,7 +962,13 @@ async def retrieve_chunks(
     api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
 
     try:
-        request = KnowledgeRetrievalRequest(**retrieve_data.model_dump(exclude_none=True))
+        retrieval_payload = retrieve_data.model_dump(exclude_none=True)
+        if retrieve_data.knowledge_bases:
+            retrieval_payload["knowledge_bases"] = [
+                kb_config.model_dump(exclude_none=True, exclude_unset=True)
+                for kb_config in retrieve_data.knowledge_bases
+            ]
+        request = KnowledgeRetrievalRequest(**retrieval_payload)
         api_logger.info(f"retrieve chunk: request={request}")
         result = KnowledgeRetrievalService.retrieve(
             db=db,
