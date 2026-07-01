@@ -11,7 +11,6 @@
 """
 
 from typing import Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -24,8 +23,6 @@ from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.memory_storage_schema import (
     ForgettingTriggerRequest,
-    ForgettingConfigResponse,
-    ForgettingConfigUpdateRequest,
     ForgettingStatsResponse,
     ForgettingReportResponse,
     ForgettingCurveRequest,
@@ -127,114 +124,9 @@ async def trigger_forgetting_cycle(
         return fail(BizCode.INTERNAL_ERROR, "触发遗忘周期失败", str(e))
 
 
-@router.get("/read_config", response_model=ApiResponse)
-async def read_forgetting_config(
-        config_id: UUID | int,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """
-    获取遗忘引擎配置
-    
-    读取指定配置ID的遗忘引擎参数。
-    
-    Args:
-        config_id: 配置ID
-        current_user: 当前用户
-        db: 数据库会话
-    
-    Returns:
-        ApiResponse: 包含配置信息的响应
-    """
-    workspace_id = current_user.current_workspace_id
-
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试读取遗忘引擎配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(
-        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取遗忘引擎配置: {config_id}"
-    )
-
-    try:
-        config_id = resolve_config_id(config_id, db)
-        # 调用服务层读取配置
-        config = forget_service.read_forgetting_config(db=db, config_id=config_id)
-
-        # 构建响应
-        response_data = ForgettingConfigResponse(**config)
-
-        return success(data=response_data.model_dump(), msg="查询成功")
-
-    except ValueError as e:
-        api_logger.warning(f"配置不存在: config_id={config_id}, 错误: {str(e)}")
-        return fail(BizCode.INVALID_PARAMETER, f"配置不存在: {config_id}", str(e))
-
-    except Exception as e:
-        api_logger.error(f"读取遗忘引擎配置失败: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "查询遗忘引擎配置失败", str(e))
-
-
-@router.post("/update_config", response_model=ApiResponse)
-async def update_forgetting_config(
-        payload: ForgettingConfigUpdateRequest,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """
-    更新遗忘引擎配置
-    
-    更新指定配置ID的遗忘引擎参数。
-    
-    Args:
-        payload: 配置更新请求
-        current_user: 当前用户
-        db: 数据库会话
-    
-    Returns:
-        ApiResponse: 包含更新结果的响应
-    """
-    workspace_id = current_user.current_workspace_id
-    payload.config_id = resolve_config_id(payload.config_id, db)
-
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新遗忘引擎配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(
-        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新遗忘引擎配置: {payload.config_id}"
-    )
-
-    try:
-        # 构建更新字段字典（排除 None 值和 config_id）
-        update_data = {
-            key: value
-            for key, value in payload.model_dump(exclude_none=True).items()
-            if key != 'config_id'
-        }
-
-        # 调用服务层更新配置
-        config = forget_service.update_forgetting_config(
-            db=db,
-            config_id=payload.config_id,
-            update_fields=update_data
-        )
-
-        # 构建响应
-        response_data = ForgettingConfigResponse(**config)
-
-        return success(data=response_data.model_dump(), msg="更新成功")
-
-    except ValueError as e:
-        api_logger.warning(f"配置不存在: config_id={payload.config_id}, 错误: {str(e)}")
-        return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
-
-    except Exception as e:
-        db.rollback()
-        api_logger.error(f"更新遗忘引擎配置失败: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "更新遗忘引擎配置失败", str(e))
+# ==================== 记忆配置接口已迁移 ====================
+# read_forgetting_config / update_forgetting_config 已迁移至 memory_config_controller
+# （/memory_config/read_config_forgetting、/memory_config/update_config_forgetting）。
 
 
 @router.get("/stats", response_model=ApiResponse)

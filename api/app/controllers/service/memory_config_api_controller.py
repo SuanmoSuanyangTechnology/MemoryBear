@@ -7,11 +7,8 @@ from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
-from app.controllers import memory_storage_controller
-from app.controllers import memory_forget_controller
+from app.controllers import memory_config_controller
 from app.controllers import ontology_controller
-from app.controllers import emotion_config_controller
-from app.controllers import memory_reflection_controller
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
 from app.schemas.memory_reflection_schemas import Memory_Reflection
@@ -125,7 +122,7 @@ async def read_all_config(
 
     current_user = _get_current_user(api_key_auth, db)
 
-    return memory_storage_controller.read_all_config(
+    return memory_config_controller.read_all_config(
         current_user=current_user,
         db=db,
     )
@@ -171,7 +168,7 @@ async def read_config_extracted(
 
     current_user = _get_current_user(api_key_auth, db)
 
-    return memory_storage_controller.read_config_extracted(
+    return memory_config_controller.read_config_extracted(
         config_id = config_id,
         current_user = current_user,
         db = db,
@@ -196,7 +193,7 @@ async def read_config_forgetting(
 
     current_user = _get_current_user(api_key_auth, db)
 
-    result = await memory_forget_controller.read_forgetting_config(
+    result = await memory_config_controller.read_forgetting_config(
         config_id = config_id,
         current_user = current_user,
         db = db,
@@ -224,7 +221,7 @@ async def read_config_emotion(
 
     current_user = _get_current_user(api_key_auth, db)
 
-    return jsonable_encoder(emotion_config_controller.get_emotion_config(
+    return jsonable_encoder(memory_config_controller.get_emotion_config(
         config_id=config_id,
         db=db,
         current_user=current_user,
@@ -249,7 +246,7 @@ async def read_config_reflection(
 
     current_user = _get_current_user(api_key_auth, db)
 
-    return jsonable_encoder(await memory_reflection_controller.start_reflection_configs(
+    return jsonable_encoder(await memory_config_controller.start_reflection_configs(
         config_id=config_id,
         current_user=current_user,
         db=db,
@@ -289,7 +286,7 @@ async def create_memory_config(
         emotion_model_id=payload.emotion_model_id,
     )
     #将返回数据中UUID序列化处理
-    result =memory_storage_controller.create_config(
+    result =memory_config_controller.create_config(
         payload=mgmt_payload,
         current_user=current_user,
         db=db,
@@ -326,7 +323,7 @@ async def update_memory_config(
         scene_id = payload.scene_id,
     )
 
-    return memory_storage_controller.update_config(
+    return memory_config_controller.update_config(
         payload = mgmt_payload,
         current_user = current_user,
         db = db,
@@ -358,7 +355,7 @@ async def update_memory_config_extracted(
    update_fields = payload.model_dump(exclude_unset=True)
    mgmt_payload = ConfigUpdateExtracted(**update_fields)
 
-   return memory_storage_controller.update_config_extracted(
+   return memory_config_controller.update_config_extracted(
         payload = mgmt_payload,
         current_user = current_user,
         db = db,
@@ -391,7 +388,7 @@ async def update_memory_config_forgetting(
    mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
 
    #将返回数据中UUID序列化处理
-   result = await memory_forget_controller.update_forgetting_config(
+   result = await memory_config_controller.update_forgetting_config(
         payload = mgmt_payload,
         current_user = current_user,
         db = db,
@@ -422,7 +419,7 @@ async def update_config_emotion(
     current_user = _get_current_user(api_key_auth, db)
     update_fields = payload.model_dump(exclude_unset=True)
     mgmt_payload = EmotionConfigUpdate(**update_fields)
-    return jsonable_encoder(emotion_config_controller.update_emotion_config(
+    return jsonable_encoder(memory_config_controller.update_emotion_config(
         config=mgmt_payload,
         db=db,
         current_user=current_user,
@@ -453,7 +450,7 @@ async def update_config_reflection(
     update_fields = payload.model_dump(exclude_unset=True)
     mgmt_payload = Memory_Reflection(**update_fields)
 
-    return jsonable_encoder(await memory_reflection_controller.save_reflection_config(
+    return jsonable_encoder(await memory_config_controller.save_reflection_config(
         request=mgmt_payload,
         current_user=current_user,
         db=db,
@@ -483,7 +480,7 @@ async def delete_memory_config(
 
     current_user = _get_current_user(api_key_auth, db)
 
-    return memory_storage_controller.delete_config(
+    return memory_config_controller.delete_config(
         config_id=config_id,
         force=force,
         current_user=current_user,

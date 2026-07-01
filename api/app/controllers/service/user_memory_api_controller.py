@@ -32,6 +32,7 @@ from app.schemas.memory_storage_schema import GenerateCacheRequest
 
 # 包装内部服务 controller
 from app.controllers import memory_analytics_controller
+from app.controllers import end_user_controller
 
 router = APIRouter(prefix="/memory", tags=["V1 - User Memory API"])
 logger = get_business_logger()
@@ -192,7 +193,7 @@ async def get_end_user_info(
     current_user = get_current_user_from_api_key(db, api_key_auth)
     validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
 
-    return await memory_analytics_controller.get_end_user_info(
+    return await end_user_controller.get_end_user_info(
         end_user_id=end_user_id,
         current_user=current_user,
         db=db,
