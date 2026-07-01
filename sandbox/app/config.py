@@ -43,7 +43,6 @@ class Config(BaseModel):
     """Global configuration"""
     app: AppConfig = Field(default_factory=AppConfig)
     max_workers: int = 4
-    max_requests: int = 50
     worker_timeout: int = 30
 
     enable_network: bool = True
@@ -72,7 +71,6 @@ class Config(BaseModel):
         env_map = {
             "DEBUG": ("app.debug", lambda v: v.lower() in ("true", "1", "yes")),
             "MAX_WORKERS": ("max_workers", int),
-            "MAX_REQUESTS": ("max_requests", int),
             "SANDBOX_PORT": ("app.port", int),
             "WORKER_TIMEOUT": ("worker_timeout", int),
             "API_KEY": ("app.key", str),

@@ -59,7 +59,7 @@ async def write_server_async(
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
 
-    config_id = user_input.config_id
+    config_id = MemoryConfigService(db).get_config_id_by_end_user(user_input.end_user_id)
     workspace_id = current_user.current_workspace_id
     api_logger.info(
         f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")

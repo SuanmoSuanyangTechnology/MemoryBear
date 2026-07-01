@@ -76,7 +76,10 @@ class WorkspaceRepository:
                 configs = {
                     "llm": workspace.llm,
                     "embedding": workspace.embedding,
-                    "rerank": workspace.rerank
+                    "rerank": workspace.rerank,
+                    "vision": workspace.vision,
+                    "audio": workspace.audio,
+                    "video": workspace.video,
                 }
                 db_logger.debug(
                     f"工作空间模型配置查询成功: workspace_id={workspace_id}, "

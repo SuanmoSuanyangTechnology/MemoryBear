@@ -13,7 +13,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -78,6 +78,57 @@ def read_all_config(
         return fail(BizCode.INTERNAL_ERROR, "查询所有配置失败", str(e))
 
 
+@router.post('/active_config', response_model=ApiResponse)
+async def active_config(
+        config_id: UUID = Body(..., embed=True),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> dict:
+    workspace_id = current_user.current_workspace_id
+
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    from app.core.exceptions import BusinessException
+    from app.schemas.memory_config_schema import ConfigurationError
+
+    svc = DataConfigService(db)
+    try:
+        result = await svc.active(workspace_id, config_id)
+        if result.get("success"):
+            return success(data=result)
+        else:
+            return fail(code=BizCode.API_KEY_INACTIVE, msg="配置异常", data=result)
+    except ConfigurationError as e:
+        return fail(BizCode.INVALID_PARAMETER, str(e))
+    except BusinessException as e:
+        return fail(BizCode.INVALID_PARAMETER, str(e))
+
+
+@router.get('/validate_active_config', response_model=ApiResponse)
+async def validate_active_config_models(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> dict:
+    """校验当前工作空间激活记忆配置中的模型 API 可用性"""
+    from app.core.exceptions import BusinessException
+    from app.services.memory_config_service import MemoryConfigService
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+
+    api_logger.info(f"用户 {current_user.username} 请求校验激活配置模型: workspace_id={workspace_id}")
+
+    try:
+        config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
+    except BusinessException:
+        return success(data={"valid": False, "warnings": [{"message": "当前工作空间无启用的记忆配置"}]})
+
+    result = await MemoryConfigService(db).valid_config(config_id)
+    return success(data=result)
+
+
 @router.get("/read_config_extracted", response_model=ApiResponse)  # 读取某条抽取配置
 def read_config_extracted(
         config_id: UUID | int,
@@ -103,9 +154,9 @@ def read_config_extracted(
 
 @router.get("/read_config_forgetting", response_model=ApiResponse)
 async def read_forgetting_config(
-    config_id: UUID | int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        config_id: UUID | int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """获取遗忘引擎配置"""
     workspace_id = current_user.current_workspace_id
@@ -134,9 +185,9 @@ async def read_forgetting_config(
 
 @router.get("/read_config_emotion", response_model=ApiResponse)
 def get_emotion_config(
-    config_id: UUID | int = Query(..., description="配置ID"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+        config_id: UUID | int = Query(..., description="配置ID"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
 ):
     """获取情绪引擎配置"""
     try:
@@ -307,9 +358,9 @@ def update_config_extracted(
 
 @router.post("/update_config_forgetting", response_model=ApiResponse)
 async def update_forgetting_config(
-    payload: ForgettingConfigUpdateRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        payload: ForgettingConfigUpdateRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """更新遗忘引擎配置"""
     workspace_id = current_user.current_workspace_id
@@ -349,9 +400,9 @@ async def update_forgetting_config(
 
 @router.post("/update_config_emotion", response_model=ApiResponse)
 def update_emotion_config(
-    config: EmotionConfigUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+        config: EmotionConfigUpdate,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
 ):
     """更新情绪引擎配置"""
     config.config_id = resolve_config_id(config.config_id, db)
@@ -385,9 +436,9 @@ def update_emotion_config(
 
 @router.post("/update_config_reflection", response_model=ApiResponse)
 async def save_reflection_config(
-    request: Memory_Reflection,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        request: Memory_Reflection,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """保存反思引擎配置"""
     try:

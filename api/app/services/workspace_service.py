@@ -924,13 +924,13 @@ def get_workspace_models_configs(
     return configs
 
 
-def update_workspace_models_configs(
+async def update_workspace_models_configs(
         db: Session,
         workspace_id: uuid.UUID,
         models_update: WorkspaceModelsUpdate,
         user: User,
-) -> Workspace:
-    """更新工作空间的模型配置（llm, embedding, rerank）
+) -> tuple[Workspace, list[dict]]:
+    """更新工作空间的模型配置，并校验关联默认配置的模型可用性。
 
     Args:
         db: 数据库会话
@@ -939,7 +939,7 @@ def update_workspace_models_configs(
         user: 当前用户
 
     Returns:
-        Workspace: 更新后的工作空间对象
+        tuple[Workspace, list[dict]]: (更新后的工作空间对象, 模型校验告警列表)
     """
     business_logger.info(f"用户 {user.username} 请求更新工作空间 {workspace_id} 的模型配置")
 
@@ -948,39 +948,41 @@ def update_workspace_models_configs(
     default_memory_config = MemoryConfigService(db).get_workspace_default_config(workspace_id=workspace_id)
 
     try:
-        if models_update.llm is not None:
-            db_workspace.llm = str(models_update.llm) if models_update.llm else None
+        db_workspace.llm = str(models_update.llm) if models_update.llm else None
+        db_workspace.embedding = str(models_update.embedding) if models_update.embedding else None
+        db_workspace.rerank = str(models_update.rerank) if models_update.rerank else None
+        db_workspace.vision = str(models_update.vision) if models_update.vision else None
+        db_workspace.audio = str(models_update.audio) if models_update.audio else None
+        db_workspace.video = str(models_update.video) if models_update.video else None
+
+        if default_memory_config:
             default_memory_config.llm = str(models_update.llm) if models_update.llm else None
-
-        if models_update.embedding is not None:
-            db_workspace.embedding = str(models_update.embedding) if models_update.embedding else None
             default_memory_config.embedding = str(models_update.embedding) if models_update.embedding else None
-
-        if models_update.rerank is not None:
-            db_workspace.rerank = str(models_update.rerank) if models_update.rerank else None
             default_memory_config.rerank = str(models_update.rerank) if models_update.rerank else None
-
-        if models_update.vision is not None:
-            db_workspace.vision = str(models_update.vision) if models_update.vision else None
             default_memory_config.vision = str(models_update.vision) if models_update.vision else None
-
-        if models_update.audio is not None:
-            db_workspace.audio = str(models_update.audio) if models_update.audio else None
             default_memory_config.audio = str(models_update.audio) if models_update.audio else None
-
-        if models_update.video is not None:
-            db_workspace.video = str(models_update.video) if models_update.video else None
             default_memory_config.video = str(models_update.video) if models_update.video else None
 
         db.add(db_workspace)
+        if default_memory_config:
+            db.add(default_memory_config)
         db.commit()
         db.refresh(db_workspace)
+        if default_memory_config:
+            db.refresh(default_memory_config)
 
         business_logger.info(
             f"工作空间模型配置更新成功: workspace_id={workspace_id}, "
             f"llm={db_workspace.llm}, embedding={db_workspace.embedding}, rerank={db_workspace.rerank}"
         )
-        return db_workspace
+
+        # 校验默认配置的模型可用性
+        warnings: list[dict] = []
+        if default_memory_config:
+            result = await MemoryConfigService(db).valid_config(default_memory_config.config_id)
+            warnings = result.get("warnings", [])
+
+        return db_workspace, warnings
 
     except Exception as e:
         business_logger.error(f"工作空间模型配置更新失败: workspace_id={workspace_id} - {str(e)}")

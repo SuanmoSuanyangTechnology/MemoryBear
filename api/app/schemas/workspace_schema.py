@@ -201,3 +201,6 @@ class WorkspaceModelsConfig(BaseModel):
     llm: Optional[str] = Field(default=None, description="LLM模型ID")
     embedding: Optional[str] = Field(default=None, description="嵌入模型ID")
     rerank: Optional[str] = Field(default=None, description="重排序模型ID")
+    vision: Optional[str] = Field(default=None, description="视觉模型")
+    audio: Optional[str] = Field(default=None, description="音频模型")
+    video: Optional[str] = Field(default=None, description="视频模型")

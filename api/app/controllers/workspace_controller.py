@@ -437,17 +437,17 @@ def workspace_models_configs(
 
 @router.put("/workspace_models", response_model=ApiResponse)
 @cur_workspace_access_guard()
-def update_workspace_models_configs(
+async def update_workspace_models_configs(
         models_update: WorkspaceModelsUpdate,
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
         t: callable = Depends(get_translator)
 ):
-    """更新当前工作空间的模型配置（llm, embedding, rerank）"""
+    """更新当前工作空间的模型配置，并校验模型可用性"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的模型配置")
 
-    updated_workspace = workspace_service.update_workspace_models_configs(
+    updated_workspace, warnings = await workspace_service.update_workspace_models_configs(
         db=db,
         workspace_id=workspace_id,
         models_update=models_update,
@@ -458,5 +458,10 @@ def update_workspace_models_configs(
         f"成功更新工作空间 {workspace_id} 的模型配置: "
         f"llm={updated_workspace.llm}, embedding={updated_workspace.embedding}, rerank={updated_workspace.rerank}"
     )
-    return success(data=WorkspaceModelsConfig.model_validate(updated_workspace), msg=t("workspace.models.config_updated"))
+
+    data = WorkspaceModelsConfig.model_validate(updated_workspace)
+    response_data = {"workspace": data}
+    if warnings:
+        response_data["warnings"] = warnings
+    return success(data=response_data, msg=t("workspace.models.config_updated"))
 
