@@ -23,7 +23,7 @@ interface DesktopLayoutProps {
 
 const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
   const {
-    t, conversation_id, historyList, groupHistoryList, hasMore, scrollRef, toolbarRef, config,
+    t, conversation_id, historyList, groupHistoryList, hasMore, scrollRef, toolbarCallbackRef, config,
     isShare, chatTitle,
     getHistory, handleChangeHistory, handleShare,
   } = ctx
@@ -116,7 +116,7 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
             labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
           >
             <ChatToolbar
-              ref={toolbarRef}
+              ref={toolbarCallbackRef}
               {...buildSharedToolbarProps(ctx)}
               rightExtra={<ToolbarExtra ctx={ctx} />}
             />

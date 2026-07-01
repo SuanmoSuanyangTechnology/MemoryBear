@@ -3,7 +3,7 @@
  * 会话页面的核心状态与逻辑：历史记录、配置加载、消息发送/重新生成、人工干预、反馈、收藏、删除等。
  * 所有接口均使用分享态 token（shareToken）调用。
  */
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { App } from 'antd'
@@ -47,7 +47,14 @@ export function useConversation() {
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const toolbarRef = useRef<ChatToolbarRef>(null)
+  const toolbarRef = useRef<ChatToolbarRef | null>(null)
+  // Track toolbar mount so config variables can be (re)applied once its ref is
+  // attached — getExperienceConfig often resolves before the toolbar mounts.
+  const [toolbarReady, setToolbarReady] = useState(false)
+  const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
+    toolbarRef.current = node
+    setToolbarReady(!!node)
+  }, [])
   const abortRef = useRef<(() => void) | null>(null)
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
   const [fileList, setFileList] = useState<any[]>([])
@@ -157,6 +164,17 @@ export function useConversation() {
       setChatList([])
     }
   }, [shareToken])
+
+  // Re-apply config variables whenever the toolbar becomes ready. Without this the
+  // imperative setVariables in getExperienceConfig is silently dropped when the
+  // toolbar ref is still null, leaving the variable-config entry permanently hidden.
+  useEffect(() => {
+    if (!toolbarReady) return
+    const configVariables = (config?.variables as Variable[] | undefined) || []
+    if (configVariables.length > 0) {
+      toolbarRef.current?.setVariables(configVariables)
+    }
+  }, [toolbarReady, config])
 
   /** 按日期对会话历史分组 */
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
@@ -520,6 +538,7 @@ export function useConversation() {
     hasMore,
     scrollRef,
     toolbarRef,
+    toolbarCallbackRef,
     shareToken,
     fileList,
     setFileList,

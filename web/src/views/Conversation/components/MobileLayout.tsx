@@ -23,7 +23,7 @@ interface MobileLayoutProps {
 
 const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
   const {
-    t, conversation_id, historyList, hasMore, scrollRef, toolbarRef, config,
+    t, conversation_id, historyList, hasMore, scrollRef, toolbarCallbackRef, config,
     isShare, isIframe, isFloatBtn, isSmallScreen, chatTitle, showHistory, setShowHistory,
     getHistory, handleChangeHistory, handleShare,
   } = ctx
@@ -96,7 +96,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
             labelFormat={(item) => isFloatBtn ? formatDateTime(item.created_at, 'HH:mm') : formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
           >
             <ChatToolbar
-              ref={toolbarRef}
+              ref={toolbarCallbackRef}
               {...buildSharedToolbarProps(ctx)}
               leftExtra={<ToolbarExtra ctx={ctx} />}
             />
