@@ -668,6 +668,9 @@ class ConversationService:
         ):
             raise BusinessException("无权访问该消息", BizCode.FORBIDDEN)
 
+        if message.role != "assistant":
+            raise BusinessException("仅支持 assistant 消息", BizCode.BAD_REQUEST)
+
         meta_data = message.meta_data
         if not isinstance(meta_data, dict):
             return []

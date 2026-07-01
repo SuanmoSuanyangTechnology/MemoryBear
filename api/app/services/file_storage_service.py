@@ -371,6 +371,42 @@ def get_file_storage_service() -> FileStorageService:
     return _default_service
 
 
+_V1_UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MiB
+
+
+class _V1UploadValidation:
+    """Tracks streamed upload size and deferred validation errors."""
+
+    def __init__(self, max_size: int):
+        self.max_size = max_size
+        self.total = 0
+        self.error: HTTPException | None = None
+
+
+async def _v1_app_file_chunks(
+    file: UploadFile,
+    validation: _V1UploadValidation,
+) -> AsyncIterator[bytes]:
+    """Yield upload chunks while enforcing empty-file and max-size limits."""
+    while True:
+        chunk = await file.read(_V1_UPLOAD_CHUNK_SIZE)
+        if not chunk:
+            if validation.total == 0:
+                validation.error = HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The file is empty.",
+                )
+            return
+        validation.total += len(chunk)
+        if validation.total > validation.max_size:
+            validation.error = HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"The file size exceeds the {validation.max_size} byte limit",
+            )
+            return
+        yield chunk
+
+
 async def upload_v1_app_file(
     *,
     db: Session,
@@ -380,18 +416,7 @@ async def upload_v1_app_file(
     storage_service: FileStorageService,
 ) -> dict[str, str]:
     """Upload file for `/v1/app/files` without changing legacy upload endpoints."""
-    contents = await file.read()
-    file_size = len(contents)
-    if file_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The file is empty.",
-        )
-    if file_size > settings.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit",
-        )
+    validation = _V1UploadValidation(settings.MAX_FILE_SIZE)
 
     _, file_extension = os.path.splitext(file.filename)
     file_ext = file_extension.lower()
@@ -410,7 +435,7 @@ async def upload_v1_app_file(
         file_key=file_key,
         file_name=file.filename,
         file_ext=file_ext,
-        file_size=file_size,
+        file_size=0,
         content_type=file.content_type,
         status="pending",
     )
@@ -419,19 +444,26 @@ async def upload_v1_app_file(
     db.refresh(file_metadata)
 
     try:
-        await storage_service.upload_file(
+        file_size = await storage_service.upload_stream(
             tenant_id=tenant_id,
             workspace_id=workspace_id,
             file_id=file_id,
             file_ext=file_ext,
-            content=contents,
+            stream=_v1_app_file_chunks(file, validation),
             content_type=file.content_type,
         )
+        if validation.error:
+            file_metadata.status = "failed"
+            db.commit()
+            raise validation.error
         file_metadata.status = "completed"
+        file_metadata.file_size = file_size
         db.commit()
     except StorageUploadError as exc:
         file_metadata.status = "failed"
         db.commit()
+        if isinstance(exc.__cause__, HTTPException):
+            raise exc.__cause__
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"File storage failed: {str(exc)}",
