@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.schemas.chunk_schema import RetrieveType
+from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_db_context
@@ -143,6 +143,7 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
 
     request = KnowledgeRetrievalRequest(
         query=query,
+        caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         top_k=_as_int(first_kb.get("top_k"), 3),
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),

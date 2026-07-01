@@ -12,6 +12,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
+from app.schemas.chunk_schema import KnowledgeRetrievalCaller
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
@@ -359,6 +360,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         request = KnowledgeRetrievalRequest(
             query=query,
+            caller=KnowledgeRetrievalCaller.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
             similarity_threshold=first_kb.similarity_threshold,
