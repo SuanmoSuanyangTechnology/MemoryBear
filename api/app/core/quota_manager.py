@@ -146,6 +146,13 @@ def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     return None
 
 
+def get_end_user_memory_limit(db: Session, tenant_id: UUID) -> Optional[int]:
+    quota_config = _get_quota_config(db, tenant_id)
+    if quota_config:
+        return quota_config.get("end_user_memory_limit")
+    return None
+
+
 class QuotaUsageRepository:
     """配额使用量数据访问层"""
 
@@ -268,12 +275,12 @@ class QuotaUsageRepository:
 
 
 def _check_quota(
-    db: Session,
-    tenant_id: UUID,
-    quota_type: str,
-    resource_name: str,
-    usage_func: Optional[Callable] = None,
-    workspace_id: Optional[UUID] = None,
+        db: Session,
+        tenant_id: UUID,
+        quota_type: str,
+        resource_name: str,
+        usage_func: Optional[Callable] = None,
+        workspace_id: Optional[UUID] = None,
 ) -> None:
     """核心配额检查逻辑：对比使用量和配额限制"""
     try:
@@ -441,7 +448,8 @@ def check_memory_engine_quota(func: Callable) -> Callable:
     async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
-        logger.debug(f"check_memory_engine_quota async_wrapper: db={db is not None}, user={user}, kwargs_keys={list(kwargs.keys())}")
+        logger.debug(
+            f"check_memory_engine_quota async_wrapper: db={db is not None}, user={user}, kwargs_keys={list(kwargs.keys())}")
         if not db or not user:
             logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
             raise InternalServerError()
@@ -456,7 +464,8 @@ def check_memory_engine_quota(func: Callable) -> Callable:
     def sync_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
-        logger.debug(f"check_memory_engine_quota sync_wrapper: db={db is not None}, user={user}, kwargs_keys={list(kwargs.keys())}")
+        logger.debug(
+            f"check_memory_engine_quota sync_wrapper: db={db is not None}, user={user}, kwargs_keys={list(kwargs.keys())}")
         if not db or not user:
             logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
             raise InternalServerError()
@@ -566,6 +575,7 @@ def check_model_quota(func: Callable) -> Callable:
 
 def check_model_activation_quota(func: Callable) -> Callable:
     """模型激活时的配额检查装饰器"""
+
     @wraps(func)
     async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
@@ -639,6 +649,7 @@ def check_model_activation_quota(func: Callable) -> Callable:
 
 def check_quota(quota_type: str, resource_name: str, usage_func: Optional[Callable] = None):
     """通用配额检查装饰器，支持自定义使用量获取函数"""
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -661,6 +672,7 @@ def check_quota(quota_type: str, resource_name: str, usage_func: Optional[Callab
             return func(*args, **kwargs)
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
     return decorator
 
 
@@ -678,7 +690,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     quota_config = _get_quota_config(db, tenant_id)
     if not quota_config:
         return {}
-    
+
     repo = QuotaUsageRepository(db)
 
     def pct(used, limit):
@@ -753,8 +765,10 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
         logger.warning(f"获取 api_ops_current 失败，返回 0: {type(e).__name__}: {e}")
 
     return {
-        "workspace": {"used": workspace_count, "limit": quota_config.get("workspace_quota"), "percentage": pct(workspace_count, quota_config.get("workspace_quota"))},
-        "skill": {"used": skill_count, "limit": quota_config.get("skill_quota"), "percentage": pct(skill_count, quota_config.get("skill_quota"))},
+        "workspace": {"used": workspace_count, "limit": quota_config.get("workspace_quota"),
+                      "percentage": pct(workspace_count, quota_config.get("workspace_quota"))},
+        "skill": {"used": skill_count, "limit": quota_config.get("skill_quota"),
+                  "percentage": pct(skill_count, quota_config.get("skill_quota"))},
         "app": {
             "used": app_count,
             "limit": app_effective_limit,
@@ -786,6 +800,8 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "percentage": pct(ontology_count, ontology_effective_limit),
             "per_workspace": _build_per_workspace_detail(repo.count_ontology_projects, ontology_quota_per_ws),
         },
-        "model": {"used": model_count, "limit": quota_config.get("model_quota"), "percentage": pct(model_count, quota_config.get("model_quota"))},
-        "api_ops_rate_limit": {"current": api_ops_current, "limit": quota_config.get("api_ops_rate_limit"), "percentage": None, "unit": "次/秒"},
+        "model": {"used": model_count, "limit": quota_config.get("model_quota"),
+                  "percentage": pct(model_count, quota_config.get("model_quota"))},
+        "api_ops_rate_limit": {"current": api_ops_current, "limit": quota_config.get("api_ops_rate_limit"),
+                               "percentage": None, "unit": "次/秒"},
     }

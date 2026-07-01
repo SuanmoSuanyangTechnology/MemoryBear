@@ -34,6 +34,7 @@ from app.schemas.memory_storage_schema import (
     PendingNodesResponse,
 )
 from app.schemas.response_schema import ApiResponse
+from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.utils.config_utils import resolve_config_id
 
@@ -54,9 +55,9 @@ forget_service = MemoryForgetService()
 
 @router.post("/trigger", response_model=ApiResponse)
 async def trigger_forgetting_cycle(
-    payload: ForgettingTriggerRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        payload: ForgettingTriggerRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """
     手动触发遗忘周期
@@ -73,24 +74,21 @@ async def trigger_forgetting_cycle(
     """
     workspace_id = current_user.current_workspace_id
     end_user_id = payload.end_user_id  # 从 payload 中获取 end_user_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试触发遗忘周期但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     # 通过 end_user_id 获取关联的 config_id
     try:
-        from app.services.memory_agent_service import get_end_user_connected_config
-        
-        connected_config = get_end_user_connected_config(end_user_id, db)
-        config_id = connected_config.get("memory_config_id")
-        config_id = resolve_config_id((config_id), db)
+        config_service = MemoryConfigService(db)
+        config_id = config_service.get_config_id_by_end_user(end_user_id)
 
         if config_id is None:
             api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
             return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
-        
+
         api_logger.debug(f"通过 end_user_id={end_user_id} 获取到 config_id={config_id}")
     except ValueError as e:
         api_logger.warning(f"获取终端用户配置失败: {str(e)}")
@@ -98,13 +96,13 @@ async def trigger_forgetting_cycle(
     except Exception as e:
         api_logger.error(f"获取终端用户配置时发生错误: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取终端用户配置失败", str(e))
-    
+
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求触发遗忘周期: "
         f"end_user_id={end_user_id}, config_id={config_id}, max_batch={payload.max_merge_batch_size}, "
         f"min_days={payload.min_days_since_access}"
     )
-    
+
     try:
         # 调用服务层执行遗忘周期
         report = await forget_service.trigger_forgetting_cycle(
@@ -114,16 +112,16 @@ async def trigger_forgetting_cycle(
             min_days_since_access=payload.min_days_since_access,
             config_id=config_id
         )
-        
+
         # 构建响应
         response_data = ForgettingReportResponse(**report)
-        
+
         return success(data=response_data.model_dump(), msg="遗忘周期执行成功")
-    
+
     except RuntimeError as e:
         api_logger.warning(f"遗忘周期执行被拒绝: {str(e)}")
         return fail(BizCode.INVALID_PARAMETER, str(e), "RuntimeError")
-    
+
     except Exception as e:
         api_logger.error(f"触发遗忘周期失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "触发遗忘周期失败", str(e))
@@ -131,9 +129,9 @@ async def trigger_forgetting_cycle(
 
 @router.get("/read_config", response_model=ApiResponse)
 async def read_forgetting_config(
-    config_id: UUID|int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        config_id: UUID | int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """
     获取遗忘引擎配置
@@ -149,30 +147,30 @@ async def read_forgetting_config(
         ApiResponse: 包含配置信息的响应
     """
     workspace_id = current_user.current_workspace_id
-    
+
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试读取遗忘引擎配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取遗忘引擎配置: {config_id}"
     )
-    
+
     try:
-        config_id=resolve_config_id(config_id, db)
+        config_id = resolve_config_id(config_id, db)
         # 调用服务层读取配置
         config = forget_service.read_forgetting_config(db=db, config_id=config_id)
-        
+
         # 构建响应
         response_data = ForgettingConfigResponse(**config)
-        
+
         return success(data=response_data.model_dump(), msg="查询成功")
-    
+
     except ValueError as e:
         api_logger.warning(f"配置不存在: config_id={config_id}, 错误: {str(e)}")
         return fail(BizCode.INVALID_PARAMETER, f"配置不存在: {config_id}", str(e))
-    
+
     except Exception as e:
         api_logger.error(f"读取遗忘引擎配置失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "查询遗忘引擎配置失败", str(e))
@@ -180,9 +178,9 @@ async def read_forgetting_config(
 
 @router.post("/update_config", response_model=ApiResponse)
 async def update_forgetting_config(
-    payload: ForgettingConfigUpdateRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        payload: ForgettingConfigUpdateRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """
     更新遗忘引擎配置
@@ -198,42 +196,41 @@ async def update_forgetting_config(
         ApiResponse: 包含更新结果的响应
     """
     workspace_id = current_user.current_workspace_id
-    payload.config_id=resolve_config_id((payload.config_id), db)
+    payload.config_id = resolve_config_id(payload.config_id, db)
 
-    
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新遗忘引擎配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新遗忘引擎配置: {payload.config_id}"
     )
-    
+
     try:
         # 构建更新字段字典（排除 None 值和 config_id）
         update_data = {
-            key: value 
-            for key, value in payload.model_dump(exclude_none=True).items() 
+            key: value
+            for key, value in payload.model_dump(exclude_none=True).items()
             if key != 'config_id'
         }
-        
+
         # 调用服务层更新配置
         config = forget_service.update_forgetting_config(
             db=db,
             config_id=payload.config_id,
             update_fields=update_data
         )
-        
+
         # 构建响应
         response_data = ForgettingConfigResponse(**config)
-        
+
         return success(data=response_data.model_dump(), msg="更新成功")
-    
+
     except ValueError as e:
         api_logger.warning(f"配置不存在: config_id={payload.config_id}, 错误: {str(e)}")
         return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
-    
+
     except Exception as e:
         db.rollback()
         api_logger.error(f"更新遗忘引擎配置失败: {str(e)}")
@@ -242,9 +239,9 @@ async def update_forgetting_config(
 
 @router.get("/stats", response_model=ApiResponse)
 async def get_forgetting_stats(
-    end_user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        end_user_id: Optional[str] = None,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """
     获取遗忘引擎统计信息
@@ -268,16 +265,14 @@ async def get_forgetting_stats(
     config_id = None
     if end_user_id:
         try:
-            from app.services.memory_agent_service import get_end_user_connected_config
-            
-            connected_config = get_end_user_connected_config(end_user_id, db)
-            config_id = connected_config.get("memory_config_id")
-            config_id = resolve_config_id(config_id, db)
-            
+            config_service = MemoryConfigService(db)
+            config_id = config_service.get_config_id_by_end_user(end_user_id)
+
             if config_id is None:
                 api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
-                return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
-            
+                return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置",
+                            "memory_config_id is None")
+
             api_logger.debug(f"通过 end_user_id={end_user_id} 获取到 config_id={config_id}")
         except ValueError as e:
             api_logger.warning(f"获取终端用户配置失败: {str(e)}")
@@ -285,12 +280,12 @@ async def get_forgetting_stats(
         except Exception as e:
             api_logger.error(f"获取终端用户配置时发生错误: {str(e)}")
             return fail(BizCode.INTERNAL_ERROR, "获取终端用户配置失败", str(e))
-    
+
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求获取遗忘引擎统计: "
         f"end_user_id={end_user_id}, config_id={config_id}"
     )
-    
+
     try:
         # 调用服务层获取统计信息
         stats = await forget_service.get_forgetting_stats(
@@ -298,12 +293,12 @@ async def get_forgetting_stats(
             end_user_id=end_user_id,
             config_id=config_id
         )
-        
+
         # 构建响应
         response_data = ForgettingStatsResponse(**stats)
-        
+
         return success(data=response_data.model_dump(), msg="查询成功")
-    
+
     except Exception as e:
         api_logger.error(f"获取遗忘引擎统计失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取遗忘引擎统计失败", str(e))
@@ -311,11 +306,11 @@ async def get_forgetting_stats(
 
 @router.get("/pending-nodes", response_model=ApiResponse)
 async def get_pending_nodes(
-    end_user_id: str,
-    page: int = 1,
-    pagesize: int = 10,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        end_user_id: str,
+        page: int = 1,
+        pagesize: int = 10,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """
     获取待遗忘节点列表（独立分页接口）
@@ -354,11 +349,8 @@ async def get_pending_nodes(
 
     # 通过 end_user_id 获取关联的 config_id
     try:
-        from app.services.memory_agent_service import get_end_user_connected_config
-
-        connected_config = get_end_user_connected_config(end_user_id, db)
-        config_id = connected_config.get("memory_config_id")
-        config_id = resolve_config_id(config_id, db)
+        config_service = MemoryConfigService(db)
+        config_id = config_service.get_config_id_by_end_user(end_user_id)
 
         if config_id is None:
             api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
@@ -405,9 +397,9 @@ async def get_pending_nodes(
 
 @router.post("/forgetting_curve", response_model=ApiResponse)
 async def get_forgetting_curve(
-    request: ForgettingCurveRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+        request: ForgettingCurveRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """
     获取遗忘曲线数据
@@ -423,17 +415,17 @@ async def get_forgetting_curve(
         ApiResponse: 包含遗忘曲线数据的响应
     """
     workspace_id = current_user.current_workspace_id
-    request.config_id = resolve_config_id((request.config_id), db)
+    request.config_id = resolve_config_id(request.config_id, db)
     # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试获取遗忘曲线但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-    
+
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求获取遗忘曲线: "
         f"importance_score={request.importance_score}, days={request.days}, config_id={request.config_id}"
     )
-    
+
     try:
         # 调用服务层生成遗忘曲线
         result = await forget_service.get_forgetting_curve(
@@ -442,21 +434,21 @@ async def get_forgetting_curve(
             days=request.days,
             config_id=request.config_id
         )
-        
+
         # 转换为响应格式
         curve_points = [
             ForgettingCurvePoint(**point)
             for point in result['curve_data']
         ]
-        
+
         # 构建响应
         response_data = ForgettingCurveResponse(
             curve_data=curve_points,
             config=result['config']
         )
-        
+
         return success(data=response_data.model_dump(), msg="查询成功")
-    
+
     except Exception as e:
         api_logger.error(f"获取遗忘曲线失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取遗忘曲线失败", str(e))

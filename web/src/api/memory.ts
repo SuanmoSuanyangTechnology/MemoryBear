@@ -66,6 +66,10 @@ export const userMemoryListUrl = '/dashboard/end_users'
 export const getUserMemoryList = (query?: { keyword?: string }) => {
   return request.get(userMemoryListUrl, query)
 }
+// User Memory - Delete end user
+export const deleteEndUser = (end_user_id: string) => {
+  return request.delete(`/memory-storage/end-users/${end_user_id}`)
+}
 // User Memory - Total end users
 export const getTotalEndUsers = () => {
   return request.get(`/dashboard/total_end_users`)

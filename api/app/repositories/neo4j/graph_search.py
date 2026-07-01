@@ -36,90 +36,90 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 logger = logging.getLogger(__name__)
 
 
-async def _update_activation_values_batch(
-        nodes: List[Dict[str, Any]],
-        node_label: str,
-        end_user_id: Optional[str] = None,
-        max_retries: int = 3
-) -> List[Dict[str, Any]]:
-    """
-    批量更新节点的激活值
-    
-    为提高性能，批量更新多个节点的访问历史和激活值。
-    使用重试机制处理更新失败的情况。
-    
-    Args:
-        connector: Neo4j连接器
-        nodes: 节点列表，每个节点必须包含 'id' 字段
-        node_label: 节点标签（Statement, ExtractedEntity, MemorySummary）
-        end_user_id: 组ID（可选）
-        max_retries: 最大重试次数
-    
-    Returns:
-        List[Dict[str, Any]]: 成功更新的节点列表
-    """
-    async with Neo4jConnector() as connector:
-        if not nodes:
-            return []
-
-        # 延迟导入以避免循环依赖
-        from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
-            AccessHistoryManager,
-        )
-        from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
-            ACTRCalculator,
-        )
-
-        # 创建计算器和管理器实例
-        actr_calculator = ACTRCalculator()
-        access_manager = AccessHistoryManager(
-            connector=connector,
-            actr_calculator=actr_calculator,
-            max_retries=max_retries
-        )
-
-        # 提取节点ID列表并去重（保持原始顺序）
-        seen_ids = set()
-        unique_node_ids = []
-        for node in nodes:
-            node_id = node.get('id')
-            if node_id and node_id not in seen_ids:
-                seen_ids.add(node_id)
-                unique_node_ids.append(node_id)
-
-        if not unique_node_ids:
-            logger.warning("批量更新激活值：没有有效的节点ID")
-            return nodes
-
-        # 记录去重信息（仅针对具有有效 ID 的节点）
-        id_nodes_count = sum(1 for n in nodes if n.get("id"))
-        if len(unique_node_ids) < id_nodes_count:
-            logger.info(
-                f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
-                f"去重后唯一ID数量={len(unique_node_ids)}"
-            )
-
-        # 批量记录访问
-        try:
-            updated_nodes = await access_manager.record_batch_access(
-                node_ids=unique_node_ids,
-                node_label=node_label,
-                end_user_id=end_user_id
-            )
-
-            logger.debug(
-                f"批量更新激活值成功: {node_label}, "
-                f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
-            )
-
-            return updated_nodes
-
-        except Exception as e:
-            logger.error(
-                f"批量更新激活值失败: {node_label}, 错误: {str(e)}"
-            )
-            # 失败时返回原始节点列表
-            return nodes
+# async def _update_activation_values_batch(
+#         nodes: List[Dict[str, Any]],
+#         node_label: str,
+#         end_user_id: Optional[str] = None,
+#         max_retries: int = 3
+# ) -> List[Dict[str, Any]]:
+#     """
+#     批量更新节点的激活值
+#
+#     为提高性能，批量更新多个节点的访问历史和激活值。
+#     使用重试机制处理更新失败的情况。
+#
+#     Args:
+#         connector: Neo4j连接器
+#         nodes: 节点列表，每个节点必须包含 'id' 字段
+#         node_label: 节点标签（Statement, ExtractedEntity, MemorySummary）
+#         end_user_id: 组ID（可选）
+#         max_retries: 最大重试次数
+#
+#     Returns:
+#         List[Dict[str, Any]]: 成功更新的节点列表
+#     """
+#     async with Neo4jConnector() as connector:
+#         if not nodes:
+#             return []
+#
+#         # 延迟导入以避免循环依赖
+#         from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
+#             AccessHistoryManager,
+#         )
+#         from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
+#             ACTRCalculator,
+#         )
+#
+#         # 创建计算器和管理器实例
+#         actr_calculator = ACTRCalculator()
+#         access_manager = AccessHistoryManager(
+#             connector=connector,
+#             actr_calculator=actr_calculator,
+#             max_retries=max_retries
+#         )
+#
+#         # 提取节点ID列表并去重（保持原始顺序）
+#         seen_ids = set()
+#         unique_node_ids = []
+#         for node in nodes:
+#             node_id = node.get('id')
+#             if node_id and node_id not in seen_ids:
+#                 seen_ids.add(node_id)
+#                 unique_node_ids.append(node_id)
+#
+#         if not unique_node_ids:
+#             logger.warning("批量更新激活值：没有有效的节点ID")
+#             return nodes
+#
+#         # 记录去重信息（仅针对具有有效 ID 的节点）
+#         id_nodes_count = sum(1 for n in nodes if n.get("id"))
+#         if len(unique_node_ids) < id_nodes_count:
+#             logger.info(
+#                 f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
+#                 f"去重后唯一ID数量={len(unique_node_ids)}"
+#             )
+#
+#         # 批量记录访问
+#         try:
+#             updated_nodes = await access_manager.record_batch_access(
+#                 node_ids=unique_node_ids,
+#                 node_label=node_label,
+#                 end_user_id=end_user_id
+#             )
+#
+#             logger.debug(
+#                 f"批量更新激活值成功: {node_label}, "
+#                 f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
+#             )
+#
+#             return updated_nodes
+#
+#         except Exception as e:
+#             logger.error(
+#                 f"批量更新激活值失败: {node_label}, 错误: {str(e)}"
+#             )
+#             # 失败时返回原始节点列表
+#             return nodes
 
 
 async def _update_search_results_activation(

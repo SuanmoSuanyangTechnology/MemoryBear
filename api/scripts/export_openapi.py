@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Export OpenAPI schema from the FastAPI app without running the server.
+
+Mocks all external connections (ES, Neo4j, Redis) so it can run in CI
+without any infrastructure.
+
+Usage:
+    uv run python scripts/export_openapi.py
+    uv run python scripts/export_openapi.py --output openapi-current.json
+    uv run python scripts/export_openapi.py --v1-only
+"""
+import argparse
+import json
+import os
+import pathlib
+import sys
+from unittest.mock import patch, MagicMock
+
+# Ensure app is importable
+api_dir = str(pathlib.Path(__file__).resolve().parent.parent)
+if api_dir not in sys.path:
+    sys.path.insert(0, api_dir)
+
+# Disable startup tasks
+os.environ.setdefault("DB_AUTO_UPGRADE", "false")
+os.environ.setdefault("LOAD_MODEL", "false")
+os.environ.setdefault("ELASTICSEARCH_HOST", "127.0.0.1")
+os.environ.setdefault("ELASTICSEARCH_PORT", "19999")
+os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
+os.environ.setdefault("NEO4J_USERNAME", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", "dummy_for_schema_export")
+os.environ.setdefault("REDIS_HOST", "127.0.0.1")
+os.environ.setdefault("REDIS_PORT", "6379")
+os.environ.setdefault("SECRET_KEY", "dummy_for_schema_export")
+os.environ.setdefault("DB_HOST", "127.0.0.1")
+os.environ.setdefault("DB_PORT", "5432")
+os.environ.setdefault("DB_USER", "postgres")
+os.environ.setdefault("DB_PASSWORD", "dummy")
+os.environ.setdefault("DB_NAME", "dummy")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Export OpenAPI schema")
+    parser.add_argument("--output", "-o", default="openapi-baseline.json")
+    parser.add_argument("--v1-only", action="store_true", help="Only include /v1 paths")
+    args = parser.parse_args()
+
+    # Mock external connections
+    es_mock = MagicMock()
+    es_mock.return_value.info.return_value = {"status": "green"}
+    es_mock.return_value.ping.return_value = True
+
+    neo4j_mock = MagicMock()
+    redis_mock = MagicMock()
+
+    with patch("elasticsearch.Elasticsearch", es_mock), \
+         patch("neo4j.GraphDatabase.driver", return_value=neo4j_mock), \
+         patch("app.repositories.neo4j.neo4j_connector.Neo4jConnector._build_driver", return_value=neo4j_mock), \
+         patch("app.repositories.neo4j.neo4j_connector.Neo4jConnector._create_or_get_driver", return_value=neo4j_mock), \
+         patch("redis.Redis", return_value=redis_mock), \
+         patch("redis.StrictRedis", return_value=redis_mock):
+        from app.main import app
+        schema = app.openapi()
+
+    if args.v1_only:
+        schema["paths"] = {k: v for k, v in schema["paths"].items() if k.startswith("/v1")}
+
+    out = pathlib.Path(args.output)
+    out.write_text(json.dumps(schema, indent=2, ensure_ascii=False))
+
+    total = len(schema["paths"])
+    print(f"Exported {total} paths to {out} ({out.stat().st_size} bytes)")
+
+
+if __name__ == "__main__":
+    main()

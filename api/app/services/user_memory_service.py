@@ -7,13 +7,12 @@ User Memory Service
 import os
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow_naive
 from app.core.logging_config import get_logger
 from app.core.memory.constants.graph_data_constants import (
     DEPTH_HARD_MAX,
@@ -22,10 +21,13 @@ from app.core.memory.constants.graph_data_constants import (
 )
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow_naive
 from app.db import get_db_context
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.graph_data_schema import GraphDataResponse
+from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
     assemble_center_per_type_stat,
@@ -36,8 +38,6 @@ from app.services._graph_data_helpers import (
     _query_rel_count_batch,
     _query_total_count_by_type,
 )
-from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
-from app.schemas.graph_data_schema import GraphDataResponse
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
@@ -77,16 +77,12 @@ def _get_llm_client_for_user(user_id: str):
     """
     with get_db_context() as db:
         try:
-            from app.services.memory_agent_service import get_end_user_connected_config
-            connected_config = get_end_user_connected_config(user_id, db)
-            config_id = connected_config.get("memory_config_id")
-            workspace_id = connected_config.get("workspace_id")
+            config_id = MemoryConfigService(db).get_config_id_by_end_user(user_id)
             
-            if config_id or workspace_id:
+            if config_id:
                 config_service = MemoryConfigService(db)
                 memory_config = config_service.load_memory_config(
                     config_id=config_id,
-                    workspace_id=workspace_id
                 )
                 factory = MemoryClientFactory(db)
                 return factory.get_llm_client(memory_config.llm_model_id)
@@ -1649,11 +1645,9 @@ async def analytics_memory_types(
             from app.core.memory.storage_services.forgetting_engine.config_utils import (
                 load_actr_config_from_db,
             )
-            from app.services.memory_agent_service import get_end_user_connected_config
             
             # 获取用户关联的 config_id
-            connected_config = get_end_user_connected_config(end_user_id, db)
-            config_id = connected_config.get('memory_config_id')
+            config_id = MemoryConfigService(db).get_config_id_by_end_user(end_user_id)
             
             if config_id:
                 # 从数据库加载配置

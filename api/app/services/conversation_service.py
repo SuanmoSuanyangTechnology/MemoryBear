@@ -8,12 +8,12 @@ import json_repair
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db
 from app.models import Conversation, Message, User, ModelType
 from app.models.conversation_model import ConversationDetail
@@ -23,6 +23,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.conversation_schema import ConversationOut
 from app.services import workspace_service
+from app.services.memory_config_service import MemoryConfigService
 from app.services.model_service import ModelConfigService, ModelApiKeyService
 from app.services.prompt import prompt_manager
 
@@ -376,8 +377,8 @@ class ConversationService:
         )
         return msg
 
-    @staticmethod
     def _dispatch_memory_sync(
+        self,
         message: Message,
         conversation: Conversation,
         should_memorize: bool = True,
@@ -399,13 +400,13 @@ class ConversationService:
 
             workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
             end_user_id = str(conversation.user_id) if conversation.user_id else ""
-
+            config_id = MemoryConfigService(self.db).get_workspace_active_config_id(conversation.workspace_id)
             from app.core.memory.memory_service import MemoryService
             coro = MemoryService.ingest_agent_message(
                 conversation_id=str(message.conversation_id),
                 message=message,
                 app_id=str(conversation.app_id),
-                config_id="",
+                config_id=str(config_id),
                 workspace_id=workspace_id,
                 end_user_id=end_user_id,
                 should_memorize=should_memorize,

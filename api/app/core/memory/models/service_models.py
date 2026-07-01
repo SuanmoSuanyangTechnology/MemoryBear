@@ -1,3 +1,4 @@
+import uuid
 from typing import Self
 
 from pydantic import BaseModel, Field, field_serializer, ConfigDict, computed_field
@@ -23,6 +24,7 @@ class MemoryContext(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     end_user_id: str
+    config_id: uuid.UUID | None = None
     memory_config: MemoryConfig | None = None
     storage_type: StorageType = StorageType.NEO4J
     user_rag_memory_id: str | None = None

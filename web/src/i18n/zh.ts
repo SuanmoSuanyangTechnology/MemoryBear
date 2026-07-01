@@ -1629,6 +1629,13 @@ export const zh = {
       total_num: '用户总数',
       online_num: '在线用户数',
 
+      deleteMemoryStore: '删除记忆库',
+      deleteWarning: '「{{name}}」的全部 {{count}} 条记忆将被永久删除且不可恢复，包括其感知、情景、情绪与长期记忆。',
+      enterNameConfirm: '请输入记忆库名称 「{{name}}」 以确认删除',
+      enterNamePlaceholder: '请输入名称确认',
+      permanentDelete: '永久删除',
+      deleteConfirmNameError: '请输入正确的名称',
+
       user: '用户',
       knowledgeEntryCount: '知识条目数',
       interactionCount: '交互次数',

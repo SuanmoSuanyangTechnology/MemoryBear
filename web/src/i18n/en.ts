@@ -1634,6 +1634,13 @@ export const en = {
       total_num: 'Total Number of Users',
       online_num: 'Number of Online Users',
 
+      deleteMemoryStore: 'Delete Memory Store',
+      deleteWarning: 'All {{count}} memories of "{{name}}" will be permanently deleted and unrecoverable, including perception, episodic, emotional, and long-term memories.',
+      enterNameConfirm: 'Enter the memory store name "{{name}}" to confirm deletion',
+      enterNamePlaceholder: 'Enter name to confirm',
+      permanentDelete: 'Permanently Delete',
+      deleteConfirmNameError: 'Please enter the correct name',
+
       user: 'User',
       knowledgeEntryCount: 'Knowledge Entry Count',
       interactionCount: 'Interaction Count',

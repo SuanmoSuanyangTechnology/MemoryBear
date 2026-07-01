@@ -10,6 +10,7 @@ MemoryService — 记忆模块统一入口（Facade）
 """
 
 import logging
+import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -26,7 +27,6 @@ from app.services.memory_config_service import MemoryConfigService
 logger = logging.getLogger(__name__)
 
 
-
 class MemoryService:
     """记忆模块统一入口
 
@@ -41,7 +41,7 @@ class MemoryService:
 
     def __init__(
             self,
-            config_id: str | None,
+            config_id: uuid.UUID | None,
             end_user_id: str,
             workspace_id: str | None = None,
             storage_type: str = "neo4j",
@@ -53,11 +53,9 @@ class MemoryService:
         with get_db_read() as db:
             config_service = MemoryConfigService(db)
             memory_config = None
-            if config_id is not None and config_id != "":
+            if config_id is not None:
                 memory_config = config_service.load_memory_config(
-                    config_id=config_id,
-                    workspace_id=workspace_id,
-                    service_name="MemoryService",
+                    config_id=config_id
                 )
         if memory_config is None and storage_type.lower() == "neo4j":
             logger.warning(
@@ -66,6 +64,7 @@ class MemoryService:
             )
         self.ctx = MemoryContext(
             end_user_id=end_user_id,
+            config_id=config_id,
             memory_config=memory_config,
             storage_type=StorageType(storage_type),
             user_rag_memory_id=user_rag_memory_id,
@@ -144,7 +143,7 @@ class MemoryService:
     async def dispatch_mcp_write(
         message: str,
         end_user_id: str,
-        config_id: str,
+        config_id: uuid.UUID,
         workspace_id: str,
         storage_type: str = "neo4j",
         dialog_at: str = "",
@@ -204,6 +203,31 @@ class MemoryService:
         """Flush 兜底任务派发。"""
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
         return dispatch_flush_conversation(conversation_id)
+
+    @staticmethod
+    async def delete_node_by_element_id(element_id: str, end_user_id: str) -> bool:
+        """通过 elementId 删除 Neo4j 图节点（同时 DETACH DELETE 关联边）。"""
+        from app.core.memory.models.service_models import MemoryContext
+        from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
+
+        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+        return await pipeline.delete_node_by_element_id(
+            element_id=element_id,
+            end_user_id=end_user_id,
+        )
+
+    @staticmethod
+    async def delete_all_nodes_by_end_user_id(end_user_id: str) -> int:
+        """删除指定用户的所有 Neo4j 记忆节点和边。
+
+        Returns:
+            删除的节点总数
+        """
+        from app.core.memory.models.service_models import MemoryContext
+        from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
+
+        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+        return await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
 
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）
@@ -314,7 +338,7 @@ class MemoryService:
         """遗忘：识别低激活节点并融合"""
         raise NotImplementedError("ForgettingPipeline 尚未实现")
 
-    async def run_reflection_layer2(self, baseline: str = "HYBRID", language: str = "zh") -> dict:
+    async def run_reflection_layer2(self, language: str = "zh") -> dict:
         """反思引擎 Layer 2 离线巡检
 
         由 Celery 定时任务调用（每 10 分钟），执行描述合并等子问题。
@@ -326,9 +350,9 @@ class MemoryService:
             end_user_id=self.ctx.end_user_id,
             language=language,
         )
-        return await pipeline.run_layer2(baseline=baseline)
+        return await pipeline.run_layer2(baseline=self.ctx.memory_config.reflexion_baseline or "HYBRID")
 
-    async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
+    async def run_dedup_full_scan(self) -> Dict[str, Any]:
         """反思引擎 Layer 2 — 去重方案B低频全量扫描去重（单用户入口）
 
         由 Celery 定时任务调用（每天）。
@@ -340,7 +364,7 @@ class MemoryService:
             end_user_id=self.ctx.end_user_id,
             language="zh",
         )
-        return await pipeline.run_dedup_full_scan(baseline=baseline)
+        return await pipeline.run_dedup_full_scan(baseline=self.ctx.memory_config.reflexion_baseline or "HYBRID")
 
     async def run_reflection_layer3(self) -> dict:
         """反思引擎 Layer 3 知识综合

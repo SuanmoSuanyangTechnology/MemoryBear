@@ -113,7 +113,7 @@ class RedisTaskScheduler:
                 "msg_id": msg_id,
                 "task_name": task_name,
                 "user_id": user_id,
-                "params": json.dumps(params),
+                "params": json.dumps(params, default=str),
             })
 
             lock_key = f"{task_name}:{user_id}"
@@ -244,8 +244,6 @@ class RedisTaskScheduler:
 
     def _heartbeat(self):
         now = time.time()
-        if now - self._last_heartbeat < HEARTBEAT_INTERVAL:
-            return
         self._last_heartbeat = now
 
         self.redis.hset(REGISTRY_KEY, self.instance_id, str(now))
@@ -386,7 +384,6 @@ class RedisTaskScheduler:
                     self.redis.sadd(READY_SET, uid)
 
     def schedule_loop(self):
-        self._heartbeat()
         self._cleanup_finished()
 
         ready_users = self.redis.smembers(READY_SET) or set()
@@ -455,6 +452,13 @@ class RedisTaskScheduler:
         logger.info(
             "Scheduler started: instance=%s", self.instance_id,
         )
+
+        def _heartbeat_thread():
+            while self.running:
+                self._heartbeat()
+                time.sleep(HEARTBEAT_INTERVAL)
+
+        threading.Thread(target=_heartbeat_thread, daemon=True).start()
 
         while self.running:
             try:

@@ -544,3 +544,18 @@ class ForgettingCurveResponse(BaseModel):
 
     curve_data: List[ForgettingCurvePoint] = Field(..., description="遗忘曲线数据点列表")
     config: Dict[str, Any] = Field(..., description="使用的配置参数")
+
+
+class DeleteNodeRequest(BaseModel):
+    """删除单个图节点请求"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    element_id: str = Field(..., description="Neo4j elementId")
+    end_user_id: str = Field(..., description="端用户 ID")
+
+
+class DeleteAllNodesRequest(BaseModel):
+    """删除用户所有记忆节点请求"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    end_user_id: str = Field(..., description="端用户 ID")

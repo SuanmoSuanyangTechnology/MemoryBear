@@ -290,9 +290,7 @@ class MemoryAgentService:
         # Load configuration to get LLM model ID
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(
-            config_id=config_id,
-            workspace_id=workspace_id,
-            service_name="MemoryAgentService"
+            config_id=config_id
         )
 
         status = await status_typle(message, memory_config.llm_model_id)
@@ -324,20 +322,12 @@ class MemoryAgentService:
         # Always get workspace_id from end_user for fallback, even if config_id is provided
         with get_db_read() as db:
             try:
-
-                connected_config = get_end_user_connected_config(end_user_id, db)
-                workspace_id = connected_config.get('workspace_id')
-                if config_id is None:
-                    config_id = connected_config.get('memory_config_id')
-                logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
-                if config_id is None and workspace_id is None:
-                    raise ValueError(
-                        f"No memory configuration found for end_user_id {end_user_id}. Please ensure the user has a connected memory configuration.")
                 config_service = MemoryConfigService(db)
+                config_id = config_service.get_config_id_by_end_user(end_user_id)
+                logger.info(f"Resolved config from end_user: config_id = {config_id}")
+
                 memory_config = config_service.load_memory_config(
-                    config_id=config_id,
-                    workspace_id=workspace_id,
-                    service_name="MemoryAgentService"
+                    config_id=config_id
                 )
                 model_config = config_service.get_model_config(str(memory_config.llm_model_id))
             except Exception as e:
