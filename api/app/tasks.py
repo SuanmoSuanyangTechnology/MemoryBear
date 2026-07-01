@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import redis
+from celery.exceptions import SoftTimeLimitExceeded
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
@@ -2610,188 +2611,233 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         }
 
 
+# ============================================================
+# 洞察/摘要缓存刷新：扫描 + 派发模式（替代旧 refresh_memory_insight_and_summary_cache 单任务）
+# ============================================================
+
+# 在途锁 key 与 TTL：TTL 略大于 do 任务的 time_limit(900s)，兜底 worker 崩溃不会永久占用
+CACHE_INFLIGHT_KEY_FMT = "insight_summary_cache:inflight:{end_user_id}"
+CACHE_INFLIGHT_TTL_SEC = 1800
+
+
+def _classify_cache_refresh(insight_at, summary_at, write_at) -> str:
+    """判定单个用户本轮是否需要刷新洞察/摘要缓存。
+
+    入参为三个时间戳标量（非 ORM 对象），便于在 DB 会话外安全调用：
+        insight_at —— memory_insight_updated_at（洞察缓存最后生成时间）
+        summary_at —— user_summary_updated_at（摘要缓存最后生成时间）
+        write_at   —— write_time（最后一次记忆写入时间，覆盖 API / MCP 全部写入路径）
+
+    两层过滤：
+        1. 数据未变跳过：缓存比最后写入更新（或从未写入）→ 重算结果相同
+        2. 新鲜度窗口：数据虽有变，但缓存在 MEMORY_CACHE_FRESH_HOURS 内刚刷过 → 限频跳过
+
+    返回值：
+        "dispatch"        需要派发刷新
+        "skip_no_change"  缓存已是最新（write_time 为 null 或 updated_at > write_time）
+        "skip_fresh"      数据有变但缓存刚刷新过（未到最短刷新间隔）
+    """
+    # 1) 缓存从未生成 → 必须刷新
+    if insight_at is None or summary_at is None:
+        return "dispatch"
+
+    # 2) write_time 为 null（从未写入，或者之前没有write_time的终端用户）或 数据未变（两份缓存都比最后写入更新）→ 跳过
+    if write_at is None:
+        return "skip_no_change"
+    write_at_naive = as_utc_aware(write_at).replace(tzinfo=None)
+    insight_at_naive = as_utc_aware(insight_at).replace(tzinfo=None)
+    summary_at_naive = as_utc_aware(summary_at).replace(tzinfo=None)
+    if insight_at_naive > write_at_naive and summary_at_naive > write_at_naive:
+        return "skip_no_change"
+
+    # 3) 数据有变，但缓存在新鲜度窗口内刚刷过 → 限频跳过（取更早的一份刷新时间，两份都够新才算新鲜）
+    fresh_hours = settings.MEMORY_CACHE_FRESH_HOURS
+    last_refresh = min(insight_at_naive, summary_at_naive)
+    if (utcnow_naive() - last_refresh).total_seconds() / 3600 < fresh_hours:
+        return "skip_fresh"
+
+    # 4) 数据有变且已过新鲜度窗口 → 派发
+    return "dispatch"
+
+
 @celery_app.task(
-    name="app.tasks.refresh_memory_insight_and_summary_cache",
+    name="app.tasks.scan_refresh_insight_summary_cache",
     bind=True,
-    ignore_result=True,
+    ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=7500,  # 2小时5分钟硬超时
-    soft_time_limit=7200,  # 2小时软超时
+    time_limit=600,        # 10 分钟硬超时（仅枚举 + 派发，足够）
+    soft_time_limit=540,
 )
-def refresh_memory_insight_and_summary_cache(self) -> Dict[str, Any]:
-    """定时任务：为所有用户重新生成记忆洞察和用户摘要缓存
+def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
+    """扫描器：遍历所有用户，筛选出需要刷新洞察/摘要缓存的，派发 do_refresh_insight_summary_cache。
 
-    遍历所有活动工作空间的所有终端用户，为每个用户重新生成记忆洞察和用户摘要。
-    实现错误隔离，单个用户失败不影响其他用户的处理。
-
-    Returns:
-        包含任务执行结果的字典，包括：
-        - status: 任务状态 (SUCCESS/FAILURE)
-        - message: 执行消息
-        - workspace_count: 处理的工作空间数量
-        - total_users: 总用户数
-        - successful: 成功生成的用户数
-        - failed: 失败的用户数
-        - workspace_results: 每个工作空间的详细结果
-        - elapsed_time: 执行耗时（秒）
-        - task_id: 任务ID
+    轻量、无事件循环、不调 LLM、无超时风险。两层过滤：
+      1. 数据未变跳过：上次缓存生成之后没有新记忆写入（updated_at > write_time）
+      2. 新鲜度窗口：数据虽有变，但缓存在 MEMORY_CACHE_FRESH_HOURS 内刚刷过 → 限频跳过
+    在途锁（Redis SETNX）防止同一用户被并发派发多次。
     """
     start_time = time.time()
+    from app.repositories.end_user_repository import EndUserRepository
+
+    redis_client = get_sync_redis_client()
+    dispatched = 0
+    dispatched_user_ids: List[str] = []
+    skip_no_change = 0      # write_time 为 null 或 数据未变
+    skip_fresh = 0          # 数据有变但缓存刚刷过（未到最短刷新间隔）
+    skip_inflight = 0       # 在途锁未抢到
+
+    # db-session 规范：先用只读短 session 取 workspace 列表，
+    # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
+    with get_db_read() as db:
+        workspace_ids = EndUserRepository(db).get_all_active_workspaces()
+
+    for ws_id in workspace_ids:
+        # 列裁剪查询：返回普通元组，不受 session 关闭后 detach 影响，且内存更省
+        with get_db_read() as db:
+            rows = EndUserRepository(db).get_cache_refresh_fields_by_workspace(ws_id)
+
+        for eu_id_raw, write_at, insight_at, summary_at in rows:
+            eu_id = str(eu_id_raw)
+            try:
+                decision = _classify_cache_refresh(insight_at, summary_at, write_at)
+                if decision == "skip_no_change":
+                    skip_no_change += 1
+                    continue
+                if decision == "skip_fresh":
+                    skip_fresh += 1
+                    continue
+
+                # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
+                if redis_client is not None:
+                    ok = redis_client.set(
+                        CACHE_INFLIGHT_KEY_FMT.format(end_user_id=eu_id),
+                        "1", nx=True, ex=CACHE_INFLIGHT_TTL_SEC,
+                    )
+                    if not ok:
+                        skip_inflight += 1
+                        continue
+
+                # 派发：用 countdown 错峰，每 60 个一波、每波摊到 0~295s，平滑 LLM 调用
+                countdown = (dispatched % 60) * 5
+                do_refresh_insight_summary_cache.apply_async(
+                    kwargs={
+                        "end_user_id": eu_id,
+                        "workspace_id": str(ws_id),
+                        "language": "zh",  # 与旧任务行为对齐
+                    },
+                    countdown=countdown,
+                )
+                dispatched += 1
+                dispatched_user_ids.append(eu_id)
+                if dispatched % 50 == 0:
+                    logger.info(
+                        f"scan_refresh_insight_summary_cache 进度: 已派发 {dispatched}, "
+                        f"最近 10 个: {dispatched_user_ids[-10:]}"
+                    )
+            except Exception as e:
+                logger.error(f"洞察/摘要缓存scan 处理用户失败 user={eu_id}: {e}")
+
+    logger.info(
+        f"scan_refresh_insight_summary_cache 完成: 派发 {dispatched}, "
+        f"跳过(数据未变) {skip_no_change}, 跳过(刚刷过) {skip_fresh}, "
+        f"跳过(在途) {skip_inflight}, 耗时 {time.time() - start_time:.1f}s"
+    )
+    return {
+        "status": "SUCCESS",
+        "dispatched": dispatched,
+        "dispatched_user_ids": dispatched_user_ids,
+        "skip_no_change": skip_no_change,
+        "skip_fresh": skip_fresh,
+        "skip_inflight": skip_inflight,
+        "elapsed_time": time.time() - start_time,
+        "task_id": self.request.id,
+    }
+
+
+@celery_app.task(
+    name="app.tasks.do_refresh_insight_summary_cache",
+    bind=True,
+    ignore_result=False,
+    max_retries=2,                          # LLM 偶发失败/软超时允许重试
+    autoretry_for=(SoftTimeLimitExceeded,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    acks_late=False,                        # 避免 worker 崩溃后被重投跑两次
+    time_limit=900,                         # 15 分钟硬超时
+    soft_time_limit=840,                    # 14 分钟软超时
+)
+def do_refresh_insight_summary_cache(
+    self,
+    end_user_id: str,
+    workspace_id: str,
+    language: str = "zh",
+) -> Dict[str, Any]:
+    """对【单个用户】刷新一次记忆洞察 + 用户摘要缓存。
+
+    由 scan_refresh_insight_summary_cache 派发，每个用户一个独立任务、独立 db session，
+    跑完即释放内存。返回 status：success / partial / failed。
+    """
+    start_time = time.time()
+    inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
 
     async def _run() -> Dict[str, Any]:
-        from app.repositories.end_user_repository import EndUserRepository
         from app.services.user_memory_service import UserMemoryService
 
-        logger.info("开始执行记忆缓存重新生成定时任务")
-
         service = UserMemoryService()
-
-        total_users = 0
-        successful = 0
-        failed = 0
-        workspace_results = []
-
+        ws_uuid = uuid.UUID(workspace_id)
         with get_db_context() as db:
-            try:
-                # 获取所有活动工作空间
-                repo = EndUserRepository(db)
-                workspaces = repo.get_all_active_workspaces()
-                logger.info(f"找到 {len(workspaces)} 个活动工作空间")
-
-                # 遍历每个工作空间
-                for workspace_id in workspaces:
-                    logger.info(f"开始处理工作空间: {workspace_id}")
-                    workspace_start_time = time.time()
-
-                    try:
-                        # 获取工作空间的所有终端用户
-                        end_users = repo.get_all_by_workspace(workspace_id)
-                        workspace_user_count = len(end_users)
-                        total_users += workspace_user_count
-
-                        logger.info(f"工作空间 {workspace_id} 有 {workspace_user_count} 个终端用户")
-
-                        workspace_successful = 0
-                        workspace_failed = 0
-                        workspace_errors = []
-
-                        # 遍历每个用户并生成缓存
-                        for end_user in end_users:
-                            end_user_id = str(end_user.id)
-
-                            try:
-                                # 生成记忆洞察
-                                insight_result = await service.generate_and_cache_insight(db, end_user_id)
-
-                                # 生成用户摘要
-                                summary_result = await service.generate_and_cache_summary(db, end_user_id)
-
-                                # 检查是否都成功
-                                if insight_result["success"] and summary_result["success"]:
-                                    workspace_successful += 1
-                                    successful += 1
-                                    logger.info(f"成功为终端用户 {end_user_id} 重新生成缓存")
-                                else:
-                                    workspace_failed += 1
-                                    failed += 1
-                                    error_info = {
-                                        "end_user_id": end_user_id,
-                                        "insight_error": insight_result.get("error"),
-                                        "summary_error": summary_result.get("error")
-                                    }
-                                    workspace_errors.append(error_info)
-                                    logger.warning(f"终端用户 {end_user_id} 的缓存重新生成部分失败: {error_info}")
-
-                            except Exception as e:
-                                # 单个用户失败不影响其他用户（错误隔离）
-                                workspace_failed += 1
-                                failed += 1
-                                error_info = {
-                                    "end_user_id": end_user_id,
-                                    "error": str(e)
-                                }
-                                workspace_errors.append(error_info)
-                                logger.error(f"为终端用户 {end_user_id} 重新生成缓存时出错: {str(e)}")
-
-                        workspace_elapsed = time.time() - workspace_start_time
-
-                        # 记录工作空间处理结果
-                        workspace_result = {
-                            "workspace_id": str(workspace_id),
-                            "total_users": workspace_user_count,
-                            "successful": workspace_successful,
-                            "failed": workspace_failed,
-                            "errors": workspace_errors[:10],  # 只保留前10个错误
-                            "elapsed_time": workspace_elapsed
-                        }
-                        workspace_results.append(workspace_result)
-
-                        logger.info(
-                            f"工作空间 {workspace_id} 处理完成: "
-                            f"总数={workspace_user_count}, 成功={workspace_successful}, "
-                            f"失败={workspace_failed}, 耗时={workspace_elapsed:.2f}秒"
-                        )
-
-                    except Exception as e:
-                        # 工作空间处理失败，记录错误并继续处理下一个
-                        logger.error(f"处理工作空间 {workspace_id} 时出错: {str(e)}")
-                        workspace_results.append({
-                            "workspace_id": str(workspace_id),
-                            "error": str(e),
-                            "total_users": 0,
-                            "successful": 0,
-                            "failed": 0,
-                            "errors": []
-                        })
-
-                # 记录总体统计信息
-                logger.info(
-                    f"记忆缓存重新生成定时任务完成: "
-                    f"工作空间数={len(workspaces)}, 总用户数={total_users}, "
-                    f"成功={successful}, 失败={failed}"
-                )
-
-                return {
-                    "status": "SUCCESS",
-                    "message": f"成功处理 {len(workspaces)} 个工作空间，总共 {successful}/{total_users} 个用户缓存重新生成成功",
-                    "workspace_count": len(workspaces),
-                    "total_users": total_users,
-                    "successful": successful,
-                    "failed": failed,
-                    "workspace_results": workspace_results
-                }
-
-            except Exception as e:
-                logger.error(f"记忆缓存重新生成定时任务执行失败: {str(e)}")
-                return {
-                    "status": "FAILURE",
-                    "error": str(e),
-                    "workspace_count": len(workspace_results),
-                    "total_users": total_users,
-                    "successful": successful,
-                    "failed": failed,
-                    "workspace_results": workspace_results
-                }
-
-    try:
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        loop = set_asyncio_event_loop()
-
-        result = loop.run_until_complete(_run())
-        elapsed_time = time.time() - start_time
-        result["elapsed_time"] = elapsed_time
-        result["task_id"] = self.request.id
-
-        return result
-    except Exception as e:
-        elapsed_time = time.time() - start_time
+            insight = await service.generate_and_cache_insight(
+                db, end_user_id, ws_uuid, language=language,
+            )
+            summary = await service.generate_and_cache_summary(
+                db, end_user_id, ws_uuid, language=language,
+            )
         return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id
+            "insight_success": bool(insight.get("success")),
+            "summary_success": bool(summary.get("success")),
+            "insight_error": insight.get("error"),
+            "summary_error": summary.get("error"),
         }
+
+    loop = set_asyncio_event_loop()
+    will_retry = False
+    try:
+        result = loop.run_until_complete(_run())
+        result["status"] = (
+            "success" if (result["insight_success"] and result["summary_success"]) else "partial"
+        )
+        logger.info(
+            f"do_refresh_insight_summary_cache 完成 user={end_user_id} status={result['status']} "
+            f"insight={result['insight_success']} summary={result['summary_success']} "
+            f"耗时={time.time() - start_time:.1f}s"
+        )
+    except SoftTimeLimitExceeded:
+        # 还有重试次数则交给 autoretry_for 重试；标记 will_retry，避免提前删除在途锁
+        will_retry = self.request.retries < self.max_retries
+        raise
+    except Exception as e:
+        logger.error(
+            f"do_refresh_insight_summary_cache 失败 user={end_user_id}: {e}", exc_info=True
+        )
+        result = {"status": "failed", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 删除在途标记：放行下一轮 scan 对该用户的派发。
+        # 但若本次因软超时将要重试，则保留 key 直到重试结束，避免退避窗口内被 scan 重复派发。
+        if not will_retry:
+            try:
+                _rc = get_sync_redis_client()
+                if _rc is not None:
+                    _rc.delete(inflight_key)
+            except Exception:
+                pass
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    result["end_user_id"] = end_user_id
+    return result
 
 @celery_app.task(
     name="app.tasks.run_forgetting_cycle_task",

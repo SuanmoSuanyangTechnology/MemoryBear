@@ -127,9 +127,10 @@ celery_app.conf.update(
         'app.tasks.run_workflow_schedule_trigger': {'queue': 'workflow_trigger_tasks'},
 
         # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
-        'app.tasks.refresh_memory_insight_and_summary_cache': {'queue': 'memory_heavy_tasks'},  # NOTE：生成记忆洞察、用户摘要缓存
-        'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},  # NOTE：定时任务，跑遗忘 可以暂时关闭
-        'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：定时任务，记忆增量统计
+        'app.tasks.scan_refresh_insight_summary_cache': {'queue': 'periodic_tasks'}, # NOTE：扫描器，仅枚举+派发，轻量
+        'app.tasks.do_refresh_insight_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：单用户生成记忆洞察、用户摘要缓存
+        'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
+        'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
         'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
@@ -188,7 +189,7 @@ beat_schedule_config = {
     #     "args": (),
     # },
     "regenerate-memory-cache": {
-        "task": "app.tasks.refresh_memory_insight_and_summary_cache",
+        "task": "app.tasks.scan_refresh_insight_summary_cache",
         "schedule": memory_cache_regeneration_schedule,
         "args": (),
     },

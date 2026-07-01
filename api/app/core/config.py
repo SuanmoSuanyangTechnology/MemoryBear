@@ -289,6 +289,10 @@ class Settings:
     MEMORY_CACHE_REGENERATION_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="memory cache regeneration cron minute [0, 59]")]
     ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_MINUTE", "0")))
+    # 洞察/摘要缓存刷新新鲜度窗口（小时）：缓存上次刷新距今 < 该值则本轮跳过（限频，避免频繁重算），默认 72
+    MEMORY_CACHE_FRESH_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="insight/summary cache freshness window in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("MEMORY_CACHE_FRESH_HOURS", "72")))
 
     # forgetting cycle 执行时间点（UTC 小时 0-23，默认 18 = 北京时间 2:00）
     FORGETTING_CYCLE_HOUR: int = TypeAdapter(
