@@ -1,7 +1,8 @@
 """
 用户记忆相关的控制器
-保留终端用户信息更新与记忆空间（memory_space）相关接口。
-分析类（analytics）接口已迁移至 memory_analytics_controller。
+保留记忆空间（memory_space）相关接口。
+分析类（analytics）接口已迁移至 memory_analytics_controller；
+终端用户信息接口已迁移至 end_user_controller。
 """
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
@@ -13,11 +14,7 @@ from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
-from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workspace_repository import WorkspaceRepository
-from app.schemas.end_user_info_schema import (
-    EndUserInfoUpdate,
-)
 from app.schemas.memory_storage_schema import DeleteNodeRequest
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction
@@ -36,67 +33,7 @@ router = APIRouter(
 
 
 # =======================终端用户信息接口=======================
-
-@router.post("/end_user_info/updated", response_model=ApiResponse)
-async def update_end_user_info(
-        info_update: EndUserInfoUpdate,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    """
-    更新终端用户信息记录
-
-    根据 end_user_id 更新终端用户信息记录，支持批量更新多个别名。
-    
-    示例请求体：
-    {
-      "end_user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "other_name": "张三1",
-      "aliases": ["小张", "张工"],
-      "meta_data": {"position": "工程师", "department": "技术部"}
-    }
-    """
-    workspace_id = current_user.current_workspace_id
-    end_user_id = info_update.end_user_id
-
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新终端用户信息但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(
-        f"更新终端用户信息请求: end_user_id={end_user_id}, user={current_user.username}, "
-        f"workspace={workspace_id}"
-    )
-
-    # 校验 end_user 是否属于当前工作空间
-    end_user_repo = EndUserRepository(db)
-    end_user = end_user_repo.get_end_user_by_id(end_user_id)
-    if end_user is None:
-        return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
-    if str(end_user.workspace_id) != str(workspace_id):
-        api_logger.warning(
-            f"用户 {current_user.username} 尝试更新不属于工作空间 {workspace_id} 的终端用户 {end_user_id}"
-        )
-        return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
-
-    # 获取更新数据（排除 end_user_id）
-    update_data = info_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
-
-    result = user_memory_service.update_end_user_info(db, end_user_id, update_data)
-
-    if result["success"]:
-        api_logger.info(f"成功更新终端用户信息: end_user_id={end_user_id}")
-        return success(data=result["data"], msg="更新成功")
-    else:
-        error_msg = result["error"]
-        api_logger.error(f"终端用户信息更新失败: end_user_id={end_user_id}, error={error_msg}")
-
-        if error_msg == "终端用户信息记录不存在":
-            return fail(BizCode.USER_NOT_FOUND, "终端用户信息记录不存在", error_msg)
-        elif error_msg == "无效的终端用户ID格式":
-            return fail(BizCode.INVALID_USER_ID, "无效的终端用户ID格式", error_msg)
-        else:
-            return fail(BizCode.INTERNAL_ERROR, "终端用户信息更新失败", error_msg)
+# update_end_user_info 已迁移至 end_user_controller（/end_user/info/update）
 
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)

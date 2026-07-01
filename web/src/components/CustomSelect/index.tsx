@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next';
 import { request } from '@/utils/request';
 
 // Generic option type for API response data
-interface OptionType {
+export interface OptionType {
   [key: string]: any;
 }
 

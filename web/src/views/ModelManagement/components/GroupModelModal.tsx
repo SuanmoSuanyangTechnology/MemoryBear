@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-02 12:23:13
+ * @Last Modified time: 2026-07-01 10:12:44
  */
 /**
  * Group Model Modal
@@ -22,6 +22,7 @@ import UploadImages from '@/components/Upload/UploadImages'
 import ModelImplement from './ModelImplement'
 import { getFileLink } from '@/api/fileStorage'
 import { validateSquareImage, stringRegExp } from '@/utils/validator'
+import { formatModelType } from '../utils'
 
 /**
  * Group model modal component
@@ -166,10 +167,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
           <CustomSelect
             url={modelTypeUrl}
             hasAll={false}
-            format={(items) => items.map((item) => ({ 
-              label: t(`modelNew.${typeof item === 'object' ? item.value : item}`), 
-              value: typeof item === 'object' ? item.value : item 
-            }))}
+            format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
             disabled={isEdit}
           />
         </Form.Item>

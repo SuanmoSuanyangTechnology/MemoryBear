@@ -40,39 +40,29 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([])
   const [treeData, setTreeData] = useState<TreeNode[]>([])
 
-  // Pagination state for root and folders
-  const [pagination, setPagination] = useState<Record<string, { page: number; hasMore: boolean }>>({})
-
   const [form] = Form.useForm()
   const keywords = Form.useWatch('keywords', form)
 
   // Load root list (first page)
-  const loadRootList = useCallback((isLoadMore = false) => {
+  const loadRootList = useCallback(() => {
     setLoading(true)
-    const page = isLoadMore ? (pagination['root']?.page || 1) + 1 : 1  
     getKnowledgeBaseList(undefined, {
       keywords,
-      page,
+      page: 1,
       pagesize: 50,
       orderby: 'created_at',
       desc: true,
     })
       .then(res => {
         const items = (res as { items: KnowledgeBaseListItem[] }).items || []
-        const hasMore = res.page?.has_next ?? false
         const newNodes = items.map(item => transformToTreeNode(item))
         
         setTreeData(newNodes)
-        
-        setPagination(prev => ({
-          ...prev,
-          root: { page, hasMore }
-        }))
       })
       .finally(() => {
         setLoading(false)
       })
-  }, [keywords, pagination])
+  }, [keywords])
 
   // Transform item to tree node
   const transformToTreeNode = (item: KnowledgeBaseListItem): TreeNode => {
@@ -101,7 +91,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       setCheckedIds([])
       setCheckedRows([])
       setExpandedKeys([])
-      setPagination({}) // Reset pagination on open
       loadRootList()
     }
   }, [keywords, visible])
@@ -120,7 +109,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     setCheckedIds([])
     setCheckedRows([])
     setExpandedKeys([])
-    loadRootList()
   };
 
   // Handle folder expansion
