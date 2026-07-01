@@ -180,7 +180,7 @@ If there are no candidate aliases, return:
 6. `confidence` must be a number between 0.0 and 1.0
 
 {% if language == "zh" %}
-输出语言应始终与输入语言相同。
+`reason` 的语言应跟随规范实体与候选别名描述/摘要的主要语言；`alias_index` 和 `confidence` 保持固定 JSON 格式。
 {% else %}
-The output language should always be the same as the input language.
+The language of `reason` should follow the primary language of the canonical entity and candidate alias descriptions/summaries; `alias_index` and `confidence` keep the fixed JSON format.
 {% endif %}

@@ -6,9 +6,9 @@
 Summarize the provided conversation chunks into a concise Memory summary.
 
 {% if language == "zh" %}
-**重要：请使用中文生成摘要内容。**
+**重要：摘要内容应跟随输入 conversation chunks 的主要语言。**
 {% else %}
-**Important: Please generate the summary content in English.**
+**Important: Generate the summary content in the primary language of the input conversation chunks.**
 {% endif %}
 
 === Requirements ===
@@ -16,9 +16,9 @@ Summarize the provided conversation chunks into a concise Memory summary.
 - Avoid repetition and filler; be specific.
 - Keep it under {{ max_words or 200 }} words.
 {% if language == "zh" %}
-- 摘要内容必须使用中文
+- 摘要内容必须跟随输入 conversation chunks 的主要语言
 {% else %}
-- Summary content must be in English
+- Summary content must follow the primary language of the input conversation chunks
 {% endif %}
 - Output must be valid JSON conforming to the schema below.
 
@@ -36,9 +36,9 @@ Summarize the provided conversation chunks into a concise Memory summary.
 5. Example of proper escaping: "statement": "张曼婷说：\"我很喜欢这本书。\""
 
 {% if language == "zh" %}
-**语言要求：输出内容必须使用中文。**
+**语言要求：flexible 的摘要文本跟随输入 conversation chunks 的主要语言；JSON schema 和字段名保持不变。**
 {% else %}
-**Language Requirement: The output content must be in English.**
+**Language Requirement: Flexible summary text follows the primary language of the input conversation chunks; JSON schema and field names stay unchanged.**
 {% endif %}
 
 Return only a list of extracted labelled statements in the JSON ARRAY of objects that match the schema below:
