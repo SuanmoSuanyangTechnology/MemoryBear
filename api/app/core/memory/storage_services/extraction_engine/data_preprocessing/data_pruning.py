@@ -70,7 +70,7 @@ class AssistantPruningResponse(BaseModel):
         description="comfort | suggestion | recommendation | warning | instruction | NULL，Assistant 为空时为 null",
     )
     should_process_user_msg: Optional[bool] = Field(
-        default=False, description="是否需要对 User 消息做规整，User 为空时为 null"
+        default=None, description="是否需要对 User 消息做规整，User 为空时为 null"
     )
     processed_user_msg: Optional[str] = Field(
         default=None, description="规整后的 User 消息文本，不需要处理时为 null"
