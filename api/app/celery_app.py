@@ -115,7 +115,6 @@ celery_app.conf.update(
         'app.tasks.do_layer2_reflection': {'queue': 'reflection_tasks'},
         'app.tasks.scan_layer2_dedup_full_scan': {'queue': 'periodic_tasks'},
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
-        'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
@@ -180,7 +179,6 @@ implicit_emotions_update_schedule = crontab(
 )
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
-reflection_retry_schedule = timedelta(minutes=settings.REFLECTION_RETRY_SCAN_INTERVAL_MINUTES)
 hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
 # 构建定时任务配置
@@ -220,11 +218,6 @@ beat_schedule_config = {
     "run-layer2-dedup-full-scan": {
         "task": "app.tasks.scan_layer2_dedup_full_scan",
         "schedule": layer2_dedup_full_scan_schedule,
-        "args": (),
-    },
-    "scan-reflection-retry": {
-        "task": "app.tasks.scan_reflection_retry",
-        "schedule": reflection_retry_schedule,
         "args": (),
     },
     "refresh-hot-memory-tags-cache": {
