@@ -85,7 +85,7 @@ def _get_llm_client_for_user(user_id: str):
                     config_id=config_id,
                 )
                 factory = MemoryClientFactory(db)
-                return factory.get_llm_client(memory_config.llm_model_id)
+                return factory.get_llm_client_from_config(memory_config)
             else:
                 factory = MemoryClientFactory(db)
                 return factory.get_llm_client(DEFAULT_LLM_ID)

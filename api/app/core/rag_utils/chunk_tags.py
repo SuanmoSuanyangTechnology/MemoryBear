@@ -33,7 +33,7 @@ def _get_llm_client(end_user_id: Optional[str] = None):
                         config_id=config_id
                     )
                     factory = MemoryClientFactory(db)
-                    return factory.get_llm_client(str(memory_config.llm_model_id))
+                    return factory.get_llm_client_from_config(memory_config)
         except Exception as e:
             business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
         factory = MemoryClientFactory(db)

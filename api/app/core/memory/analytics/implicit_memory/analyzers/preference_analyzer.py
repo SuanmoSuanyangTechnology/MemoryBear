@@ -30,16 +30,17 @@ class PreferenceAnalysisResponse(BaseModel):
 class PreferenceAnalyzer:
     """Analyzes user memory summaries to extract implicit preferences."""
     
-    def __init__(self, db: Session, llm_model_id: Optional[str] = None):
+    def __init__(self, db: Session, llm_model_id: Optional[str] = None, tenant_id=None):
         """Initialize the preference analyzer.
         
         Args:
             db: Database session
             llm_model_id: Optional LLM model ID to use for analysis
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
         """
         self.db = db
         self.llm_model_id = llm_model_id
-        self._llm_client = ImplicitMemoryLLMClient(db, llm_model_id)
+        self._llm_client = ImplicitMemoryLLMClient(db, llm_model_id, tenant_id=tenant_id)
     
     async def analyze_preferences(
         self,
