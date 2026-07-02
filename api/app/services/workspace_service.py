@@ -929,6 +929,7 @@ async def update_workspace_models_configs(
         workspace_id: uuid.UUID,
         models_update: WorkspaceModelsUpdate,
         user: User,
+        locale: str = "zh",
 ) -> tuple[Workspace, list[dict]]:
     """更新工作空间的模型配置，并校验关联默认配置的模型可用性。
 
@@ -937,6 +938,7 @@ async def update_workspace_models_configs(
         workspace_id: 工作空间ID
         models_update: 模型配置更新对象
         user: 当前用户
+        locale: 语言代码（zh / en），用于 i18n 告警消息
 
     Returns:
         tuple[Workspace, list[dict]]: (更新后的工作空间对象, 模型校验告警列表)
@@ -957,6 +959,8 @@ async def update_workspace_models_configs(
 
         if default_memory_config:
             default_memory_config.llm = str(models_update.llm) if models_update.llm else None
+            default_memory_config.reflection_model_id = str(models_update.llm) if models_update.llm else None
+            default_memory_config.emotion_model_id = str(models_update.llm) if models_update.llm else None
             default_memory_config.embedding = str(models_update.embedding) if models_update.embedding else None
             default_memory_config.rerank = str(models_update.rerank) if models_update.rerank else None
             default_memory_config.vision = str(models_update.vision) if models_update.vision else None
@@ -979,8 +983,12 @@ async def update_workspace_models_configs(
         # 校验默认配置的模型可用性
         warnings: list[dict] = []
         if default_memory_config:
-            result = await MemoryConfigService(db).valid_config(default_memory_config.config_id)
-            warnings = result.get("warnings", [])
+            result = await MemoryConfigService(db).valid_config(default_memory_config.config_id, locale=locale)
+            warnings = [
+                warning
+                for warning in result.get("warnings", [])
+                if warning.get("source") == "extracted"
+            ]
 
         return db_workspace, warnings
 
