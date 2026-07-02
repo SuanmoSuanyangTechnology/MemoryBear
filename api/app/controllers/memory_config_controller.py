@@ -95,10 +95,7 @@ async def active_config(
     svc = DataConfigService(db)
     try:
         result = await svc.active(workspace_id, config_id)
-        if result.get("success"):
-            return success(data=result)
-        else:
-            return fail(code=BizCode.API_KEY_INACTIVE, msg="配置异常", data=result)
+        return success(data=result)
     except ConfigurationError as e:
         return fail(BizCode.INVALID_PARAMETER, str(e))
     except BusinessException as e:
@@ -236,7 +233,8 @@ async def start_reflection_configs(
             "baseline": result.baseline,
             "reflection_model_id": result.reflection_model_id,
             "memory_verify": result.memory_verify,
-            "quality_assessment": result.quality_assessment
+            "quality_assessment": result.quality_assessment,
+            "is_default": result.is_default
         }
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
         return success(data=reflection_config, msg="反思配置查询成功")
