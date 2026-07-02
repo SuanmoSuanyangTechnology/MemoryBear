@@ -441,17 +441,22 @@ async def update_workspace_models_configs(
         models_update: WorkspaceModelsUpdate,
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
+        language: str = Depends(get_current_language),
         t: callable = Depends(get_translator)
 ):
     """更新当前工作空间的模型配置，并校验模型可用性"""
+    from app.core.language_utils import get_language_from_header
+
     workspace_id = current_user.current_workspace_id
+    locale = get_language_from_header(language)
     api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的模型配置")
 
     updated_workspace, warnings = await workspace_service.update_workspace_models_configs(
         db=db,
         workspace_id=workspace_id,
         models_update=models_update,
-        user=current_user
+        user=current_user,
+        locale=locale,
     )
 
     api_logger.info(

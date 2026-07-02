@@ -83,6 +83,7 @@ async def active_config(
         config_id: UUID = Body(..., embed=True),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
+        language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -92,9 +93,10 @@ async def active_config(
     from app.core.exceptions import BusinessException
     from app.schemas.memory_config_schema import ConfigurationError
 
+    locale = get_language_from_header(language_type)
     svc = DataConfigService(db)
     try:
-        result = await svc.active(workspace_id, config_id)
+        result = await svc.active(workspace_id, config_id, locale=locale)
         return success(data=result)
     except ConfigurationError as e:
         return fail(BizCode.INVALID_PARAMETER, str(e))
@@ -106,6 +108,7 @@ async def active_config(
 async def validate_active_config_models(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
+        language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
     """校验当前工作空间激活记忆配置中的模型 API 可用性"""
     from app.core.exceptions import BusinessException
@@ -116,13 +119,14 @@ async def validate_active_config_models(
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
 
     api_logger.info(f"用户 {current_user.username} 请求校验激活配置模型: workspace_id={workspace_id}")
+    locale = get_language_from_header(language_type)
 
     try:
         config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
     except BusinessException:
         return success(data={"valid": False, "warnings": [{"message": "当前工作空间无启用的记忆配置"}]})
 
-    result = await MemoryConfigService(db).valid_config(config_id)
+    result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
     return success(data=result)
 
 

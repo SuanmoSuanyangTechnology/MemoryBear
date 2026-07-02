@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
+from app.i18n.service import t
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
@@ -175,6 +176,7 @@ class MemoryConfigService:
         tenant_id: UUID | None,
         config_id: UUID,
         workspace_id: UUID | None,
+        locale: str = "zh",
     ) -> None:
         """解析模型凭证并调用 validate_model_config 验证 API 连通性。
 
@@ -184,6 +186,7 @@ class MemoryConfigService:
             tenant_id: 租户 ID
             config_id: 记忆配置 ID（用于错误上下文）
             workspace_id: 工作空间 ID（用于错误上下文）
+            locale: 语言代码（zh / en），用于 i18n 错误消息
 
         Raises:
             ModelNotFoundError: 模型不存在或没有可用 API 密钥
@@ -201,7 +204,8 @@ class MemoryConfigService:
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=f"{model_type_label} 模型 {model_id} 不存在: {e}",
+                message=t("memory_config.model.not_found_with_error", locale=locale,
+                          model_type=model_type_label, model_id=model_id, error=str(e)),
             )
 
         # 2. 获取可用 API Key
@@ -215,7 +219,8 @@ class MemoryConfigService:
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=f"{model_type_label} 模型 {model_config.name} 没有可用的 API 密钥",
+                message=t("memory_config.model.no_api_key", locale=locale,
+                          model_type=model_type_label, model_name=model_config.name),
             )
 
         # 3. 实际 API 连通性验证
@@ -237,16 +242,19 @@ class MemoryConfigService:
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=f"{model_type_label} 模型 {api_key_config.model_name} API 验证失败: {result.get('error', '未知错误')}",
+                message=t("memory_config.model.api_verify_failed", locale=locale,
+                          model_type=model_type_label, model_name=api_key_config.model_name,
+                          error=result.get('error', 'Unknown error')),
             )
 
-    async def valid_config(self, config_id: uuid.UUID) -> dict:
+    async def valid_config(self, config_id: uuid.UUID, locale: str = "zh") -> dict:
         """验证配置是否存在且关联模型 API 可用。
 
         所有模型验证失败均不阻断，统一收集到 warnings 返回前端告警。
 
         Args:
             config_id: 配置 UUID
+            locale: 语言代码（zh / en），用于 i18n 告警消息
 
         Returns:
             dict: {
@@ -264,7 +272,7 @@ class MemoryConfigService:
         config = self.db.get(MemoryConfigModel, config_id)
         if not config:
             raise InvalidConfigError(
-                f"配置不存在: config_id={config_id}",
+                t("memory_config.config.not_found", locale=locale, config_id=str(config_id)),
                 field_name="config_id",
                 invalid_value=config_id,
             )
@@ -274,41 +282,44 @@ class MemoryConfigService:
         workspace_id = workspace.id if workspace else None
 
         all_models = [
-            ("llm", config.llm_id),
-            ("embedding", config.embedding_id),
-            ("rerank", config.rerank_id),
-            ("vision", config.vision_id),
-            ("video", config.video_id),
-            ("audio", config.audio_id),
+            ("llm", config.llm_id, "extracted"),
+            ("embedding", config.embedding_id,"extracted"),
+            ("rerank", config.rerank_id, "extracted"),
+            ("vision", config.vision_id, "extracted"),
+            ("video", config.video_id, "extracted"),
+            ("audio", config.audio_id, "extracted"),
+            ("reflection", config.reflection_model_id, "reflection"),
+            ("emotion", config.emotion_model_id, "emotion"),
         ]
 
         warnings: list[dict] = []
 
-        for model_type, model_id in all_models:
+        for model_type, model_id, source in all_models:
             if not model_id:
                 warnings.append({
                     "model_type": model_type,
                     "model_id": None,
-                    "message": f"{model_type} 模型未配置",
+                    "source": source,
+                    "message": t("memory_config.model.not_configured", locale=locale, model_type=model_type),
                 })
 
-        _VALIDATE_AS_LLM = {"vision", "video", "audio"}
+        _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
         async def _validate_one(model_type: str, model_id: str) -> dict | None:
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                await self._validate_model_connectivity(model_id, validate_type, tenant_id, config_id, workspace_id)
+                await self._validate_model_connectivity(model_id, validate_type, tenant_id, config_id, workspace_id, locale=locale)
                 return None
             except ConfigurationError as e:
                 logger.warning(
                     f"模型 {model_type} API 验证失败: {e}",
                     extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
                 )
-                return {"model_type": model_type, "model_id": str(model_id), "message": str(e)}
+                return {"model_type": model_type, "model_id": str(model_id), "message": e.err_message}
 
         tasks = [
             _validate_one(model_type, model_id)
-            for model_type, model_id in all_models
+            for model_type, model_id, _ in all_models
             if model_id
         ]
         if tasks:

@@ -89,7 +89,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         """
         self.db = db
 
-    async def active(self, workspace_id: uuid.UUID, config_id: uuid.UUID) -> Dict[str, Any]:
+    async def active(self, workspace_id: uuid.UUID, config_id: uuid.UUID, locale: str = "zh") -> Dict[str, Any]:
         stmt = select(Workspace).where(
             Workspace.id == workspace_id,
             Workspace.is_active.is_(True)
@@ -97,7 +97,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         workspace = self.db.scalar(stmt)
         if not workspace:
             raise BusinessException("空间不存在")
-        validation_result = await MemoryConfigService(self.db).valid_config(config_id)
+        validation_result = await MemoryConfigService(self.db).valid_config(config_id, locale=locale)
         warnings = validation_result.get("warnings", [])
         success = False
         if not warnings:
