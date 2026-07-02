@@ -95,10 +95,7 @@ async def active_config(
     svc = DataConfigService(db)
     try:
         result = await svc.active(workspace_id, config_id)
-        if result.get("success"):
-            return success(data=result)
-        else:
-            return fail(code=BizCode.API_KEY_INACTIVE, msg="配置异常", data=result)
+        return success(data=result)
     except ConfigurationError as e:
         return fail(BizCode.INVALID_PARAMETER, str(e))
     except BusinessException as e:
