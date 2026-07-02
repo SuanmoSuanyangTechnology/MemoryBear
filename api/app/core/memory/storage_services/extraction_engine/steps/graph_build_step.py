@@ -409,6 +409,11 @@ async def build_graph_nodes_and_edges(
 
         for record in pruning_records:
             pair_id = record["pair_id"]
+
+            # 跳过空 original_text 的记录（MCP 场景中空 assistant 占位不需要存入节点）
+            if not record.get("original_text", "").strip():
+                continue
+
             # 节点 ID 基于 pair_id，确保 MERGE 幂等
             # （pair_id 在 pruning_records 中固定，同一条消息重复处理时 ID 不变）
             original_id = f"orig_{pair_id}"
