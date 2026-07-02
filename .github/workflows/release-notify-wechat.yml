@@ -152,7 +152,7 @@ jobs:
             "---\n"
             "🔗 [查看PR详情](" + os.environ["PR_URL"] + ")"
           )
-          payload = {"msgtype": "markdown", "markdown": {"content": content}}
+          payload = {"msgtype": "markdown", "markdown": {"title": "🚀 Release 发布通知", "text": content}}
           data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
           req = urllib.request.Request(
             os.environ["WECHAT_WEBHOOK"],
