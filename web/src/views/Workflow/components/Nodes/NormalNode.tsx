@@ -31,7 +31,15 @@ const NormalNode: ReactShapeConfig['component'] = ({ node }) => {
         }
       </Flex>
 
-      <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:mt-3">{t('workflow.clickToConfigure')}</div>
+      {['memory-read', 'memory-write'].includes(data.type) && data.activeMemoryConfig
+        ? <Flex align="center" gap={4}
+            className="rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:px-1.5! rb:py-1! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-4 rb:mt-3! rb:truncate"
+          >
+            <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/conversation/memoryFunction.svg')] rb:shrink-0" />
+            <span className="rb:truncate">{t('application.memoryConfiguration')}: {data.activeMemoryConfig.config_name}</span>
+          </Flex>
+        : <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:mt-3">{t('workflow.clickToConfigure')}</div>
+      }
     </div>
   );
 };

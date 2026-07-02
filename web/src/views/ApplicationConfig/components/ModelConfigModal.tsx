@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 18:35:43
+ * @Last Modified time: 2026-07-02 16:37:51
  */
 /**
  * Model Configuration Modal
@@ -75,14 +75,14 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     if (source === 'model') {
       form.setFieldsValue({
         ...(data?.model_parameters || {}),
-        default_model_config_id: data.default_model_config_id || '',
+        default_model_config_id: data.default_model_config_id,
         capability: model?.capability || []
       })
     } else if (source === 'chat' || source === 'multi_agent') {
       if (model) {
         form.setFieldsValue({
           ...(model?.model_parameters || {}),
-          default_model_config_id: model.default_model_config_id || ''
+          default_model_config_id: model.default_model_config_id
         })
       } else {
         form.setFieldsValue({

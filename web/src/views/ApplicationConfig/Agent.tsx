@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 16:45:11
+ * @Last Modified time: 2026-07-02 16:40:04
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -33,15 +33,15 @@ import { saveAgentConfig } from '@/api/application'
 import Knowledge from '@/components/Knowledge'
 import VariableList from './components/VariableList/VariableList'
 import { getApplicationConfig } from '@/api/application'
-import { memoryConfigListUrl } from '@/api/memory'
-import CustomSelect from '@/components/CustomSelect'
+import { getMemoryConfigList } from '@/api/memory'
+import type { Memory } from '@/views/MemoryManagement/types'
 import AiPromptModal from './components/AiPromptModal'
 import ToolList from './components/ToolList/ToolList'
 import SkillList from './components/Skill'
+import ActiveMemoryConfig from '@/components/ActiveMemoryConfig'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import type { Skill } from '@/views/Skills/types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
-import DescWrapper from '@/components/FormItem/DescWrapper'
 import FeaturesConfig from './components/FeaturesConfig'
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
 import Editor from './components/Editor'
@@ -84,6 +84,21 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
     getData()
   }, [id])
 
+  const [activeMemoryConfig, setActiveMemoryConfig] = useState<Memory | null>(null)
+  const getActiveMemoryConfig = () => {
+    getMemoryConfigList()
+      .then((res) => {
+        setActiveMemoryConfig((res as Memory[])[0])
+      })
+      .catch(() => {
+        setActiveMemoryConfig(null)
+      })
+  }
+  useEffect(() => {
+    getActiveMemoryConfig()
+  }, [])
+
+
   /**
    * Fetch agent configuration data
    */
@@ -93,10 +108,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       const { skills, variables } = response
       const allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       const allTools = Array.isArray(response.tools) ? response.tools : []
-      const memoryContent = response.memory?.memory_config_id
-      const parsedMemoryContent = memoryContent === null || memoryContent === ''
-        ? undefined
-        : !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
       const variableList = variables?.map((item, index) => ({
         ...item,
         index
@@ -106,7 +117,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         tools: allTools,
         memory: {
           ...response.memory,
-          memory_config_id: parsedMemoryContent
         },
         skills: {
           ...skills,
@@ -150,7 +160,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         const label = defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name : vo.label || ''
         setChatList([{
           label: label,
-          model_config_id: default_model_config_id || '',
+          model_config_id: default_model_config_id,
           model_parameters: {...rest},
           list: []
         }])
@@ -165,7 +175,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       setChatList((prev: ChatData[]) => {
         const newChatItem: ChatData = {
           label,
-          model_config_id: default_model_config_id || '',
+          model_config_id: default_model_config_id,
           model_parameters: {...reset},
           list: []
         };
@@ -204,7 +214,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
     if (!isSave || !data) return Promise.resolve()
     const { memory, knowledge_retrieval, tools, skills, ...rest } = values
     const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
-    const { memory_config_id } = memory || {}
     // Get other necessary properties of memory from original data
     const originalMemory = data.memory || ({} as MemoryConfig)
     
@@ -214,7 +223,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       memory: {
         ...originalMemory,
         ...memory,
-        memory_config_id: memory_config_id ? String(memory_config_id) : '',
       },
       knowledge_retrieval: knowledge_bases.length > 0 ? {
         ...data.knowledge_retrieval,
@@ -282,7 +290,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       setDefaultModel(filterValue as Model | null)
       setChatList([{
         label: filterValue?.name || '',
-        model_config_id: filterValue?.id || '',
+        model_config_id: filterValue?.id,
         model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
         list: []
       }])
@@ -508,22 +516,10 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                       name={['memory', 'enabled']}
                       desc={t('application.dialogueHistoricalMemoryDesc')}
                     />
-                    <Form.Item
-                      name={['memory', 'memory_config_id']}
-                      label={t('application.selectMemoryContent')}
-                      extra={<DescWrapper desc={t('application.selectMemoryContentDesc')} className="rb:mt-1" />}
-                      layout="vertical"
-                      className="rb:mb-0!"
-                    >
-                      <CustomSelect
-                        placeholder={t('common.pleaseSelect')}
-                        url={memoryConfigListUrl}
-                        hasAll={false}
-                        valueKey='config_id'
-                        labelKey="config_name"
-                        disabled={!values?.memory?.enabled}
-                      />
-                    </Form.Item>
+                    <ActiveMemoryConfig
+                      activeMemoryConfig={activeMemoryConfig}
+                      variant="outline"
+                    />
                   </Flex>
                 </Card>
 

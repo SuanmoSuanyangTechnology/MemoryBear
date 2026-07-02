@@ -516,3 +516,7 @@ input:-webkit-autofill:active {
 .ant-tree .ant-tree-checkbox .ant-tree-checkbox-inner {
   border-radius: 4px !important;
 }
+.ant-steps .ant-steps-item-finish .ant-steps-item-icon {
+  background-color: white;
+  border-color: #171719;
+}

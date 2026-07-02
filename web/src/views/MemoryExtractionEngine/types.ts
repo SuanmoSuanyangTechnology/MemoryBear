@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:29:55 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 20:56:31
+ * @Last Modified time: 2026-07-02 16:13:41
  */
 /**
  * Memory Extraction Engine Configuration Form Types
@@ -26,7 +26,7 @@ export interface ConfigForm {
   iteration_period: number;
   reflexion_range: string;
   baseline: string;
-  
+  is_default: boolean;
 }
 /**
  * Configuration variable definition

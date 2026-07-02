@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:56:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:59:16
+ * @Last Modified time: 2026-06-29 18:33:05
  */
 /**
  * Emotion Engine Configuration Page
@@ -71,6 +71,7 @@ const EmotionEngine: React.FC = () => {
   const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
   const { language } = useI18n()
+  const [isDefault, setIsDefault] = useState(true)
 
   const values = Form.useWatch([], form);
 
@@ -94,6 +95,7 @@ const EmotionEngine: React.FC = () => {
           ...response,
         }
         setConfigData(initialValues);
+        setIsDefault(response.is_default)
         form.setFieldsValue(initialValues);
       })
       .catch(() => {
@@ -131,15 +133,16 @@ const EmotionEngine: React.FC = () => {
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
           extra={<Space>
-            <Button block onClick={handleReset}>{t('common.reset')}</Button>
-            <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
+            <Button block disabled={isDefault} onClick={handleReset}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} disabled={isDefault} block onClick={handleSave}>{t('common.save')}</Button>
           </Space>}
           className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
-          <Form 
+          <Form
             form={form}
             layout="vertical"
+            disabled={isDefault}
             initialValues={{
               offset: 0,
               lambda_time: 0.03,
@@ -190,7 +193,7 @@ const EmotionEngine: React.FC = () => {
                       >
                         <ModelSelect
                           params={config.params}
-                          disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
+                          disabled={isDefault || (!values?.emotion_enabled && config.key !== 'emotion_enabled')}
                         />
                       </Form.Item>
                     </div>
@@ -204,7 +207,7 @@ const EmotionEngine: React.FC = () => {
                       {config.hasSubTitle && <div className="rb:mt-1 rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_subTitle`)}</div>}
                       <div className="rb:mt-1  rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_desc`)}</div>
                     </>}
-                    disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
+                    disabled={isDefault || (!values?.emotion_enabled && config.key !== 'emotion_enabled')}
                     className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3!"
                   />
                 )

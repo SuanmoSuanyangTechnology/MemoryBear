@@ -96,4 +96,6 @@ export interface ConfigForm {
   emotion_min_intensity: number;
   /** Whether to enable subject extraction */
   emotion_enable_subject: boolean;
+  /** Whether it's the system default */
+  is_default: boolean;
 }

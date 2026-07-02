@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:54:38
+ * @Last Modified time: 2026-07-02 16:15:49
  */
 /**
  * Forgetting Engine Configuration Page
@@ -106,11 +106,12 @@ const configList = [
 const ForgettingEngine: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
-  const [configData, setConfigData] = useState<ConfigForm>();
+  const [configData, setConfigData] = useState<ConfigForm>({} as ConfigForm);
   const [form] = Form.useForm<ConfigForm>();
   const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
   const { language } = useI18n()
+  const [isDefault, setIsDefault] = useState(true)
 
   const values = Form.useWatch([], form);
 
@@ -134,6 +135,7 @@ const ForgettingEngine: React.FC = () => {
           offset: Number(response.offset || 0),
         }
         setConfigData(initialValues);
+        setIsDefault(response.is_default)
         form.setFieldsValue(initialValues);
       })
       .catch(() => {
@@ -166,17 +168,18 @@ const ForgettingEngine: React.FC = () => {
         <RbCard
           title={t('forgettingEngine.forgettingEngineConfigParams')}
           extra={<Space>
-            <Button block onClick={handleReset}>{t('common.reset')}</Button>
-            <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
+            <Button block disabled={isDefault} onClick={handleReset}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} disabled={isDefault} block onClick={handleSave}>{t('common.save')}</Button>
           </Space>}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
           className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
-          <Form 
+          <Form
             form={form}
             layout="vertical"
+            disabled={isDefault}
             initialValues={{
               offset: 0,
               lambda_time: 0.03,

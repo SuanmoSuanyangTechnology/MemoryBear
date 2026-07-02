@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:01 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-05 16:33:53
+ * @Last Modified time: 2026-07-02 10:30:51
  */
 /**
  * Memory management form data type
@@ -18,7 +18,7 @@ export interface MemoryFormData {
  * Memory configuration data type
  */
 export interface Memory {
-  config_id: number;
+  config_id: string;
   config_name: string;
   group_id: string;
   user_id: string;
