@@ -8,5 +8,8 @@
   },
   "config": {
     "not_found": "Configuration not found: {config_id}"
+  },
+  "workspace": {
+    "no_active_config": "No active memory configuration in the current workspace"
   }
 }

@@ -124,7 +124,8 @@ async def validate_active_config_models(
     try:
         config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
     except BusinessException:
-        return success(data={"valid": False, "warnings": [{"message": "当前工作空间无启用的记忆配置"}]})
+        from app.i18n.service import t
+        return success(data={"valid": False, "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
 
     result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
     return success(data=result)

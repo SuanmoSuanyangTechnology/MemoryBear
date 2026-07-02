@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
+from app.i18n.service import t
 from app.core.memory.analytics.hot_memory_tags import (
     filter_tags_with_llm,
     get_raw_tags_batch,
@@ -96,7 +97,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         )
         workspace = self.db.scalar(stmt)
         if not workspace:
-            raise BusinessException("空间不存在")
+            raise BusinessException(t("workspace.not_found", locale=locale))
         validation_result = await MemoryConfigService(self.db).valid_config(config_id, locale=locale)
         warnings = validation_result.get("warnings", [])
         success = False
