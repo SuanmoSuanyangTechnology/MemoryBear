@@ -247,7 +247,7 @@ export function useChatMessages() {
               ...intervention,
               execution_id: pendingIntervention.execution_id,
             }))
-            return { ...item, meta_data: { ...item.meta_data, audio_status: 'pending' } }
+            return { ...item, meta_data: { ...item.meta_data } }
           }
           return item
         })
@@ -257,14 +257,14 @@ export function useChatMessages() {
           ...intervention,
           execution_id: pendingIntervention.execution_id,
         }))
-        return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+        return { ...msg, meta_data: { ...msg.meta_data } }
       } else if (msg.role === 'assistant') {
         const pendingIntervention = msg.id ? response?.pending_intervention?.[msg.id] || {} : {}
         msg.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
           ...intervention,
           execution_id: pendingIntervention.execution_id,
         }))
-        return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+        return { ...msg, meta_data: { ...msg.meta_data } }
       }
       msg.status = msg.role === 'user' ? undefined : msg.status
       return msg

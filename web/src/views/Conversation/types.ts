@@ -76,6 +76,7 @@ export interface ReportMessageData {
 }
 export interface StreamData {
   message_id?: string;
+  user_message_id?: string;
   file_id?: string;
   execution_id: string;
   node_id: string;

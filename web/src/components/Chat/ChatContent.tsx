@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 18:19:07
+ * @Last Modified time: 2026-07-02 16:00:20
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -435,7 +435,7 @@ const ChatContent: FC<ChatContentProps> = ({
                               ></div>
                             </Tooltip>
                           }
-                          {isSupportTools && item.role === 'user' && deleteMsg &&
+                          {isSupportTools && item.role === 'user' && item.id && deleteMsg &&
                             <Tooltip title={t('common.delete')}>
                               <div
                                 className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete_big.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red_big.svg')]"

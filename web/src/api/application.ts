@@ -61,13 +61,9 @@ export const runCompare = (app_id: string, values: Record<string, unknown>, onMe
 export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage, undefined, onAbort)
 }
-// Agent re-run the draft and regenerate the assistant response
-export const agentDraftRunRegenerate = (app_id: string, message_id: string, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
-  return handleSSE(`/apps/${app_id}/messages/${message_id}/regenerate`, { stream: true }, onMessage, undefined, onAbort)
-}
 // Re-run the draft and regenerate the assistant response
 export const draftRunRegenerate = (app_id: string, message_id: string, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
-  return handleSSE(`/apps/${app_id}/workflow/messages/${message_id}/regenerate`, { stream: true }, onMessage, undefined, onAbort)
+  return handleSSE(`/apps/${app_id}/messages/${message_id}/regenerate`, { stream: true }, onMessage, undefined, onAbort)
 }
 // Switch to another version of a message via the version switcher
 export const draftRunSwitchMessageVersion = (app_id: string, message_id: string, version: number) => {

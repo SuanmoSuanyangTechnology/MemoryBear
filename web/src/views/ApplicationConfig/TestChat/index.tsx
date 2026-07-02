@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-03-13 17:27:52
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 16:47:37
+ * @Last Modified time: 2026-07-02 15:45:25
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -15,7 +15,6 @@ import {
   draftRun,
   appInterventionsSubmit,
   draftRunRegenerate,
-  agentDraftRunRegenerate,
   draftRunSwitchMessageVersion,
   draftRunFavoriteMessage,
   draftRunFeedbackMessage,
@@ -46,7 +45,6 @@ import {
   applyErrorMessage,
   applyWorkflowSendError,
   applyInterventionResolved,
-  mapLastVersion,
 } from './helpers'
 import {
   appendRegenerateVersion,
@@ -135,6 +133,7 @@ const TestChat: FC<TestChatProps> = ({
       conversationId,
       setConversationId,
       setChatList,
+      setLoading,
       setStreamLoading,
       streamLoadingRef,
       audioStatusMap,
@@ -255,24 +254,20 @@ const TestChat: FC<TestChatProps> = ({
     const { isCanSend } = resolveSendParams()
     if (!isCanSend) return
 
-    setChatList(prev => appendRegenerateVersion(prev, vo.id as string))
+    let snapshot: Array<ChatItem | ChatItem[]> = []
+    setChatList(prev => {
+      snapshot = prev
+      return appendRegenerateVersion(prev, vo.id as string)
+    })
     streamLoadingRef.current = true
     setStreamLoading(true)
     setLoading(true)
 
     const handler = isWorkflow ? handleWorkflowStreamMessage : handleStreamMessage
-    const request = application.type === 'agent'
-      ? agentDraftRunRegenerate
-      : draftRunRegenerate
-    request(application.id, vo.id, handler, (abort) => { abortRef.current = abort })
-      .catch((error) => {
-        const errorInfo = JSON.parse(error.message)
-        setChatList(prev => mapLastVersion(prev, (current) => ({
-          ...current,
-          status: 'failed',
-          content: null,
-          error: errorInfo.msg,
-        })))
+    draftRunRegenerate(application.id, vo.id, handler, (abort) => { abortRef.current = abort })
+      .catch(() => {
+        // Roll back to the state captured before appendRegenerateVersion.
+        setChatList(snapshot)
       })
       .finally(() => {
         setLoading(false)
@@ -287,10 +282,7 @@ const TestChat: FC<TestChatProps> = ({
     draftRunSwitchMessageVersion(application.id, item.id, page)
       .then((res) => {
         const rebuilt = buildVersionMessages(res, getNodeContext)
-        // The switch response omits the opening statement, so re-insert it at the
-        // top when configured to keep the greeting visible after switching.
-        const assistantMsg = buildOpeningStatementMessage(features?.opening_statement, { variables })
-        setChatList(assistantMsg ? [assistantMsg, ...rebuilt] : rebuilt)
+        setChatList(rebuilt)
         messageApi.success(t('common.operateSuccess'))
       })
   }
@@ -352,7 +344,7 @@ const TestChat: FC<TestChatProps> = ({
         return [...prev]
       })
     }
-  }, [chatList.length, features?.opening_statement, variables])
+  }, [features?.opening_statement, variables])
   console.log('chatList', chatList)
 
   const isSupportTools = application?.type && ['workflow', 'agent'].includes(application?.type)
