@@ -72,7 +72,7 @@ class EndUserRepository:
             raise
 
     def get_end_users_count_by_workspace(self, workspace_id: uuid.UUID) -> int:
-        """获取指定 workspace 下的所有 end_user"""
+        """获取指定 workspace 下的所有 end_user数量"""
         try:
             end_users_count = (
                 self.db.query(EndUser)

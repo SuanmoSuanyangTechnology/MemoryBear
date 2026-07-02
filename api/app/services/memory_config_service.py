@@ -16,15 +16,14 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
-from app.i18n.service import t
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
 )
+from app.i18n.service import t
 from app.models import Workspace
 from app.models.app_model import AppType
-from app.repositories.end_user_repository import get_end_user_by_id, get_end_users_by_workspace, \
-    get_end_users_count_by_workspace
+from app.repositories.end_user_repository import get_end_user_by_id
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.workspace_repository import get_workspace_memory_config_id
 from app.schemas.memory_config_schema import (
@@ -986,7 +985,7 @@ class MemoryConfigService:
                 "message": "默认配置不允许删除",
                 "is_default": True
             }
-        active_config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
+        active_config_id = self.get_workspace_active_config_id(workspace_id)
 
         if str(config.config_id) == str(active_config_id):
             logger.warning(
