@@ -497,7 +497,6 @@ async def save_reflection_config(
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除记忆配置（按配置ID）
 def delete_config(
         config_id: UUID | int,
-        force: bool = Query(False, description="是否强制删除（即使有终端用户正在使用）"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ) -> dict:
@@ -517,14 +516,14 @@ def delete_config(
 
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: "
-        f"config_id={config_id}, force={force}"
+        f"config_id={config_id}"
     )
 
     try:
         from app.services.memory_config_service import MemoryConfigService
 
         config_service = MemoryConfigService(db)
-        result = config_service.delete_config(config_id=config_id, force=force, workspace_id=workspace_id)
+        result = config_service.delete_config(config_id=config_id, workspace_id=workspace_id)
 
         if result["status"] == "error":
             api_logger.warning(

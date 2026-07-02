@@ -938,7 +938,6 @@ class MemoryConfigService:
             self,
             config_id: UUID | int,
             workspace_id: uuid.UUID,
-            force: bool = False
     ) -> dict:
         """Delete memory config with protection against in-use configs.
         
@@ -948,7 +947,6 @@ class MemoryConfigService:
         Args:
             workspace_id:
             config_id: Memory config ID to delete (UUID or legacy int)
-            force: If True, clear end user references before deleting
             
         Returns:
             Dict with status, message, and affected_users count
@@ -960,7 +958,6 @@ class MemoryConfigService:
 
         from app.core.exceptions import ResourceNotFoundException
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-        from app.repositories.end_user_repository import EndUserRepository
 
         # 处理旧格式 int 类型的 config_id
         if isinstance(config_id, int):
@@ -991,7 +988,7 @@ class MemoryConfigService:
             }
         active_config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
 
-        if str(config.config_id) == str(active_config_id) and not force:
+        if str(config.config_id) == str(active_config_id):
             logger.warning(
                 "Attempted to delete memory config with connected end users",
                 extra={
@@ -1005,16 +1002,6 @@ class MemoryConfigService:
                 "force_required": True
             }
 
-        # Force delete: use repository to clear end user references first
-        if str(config.config_id) == str(active_config_id) and force:
-            logger.warning(
-                "Force deleting memory config, clearing end user references",
-                extra={
-                    "config_id": str(config_id),
-                    "end_user_count": get_end_users_by_workspace
-                }
-            )
-        end_users_count = get_end_users_count_by_workspace(self.db, workspace_id)
         try:
             self.db.delete(config)
             self.db.commit()
@@ -1023,14 +1010,12 @@ class MemoryConfigService:
                 "Memory config deleted",
                 extra={
                     "config_id": str(config_id),
-                    "force": force
                 }
             )
 
             return {
                 "status": "success",
                 "message": "记忆配置删除成功",
-                "affected_users": end_users_count
             }
 
         except IntegrityError as e:
