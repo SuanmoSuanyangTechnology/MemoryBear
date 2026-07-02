@@ -12,14 +12,14 @@ Extract entities and knowledge triplets from the given statement.
 - 非用户自指代词或指示表达，如“他”“她”“它”“这个”“那个”“这家”“那家”“这里”“那里”，如果能从 `supporting_context` 中稳定解析出具体指代，则必须替换为具体指代实体名。
 - 如果上述代词或指示表达不能稳定解析，则整条跳过。
 - 命名关系中新出现的称呼、别名、昵称、产品名保持原样，不做替换。
-- `description` 必须使用中文。
+- `description` 必须跟随输入 `statement_text` 的主要语言。
 - 每个实体的 `description` 必须以输入中的 `dialog_at` 时间戳开头，格式为 `[dialog_at] 描述文本`；如果输入中 `dialog_at` 为空或不存在，则使用 `[NULL]`。
 - 如果 `statement_text` 表达已发生或正在发生的事件，且上游已经把相对时间解析进 `statement_text` 或 `valid_at`/`invalid_at`，实体 `description` 的正文必须保留这个事件时间；不要只写 `[dialog_at]` 后接无时间描述。
 - `type`、`predicate` 必须使用上方预定义的中文标签。
 - 每个实体必须输出 `type_id`，并且必须与 `type` 对应的本体 ID 完全一致。
 - 每个 triplet 必须输出 `predicate_id`，并且必须与 `predicate` 对应的本体 ID 完全一致。
 - 每个 triplet 必须输出 `predicate_surface`：尽量使用当前陈述中表达该关系的原文关系短语；如果没有更贴近原文的短语，则使用 canonical `predicate`。
-- 除 `type`、`predicate` 外，其余输出文本字段都必须与输入语言一致；因此在中文输入下，`type_description`、`predicate_description` 也必须使用中文。
+- 除 `type`、`predicate` 外，其余 flexible 输出文本字段都必须与输入 `statement_text` 的主要语言一致；`type_description`、`predicate_description` 使用与 `description` 相同的语言说明。
 - 每个 `triplet` 都必须携带 `valid_at` 和 `invalid_at`，并直接复制输入中的同名字段，不要自行改写或推断新的时间边界。
   {% else %}
   Important:
@@ -31,7 +31,7 @@ Extract entities and knowledge triplets from the given statement.
 - For non-user pronouns or demonstratives such as "he", "she", "it", "this", "that", "this company", "that place", if a stable referent can be resolved from `supporting_context`, replace them with the resolved entity name.
 - If such references cannot be resolved stably, skip the entire statement.
 - Newly introduced names in naming or alias expressions must stay in their original form.
-- Generate `description` in English.
+- Generate `description` in the primary language of the input `statement_text`.
 - Every entity `description` MUST start with the input `dialog_at` timestamp, formatted as `[dialog_at] description text`; if `dialog_at` is empty or absent, use `[NULL]`.
 - If `statement_text` describes an event that has happened or is happening, and upstream has resolved the relative time into `statement_text` or `valid_at`/`invalid_at`, the entity `description` body MUST preserve that event time; do not write only a `[dialog_at]` prefix followed by a timeless description.
 - Always generate `type` and `predicate` using the predefined Chinese labels above.
@@ -462,8 +462,8 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `角色职业` 是例外：角色/职业类别本身可以作为实体，例如 `导师`、`程序员`；但具体人物的稳定关系应通过 triplet 或 description 表达。
 - 用户本人节点必须命名为 `用户`；用户拥有、归属或关联的实体应使用完整所有格、归属短语或稳定语义限定，例如 `用户的小狗`、`用户的 GitHub 账号`、`用户的公司办公室`、`用户就职的公司`，不要简化成 `小狗`、`账号`，也不要使用 `用户's小狗` 等中英混合形式。
 - 泛化或未稳定指向的表达不要抽取，例如 `一只狗`、`狗这种动物`、`某个朋友`、`一个账号`、`某个办公室`。
-- `description` 必须使用中文。
-- `type` 必须使用上方预定义的中文标签；`type_description` 必须直接复用对应 `type` 的预定义中文定义。
+- `description` 必须跟随输入 `statement_text` 的主要语言。
+- `type` 必须使用上方预定义的中文标签；`type_description` 使用与 `description` 相同的语言说明对应 `type`。
   {% else %}
 - Do not split generic propositions, causal slogans, or value judgments into low-value abstract entities. For example, "effort brings reward" should not create standalone entities for "effort" or "reward" by default.
 - Do not extract ordinary time expressions as entities, including dates, timestamps, "tomorrow", "next week", or "8 PM tonight".
@@ -479,8 +479,8 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `角色职业` is an exception: role and occupation categories may themselves be entities, such as `导师` or `程序员`; but stable relations involving specific people should be represented through triplets or descriptions.
 - The user node itself must be named `用户`; entities owned by, affiliated with, or associated with the user should use a complete possessive phrase, affiliation phrase, or stable semantic qualifier, such as `the user's dog`, `the user's GitHub account`, `the user's company office`, or `the company where the user works`. Do not collapse these names to `dog` or `account`, and never use mixed forms such as `用户's dog`.
 - Do not extract generic or weakly resolved mentions, such as `a dog`, `dogs as a species`, `some friend`, `an account`, or `some office`.
-- `description` must be in English.
-- `type` must use the predefined Chinese label above, while `type_description` must explain that predefined type in English.
+- `description` must follow the primary language of the input `statement_text`.
+- `type` must use the predefined Chinese label above, while `type_description` must explain that predefined type in the same language as `description`.
   {% endif %}
 
 **Semantic Memory (`is_explicit_memory`):**
@@ -887,9 +887,9 @@ JSON 要求：
 - 不要使用中文引号
 - 字符串值中不要换行
 - `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，但用户自指必须规范成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名
-- `description` 必须使用中文，并且每个实体都必须以输入 `dialog_at` 的方括号时间戳开头；如果 `dialog_at` 为空或不存在，则以 `[NULL]` 开头
+- `description` 必须跟随输入 `statement_text` 的主要语言，并且每个实体都必须以输入 `dialog_at` 的方括号时间戳开头；如果 `dialog_at` 为空或不存在，则以 `[NULL]` 开头
 - 如果 statement 是有长期记忆价值的事件、经历、变化或里程碑，`description` 正文必须保留已解析事件时间，不能只依赖 `[dialog_at]` 前缀表达时间
-- `type`、`predicate` 必须使用上方预定义的中文标签；`type_description`、`predicate_description` 必须使用中文说明
+- `type`、`predicate` 必须使用上方预定义的中文标签；`type_description`、`predicate_description` 必须使用与 `description` 相同的语言说明
 - 每个 entity 都必须包含 `type_id`，且必须与 `type` 的本体 ID 一致
 - 每个 triplet 都必须包含 `predicate_id`，且必须与 `predicate` 的本体 ID 一致
 - 每个 triplet 都必须包含 `predicate_surface`；中文输入下使用中文或原文中的关系表达
@@ -904,9 +904,9 @@ JSON 要求：
 - No Chinese quotation marks
 - No line breaks inside string values
 - `name`, `subject_name`, and `object_name` keep their original surface forms by default, but user self-reference must be normalized to `用户` and other stably resolvable references must be replaced by their resolved entity names
-- `description` must be in English, and every entity description must start with the bracketed input `dialog_at` timestamp; if `dialog_at` is empty or absent, start with `[NULL]`
+- `description` must follow the primary language of the input `statement_text`, and every entity description must start with the bracketed input `dialog_at` timestamp; if `dialog_at` is empty or absent, start with `[NULL]`
 - If the statement is a long-term-memory-worthy event, experience, change, or milestone, the `description` body must preserve the resolved event time and must not rely only on the `[dialog_at]` prefix for time
-- `type` and `predicate` must use the predefined Chinese labels above; `type_description` and `predicate_description` must be written in English
+- `type` and `predicate` must use the predefined Chinese labels above; `type_description` and `predicate_description` must be written in the same language as `description`
 - Every entity must include `type_id`, exactly matching the ontology ID for `type`
 - Every triplet must include `predicate_id`, exactly matching the ontology ID for `predicate`
 - Every triplet must include `predicate_surface`; for English input, use English or the source-text relation expression

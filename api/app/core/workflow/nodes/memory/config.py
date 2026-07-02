@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from pydantic import BaseModel, field_validator, Field
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
@@ -33,10 +31,6 @@ class MemoryReadNodeConfig(BaseNodeConfig):
         ...
     )
 
-    config_id: UUID | int = Field(
-        ...
-    )
-
     search_switch: str = Field(
         "0",
         description="Search mode: 0=verify, 1=direct, 2=context"
@@ -50,8 +44,4 @@ class MemoryWriteNodeConfig(BaseNodeConfig):
 
     messages: list[MessageConfig] = Field(
         default_factory=list
-    )
-
-    config_id: UUID | int = Field(
-        ...
     )

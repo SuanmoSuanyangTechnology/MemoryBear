@@ -9,7 +9,6 @@ import { Button, App, Flex } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import copy from 'copy-to-clipboard'
-import dayjs from 'dayjs'
 import html2canvas from 'html2canvas'
 
 import type {  ShareModalRef } from '../types'
@@ -18,6 +17,7 @@ import { generateShareLink, getConversationDetail } from '@/api/application'
 import RbAlert from '@/components/RbAlert'
 import ChatContent from '@/components/Chat/ChatContent';
 import type { ChatItem } from '@/components/Chat/types';
+import { formatDateTime } from '@/utils/format'
 
 /**
  * Component props
@@ -149,7 +149,7 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
               classNames="rb:p-3"
               data={chatList}
               streamLoading={streamLoading}
-              labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+              labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
             />
           </div>
         </div>

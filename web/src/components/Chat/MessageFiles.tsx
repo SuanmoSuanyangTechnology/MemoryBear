@@ -38,7 +38,7 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
         if (file.type.includes('image')) {
           return (
             <div key={key} className={clsx('rb:inline-block rb:group rb:relative rb:rounded-lg', contentClassNames)}>
-              <Image src={getFileUrl(file)} alt={file.name} className="rb:w-full rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+              <Image src={getFileUrl(file)} alt={file.name} className="rb:w-full rb:max-w-50 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
             </div>
           )
         }

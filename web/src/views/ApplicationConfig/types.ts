@@ -232,8 +232,8 @@ export interface ChatData {
   model_config_id?: string;
   /** Model parameters */
   model_parameters?: ModelConfig;
-  /** Chat messages list */
-  list?: ChatItem[];
+  /** Chat messages list (supports regenerate version arrays) */
+  list?: Array<ChatItem | ChatItem[]>;
   /** Conversation ID */
   conversation_id?: string | null;
 }

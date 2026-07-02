@@ -1,0 +1,15 @@
+{
+  "model": {
+    "not_configured": "{model_type} model is not configured",
+    "not_found": "{model_type} model {model_id} not found",
+    "not_found_with_error": "{model_type} model {model_id} not found: {error}",
+    "no_api_key": "{model_type} model {model_name} has no available API key",
+    "api_verify_failed": "{model_type} model {model_name} API verification failed: {error}"
+  },
+  "config": {
+    "not_found": "Configuration not found: {config_id}"
+  },
+  "workspace": {
+    "no_active_config": "No active memory configuration in the current workspace"
+  }
+}

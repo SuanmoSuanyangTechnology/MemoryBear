@@ -101,9 +101,9 @@ Each output item should be a structured candidate memory statement.
 
 用户主语归一化：
 
-- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与输出语言一致的用户锚点，不要使用用户的具体名字或别名。
-- 中文输出使用“用户”作为主语。
-- 英文输出使用 `the user` 作为主语。
+- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与 `target_content` 主要语言一致的用户锚点，不要使用用户的具体名字或别名。
+- `target_content` 主要是中文时使用“用户”作为主语。
+- `target_content` 主要是英文时使用 `the user` 作为主语。
 - 这是硬规则；如果用户主语没有按输出语言统一成对应锚点，则该 statement 视为不合格。
 
 共指消解：
@@ -970,14 +970,14 @@ Example Output: {
 **LANGUAGE REQUIREMENT:**
 {% if language == "zh" %}
 
-- 输出语言应以 `language` 参数为准。
-- 如果 `language == "zh"`，用中文提取陈述句。
-- 如果 `language` 参数缺失或无法判断，才跟随输入文本的主要语言。
+- `statement_text` 的语言必须跟随 `target_content` 的主要语言，不要跟随前端传入的 `language` 参数。
+- 如果 `target_content` 主要是中文，用中文提取陈述句。
+- 如果 `target_content` 主要是英文，用英文提取陈述句。
 - 保留原始专有名词和代码片段，不要无必要翻译。
   {% else %}
-- The output language should follow the `language` parameter.
-- If `language != "zh"`, extract statements in English.
-- Only follow the dominant language of the input text when the `language` parameter is missing or unclear.
+- `statement_text` must follow the primary language of `target_content`; do not use the frontend `language` parameter as the source of truth.
+- If `target_content` is primarily Chinese, extract statements in Chinese.
+- If `target_content` is primarily English, extract statements in English.
 - Preserve original proper nouns and code snippets; do not translate them unnecessarily.
   {% endif %}
 

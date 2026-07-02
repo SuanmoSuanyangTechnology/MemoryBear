@@ -232,8 +232,8 @@ Context:
 4. Test your JSON output mentally to ensure it can be parsed correctly
 
 {% if language == "zh" %}
-输出语言应始终与输入语言相同。
+`reason` 的语言应跟随两个实体名称、描述和关系陈述的主要语言。`suggested_type` 若输出字符串，必须沿用输入实体类型体系中的标签，不要为了语言一致而翻译。
 {% else %}
-The output language should always be the same as the input language.
+The language of `reason` should follow the primary language of the two entity names, descriptions, and relationship statements. If `suggested_type` is a string, keep the label from the input entity type system; do not translate it for language consistency.
 {% endif %}
 {{ json_schema }}

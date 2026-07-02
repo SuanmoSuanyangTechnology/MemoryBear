@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
+from app.i18n.service import t
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
@@ -175,6 +176,7 @@ class MemoryConfigService:
         tenant_id: UUID | None,
         config_id: UUID,
         workspace_id: UUID | None,
+        locale: str = "zh",
     ) -> None:
         """解析模型凭证并调用 validate_model_config 验证 API 连通性。
 
@@ -184,6 +186,7 @@ class MemoryConfigService:
             tenant_id: 租户 ID
             config_id: 记忆配置 ID（用于错误上下文）
             workspace_id: 工作空间 ID（用于错误上下文）
+            locale: 语言代码（zh / en），用于 i18n 错误消息
 
         Raises:
             ModelNotFoundError: 模型不存在或没有可用 API 密钥
@@ -201,7 +204,8 @@ class MemoryConfigService:
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=f"{model_type_label} 模型 {model_id} 不存在: {e}",
+                message=t("memory_config.model.not_found_with_error", locale=locale,
+                          model_type=model_type_label, model_id=model_id, error=str(e)),
             )
 
         # 2. 获取可用 API Key
@@ -215,7 +219,8 @@ class MemoryConfigService:
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=f"{model_type_label} 模型 {model_config.name} 没有可用的 API 密钥",
+                message=t("memory_config.model.no_api_key", locale=locale,
+                          model_type=model_type_label, model_name=model_config.name),
             )
 
         # 3. 实际 API 连通性验证
@@ -237,16 +242,19 @@ class MemoryConfigService:
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=f"{model_type_label} 模型 {api_key_config.model_name} API 验证失败: {result.get('error', '未知错误')}",
+                message=t("memory_config.model.api_verify_failed", locale=locale,
+                          model_type=model_type_label, model_name=api_key_config.model_name,
+                          error=result.get('error', 'Unknown error')),
             )
 
-    async def valid_config(self, config_id: uuid.UUID) -> dict:
+    async def valid_config(self, config_id: uuid.UUID, locale: str = "zh") -> dict:
         """验证配置是否存在且关联模型 API 可用。
 
         所有模型验证失败均不阻断，统一收集到 warnings 返回前端告警。
 
         Args:
             config_id: 配置 UUID
+            locale: 语言代码（zh / en），用于 i18n 告警消息
 
         Returns:
             dict: {
@@ -264,7 +272,7 @@ class MemoryConfigService:
         config = self.db.get(MemoryConfigModel, config_id)
         if not config:
             raise InvalidConfigError(
-                f"配置不存在: config_id={config_id}",
+                t("memory_config.config.not_found", locale=locale, config_id=str(config_id)),
                 field_name="config_id",
                 invalid_value=config_id,
             )
@@ -274,41 +282,44 @@ class MemoryConfigService:
         workspace_id = workspace.id if workspace else None
 
         all_models = [
-            ("llm", config.llm_id),
-            ("embedding", config.embedding_id),
-            ("rerank", config.rerank_id),
-            ("vision", config.vision_id),
-            ("video", config.video_id),
-            ("audio", config.audio_id),
+            ("llm", config.llm_id, "extracted"),
+            ("embedding", config.embedding_id,"extracted"),
+            ("rerank", config.rerank_id, "extracted"),
+            ("vision", config.vision_id, "extracted"),
+            ("video", config.video_id, "extracted"),
+            ("audio", config.audio_id, "extracted"),
+            ("reflection", config.reflection_model_id, "reflection"),
+            ("emotion", config.emotion_model_id, "emotion"),
         ]
 
         warnings: list[dict] = []
 
-        for model_type, model_id in all_models:
+        for model_type, model_id, source in all_models:
             if not model_id:
                 warnings.append({
                     "model_type": model_type,
                     "model_id": None,
-                    "message": f"{model_type} 模型未配置",
+                    "source": source,
+                    "message": t("memory_config.model.not_configured", locale=locale, model_type=model_type),
                 })
 
-        _VALIDATE_AS_LLM = {"vision", "video", "audio"}
+        _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
         async def _validate_one(model_type: str, model_id: str) -> dict | None:
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                await self._validate_model_connectivity(model_id, validate_type, tenant_id, config_id, workspace_id)
+                await self._validate_model_connectivity(model_id, validate_type, tenant_id, config_id, workspace_id, locale=locale)
                 return None
             except ConfigurationError as e:
                 logger.warning(
                     f"模型 {model_type} API 验证失败: {e}",
                     extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
                 )
-                return {"model_type": model_type, "model_id": str(model_id), "message": str(e)}
+                return {"model_type": model_type, "model_id": str(model_id), "message": e.err_message}
 
         tasks = [
             _validate_one(model_type, model_id)
-            for model_type, model_id in all_models
+            for model_type, model_id, _ in all_models
             if model_id
         ]
         if tasks:
@@ -1071,7 +1082,7 @@ class MemoryConfigService:
         if app_type == AppType.AGENT:
             return self._extract_memory_config_id_from_agent(config)
         elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-            return self._extract_memory_config_id_from_workflow(config)
+            return None, False
         elif app_type == AppType.MULTI_AGENT:
             # Multi-agent 暂不支持记忆配置提取
             logger.debug(f"多智能体应用暂不支持记忆配置提取: app_type={app_type}")
@@ -1157,63 +1168,3 @@ class MemoryConfigService:
                 f"Agent 配置中 memory_config_id 格式无效: error={str(e)}"
             )
             return None, False
-
-    def _extract_memory_config_id_from_workflow(
-            self,
-            config: dict
-    ) -> tuple[Optional[uuid.UUID], bool]:
-        """从 Workflow 应用配置中提取 memory_config_id
-        
-        扫描工作流节点，查找 MemoryRead 或 MemoryWrite 节点。
-        返回第一个找到的记忆节点的 config_id。
-        
-        Args:
-            config: Workflow 配置字典
-            
-        Returns:
-            Tuple[Optional[uuid.UUID], bool]: (memory_config_id, is_legacy_int)
-                - memory_config_id: 记忆配置ID，如果不存在或为旧格式则返回 None
-                - is_legacy_int: 是否检测到旧格式 int 数据
-        """
-        nodes = config.get("nodes", [])
-
-        for node in nodes:
-            node_type = node.get("type", "")
-
-            # 检查是否为记忆节点 (support both formats: memory-read/memory-write and MemoryRead/MemoryWrite)
-            if node_type.lower() in ["memoryread", "memorywrite", "memory-read", "memory-write"]:
-                config_id = node.get("config", {}).get("config_id")
-
-                if config_id:
-                    try:
-                        # 处理字符串、UUID 和 int（旧数据兼容）三种情况
-                        if isinstance(config_id, uuid.UUID):
-                            return config_id, False
-                        elif isinstance(config_id, str):
-                            return uuid.UUID(config_id), False
-                        elif isinstance(config_id, int):
-                            resolved = self._resolve_config_id_old(config_id)
-                            if resolved:
-                                logger.info(
-                                    f"Resolved workflow legacy config_id_old={config_id} to config_id={resolved}: "
-                                    f"node_id={node.get('id')}, node_type={node_type}"
-                                )
-                                return resolved, False
-                            logger.warning(
-                                f"未找到工作流记忆节点 config_id_old={config_id} 对应的配置，将使用工作空间默认配置: "
-                                f"node_id={node.get('id')}, node_type={node_type}"
-                            )
-                            return None, True
-                        else:
-                            logger.warning(
-                                f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
-                                f"node_type={node_type}, type={type(config_id)}"
-                            )
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
-                            f"node_type={node_type}, error={str(e)}"
-                        )
-
-        logger.debug("工作流配置中未找到记忆节点")
-        return None, False

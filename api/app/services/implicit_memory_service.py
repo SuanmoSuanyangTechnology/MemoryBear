@@ -69,11 +69,12 @@ class ImplicitMemoryService:
         self.neo4j_connector = Neo4jConnector()
         
         # Initialize core components with LLM model ID
+        tenant_id = getattr(self.memory_config, 'tenant_id', None)
         self.data_source = MemoryDataSource(db, self.neo4j_connector)
-        self.preference_analyzer = PreferenceAnalyzer(db, llm_model_id)
-        self.dimension_analyzer = DimensionAnalyzer(db, llm_model_id)
-        self.interest_analyzer = InterestAnalyzer(db, llm_model_id)
-        self.habit_detector = HabitDetector(db, llm_model_id)
+        self.preference_analyzer = PreferenceAnalyzer(db, llm_model_id, tenant_id=tenant_id)
+        self.dimension_analyzer = DimensionAnalyzer(db, llm_model_id, tenant_id=tenant_id)
+        self.interest_analyzer = InterestAnalyzer(db, llm_model_id, tenant_id=tenant_id)
+        self.habit_detector = HabitDetector(db, llm_model_id, tenant_id=tenant_id)
         
         logger.info(f"ImplicitMemoryService initialized for end_user: {end_user_id}")
     

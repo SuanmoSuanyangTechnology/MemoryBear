@@ -31,17 +31,19 @@ class HabitDetector:
     def __init__(
         self,
         db: Session,
-        llm_model_id: Optional[str] = None
+        llm_model_id: Optional[str] = None,
+        tenant_id=None
     ):
         """Initialize the habit detector.
         
         Args:
             db: Database session
             llm_model_id: Optional LLM model ID to use for analysis
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
         """
         self.db = db
         self.llm_model_id = llm_model_id
-        self.habit_analyzer = HabitAnalyzer(db, llm_model_id)
+        self.habit_analyzer = HabitAnalyzer(db, llm_model_id, tenant_id=tenant_id)
     
     async def detect_habits(
         self,

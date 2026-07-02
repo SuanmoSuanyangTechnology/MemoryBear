@@ -44,16 +44,9 @@ import type { Skill } from '@/views/Skills/types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FeaturesConfig from './components/FeaturesConfig'
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
-import type { ChatItem } from '@/components/Chat/types'
 import Editor from './components/Editor'
 import Tag from '@/components/Tag'
-
-export const replaceVariables = (statement: string, variables: Variable[]) => {
-  return statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
-    const v = variables.find(item => item.name === name)
-    return v?.value != null && v.value !== '' ? String(v.value) : match
-  })
-}
+import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
 
 /**
  * Agent configuration component
@@ -186,6 +179,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
           model_parameters: {...reset},
           list: []
         };
+        if (prev.some(item => item.model_config_id === default_model_config_id)) return prev
         return [
           ...(prev || []).map(item => ({
             ...item,
@@ -394,14 +388,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   useEffect(() => {
     const opening_statement = form.getFieldValue(['features', 'opening_statement'])
 
-    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
-      const assistantMsg: ChatItem = {
-        role: 'assistant',
-        content: replaceVariables(opening_statement.statement, chatVariables),
-        meta_data: {
-          suggested_questions: opening_statement?.suggested_questions
-        }
-      }
+    const assistantMsg = buildOpeningStatementMessage(opening_statement, { variables: chatVariables })
+    if (assistantMsg) {
       setChatList(prev => {
         if (prev.length === 0 && !defaultModel) return prev
         if (defaultModel && prev.length === 1) {
@@ -416,7 +404,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         return prev.map(vo => {
           if (vo.list?.length === 0) {
             return { ...vo, list: [assistantMsg] }
-          } else if (vo.list && vo.list[0].role === 'assistant') {
+          } else if (vo.list && !Array.isArray(vo.list[0]) && vo.list[0].role === 'assistant') {
             vo.list[0] = assistantMsg
             return { ...vo, list: [...vo.list] }
           } else {
