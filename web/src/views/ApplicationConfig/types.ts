@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 10:58:50
+ * @Last Modified time: 2026-07-02 16:38:47
  */
 import type { KnowledgeConfig } from '@/components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -48,8 +48,6 @@ export interface ModelConfig {
 export interface MemoryConfig {
   /** Whether memory is enabled */
   enabled: boolean;
-  /** Memory content */
-  memory_config_id?: string;
   /** Maximum history length */
   max_history?: number | string;
 }

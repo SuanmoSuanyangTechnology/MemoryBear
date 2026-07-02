@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-12 11:40:46
+ * @Last Modified time: 2026-06-30 12:17:15
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -14,7 +14,6 @@ import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
 import NoteNode from './components/Nodes/NoteNode';
 
-import { memoryConfigListUrl } from '@/api/memory';
 import type { NodeLibrary } from './types';
 
 // Nodes with Data Processing in Execution Results
@@ -522,11 +521,7 @@ export const nodeLibrary: NodeLibrary[] = [
             isArray: false
           },
           config_id: {
-            type: 'customSelect',
-            required: true,
-            url: memoryConfigListUrl,
-            valueKey: 'config_id',
-            labelKey: 'config_name'
+            type: 'activeMemoryConfig',
           },
           search_switch: {
             type: 'select',
@@ -558,12 +553,8 @@ export const nodeLibrary: NodeLibrary[] = [
             isArray: true
           },
           config_id: {
-            type: 'customSelect',
-            required: true,
-            url: memoryConfigListUrl,
-            valueKey: 'config_id',
-            labelKey: 'config_name'
-          }
+            type: 'activeMemoryConfig',
+          },
         }
       },
     ]
@@ -1328,6 +1319,24 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     ports: {
       groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 18 }}],
+    },
+  },
+  'memory-read': {
+    width: nodeWidth,
+    height: 84,
+    shape: 'normal-node',
+    ports: {
+      groups: defaultAbsolutePortGroups,
+      items: defaultPortItems,
+    },
+  },
+  'memory-write': {
+    width: nodeWidth,
+    height: 84,
+    shape: 'normal-node',
+    ports: {
+      groups: defaultAbsolutePortGroups,
+      items: defaultPortItems,
     },
   },
   default: {

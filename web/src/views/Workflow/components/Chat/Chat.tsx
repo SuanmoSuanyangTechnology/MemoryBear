@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 17:38:17
+ * @Last Modified time: 2026-07-02 15:45:38
  */
 /**
  * Workflow Chat Component
@@ -383,7 +383,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         return [...prev]
       })
     }
-  }, [chatList.length, features?.opening_statement, variables])
+  }, [features?.opening_statement, variables])
 
   useEffect(() => {
     if (chatList.length < 1) return
@@ -404,23 +404,21 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     if (!isCanSend) return
 
     // Append a new version of the assistant message to the chat list
-    // and drop everything that originally followed it.
-    setChatList(prev => appendRegenerateVersion(prev, vo.id as string))
+    // and drop everything that originally followed it. Snapshot the list
+    // beforehand so a request failure can restore the exact prior state.
+    let snapshot: Array<ChatItem | ChatItem[]> = []
+    setChatList(prev => {
+      snapshot = prev
+      return appendRegenerateVersion(prev, vo.id as string)
+    })
 
     setLoading(true)
     setStreamLoading(true)
     chatIsEnded.current = false
     draftRunRegenerate(appId, vo.id, handleStreamMessage, abort => { abortRef.current = abort })
       .catch(() => {
-        setChatList(prev => {
-          const lastEntry = prev[prev.length - 1]
-          if (!lastEntry || !Array.isArray(lastEntry)) return prev
-          return mapLastVersion(prev, (current) => ({
-            ...current,
-            status: 'failed',
-            content: null,
-          }))
-        })
+        // Roll back to the state captured before appendRegenerateVersion.
+        setChatList(snapshot)
         chatIsEnded.current = true
       })
       .finally(() => {
@@ -435,8 +433,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     draftRunSwitchMessageVersion(appId, item.id, page)
       .then((res) => {
         const rebuilt = buildVersionMessages(res as Data, getNodeContext)
-        const assistantMsg = buildOpeningStatementMessage(features?.opening_statement, { variables })
-        setChatList(assistantMsg ? [assistantMsg, ...rebuilt] : rebuilt)
+        setChatList(rebuilt)
         messageApi.success(t('common.operateSuccess'))
       })
   }

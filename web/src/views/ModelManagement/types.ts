@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 16:11:24
+ * @Last Modified time: 2026-06-30 10:02:24
  */
 /**
  * Type definitions for Model Management
@@ -28,6 +28,7 @@ export interface Query {
   pagesize?: number;
   /** Page number */
   page?: number;
+  capability?: Capability;
 }
 
 /**

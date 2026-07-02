@@ -16,11 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
-from app.i18n.service import t
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
 )
+from app.i18n.service import t
 from app.models import Workspace
 from app.models.app_model import AppType
 from app.repositories.end_user_repository import get_end_user_by_id
@@ -170,13 +170,13 @@ class MemoryConfigService:
         self.db = db
 
     async def _validate_model_connectivity(
-        self,
-        model_id: str,
-        model_type_label: str,
-        tenant_id: UUID | None,
-        config_id: UUID,
-        workspace_id: UUID | None,
-        locale: str = "zh",
+            self,
+            model_id: str,
+            model_type_label: str,
+            tenant_id: UUID | None,
+            config_id: UUID,
+            workspace_id: UUID | None,
+            locale: str = "zh",
     ) -> None:
         """解析模型凭证并调用 validate_model_config 验证 API 连通性。
 
@@ -283,7 +283,7 @@ class MemoryConfigService:
 
         all_models = [
             ("llm", config.llm_id, "extracted"),
-            ("embedding", config.embedding_id,"extracted"),
+            ("embedding", config.embedding_id, "extracted"),
             ("rerank", config.rerank_id, "extracted"),
             ("vision", config.vision_id, "extracted"),
             ("video", config.video_id, "extracted"),
@@ -308,7 +308,14 @@ class MemoryConfigService:
         async def _validate_one(model_type: str, model_id: str) -> dict | None:
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                await self._validate_model_connectivity(model_id, validate_type, tenant_id, config_id, workspace_id, locale=locale)
+                await self._validate_model_connectivity(
+                    model_id,
+                    validate_type,
+                    tenant_id,
+                    config_id,
+                    workspace_id,
+                    locale=locale
+                )
                 return None
             except ConfigurationError as e:
                 logger.warning(
@@ -929,7 +936,7 @@ class MemoryConfigService:
     def delete_config(
             self,
             config_id: UUID | int,
-            force: bool = False
+            workspace_id: uuid.UUID,
     ) -> dict:
         """Delete memory config with protection against in-use configs.
         
@@ -937,8 +944,8 @@ class MemoryConfigService:
         that are actively being used by end users or marked as default.
         
         Args:
+            workspace_id:
             config_id: Memory config ID to delete (UUID or legacy int)
-            force: If True, clear end user references before deleting
             
         Returns:
             Dict with status, message, and affected_users count
@@ -950,7 +957,6 @@ class MemoryConfigService:
 
         from app.core.exceptions import ResourceNotFoundException
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-        from app.repositories.end_user_repository import EndUserRepository
 
         # 处理旧格式 int 类型的 config_id
         if isinstance(config_id, int):
@@ -979,38 +985,21 @@ class MemoryConfigService:
                 "message": "默认配置不允许删除",
                 "is_default": True
             }
+        active_config_id = self.get_workspace_active_config_id(workspace_id)
 
-        # Use repository to count connected end users
-        end_user_repo = EndUserRepository(self.db)
-        connected_count = end_user_repo.count_by_memory_config_id(config_id)
-
-        if connected_count > 0 and not force:
+        if str(config.config_id) == str(active_config_id):
             logger.warning(
                 "Attempted to delete memory config with connected end users",
                 extra={
                     "config_id": str(config_id),
-                    "connected_count": connected_count
                 }
             )
 
             return {
                 "status": "warning",
-                "message": f"无法删除记忆配置：{connected_count} 个终端用户正在使用此配置",
-                "connected_count": connected_count,
+                "message": f"无法删除记忆配置：当前空间正在使用此配置",
                 "force_required": True
             }
-
-        # Force delete: use repository to clear end user references first
-        if connected_count > 0 and force:
-            cleared_count = end_user_repo.clear_memory_config_id(config_id)
-
-            logger.warning(
-                "Force deleting memory config, clearing end user references",
-                extra={
-                    "config_id": str(config_id),
-                    "cleared_end_users": cleared_count
-                }
-            )
 
         try:
             self.db.delete(config)
@@ -1020,15 +1009,12 @@ class MemoryConfigService:
                 "Memory config deleted",
                 extra={
                     "config_id": str(config_id),
-                    "force": force,
-                    "affected_users": connected_count
                 }
             )
 
             return {
                 "status": "success",
                 "message": "记忆配置删除成功",
-                "affected_users": connected_count
             }
 
         except IntegrityError as e:

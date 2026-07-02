@@ -28,6 +28,7 @@ export interface AgentStreamDeps {
   conversationId: string | null;
   setConversationId: (id: string) => void;
   setChatList: SetChatList;
+  setLoading: (loading: boolean) => void;
   setStreamLoading: (loading: boolean) => void;
   streamLoadingRef: MutableRefObject<boolean>;
   audioStatusMap: Record<string, string>;
@@ -39,7 +40,7 @@ export interface AgentStreamDeps {
 export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
   const {
     conversationId, setConversationId, setChatList,
-    setStreamLoading, streamLoadingRef,
+    setLoading, setStreamLoading, streamLoadingRef,
     audioStatusMap, setAudioStatusMap, audioPollingRef,
   } = deps
 
@@ -84,6 +85,8 @@ export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
           break
         case 'error':
           setChatList(prev => applyErrorMessage(prev, message_length, error))
+          streamLoadingRef.current = false
+          setLoading(false)
           break
         case 'end':
           if (audio_url && !audioStatusMap[audio_url]) {
@@ -125,6 +128,8 @@ export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
           setChatList(prev => applyErrorMessage(prev, message_length, error))
           streamLoadingRef.current = false
           setStreamLoading(false)
+          streamLoadingRef.current = false
+          setLoading(false)
           break
       }
     })

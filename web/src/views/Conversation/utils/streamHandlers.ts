@@ -6,6 +6,23 @@ import { type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
 import type { StreamData } from '../types';
 
+/** start/node_start 事件：把最近一条 user 消息的 id 回填为真实的 user_message_id */
+const applyUserMessageId = (
+  prev: Array<ChatItem | ChatItem[]>,
+  id?: string,
+): Array<ChatItem | ChatItem[]> => {
+  if (!id) return prev
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const entry = prev[i]
+    if (!Array.isArray(entry) && entry.role === 'user') {
+      if (entry.id === id) return prev
+      return prev.map((it, idx) => (idx === i && !Array.isArray(it) ? { ...it, id } : it))
+    }
+  }
+  return prev
+}
+
+
 /** 收到 intervention_required 事件：为末条助手消息追加一条待处理人工干预 */
 const appendInterventionRequired = (
   prev: Array<ChatItem | ChatItem[]>,
@@ -166,6 +183,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
     data.forEach((item) => {
       const {
         message_id,
+        user_message_id,
         file_id,
         content, conversation_id: curId, audio_url, citations, suggested_questions, error,
       } = item.data as StreamData;
@@ -174,7 +192,8 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
         case 'node_start': {
           currentConversationId = curId
           setChatList(prev => {
-            const lastList = [...prev]
+            const withUserId = applyUserMessageId(prev, user_message_id)
+            const lastList = [...withUserId]
             const lastIndex = lastList.length - 1
             const lastMsg = lastList[lastIndex] as ChatItem
             if (lastMsg?.role === 'assistant') {
@@ -186,7 +205,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
                 }
               ]
             }
-            return prev
+            return withUserId
           })
           break
         }
@@ -244,16 +263,17 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
 
   return (data: SSEMessage[]) => {
     data.forEach((item) => {
-      const { message_id, file_id, content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as StreamData;
+      const { message_id, user_message_id, file_id, content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as StreamData;
       switch (item.event) {
         case 'start':
         case 'node_start': {
           currentConversationId = curId
           setChatList(prev => {
-            const lastList = [...prev]
+            const withUserId = applyUserMessageId(prev, user_message_id)
+            const lastList = [...withUserId]
             const lastIndex = lastList.length - 1
             const lastEntry = lastList[lastIndex]
-            
+
             if (Array.isArray(lastEntry)) {
               const lastChatIndex = lastEntry.length - 1
               const lastMsg = lastEntry[lastChatIndex]
@@ -272,7 +292,7 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
                 { id: message_id, ...lastEntry },
               ]
             }
-            return prev
+            return withUserId
           })
           break
         }

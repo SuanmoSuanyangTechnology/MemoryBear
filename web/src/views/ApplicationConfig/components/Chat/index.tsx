@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-02-03 16:27:39
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 19:48:04
+ * @Last Modified time: 2026-07-02 16:02:29
  */
 /**
  * Chat debugging component for application testing
@@ -24,7 +24,7 @@ import type { ReportModalRef } from '@/views/Conversation/types'
 import {
   runCompare,
   draftRun,
-  agentDraftRunRegenerate,
+  draftRunRegenerate,
   draftRunSwitchMessageVersion,
   draftRunFavoriteMessage,
   draftRunFeedbackMessage,
@@ -45,7 +45,6 @@ import {
   collectVariableParams,
   formatFiles,
   updateClusterErrorAssistantMessage,
-  updateErrorAssistantMessage,
 } from './helpers'
 import {
   appendRegenerateVersion,
@@ -55,7 +54,6 @@ import {
   applyVersionMessages,
 } from './messageReducers'
 import { createCompareStreamHandler, createClusterStreamHandler, createRegenerateStreamHandler } from './streamHandlers'
-import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
 
 /**
  * Component props
@@ -271,7 +269,11 @@ const Chat: FC<ChatProps> = ({
     const column = findColumn(vo.id)
     if (!column) return
 
-    updateChatList(prev => appendRegenerateVersion(prev, vo.id as string))
+    let snapshot: ChatData[] = []
+    updateChatList(prev => {
+      snapshot = prev
+      return appendRegenerateVersion(prev, vo.id as string)
+    })
     setLoading(true)
     compareLoadingRef.current = true
 
@@ -286,9 +288,10 @@ const Chat: FC<ChatProps> = ({
     })
 
     setTimeout(() => {
-      agentDraftRunRegenerate(id, vo.id as string, handleStreamMessage, (abort) => { abortRef.current = abort })
+      draftRunRegenerate(id, vo.id as string, handleStreamMessage, (abort) => { abortRef.current = abort })
         .catch(() => {
-          updateChatList(prev => updateErrorAssistantMessage(prev, 0, column.model_config_id))
+          // Roll back to the state captured before appendRegenerateVersion.
+          updateChatList(snapshot)
         })
         .finally(() => {
           setLoading(false)
@@ -302,8 +305,7 @@ const Chat: FC<ChatProps> = ({
     if (!page || !item.id || !id) return
     draftRunSwitchMessageVersion(id, item.id, page)
       .then((res) => {
-        const openingMessage = buildOpeningStatementMessage(features?.opening_statement, { variables: chatVariables })
-        updateChatList(prev => applyVersionMessages(prev, item.id as string, res, getNodeContext, openingMessage))
+        updateChatList(prev => applyVersionMessages(prev, item.id as string, res, getNodeContext))
         messageApi.success(t('common.operateSuccess'))
       })
   }

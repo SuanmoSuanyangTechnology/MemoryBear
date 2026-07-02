@@ -437,7 +437,7 @@ class MemoryConfigRepository:
                 "iteration_period": db_config.iteration_period,
                 "reflexion_range": db_config.reflexion_range,
                 "baseline": db_config.baseline,
-                "is_default": db_config.is_default,
+                "is_default": bool(db_config.is_default),
             }
 
             db_logger.debug(f"萃取配置查询成功: config_id={config_id}")

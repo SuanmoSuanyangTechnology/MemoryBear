@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 13:50:18
+ * @Last Modified time: 2026-07-02 10:32:30
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -295,11 +295,19 @@ export const updateMemoryConfig = (values: MemoryFormData) => {
   return request.post('/memory_config/update_config', values)
 }
 // Memory Management - Delete configuration
-export const deleteMemoryConfig = (config_id: number) => {
+export const deleteMemoryConfig = (config_id: string) => {
   return request.delete(`/memory_config/delete_config?config_id=${config_id}`)
 }
+// Memory Management - Set a configuration as the active online configuration
+export const setActiveMemoryConfig = (config_id: string) => {
+  return request.post('/memory_config/active_config', { config_id })
+}
+// Memory Management - Validate a configuration
+export const validateMemoryConfig = () => {
+  return request.get('/memory_config/validate_active_config')
+}
 // Forgetting Engine - Get configuration
-export const getMemoryForgetConfig = (config_id: number | string) => {
+export const getMemoryForgetConfig = (config_id: string | string) => {
   return request.get('/memory_config/read_config_forgetting', { config_id })
 }
 // Forgetting Engine - Update configuration
@@ -307,7 +315,7 @@ export const updateMemoryForgetConfig = (values: ForgetConfigForm) => {
   return request.post('/memory_config/update_config_forgetting', values)
 }
 // Memory Extraction Engine - Get configuration
-export const getMemoryExtractionConfig = (config_id: number | string) => {
+export const getMemoryExtractionConfig = (config_id: string | string) => {
   return request.get('/memory_config/read_config_extracted', { config_id: config_id })
 }
 // Memory Extraction Engine - Update configuration
@@ -315,11 +323,11 @@ export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory_config/update_config_extracted', values)
 }
 // Memory Extraction Engine - Pilot run
-export const pilotRunMemoryExtractionConfig = (values: { config_id: number | string; dialogue_text: string; custom_text?: string; }, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+export const pilotRunMemoryExtractionConfig = (values: { config_id: string | string; dialogue_text: string; custom_text?: string; }, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE('/memory-storage/pilot_run', values, onMessage, undefined, onAbort)
 }
 // Emotion Engine - Get configuration
-export const getMemoryEmotionConfig = (config_id: number | string) => {
+export const getMemoryEmotionConfig = (config_id: string | string) => {
   return request.get('/memory_config/read_config_emotion', { config_id: config_id })
 }
 // Emotion Engine - Update configuration
@@ -327,7 +335,7 @@ export const updateMemoryEmotionConfig = (values: EmotionConfig) => {
   return request.post('/memory_config/update_config_emotion', values)
 }
 // Reflection Engine - Get configuration
-export const getMemoryReflectionConfig = (config_id: number | string) => {
+export const getMemoryReflectionConfig = (config_id: string | string) => {
   return request.get('/memory_config/read_config_reflection', { config_id: config_id })
 }
 // Reflection Engine - Update configuration
@@ -335,7 +343,7 @@ export const updateMemoryReflectionConfig = (values: SelfReflectionEngineConfig)
   return request.post('/memory_config/update_config_reflection', values)
 }
 // Reflection Engine - Pilot run
-export const pilotRunMemoryReflectionConfig = (values: { config_id: number | string; language_type: string; }) => {
+export const pilotRunMemoryReflectionConfig = (values: { config_id: string | string; language_type: string; }) => {
   return request.get('/memory/reflection/run', values)
 }
 // User Memory - Reflection logs
