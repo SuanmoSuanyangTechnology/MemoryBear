@@ -239,7 +239,7 @@ async def start_reflection_configs(
             "reflection_model_id": result.reflection_model_id,
             "memory_verify": result.memory_verify,
             "quality_assessment": result.quality_assessment,
-            "is_default": result.is_default
+            "is_default": bool(result.is_default)
         }
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
         return success(data=reflection_config, msg="反思配置查询成功")
@@ -524,7 +524,7 @@ def delete_config(
         from app.services.memory_config_service import MemoryConfigService
 
         config_service = MemoryConfigService(db)
-        result = config_service.delete_config(config_id=config_id, force=force)
+        result = config_service.delete_config(config_id=config_id, force=force, workspace_id=workspace_id)
 
         if result["status"] == "error":
             api_logger.warning(

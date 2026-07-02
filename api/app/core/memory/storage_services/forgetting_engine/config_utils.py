@@ -135,7 +135,7 @@ def load_actr_config_from_db(
             'enable_llm_summary': enable_llm_summary,
             'max_merge_batch_size': max_merge_batch_size,
             'forgetting_interval_hours': forgetting_interval_hours,
-            'is_default': is_default
+            'is_default': bool(is_default)
             # 注意：llm_id 不包含在配置响应中，仅在内部使用
         }
         

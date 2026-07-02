@@ -71,6 +71,21 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    def get_end_users_count_by_workspace(self, workspace_id: uuid.UUID) -> int:
+        """获取指定 workspace 下的所有 end_user"""
+        try:
+            end_users_count = (
+                self.db.query(EndUser)
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
+                .count()
+            )
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {end_users_count} 个终端用户")
+            return end_users_count
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         """根据 end_user_id 查询宿主"""
         try:
@@ -1206,6 +1221,11 @@ def get_end_users_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[End
     repo = EndUserRepository(db)
     end_users = repo.get_end_users_by_workspace(workspace_id)
     return end_users
+
+def get_end_users_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> int:
+    repo = EndUserRepository(db)
+    end_users_count = repo.get_end_users_count_by_workspace(workspace_id)
+    return end_users_count
 
 def get_end_user_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:
     """根据 end_user_id 查询对应宿主"""
