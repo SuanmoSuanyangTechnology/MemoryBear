@@ -594,7 +594,7 @@ class ConversationService:
             raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
 
         if internal_user_id is None:
-            raise BusinessException("会话不存在", BizCode.NOT_FOUND)
+            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
 
         if (
             conversation.app_id != app_id
