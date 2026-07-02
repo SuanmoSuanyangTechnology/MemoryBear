@@ -97,7 +97,6 @@ class WorkspaceAppService:
                 "config": memory_content
             }
 
-
             if memory_content:
                 processed_configs.add(memory_content)
                 memory_config_info = self._get_memory_config(memory_content)
