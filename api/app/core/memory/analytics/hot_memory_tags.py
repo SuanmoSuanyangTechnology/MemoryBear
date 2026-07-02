@@ -54,14 +54,9 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
                 config_id=config_id
             )
 
-            if not memory_config.llm_model_id:
-                raise ValueError(
-                    f"No llm_model_id found in memory config {config_id}. "
-                    "Please configure a valid LLM model."
-                )
-
+       
             factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+            llm_client = factory.get_llm_client_from_config(memory_config)
 
         # 3. 构建Prompt
         tag_list_str = ", ".join(tags)
@@ -118,13 +113,9 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
                 config_id=config_id,
             )
 
-            if not memory_config.llm_model_id:
-                raise ValueError(
-                    f"No llm_model_id found in memory config {config_id}."
-                )
 
             factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+            llm_client = factory.get_llm_client_from_config(memory_config)
 
         tag_list_str = ", ".join(tags)
         from app.core.memory.utils.prompt.prompt_utils import render_interest_filter_prompt
