@@ -4511,6 +4511,8 @@ class WorkflowService:
         if not latest:
             return None
         conv_messages = self._trace_context_chain(latest)
+        if latest.role in ("user", "assistant"):
+            conv_messages.append({"role": latest.role, "content": latest.content})
         return conv_vars, conv_messages
 
 
