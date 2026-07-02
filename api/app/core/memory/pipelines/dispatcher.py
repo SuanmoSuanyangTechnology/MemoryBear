@@ -846,26 +846,20 @@ async def dispatch_mcp_write(
         end_user_id=end_user_id,
     )
 
-    # 2. 写入 memory_messages 表（构造 QA 对，让剪枝流程能配对处理）
-    # user 消息保留原始内容，空 assistant 作为占位使剪枝流程能对 user 执行规整
-    messages = [
-        {"role": "user", "content": message, "dialog_at": dialog_at},
-        {"role": "assistant", "content": "", "dialog_at": dialog_at},
-    ]
+    # 2. 写入 memory_messages 表
+    messages = [{"role": "user", "content": message, "dialog_at": dialog_at}]
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
         written_mms = repo.write_batch(conversation_id, messages)
         db.commit()
 
     target_msg = written_mms[0]
-    # 取最后一条消息的 seq 用于 write_cursor 推进（覆盖 user + assistant 占位）移除哨兵app后mcp不用推进write_cursor
-    last_seq = written_mms[-1]["message_seq"]
     target_seq = target_msg["message_seq"]
 
-    # 3. 推进 write_cursor（推进到最后一条，避免重复处理）
+    # 3. 推进 write_cursor
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        repo.advance_write_cursor(conversation_id, last_seq)
+        repo.advance_write_cursor(conversation_id, target_seq)
         db.commit()
 
     # 4. 直接派发写入任务（空 assistant 通过标记传递给 pipeline）
