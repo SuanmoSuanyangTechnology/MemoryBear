@@ -4,6 +4,8 @@
 
 # MemoryBear — Empowering AI with Human-Like Memory
 
+<!-- webhook test: v0.3.10 release notification -->
+
 **Next-Generation AI Memory Management System · Perceive · Extract · Associate · Forget**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)

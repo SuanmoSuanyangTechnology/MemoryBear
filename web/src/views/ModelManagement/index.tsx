@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 15:17:07
+ * @Last Modified time: 2026-07-01 10:15:57
  */
 /**
  * Model Management Main Page
@@ -24,6 +24,7 @@ import ModelSquare from './Square'
 import CustomModelModal from './components/CustomModelModal'
 import CustomSelect from '@/components/CustomSelect'
 import { modelTypeUrl, modelProviderUrl } from '@/api/models'
+import { formatModelType } from './utils'
 
 /**
  * Available tab keys
@@ -99,7 +100,7 @@ const tabKeys = ['square', 'list', 'group']
                 <CustomSelect
                   url={modelTypeUrl}
                   hasAll={false}
-                  format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+                  format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
                   className="rb:w-40"
                   allowClear={true}
                   placeholder={t('modelNew.type')}

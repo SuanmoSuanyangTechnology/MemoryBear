@@ -13,10 +13,13 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
+from app.db import get_db_read
 from app.models import FileMetadata, ModelApiKey, ModelType
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
+from app.repositories.end_user_repository import get_end_user_by_id
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
+from app.repositories.workspace_repository import get_workspace_by_id
 from app.schemas import FileType, FileInput
 from app.schemas.memory_config_schema import MemoryConfig
 from app.schemas.memory_perceptual_schema import (
@@ -203,28 +206,33 @@ class MemoryPerceptualService:
     def _get_mutlimodal_client(
             self,
             file_type: FileType,
-            config: MemoryConfig
+            config: MemoryConfig,
+            tenant_id: uuid.UUID,
     ) -> tuple[RedBearLLM | None, ModelApiKey | None]:
         model_config = None
         if file_type == FileType.AUDIO:
             model_config = ModelApiKeyService.get_available_api_key(
                 self.db,
-                config.audio_model_id
+                config.audio_model_id,
+                tenant_id=tenant_id
             )
         elif file_type == FileType.VIDEO:
             model_config = ModelApiKeyService.get_available_api_key(
                 self.db,
-                config.video_model_id
+                config.video_model_id,
+                tenant_id=tenant_id
             )
         elif file_type == FileType.DOCUMENT:
             model_config = ModelApiKeyService.get_available_api_key(
                 self.db,
-                config.llm_model_id
+                config.llm_model_id,
+                tenant_id=tenant_id
             )
         elif file_type == FileType.IMAGE:
             model_config = ModelApiKeyService.get_available_api_key(
                 self.db,
-                config.vision_model_id
+                config.vision_model_id,
+                tenant_id=tenant_id
             )
         llm = None
         if model_config:
@@ -247,7 +255,12 @@ class MemoryPerceptualService:
             file: FileInput,
             content: str | None = None,
     ):
-        llm, model_config = self._get_mutlimodal_client(file.type, memory_config)
+        with get_db_read() as db:
+            end_user = get_end_user_by_id(db, end_user_id)
+            workspace_id = end_user.workspace_id
+            workspace = get_workspace_by_id(db, workspace_id)
+            tenant_id = workspace.tenant_id
+        llm, model_config = self._get_mutlimodal_client(file.type, memory_config, tenant_id)
         if model_config is None or llm is None:
             return None
         multimodel_service = MultimodalService(self.db, ModelInfo(

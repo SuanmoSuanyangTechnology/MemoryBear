@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:19:24
+ * @Last Modified time: 2026-07-01 10:13:27
  */
 /**
  * Model Square View
@@ -21,7 +21,7 @@ import RbCard from '@/components/RbCard'
 import { getModelPlaza, addModelPlaza } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import Tag from '@/components/Tag';
-import { getLogoUrl } from './utils'
+import { getLogoUrl, formatModelType } from './utils'
 
 /**
  * Model square component
@@ -71,7 +71,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
                 key={vo.provider}
                 className={clsx('rb:border rb:border-[#171719] rb:rounded-full rb:px-2 rb:py-1 rb:cursor-pointer', {
                   'rb:text-white rb:bg-[#171719]': activeProvider === vo.provider,
-                  'rb:text-[#171719]': activeProvider === vo.provider,
+                  'rb:text-[#171719]': activeProvider !== vo.provider,
                 })}
                 onClick={() => setActiveProvider(vo.provider)}
               >{String(vo.provider).charAt(0).toUpperCase() + String(vo.provider).slice(1)}</div>
@@ -92,7 +92,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
                             <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
                           </Tooltip>
                           <Space size={8} className="rb:mt-1!">
-                            <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                            <Tag>{formatModelType(item.type)}</Tag>
                             {item.is_official && <Tag color="success">{t(`modelNew.official`)}</Tag>}
                           </Space>
                         </Flex>
