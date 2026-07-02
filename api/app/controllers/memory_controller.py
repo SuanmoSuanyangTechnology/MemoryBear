@@ -25,7 +25,7 @@ from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserIn
 from app.schemas.response_schema import ApiResponse
 from app.services import workspace_service
 from app.services.memory_agent_service import MemoryAgentService
-from app.services.memory_agent_service import get_end_user_connected_config as get_config
+from app.services.memory_config_service import MemoryConfigService
 from app.utils.tmp_session import ChatSessionCache
 
 api_logger = get_api_logger()
@@ -59,7 +59,7 @@ async def write_server_async(
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
 
-    config_id = user_input.config_id
+    config_id = MemoryConfigService(db).get_config_id_by_end_user(user_input.end_user_id)
     workspace_id = current_user.current_workspace_id
     api_logger.info(
         f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
@@ -141,8 +141,8 @@ async def read_server(
         if storage_type is None:
             storage_type = 'neo4j'
         user_rag_memory_id = ''
+        memory_config_id = MemoryConfigService(db).get_config_id_by_end_user(user_input.end_user_id)
         if workspace_id:
-
             knowledge = knowledge_repository.get_knowledge_by_name(
                 db=db,
                 name="USER_RAG_MERORY",
@@ -156,9 +156,8 @@ async def read_server(
     api_logger.info(
         f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, session_id={session_id}")
     try:
-        memory_config = get_config(user_input.end_user_id, db)
         service = MemoryService(
-            memory_config["memory_config_id"],
+            memory_config_id,
             end_user_id=user_input.end_user_id,
             draft=True
         )

@@ -66,7 +66,7 @@ def main():
         schema["paths"] = {k: v for k, v in schema["paths"].items() if k.startswith("/v1")}
 
     out = pathlib.Path(args.output)
-    out.write_text(json.dumps(schema, indent=2, ensure_ascii=False))
+    out.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     total = len(schema["paths"])
     print(f"Exported {total} paths to {out} ({out.stat().st_size} bytes)")

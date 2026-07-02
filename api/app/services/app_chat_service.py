@@ -225,7 +225,7 @@ class AppChatService:
         tools.extend(kb_tools)
         if memory:
             memory_tools, _ = self.agent_service.load_memory_config(
-                config.memory, user_id, storage_type, user_rag_memory_id
+                config.memory, user_id, uuid.UUID(workspace_id), storage_type, user_rag_memory_id
             )
             tools.extend(memory_tools)
 
@@ -653,7 +653,7 @@ class AppChatService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.agent_service.load_memory_config(
-                    config.memory, user_id, storage_type, user_rag_memory_id
+                    config.memory, user_id, uuid.UUID(workspace_id), storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
@@ -1447,11 +1447,10 @@ class AppChatService:
 
         # 6. 加载上下文（到父消息为止）
         conversation_id = original_msg.conversation_id
-        max_history = config.memory.get("max_history", 10) if config.memory else 10
         filtered_history = await self._load_history_before_message(
             conversation_id=conversation_id,
             before_time=parent_msg.created_at,
-            max_history=max_history
+            max_history=settings.AGENT_MAX_HISTORY
         )
 
         # 7. 调用 agent_chat（传入版本参数，由 agent_chat 保存）
@@ -1603,11 +1602,10 @@ class AppChatService:
 
         # 6. 加载上下文
         conversation_id = original_msg.conversation_id
-        max_history = config.memory.get("max_history", 10) if config.memory else 10
         filtered_history = await self._load_history_before_message(
             conversation_id=conversation_id,
             before_time=parent_msg.created_at,
-            max_history=max_history
+            max_history=settings.AGENT_MAX_HISTORY
         )
 
         # 7. 流式调用（传入版本参数，由 agent_chat_stream 保存）

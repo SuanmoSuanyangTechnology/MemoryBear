@@ -69,7 +69,7 @@ CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
     ("entity_id_unique", "ExtractedEntity", "id"),
     ("memory_summary_id_unique", "MemorySummary", "id"),
     ("perceptual_id_unique", "Perceptual", "id"),
-    # Community 存在重复数据，暂不建唯一约束
+    ("community_id_unique", "Community", "community_id"),
 ]
 
 

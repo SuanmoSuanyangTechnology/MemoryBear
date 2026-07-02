@@ -7,17 +7,16 @@ Classes:
     EmotionAnalyticsService: 情绪分析服务，提供各种情绪分析功能
 """
 
-import json
 import statistics
 from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
 from app.repositories.neo4j.emotion_repository import EmotionRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-
-from app.utils.config_utils import resolve_config_id
+from app.services.memory_config_service import MemoryConfigService
 
 logger = get_business_logger()
 
@@ -551,23 +550,11 @@ class EmotionAnalyticsService:
             # 1. 从 end_user_id 获取关联的 memory_config_id
             llm_client = None
             try:
-                from app.services.memory_agent_service import (
-                    get_end_user_connected_config,
-                )
-
-                connected_config = get_end_user_connected_config(end_user_id, db)
-                config_id = connected_config.get("memory_config_id")
-                workspace_id = connected_config.get("workspace_id")
-                config_id = resolve_config_id(config_id, db) if config_id else None
-                if config_id is not None or workspace_id is not None:
-                    from app.services.memory_config_service import (
-                        MemoryConfigService,
-                    )
-                    config_service = MemoryConfigService(db)
+                config_service = MemoryConfigService(db)
+                config_id = config_service.get_config_id_by_end_user(end_user_id)
+                if config_id is not None:
                     memory_config = config_service.load_memory_config(
-                        config_id=config_id,
-                        workspace_id=workspace_id,
-                        service_name="EmotionAnalyticsService.generate_emotion_suggestions"
+                        config_id=config_id
                     )
                     from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
                     factory = MemoryClientFactory(db)

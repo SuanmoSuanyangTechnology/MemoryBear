@@ -8,18 +8,23 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
-from app.core.utils.datetime_utils import to_timestamp_ms
+from app.i18n.service import t
 from app.core.memory.analytics.hot_memory_tags import (
     filter_tags_with_llm,
     get_raw_tags_batch,
 )
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
+from app.core.utils.datetime_utils import to_timestamp_ms
+from app.models import Workspace
 from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -85,6 +90,27 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         """
         self.db = db
 
+    async def active(self, workspace_id: uuid.UUID, config_id: uuid.UUID, locale: str = "zh") -> Dict[str, Any]:
+        stmt = select(Workspace).where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True)
+        )
+        workspace = self.db.scalar(stmt)
+        if not workspace:
+            raise BusinessException(t("workspace.not_found", locale=locale))
+        validation_result = await MemoryConfigService(self.db).valid_config(config_id, locale=locale)
+        warnings = validation_result.get("warnings", [])
+        success = False
+        if not warnings:
+            workspace.memory_config = config_id
+            success = True
+        self.db.commit()
+        return {
+            "config_id": config_id,
+            "warnings": validation_result.get("warnings", []),
+            "success": success,
+        }
+
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（仅名称与描述）
         # 业务层检查同一工作空间下是否已存在同名配置
@@ -111,6 +137,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 params.embedding_id = configs.get('embedding')
             if not params.rerank_id:
                 params.rerank_id = configs.get('rerank')
+            if not params.vision_id:
+                params.vision_id = configs.get('vision')
+            if not params.audio_id:
+                params.audio_id = configs.get('audio')
+            if not params.video_id:
+                params.video_id = configs.get('video')
 
         # reflection_model_id 和 emotion_model_id 默认与 llm_id 一致
         if not params.reflection_model_id:
@@ -183,7 +215,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return result
 
     # --- Read All ---
-    def get_all(self, workspace_id=None) -> List[Dict[str, Any]]:  # 获取所有配置参数
+    def get_all(self, workspace_id) -> List[Dict[str, Any]]:  # 获取所有配置参数
         results = MemoryConfigRepository.get_all(self.db, workspace_id)
 
         # 检查并修正 pruning_scene 与 scene_name 不一致的记录
@@ -198,6 +230,8 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 needs_commit = True
         if needs_commit:
             self.db.commit()
+
+        activate_config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
 
         # 将 ORM 对象转换为字典列表，时间字段统一转为 UTC 毫秒时间戳
         data_list = []
@@ -247,6 +281,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "offset": config.offset,
                 "created_at": to_timestamp_ms(config.created_at),
                 "updated_at": to_timestamp_ms(config.updated_at),
+                "is_active": str(config.config_id) == str(activate_config_id),
             }
             data_list.append(config_dict)
 
@@ -301,8 +336,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 try:
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=str(cid),
-                        service_name="DataConfigService.pilot_run_stream"
+                        config_id=str(cid)
                     )
                     logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
                 except ConfigurationError as e:
@@ -452,6 +486,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "error": str(e),
                 "time": int(time.time() * 1000)
             })
+
 
 # -------------------- Neo4j Search & Analytics (fused from data_search_service.py) --------------------
 # Ensure env for connector (e.g., NEO4J_PASSWORD)
@@ -630,6 +665,7 @@ async def compute_hot_memory_tags(
         return [{"name": t, "frequency": f} for t, f in top_tags]
     finally:
         await connector.close()
+
 
 async def analytics_hot_memory_tags(
         db: Session,

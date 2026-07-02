@@ -290,9 +290,7 @@ class MemoryAgentService:
         # Load configuration to get LLM model ID
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(
-            config_id=config_id,
-            workspace_id=workspace_id,
-            service_name="MemoryAgentService"
+            config_id=config_id
         )
 
         status = await status_typle(message, memory_config.llm_model_id)
@@ -324,20 +322,12 @@ class MemoryAgentService:
         # Always get workspace_id from end_user for fallback, even if config_id is provided
         with get_db_read() as db:
             try:
-
-                connected_config = get_end_user_connected_config(end_user_id, db)
-                workspace_id = connected_config.get('workspace_id')
-                if config_id is None:
-                    config_id = connected_config.get('memory_config_id')
-                logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
-                if config_id is None and workspace_id is None:
-                    raise ValueError(
-                        f"No memory configuration found for end_user_id {end_user_id}. Please ensure the user has a connected memory configuration.")
                 config_service = MemoryConfigService(db)
+                config_id = config_service.get_config_id_by_end_user(end_user_id)
+                logger.info(f"Resolved config from end_user: config_id = {config_id}")
+
                 memory_config = config_service.load_memory_config(
-                    config_id=config_id,
-                    workspace_id=workspace_id,
-                    service_name="MemoryAgentService"
+                    config_id=config_id
                 )
                 model_config = config_service.get_model_config(str(memory_config.llm_model_id))
             except Exception as e:
@@ -721,10 +711,7 @@ class MemoryAgentService:
 # TODO: move to memory_config_service.py
 def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, Any]:
     """
-    获取终端用户关联的记忆配置
-
-    兼容旧数据：如果 end_user.memory_config_id 为空，则从 AppRelease.config 中获取
-    并回填到 end_user.memory_config_id 字段（懒迁移）。
+    获取终端用户所在工作空间当前生效的记忆配置。
 
     Args:
         end_user_id: 终端用户ID
@@ -736,16 +723,11 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     Raises:
         ValueError: 当终端用户不存在或应用未发布时
     """
-    import json as json_module
-
-    from sqlalchemy import select
-
     from app.models.app_model import App
-    from app.models.app_release_model import AppRelease
     from app.repositories.end_user_repository import EndUserRepository
     from app.services.memory_config_service import MemoryConfigService
 
-    logger.info(f"Getting connected config for end_user_id: {end_user_id}")
+    logger.info(f"Getting workspace memory config for end_user_id: {end_user_id}")
 
     # TODO: check sources for enduserid, should be one of these three: chat, draft, apikey
     # 1. 获取 end_user 及其 app_id
@@ -773,73 +755,10 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     #     logger.warning(f"No current release for app: {app_id}")
     #     raise ValueError(f"应用未发布: {app_id}")
 
-    # 3. 兼容旧数据：如果 memory_config_id 为空，从 AppRelease.config 获取并回填
-    memory_config_id_to_use = end_user.memory_config_id
-
-    # 如果已有 memory_config_id，直接使用
-    # 如果新创建enduser，enduser.memory_config_id 必定为none
-    # 那么使用从release中获取memory_config_id为预期行为，并且回填到
-    # end_user.memory_config_id
-    if not memory_config_id_to_use:
-        logger.info(f"end_user.memory_config_id is None, migrating from AppRelease.config")
-
-        # 获取最新发布版本
-        stmt = (
-            select(AppRelease)
-            .where(AppRelease.app_id == app_id, AppRelease.is_active.is_(True))
-            .order_by(AppRelease.version.desc())
-        )
-        # TODO: change to current_release_id
-        latest_release = db.scalars(stmt).first()
-
-        if latest_release:
-            config = latest_release.config or {}
-
-            # 如果 config 是字符串，解析为字典
-            if isinstance(config, str):
-                try:
-                    config = json_module.loads(config)
-                except json_module.JSONDecodeError:
-                    logger.warning(f"Failed to parse config JSON for release {latest_release.id}")
-                    config = {}
-
-            # 使用 MemoryConfigService 的提取方法
-            memory_config_service = MemoryConfigService(db)
-            legacy_config_id, is_legacy_int = memory_config_service.extract_memory_config_id(
-                app_type=app.type,
-                config=config
-            )
-
-            if legacy_config_id:
-                # 验证提取的 config_id 是否存在于数据库中
-                from app.models.memory_config_model import (
-                    MemoryConfig as MemoryConfigModel,
-                )
-                existing_config = db.get(MemoryConfigModel, legacy_config_id)
-
-                if existing_config:
-                    memory_config_id_to_use = legacy_config_id
-
-                    # 回填到 end_user 表（lazy update）
-                    end_user.memory_config_id = memory_config_id_to_use
-                    db.commit()
-                    logger.info(
-                        f"Migrated memory_config_id for end_user {end_user_id}: {memory_config_id_to_use}"
-                    )
-                else:
-                    logger.warning(
-                        f"Extracted memory_config_id does not exist, skipping backfill: "
-                        f"end_user_id={end_user_id}, config_id={legacy_config_id}"
-                    )
-            elif is_legacy_int:
-                logger.info(
-                    f"Legacy int config detected for end_user {end_user_id}, will use workspace default"
-                )
-
-    # 4. 使用 get_config_with_fallback 获取记忆配置
+    # 3. 统一按工作空间生效配置获取记忆配置
     memory_config_service = MemoryConfigService(db)
     memory_config = memory_config_service.get_config_with_fallback(
-        memory_config_id=memory_config_id_to_use,
+        memory_config_id=None,
         workspace_id=end_user.workspace_id
     )
 
@@ -852,7 +771,9 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     }
 
     logger.info(
-        f"Successfully retrieved connected config: memory_config_id = {memory_config_id}, workspace_id = {end_user.workspace_id}")
+        f"Successfully retrieved workspace memory config: memory_config_id = {memory_config_id}, "
+        f"workspace_id = {end_user.workspace_id}"
+    )
     return result
 
 
@@ -861,15 +782,14 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     批量获取多个终端用户关联的记忆配置。
 
     逻辑：
-    1. 优先使用 end_user.memory_config_id
-    2. 如果没有，回退到工作空间默认配置
+    1. 统一使用工作空间生效记忆配置
 
     实现说明：
     - 之前是 4 次串行查询（end_users → apps → 直接配置 → 工作空间默认配置），
       冷链路上的 RT 累计成本较高；
     - 现在合并为最多 2 次：
-        a) 一次 JOIN：EndUser LEFT JOIN App，一次性拿到 app_id / memory_config_id / workspace_id
-        b) 一次 MemoryConfig 查询：用 OR 同时取"直接绑定的配置"和"工作空间默认配置"。
+        a) 一次 JOIN：EndUser LEFT JOIN App，一次性拿到 workspace_id
+        b) 一次 MemoryConfig 查询：按 workspace_id 取工作空间默认配置。
 
     Args:
         end_user_ids: 终端用户ID列表
@@ -878,7 +798,7 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     Returns:
         字典，key 为 end_user_id，value 为包含 memory_config_id 和 memory_config_name 的字典
     """
-    from sqlalchemy import and_, or_
+    from sqlalchemy import and_
 
     from app.models.memory_config_model import MemoryConfig
     from app.repositories.end_user_repository import EndUserRepository
@@ -890,17 +810,15 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
     if not end_user_ids:
         return result
 
-    # 1) 一次 JOIN 拿齐 (end_user_id, app_id, memory_config_id, workspace_id)
+    # 1) 一次 JOIN 拿齐 (end_user_id, workspace_id)
     repo = EndUserRepository(db)
     rows = repo.get_config_batch_by_ids([UUID(uid) if isinstance(uid, str) else uid for uid in end_user_ids])
 
     # found_ids 用于补齐"未找到的用户"
     found_ids = set()
-    direct_config_ids: set = set()
     workspace_ids: set = set()
 
-    # row_index: end_user_id -> (memory_config_id, workspace_id)
-    # workspace_id 取 App.workspace_id，回退到 EndUser.workspace_id（兼容历史数据）
+    # row_index: end_user_id -> workspace_id
     row_index: Dict[str, Dict[str, Any]] = {}
 
     for row in rows:
@@ -908,39 +826,21 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
         found_ids.add(end_user_id)
 
         workspace_id = row.app_workspace_id or row.end_user_workspace_id
-        memory_config_id = row.memory_config_id
-
         row_index[end_user_id] = {
-            "memory_config_id": memory_config_id,
             "workspace_id": workspace_id,
         }
 
-        if memory_config_id:
-            direct_config_ids.add(memory_config_id)
-        elif workspace_id:
+        if workspace_id:
             workspace_ids.add(workspace_id)
 
     # 未找到的用户直接补空结果
     for missing_id in set(end_user_ids) - found_ids:
         result[missing_id] = {"memory_config_id": None, "memory_config_name": None}
 
-    # 2) 一次 MemoryConfig 查询：OR(直接配置, 工作空间默认配置)
-    config_id_to_config: Dict[Any, Any] = {}
+    # 2) 一次 MemoryConfig 查询：工作空间默认配置
     workspace_default_configs: Dict[Any, Any] = {}
 
-    if direct_config_ids or workspace_ids:
-        filters = []
-        if direct_config_ids:
-            filters.append(MemoryConfig.config_id.in_(direct_config_ids))
-        if workspace_ids:
-            filters.append(
-                and_(
-                    MemoryConfig.workspace_id.in_(workspace_ids),
-                    MemoryConfig.is_default.is_(True),
-                    MemoryConfig.state.is_(True),
-                )
-            )
-
+    if workspace_ids:
         configs = (
             db.query(MemoryConfig)
             .options(load_only(
@@ -950,26 +850,23 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
                 MemoryConfig.is_default,
                 MemoryConfig.state,
             ))
-            .filter(or_(*filters) if len(filters) > 1 else filters[0])
+            .filter(
+                and_(
+                    MemoryConfig.workspace_id.in_(workspace_ids),
+                    MemoryConfig.is_default.is_(True),
+                    MemoryConfig.state.is_(True),
+                )
+            )
             .all()
         )
 
         for cfg in configs:
-            # 直接配置查询命中
-            if cfg.config_id in direct_config_ids:
-                config_id_to_config[cfg.config_id] = cfg
-            # 工作空间默认配置命中（同一个 workspace 可能有多个 is_default=True，最后一个胜出，
-            # 行为与原实现一致）
             if cfg.is_default and cfg.state and cfg.workspace_id in workspace_ids:
                 workspace_default_configs[cfg.workspace_id] = cfg
 
     # 3) 拼装最终结果
     for end_user_id, data in row_index.items():
-        memory_config = None
-        if data["memory_config_id"]:
-            memory_config = config_id_to_config.get(data["memory_config_id"])
-        if not memory_config and data["workspace_id"]:
-            memory_config = workspace_default_configs.get(data["workspace_id"])
+        memory_config = workspace_default_configs.get(data["workspace_id"])
 
         if memory_config:
             result[end_user_id] = {

@@ -28,7 +28,11 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
   const currentMode = Form.useWatch(['metadata_filter_mode'], form) || 'disabled';
   const metadata_filters = Form.useWatch(['metadata_filters'], form) || { conditions: [], logic: 'and' };
   const isInitialized = useRef(false);
-  const prevKnowledgeBases = useRef<any[]>([]);
+  const prevKbIds = useRef<string>('');
+  const requestLock = useRef(false);
+
+  // 计算稳定的 KB ID 字符串
+  const kbIdsString = knowledge_bases?.map((kb: any) => kb.kb_id || kb.id).filter(Boolean).sort().join(',') || '';
 
   const handleOpenModal = () => {
     metadataFilterModalRef.current?.open(metadata_filters);
@@ -41,8 +45,15 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
   };
 
   useEffect(() => {
-    const kb_ids = knowledge_bases?.map((kb: any) => kb.kb_id || kb.id).filter(Boolean) || [];
+    const kb_ids = kbIdsString ? kbIdsString.split(',') : [];
+
+    // 防止重复请求
+    if (requestLock.current || kbIdsString === prevKbIds.current) {
+      return;
+    }
+
     if (kb_ids.length) {
+      requestLock.current = true;
       getPublicMetadataFields({ kb_ids })
         .then(res => {
           const { custom, builtin_fields } = res as { custom: MetadataField[], builtin_fields: MetadataField[] };
@@ -52,13 +63,13 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
 
           if (!isInitialized.current) {
             isInitialized.current = true;
-            prevKnowledgeBases.current = knowledge_bases;
+            prevKbIds.current = kbIdsString;
             return;
           }
 
-          const isKnowledgeBasesChanged = JSON.stringify(prevKnowledgeBases.current) !== JSON.stringify(knowledge_bases);
-          if (isKnowledgeBasesChanged) {
-            prevKnowledgeBases.current = knowledge_bases;
+          // ID 字符串变化才更新
+          if (kbIdsString !== prevKbIds.current) {
+            prevKbIds.current = kbIdsString;
             form.setFieldsValue({
               metadata_filters: {
                 conditions: filterConditions,
@@ -67,8 +78,12 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
             })
           }
         })
+        .finally(() => {
+          requestLock.current = false;
+        })
     } else {
-      if (isInitialized.current) {
+      if (isInitialized.current && kbIdsString !== prevKbIds.current) {
+        prevKbIds.current = kbIdsString;
         form.setFieldsValue({
           metadata_filters: {
             conditions: [],
@@ -77,7 +92,7 @@ const MetadataFilter: FC<MetadataFilterProps> = ({
         })
       }
     }
-  }, [knowledge_bases, metadata_filters])
+  }, [kbIdsString])
 
   return (
     <>

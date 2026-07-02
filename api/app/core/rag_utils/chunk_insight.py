@@ -11,7 +11,6 @@ generate_chunk_insight() returns the full raw text (stored in end_user.memory_in
 generate_chunk_insight_sections() returns a dict with all four fields for richer storage.
 """
 
-import asyncio
 import os
 import re
 from collections import Counter
@@ -20,6 +19,7 @@ from typing import Dict, List, Optional
 from app.core.logging_config import get_business_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
+from app.services.memory_config_service import MemoryConfigService
 
 business_logger = get_business_logger()
 
@@ -33,19 +33,14 @@ def _get_llm_client(end_user_id: Optional[str] = None):
     with get_db_context() as db:
         try:
             if end_user_id:
-                from app.services.memory_agent_service import get_end_user_connected_config
-                from app.services.memory_config_service import MemoryConfigService
-                connected_config = get_end_user_connected_config(end_user_id, db)
-                config_id = connected_config.get("memory_config_id")
-                workspace_id = connected_config.get("workspace_id")
-                if config_id or workspace_id:
-                    config_service = MemoryConfigService(db)
+                config_service = MemoryConfigService(db)
+                config_id = config_service.get_config_id_by_end_user(end_user_id)
+                if config_id:
                     memory_config = config_service.load_memory_config(
                         config_id=config_id,
-                        workspace_id=workspace_id
                     )
                     factory = MemoryClientFactory(db)
-                    return factory.get_llm_client(memory_config.llm_model_id)
+                    return factory.get_llm_client_from_config(memory_config)
         except Exception as e:
             business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
         factory = MemoryClientFactory(db)

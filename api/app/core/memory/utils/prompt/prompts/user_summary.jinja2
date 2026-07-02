@@ -8,9 +8,9 @@
 Your task is to generate a comprehensive user profile based on the provided entities and statements. The profile should include four distinct sections that capture different aspects of the user's identity and characteristics.
 
 {% if language == "zh" %}
-**重要：请使用中文生成用户画像内容。**
+**重要：用户画像正文应跟随输入 entities/statements 的主要语言。**
 {% else %}
-**Important: Please generate the user profile content in English.**
+**Important: Generate the user profile content in the primary language of the input entities/statements.**
 {% endif %}
 
 ===Inputs===
@@ -173,12 +173,10 @@ Before generating your final output, internally verify:
 
 **LANGUAGE REQUIREMENT:**
 {% if language == "zh" %}
-- 输出语言必须为简体中文
-- 所有部分内容必须使用中文
+- 各部分正文必须跟随输入 entities/statements 的主要语言
 - 部分标题必须使用指定的中文格式：【基本介绍】【性格特点】【核心价值观】【一句话总结】
 {% else %}
-- The output language must be English
-- All section content must be in English
+- Section body content must follow the primary language of the input entities/statements
 - Section headers must use the specified format: 【Basic Introduction】【Personality Traits】【Core Values】【One-Sentence Summary】
 {% endif %}
 

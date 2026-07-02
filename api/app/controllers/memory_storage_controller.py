@@ -1,8 +1,8 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -13,11 +13,7 @@ from app.db import get_db, get_db_context
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.memory_storage_schema import (
-    ConfigKey,
-    ConfigParamsCreate,
     ConfigPilotRun,
-    ConfigUpdate,
-    ConfigUpdateExtracted,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
@@ -35,10 +31,7 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
-from app.core.quota_stub import check_memory_engine_quota
-from fastapi import APIRouter, Depends, Header
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from fastapi import Header
 
 from app.utils.config_utils import resolve_config_id
 
@@ -77,232 +70,10 @@ async def get_storage_info(
         return fail(BizCode.INTERNAL_ERROR, "存储信息获取失败", str(e))
 
 
-@router.post("/create_config", response_model=ApiResponse)  # 创建配置文件，其他参数默认
-@check_memory_engine_quota
-def create_config(
-        payload: ConfigParamsCreate,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-        x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
-) -> dict:
-    workspace_id = current_user.current_workspace_id
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试创建配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求创建配置: {payload.config_name}")
-    try:
-        # 将 workspace_id 注入到 payload 中（保持为 UUID 类型）
-        payload.workspace_id = workspace_id
-        svc = DataConfigService(db)
-        result = svc.create(payload)
-        return success(data=result, msg="创建成功")
-    except ValueError as e:
-        err_str = str(e)
-        if err_str.startswith("DUPLICATE_CONFIG_NAME:"):
-            config_name = err_str.split(":", 1)[1]
-            api_logger.warning(f"重复的配置名称 '{config_name}' 在工作空间 {workspace_id}")
-            lang = get_language_from_header(x_language_type)
-            if lang == "en":
-                msg = fail(BizCode.BAD_REQUEST, "Config name already exists",
-                           f"A config named \"{config_name}\" already exists in the current workspace. Please use a different name.")
-            else:
-                msg = fail(BizCode.BAD_REQUEST, "配置名称已存在",
-                           f"当前工作空间下已存在名为「{config_name}」的记忆配置，请使用其他名称")
-            return JSONResponse(status_code=400, content=msg)
-        api_logger.error(f"Create config failed: {err_str}")
-        return fail(BizCode.INTERNAL_ERROR, "创建配置失败", err_str)
-    except Exception as e:
-        from sqlalchemy.exc import IntegrityError
-        if isinstance(e, IntegrityError) and "uq_workspace_config_name" in str(getattr(e, 'orig', '')):
-            api_logger.warning(f"重复的配置名称 '{payload.config_name}' 在工作空间 {workspace_id}")
-            lang = get_language_from_header(x_language_type)
-            if lang == "en":
-                msg = fail(BizCode.BAD_REQUEST, "Config name already exists",
-                           f"A config named \"{payload.config_name}\" already exists in the current workspace. Please use a different name.")
-            else:
-                msg = fail(BizCode.BAD_REQUEST, "配置名称已存在",
-                           f"当前工作空间下已存在名为「{payload.config_name}」的记忆配置，请使用其他名称")
-            return JSONResponse(status_code=400, content=msg)
-        api_logger.error(f"Create config failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "创建配置失败", str(e))
-
-
-@router.delete("/delete_config", response_model=ApiResponse)  # 删除数据库中的内容（按配置名称）
-def delete_config(
-        config_id: UUID | int,
-        force: bool = Query(False, description="是否强制删除（即使有终端用户正在使用）"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    """删除记忆配置（带终端用户保护）
-    
-    - 检查是否为默认配置，默认配置不允许删除
-    - 检查是否有终端用户连接到该配置
-    - 如果有连接且 force=False，返回警告
-    - 如果 force=True，清除终端用户引用后删除配置
-    
-    Query Parameters:
-        force: 设置为 true 可强制删除（即使有终端用户正在使用）
-    """
-    workspace_id = current_user.current_workspace_id
-    config_id = resolve_config_id(config_id, db)
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试删除配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(
-        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: "
-        f"config_id={config_id}, force={force}"
-    )
-
-    try:
-        # 使用带保护的删除服务
-        from app.services.memory_config_service import MemoryConfigService
-
-        config_service = MemoryConfigService(db)
-        result = config_service.delete_config(config_id=config_id, force=force)
-
-        if result["status"] == "error":
-            api_logger.warning(
-                f"记忆配置删除被拒绝: config_id={config_id}, reason={result['message']}"
-            )
-            return fail(
-                code=BizCode.FORBIDDEN,
-                msg=result["message"],
-                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
-            )
-
-        if result["status"] == "warning":
-            api_logger.warning(
-                f"记忆配置正在使用，无法删除: config_id={config_id}, "
-                f"connected_count={result['connected_count']}"
-            )
-            return fail(
-                code=BizCode.RESOURCE_IN_USE,
-                msg=result["message"],
-                data={
-                    "connected_count": result["connected_count"],
-                    "force_required": result["force_required"]
-                }
-            )
-
-        api_logger.info(
-            f"记忆配置删除成功: config_id={config_id}, "
-            f"affected_users={result['affected_users']}"
-        )
-        return success(
-            msg=result["message"],
-            data={"affected_users": result["affected_users"]}
-        )
-
-    except Exception as e:
-        api_logger.error(f"Delete config failed: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "删除配置失败", str(e))
-
-
-@router.post("/update_config", response_model=ApiResponse)  # 更新配置文件中name和desc
-def update_config(
-        payload: ConfigUpdate,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    workspace_id = current_user.current_workspace_id
-    payload.config_id = resolve_config_id(payload.config_id, db)
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    # 校验至少有一个字段需要更新
-    if payload.config_name is None and payload.config_desc is None and payload.scene_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未提供任何更新字段")
-        return fail(BizCode.INVALID_PARAMETER, "请至少提供一个需要更新的字段",
-                    "config_name, config_desc, scene_id 均为空")
-
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新配置: {payload.config_id}")
-    try:
-        svc = DataConfigService(db)
-        result = svc.update(payload)
-        return success(data=result, msg="更新成功")
-    except Exception as e:
-        api_logger.error(f"Update config failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "更新配置失败", str(e))
-
-
-@router.post("/update_config_extracted", response_model=ApiResponse)  # 更新数据库中的部分内容 所有业务字段均可选
-def update_config_extracted(
-        payload: ConfigUpdateExtracted,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    workspace_id = current_user.current_workspace_id
-    payload.config_id = resolve_config_id(payload.config_id, db)
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新提取配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新提取配置: {payload.config_id}")
-    try:
-        svc = DataConfigService(db)
-        result = svc.update_extracted(payload)
-        return success(data=result, msg="更新成功")
-    except Exception as e:
-        api_logger.error(f"Update config extracted failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "更新配置失败", str(e))
-
-
-# --- Forget config params ---
-# 遗忘引擎配置接口已迁移到 memory_forget_controller.py
-# 使用新接口: /api/memory/forget/read_config 和 /api/memory/forget/update_config
-
-@router.get("/read_config_extracted", response_model=ApiResponse)  # 通过查询参数读取某条配置（固定路径） 没有意义的话就删除
-def read_config_extracted(
-        config_id: UUID | int,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    workspace_id = current_user.current_workspace_id
-    config_id = resolve_config_id(config_id, db)
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试读取提取配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取提取配置: {config_id}")
-    try:
-        svc = DataConfigService(db)
-        result = svc.get_extracted(ConfigKey(config_id=config_id))
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Read config extracted failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "查询配置失败", str(e))
-
-
-@router.get("/read_all_config", response_model=ApiResponse)  # 读取所有配置文件列表
-def read_all_config(
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    workspace_id = current_user.current_workspace_id
-
-    # 检查用户是否已选择工作空间
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试查询配置但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取所有配置")
-    try:
-        svc = DataConfigService(db)
-        # 传递 workspace_id 进行过滤（保持为 UUID 类型）
-        result = svc.get_all(workspace_id=workspace_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Read all config failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "查询所有配置失败", str(e))
+# ==================== 记忆配置接口已迁移 ====================
+# create_config / delete_config / update_config / update_config_extracted /
+# read_config_extracted / read_all_config 已迁移至 memory_config_controller
+# （前缀 /memory_config），此处不再保留。
 
 
 @router.post("/pilot_run", response_model=None)

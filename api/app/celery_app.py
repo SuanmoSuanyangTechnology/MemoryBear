@@ -99,19 +99,7 @@ celery_app.conf.update(
     # task routing
     task_routes={
         # Memory tasks → memory_tasks queue (threads worker)
-        # 'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'}, # NOTE：只有路由可以删除
-        'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
-
-        # # Long-term storage tasks → memory_tasks queue (batched write strategies)  # NOTE：只有路由可以删除
-        # 'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
-        # 'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
-        # 'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
-
-
-
-        # Metadata extraction → memory_tasks queue
-        # 'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'}, # NOTE：没有使用地方，可以删除
 
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
@@ -139,7 +127,8 @@ celery_app.conf.update(
         'app.tasks.run_workflow_schedule_trigger': {'queue': 'workflow_trigger_tasks'},
 
         # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
-        'app.tasks.refresh_memory_insight_and_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：生成记忆洞察、用户摘要缓存
+        'app.tasks.scan_refresh_insight_summary_cache': {'queue': 'periodic_tasks'}, # NOTE：扫描器，仅枚举+派发，轻量
+        'app.tasks.do_refresh_insight_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：单用户生成记忆洞察、用户摘要缓存
         'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
         'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},
@@ -150,13 +139,13 @@ celery_app.conf.update(
     },
 )
 
-
 # 自动发现任务模块
 celery_app.autodiscover_tasks(['app'])
 
 # 企业版订阅任务路由（仅在 premium 模块存在时注册，避免社区版 worker 误接任务）
 try:
     import premium.platform_admin.subscription_tasks  # noqa: F401
+
     _HAS_SUBSCRIPTION_TASKS = True
     # 状态变更任务 → subscription_state_tasks 队列（轻量，每 10 分钟一次）
     celery_app.conf.task_routes['subscription.process_expired_subscriptions'] = {
@@ -200,7 +189,7 @@ beat_schedule_config = {
     #     "args": (),
     # },
     "regenerate-memory-cache": {
-        "task": "app.tasks.refresh_memory_insight_and_summary_cache",
+        "task": "app.tasks.scan_refresh_insight_summary_cache",
         "schedule": memory_cache_regeneration_schedule,
         "args": (),
     },
@@ -222,9 +211,9 @@ beat_schedule_config = {
         "args": (),
     },
     "run-layer2-reflection": {
-            "task": "app.tasks.scan_layer2_reflection",
-            "schedule": layer2_reflection_schedule,
-            "args": (),
+        "task": "app.tasks.scan_layer2_reflection",
+        "schedule": layer2_reflection_schedule,
+        "args": (),
     },
     "run-layer2-dedup-full-scan": {
         "task": "app.tasks.scan_layer2_dedup_full_scan",

@@ -54,16 +54,17 @@ class ImplicitMemoryLLMClient:
     interests, and behavioral habits.
     """
 
-    def __init__(self, db: Session, default_model_id: Optional[str] = None):
+    def __init__(self, db: Session, default_model_id: Optional[str] = None, tenant_id=None):
         """Initialize the LLM client wrapper.
         
         Args:
             db: Database session for accessing model configurations
             default_model_id: Default LLM model ID to use if none specified
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
         """
         self.db = db
         self.default_model_id = default_model_id
-        self._client_factory = MemoryClientFactory(db)
+        self._client_factory = MemoryClientFactory(db, tenant_id=tenant_id)
         
         logger.debug("ImplicitMemoryLLMClient initialized")
 

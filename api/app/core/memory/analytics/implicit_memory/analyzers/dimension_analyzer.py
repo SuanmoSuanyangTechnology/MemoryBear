@@ -42,16 +42,17 @@ class DimensionAnalyzer:
     # Define the four dimensions we analyze
     DIMENSIONS = ["creativity", "aesthetic", "technology", "literature"]
     
-    def __init__(self, db: Session, llm_model_id: Optional[str] = None):
+    def __init__(self, db: Session, llm_model_id: Optional[str] = None, tenant_id=None):
         """Initialize the dimension analyzer.
         
         Args:
             db: Database session
             llm_model_id: Optional LLM model ID to use for analysis
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
         """
         self.db = db
         self.llm_model_id = llm_model_id
-        self._llm_client = ImplicitMemoryLLMClient(db, llm_model_id)
+        self._llm_client = ImplicitMemoryLLMClient(db, llm_model_id, tenant_id=tenant_id)
     
     async def analyze_dimensions(
         self,

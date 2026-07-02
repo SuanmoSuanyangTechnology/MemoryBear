@@ -94,7 +94,7 @@ const CreateDataset = () => {
   const [pollingLoading, setPollingLoading] = useState<boolean>(false);
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
-  const [blockSize, setBlockSize] = useState<number>(130);
+  const [blockSize, setBlockSize] = useState<number>(512);
   const [qaPrompt, setQaPrompt] = useState<string | undefined>()
   console.log('qaPrompt', qaPrompt)
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');

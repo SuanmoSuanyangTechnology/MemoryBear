@@ -76,7 +76,10 @@ class WorkspaceRepository:
                 configs = {
                     "llm": workspace.llm,
                     "embedding": workspace.embedding,
-                    "rerank": workspace.rerank
+                    "rerank": workspace.rerank,
+                    "vision": workspace.vision,
+                    "audio": workspace.audio,
+                    "video": workspace.video,
                 }
                 db_logger.debug(
                     f"工作空间模型配置查询成功: workspace_id={workspace_id}, "
@@ -313,6 +316,17 @@ class WorkspaceRepository:
             db_logger.error(f"更新成员角色失败: id={id} - {str(e)}")
             raise
 
+    def get_workspace_memory_config_id(self, workspace_id: uuid.UUID) -> Optional[uuid.UUID]:
+        try:
+            stmt = select(Workspace.memory_config).where(
+                Workspace.id == workspace_id,
+                Workspace.is_active.is_(True),
+            )
+            return self.db.scalar(stmt)
+        except Exception as e:
+            db_logger.error(f"查询空间记忆配置失败 - {str(e)}")
+            raise
+
 
 # 保持向后兼容的函数
 def get_workspace_by_id(db: Session, workspace_id: uuid.UUID) -> Workspace | None:
@@ -417,3 +431,8 @@ def get_workspace_models_configs(db: Session, workspace_id: uuid.UUID) -> Option
     """
     repo = WorkspaceRepository(db)
     return repo.get_workspace_models_configs(workspace_id)
+
+
+def get_workspace_memory_config_id(db: Session, workspace_id: uuid.UUID) -> uuid.UUID | None:
+    repo = WorkspaceRepository(db)
+    return repo.get_workspace_memory_config_id(workspace_id)

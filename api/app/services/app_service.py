@@ -319,8 +319,13 @@ class AppService:
                 multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
             from app.repositories.tool_repository import ToolRepository
+            from app.models import App
 
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+            db_app = self.db.get(App, app_id)
+            if not db_app:
+                raise BusinessException("应用不存在", BizCode.NOT_FOUND)
+
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(db_app.workspace_id))
             model_api_key = ModelApiKeyService.get_available_api_key(
                 self.db,
                 multi_agent_config.default_model_config_id,
@@ -1559,7 +1564,6 @@ class AppService:
             memory={
                 "enabled": True,
                 "memory_config_id": None,
-                "max_history": 10
             },
             variables=[],
             tools=[],
@@ -1921,8 +1925,6 @@ class AppService:
             if agent_cfg.default_model_config_id is None:
                 miss_params.append("模型配置")
 
-            if agent_cfg.memory.get("enabled") and not agent_cfg.memory.get("memory_config_id"):
-                miss_params.append("记忆配置")
             if miss_params:
                 raise BusinessException(
                     f"应用发布失败：检测到以下必要配置尚未完成：{', '.join(miss_params)}。请返回应用编辑页面完成相关配置后再尝试发布。",
@@ -2032,29 +2034,6 @@ class AppService:
         )
         self.db.add(release)
         self.db.flush()  # 先 flush，确保 release 已插入数据库
-
-        # 提取记忆配置ID并更新终端用户
-        memory_config_id, is_legacy_int = self._get_memory_config_id_from_release(app.type, config)
-
-        # 如果检测到旧格式 int 数据，回退到工作空间默认配置
-        if is_legacy_int and not memory_config_id:
-            memory_config_id = self._get_workspace_default_memory_config_id(app.workspace_id)
-            if memory_config_id:
-                logger.info(
-                    f"发布时使用工作空间默认记忆配置（旧数据兼容）: app_id={app_id}, "
-                    f"workspace_id={app.workspace_id}, memory_config_id={memory_config_id}"
-                )
-
-        if memory_config_id:
-            app = self.db.query(App).filter(App.id == app_id).first()
-            if app:
-                updated_count = self._update_endusers_memory_config_by_app(
-                    app_id, memory_config_id
-                )
-                logger.info(
-                    f"发布时更新终端用户记忆配置: app_id={app_id}, workspace_id={app.workspace_id}, "
-                    f"memory_config_id={memory_config_id}, updated_count={updated_count}"
-                )
 
         # 更新当前发布版本指针
         app.current_release_id = release.id
@@ -2170,26 +2149,6 @@ class AppService:
                 extra={"app_id": str(app_id), "version": version}
             )
             raise ResourceNotFoundException("发布版本", f"app_id={app_id}, version={version}")
-
-        # 提取记忆配置ID并更新终端用户
-        memory_config_id, is_legacy_int = self._get_memory_config_id_from_release(release.type, release.config)
-
-        # 如果检测到旧格式 int 数据，回退到工作空间默认配置
-        if is_legacy_int and not memory_config_id:
-            memory_config_id = self._get_workspace_default_memory_config_id(app.workspace_id)
-            if memory_config_id:
-                logger.info(
-                    f"回滚时使用工作空间默认记忆配置（旧数据兼容）: app_id={app_id}, "
-                    f"workspace_id={app.workspace_id}, memory_config_id={memory_config_id}"
-                )
-
-        if memory_config_id:
-
-            updated_count = self._update_endusers_memory_config_by_app(app_id, memory_config_id)
-            logger.info(
-                f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
-                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
-            )
 
         app.current_release_id = release.id
         app.updated_at = utcnow_naive()

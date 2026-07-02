@@ -1,21 +1,25 @@
-import datetime
-from enum import StrEnum
 import uuid
+from enum import StrEnum
+
 from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from app.db import Base
+
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
+
 
 class WorkspaceRole(StrEnum):
     manager = "manager"
     member = "member"
 
+
 class InviteStatus(StrEnum):
     pending = "pending"
     accepted = "accepted"
-    revoked = "revoked"
+    revoked = "revoked" 
     expired = "expired"
+
 
 class Workspace(Base):
     __tablename__ = "workspaces"
@@ -30,16 +34,22 @@ class Workspace(Base):
     llm = Column(String, nullable=True)
     embedding = Column(String, nullable=True)
     rerank = Column(String, nullable=True)
+    vision = Column(String, nullable=True)
+    audio = Column(String, nullable=True)
+    video = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+    is_default_config = Column(Boolean, default=False, server_default="false", nullable=False)
+    memory_config = Column(UUID(as_uuid=True), nullable=True)
     is_active = Column(Boolean, default=True)
-    
+
     # Relationships
     tenant = relationship("Tenants", back_populates="owned_workspaces")  # belongs to tenant
     members = relationship("WorkspaceMember", back_populates="workspace")  # users collaborate through membership
     api_keys = relationship("ApiKey", back_populates="workspace", cascade="all, delete-orphan")  # API Keys
     memory_increments = relationship("MemoryIncrement", back_populates="workspace")
     end_users = relationship("EndUser", back_populates="workspace", cascade="all, delete-orphan")
+
 
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
@@ -51,6 +61,7 @@ class WorkspaceMember(Base):
     is_active = Column(Boolean, default=True)
     user = relationship("User", back_populates="workspaces")
     workspace = relationship("Workspace", back_populates="members")
+
 
 class WorkspaceInvite(Base):
     __tablename__ = "workspace_invites"
@@ -66,7 +77,7 @@ class WorkspaceInvite(Base):
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
-    
+
     # Relationships
     workspace = relationship("Workspace")
     created_by = relationship("User", foreign_keys=[created_by_user_id])
