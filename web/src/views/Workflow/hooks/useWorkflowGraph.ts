@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 15:18:48
+ * @Last Modified time: 2026-07-02 16:50:05
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   Scroller,
@@ -25,6 +25,8 @@ import type { ChatVariable, EnvVariable, HistoryRecord, NodeProperties, Workflow
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
 import type { Application } from '@/views/ApplicationManagement/types'
+import type { Memory } from '@/views/MemoryManagement/types'
+import { getMemoryConfigList } from '@/api/memory'
 
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
@@ -101,6 +103,7 @@ export interface UseWorkflowGraphReturn {
   historyRecords: HistoryRecord[];
   /** Clear history records */
   clearHistoryRecords: () => void;
+  activeMemoryConfig?: Memory | null;
 }
 
 /**
@@ -150,6 +153,16 @@ export const useWorkflowGraph = ({
    * edits and duplicating edges.
    */
   const workflowInitializedRef = useRef(false)
+  const [activeMemoryConfig, setActiveMemoryConfig] = useState<Memory | null>(null)
+  const getActiveMemoryConfig = () => {
+    getMemoryConfigList()
+      .then((res) => {
+        setActiveMemoryConfig((res as Memory[])[0])
+      })
+      .catch(() => {
+        setActiveMemoryConfig(null)
+      })
+  }
   useEffect(() => {
     if (!graphRef.current) return
     graphRef.current.getNodes().forEach(node => {
@@ -157,8 +170,11 @@ export const useWorkflowGraph = ({
       if (['if-else', 'question-classifier', 'human-intervention'].includes(data?.type)) {
         node.setData({ ...data, chatVariables, envVariables })
       }
+      if (['memory-read', 'memory-write'].includes(data?.type)) {
+        node.setData({ ...data, activeMemoryConfig })
+      }
     })
-  }, [chatVariables, envVariables, graphRef.current])
+  }, [chatVariables, envVariables, activeMemoryConfig, graphRef.current?.getNodes()])
 
   useEffect(() => {
     if (!appType || !graphRef.current) return
@@ -170,6 +186,7 @@ export const useWorkflowGraph = ({
 
   useEffect(() => {
     getConfig()
+    getActiveMemoryConfig()
   }, [id])
   /**
    * Fetch workflow configuration from API
@@ -2142,5 +2159,6 @@ export const useWorkflowGraph = ({
     redo,
     historyRecords,
     clearHistoryRecords,
+    activeMemoryConfig,
   };
 };

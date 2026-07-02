@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-12 13:59:20
+ * @Last Modified time: 2026-06-30 11:59:12
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -56,6 +56,8 @@ import HumanIntervention from './HumanIntervention'
 import ToolList from './ToolList'
 import MetadataFilter from './MetadataFilter'
 import { openHelpCenter } from '@/utils/help';
+import ActiveMemoryConfig from '@/components/ActiveMemoryConfig'
+import type { Memory } from '@/views/MemoryManagement/types'
 
 /**
  * Props for Properties component
@@ -89,6 +91,7 @@ interface PropertiesProps {
   appType?: Application['type'];
   /** Function to refresh cache */
   refreshCache: () => void;
+  activeMemoryConfig?: Memory | null;
 }
 
 /**
@@ -108,6 +111,7 @@ const Properties: FC<PropertiesProps> = ({
   nodeClick,
   appType,
   refreshCache,
+  activeMemoryConfig,
 }) => {
   const { t, i18n } = useTranslation()
   const { message } = App.useApp()
@@ -597,7 +601,7 @@ const Properties: FC<PropertiesProps> = ({
       .then(() => {
         if (appId) {
           const nodeResult = getCheckResults(appId).find(r => r.id === selectedNode.id)
-          const configErrors = nodeResult?.errors.filter(e => e.key !== 'notConnected') ?? []
+          const configErrors = nodeResult?.errors.filter((e: any) => e.key !== 'notConnected') ?? []
           if (configErrors.length) {
             message.error(configErrors[0].message)
             return
@@ -1161,6 +1165,11 @@ const Properties: FC<PropertiesProps> = ({
                                         hasAll={false}
                                         valueKey={config.valueKey}
                                         labelKey={config.labelKey}
+                                        size="small"
+                                      />
+                                      : config.type === 'activeMemoryConfig'
+                                      ? <ActiveMemoryConfig
+                                        activeMemoryConfig={activeMemoryConfig}
                                         size="small"
                                       />
                                       : config.type === 'variableList'
