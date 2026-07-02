@@ -1082,7 +1082,7 @@ class MemoryConfigService:
         if app_type == AppType.AGENT:
             return self._extract_memory_config_id_from_agent(config)
         elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-            return self._extract_memory_config_id_from_workflow(config)
+            return None, False
         elif app_type == AppType.MULTI_AGENT:
             # Multi-agent 暂不支持记忆配置提取
             logger.debug(f"多智能体应用暂不支持记忆配置提取: app_type={app_type}")
@@ -1168,63 +1168,3 @@ class MemoryConfigService:
                 f"Agent 配置中 memory_config_id 格式无效: error={str(e)}"
             )
             return None, False
-
-    def _extract_memory_config_id_from_workflow(
-            self,
-            config: dict
-    ) -> tuple[Optional[uuid.UUID], bool]:
-        """从 Workflow 应用配置中提取 memory_config_id
-        
-        扫描工作流节点，查找 MemoryRead 或 MemoryWrite 节点。
-        返回第一个找到的记忆节点的 config_id。
-        
-        Args:
-            config: Workflow 配置字典
-            
-        Returns:
-            Tuple[Optional[uuid.UUID], bool]: (memory_config_id, is_legacy_int)
-                - memory_config_id: 记忆配置ID，如果不存在或为旧格式则返回 None
-                - is_legacy_int: 是否检测到旧格式 int 数据
-        """
-        nodes = config.get("nodes", [])
-
-        for node in nodes:
-            node_type = node.get("type", "")
-
-            # 检查是否为记忆节点 (support both formats: memory-read/memory-write and MemoryRead/MemoryWrite)
-            if node_type.lower() in ["memoryread", "memorywrite", "memory-read", "memory-write"]:
-                config_id = node.get("config", {}).get("config_id")
-
-                if config_id:
-                    try:
-                        # 处理字符串、UUID 和 int（旧数据兼容）三种情况
-                        if isinstance(config_id, uuid.UUID):
-                            return config_id, False
-                        elif isinstance(config_id, str):
-                            return uuid.UUID(config_id), False
-                        elif isinstance(config_id, int):
-                            resolved = self._resolve_config_id_old(config_id)
-                            if resolved:
-                                logger.info(
-                                    f"Resolved workflow legacy config_id_old={config_id} to config_id={resolved}: "
-                                    f"node_id={node.get('id')}, node_type={node_type}"
-                                )
-                                return resolved, False
-                            logger.warning(
-                                f"未找到工作流记忆节点 config_id_old={config_id} 对应的配置，将使用工作空间默认配置: "
-                                f"node_id={node.get('id')}, node_type={node_type}"
-                            )
-                            return None, True
-                        else:
-                            logger.warning(
-                                f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
-                                f"node_type={node_type}, type={type(config_id)}"
-                            )
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"工作流记忆节点 config_id 格式无效: node_id={node.get('id')}, "
-                            f"node_type={node_type}, error={str(e)}"
-                        )
-
-        logger.debug("工作流配置中未找到记忆节点")
-        return None, False

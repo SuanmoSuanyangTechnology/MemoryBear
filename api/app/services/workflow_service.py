@@ -5393,6 +5393,7 @@ class WorkflowService:
             # 工作流引擎执行期间不需要 db，提前归还连接给连接池
             # execution 对象保持内存状态，事件处理时通过 self.db 懒重连写入
             # 写完后再调用 self.db.close() 归还连接
+            self.db.refresh(execution)
             self.db.close()
 
             async for event in execute_workflow_stream(
