@@ -13,10 +13,7 @@ MemoryWriteDispatcher — 记忆写入派发层
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.models.conversation_model import Message
+from typing import Any, List
 
 from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
@@ -512,56 +509,38 @@ async def ingest_workflow_messages(
 #
 # 调用链路：
 #   dispatch_flush_conversation (扫描待处理消息)
-#     ├── _resolve_release_memory_config_id (从 app_releases 解析 config_id)
+#     ├── _resolve_workspace_memory_config_id (按工作空间解析当前生效配置)
 #     └── dispatch_single_message [write_dispatcher] (构建上下文 + push_write_task + 推进 cursor)
 #           └── push_write_task (发 Celery 任务)
 # ──────────────────────────────────────────────
 
 
-def _resolve_release_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
-    """从应用当前发布版本的 config 中解析 memory_config_id。
-
-    查询链路：conversations.app_id → apps.current_release_id → app_releases.config["memory"]["memory_config_id"]
-    """
+def _resolve_workspace_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
+    """根据对话所属工作空间解析当前生效的记忆配置 ID。"""
     try:
         from sqlalchemy import select as sa_select
-        from app.models.app_model import App
-        from app.models.app_release_model import AppRelease
         from app.models.conversation_model import Conversation
         from app.services.memory_config_service import MemoryConfigService
 
         with get_db_context() as db:
             row = db.execute(
                 sa_select(
-                    App.id,
-                    App.type,
-                    App.current_release_id,
-                    AppRelease.config,
+                    Conversation.workspace_id,
                 )
                 .select_from(Conversation)
-                .join(App, App.id == Conversation.app_id)
-                .outerjoin(AppRelease, AppRelease.id == App.current_release_id)
                 .where(Conversation.id == conversation_id)
             ).one_or_none()
 
             if row is None:
                 return None
 
-            app_id, app_type, current_release_id, release_config = row
-
-            if not current_release_id:
+            (workspace_id,) = row
+            if not workspace_id:
                 return None
 
-            if not isinstance(release_config, dict) or not release_config:
-                return None
-
-            config_id, _ = MemoryConfigService(db).extract_memory_config_id(
-                app_type=str(app_type) if app_type else "",
-                config=release_config,
-            )
-            return config_id
+            return MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
     except Exception as e:
-        logger.error(f"[Dispatcher] 解析 release memory_config_id 异常: conv={conversation_id}, err={e}", exc_info=True)
+        logger.error(f"[Dispatcher] 解析工作空间记忆配置异常: conv={conversation_id}, err={e}", exc_info=True)
         return None
 
 
@@ -623,13 +602,12 @@ def dispatch_flush_conversation(conversation_id: str) -> int:
                 logger.info(f"[Dispatcher] Flush 无未写入消息，跳过: conv={conversation_id}")
                 return 0
 
-        # Step 2: 解析 memory_config_id
-        config_id = ""
-        release_config_id = _resolve_release_memory_config_id(conversation_id)
-        if not release_config_id:
-            logger.warning(f"[Dispatcher] Flush 未能解析 memory_config_id，跳过: conv={conversation_id}")
+        # Step 2: 解析工作空间当前生效记忆配置
+        workspace_config_id = _resolve_workspace_memory_config_id(conversation_id)
+        if not workspace_config_id:
+            logger.warning(f"[Dispatcher] Flush 未能解析工作空间记忆配置，跳过: conv={conversation_id}")
             return 0
-        config_id = str(release_config_id)
+        config_id = str(workspace_config_id)
 
         # Step 3: 逐条处理
         dispatched = 0

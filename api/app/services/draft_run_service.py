@@ -587,6 +587,7 @@ class AgentRunService:
             self,
             memory_config: dict | None,
             user_id,
+            workspace_id: uuid.UUID,
             storage_type,
             user_rag_memory_id
     ) -> tuple[list, bool]:
@@ -595,7 +596,7 @@ class AgentRunService:
 
         enabled = bool(memory_config and memory_config.get("enabled"))
         tool = create_long_term_memory_tool(
-            memory_config, user_id, storage_type, user_rag_memory_id,
+            memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
             db=self.db,
         )
         tools = [tool] if tool else []
@@ -805,7 +806,7 @@ class AgentRunService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.load_memory_config(
-                    memory_config, user_id, storage_type, user_rag_memory_id
+                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
@@ -1217,7 +1218,7 @@ class AgentRunService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.load_memory_config(
-                    memory_config, user_id, storage_type, user_rag_memory_id
+                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
@@ -3342,13 +3343,12 @@ class AgentRunService:
 
         # 4. 加载上下文（到父消息为止，不包含当前要重新生成的消息）
         conversation_id = str(original_msg.conversation_id)
-        max_history = agent_config.memory.get("max_history", 10) if agent_config.memory else 10
 
         # 使用封装的方法加载父消息之前的历史
         filtered_history = await self._load_history_before_message(
             conversation_id=original_msg.conversation_id,
             before_time=parent_msg.created_at,
-            max_history=max_history
+            max_history=settings.AGENT_MAX_HISTORY
         )
 
         # 5. 调用 LLM（复用现有 run 方法，传入过滤后的历史和文件）
@@ -3501,12 +3501,11 @@ class AgentRunService:
 
         # 4. 加载上下文
         conversation_id = str(original_msg.conversation_id)
-        max_history = agent_config.memory.get("max_history", 10) if agent_config.memory else 10
 
         filtered_history = await self._load_history_before_message(
             conversation_id=original_msg.conversation_id,
             before_time=parent_msg.created_at,
-            max_history=max_history
+            max_history=settings.AGENT_MAX_HISTORY
         )
 
         # 5. 流式调用 LLM

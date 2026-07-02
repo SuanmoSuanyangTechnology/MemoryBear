@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, AsyncGenerator
 from deprecated import deprecated
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_business_logger
@@ -254,7 +255,11 @@ class SharedChatService:
         # 添加长期记忆工具
         if memory:
             memory_config = config.get("memory", {})
-            memory_tool = create_long_term_memory_tool(memory_config, user_id)
+            memory_tool = create_long_term_memory_tool(
+                memory_config,
+                user_id,
+                release.app.workspace_id if release.app else None,
+            )
             if memory_tool:
                 tools.append(memory_tool)
 
@@ -294,17 +299,14 @@ class SharedChatService:
         )
 
         # 加载历史消息
-        history = []
-        memory_config = {"enabled": True, 'max_history': 10}
-        if memory_config.get("enabled"):
-            messages = self.conversation_service.get_messages(
-                conversation_id=conversation.id,
-                limit=memory_config.get("max_history", 10)
-            )
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in messages
-            ]
+        messages = self.conversation_service.get_messages(
+            conversation_id=conversation.id,
+            limit=settings.AGENT_MAX_HISTORY
+        )
+        history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
 
         # 调用 Agent
         result = await agent.chat(
@@ -384,8 +386,6 @@ class SharedChatService:
 
         if variables is None:
             variables = {}
-        # 兼容新旧字段名：使用 memory_config_id
-        memory_config = {"enabled": memory, "memory_config_id": "17", "max_history": 10}
 
         try:
             # 获取发布版本和配置
@@ -464,7 +464,11 @@ class SharedChatService:
             # 添加长期记忆工具
             if memory:
                 memory_config = config.get("memory", {})
-                memory_tool = create_long_term_memory_tool(memory_config, user_id)
+                memory_tool = create_long_term_memory_tool(
+                    memory_config,
+                    user_id,
+                    release.app.workspace_id if release.app else None,
+                )
                 if memory_tool:
                     tools.append(memory_tool)
 
@@ -505,17 +509,14 @@ class SharedChatService:
             )
 
             # 加载历史消息
-            history = []
-            memory_config = {"enabled": True, 'max_history': 10}
-            if memory_config.get("enabled"):
-                messages = self.conversation_service.get_messages(
-                    conversation_id=conversation.id,
-                    limit=memory_config.get("max_history", 10)
-                )
-                history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in messages
-                ]
+            messages = self.conversation_service.get_messages(
+                conversation_id=conversation.id,
+                limit=settings.AGENT_MAX_HISTORY
+            )
+            history = [
+                {"role": msg.role, "content": msg.content}
+                for msg in messages
+            ]
 
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation.id)}, ensure_ascii=False)}\n\n"
