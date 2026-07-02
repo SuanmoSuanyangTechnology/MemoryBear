@@ -353,6 +353,15 @@ class WritePipeline:
 
                 messages = [target_message]
 
+                # MCP 路径：追加空 assistant 占位消息，使 get_chunked_dialogs 内的
+                # prune_dataset 能配对出 (user, assistant) 并对 user 执行规整
+                if target_message.get("_mcp_pair_assistant"):
+                    messages.append({
+                        "role": "assistant",
+                        "content": "",
+                        "dialog_at": target_message.get("dialog_at", ""),
+                    })
+
                 # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
                 await self._preprocess_files(messages)
                 await self._preprocess_files(context_before_pruned)
