@@ -1,6 +1,6 @@
 """子问题 3 · 丢弃缓存：Redis 7天TTL，避免重复计算低分对"""
 import logging
-from app.aioRedis import get_thread_safe_redis
+from app.aioRedis import get_redis_connection
 
 logger = logging.getLogger(__name__)
 TTL_SECONDS = 7 * 24 * 3600  # 7 天
@@ -15,9 +15,7 @@ async def filter_discarded(end_user_id: str, candidates: list) -> list:
     """过滤掉近 7 天已评估过的低分对（批量 mget）"""
     if not candidates:
         return candidates
-    # get_thread_safe_redis：按 pid+线程+loop 绑定连接池，避免 --pool=threads 下
-    # 复用全局 client 触发 "Future attached to a different loop"。
-    redis = get_thread_safe_redis()
+    redis = await get_redis_connection()
     keys = [_cache_key(end_user_id, p.a_id, p.b_id) for p in candidates]
     results = await redis.mget(keys)
     return [p for p, cached in zip(candidates, results) if cached is None]
@@ -32,7 +30,7 @@ async def cache_discarded(end_user_id: str, discard_pool: list) -> None:
     """
     if not discard_pool:
         return
-    redis = get_thread_safe_redis()
+    redis = await get_redis_connection()
     pipe = redis.pipeline()
     for pair in discard_pool:
         key = _cache_key(end_user_id, pair.a_id, pair.b_id)
