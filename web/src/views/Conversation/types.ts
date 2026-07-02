@@ -8,6 +8,7 @@
  * Type definitions for Conversation
  */
 import type { ChatItem } from '@/components/Chat/types'
+import { type ButtonProps } from 'antd'
 
 /**
  * Conversation history item
@@ -72,4 +73,32 @@ export interface ReportMessageData {
   text_start_offset?: number;
   text_end_offset?: number;
   selected_text: string;
+}
+export interface StreamData {
+  message_id?: string;
+  user_message_id?: string;
+  file_id?: string;
+  execution_id: string;
+  node_id: string;
+  node_name: string;
+  content: string; conversation_id: string; audio_url?: string;
+  citations?: {
+    document_id: string;
+    file_name: string;
+    knowledge_id: string;
+    score: string;
+  }[];
+  error?: string;
+  suggested_questions?: string[];
+  rendered_content?: string;
+  form_fields?: {
+    id: string;
+    default_value?: string;
+  }[]
+  actions?: {
+    id: string;
+    label: string;
+    variant: ButtonProps['type'];
+  }[];
+  timeout_at?: number;
 }

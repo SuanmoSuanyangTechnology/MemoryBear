@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 10:16:43
+ * @Last Modified time: 2026-07-01 15:17:24
  */
 /**
  * Server-Sent Events (SSE) Stream Utility Module
@@ -183,21 +183,21 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
         const errorData = await response.json();
         const errorInfo = errorData.error || errorData.msg || i18n.t('common.serviceUpgrading');
         message.warning(errorInfo);
-        throw new Error(errorData);
+        throw new Error(JSON.stringify(errorData));
       case 400:
         const error = await response.json();
         const error400 = error.error || error.msg || 'Bad Request';
         message.warning(error400);
-        throw new Error(error);
+        throw new Error(JSON.stringify(error));
       case 403:
         const errors = await response.json();
         message.warning(i18n.t('common.permissionDenied'));
-        throw new Error(errors);
+        throw new Error(JSON.stringify(errors));
       case 504:
         const errorJson = await response.json();
         const errorMsg = errorJson.error || errorJson.msg || i18n.t('common.serverError');
         message.warning(errorMsg);
-        throw new Error(errorJson);
+        throw new Error(JSON.stringify(errorJson));
       case 401:
         if (url?.includes('/public')) {
           return message.warning(i18n.t('common.publicApiCannotRefreshToken'));
