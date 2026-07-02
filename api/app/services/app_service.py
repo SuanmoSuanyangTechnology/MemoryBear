@@ -284,8 +284,6 @@ class AppService:
         from app.models import ModelConfig
         from app.services.multi_agent_service import MultiAgentService
 
-        app = self._get_app_or_404(app_id)
-
         # 1. 检查多智能体配置是否存在
         service = MultiAgentService(self.db)
         multi_agent_config = service.get_config(app_id)
