@@ -1,13 +1,16 @@
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import User
+from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.schemas import conversation_schema
 from app.schemas.response_schema import ApiResponse
 from app.services.conversation_service import ConversationService
@@ -141,3 +144,81 @@ async def get_conversation_detail(
         workspace_id=current_user.current_workspace_id
     )
     return success(data=detail.model_dump(), msg="get conversation detail success")
+
+
+# ──────────────────────────────────────────────
+# API/MCP 工作记忆展示接口
+# ──────────────────────────────────────────────
+
+
+def _parse_dialog_at_to_ms(dialog_at: str | None) -> int | None:
+    """将 dialog_at（ISO 8601 字符串）解析为毫秒时间戳；无法解析时返回 None。"""
+    if not dialog_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(dialog_at)
+        return to_timestamp_ms(dt)
+    except (ValueError, TypeError):
+        return None
+
+
+@router.get("/{end_user_id}/sources", response_model=ApiResponse)
+def get_sources(
+        end_user_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """查询该用户通过 API/MCP 写入的记忆来源摘要。
+
+    每个来源（service_api / mcp）最多返回一条，包含消息总数和最后写入时间。
+    用户从未用过 API/MCP 时 items 为空数组。
+    """
+    memory_message_repo = MemoryMessageRepository(db)
+    sources = memory_message_repo.get_working_memory_sources(str(end_user_id))
+    items = [
+        {
+            "source": row["source"],
+            "message_count": row["message_count"],
+            "latest_at": to_timestamp_ms(row["latest_at"]),
+        }
+        for row in sources
+    ]
+    return success(data={"items": items}, msg="查询成功")
+
+
+@router.get("/{end_user_id}/source_messages", response_model=ApiResponse)
+def get_source_messages(
+        end_user_id: uuid.UUID,
+        source: str = Query(..., description="来源：service_api 或 mcp"),
+        limit: int = Query(default=20, ge=1, le=100, description="返回条数上限"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """按来源获取最近 N 条消息，从旧到新排列，形成连贯对话流。
+
+    Args:
+        end_user_id: 终端用户 UUID
+        source: service_api 或 mcp
+        limit: 返回条数上限（默认 20，最大 100）
+    """
+    allowed_sources = {"service_api", "mcp"}
+    if source not in allowed_sources:
+        return success(data={"items": [], "total": 0, "source": source}, msg="unsupported source")
+
+    memory_message_repo = MemoryMessageRepository(db)
+    rows, total = memory_message_repo.list_recent_messages_by_source(
+        end_user_id=str(end_user_id),
+        source=source,
+        limit=limit,
+    )
+    items = [
+        {
+            "role": m.role,
+            "content": m.content,
+            "message_seq": m.message_seq,
+            "created_at": to_timestamp_ms(m.created_at),
+            "dialog_at": _parse_dialog_at_to_ms(m.dialog_at),
+        }
+        for m in rows
+    ]
+    return success(data={"items": items, "total": total, "source": source}, msg="查询成功")
