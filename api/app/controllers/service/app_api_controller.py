@@ -10,7 +10,7 @@ from starlette.responses import StreamingResponse
 from app.services.file_storage_service import (
     FileStorageService,
     get_file_storage_service,
-    upload_v1_app_file,
+    upload_workspace_file,
 )
 from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
@@ -110,8 +110,13 @@ def _variables_from_release(release: AppRelease) -> list:
     if release.type == AppType.AGENT:
         cfg = agent_config_4_app_release(release)
         cfg = enrich_agent_config(cfg)
-        variables = app_schema.AgentConfig.model_validate(cfg).variables
-        return [v.model_dump(mode="json") for v in variables]
+        variables = cfg.variables or config.get("variables") or []
+        return [
+            v.model_dump(mode="json")
+            if hasattr(v, "model_dump")
+            else app_schema.VariableDefinition.model_validate(v).model_dump(mode="json")
+            for v in variables
+        ]
     if release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         return WorkflowService.get_start_node_variables(config)
     if release.type == AppType.MULTI_AGENT:
@@ -541,7 +546,7 @@ async def upload_chat_file(
     )
 
     try:
-        upload_result = await upload_v1_app_file(
+        upload_result = await upload_workspace_file(
             db=db,
             tenant_id=workspace.tenant_id,
             workspace_id=api_key_auth.workspace_id,
