@@ -148,6 +148,7 @@
 - 自然语言输出字段的语言必须跟随各自输入内容的主要语言。
 - `assistant_memory_hint` 必须跟随 `Assistant.msg` 的主要语言。
 - `processed_user_msg` 必须跟随 `User.msg` 去除文件摘要标签后的主要语言。
+- `assistant_memory_type` 是固定枚举，必须保持英文枚举值，不要翻译。
 
 示例 1
 输入：
@@ -409,6 +410,7 @@ Output requirements:
 - The language of each natural-language output field must follow the primary language of the corresponding input content.
 - `assistant_memory_hint` must follow the primary language of `Assistant.msg`.
 - `processed_user_msg` must follow the primary language of `User.msg` after removing file-summary tags.
+- `assistant_memory_type` is a fixed enum and must keep the English enum value; do not translate it.
 
 Few-shot Example 1
 Input:
