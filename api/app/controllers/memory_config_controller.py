@@ -236,7 +236,8 @@ async def start_reflection_configs(
             "baseline": result.baseline,
             "reflection_model_id": result.reflection_model_id,
             "memory_verify": result.memory_verify,
-            "quality_assessment": result.quality_assessment
+            "quality_assessment": result.quality_assessment,
+            "is_default": result.is_default
         }
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
         return success(data=reflection_config, msg="反思配置查询成功")
