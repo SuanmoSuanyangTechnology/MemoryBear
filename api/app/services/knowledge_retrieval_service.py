@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearRerank
+from app.core.models import RedBearLLM, RedBearRerank
 from app.core.models.base import RedBearModelConfig
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
@@ -27,7 +27,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
     ElasticSearchVectorIndexOps,
 )
-from app.models import knowledge_model, knowledgeshare_model
+from app.models import ModelType, knowledge_model, knowledgeshare_model
 from app.models.models_model import ModelApiKey
 from app.repositories import knowledge_repository
 from app.repositories.tool_repository import ToolRepository
@@ -37,7 +37,7 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest, Kn
 from app.services import knowledge_service, knowledgeshare_service
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -1384,15 +1384,32 @@ class KnowledgeRetrievalService:
             db: Session,
             knowledge_id: uuid.UUID,
             tenant_id: uuid.UUID | None,
-    ) -> Base | None:
+    ) -> RedBearLLM | None:
         knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
         if not knowledge or not knowledge.llm_id:
+            return None
+
+        try:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=knowledge.llm_id)
+        except BusinessException:
             return None
 
         api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id, tenant_id=tenant_id)
         if not api_key:
             return None
-        return cls._build_chat_model(api_key)
+
+        # 参数折叠进 RedBearModelConfig.extra_params（与 knowledge 节点 auto 模式、LLM 节点一致）。
+        # 此兜底路径用知识库 llm_id、无 completion_params，保留原默认 temperature=0 行为。
+        rb_config = RedBearModelConfig(
+            model_name=api_key.model_name,
+            provider=api_key.provider,
+            api_key=api_key.api_key,
+            base_url=api_key.api_base,
+            is_omni=api_key.is_omni,
+            capability=api_key.capability or [],
+            extra_params={"temperature": 0},
+        )
+        return RedBearLLM(rb_config, type=ModelType(config.type))
 
     @staticmethod
     def _get_common_metadata_defs(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> dict[str, dict]:

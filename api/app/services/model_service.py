@@ -556,6 +556,12 @@ class ModelApiKeyService:
 
         from premium.platform_admin.models import TenantSpeedBearBinding
 
+        if not model_config.is_active:
+            raise BusinessException(
+                "当前模型已禁用，无法调用",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
         binding = (
             db.query(TenantSpeedBearBinding)
             .filter(TenantSpeedBearBinding.tenant_id == tenant_id)
@@ -814,6 +820,9 @@ class ModelApiKeyService:
         """获取可用的API Key（根据负载均衡策略）"""
         model_config = ModelConfigRepository.get_by_id(db, model_config_id)
         if not model_config:
+            return None
+
+        if not model_config.is_active:
             return None
 
         if ModelApiKeyService._is_public_speedbear_model(model_config):

@@ -21,6 +21,7 @@ import { cookieUtils } from '@/utils/request';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
+import TextVirtualList from './TextVirtualList';
 
 // 设置 pdf.js worker - 使用 CDN 避免 Vite 打包动态 import 问题
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
@@ -550,13 +551,9 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         </div>
       )}
 
-      {/* 文本预览 */}
+      {/* 文本预览 - react-window 按行虚拟滚动 */}
       {isTextFile() && !error && !loading && (
-        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
-          <pre className="rb:whitespace-pre-wrap rb:text-sm rb:text-gray-800 rb:font-mono">
-            {textContent}
-          </pre>
-        </div>
+        <TextVirtualList content={textContent} />
       )}
 
       {/* Word 预览 */}

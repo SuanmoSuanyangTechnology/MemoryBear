@@ -5,7 +5,7 @@
 (`pipeline_snapshot.upload_stage_snapshot`)，自管独立前缀 `reflection_snapshot/`。
 
 受 env 变量 REFLECTION_SNAPSHOT_ENABLED 控制（默认 false），关闭时全部方法 no-op。
-与写链路 PIPELINE_SNAPSHOT_ENABLED 相互独立。
+与写链路 EXTRACT_SNAPSHOT_ENABLED 相互独立。
 """
 
 from __future__ import annotations
