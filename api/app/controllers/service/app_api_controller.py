@@ -1,12 +1,17 @@
 """App 服务接口 - 基于 API Key 认证"""
 import json
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, Body, Query
+from fastapi import APIRouter, Depends, Request, Body, Query, File, UploadFile, HTTPException
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from app.services.file_storage_service import (
+    FileStorageService,
+    get_file_storage_service,
+    upload_workspace_file,
+)
 from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -14,19 +19,22 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db, get_db_context
 from app.models.app_model import AppType
+from app.models.workspace_model import Workspace
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas import AppChatRequest, conversation_schema
+from app.schemas import AppChatRequest, app_schema, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
+from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
-from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
+from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import get_app_service, AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
 from app.services.intervention_registry import submit_intervention
+from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 
@@ -66,6 +74,12 @@ async def list_apps():
 #     return success(data={"received": True}, msg="消息已接收")
 
 
+def _get_app_id(api_key_auth: ApiKeyAuth) -> uuid.UUID:
+    if not api_key_auth.resource_id:
+        raise BusinessException("API Key 未绑定应用", BizCode.BAD_REQUEST)
+    return api_key_auth.resource_id
+
+
 def _checkAppConfig(release: AppRelease):
     if release.type == AppType.AGENT:
         if not release.config:
@@ -78,6 +92,81 @@ def _checkAppConfig(release: AppRelease):
             raise BusinessException("工作流应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
     else:
         raise BusinessException("不支持的应用类型", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+
+def _parse_release_config(release: AppRelease) -> dict:
+    config = release.config or {}
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            config = {}
+    return config if isinstance(config, dict) else {}
+
+
+def _get_standard_variables(variables: list, app_type: AppType) -> list:
+    """统一 Agent / Workflow 变量输出格式。"""
+    is_agent = app_type in (AppType.AGENT, AppType.MULTI_AGENT)
+    result = []
+    for raw in variables:
+        v = raw.model_dump(mode="json") if hasattr(raw, "model_dump") else dict[Any, Any](raw)
+        if is_agent:
+            ui_type = v.get("type", "string")
+            data_type = "number" if ui_type == "number" else "string"
+        else:
+            ui_type = v.get("ui_type") or ("number" if v.get("type") == "number" else "text-input")
+            data_type = v.get("type", "string")
+        result.append({
+            "name": v["name"],
+            "display_name": v.get("display_name"),
+            "type": data_type,
+            "ui_type": ui_type,
+            "required": v.get("required", False),
+            "description": v.get("description"),
+            "max_length": v.get("max_length"),
+            "default": None if is_agent else v.get("default"),
+            "options": None if is_agent else v.get("options"),
+            "allowed_file_types": None if is_agent else v.get("allowed_file_types"),
+            "max_file_count": None if is_agent else v.get("max_file_count"),
+            "max_file_size_mb": None if is_agent else v.get("max_file_size_mb"),
+        })
+    return result
+
+
+def _variables_from_release(release: AppRelease) -> list:
+    """从当前发布版本快照提取应用变量定义（与公开分享 /config 接口逻辑一致）。"""
+    config = _parse_release_config(release)
+    if release.type == AppType.AGENT:
+        cfg = agent_config_4_app_release(release)
+        cfg = enrich_agent_config(cfg)
+        variables = cfg.variables or config.get("variables") or []
+    elif release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        variables = WorkflowService.get_start_node_variables(config)
+    elif release.type == AppType.MULTI_AGENT:
+        variables = config.get("variables") or []
+    else:
+        raise BusinessException(f"不支持的应用类型: {release.type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+    return _get_standard_variables(variables, release.type)
+
+
+@router.get("/variable", summary="获取应用变量配置")
+@require_api_key(scopes=["app"])
+async def get_app_variables(
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        app_service: Annotated[AppService, Depends(get_app_service)] = None,
+):
+    """获取 API Key 绑定应用的变量定义列表（来自当前发布版本的 config 快照）。"""
+    app_id = _get_app_id(api_key_auth)
+    workspace_id = api_key_auth.workspace_id
+
+    app_service.get_app(app_id, workspace_id)
+    release = app_service.get_current_release(app_id=app_id, workspace_id=workspace_id)
+    if not release:
+        raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
+
+    return success(data=_variables_from_release(release))
 
 
 @router.post("/chat")
@@ -450,4 +539,106 @@ async def submit_human_intervention_api(
         "node_id": node_id,
         "action_id": action_id,
         "form_data": form_data,
+    })
+
+
+@router.post("/files", response_model=ApiResponse, summary="AI 对话文件上传")
+@require_api_key(scopes=["app"])
+async def upload_chat_file(
+        request: Request,
+        file: UploadFile = File(...),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """
+    上传文件到存储后端，供 /chat 接口多模态对话使用。
+
+    - 入参: multipart/form-data，字段 file
+    - 出参: {"file_id": "...", "file_key": "..."}
+    - 在 /chat 请求中通过 files 字段引用，例如:
+      {"type": "image", "transfer_method": "local_file", "upload_file_id": "<file_id>"}
+    """
+    app_id = _get_app_id(api_key_auth)
+
+    workspace = db.query(Workspace).filter(Workspace.id == api_key_auth.workspace_id).first()
+    if not workspace:
+        raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+
+    logger.info(
+        f"V1 app file upload: app_id={app_id}, "
+        f"workspace_id={api_key_auth.workspace_id}, filename={file.filename}"
+    )
+
+    try:
+        upload_result = await upload_workspace_file(
+            db=db,
+            tenant_id=workspace.tenant_id,
+            workspace_id=api_key_auth.workspace_id,
+            file=file,
+            storage_service=storage_service,
+        )
+    except HTTPException as exc:
+        logger.error(f"Storage upload failed: {exc}")
+        raise
+
+    logger.info(f"File uploaded to storage: file_key={upload_result['file_key']}")
+    logger.info(
+        f"File upload successful: {file.filename} (file_id: {upload_result['file_id']})"
+    )
+
+    return success(data=upload_result, msg="File upload successful")
+
+
+@router.get("/messages/{message_id}/suggested", summary="获取消息预制问题")
+@require_api_key(scopes=["app"])
+async def get_message_suggested_questions_v1(
+        message_id: uuid.UUID,
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+):
+    """获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。"""
+    app_id = _get_app_id(api_key_auth)
+    logger.info(
+        f"V1 get message suggested questions - message_id: {message_id}, "
+        f"app_id: {app_id}, workspace: {api_key_auth.workspace_id}"
+    )
+
+    suggested_questions = conversation_service.get_v1_message_suggested_questions(
+        app_id=app_id,
+        workspace_id=api_key_auth.workspace_id,
+        message_id=message_id,
+    )
+    return success(data=suggested_questions)
+
+
+@router.get("/info", summary="获取应用基本信息")
+@require_api_key(scopes=["app"])
+async def get_app_basic_info_v1(
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        app_service: Annotated[AppService, Depends(get_app_service)] = None,
+        version: uuid.UUID | None = Query(None, description="发布版本 ID，不传则使用当前生效版本"),
+):
+    """获取 API Key 绑定应用的基本信息（来自发布版本快照）。"""
+    app_id = _get_app_id(api_key_auth)
+    workspace_id = api_key_auth.workspace_id
+
+    app_service.get_app(app_id, workspace_id)
+    if version is not None:
+        release = app_service.get_release_by_id(app_id, version)
+    else:
+        release = app_service.get_current_release(app_id=app_id, workspace_id=workspace_id)
+        if not release:
+            raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
+
+    return success(data={
+        "app_id": str(release.app_id),
+        "name": release.name,
+        "description": release.description,
+        "icon": release.icon,
+        "type": release.type,
     })
