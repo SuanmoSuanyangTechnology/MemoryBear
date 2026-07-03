@@ -1710,6 +1710,7 @@ def write_message_task(
         language: str = "zh",
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",  # 任务执行时间
+        source: str = "",  # 写入来源（agent/service_api/mcp/workflow）
         # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
         messages: Optional[List[dict]] = None,
         storage_type: str = "neo4j",
@@ -1795,6 +1796,7 @@ def write_message_task(
             language=language,
             skip_cursor_advance=skip_cursor_advance,
             dispatch_at=dispatch_at,
+            source=source,
         )
         return {"status": result.status, "extraction": result.extraction}
 
