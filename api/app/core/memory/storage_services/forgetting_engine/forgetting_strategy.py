@@ -541,22 +541,17 @@ class ForgettingStrategy:
             LLM 客户端实例，如果无法获取则返回 None
         """
         try:
-            from app.repositories.memory_config_repository import MemoryConfigRepository
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+            from app.services.memory_config_service import MemoryConfigService
+
+            memory_config = MemoryConfigService(db).load_memory_config(config_id=config_id)
+            llm_client = ModelClientMixin.get_llm_client(
+                db,
+                memory_config.llm_model_id,
+                tenant_id=memory_config.tenant_id,
+            )
             
-            # 从数据库读取配置
-            repository = MemoryConfigRepository()
-            db_config = repository.get_by_id(db, config_id)
-            
-            if db_config is None or db_config.llm_id is None:
-                logger.warning(f"配置 {config_id} 不存在或未设置 llm_id")
-                return None
-            
-            # 创建 LLM 客户端
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client(str(db_config.llm_id))
-            
-            logger.info(f"成功获取 LLM 客户端: config_id={config_id}, llm_id={db_config.llm_id}")
+            logger.info(f"成功获取 LLM 客户端: config_id={config_id}, llm_id={memory_config.llm_model_id}")
             return llm_client
             
         except Exception as e:

@@ -74,6 +74,7 @@ class RetrievalParams:
     top_k: int
     top_n: int
     retrieve_type: RetrieveType
+    rerank_score_threshold: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -398,6 +399,26 @@ class KnowledgeRetrievalService:
         )
 
     @staticmethod
+    def _resolve_rerank_score_threshold(
+            request: KnowledgeRetrievalRequest,
+            config: KnowledgeBaseConfig | None = None,
+    ) -> float:
+        explicit_fields = config.model_fields_set if config else set()
+        if (
+                config
+                and "rerank_score_threshold" in explicit_fields
+                and config.rerank_score_threshold is not None
+        ):
+            return config.rerank_score_threshold
+        if config and "vector_similarity_weight" in explicit_fields:
+            return config.vector_similarity_weight
+        if request.rerank_score_threshold is not None:
+            return request.rerank_score_threshold
+        if request.vector_similarity_weight is not None:
+            return request.vector_similarity_weight
+        return 0.1
+
+    @staticmethod
     def _build_retrieval_params(
             request: KnowledgeRetrievalRequest,
             config: KnowledgeBaseConfig | None = None,
@@ -415,6 +436,7 @@ class KnowledgeRetrievalService:
             if config and "vector_similarity_weight" in explicit_fields
             else request.vector_similarity_weight
         )
+        rerank_score_threshold = KnowledgeRetrievalService._resolve_rerank_score_threshold(request, config)
         top_n = max(top_k, request.top_n or top_k)
         return RetrievalParams(
             similarity_threshold=similarity_threshold,
@@ -422,6 +444,7 @@ class KnowledgeRetrievalService:
             top_k=top_k,
             top_n=top_n,
             retrieve_type=retrieve_type,
+            rerank_score_threshold=rerank_score_threshold,
         )
 
     @classmethod
@@ -756,6 +779,11 @@ class KnowledgeRetrievalService:
             docs=unique_chunks,
             top_k=target.params.top_k,
         )
+        chunks = [
+            chunk
+            for chunk in chunks
+            if (chunk.metadata or {}).get("score", 0) > target.params.rerank_score_threshold
+        ]
         if log_id:
             logger.info(
                 "[Retrieval] target_done %s",
@@ -865,7 +893,7 @@ class KnowledgeRetrievalService:
             used_rerank: bool,
     ) -> float:
         if used_rerank:
-            return request.rerank_score_threshold or request.vector_similarity_weight or 0.1
+            return KnowledgeRetrievalService._resolve_rerank_score_threshold(request)
 
         retrieve_types = {target.params.retrieve_type for target in targets}
         if retrieve_types == {RetrieveType.PARTICIPLE}:
@@ -985,7 +1013,7 @@ class KnowledgeRetrievalService:
 
         logger.debug(f"[rerank]rerank_id:{request.rerank_id}, returned {len(reranked_chunks)} docs")
 
-        rerank_score_threshold = request.rerank_score_threshold or request.vector_similarity_weight or 0.1
+        rerank_score_threshold = cls._resolve_rerank_score_threshold(request)
 
         filtered_chunks = [
             chunk

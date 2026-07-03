@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 
 from app.repositories.neo4j.community_repository import CommunityRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.memory_config_schema import MemoryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -81,18 +82,19 @@ class LabelPropagationEngine:
     def __init__(
         self,
         connector: Neo4jConnector,
-        llm_model_id: Optional[str] = None,
-        embedding_model_id: Optional[str] = None,
+        memory_config: MemoryConfig,
         language: str = "zh",
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
-        self.llm_model_id = llm_model_id
-        self.embedding_model_id = embedding_model_id
+        # memory_config 打包了 tenant_id 与各 model_id（同源加载，不会漏传 tenant）。
+        # MemoryConfig 是 frozen dataclass（纯值），可安全跨 db 会话/进程边界持有。
+        self.memory_config = memory_config
         self.language = language
         # 缓存客户端实例，避免重复初始化
         self._llm_client = None
         self._embedder_client = None
+
 
     # ──────────────────────────────────────────────────────────────────────────
     # 公开接口
@@ -528,7 +530,7 @@ class LabelPropagationEngine:
             """准备单个社区的数据和 prompt"""
             try:
                 if not force:
-                    check_embedding = bool(self.embedding_model_id)
+                    check_embedding = bool(self.memory_config.embedding_model_id)
                     if await self.repo.is_community_complete(cid, end_user_id, check_embedding=check_embedding):
                         return None
 
@@ -551,7 +553,7 @@ class LabelPropagationEngine:
 
                 # 准备 LLM prompt（如果配置了 LLM）
                 prompt = None
-                if self.llm_model_id:
+                if self.memory_config.llm_model_id:
                     # P4：只取 Top-MAX_MEMBERS_FOR_PROMPT 成员参与 prompt，防止超大社区超出 LLM 输入上限
                     prompt_members = sorted_members[:MAX_MEMBERS_FOR_PROMPT]
                     entity_list_str = "\n".join(self._build_entity_lines(prompt_members))
@@ -627,11 +629,11 @@ class LabelPropagationEngine:
             return
 
         # --- 阶段2：批量调用 LLM 生成 name 和 summary ---
-        if self.llm_model_id:
+        if self.memory_config.llm_model_id:
             llm_client = self._get_llm_client()
             if not llm_client:
                 logger.warning(
-                    f"[Clustering] LLM 已配置（model_id={self.llm_model_id}）但客户端初始化失败，"
+                    f"[Clustering] LLM 已配置（model_id={self.memory_config.llm_model_id}）但客户端初始化失败，"
                     f"将跳过社区元数据的 LLM 富化。请检查 model_id 是否正确或数据库连接是否正常。"
                 )
             if llm_client:
@@ -639,22 +641,20 @@ class LabelPropagationEngine:
                 
                 if prompts_to_process:
                     logger.info(f"[Clustering] 批量调用 LLM 生成 {len(prompts_to_process)} 个社区元数据")
-                    
-                    # LLM 并发限流：避免大量社区同时调用触发 LLM 侧限流
-                    llm_sem = asyncio.Semaphore(5)
 
                     async def _call_llm(idx: int, meta: Dict) -> tuple:
-                        """单个 LLM 调用（受 Semaphore 保护）"""
-                        async with llm_sem:
-                            try:
-                                response = await llm_client.chat([{"role": "user", "content": meta["prompt"]}])
-                                text = response.content if hasattr(response, "content") else str(response)
-                                return (idx, text, None)
-                            except Exception as e:
-                                logger.warning(f"[Clustering] 社区 {meta['community_id']} LLM 生成失败: {e}")
-                                return (idx, None, e)
+                        """单个 LLM 调用"""
+                        try:
+                            response = await llm_client.ainvoke(
+                                [{"role": "user", "content": meta["prompt"]}],
+                                config={"callbacks": []},
+                            )
+                            text = response.content
+                            return (idx, text, None)
+                        except Exception as e:
+                            logger.warning(f"[Clustering] 社区 {meta['community_id']} LLM 生成失败: {e}")
+                            return (idx, None, e)
                     
-                    # 并发调用所有 LLM 请求（最多 5 个同时进行）
                     llm_results = await asyncio.gather(
                         *[_call_llm(idx, meta) for idx, meta in prompts_to_process],
                         return_exceptions=True
@@ -682,18 +682,18 @@ class LabelPropagationEngine:
                     logger.info(f"[Clustering] LLM 批量生成完成")
 
         # --- 阶段3：批量生成 summary_embedding ---
-        if self.embedding_model_id:
+        if self.memory_config.embedding_model_id:
             embedder = self._get_embedder_client()
             if not embedder:
                 logger.warning(
-                    f"[Clustering] Embedding 已配置（model_id={self.embedding_model_id}）但客户端初始化失败，"
+                    f"[Clustering] Embedding 已配置（model_id={self.memory_config.embedding_model_id}）但客户端初始化失败，"
                     f"将跳过社区摘要的向量化。请检查 model_id 是否正确或数据库连接是否正常。"
                 )
             if embedder:
                 try:
                     summaries = [m["summary"] for m in metadata_list]
                     logger.info(f"[Clustering] 批量生成 {len(summaries)} 个 summary embedding")
-                    embeddings = await embedder.response(summaries)
+                    embeddings = await embedder.aembed_documents(summaries)
                     for i, meta in enumerate(metadata_list):
                         meta["summary_embedding"] = embeddings[i] if i < len(embeddings) else None
                     logger.info(f"[Clustering] Embedding 批量生成完成")
@@ -723,25 +723,40 @@ class LabelPropagationEngine:
                 logger.error(f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据失败")
             else:
                 logger.info(f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据成功")
-
     def _get_llm_client(self):
-        """获取或创建 LLM 客户端（单例模式）"""
-        if self._llm_client is None and self.llm_model_id:
+        """获取或创建 LLM 客户端（单例缓存）。
+
+        统一经 ModelClientMixin 获取；model_id 与 tenant_id 均取自同一个
+        memory_config（同源，杜绝漏传 tenant）。
+
+        保留这层包装的原因：mixin 只管"用 db + UUID 造客户端"，这里额外承担：
+        1. 借 get_db_context() 开短连接（引擎只持有 Neo4j connector）；
+        2. 单例缓存，避免同一 engine 复用时重复查配置 + 重建客户端。
+        """
+        if self._llm_client is None:
             from app.db import get_db_context
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
             with get_db_context() as db:
-                self._llm_client = MemoryClientFactory(db).get_llm_client(self.llm_model_id)
-            logger.info(f"[Clustering] LLM 客户端初始化完成（单例）: model_id={self.llm_model_id}")
+                self._llm_client = ModelClientMixin.get_llm_client(
+                    db,
+                    self.memory_config.llm_model_id,
+                    tenant_id=self.memory_config.tenant_id,
+                )
+            logger.info(f"[Clustering] LLM 客户端初始化完成（单例）: model_id={self.memory_config.llm_model_id}")
         return self._llm_client
 
     def _get_embedder_client(self):
-        """获取或创建 Embedder 客户端（单例模式）"""
-        if self._embedder_client is None and self.embedding_model_id:
+        """获取或创建 Embedder 客户端（单例缓存）。同 _get_llm_client。"""
+        if self._embedder_client is None:
             from app.db import get_db_context
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
             with get_db_context() as db:
-                self._embedder_client = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
-            logger.info(f"[Clustering] Embedder 客户端初始化完成（单例）: model_id={self.embedding_model_id}")
+                self._embedder_client = ModelClientMixin.get_embedding_client(
+                    db,
+                    self.memory_config.embedding_model_id,
+                    tenant_id=self.memory_config.tenant_id,
+                )
+            logger.info(f"[Clustering] Embedder 客户端初始化完成（单例）: model_id={self.memory_config.embedding_model_id}")
         return self._embedder_client
 
     @staticmethod

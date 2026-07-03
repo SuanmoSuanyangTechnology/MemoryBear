@@ -176,8 +176,8 @@ async def save_dialog_and_statements_to_neo4j(
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
-    只负责数据写入，不触发聚类。聚类由调用方在写入成功后通过
-    _trigger_clustering_sync() 显式触发。
+    只负责数据写入，不触发聚类。聚类由写入管线在写入成功后通过 Celery
+    任务 run_incremental_clustering 异步触发。
 
     Args:
         dialogue_nodes: List of DialogueNode objects to save
@@ -454,53 +454,3 @@ async def save_dialog_and_statements_to_neo4j(
         print(f"Neo4j integration error: {e}")
         print("Continuing without database storage...")
         return False
-
-
-async def _trigger_clustering_sync(
-        entity_nodes: List,
-        llm_model_id: Optional[str] = None,
-        embedding_model_id: Optional[str] = None,
-) -> None:
-    """
-    同步等待聚类完成，避免与其他 LLM 任务并发冲突。
-    """
-    if not entity_nodes:
-        return
-
-    clustering_enabled = os.getenv("CLUSTERING_ENABLED", "true").lower() != "false"
-    if not clustering_enabled:
-        logger.info("[Clustering] 聚类已禁用（CLUSTERING_ENABLED=false），跳过聚类触发")
-        return
-
-    end_user_id = entity_nodes[0].end_user_id
-    new_entity_ids = [e.id for e in entity_nodes]
-    logger.info(f"[Clustering] 准备触发聚类（同步），实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
-    await _trigger_clustering(new_entity_ids, end_user_id, llm_model_id=llm_model_id,
-                              embedding_model_id=embedding_model_id)
-
-
-async def _trigger_clustering(
-        new_entity_ids: List[str],
-        end_user_id: str,
-        llm_model_id: Optional[str] = None,
-        embedding_model_id: Optional[str] = None,
-) -> None:
-    """
-    聚类触发函数，自动判断全量初始化还是增量更新。
-    """
-    connector = None
-    try:
-        from app.core.memory.storage_services.clustering_engine import LabelPropagationEngine
-        logger.info(f"[Clustering] 开始聚类，end_user_id={end_user_id}, 实体数={len(new_entity_ids)}")
-        connector = Neo4jConnector()
-        engine = LabelPropagationEngine(connector, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id)
-        await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
-        logger.info(f"[Clustering] 聚类完成，end_user_id={end_user_id}")
-    except Exception as e:
-        logger.error(f"[Clustering] 聚类触发失败: {e}", exc_info=True)
-    finally:
-        if connector:
-            try:
-                await connector.close()
-            except Exception:
-                pass

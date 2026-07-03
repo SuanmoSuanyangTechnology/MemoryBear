@@ -150,6 +150,9 @@ def workflow_config_4_app_release(release: AppRelease) -> WorkflowConfig:
     config = WorkflowConfig(
         id=config_dict.get("id"),
         app_id=release.app_id,
+        # 必须回填 workflow_type，否则 _supports_conversation 会因属性为 None 而误判为 False，
+        # 导致走 release 配置的聊天（如 apikey /v1/app/chat）永远跳过标注命中检查。
+        workflow_type=config_dict.get("workflow_type", "workflow"),
         nodes=config_dict.get("nodes", []),
         edges=config_dict.get("edges", []),
         variables=config_dict.get("variables", []),
