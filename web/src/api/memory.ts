@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 10:32:30
+ * @Last Modified time: 2026-07-03 11:08:34
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -248,14 +248,25 @@ export const getSemanticsMemory = (end_user_id: string) => {
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
   return request.post(`/memory/explicit-memory/details`, data)
 }
+// Work Memory Conversations
 export const getConversations = (end_user_id: string, page = 1, pagesize = 20) => {
   return request.get(`/memory/work/${end_user_id}/conversations`, { page, pagesize })
 }
+// Work Memory Conversation Messages
 export const getConversationMessages = (end_user_id: string, conversation_id: string) => {
   return request.get(`/memory/work/${end_user_id}/messages`, { conversation_id })
 }
+// Work Memory Conversation Detail
 export const getConversationDetail = (end_user_id: string, conversation_id: string) => {
   return request.get(`/memory/work/${end_user_id}/detail`, { conversation_id })
+}
+// Work Memory API/MCP Data Sources
+export const getApiMcpDataSources = (end_user_id: string) => {
+  return request.get(`/memory/work/${end_user_id}/sources`)
+}
+// Work Memory API/MCP Messages Record
+export const getApiMcpMessages = (end_user_id: string, data: { source: 'mcp' | 'service_api'; limit: number; }) => {
+  return request.get(`/memory/work/${end_user_id}/source_messages`, data)
 }
 export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
   return request.post(`/memory/forget-memory/trigger`, data)

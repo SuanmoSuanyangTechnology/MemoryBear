@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:11:46
+ * @Last Modified time: 2026-07-02 11:36:50
  */
 /**
  * Memory Insight Component
@@ -25,7 +25,7 @@ import type { MemoryInsightRef } from '../types'
 /**
  * Insight data structure
  */
-interface Data {
+export interface Data {
   memory_insight?: string;
   behavior_pattern?: string;
   key_findings?: string[];
@@ -33,6 +33,8 @@ interface Data {
   updated_at?: number;
   is_cached: boolean;
 }
+/** Insight keys rendered in the right column, in display order. */
+export const INSIGHT_KEYS = ['memory_insight', 'key_findings', 'behavior_pattern', 'growth_trajectory'] as const
 
 const MemoryInsight = forwardRef<MemoryInsightRef, { className?: string; }>(({ className }, ref) => {
   const { t } = useTranslation()
@@ -72,7 +74,7 @@ const MemoryInsight = forwardRef<MemoryInsightRef, { className?: string; }>(({ c
         ? <Skeleton />
         : Object.keys(data).length > 0
         ? <div>
-            {['memory_insight', 'key_findings', 'behavior_pattern', 'growth_trajectory'].map((key, index) => {
+            {INSIGHT_KEYS.map((key, index) => {
               const value = data[key as keyof Data];
               if (Array.isArray(value) && value.length > 0 || (!Array.isArray(value) && value)) {
                 return (
