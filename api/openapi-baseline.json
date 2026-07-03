@@ -26,6 +26,45 @@
         }
       }
     },
+    "/v1/app/variable": {
+      "get": {
+        "tags": [
+          "V1 - App API"
+        ],
+        "summary": "获取应用变量配置",
+        "description": "获取 API Key 绑定应用的变量定义列表（来自当前发布版本的 config 快照）。",
+        "operationId": "get_app_variables_v1_app_variable_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/app/chat": {
       "post": {
         "tags": [
@@ -241,6 +280,159 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/files": {
+      "post": {
+        "tags": [
+          "V1 - App API"
+        ],
+        "summary": "AI 对话文件上传",
+        "description": "上传文件到存储后端，供 /chat 接口多模态对话使用。\n\n- 入参: multipart/form-data，字段 file\n- 出参: {\"file_id\": \"...\", \"file_key\": \"...\"}\n- 在 /chat 请求中通过 files 字段引用，例如:\n  {\"type\": \"image\", \"transfer_method\": \"local_file\", \"upload_file_id\": \"<file_id>\"}",
+        "operationId": "upload_chat_file_v1_app_files_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_chat_file_v1_app_files_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/messages/{message_id}/suggested": {
+      "get": {
+        "tags": [
+          "V1 - App API"
+        ],
+        "summary": "获取消息预制问题",
+        "description": "获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。",
+        "operationId": "get_message_suggested_questions_v1_v1_app_messages__message_id__suggested_get",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/info": {
+      "get": {
+        "tags": [
+          "V1 - App API"
+        ],
+        "summary": "获取应用基本信息",
+        "description": "获取 API Key 绑定应用的基本信息（来自发布版本快照）。",
+        "operationId": "get_app_basic_info_v1_v1_app_info_get",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "发布版本 ID，不传则使用当前生效版本",
+              "title": "Version"
+            },
+            "description": "发布版本 ID，不传则使用当前生效版本"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
               }
             }
           }
@@ -5046,138 +5238,6 @@
           }
         }
       }
-    },
-    "/v1/app/files": {
-      "post": {
-        "tags": [
-          "V1 - App API"
-        ],
-        "summary": "AI 对话文件上传",
-        "description": "上传文件到存储后端，供 /chat 接口多模态对话使用。\n\n- 入参: multipart/form-data，字段 file\n- 出参: {\"file_id\": \"...\", \"file_key\": \"...\"}\n- 在 /chat 请求中通过 files 字段引用，例如:\n  {\"type\": \"image\", \"transfer_method\": \"local_file\", \"upload_file_id\": \"<file_id>\"}",
-        "operationId": "upload_chat_file_v1_app_files_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_chat_file_v1_app_files_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/app/messages/{message_id}/suggested": {
-      "get": {
-        "tags": [
-          "V1 - App API"
-        ],
-        "summary": "获取消息预制问题",
-        "description": "获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。",
-        "operationId": "get_message_suggested_questions_v1_v1_app_messages__message_id__suggested_get",
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Message Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/app/info": {
-      "get": {
-        "tags": [
-          "V1 - App API"
-        ],
-        "summary": "获取应用基本信息",
-        "description": "获取 API Key 绑定应用的详细信息，业务逻辑与 GET /api/apps/{app_id} 一致。",
-        "operationId": "get_app_basic_info_v1_v1_app_info_get",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -7089,6 +7149,23 @@
         "type": "object",
         "title": "Body_update_scene_v1_memory_ontology_scene__scene_id__put"
       },
+      "Body_upload_chat_file_v1_app_files_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_chat_file_v1_app_files_post"
+      },
       "Body_upload_file_api_api_upload_post": {
         "properties": {
           "file": {
@@ -7415,6 +7492,10 @@
       },
       "ChunkRetrieve": {
         "properties": {
+          "caller": {
+            "$ref": "#/components/schemas/KnowledgeRetrievalCaller",
+            "default": "general"
+          },
           "query": {
             "type": "string",
             "title": "Query"
@@ -7505,10 +7586,6 @@
             "title": "Top N",
             "default": 20
           },
-          "caller": {
-            "$ref": "#/components/schemas/KnowledgeRetrievalCaller",
-            "default": "general"
-          },
           "retrieve_type": {
             "anyOf": [
               {
@@ -7555,8 +7632,7 @@
         },
         "type": "object",
         "required": [
-          "query",
-          "kb_ids"
+          "query"
         ],
         "title": "ChunkRetrieve"
       },
@@ -10694,6 +10770,8 @@
         "type": "string",
         "enum": [
           "general",
+          "ex_api",
+          "in_api",
           "agent",
           "workflow"
         ],
@@ -15730,49 +15808,6 @@
         ],
         "title": "VariableDefinition",
         "description": "变量定义"
-      },
-      "Body_upload_chat_file_v1_app_files_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          },
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_chat_file_v1_app_files_post"
-      },
-      "WorkflowRegenerateRequest": {
-        "properties": {
-          "stream": {
-            "type": "boolean",
-            "title": "Stream",
-            "description": "是否流式返回",
-            "default": true
-          },
-          "variables": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Variables",
-            "description": "覆盖原输入快照中的开始节点变量；为空则完全沿用原输入"
-          }
-        },
-        "type": "object",
-        "title": "WorkflowRegenerateRequest",
-        "description": "工作流重新生成请求（对某一轮助手回复重新执行工作流）"
       }
     },
     "securitySchemes": {
