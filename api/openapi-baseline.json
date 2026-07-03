@@ -6,6 +6,308 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/v1/app/annotations": {
+      "get": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "获取标注列表",
+        "description": "获取当前应用的标注列表，支持分页和关键词搜索。",
+        "operationId": "list_annotations_v1_app_annotations_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "搜索关键词（匹配问题或答案）",
+              "title": "Search"
+            },
+            "description": "搜索关键词（匹配问题或答案）"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页数量，最大 100",
+              "default": 20,
+              "title": "Pagesize"
+            },
+            "description": "每页数量，最大 100"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "创建标注",
+        "description": "创建一个新的标注（QA问答对）。\n\n如果标注功能已启用Embedding模型，会自动为问题生成向量用于相似度匹配。",
+        "operationId": "create_annotation_v1_app_annotations_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/annotations/settings": {
+      "get": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "获取标注设置",
+        "description": "获取当前应用的标注设置。",
+        "operationId": "get_annotation_settings_v1_app_annotations_settings_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "更新标注设置",
+        "description": "更新当前应用的标注设置（相似度阈值、Embedding模型、启用/禁用）。",
+        "operationId": "update_annotation_settings_v1_app_annotations_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationSettingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/annotations/{annotation_id}": {
+      "put": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "更新标注",
+        "description": "更新指定标注的问题和/或答案。\n\n如果更新了问题且已配置Embedding模型，会自动重新生成向量。",
+        "operationId": "update_annotation_v1_app_annotations__annotation_id__put",
+        "parameters": [
+          {
+            "name": "annotation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Annotation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "删除标注",
+        "description": "删除指定标注（软删除）。",
+        "operationId": "delete_annotation_v1_app_annotations__annotation_id__delete",
+        "parameters": [
+          {
+            "name": "annotation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Annotation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/app": {
       "get": {
         "tags": [
@@ -7271,6 +7573,10 @@
       },
       "ChunkRetrieve": {
         "properties": {
+          "caller": {
+            "$ref": "#/components/schemas/KnowledgeRetrievalCaller",
+            "default": "general"
+          },
           "query": {
             "type": "string",
             "title": "Query"
@@ -7361,10 +7667,6 @@
             "title": "Top N",
             "default": 20
           },
-          "caller": {
-            "$ref": "#/components/schemas/KnowledgeRetrievalCaller",
-            "default": "general"
-          },
           "retrieve_type": {
             "anyOf": [
               {
@@ -7411,8 +7713,7 @@
         },
         "type": "object",
         "required": [
-          "query",
-          "kb_ids"
+          "query"
         ],
         "title": "ChunkRetrieve"
       },
@@ -10550,6 +10851,8 @@
         "type": "string",
         "enum": [
           "general",
+          "ex_api",
+          "in_api",
           "agent",
           "workflow"
         ],
@@ -14823,6 +15126,11 @@
             ],
             "title": "Storage Type"
           },
+          "is_default_config": {
+            "type": "boolean",
+            "title": "Is Default Config",
+            "default": false
+          },
           "llm": {
             "anyOf": [
               {
@@ -14944,6 +15252,18 @@
       },
       "WorkspaceModelsUpdate": {
         "properties": {
+          "is_default_config": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default Config",
+            "description": "是否使用默认配置"
+          },
           "llm": {
             "anyOf": [
               {
