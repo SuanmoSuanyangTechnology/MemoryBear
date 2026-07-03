@@ -17,7 +17,7 @@ class DistinguishTypeResponse(BaseModel):
     type: str
 
 
-async def status_typle(messages: str, llm_model_id: str) -> dict:
+async def status_typle(messages: str, llm_model_id: str, tenant_id=None) -> dict:
     """
     Classify message type as read or write operation.
     Updated to eliminate global variables in favor of explicit parameters.
@@ -25,6 +25,7 @@ async def status_typle(messages: str, llm_model_id: str) -> dict:
     Args:
         messages: User message to classify
         llm_model_id: LLM model ID to use (required, no longer from global variables)
+        tenant_id: Tenant ID for SpeedBear public model authentication
         
     Returns:
         dict: Contains 'type' field with classification result
@@ -44,7 +45,7 @@ async def status_typle(messages: str, llm_model_id: str) -> dict:
     
     with get_db_context() as db:
         factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(llm_model_id)
+        llm_client = factory.get_llm_client(llm_model_id, tenant_id=tenant_id)
 
     try:
         structured = await llm_client.response_structured(
