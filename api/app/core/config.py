@@ -82,6 +82,7 @@ class Settings:
     ELASTICSEARCH_REQUEST_TIMEOUT: int = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "100000"))
     ELASTICSEARCH_RETRY_ON_TIMEOUT: bool = os.getenv("ELASTICSEARCH_RETRY_ON_TIMEOUT", "True").lower() == "true"
     ELASTICSEARCH_MAX_RETRIES: int = int(os.getenv("ELASTICSEARCH_MAX_RETRIES", "10"))
+    KNOWLEDGE_RETRIEVAL_MAX_WORKERS: int = int(os.getenv("KNOWLEDGE_RETRIEVAL_MAX_WORKERS", "3"))
 
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
