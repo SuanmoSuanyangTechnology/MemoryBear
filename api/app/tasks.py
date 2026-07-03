@@ -1710,6 +1710,7 @@ def write_message_task(
         language: str = "zh",
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",  # 任务执行时间
+        source: str = "",  # 写入来源（agent/service_api/mcp/workflow）
         # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
         messages: Optional[List[dict]] = None,
         storage_type: str = "neo4j",
@@ -1795,6 +1796,7 @@ def write_message_task(
             language=language,
             skip_cursor_advance=skip_cursor_advance,
             dispatch_at=dispatch_at,
+            source=source,
         )
         return {"status": result.status, "extraction": result.extraction}
 
@@ -3536,12 +3538,11 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     soft_time_limit=1700,
 )
 def run_incremental_clustering(
-        self,
-        end_user_id: str,
-        new_entity_ids: List[str],
-        llm_model_id: Optional[str] = None,
-        embedding_model_id: Optional[str] = None,
-        language: str = "zh",
+    self,
+    end_user_id: str,
+    new_entity_ids: List[str],
+    config_id: Optional[str] = None,
+    language: str = "zh",
 ) -> Dict[str, Any]:
     """增量聚类任务：处理新增实体的社区分配和元数据生成。
     
@@ -3550,8 +3551,8 @@ def run_incremental_clustering(
     Args:
         end_user_id: 用户 ID
         new_entity_ids: 新增实体 ID 列表
-        llm_model_id: LLM 模型 ID（可选）
-        embedding_model_id: Embedding 模型 ID（可选）
+        config_id: 记忆配置 ID（可选）。任务内经 load_memory_config 重建完整
+            MemoryConfig（内含 tenant_id + 各 model_id，同源），交由引擎使用。
         language: 语言类型 ("zh" | "en")
     
     Returns:
@@ -3567,15 +3568,20 @@ def run_incremental_clustering(
         logger = get_logger(__name__)
         logger.info(
             f"[IncrementalClustering] 开始增量聚类任务 - end_user_id={end_user_id}, "
-            f"实体数={len(new_entity_ids)}, llm_model_id={llm_model_id}"
+            f"实体数={len(new_entity_ids)}, config_id={config_id}"
         )
+
+        # 跨进程只传 config_id，任务内重建完整 MemoryConfig：
+        # tenant_id 与各 model_id 同源加载，杜绝拍扁传参时漏传 tenant。
+        with get_db_context() as db:
+            from app.services.memory_config_service import MemoryConfigService
+            memory_config = MemoryConfigService(db).load_memory_config(config_id=config_id)
 
         connector = Neo4jConnector()
         try:
             engine = LabelPropagationEngine(
                 connector=connector,
-                llm_model_id=llm_model_id,
-                embedding_model_id=embedding_model_id,
+                memory_config=memory_config,
                 language=language,
             )
 
@@ -3665,9 +3671,9 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
         try:
             repo = CommunityRepository(connector)
 
-            # 批量预取所有用户的配置（内置兜底：用户配置不可用时自动回退到工作空间默认配置）
-            user_llm_map: Dict[str, Optional[str]] = {}
-            user_embedding_map: Dict[str, Optional[str]] = {}
+            # 批量预取所有用户的 MemoryConfig（tenant 与 model_id 同源），避免循环内逐个查库。
+            # 加载失败的用户不存入 map，循环内检测到缺失时直接 skip。
+            user_config_map: Dict[str, Any] = {}
             try:
                 with get_db_context() as db:
                     from app.services.memory_agent_service import get_end_users_connected_configs_batch
@@ -3677,29 +3683,27 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         config_id = cfg_info.get("memory_config_id")
                         if config_id:
                             try:
-                                cfg = MemoryConfigService(db).load_memory_config(config_id=config_id)
-                                user_llm_map[uid] = str(cfg.llm_model_id) if cfg.llm_model_id else None
-                                user_embedding_map[uid] = str(
-                                    cfg.embedding_model_id) if cfg.embedding_model_id else None
+                                user_config_map[uid] = MemoryConfigService(db).load_memory_config(config_id=config_id)
                             except Exception as e:
-                                logger.warning(f"[CommunityCluster] 用户 {uid} 加载配置失败，将使用 None: {e}")
-                                user_llm_map[uid] = None
-                                user_embedding_map[uid] = None
-                        else:
-                            user_llm_map[uid] = None
-                            user_embedding_map[uid] = None
+                                logger.error(f"[CommunityCluster] 用户 {uid} 加载配置失败，将跳过: {e}")
             except Exception as e:
-                logger.warning(f"[CommunityCluster] 批量获取配置失败，所有用户将使用 None: {e}")
+                logger.error(f"[CommunityCluster] 批量获取配置失败: {e}")
 
             for end_user_id in end_user_ids:
                 try:
+                    # 配置加载失败的用户直接跳过
+                    memory_config = user_config_map.get(end_user_id)
+                    if not memory_config:
+                        failed += 1
+                        logger.warning(f"[CommunityCluster] 用户 {end_user_id} 无有效配置，跳过聚类")
+                        continue
+
                     # 已有社区节点时，检查是否存在属性不完整的节点
                     has_communities = await repo.has_communities(end_user_id)
                     if has_communities:
-                        llm_model_id = user_llm_map.get(end_user_id)
-                        embedding_model_id = user_embedding_map.get(end_user_id)
                         incomplete_ids = await repo.get_incomplete_communities(
-                            end_user_id, check_embedding=bool(embedding_model_id)
+                            end_user_id,
+                            check_embedding=bool(memory_config.embedding_model_id),
                         )
                         if not incomplete_ids:
                             skipped += 1
@@ -3709,8 +3713,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         # 对不完整的社区节点逐一补全元数据
                         engine = LabelPropagationEngine(
                             connector=connector,
-                            llm_model_id=llm_model_id,
-                            embedding_model_id=embedding_model_id,
+                            memory_config=memory_config,
                         )
                         logger.info(
                             f"[CommunityCluster] 用户 {end_user_id} 发现 {len(incomplete_ids)} 个属性不完整的社区，开始补全"
@@ -3737,17 +3740,15 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         logger.debug(f"[CommunityCluster] 用户 {end_user_id} 无实体节点，跳过")
                         continue
 
-                    # 每个用户使用自己的 llm_model_id / embedding_model_id
-                    llm_model_id = user_llm_map.get(end_user_id)
-                    embedding_model_id = user_embedding_map.get(end_user_id)
+                    # 每个用户使用自己的 MemoryConfig（tenant 与 model_id 同源）
                     engine = LabelPropagationEngine(
                         connector=connector,
-                        llm_model_id=llm_model_id,
-                        embedding_model_id=embedding_model_id,
+                        memory_config=memory_config,
                     )
 
                     logger.info(
-                        f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，llm_model_id={llm_model_id}")
+                        f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，"
+                        f"llm_model_id={memory_config.llm_model_id}")
                     await engine.full_clustering(end_user_id)
                     initialized += 1
                     logger.info(f"[CommunityCluster] 用户 {end_user_id} 聚类完成")

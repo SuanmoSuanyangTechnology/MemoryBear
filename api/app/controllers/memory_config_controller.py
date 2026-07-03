@@ -505,8 +505,7 @@ def delete_config(
 
     - 检查是否为默认配置，默认配置不允许删除
     - 检查是否有终端用户连接到该配置
-    - 如果有连接且 force=False，返回警告
-    - 如果 force=True，清除终端用户引用后删除配置
+    - 如果有连接，返回警告
     """
     workspace_id = current_user.current_workspace_id
     config_id = resolve_config_id(config_id, db)

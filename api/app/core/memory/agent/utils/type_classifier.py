@@ -4,7 +4,7 @@ Type classification utility for distinguishing read/write operations.
 from app.core.logging_config import get_agent_logger, log_prompt_rendering
 from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
 from app.core.memory.agent.utils.messages_tools import read_template_file
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.db import get_db_context
 from jinja2 import Template
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ class DistinguishTypeResponse(BaseModel):
     type: str
 
 
-async def status_typle(messages: str, llm_model_id: str) -> dict:
+async def status_typle(messages: str, llm_model_id: str, tenant_id=None) -> dict:
     """
     Classify message type as read or write operation.
     Updated to eliminate global variables in favor of explicit parameters.
@@ -25,6 +25,7 @@ async def status_typle(messages: str, llm_model_id: str) -> dict:
     Args:
         messages: User message to classify
         llm_model_id: LLM model ID to use (required, no longer from global variables)
+        tenant_id: Tenant ID for SpeedBear public model authentication
         
     Returns:
         dict: Contains 'type' field with classification result
@@ -43,8 +44,7 @@ async def status_typle(messages: str, llm_model_id: str) -> dict:
         }
     
     with get_db_context() as db:
-        factory = MemoryClientFactory(db)
-        llm_client = factory.get_llm_client(llm_model_id)
+        llm_client = ModelClientMixin.get_llm_client(db, llm_model_id, tenant_id=tenant_id)
 
     try:
         structured = await llm_client.response_structured(

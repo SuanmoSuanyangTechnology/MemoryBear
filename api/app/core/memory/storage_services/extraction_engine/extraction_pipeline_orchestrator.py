@@ -506,7 +506,7 @@ class NewExtractionOrchestrator:
             "statement_results": all_stmt_results,
             "statement_inputs": self._last_statement_inputs,
             "triplet_results": all_triplet_results,
-            "emotion_results": {},
+            "emotion_results": emotion_results,
             "embedding_output": merged_emb,
         }
 

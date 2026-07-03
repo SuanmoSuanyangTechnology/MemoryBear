@@ -1576,19 +1576,31 @@ async def analytics_memory_types(
     else:
         perceptual_count = 0
     
-    # 获取工作记忆数量（基于会话数量）
+    # 获取工作记忆数量（agent/workflow 会话数 + API/MCP 有记录则 +1）
     work_count = 0
     if end_user_id:
         try:
+            from app.repositories.memory_message_repository import MemoryMessageRepository
+
             conversation_repo = ConversationRepository(db)
             conversations, total = conversation_repo.get_conversation_by_user_id(
                 user_id=uuid.UUID(end_user_id),
                 is_activate=True
             )
-            work_count = total
-            logger.debug(f"工作记忆数量（会话数）: {work_count} (end_user_id={end_user_id})")
+            agent_workflow_count = total
+
+            memory_message_repo = MemoryMessageRepository(db)
+            sources = memory_message_repo.get_working_memory_sources(end_user_id)
+            api_mcp_count = len(sources)  # 每个 source（service_api / mcp）有记录则各占 1
+
+            work_count = agent_workflow_count + api_mcp_count
+            logger.debug(
+                f"工作记忆数量: total={work_count} "
+                f"(agent_workflow={agent_workflow_count}, api_mcp_sources={[s['source'] for s in sources]}) "
+                f"(end_user_id={end_user_id})"
+            )
         except Exception as e:
-            logger.warning(f"获取会话数量失败，工作记忆数量设为0: {str(e)}")
+            logger.warning(f"获取工作记忆数量失败，设为0: {str(e)}")
             work_count = 0
     
     # 获取隐性记忆数量（基于有关联关系的 MemorySummary 节点数量，需 >= MIN_MEMORY_SUMMARY_COUNT 才计入）

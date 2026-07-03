@@ -96,13 +96,11 @@ def store_mineru_v3_image(
 
 
 def _build_image_download_url(file_id: uuid.UUID) -> str:
-    path = f"/api/storage/permanent/{file_id}"
-    base_url = (settings.BASE_URL or "").rstrip("/")
-    if not base_url:
+    server_url = (settings.FILE_LOCAL_SERVER_URL or "").rstrip("/")
+    path = f"/storage/permanent/{file_id}"
+    if not server_url:
         return path
-    if base_url.endswith("/api") and path.startswith("/api/"):
-        path = path[len("/api"):]
-    return f"{base_url}{path}"
+    return f"{server_url}{path}"
 
 
 def _parse_uuid(value: Any) -> uuid.UUID | None:

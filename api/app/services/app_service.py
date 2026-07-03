@@ -321,11 +321,13 @@ class AppService:
             from app.repositories.tool_repository import ToolRepository
             from app.models import App
 
-            db_app = self.db.get(App, app_id)
-            if not db_app:
+            # 方法仅接收 app_id，此处按 id 取出 App 以读取 workspace_id（命中
+            # session identity map，调用方已加载过，无额外 DB 查询）
+            app = self.db.get(App, app_id)
+            if not app:
                 raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(db_app.workspace_id))
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
             model_api_key = ModelApiKeyService.get_available_api_key(
                 self.db,
                 multi_agent_config.default_model_config_id,
@@ -1401,8 +1403,13 @@ class AppService:
         """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
         now = release.created_at or utcnow_naive()
+        # 查出源应用真实的 AgentConfig id，供 agent_executions 外键使用
+        real_config = self.db.scalars(
+            select(AgentConfig).where(AgentConfig.app_id == release.app_id)
+        ).first()
+        real_id = real_config.id if real_config else uuid.uuid4()
         agent_cfg = AgentConfig(
-            id=uuid.uuid4(),
+            id=real_id,
             app_id=release.app_id,
             system_prompt=cfg.get("system_prompt", ""),
             default_model_config_id=release.default_model_config_id,

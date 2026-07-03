@@ -140,7 +140,7 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        conversation_id = variable_pool.get_value("sys.conversation_id") or ""
+        conversation_id = variable_pool.get_value("sys.conversation_id")
         workspace_id = str(state.get("workspace_id", "") or "")
 
         await MemoryService.ingest_workflow_messages(

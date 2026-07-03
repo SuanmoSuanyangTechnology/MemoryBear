@@ -1,7 +1,7 @@
 """Memory Config 服务接口 - 基于 API Key 认证"""
 
-from typing import Optional
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -9,33 +9,30 @@ from sqlalchemy.orm import Session
 
 from app.controllers import memory_config_controller
 from app.controllers import ontology_controller
-from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
-from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.response_utils import success
 from app.db import get_db
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
     ConfigUpdateExtractedRequest,
     ConfigUpdateRequest,
-    ListConfigsResponse,
     ConfigCreateRequest,
     ConfigUpdateForgettingRequest,
     EmotionConfigUpdateRequest,
     ReflectionConfigUpdateRequest,
 )
+from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.schemas.memory_storage_schema import (
-    ConfigUpdate, 
+    ConfigUpdate,
     ConfigUpdateExtracted,
     ConfigParamsCreate,
 )
+from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
 from app.services import api_key_service
-from app.services.memory_api_service import MemoryAPIService
 from app.utils.config_utils import resolve_config_id
 
 router = APIRouter(prefix="/memory_config", tags=["V1 - Memory Config API"])
@@ -58,7 +55,7 @@ def _get_current_user(api_key_auth: ApiKeyAuth, db: Session):
     return current_user
 
 
-def _verify_config_ownership(config_id:str, workspace_id:uuid.UUID, db:Session):
+def _verify_config_ownership(config_id: str, workspace_id: uuid.UUID, db: Session):
     """Verify that the config belongs to the workspace.
     
       Args: 
@@ -81,6 +78,7 @@ def _verify_config_ownership(config_id:str, workspace_id:uuid.UUID, db:Session):
             message="Config not found or access denied",
             code=BizCode.MEMORY_CONFIG_NOT_FOUND,
         )
+
 
 # @router.get("/configs")
 # @require_api_key(scopes=["memory"])
@@ -108,9 +106,9 @@ def _verify_config_ownership(config_id:str, workspace_id:uuid.UUID, db:Session):
 @router.get("/read_all_config")
 @require_api_key(scopes=["memory"])
 async def read_all_config(
-    request:Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     List all memory configs with full details (enhanced version).
@@ -127,12 +125,13 @@ async def read_all_config(
         db=db,
     )
 
+
 @router.get("/scenes/simple")
 @require_api_key(scopes=["memory"])
 async def get_ontology_scenes(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     Get available ontology scenes for the workspace.
@@ -149,13 +148,14 @@ async def get_ontology_scenes(
         current_user=current_user,
     )
 
+
 @router.get("/read_config_extracted")
 @require_api_key(scopes=["memory"])
 async def read_config_extracted(
-    request: Request,
-    config_id: str = Query(..., description="config_id"),
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        request: Request,
+        config_id: str = Query(..., description="config_id"),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     Get extraction engine config details for a specific config.
@@ -169,18 +169,19 @@ async def read_config_extracted(
     current_user = _get_current_user(api_key_auth, db)
 
     return memory_config_controller.read_config_extracted(
-        config_id = config_id,
-        current_user = current_user,
-        db = db,
+        config_id=config_id,
+        current_user=current_user,
+        db=db,
     )
+
 
 @router.get("/read_config_forgetting")
 @require_api_key(scopes=["memory"])
 async def read_config_forgetting(
-    request: Request,
-    config_id: str = Query(..., description="config_id"),
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        request: Request,
+        config_id: str = Query(..., description="config_id"),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     Get forgetting settings for a specific memory config.
@@ -194,21 +195,20 @@ async def read_config_forgetting(
     current_user = _get_current_user(api_key_auth, db)
 
     result = await memory_config_controller.read_forgetting_config(
-        config_id = config_id,
-        current_user = current_user,
-        db = db,
+        config_id=config_id,
+        current_user=current_user,
+        db=db,
     )
     return jsonable_encoder(result)
-
 
 
 @router.get("/read_config_emotion")
 @require_api_key(scopes=["memory"])
 async def read_config_emotion(
-    request: Request,
-    config_id: str = Query(..., description="config_id"),
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        request: Request,
+        config_id: str = Query(..., description="config_id"),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     Get emotion engine config details for a specific config.
@@ -227,13 +227,14 @@ async def read_config_emotion(
         current_user=current_user,
     ))
 
+
 @router.get("/read_config_reflection")
 @require_api_key(scopes=["memory"])
 async def read_config_reflection(
-    request: Request,
-    config_id: str = Query(..., description="config_id"),
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        request: Request,
+        config_id: str = Query(..., description="config_id"),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     Get reflection engine config details for a specific config.
@@ -256,11 +257,11 @@ async def read_config_reflection(
 @router.post("/create_config")
 @require_api_key(scopes=["memory"])
 async def create_memory_config(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
-    x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        message: str = Body(None, description="Request body"),
+        x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ):
     """
     Create a new memory config for the workspace.
@@ -272,7 +273,7 @@ async def create_memory_config(
     payload = ConfigCreateRequest(**body)
 
     logger.info(f"V1 create config - workspace: {api_key_auth.workspace_id}, config_name: {payload.config_name}")
-    
+
     # 构造管理端 Schema，workspace_id 从 API Key 注入
     current_user = _get_current_user(api_key_auth, db)
     mgmt_payload = ConfigParamsCreate(
@@ -285,8 +286,8 @@ async def create_memory_config(
         reflection_model_id=payload.reflection_model_id,
         emotion_model_id=payload.emotion_model_id,
     )
-    #将返回数据中UUID序列化处理
-    result =memory_config_controller.create_config(
+    # 将返回数据中UUID序列化处理
+    result = memory_config_controller.create_config(
         payload=mgmt_payload,
         current_user=current_user,
         db=db,
@@ -294,13 +295,14 @@ async def create_memory_config(
     )
     return jsonable_encoder(result)
 
+
 @router.put("/update_config")
 @require_api_key(scopes=["memory"])
 async def update_memory_config(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        message: str = Body(None, description="Request body"),
 ):
     """
     Update memory config basic info (name, description, scene).
@@ -310,98 +312,101 @@ async def update_memory_config(
     """
     body = await request.json()
     payload = ConfigUpdateRequest(**body)
-    
+
     logger.info(f"V1 update config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
     _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
 
     current_user = _get_current_user(api_key_auth, db)
     mgmt_payload = ConfigUpdate(
-        config_id = payload.config_id,
-        config_name = payload.config_name,
-        config_desc = payload.config_desc,
-        scene_id = payload.scene_id,
+        config_id=payload.config_id,
+        config_name=payload.config_name,
+        config_desc=payload.config_desc,
+        scene_id=payload.scene_id,
     )
 
     return memory_config_controller.update_config(
-        payload = mgmt_payload,
-        current_user = current_user,
-        db = db,
+        payload=mgmt_payload,
+        current_user=current_user,
+        db=db,
     )
+
 
 @router.put("/update_config_extracted")
 @require_api_key(scopes=["memory"])
 async def update_memory_config_extracted(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        message: str = Body(None, description="Request body"),
 ):
-   """
-    update memory config extraction engine config (models, thresholds, chunking, pruning, etc.).
+    """
+     update memory config extraction engine config (models, thresholds, chunking, pruning, etc.).
 
-    Requires API Key with 'memory' scope.
-    Only configs belonging to the authorized workspace can be updated.
-   """
-   body = await request.json()
-   payload = ConfigUpdateExtractedRequest(**body)
+     Requires API Key with 'memory' scope.
+     Only configs belonging to the authorized workspace can be updated.
+    """
+    body = await request.json()
+    payload = ConfigUpdateExtractedRequest(**body)
 
-   logger.info(f"V1 update extracted config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
+    logger.info(f"V1 update extracted config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-   #校验权限
-   _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    # 校验权限
+    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
 
-   current_user = _get_current_user(api_key_auth, db)
-   update_fields = payload.model_dump(exclude_unset=True)
-   mgmt_payload = ConfigUpdateExtracted(**update_fields)
+    current_user = _get_current_user(api_key_auth, db)
+    update_fields = payload.model_dump(exclude_unset=True)
+    mgmt_payload = ConfigUpdateExtracted(**update_fields)
 
-   return memory_config_controller.update_config_extracted(
-        payload = mgmt_payload,
-        current_user = current_user,
-        db = db,
-   )
+    return memory_config_controller.update_config_extracted(
+        payload=mgmt_payload,
+        current_user=current_user,
+        db=db,
+    )
+
 
 @router.put("/update_config_forgetting")
 @require_api_key(scopes=["memory"])
 async def update_memory_config_forgetting(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        message: str = Body(None, description="Request body"),
 ):
-   """
-    update memory config forgetting settings (forgetting strategy, parameters, etc.).
+    """
+     update memory config forgetting settings (forgetting strategy, parameters, etc.).
 
-    Requires API Key with 'memory' scope.
-    Only configs belonging to the authorized workspace can be updated.
-   """
-   body = await request.json()
-   payload = ConfigUpdateForgettingRequest(**body)
+     Requires API Key with 'memory' scope.
+     Only configs belonging to the authorized workspace can be updated.
+    """
+    body = await request.json()
+    payload = ConfigUpdateForgettingRequest(**body)
 
-   logger.info(f"V1 update forgetting config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
+    logger.info(f"V1 update forgetting config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-   #校验权限
-   _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    # 校验权限
+    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
 
-   current_user = _get_current_user(api_key_auth, db)
-   update_fields = payload.model_dump(exclude_unset=True)
-   mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
+    current_user = _get_current_user(api_key_auth, db)
+    update_fields = payload.model_dump(exclude_unset=True)
+    mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
 
-   #将返回数据中UUID序列化处理
-   result = await memory_config_controller.update_forgetting_config(
-        payload = mgmt_payload,
-        current_user = current_user,
-        db = db,
-   )
-   return jsonable_encoder(result)
+    # 将返回数据中UUID序列化处理
+    result = await memory_config_controller.update_forgetting_config(
+        payload=mgmt_payload,
+        current_user=current_user,
+        db=db,
+    )
+    return jsonable_encoder(result)
+
 
 @router.put("/update_config_emotion")
 @require_api_key(scopes=["memory"])
 async def update_config_emotion(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        message: str = Body(None, description="Request body"),
 ):
     """
     Update emotion engine config (full update).
@@ -425,13 +430,14 @@ async def update_config_emotion(
         current_user=current_user,
     ))
 
+
 @router.put("/update_config_reflection")
 @require_api_key(scopes=["memory"])
 async def update_config_reflection(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        message: str = Body(None, description="Request body"),
 ):
     """
     Update reflection engine config (full update).
@@ -456,25 +462,24 @@ async def update_config_reflection(
         db=db,
     ))
 
+
 @router.delete("/delete_config")
 @require_api_key(scopes=["memory"])
 async def delete_memory_config(
-    config_id: str,
-    request: Request,
-    force: bool = Query(False, description="是否强制删除（即使有终端用户正在使用）"),
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+        config_id: str,
+        request: Request,
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
 ):
     """
     Delete a memory config.
 
     - Default configs cannot be deleted.
-    - If end users are connected and force=False, returns a warning.
-    - If force=True, clears end user references and deletes the config.
+    - If end users are connected, returns a warning.
 
     Only configs belonging to the authorized workspace can be deleted.
     """
-    logger.info(f"V1 delete config - config_id: {config_id}, force: {force}, workspace: {api_key_auth.workspace_id}")
+    logger.info(f"V1 delete config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
     _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
 
@@ -482,7 +487,6 @@ async def delete_memory_config(
 
     return memory_config_controller.delete_config(
         config_id=config_id,
-        force=force,
         current_user=current_user,
         db=db,
     )

@@ -39,6 +39,8 @@
   "models": {
     "config_retrieved": "Model configuration retrieved successfully",
     "config_updated": "Model configuration updated successfully",
-    "invalid_config": "Invalid model configuration"
+    "invalid_config": "Invalid model configuration",
+    "config_verified": "Model configuration verified",
+    "default_config_updated_notice": "The workspace default model configuration has been updated."
   }
 }

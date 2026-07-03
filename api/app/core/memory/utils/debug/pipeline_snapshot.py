@@ -121,6 +121,7 @@ class PipelineSnapshot:
         end_user_id: str,
         conversation_id: Optional[str] = None,
         message_seq: Optional[int] = None,
+        source: Optional[str] = None,
         extra_metadata: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -131,6 +132,8 @@ class PipelineSnapshot:
             message_seq: 目标 user 消息的 message_seq（滑动窗口写入时传入）。
                 提供后会写入叶子目录名（``seq_{message_seq:06d}_{时间戳}``），
                 字典序与数值序一致，方便在 OSS Browser 里顺序定位。
+            source: 写入来源（'service_api' / 'mcp'）。当 conversation_id 为空时
+                用作第二级目录名，按来源分类快照输出。
             extra_metadata: 任意可序列化的额外字段，会写入 ``0_summary.json``，
                 典型字段：ref_id / dispatch_at / dialog_at / language /
                 target_content_preview。
@@ -139,24 +142,31 @@ class PipelineSnapshot:
         self.end_user_id = end_user_id
         self.conversation_id = conversation_id
         self.message_seq = message_seq
+        self.source = source
         self.extra_metadata: Dict[str, Any] = dict(extra_metadata or {})
         self._oss_prefix: Optional[str] = None
 
         if self.enabled:
             ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
+            seq_part = (
+                f"seq_{int(message_seq):06d}_{ts}"
+                if message_seq is not None
+                else f"seq_unknown_{ts}"
+            )
             if conversation_id:
-                # 滑动窗口路径：按 user / conversation / seq_xxx_时间戳 三级组织
-                seq_part = (
-                    f"seq_{int(message_seq):06d}_{ts}"
-                    if message_seq is not None
-                    else f"seq_unknown_{ts}"
-                )
+                # Agent/Workflow 路径：按 user / conversation / seq_xxx_时间戳 三级组织
                 self._oss_prefix = (
                     f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}/"
                     f"{conversation_id}/{seq_part}"
                 )
+            elif source:
+                # API/MCP 路径：按 user / source / seq_xxx_时间戳 三级组织
+                self._oss_prefix = (
+                    f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}/"
+                    f"{source}/{seq_part}"
+                )
             else:
-                # 兼容旧路径（整轮 messages 写入）
+                # 兼容旧路径（未传 conversation_id 也未传 source）
                 self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}_{ts}"
             logger.debug(f"[Snapshot] 已启用，OSS 前缀: {self._oss_prefix}")
 

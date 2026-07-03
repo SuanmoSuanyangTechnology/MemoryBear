@@ -80,7 +80,7 @@ def get_model_list(
         if capability is not None:
             flat_capability = []
             for item in capability:
-                split_items = [c.strip() for c in item.split(', ') if c.strip()]
+                split_items = [c.strip() for c in item.split(',') if c.strip()]
                 flat_capability.extend(split_items)
 
             unique_flat_capability = list(dict.fromkeys(flat_capability))
