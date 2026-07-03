@@ -1,7 +1,7 @@
 """App 服务接口 - 基于 API Key 认证"""
 import json
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Body, Query, File, UploadFile, HTTPException
 from sqlalchemy.orm import Session
@@ -104,6 +104,35 @@ def _parse_release_config(release: AppRelease) -> dict:
     return config if isinstance(config, dict) else {}
 
 
+def _get_standard_variables(variables: list, app_type: AppType) -> list:
+    """统一 Agent / Workflow 变量输出格式。"""
+    is_agent = app_type in (AppType.AGENT, AppType.MULTI_AGENT)
+    result = []
+    for raw in variables:
+        v = raw.model_dump(mode="json") if hasattr(raw, "model_dump") else dict[Any, Any](raw)
+        if is_agent:
+            ui_type = v.get("type", "string")
+            data_type = "number" if ui_type == "number" else "string"
+        else:
+            ui_type = v.get("ui_type") or ("number" if v.get("type") == "number" else "text-input")
+            data_type = v.get("type", "string")
+        result.append({
+            "name": v["name"],
+            "display_name": v.get("display_name"),
+            "type": data_type,
+            "ui_type": ui_type,
+            "required": v.get("required", False),
+            "description": v.get("description"),
+            "max_length": v.get("max_length"),
+            "default": None if is_agent else v.get("default"),
+            "options": None if is_agent else v.get("options"),
+            "allowed_file_types": None if is_agent else v.get("allowed_file_types"),
+            "max_file_count": None if is_agent else v.get("max_file_count"),
+            "max_file_size_mb": None if is_agent else v.get("max_file_size_mb"),
+        })
+    return result
+
+
 def _variables_from_release(release: AppRelease) -> list:
     """从当前发布版本快照提取应用变量定义（与公开分享 /config 接口逻辑一致）。"""
     config = _parse_release_config(release)
@@ -111,17 +140,13 @@ def _variables_from_release(release: AppRelease) -> list:
         cfg = agent_config_4_app_release(release)
         cfg = enrich_agent_config(cfg)
         variables = cfg.variables or config.get("variables") or []
-        return [
-            v.model_dump(mode="json")
-            if hasattr(v, "model_dump")
-            else app_schema.VariableDefinition.model_validate(v).model_dump(mode="json")
-            for v in variables
-        ]
-    if release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-        return WorkflowService.get_start_node_variables(config)
-    if release.type == AppType.MULTI_AGENT:
-        return config.get("variables") or []
-    raise BusinessException(f"不支持的应用类型: {release.type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+    elif release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        variables = WorkflowService.get_start_node_variables(config)
+    elif release.type == AppType.MULTI_AGENT:
+        variables = config.get("variables") or []
+    else:
+        raise BusinessException(f"不支持的应用类型: {release.type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+    return _get_standard_variables(variables, release.type)
 
 
 @router.get("/variable", summary="获取应用变量配置")
@@ -596,15 +621,24 @@ async def get_app_basic_info_v1(
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
         app_service: Annotated[AppService, Depends(get_app_service)] = None,
+        version: uuid.UUID | None = Query(None, description="发布版本 ID，不传则使用当前生效版本"),
 ):
-    """获取 API Key 绑定应用的当前发布版本信息（数据来自 app_releases 快照，含 config）。"""
+    """获取 API Key 绑定应用的基本信息（来自发布版本快照）。"""
     app_id = _get_app_id(api_key_auth)
     workspace_id = api_key_auth.workspace_id
 
-    logger.info(f"V1 get app basic info - app_id: {app_id}, workspace: {workspace_id}")
-
     app_service.get_app(app_id, workspace_id)
-    release = app_service.get_current_release(app_id=app_id, workspace_id=workspace_id)
-    if not release:
-        raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
-    return success(data=app_schema.AppRelease.model_validate(release).model_dump(mode="json"))
+    if version is not None:
+        release = app_service.get_release_by_id(app_id, version)
+    else:
+        release = app_service.get_current_release(app_id=app_id, workspace_id=workspace_id)
+        if not release:
+            raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
+
+    return success(data={
+        "app_id": str(release.app_id),
+        "name": release.name,
+        "description": release.description,
+        "icon": release.icon,
+        "type": release.type,
+    })
