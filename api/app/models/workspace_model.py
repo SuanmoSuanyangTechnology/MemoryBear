@@ -40,6 +40,7 @@ class Workspace(Base):
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
     is_default_config = Column(Boolean, default=False, server_default="false", nullable=False)
+    default_model_notice_pending = Column(Boolean, default=False, server_default="false", nullable=False)
     memory_config = Column(UUID(as_uuid=True), nullable=True)
     is_active = Column(Boolean, default=True)
 
@@ -49,6 +50,21 @@ class Workspace(Base):
     api_keys = relationship("ApiKey", back_populates="workspace", cascade="all, delete-orphan")  # API Keys
     memory_increments = relationship("MemoryIncrement", back_populates="workspace")
     end_users = relationship("EndUser", back_populates="workspace", cascade="all, delete-orphan")
+
+
+class WorkspaceDefaultModelPreset(Base):
+    __tablename__ = "workspace_default_model_presets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    singleton_key = Column(String, nullable=False, unique=True, default="default")
+    llm_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False)
+    embedding_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False)
+    rerank_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False)
+    vision_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False)
+    audio_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False)
+    video_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=False)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
 
 class WorkspaceMember(Base):

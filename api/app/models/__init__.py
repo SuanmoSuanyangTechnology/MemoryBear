@@ -1,6 +1,6 @@
 from .tenant_model import Tenants
 from .user_model import User
-from .workspace_model import Workspace, WorkspaceMember, WorkspaceRole
+from .workspace_model import Workspace, WorkspaceDefaultModelPreset, WorkspaceMember, WorkspaceRole
 from .knowledge_model import Knowledge
 from .document_model import Document
 from .file_model import File
@@ -51,6 +51,7 @@ __all__ = [
     "Tenants",
     "User",
     "Workspace",
+    "WorkspaceDefaultModelPreset",
     "WorkspaceMember",
     "WorkspaceRole",
     "Knowledge",

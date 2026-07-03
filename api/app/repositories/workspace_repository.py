@@ -30,9 +30,14 @@ class WorkspaceRepository:
                 icon=workspace_data.icon,
                 iconType=workspace_data.iconType,
                 storage_type=workspace_data.storage_type,
+                is_default_config=workspace_data.is_default_config,
+                default_model_notice_pending=False,
                 llm=workspace_data.llm,
                 embedding=workspace_data.embedding,
                 rerank=workspace_data.rerank,
+                vision=workspace_data.vision,
+                audio=workspace_data.audio,
+                video=workspace_data.video,
                 tenant_id=tenant_id
             )
             self.db.add(db_workspace)
@@ -80,6 +85,8 @@ class WorkspaceRepository:
                     "vision": workspace.vision,
                     "audio": workspace.audio,
                     "video": workspace.video,
+                    "is_default_config": workspace.is_default_config,
+                    "default_model_notice_pending": workspace.default_model_notice_pending,
                 }
                 db_logger.debug(
                     f"工作空间模型配置查询成功: workspace_id={workspace_id}, "
