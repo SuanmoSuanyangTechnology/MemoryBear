@@ -125,7 +125,8 @@ async def validate_active_config_models(
         config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
     except BusinessException:
         from app.i18n.service import t
-        return success(data={"valid": False, "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
+        return success(data={"valid": False,
+                             "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
 
     result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
     return success(data=result)
@@ -541,14 +542,16 @@ def delete_config(
             )
             return fail(
                 code=BizCode.RESOURCE_IN_USE,
-                msg=result["message"]
+                msg=result["message"],
+                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
             )
 
         api_logger.info(
             f"记忆配置删除成功: config_id={config_id}"
         )
         return success(
-            msg=result["message"]
+            msg=result["message"],
+            data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
         )
 
     except Exception as e:
