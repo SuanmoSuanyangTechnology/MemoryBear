@@ -15126,6 +15126,11 @@
             ],
             "title": "Storage Type"
           },
+          "is_default_config": {
+            "type": "boolean",
+            "title": "Is Default Config",
+            "default": false
+          },
           "llm": {
             "anyOf": [
               {
@@ -15247,6 +15252,18 @@
       },
       "WorkspaceModelsUpdate": {
         "properties": {
+          "is_default_config": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default Config",
+            "description": "是否使用默认配置"
+          },
           "llm": {
             "anyOf": [
               {
