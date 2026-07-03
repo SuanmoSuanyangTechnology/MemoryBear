@@ -40,6 +40,7 @@
     "config_retrieved": "模型配置获取成功",
     "config_updated": "模型配置更新成功",
     "invalid_config": "无效的模型配置",
-    "config_verified": "模型配置已校验"
+    "config_verified": "模型配置已校验",
+    "default_config_updated_notice": "空间默认配置模型有更新。"
   }
 }

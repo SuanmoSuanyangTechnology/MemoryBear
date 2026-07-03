@@ -444,7 +444,8 @@ def workspace_models_configs(
     configs = workspace_service.get_workspace_models_configs(
         db=db,
         workspace_id=workspace_id,
-        user=current_user
+        user=current_user,
+        locale=language,
     )
 
     if configs is None:

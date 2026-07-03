@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import secrets
 import uuid
@@ -211,7 +210,7 @@ def _get_default_workspace_model_values(db: Session) -> dict[str, str]:
     }
 
 
-def _build_workspace_models_response(source) -> dict:
+def _build_workspace_models_response(source, *, locale: str = "zh") -> dict:
     values = _extract_workspace_model_values(source)
     is_default_config = source.get("is_default_config") if isinstance(source, dict) else bool(source.is_default_config)
     notice_pending = (
@@ -223,7 +222,10 @@ def _build_workspace_models_response(source) -> dict:
         **values,
         "is_default_config": bool(is_default_config),
         "default_config_updated": notice_pending,
-        "default_config_notice": "空间默认配置模型有更新。" if notice_pending else None,
+        "default_config_notice": (
+            t("workspace.models.default_config_updated_notice", locale=locale)
+            if notice_pending else None
+        ),
     }
     return response
 
@@ -345,14 +347,13 @@ async def _validate_workspace_model_runtime(
                 "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
             })
 
-    tasks = [
-        _validate_one(slot, model_id)
-        for slot in slots_to_validate
-        if (model_id := values.get(slot))
-    ]
-    if tasks:
-        results = await asyncio.gather(*tasks)
-        warnings += [item for item in results if item is not None]
+    for slot in slots_to_validate:
+        model_id = values.get(slot)
+        if not model_id:
+            continue
+        result = await _validate_one(slot, model_id)
+        if result is not None:
+            warnings.append(result)
 
     return warnings
 
@@ -1283,6 +1284,7 @@ def get_workspace_models_configs(
         db: Session,
         workspace_id: uuid.UUID,
         user: User,
+        locale: str = "zh",
 ) -> Optional[dict]:
     """获取工作空间的模型配置（llm, embedding, rerank）
 
@@ -1290,6 +1292,7 @@ def get_workspace_models_configs(
         db: 数据库会话
         workspace_id: 工作空间ID
         user: 当前用户
+        locale: 语言代码（zh / en），用于 i18n 告警消息
 
     Returns:
         dict: 包含 llm, embedding, rerank 的字典，如果工作空间不存在则返回 None
@@ -1313,7 +1316,7 @@ def get_workspace_models_configs(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
         f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
     )
-    return _build_workspace_models_response(configs)
+    return _build_workspace_models_response(configs, locale=locale)
 
 
 async def validate_workspace_models_configs(
@@ -1345,6 +1348,7 @@ async def validate_workspace_models_configs(
                 db_workspace.default_model_notice_pending if target_is_default else False
             ),
         },
+        locale=locale,
     )
     return {
         "workspace": workspace_payload,
@@ -1420,7 +1424,7 @@ async def update_workspace_models_configs(
             f"llm={db_workspace.llm}, embedding={db_workspace.embedding}, rerank={db_workspace.rerank}"
         )
 
-        return _build_workspace_models_response(db_workspace)
+        return _build_workspace_models_response(db_workspace, locale=locale)
 
     except BusinessException:
         db.rollback()
