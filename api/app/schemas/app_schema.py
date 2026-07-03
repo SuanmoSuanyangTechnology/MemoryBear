@@ -666,6 +666,7 @@ class DraftRunRequest(BaseModel):
     stream: bool = Field(default=False, description="是否流式返回")
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
     trigger_payload: Optional[Dict[str, Any]] = Field(default=None, description="触发器 payload，webhook 试运行时传入")
+    from_message_id: Optional[str] = Field(default=None, description="从指定分支消息继续聊天（多分支场景）：以该消息对应 execution 的输出作为历史上下文起点")
 
 
 class SuggestedQuestion(BaseModel):
@@ -872,6 +873,12 @@ class MessageFeedbackResponse(BaseModel):
     feedback_type: Optional[str] = Field(None, description="当前反馈类型")
 
 
+class MessageFavoriteResponse(BaseModel):
+    """消息收藏响应"""
+    action: str = Field(..., description="操作: created/cancelled")
+    is_favorited: bool = Field(..., description="是否已收藏")
+
+
 class MessageReportRequest(BaseModel):
     """消息举报请求（含选中反馈）"""
     report_type: str = Field(
@@ -930,6 +937,28 @@ class RegenerateResponse(BaseModel):
     message: str
     version: int
     conversation_id: str
+
+
+# ---------- 工作流重新生成 ----------
+
+class WorkflowRegenerateRequest(BaseModel):
+    """工作流重新生成请求（对某一轮助手回复重新执行工作流）"""
+    stream: bool = Field(default=True, description="是否流式返回")
+    variables: Optional[Dict[str, Any]] = Field(
+        default=None, description="覆盖原输入快照中的开始节点变量；为空则完全沿用原输入"
+    )
+
+
+class WorkflowRegenerateResponse(BaseModel):
+    """工作流重新生成响应（非流式）"""
+    message_id: str = Field(..., description="新版本消息ID")
+    message: str = Field(..., description="新生成的回复内容")
+    version: int = Field(..., description="新版本号")
+    conversation_id: str = Field(..., description="会话ID")
+    execution_id: str = Field(..., description="本次重新生成产生的执行记录ID")
+    citations: List[Dict[str, Any]] = Field(default_factory=list, description="引用来源")
+    token_usage: Dict[str, Any] = Field(default_factory=dict, description="Token 使用情况")
+    elapsed_time: Optional[float] = Field(default=None, description="耗时（秒）")
 
 
 # ========== 消息审核功能 Schema ==========

@@ -22,6 +22,7 @@ class SubProblemEnum(str, Enum):
     FACT_CONTRADICTION = "fact_contradiction"
     METADATA_VALIDATION = "metadata_validation"
     UNRESOLVED_ENTITY = "unresolved_entity"
+    ALIAS_MERGE = "alias_merge"
 
 class TriggerTypeEnum(str, Enum):
     """触发方式枚举"""

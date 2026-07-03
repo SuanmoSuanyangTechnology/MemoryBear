@@ -240,6 +240,39 @@ class WorkspaceAppService:
             self.db.rollback()
             return False
 
+    def get_end_user_write_time(self, end_user_id: str) -> Optional[Any]:
+        """读取 end_user 的最后写入时间（write_time）。"""
+        try:
+            end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
+            if end_user:
+                return end_user.write_time
+            return None
+        except Exception as e:
+            api_logger.error(f"读取用户写入时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
+            # 失败先 rollback，避免事务 aborted 拖垮同一 session 后续查询
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return None
+
+    def update_end_user_write_time(self, end_user_id: str) -> bool:
+        """将 end_user 的 write_time 更新为当前时间。"""
+        try:
+            end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
+            if end_user:
+                end_user.write_time = utcnow_naive()
+                self.db.commit()
+                api_logger.info(f"成功更新用户写入时间，end_user_id: {end_user_id}")
+                return True
+            else:
+                api_logger.warning(f"未找到用户，end_user_id: {end_user_id}")
+                return False
+        except Exception as e:
+            api_logger.error(f"更新用户写入时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
+            self.db.rollback()
+            return False
+
 
 class MemoryReflectionService:
     """Memory reflection service category"""

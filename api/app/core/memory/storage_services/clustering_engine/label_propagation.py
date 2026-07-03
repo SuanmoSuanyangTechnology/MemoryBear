@@ -24,6 +24,18 @@ MAX_ITERATIONS = 10
 # 社区核心实体取 top-N 数量
 CORE_ENTITY_LIMIT = 10
 
+# P4：prompt 中最多引用的成员数，防止超大社区超出 LLM 输入上限
+MAX_MEMBERS_FOR_PROMPT = 50
+
+# P4：社区合并后允许的最大规模，防止超级社区
+MAX_COMMUNITY_SIZE = 200
+
+# P2：incremental_update 每批并发处理的实体数
+CONCURRENT_BATCH = 10
+
+# P1：_generate_community_metadata 最大并发 Neo4j 查询数（不超过连接池上限）
+METADATA_PREPARE_CONCURRENCY = 10
+
 
 def _cosine_similarity(v1: Optional[List[float]], v2: Optional[List[float]]) -> float:
     """计算两个向量的余弦相似度，任一为空则返回 0。"""
@@ -219,15 +231,25 @@ class LabelPropagationEngine:
         2. 加权多数投票决定社区归属
         3. 若邻居无社区 → 创建新社区
         4. 若邻居分属多个社区 → 评估是否合并
+
+        P2 修复：改为按批（每批 CONCURRENT_BATCH 个）并发处理，
+        避免大批量新实体时串行积压导致连接池长时间占用。
         """
-        # 收集所有需要生成元数据的社区ID
         communities_to_update = set()
-        
-        for entity_id in new_entity_ids:
-            cid = await self._process_single_entity(entity_id, end_user_id)
-            if cid:
-                communities_to_update.add(cid)
-        
+
+        # 分批并发，每批最多 CONCURRENT_BATCH 个实体
+        for i in range(0, len(new_entity_ids), CONCURRENT_BATCH):
+            batch = new_entity_ids[i:i + CONCURRENT_BATCH]
+            results = await asyncio.gather(
+                *[self._process_single_entity(eid, end_user_id) for eid in batch],
+                return_exceptions=True,
+            )
+            for res in results:
+                if isinstance(res, Exception):
+                    logger.warning(f"[Clustering] _process_single_entity 失败（已忽略）: {res}")
+                elif res:
+                    communities_to_update.add(res)
+
         # 批量生成所有社区的元数据
         if communities_to_update:
             await self._generate_community_metadata(list(communities_to_update), end_user_id, force=True)
@@ -307,52 +329,31 @@ class LabelPropagationEngine:
         """
         评估多个社区是否应合并。
 
-        策略：计算各社区成员 embedding 的平均向量，若两两余弦相似度 > 0.75 则合并。
+        策略：计算各社区成员 embedding 的平均向量，若两两余弦相似度 > MERGE_THRESHOLD 则合并。
         合并时保留成员数最多的社区，其余成员迁移过来。
 
-        全量场景（社区数 > 20）使用批量查询，避免 N 次数据库往返。
+        P7 修复：改为 Neo4j 侧计算平均向量（APOC 聚合），不再拉取全量成员到 Python，
+                 将 ~62 MB 内存峰值降至几百 KB。
+        P3 修复：合并成员迁移改为 batch_assign_entities_to_communities，消除逐成员循环写。
+        P4 修复：合并前检查合并后规模，超过 MAX_COMMUNITY_SIZE 时跳过，防止超级社区。
         """
         MERGE_THRESHOLD = 0.85
-        BATCH_THRESHOLD = 20  # 超过此数量走批量查询
 
         community_embeddings: Dict[str, Optional[List[float]]] = {}
         community_sizes: Dict[str, int] = {}
 
-        if len(community_ids) > BATCH_THRESHOLD:
-            # 批量查询：一次拉取所有社区成员
-            all_members = await self.repo.get_all_community_members_batch(
-                community_ids, end_user_id
-            )
-            for cid in community_ids:
-                members = all_members.get(cid, [])
-                community_sizes[cid] = len(members)
-                valid_embeddings = [
-                    m["name_embedding"] for m in members if m.get("name_embedding")
-                ]
-                if valid_embeddings:
-                    dim = len(valid_embeddings[0])
-                    community_embeddings[cid] = [
-                        sum(e[i] for e in valid_embeddings) / len(valid_embeddings)
-                        for i in range(dim)
-                    ]
-                else:
-                    community_embeddings[cid] = None
-        else:
-            # 增量场景：逐个查询
-            for cid in community_ids:
+        # P7：Neo4j 侧批量计算平均 embedding，无需拉取全量成员到 Python
+        avg_data = await self.repo.get_community_avg_embeddings_batch(community_ids, end_user_id)
+        for cid in community_ids:
+            entry = avg_data.get(cid)
+            if entry:
+                community_sizes[cid] = entry["member_count"]
+                community_embeddings[cid] = entry["avg_embedding"]
+            else:
+                # 无带 embedding 成员的社区：回退到查询成员数
                 members = await self.repo.get_community_members(cid, end_user_id)
                 community_sizes[cid] = len(members)
-                valid_embeddings = [
-                    m["name_embedding"] for m in members if m.get("name_embedding")
-                ]
-                if valid_embeddings:
-                    dim = len(valid_embeddings[0])
-                    community_embeddings[cid] = [
-                        sum(e[i] for e in valid_embeddings) / len(valid_embeddings)
-                        for i in range(dim)
-                    ]
-                else:
-                    community_embeddings[cid] = None
+                community_embeddings[cid] = None
 
         # 找出应合并的社区对
         to_merge: List[tuple] = []
@@ -385,6 +386,15 @@ class LabelPropagationEngine:
             if root1 == root2:
                 continue
 
+            # P4：合并规模保护，防止超级社区
+            merged_size = community_sizes.get(root1, 0) + community_sizes.get(root2, 0)
+            if merged_size > MAX_COMMUNITY_SIZE:
+                logger.info(
+                    f"[Clustering] 跳过合并 {root1} ↔ {root2}，"
+                    f"合并后规模 {merged_size} > {MAX_COMMUNITY_SIZE}"
+                )
+                continue
+
             # 用合并后的最新平均向量重新验证相似度
             # 防止链式传递：A≈B 合并后 B 的向量已更新，C 必须和新 B 相似才能合并
             current_sim = _cosine_similarity(
@@ -392,7 +402,6 @@ class LabelPropagationEngine:
                 community_embeddings.get(root2),
             )
             if current_sim <= MERGE_THRESHOLD:
-                # 合并后向量已漂移，不再满足阈值，跳过
                 logger.debug(
                     f"[Clustering] 跳过合并 {root1} ↔ {root2}，"
                     f"当前相似度 {current_sim:.3f} ≤ {MERGE_THRESHOLD}"
@@ -403,11 +412,13 @@ class LabelPropagationEngine:
             dissolve = root2 if keep == root1 else root1
             merged_into[dissolve] = keep
 
+            # P3：批量迁移成员，一次 UNWIND 替代逐成员循环写
             members = await self.repo.get_community_members(dissolve, end_user_id)
-            for m in members:
-                await self.repo.assign_entity_to_community(m["id"], keep, end_user_id)
+            if members:
+                assignments = [{"entity_id": m["id"], "community_id": keep} for m in members]
+                await self.repo.batch_assign_entities_to_communities(assignments, end_user_id)
 
-            # 合并后重新计算 keep 的平均向量（加权平均）
+            # 合并后更新内存中的平均向量（加权平均），供后续对比使用
             keep_emb = community_embeddings.get(keep)
             dissolve_emb = community_embeddings.get(dissolve)
             keep_size = community_sizes.get(keep, 0)
@@ -432,21 +443,30 @@ class LabelPropagationEngine:
     async def _flush_labels(
         self, labels: Dict[str, str], end_user_id: str
     ) -> None:
-        """将内存中的标签批量写入 Neo4j。"""
-        # 先创建所有唯一社区节点
+        """将内存中的标签批量写入 Neo4j。
+
+        P0 修复：用单条 UNWIND Cypher 替代 N×2 次串行查询，
+        将 10000 实体原先 ~600s 的写入阶段压缩到秒级。
+        """
         unique_communities = set(labels.values())
+
+        # 先创建所有唯一社区节点（数量远少于实体，串行可接受）
         for cid in unique_communities:
             await self.repo.upsert_community(cid, end_user_id)
 
-        # 再批量分配实体
-        for entity_id, community_id in labels.items():
-            await self.repo.assign_entity_to_community(
-                entity_id, community_id, end_user_id
-            )
+        # 批量分配实体：一次 UNWIND 替代 N×2 次串行 Cypher
+        assignments = [
+            {"entity_id": eid, "community_id": cid}
+            for eid, cid in labels.items()
+        ]
+        await self.repo.batch_assign_entities_to_communities(assignments, end_user_id)
+        logger.info(f"[Clustering] _flush_labels 批量写入完成，实体数={len(assignments)}，社区数={len(unique_communities)}")
 
-        # 刷新成员数
-        for cid in unique_communities:
-            await self.repo.refresh_member_count(cid, end_user_id)
+        # 刷新成员数（并发执行）
+        await asyncio.gather(
+            *[self.repo.refresh_member_count(cid, end_user_id) for cid in unique_communities],
+            return_exceptions=True,
+        )
 
     async def _get_entity_embedding(
         self, entity_id: str, end_user_id: str
@@ -521,7 +541,9 @@ class LabelPropagationEngine:
                 # 准备 LLM prompt（如果配置了 LLM）
                 prompt = None
                 if self.llm_model_id:
-                    entity_list_str = "\n".join(self._build_entity_lines(members))
+                    # P4：只取 Top-MAX_MEMBERS_FOR_PROMPT 成员参与 prompt，防止超大社区超出 LLM 输入上限
+                    prompt_members = sorted_members[:MAX_MEMBERS_FOR_PROMPT]
+                    entity_list_str = "\n".join(self._build_entity_lines(prompt_members))
                     relationships = await self.repo.get_community_relationships(cid, end_user_id)
                     rel_lines = [
                         f"- {r['subject']} → {r['predicate']} → {r['object']}"
@@ -568,9 +590,18 @@ class LabelPropagationEngine:
                 logger.error(f"[Clustering] 社区 {cid} 元数据准备失败: {e}", exc_info=True)
                 return None
 
-        # --- 阶段1：并发准备所有社区数据 ---
+        # --- 阶段1：并发准备所有社区数据（P1：Semaphore 限制并发 Neo4j 查询数） ---
+        # 每个 _prepare_one 内部有 2 次 Neo4j 查询（get_community_members + get_community_relationships）
+        # Semaphore(METADATA_PREPARE_CONCURRENCY) 确保最多同时 METADATA_PREPARE_CONCURRENCY 个社区并发查询，
+        # 不超过连接池上限，避免大量社区时连接超时断连
+        sem = asyncio.Semaphore(METADATA_PREPARE_CONCURRENCY)
+
+        async def _prepare_one_limited(cid: str) -> Optional[Dict]:
+            async with sem:
+                return await _prepare_one(cid)
+
         results = await asyncio.gather(
-            *[_prepare_one(cid) for cid in community_ids],
+            *[_prepare_one_limited(cid) for cid in community_ids],
             return_exceptions=True,
         )
         metadata_list = []
@@ -598,17 +629,21 @@ class LabelPropagationEngine:
                 if prompts_to_process:
                     logger.info(f"[Clustering] 批量调用 LLM 生成 {len(prompts_to_process)} 个社区元数据")
                     
+                    # LLM 并发限流：避免大量社区同时调用触发 LLM 侧限流
+                    llm_sem = asyncio.Semaphore(5)
+
                     async def _call_llm(idx: int, meta: Dict) -> tuple:
-                        """单个 LLM 调用"""
-                        try:
-                            response = await llm_client.chat([{"role": "user", "content": meta["prompt"]}])
-                            text = response.content if hasattr(response, "content") else str(response)
-                            return (idx, text, None)
-                        except Exception as e:
-                            logger.warning(f"[Clustering] 社区 {meta['community_id']} LLM 生成失败: {e}")
-                            return (idx, None, e)
+                        """单个 LLM 调用（受 Semaphore 保护）"""
+                        async with llm_sem:
+                            try:
+                                response = await llm_client.chat([{"role": "user", "content": meta["prompt"]}])
+                                text = response.content if hasattr(response, "content") else str(response)
+                                return (idx, text, None)
+                            except Exception as e:
+                                logger.warning(f"[Clustering] 社区 {meta['community_id']} LLM 生成失败: {e}")
+                                return (idx, None, e)
                     
-                    # 并发调用所有 LLM 请求
+                    # 并发调用所有 LLM 请求（最多 5 个同时进行）
                     llm_results = await asyncio.gather(
                         *[_call_llm(idx, meta) for idx, meta in prompts_to_process],
                         return_exceptions=True

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 10:24:32
+ * @Last Modified time: 2026-07-01 10:20:14
  */
 /**
  * Model List Detail Drawer
@@ -13,6 +13,7 @@
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Switch, Row, Col, Tooltip } from 'antd'
+import clsx from 'clsx';
 
 import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConfigModalRef } from '../types';
 import RbDrawer from '@/components/RbDrawer';
@@ -24,6 +25,7 @@ import MultiKeyConfigModal from './MultiKeyConfigModal'
 import { getModelNewList, updateModelStatus, modelTypeUrl } from '@/api/models'
 import { getLogoUrl } from '../utils'
 import CustomSelect from '@/components/CustomSelect'
+import { formatModelType } from '../utils'
 
 /**
  * Component props
@@ -124,7 +126,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             value={type}
             url={modelTypeUrl}
             hasAll={false}
-            format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+            format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
             onChange={handleTypeChange}
             className="rb:w-full"
             allowClear={true}
@@ -142,10 +144,10 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               subTitle={
                 <OverflowTags
                   items={[
-                    <Tag>{t(`modelNew.${item.type}`)}</Tag>,
-                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>,
+                    <Tag>{formatModelType(item.type)}</Tag>,
+                    item.provider !== 'speedbear' ? <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag> : null,
                     ...(item.capability ?? []).map(vo => <Tag>{t(`modelNew.${vo}`)}</Tag>)
-                  ]}
+                  ].filter(Boolean)}
                 />}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
@@ -153,25 +155,30 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                   {item.name[0]}
                 </div>
               }
-              extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
-              bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
+              extra={item.provider !== 'speedbear' && <Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
+              bodyClassName={clsx("rb:relative rb:h-[calc(100%-64px)]!", {
+                "rb:pb-0!": item.provider === 'speedbear',
+                "rb:pb-[64px]!": item.provider !== 'speedbear',
+              })}
               variant="outlined"
             >
               <Tooltip title={item.description}>
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
-              <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
-                <Row gutter={12}>
-                  {!item.model_id && 
-                    <Col span={12}>
-                      <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+              {item.provider !== 'speedbear' &&
+                <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
+                  <Row gutter={12}>
+                    {!item.model_id && 
+                      <Col span={12}>
+                        <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                      </Col>
+                    }
+                    <Col span={!item.model_id ? 12 : 24}>
+                      <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
                     </Col>
-                  }
-                  <Col span={!item.model_id ? 12 : 24}>
-                    <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
-                  </Col>
-                </Row>
-              </div>
+                  </Row>
+                </div>
+              }
             </RbCard>
           ))}
           </div>

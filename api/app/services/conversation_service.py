@@ -20,9 +20,10 @@ from app.models.conversation_model import ConversationDetail
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
 from app.repositories.end_user_repository import EndUserRepository
+from app.repositories.tool_repository import ToolRepository
 from app.schemas.conversation_schema import ConversationOut
 from app.services import workspace_service
-from app.services.model_service import ModelConfigService
+from app.services.model_service import ModelConfigService, ModelApiKeyService
 from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
@@ -195,6 +196,7 @@ class ConversationService:
             status: str = "completed",
             sync_memory: bool = True,
             should_memorize: bool = True,
+            parent_message_id: Optional[uuid.UUID] = None,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -215,6 +217,10 @@ class ConversationService:
         Returns:
             Message: Newly created Message instance.
         """
+        # 重新生成场景：由 WorkflowService.regenerate 统一保存版本化消息，
+        # 跳过 run/run_stream 内部对 user/assistant/开场白/失败消息的重复保存。
+        if getattr(self, "_suppress_message_save", False):
+            return None
         try:
             conversation = self.conversation_repo.get_conversation_by_conversation_id(
                 conversation_id
@@ -227,6 +233,7 @@ class ConversationService:
                 content=content,
                 meta_data=meta_data,
                 status=status,
+                parent_message_id=parent_message_id,
             )
 
             self.message_repo.add_message(message)
@@ -1094,11 +1101,16 @@ class ConversationService:
             logger.error("Configured model not found for model_id={model_id}")
             raise BusinessException("Configured model does not exist.", BizCode.NOT_FOUND)
 
-        if not config.api_keys or len(config.api_keys) == 0:
-            logger.error(f"Model API keys missing for model_id={model_id}", )
+        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
+        api_config = ModelApiKeyService.get_available_api_key(
+            self.db,
+            model_id,
+            tenant_id=tenant_id,
+        )
+        if not api_config:
+            logger.error(f"Model API keys missing for model_id={model_id}")
             raise BusinessException("Model configuration missing API keys.", BizCode.INVALID_PARAMETER)
 
-        api_config = config.api_keys[0]
         model_name = api_config.model_name
         provider = api_config.provider
         api_key = api_config.api_key

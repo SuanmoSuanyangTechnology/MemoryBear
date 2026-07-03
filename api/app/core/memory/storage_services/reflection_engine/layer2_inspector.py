@@ -21,12 +21,17 @@ from app.core.memory.storage_services.reflection_engine.llm.description_synthesi
     validate_summary_output,
     apply_event_operations,
     validate_event_operations,
+    _parse_timeline_full,
 )
 from app.core.memory.storage_services.reflection_engine.llm.unresolved_resolver import (
     resolve_unresolved_statement,
     validate_unresolved_output,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.utils.debug.reflection_snapshot_recorder import (
+    ReflectionSnapshotRecorder,
+    change,
+)
 from app.repositories.neo4j.cypher_queries import (
     REFLECTION_DESC_UPDATE,
     REFLECTION_RENAME_CHECK_CONFLICT,
@@ -41,6 +46,16 @@ from app.repositories.neo4j.cypher_queries import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 快照体积控制（仅调试用、不影响写库）：低频 1_input 逐实体存 description，超长会让快照过大、
+# 上传慢，故截断；aliases 是短词不限长。
+_SNAP_DESC_MAXLEN = 200
+
+
+def _snap_trunc_text(s: Optional[str], limit: int = _SNAP_DESC_MAXLEN) -> str:
+    """快照用：超长文本截断到 limit 字符，并标注省略了多少，避免快照体积失控。"""
+    s = s or ""
+    return s if len(s) <= limit else s[:limit] + f"…(+{len(s) - limit} chars)"
 
 
 class DescriptionMergeConfig(BaseModel):
@@ -70,6 +85,12 @@ class EntityDedupConfig(BaseModel):
     max_pairs_per_run: int = 10         # 单次最多合并对数
 
 
+class AliasMergeConfig(BaseModel):
+    """别名归并 LLM 校验配置"""
+    confidence_threshold: float = 0.9   # merge 阈值，confidence >= 此值才合并
+    max_per_run: int = 20               # 单次反思最多判定/处理的候选别名数
+
+
 class ReflectionConfig(BaseModel):
     """反思引擎统一配置"""
     # === 基础 ===
@@ -82,6 +103,8 @@ class ReflectionConfig(BaseModel):
     entity_dedup: EntityDedupConfig = EntityDedupConfig()
     # 子问题 6 — 描述合并
     description_merge: DescriptionMergeConfig = DescriptionMergeConfig()
+    # 别名归并 LLM 校验
+    alias_merge: AliasMergeConfig = AliasMergeConfig()
     # stale_detection: StaleDetectionConfig = StaleDetectionConfig()        # 待实现
     # fact_contradiction: FactContradictionConfig = ...                     # 待实现
     # metadata_validation: MetadataValidationConfig = ...                   # 待实现
@@ -148,6 +171,37 @@ class Layer2Inspector:
         self.desc_config = self.config.description_merge
         self.dedup_config = self.config.entity_dedup
         self._semaphore = asyncio.Semaphore(self.desc_config.merge_concurrency)
+        self._recorder: Optional[ReflectionSnapshotRecorder] = None
+
+    def _snap(self, subproblem: str, stage: str, data) -> None:
+        """安全落普通阶段文件；recorder 为 None / 关闭 / 异常时只告警，不影响主流程。"""
+        rec = self._recorder
+        if rec is None:
+            return
+        try:
+            rec.record_stage(subproblem, stage, data)
+        except Exception as e:
+            logger.warning(f"[ReflectionSnapshot] {subproblem}/{stage} 落盘失败: {e}")
+
+    def _snap_changes(self, subproblem: str, changes: list) -> None:
+        """安全落 3_changes.json。"""
+        rec = self._recorder
+        if rec is None:
+            return
+        try:
+            rec.record_changes(subproblem, changes)
+        except Exception as e:
+            logger.warning(f"[ReflectionSnapshot] {subproblem}/3_changes 落盘失败: {e}")
+
+    def _snap_summary(self, results: dict) -> None:
+        """安全落 0_summary.json。"""
+        rec = self._recorder
+        if rec is None:
+            return
+        try:
+            rec.record_summary(results)
+        except Exception as e:
+            logger.warning(f"[ReflectionSnapshot] 0_summary 落盘失败: {e}")
 
     async def run(self, end_user_id: str, baseline: str = "HYBRID",
                   language: str = "zh") -> Dict[str, Any]:
@@ -160,77 +214,240 @@ class Layer2Inspector:
         run_t0 = time.perf_counter()
         logger.info(f"[Layer2] 巡检开始 end_user_id={end_user_id}, baseline={baseline}")
 
-        # TODO: 子问题 1 — 过期检测（stale_detection）
-        # TODO: 子问题 2 — 事实矛盾检测（fact_contradiction）
-
-        # 未识别实体处理：把"未识别实体"语句解析成正式实体/关系并入图
-        unresolved = await self._run_unresolved_resolver(
-            end_user_id, baseline, language
+        # 反思快照（高频）：开关关闭时 recorder 内部 no-op，零开销
+        self._recorder = ReflectionSnapshotRecorder(
+            end_user_id=end_user_id,
+            scan_type="layer2_frequent",
+            baseline=baseline,
         )
-        results["unresolved_entity"] = unresolved
-        logger.info(
-            f"[Layer2 高频] 未识别实体处理完成 end_user_id={end_user_id}, "
-            f"候选={unresolved.get('total', 0)}, 解析={unresolved.get('resolved', 0)}, "
-            f"强制入库={unresolved.get('forced', 0)}, 失败={unresolved.get('failed', 0)}"
-        )
-
-        # 别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
-        # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点
-        results["alias_merge"] = await self._run_alias_merge(end_user_id)
-
-        # 复杂去重消歧：两路召回候选 + LLM 判定后合并重复实体
-        dedup = await self._run_entity_dedup(end_user_id, baseline)
-
-
-        results["entity_dedup"] = dedup
-        logger.info(
-            f"[Layer2 高频] 实体去重完成 end_user_id={end_user_id}, "
-            f"候选={dedup.get('candidate_count', 0)}, LLM判定={dedup.get('llm_pool', 0)}, "
-            f"合并={dedup.get('merged_count', 0)}, 记录未合并={dedup.get('recorded_count', 0)}"
-        )
-
-
-        # 子问题 7 — 用户实体元数据提取
-        # 放在 description_merge 之前：metadata 提取的输入是 description 原始碎片，
-        # description_merge 会清空 description 并写入 description_summary
-        meta = await self._run_metadata_extraction(
-            end_user_id, language
-        )
-        results["metadata_extraction"] = meta
-        logger.info(
-            f"[Layer2 高频] 元数据提取完成 end_user_id={end_user_id}, "
-            f"提取={meta.get('extracted', 0)}, 失败={meta.get('failed', 0)}"
-        )
-
-        # 描述合并：把同一实体的多条描述合并、必要时更名
-        desc = await self._run_description_merge(
-            end_user_id, baseline, language
-        )
-        results["description_merge"] = desc
-        logger.info(
-            f"[Layer2 高频] 描述合并完成 end_user_id={end_user_id}, "
-            f"候选={desc.get('candidate_count', 0)}, 合并={desc.get('merged_count', 0)}, "
-            f"失败={desc.get('failed_count', 0)}"
-        )
-
-        # TODO: 子问题 4 — 本体 Metadata 校验（metadata_validation）
-
-        logger.info(
-            f"[Layer2 高频] 巡检结束 end_user_id={end_user_id}, "
-            f"耗时={time.perf_counter() - run_t0:.2f}s"
-        )
-        return results
-
-    async def _run_alias_merge(self, end_user_id: str) -> Dict[str, Any]:
-        """别名归并：处理 "别名属于" 关系（确定性 Cypher，无 LLM）
-
-        将别名节点的 name/description 归并进规范实体，重定向其它边，
-        最后删除别名节点。逻辑迁移自原写入后处理任务。
-        """
-        from .deterministic.alias_merger import merge_alias_belongs_to
-
         try:
-            return await merge_alias_belongs_to(self.connector, end_user_id)
+            # TODO: 子问题 1 — 过期检测（stale_detection）
+            # TODO: 子问题 2 — 事实矛盾检测（fact_contradiction）
+
+            # 未识别实体处理：把"未识别实体"语句解析成正式实体/关系并入图
+            unresolved = await self._run_unresolved_resolver(
+                end_user_id, baseline, language
+            )
+            results["unresolved_entity"] = unresolved
+            logger.info(
+                f"[Layer2 高频] 未识别实体处理完成 end_user_id={end_user_id}, "
+                f"候选={unresolved.get('total', 0)}, 解析={unresolved.get('resolved', 0)}, "
+                f"强制入库={unresolved.get('forced', 0)}, 失败={unresolved.get('failed', 0)}"
+            )
+
+            # 别名归并：LLM 校验后按 merge/drop 处理 "别名属于" 关系
+            # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点
+            alias = await self._run_alias_merge(end_user_id, baseline, language)
+            results["alias_merge"] = alias
+            logger.info(
+                f"[Layer2 高频] 别名归并完成 end_user_id={end_user_id}, "
+                f"合并={alias.get('merge_count', 0)}, 丢弃={alias.get('drop_count', 0)}, "
+                f"边重定向={alias.get('edges_redirected', 0)}, 节点删除={alias.get('alias_nodes_deleted', 0)}, "
+                f"PG同步={alias.get('pg_synced', False)}"
+            )
+
+            # 复杂去重消歧：两路召回候选 + LLM 判定后合并重复实体
+            dedup = await self._run_entity_dedup(end_user_id, baseline)
+            results["entity_dedup"] = dedup
+            logger.info(
+                f"[Layer2 高频] 实体去重完成 end_user_id={end_user_id}, "
+                f"候选={dedup.get('candidate_count', 0)}, LLM判定={dedup.get('llm_pool', 0)}, "
+                f"合并={dedup.get('merged_count', 0)}, 记录未合并={dedup.get('recorded_count', 0)}"
+            )
+
+            # 子问题 7 — 用户实体元数据提取
+            # 放在 description_merge 之前：metadata 提取的输入是 description 原始碎片，
+            # description_merge 会清空 description 并写入 description_summary
+            meta = await self._run_metadata_extraction(
+                end_user_id, language
+            )
+            results["metadata_extraction"] = meta
+            logger.info(
+                f"[Layer2 高频] 元数据提取完成 end_user_id={end_user_id}, "
+                f"提取={meta.get('extracted', 0)}, 失败={meta.get('failed', 0)}"
+            )
+
+            # 描述合并：把同一实体的多条描述合并、必要时更名
+            desc = await self._run_description_merge(
+                end_user_id, baseline, language
+            )
+            results["description_merge"] = desc
+            logger.info(
+                f"[Layer2 高频] 描述合并完成 end_user_id={end_user_id}, "
+                f"候选={desc.get('candidate_count', 0)}, 合并={desc.get('merged_count', 0)}, "
+                f"失败={desc.get('failed_count', 0)}"
+            )
+
+            # TODO: 子问题 4 — 本体 Metadata 校验（metadata_validation）
+
+            logger.info(
+                f"[Layer2 高频] 巡检结束 end_user_id={end_user_id}, "
+                f"耗时={time.perf_counter() - run_t0:.2f}s"
+            )
+            return results
+        finally:
+            # finally 保证软超时/异常下 summary 不丢；空转轮由 recorder 内部跳过、整轮零文件。
+            self._snap_summary(results)
+
+    async def _run_alias_merge(self, end_user_id: str, baseline: str = "HYBRID",
+                               language: str = "zh") -> Dict[str, Any]:
+        """别名归并：LLM 校验后按 merge/drop 处理 "别名属于" 关系。
+
+        S0 收集候选 → S1 LLM 分组判定（merge/drop/skip）→ S2 删 drop 边 →
+        S3-5 按 merge 集合归并 → S6 PG 同步（在 merge_alias_belongs_to 内）→ 写日志。
+        判定失败的候选 skip（保留边，下次重判）；删边只在明确低置信时发生。
+        """
+        from collections import defaultdict
+        from .deterministic.alias_merger import (
+            merge_alias_belongs_to, collect_alias_candidates, drop_alias_edges,
+        )
+        from .llm.alias_belongs_judge import judge_alias_belongs
+
+        cfg = self.config.alias_merge
+        try:
+            t0 = time.perf_counter()
+            candidates = await collect_alias_candidates(self.connector, end_user_id)
+            recall_ms = int((time.perf_counter() - t0) * 1000)
+            if not candidates:
+                # 无候选，仅做 PG 同步（幂等）
+                return await merge_alias_belongs_to(self.connector, end_user_id, alias_ids=[])
+
+            # 每轮限流（处理后候选会减少，超出部分留待下次）
+            candidates = candidates[:cfg.max_per_run]
+            # 快照：1_input（GET_ALIAS_BELONGS_CANDIDATES 原始候选行，含 alias_*/target_*）
+            self._snap("alias_merge", "1_input", {"candidates": candidates})
+
+            # 按 target 分组（一个 canonical 一组判定）
+            groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for c in candidates:
+                groups[c["target_id"]].append(c)
+
+            merge_ids: List[str] = []
+            drop_ids: List[str] = []
+            decided_log: List[tuple] = []   # (canonical, cand, decided) 仅 LLM 判定过的，用于写日志
+            snap_skipped: List[Dict[str, Any]] = []   # LLM 未给有效判定的候选（快照 skipped）
+
+            llm_t0 = time.perf_counter()
+            for target_id, group in groups.items():
+                head = group[0]
+                canonical = {
+                    "name": head["target_name"],
+                    "entity_type": head["target_entity_type"],
+                    "description": head["target_description"],
+                    "description_summary": head["target_description_summary"],
+                    "aliases": head["target_aliases"] or [],
+                }
+                existing_lower = {a.strip().lower() for a in canonical["aliases"] if a and a.strip()}
+
+                to_judge: List[Dict[str, Any]] = []
+                for c in group:
+                    # 重复短路：候选名已在 target.aliases（忽略大小写与前后空白）→ 直接 merge，
+                    # 不送 LLM，但写反思日志表
+                    if (c["alias_name"] or "").strip().lower() in existing_lower:
+                        merge_ids.append(c["alias_id"])
+                        decided_log.append((canonical, c, {
+                            "alias_id": c["alias_id"],
+                            "decision": "merge",
+                            "confidence": 1.0,
+                            "reason": "已是现有别名，直接归并",
+                            "shortcut": True,
+                        }))
+                    else:
+                        to_judge.append(c)
+
+                if not to_judge:
+                    continue
+
+                decided = await judge_alias_belongs(
+                    self.llm_client, canonical, to_judge,
+                    threshold=cfg.confidence_threshold, language=language,
+                )
+                decided_by_id = {d["alias_id"]: d for d in decided}
+                for c in to_judge:
+                    d = decided_by_id.get(c["alias_id"])
+                    if d is None:
+                        snap_skipped.append(c)  # skip：保留边，下次重判
+                        continue
+                    (merge_ids if d["decision"] == "merge" else drop_ids).append(c["alias_id"])
+                    decided_log.append((canonical, c, d))
+            llm_ms = int((time.perf_counter() - llm_t0) * 1000)
+
+            # S2 drop（只删边）
+            await drop_alias_edges(self.connector, end_user_id, drop_ids)
+            # S3-5 merge（按 merge 集合）+ S6 PG 同步
+            result = await merge_alias_belongs_to(self.connector, end_user_id, alias_ids=merge_ids)
+
+            # 写日志（含 LLM 判定与重复短路命中的候选；仅 skip 不写）
+            timing = {"recall_ms": recall_ms, "llm_ms": llm_ms}
+            for canonical, cand, d in decided_log:
+                self._write_alias_log(end_user_id, canonical, cand, d, timing, baseline)
+
+            # 快照：2_llm_raw（判定结果）+ 3_changes（merge/drop/sync_pg/skipped）
+            self._snap("alias_merge", "2_llm_raw", {
+                "threshold": cfg.confidence_threshold,
+                "decided": [
+                    {"alias_id": cand["alias_id"], "alias_name": cand["alias_name"],
+                     "decision": d["decision"], "confidence": d["confidence"],
+                     "reason": d["reason"], "shortcut": bool(d.get("shortcut"))}
+                    for (_canon, cand, d) in decided_log
+                ],
+                "short_circuit": [
+                    cand["alias_id"] for (_canon, cand, d) in decided_log if d.get("shortcut")
+                ],
+            })
+            snap_changes: list = []
+            for _canon, cand, d in decided_log:
+                if d["decision"] == "merge":
+                    # merge 变更对象是 target(规范)实体；aliases/description 增量按
+                    # MERGE_ALIAS_BELONGS_TO 语义推导（由候选快照推导，不读写后回值）
+                    old_aliases = list(cand.get("target_aliases") or [])
+                    new_aliases = old_aliases + (
+                        [cand["alias_name"]] if cand["alias_name"] not in old_aliases else [])
+                    fc = []
+                    # 别名已在 target.aliases（短路命中）时 aliases 无实际新增，不记 old==new；
+                    # 此时 merge 的真实效果是删别名节点 + 重定向边，由 action=merge + extra 体现
+                    if new_aliases != old_aliases:
+                        fc.append({"field": "aliases", "old": ", ".join(old_aliases),
+                                   "new": ", ".join(new_aliases)})
+                    old_desc = cand.get("target_description") or ""
+                    alias_desc = cand.get("alias_description") or ""
+                    if alias_desc and alias_desc not in old_desc:
+                        new_desc = alias_desc if not old_desc else f"{old_desc}；{alias_desc}"
+                        fc.append({"field": "description", "old": old_desc, "new": new_desc})
+                    snap_changes.append(change(
+                        "entity", "merge", target_id=cand["target_id"],
+                        target_name=cand["target_name"], field_changes=fc,
+                        extra={"alias_id": cand["alias_id"], "confidence": d["confidence"],
+                               "source": "short_circuit" if d.get("shortcut") else "llm"},
+                    ))
+                else:  # drop：只删「别名属于」边、保留节点
+                    snap_changes.append(change(
+                        "edge", "delete", target_id=cand["alias_id"],
+                        target_name=cand["alias_name"],
+                        field_changes=[{"field": "别名属于边", "old": "存在", "new": None}],
+                        reason="low_confidence",
+                        extra={"confidence": d["confidence"], "node_kept": True},
+                    ))
+            for c in snap_skipped:
+                snap_changes.append(change(
+                    "edge", "merge", target_id=c["alias_id"], target_name=c["alias_name"],
+                    status="skipped", reason="llm_invalid",
+                ))
+            for step, msg in (result.get("errors") or {}).items():
+                snap_changes.append(change(
+                    "edge", "redirect_edge" if step == "redirect" else step,
+                    status="skipped", reason=f"error:{msg}",
+                ))
+            snap_changes.append(change(
+                "metadata_field", "sync_pg", target_id=end_user_id,
+                status="applied" if result.get("pg_synced") else "skipped",
+                extra={"synced_fields": ["aliases"]},
+            ))
+            self._snap_changes("alias_merge", snap_changes)
+
+            result["merge_count"] = len(merge_ids)
+            result["drop_count"] = len(drop_ids)
+            return result
         except Exception as e:
             logger.warning(f"[AliasMerge] 执行失败 end_user_id={end_user_id}: {e}")
             return {"status": "error", "error": str(e)}
@@ -253,12 +470,14 @@ class Layer2Inspector:
                 extract_metadata_for_user,
             )
 
+            want_trace = self._recorder is not None and self._recorder.enabled
             result = await extract_metadata_for_user(
                 connector=self.connector,
                 llm_client=self.llm_client,
                 end_user_id=end_user_id,
                 language=language,
                 min_fragments=self.desc_config.min_fragments,
+                collect_trace=want_trace,
             )
 
             # 输出每个实体的详细变更日志
@@ -276,6 +495,11 @@ class Layer2Inspector:
                         logger.info(f"[Metadata] {name} {label}({len(group)}): "
                                     + "; ".join(fmt(o) for o in group))
 
+            trace = result.pop("_trace", None)  # 快照数据从业务返回值剥离
+            if trace is not None:
+                self._snap("metadata_extraction", "1_input", trace.get("input"))
+                self._snap("metadata_extraction", "2_llm_raw", trace.get("llm_raw"))
+                self._snap_changes("metadata_extraction", trace.get("changes") or [])
             return {"status": "success", **result}
         except Exception as e:
             logger.warning(
@@ -314,6 +538,22 @@ class Layer2Inspector:
         # 记录候选总数（用于返回值；直合池剥离前的总和）
         total_candidates = len(candidates)
 
+        # 快照：仅在有候选时落盘，空轮（无任何候选）不产生空文件。
+        # DedupCandidatePair 无原始向量（相似度已是标量），无需截断。
+        snap_on = total_candidates > 0
+        snap_changes: list = []
+        if snap_on:
+            self._snap("entity_dedup", "1_input", {
+                "candidates": [
+                    {"a_id": c.a_id, "a_name": c.a_name, "a_aliases": c.a_aliases or [],
+                     "b_id": c.b_id, "b_name": c.b_name, "b_aliases": c.b_aliases or [],
+                     "entity_type": c.entity_type, "sim_name": c.sim_name,
+                     "sim_embed": c.sim_embed, "probability": c.probability,
+                     "source_paths": c.source_paths}
+                    for c in candidates
+                ],
+            })
+
         # 3.5 同名同类型直合池：name 完全相同（归一化后）→ 不进 LLM，确定性合并
         # entity_type 在候选对里两侧本就相同（召回 Cypher 已约束），故只需判 name。
         merged_count = 0
@@ -347,6 +587,12 @@ class Layer2Inspector:
                 direct_merged_count += 1
                 if removed_id:
                     removed_ids.add(removed_id)
+                # 快照：同名同类型直合（确定性，不经 LLM）
+                snap_changes.append(change(
+                    "entity", "merge", target_id=keeper_id, target_name=c.a_name,
+                    extra={"loser_id": removed_id, "source": "deterministic",
+                           "entity_type": c.entity_type},
+                ))
                 # 把 keeper 的累积态(合并后真实状态)写回 overrides,
                 # 让下一对涉及同一 keeper 的合并能看到真实累积,日志 old/new 才能正确反映本次增量
                 if keeper_id is not None:
@@ -366,6 +612,14 @@ class Layer2Inspector:
             candidates, config.theta_low)
         await cache_discarded(end_user_id, discard_pool)
 
+        # 快照：低分丢弃池（filtered）
+        for p in discard_pool:
+            snap_changes.append(change(
+                "entity", "merge", target_id=p.a_id, target_name=p.a_name,
+                status="filtered", reason="low_probability",
+                extra={"loser_id": p.b_id, "probability": p.probability},
+            ))
+
         # 5. LLM 判定（所有候选均需 LLM 确认）— 计时
         t0 = time.perf_counter()
         llm_results = await judge_batch(
@@ -373,6 +627,23 @@ class Layer2Inspector:
             config.merge_concurrency,
         )
         llm_ms = int((time.perf_counter() - t0) * 1000)
+
+        # 快照：LLM 池 + 逐对裁决（pair 用名字便于阅读，另带 id 定位）
+        if snap_on:
+            self._snap("entity_dedup", "2_llm_raw", {
+                "llm_pool": [f"{p.a_name} ↔ {p.b_name}" for p in llm_pool],
+                "decisions": [
+                    {"pair": f"{pair.a_name} ↔ {pair.b_name}",
+                     "a_id": pair.a_id, "b_id": pair.b_id,
+                     "same_entity": bool(d and d.same_entity),
+                     "confidence": (d.confidence if d else 0.0),
+                     "winner_id": (d.winner_id if d else "a"),
+                     "merged_name": (d.merged_name if d else ""),
+                     "new_aliases": (d.new_aliases if d else []),
+                     "reason": (d.reason if d else "")}
+                    for pair, d in llm_results
+                ],
+            })
 
         # 均摊耗时（每对候选分摊批量耗时）
         n = max(len(llm_pool), 1)
@@ -390,9 +661,15 @@ class Layer2Inspector:
             if merged_count >= config.max_merges_per_run:
                 break
             if decision and decision.same_entity and decision.confidence >= config.llm_merge_threshold:
-                success = await self._apply_dedup_merge(pair, end_user_id, baseline, llm_decision=decision, step_timing=step_timing)
+                success = await self._apply_dedup_merge(pair, end_user_id, baseline, llm_decision=decision, step_timing=step_timing, keeper_state_overrides=keeper_state_overrides)
                 if success:
                     merged_count += 1
+                    # 快照：LLM 确认合并
+                    snap_changes.append(change(
+                        "entity", "merge", target_id=pair.a_id, target_name=pair.a_name,
+                        extra={"loser_id": pair.b_id, "confidence": decision.confidence,
+                               "source": "llm"},
+                    ))
             else:
                 # LLM 拒绝或 confidence 不够 → 收集待写缓存 + 写 recorded 日志
                 rejected_pairs.append(pair)
@@ -425,10 +702,20 @@ class Layer2Inspector:
                     baseline=baseline,
                 )
                 recorded_count += 1
+                # 快照：LLM 拒绝（NO_OP）
+                snap_changes.append(change(
+                    "entity", "merge", target_id=pair.a_id, target_name=pair.a_name,
+                    status="rejected", reason="llm_no_op",
+                    extra={"loser_id": pair.b_id, "confidence": conf},
+                ))
 
         # 批量写入丢弃缓存（一次 Redis 往返）
         if rejected_pairs:
             await cache_discarded(end_user_id, rejected_pairs)
+
+        # 快照：落 3_changes（空轮 snap_on=False 时不写）
+        if snap_on:
+            self._snap_changes("entity_dedup", snap_changes)
 
         return {
             "status": "success",
@@ -445,14 +732,24 @@ class Layer2Inspector:
         """子问题 3 复杂去重 方案B：低频全量扫描去重（公共入口）"""
         t0 = time.perf_counter()
         logger.info(f"[Layer2 低频] 全量去重开始 end_user_id={end_user_id}")
-        result = await self._run_dedup_full_scan(end_user_id, baseline=baseline)
-        logger.info(
-            f"[Layer2 低频] 全量去重完成 end_user_id={end_user_id}, "
-            f"扫描类型={result.get('scanned_types', 0)}, "
-            f"合并={result.get('merged_count', 0)}, "
-            f"耗时={time.perf_counter() - t0:.2f}s"
+        # 反思快照（低频）：只有 entity_dedup 一个子问题
+        self._recorder = ReflectionSnapshotRecorder(
+            end_user_id=end_user_id,
+            scan_type="dedup_full_scan",
+            baseline=baseline,
         )
-        return result
+        result: Dict[str, Any] = {}
+        try:
+            result = await self._run_dedup_full_scan(end_user_id, baseline=baseline)
+            logger.info(
+                f"[Layer2 低频] 全量去重完成 end_user_id={end_user_id}, "
+                f"扫描类型={result.get('scanned_types', 0)}, "
+                f"合并={result.get('merged_count', 0)}, "
+                f"耗时={time.perf_counter() - t0:.2f}s"
+            )
+            return result
+        finally:
+            self._snap_summary({"entity_dedup": result})
 
     async def _run_dedup_full_scan(self, end_user_id: str, baseline: str = "HYBRID") -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重"""
@@ -470,6 +767,10 @@ class Layer2Inspector:
         total_merged = 0
         total_direct_merged = 0
         scanned_types = 0
+        # 快照累积（跨类型聚合到 entity_dedup 一个子目录）
+        snap_input: list = []
+        snap_llm: list = []
+        snap_changes: list = []
 
         entity_types = await get_entity_types(self.connector, end_user_id)
 
@@ -490,11 +791,25 @@ class Layer2Inspector:
             scanned_types += 1
             entities = await fetch_entities_by_type(self.connector, end_user_id, entity_type)
 
+            # 快照：1_input（按类型分组的实体）；description 截断、aliases 限长以控体积
+            snap_input.append({
+                "scanned_type": entity_type,
+                "entity_count": len(entities),
+                "entities": [
+                    {"entity_id": e.get("entity_id"), "name": e.get("name"),
+                     "entity_type": e.get("entity_type"),
+                     "description": _snap_trunc_text(e.get("description")),
+                     "aliases": e.get("aliases") or []}
+                    for e in entities
+                ],
+            })
+
             # 同名同类型直合（确定性快路）：分组内 name 完全相同 → 直接合并不进 LLM
             # 受 max_pairs_per_run 限制；被合并的实体从 entities 剔除，避免送 LLM 浪费
             direct_merged_count, removed_ids = await self._direct_merge_in_group(
                 entities, entity_type, end_user_id, baseline,
                 max_merges=config.max_pairs_per_run,
+                snap_sink=snap_changes,
             )
             total_merged += direct_merged_count
             total_direct_merged += direct_merged_count
@@ -505,6 +820,23 @@ class Layer2Inspector:
             pairs = await judge_batch_dedup(self.llm_client, entities, entity_type)
             llm_ms = int((time.perf_counter() - t0) * 1000)
             llm_ms_per_pair = llm_ms // max(len(pairs), 1)
+
+            # 快照：2_llm_raw（judge_batch_dedup 元组裁决，idx 映射成名字便于阅读）
+            def _ename(idx):
+                return entities[idx]["name"] if 0 <= idx < len(entities) else None
+
+            def _eid(idx):
+                return entities[idx]["entity_id"] if 0 <= idx < len(entities) else None
+
+            snap_llm.append({
+                "scanned_type": entity_type,
+                "pairs": [
+                    {"pair": f"{_ename(ia)} ↔ {_ename(ib)}",
+                     "a_id": _eid(ia), "b_id": _eid(ib), "idx_a": ia, "idx_b": ib,
+                     "confidence": cf, "new_name": nn, "new_aliases": na, "reason": rs}
+                    for (ia, ib, cf, rs, nn, na) in pairs
+                ],
+            })
 
             merged_count = 0
             for idx_a, idx_b, conf, reason, new_name, new_aliases in pairs:
@@ -545,6 +877,14 @@ class Layer2Inspector:
                 if merge_status == "success":
                     merged_count += 1
                     await self._reembed_if_name_changed(keeper, merged_name)
+                    # 快照：LLM 确认合并。与高频 entity_dedup 一致：field_changes 留空，
+                    # 关键信息走 extra.loser_id；merged 别名详情在 2_llm_raw 的 new_aliases 已有
+                    snap_changes.append(change(
+                        "entity", "merge", target_id=keeper["entity_id"],
+                        target_name=merged_name,
+                        extra={"loser_id": loser["entity_id"], "confidence": conf,
+                               "source": "llm", "entity_type": entity_type},
+                    ))
                     # 写 ReflectionLog
                     self._write_dedup_log(
                         end_user_id=end_user_id,
@@ -570,6 +910,12 @@ class Layer2Inspector:
 
             total_merged += merged_count
             await update_scan_time(end_user_id, entity_type)
+
+        # 快照：扫描到类型才落盘（空轮不产生文件）
+        if scanned_types > 0:
+            self._snap("entity_dedup", "1_input", {"types": snap_input})
+            self._snap("entity_dedup", "2_llm_raw", {"types": snap_llm})
+            self._snap_changes("entity_dedup", snap_changes)
 
         return {
             "scanned_types": scanned_types,
@@ -652,9 +998,97 @@ class Layer2Inspector:
             execution_detail=execution_detail,
         )
         
+    def _write_alias_log(self, end_user_id: str, canonical: Dict[str, Any],
+                         cand: Dict[str, Any], decided: Dict[str, Any],
+                         timing: Dict[str, Any], baseline: str = "HYBRID"):
+        """写别名归并 ReflectionLog（merge / drop 各一条）。"""
+        is_merge = decided["decision"] == "merge"
+        confidence = decided["confidence"]
+        reason = decided["reason"]
+        shortcut = decided.get("shortcut", False)
+        alias_name = (cand.get("alias_name") or "").strip()
+
+        tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
+        tracker.steps.append(ExecutionStep(
+            name="候选收集", type="prompt", duration_ms=timing.get("recall_ms") or 0,
+            output=f"alias={alias_name}", success=True,
+        ))
+        if shortcut:
+            tracker.steps.append(ExecutionStep(
+                name="规则判定", type="decide", duration_ms=0,
+                output="候选名已是现有别名，直接归并", success=True,
+            ))
+        else:
+            tracker.steps.append(ExecutionStep(
+                name="LLM 判定", type="llm", duration_ms=timing.get("llm_ms") or 0,
+                output=f"decision={decided['decision']}, confidence={confidence:.2f}", success=True,
+            ))
+        tracker.steps.append(ExecutionStep(
+            name="归并" if is_merge else "删边", type="write",
+            duration_ms=0,
+            output=(f'已并入 "{canonical["name"]}" 的 aliases' if is_merge else "已删除「别名属于」边"),
+            success=True,
+        ))
+
+        # 有效描述：description_summary 优先，回退 description
+        canon_desc = (canonical.get("description_summary") or "").strip() or (canonical.get("description") or "")
+        alias_desc = (cand.get("alias_description_summary") or "").strip() or (cand.get("alias_description") or "")
+        canon_aliases = canonical.get("aliases") or []
+
+        entity_a = {"entity_id": cand["target_id"], "name": canonical["name"],
+                    "entity_type": canonical.get("entity_type"),
+                    "description": canon_desc, "aliases": canon_aliases}
+        entity_b = {"entity_id": cand["alias_id"], "name": alias_name,
+                    "entity_type": cand.get("alias_entity_type"),
+                    "description": alias_desc, "aliases": cand.get("alias_aliases") or []}
+        trigger = {"entity_a": entity_a, "entity_b": entity_b, "reason": reason[:200]}
+
+        if is_merge:
+            already = alias_name.lower() in {a.strip().lower() for a in canon_aliases if a and a.strip()}
+            summary = f'"{alias_name}" → "{canonical["name"]}" 合并别名'
+            title = "MERGE — 已是现有别名，直接归并" if shortcut else "MERGE — LLM确认别名归并"
+            # 别名已存在（无实际新增）时不产出 diff，避免前端展示 old==new 的无意义对比
+            changes = [] if already else [{
+                "field": "aliases",
+                "old": ", ".join(canon_aliases),
+                "new": ", ".join(canon_aliases + [alias_name]),
+            }]
+            strategy = "MERGE"
+        else:
+            summary = f'"{alias_name}" ✗ 判定非别名 → 丢弃别名属于边'
+            title = "DROP — LLM判定非别名"
+            changes = [{
+                "field": "别名属于关系",
+                "old": f'{alias_name} →(别名属于) {canonical["name"]}',
+                "new": "关系已删除（非本人别名）",
+            }]
+            strategy = "DROP"
+
+        log_repo = self.log_repo_factory()
+        log_repo.create(
+            end_user_id=end_user_id,
+            sub_problem="alias_merge",
+            trigger_type="scheduled",
+            baseline=baseline,
+            strategy=strategy,
+            confidence=confidence,
+            status="resolved",
+            summary_text=summary[:256],
+            entity_ids=[cand["target_id"], cand["alias_id"]],
+            trigger_detail=trigger,
+            solution_detail={"title": title, "changes": changes},
+            execution_detail=tracker.to_dict(),
+        )
+
     async def _apply_dedup_merge(self, pair, end_user_id: str, baseline: str,
-                                llm_decision=None, step_timing=None) -> bool:
-        """执行单对合并 + 写 ReflectionLog"""
+                                llm_decision=None, step_timing=None,
+                                keeper_state_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
+        """执行单对合并 + 写 ReflectionLog
+
+        keeper_state_overrides: 可选 {entity_id: {description, aliases}}。同一去重轮内若某实体
+            已是前次合并的 keeper，从这里取累积态覆盖 pair 上的召回快照，避免连环合并时用旧
+            aliases/description 覆盖掉前次已并入的内容（与直合池 _apply_direct_merge 一致）。
+        """
         from .deterministic.cypher_merger import (
             choose_keeper, execute_merge, build_merged_aliases,
             # fetch_degrees,  # 暂时关闭度数优先,下版打开
@@ -688,6 +1122,14 @@ class Layer2Inspector:
                     "description": pair.a_desc, "aliases": pair.a_aliases}
         entity_b = {"entity_id": pair.b_id, "name": pair.b_name, "entity_type": pair.entity_type,
                     "description": pair.b_desc, "aliases": pair.b_aliases}
+        # 同一去重轮内该实体若已是前次合并的 keeper，用累积态覆盖召回快照，
+        # 避免连环合并用旧 aliases/description 覆盖掉前次已并入的内容。
+        if keeper_state_overrides:
+            for ent in (entity_a, entity_b):
+                ov = keeper_state_overrides.get(ent["entity_id"])
+                if ov:
+                    ent["description"] = ov.get("description", ent.get("description", ""))
+                    ent["aliases"] = ov.get("aliases", ent.get("aliases", []))
         winner = llm_decision.winner_id if llm_decision else None
 
         # 度数查询：用于 keeper 选择 + 超级节点保护
@@ -721,6 +1163,15 @@ class Layer2Inspector:
             tracker.end_step("合并失败", success=False)
             return False
         tracker.end_step("合并完成")
+
+        # 回写 keeper 累积态，供同一去重轮后续涉及同一 keeper 的合并使用（与直合池一致），
+        # 避免下一对用召回旧快照覆盖本次已并入的 aliases/description。
+        if keeper_state_overrides is not None:
+            keeper_state_overrides[keeper["entity_id"]] = {
+                "description": self._merged_description(
+                    keeper.get("description", ""), loser.get("description", "")),
+                "aliases": merged_aliases,
+            }
 
         # Step 5.5: name 变更则重算 name_embedding
         await self._reembed_if_name_changed(keeper, merged_name)
@@ -854,6 +1305,7 @@ class Layer2Inspector:
         end_user_id: str,
         baseline: str,
         max_merges: int,
+        snap_sink: Optional[list] = None,
     ) -> Tuple[int, set]:
         """方案B 桶内同名同类型确定性合并：分组内 name 完全相同（归一化后）的实体直接合并。
 
@@ -862,6 +1314,7 @@ class Layer2Inspector:
           - 桶内 ≥2 个 → 度数最大的当 keeper，其余依次合到 keeper；
           - 受 max_merges 限制（与 LLM 合并共享单类型上限）；
           - 失败的子合并不影响其他子合并继续。
+        snap_sink 非空时，每次成功直合追加一条 merge ChangeRecord（source=deterministic）。
 
         Returns:
             (合并次数, 被删除的 loser entity_id 集合)
@@ -931,6 +1384,15 @@ class Layer2Inspector:
                 merged += 1
                 removed_ids.add(loser["entity_id"])
 
+                # 快照：直合 merge。与高频 entity_dedup 一致：field_changes 留空，
+                # 关键信息走 extra.loser_id（避免 deterministic 直合产生 old==new 噪声）
+                if snap_sink is not None:
+                    snap_sink.append(change(
+                        "entity", "merge", target_id=keeper_id, target_name=merged_name,
+                        extra={"loser_id": loser["entity_id"], "source": "deterministic",
+                               "entity_type": entity_type},
+                    ))
+
                 # 写 ReflectionLog（与方案A 直合一致：source="deterministic"）
                 #   注意：必须先写日志再回填本地 keeper（aliases / description），
                 #   这样日志里 old=合并前快照 / new=合并后累积，能正确反映本次增量。
@@ -980,14 +1442,25 @@ class Layer2Inspector:
         if not candidates:
             return {"status": "success", "total": 0, "resolved": 0, "forced": 0}
 
+        # 快照：1_input（召回的 statement 列表）+ 并发聚合 sink
+        self._snap("unresolved_entity", "1_input",
+                   {"batch_size": 15, "statements": candidates})
+        snap_llm_raw: list = []
+        snap_changes: list = []
+
         async def _resolve_with_limit(stmt):
             async with self._semaphore:
                 return await self._resolve_one_statement(
-                    stmt, end_user_id, baseline, language
+                    stmt, end_user_id, baseline, language,
+                    snap_llm_raw=snap_llm_raw, snap_changes=snap_changes,
                 )
 
         tasks = [_resolve_with_limit(stmt) for stmt in candidates]
         results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 快照：聚合落盘（gather 后统一写，避免并发同名文件互相覆盖）
+        self._snap("unresolved_entity", "2_llm_raw", {"items": snap_llm_raw})
+        self._snap_changes("unresolved_entity", snap_changes)
 
         resolved_count = 0
         forced_count = 0
@@ -1014,11 +1487,16 @@ class Layer2Inspector:
         }
 
     async def _resolve_one_statement(self, stmt: Dict, end_user_id: str,
-                                     baseline: str, language: str) -> Optional[bool]:
+                                     baseline: str, language: str,
+                                     snap_llm_raw: Optional[list] = None,
+                                     snap_changes: Optional[list] = None) -> Optional[bool]:
         """处理单条 unresolved statement
 
         Returns:
             True = 消解成功, False = 强制提取, None = 失败（不改标记）
+
+        snap_llm_raw / snap_changes：可选快照 sink（由 _run_unresolved_resolver 创建并在
+        gather 后统一落盘）。asyncio 单线程事件循环下 list.append 在 await 间隙原子，无需加锁。
         """
         tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
 
@@ -1051,12 +1529,31 @@ class Layer2Inspector:
         # Step 3: 校验
         tracker.start_step("校验", "decide")
         validated = validate_unresolved_output(result)
+        # 快照：每条语句的 context + LLM 输出 + 校验结果
+        if snap_llm_raw is not None:
+            snap_llm_raw.append({
+                "statement_id": stmt["statement_id"],
+                "statement_text": stmt.get("statement_text"),
+                "context_chunks": context_chunks,
+                "llm_output": {
+                    "resolved": result.resolved,
+                    "resolution_note": result.resolution_note,
+                    "entities": [e.model_dump() for e in result.entities],
+                    "triplets": [t.model_dump() for t in result.triplets],
+                },
+                "validated": {"valid": validated.valid, "reason": validated.reason},
+            })
         if not validated.valid:
             tracker.end_step(f"校验失败: {validated.reason}", success=False)
             logger.warning(
                 f"未识别实体校验失败 statement={stmt['statement_id']}, "
                 f"reason={validated.reason}"
             )
+            if snap_changes is not None:
+                snap_changes.append(change(
+                    "statement", "create", target_id=stmt["statement_id"],
+                    status="filtered", reason=f"validate_failed:{validated.reason}",
+                ))
             return None
         tracker.end_step(
             f"有效实体 {len(validated.entities)}, 有效 triplet {len(validated.triplets)}"
@@ -1065,6 +1562,9 @@ class Layer2Inspector:
         # Step 4: 写入 Neo4j
         tracker.start_step("写入Neo4j", "write")
         created_entity_ids = []
+        # 回收本条 statement 每个新建实体的 name_embedding（仅供快照截断展示用）：
+        # 实际写库写全量向量，快照里只截前 5 维（见下方 snap_changes）。
+        snap_name_embeddings: Dict[str, List[float]] = {}
         # 同 statement 内所有派生实体/边共用一个 run_id：优先复用来源 statement 的 run_id，
         # 老数据为空时一次性兜底，避免实体和关系边拿到不同的随机 run_id。
         fallback_run_id = stmt.get("run_id") or uuid.uuid4().hex
@@ -1098,6 +1598,7 @@ class Layer2Inspector:
                 type_description=entity.type_description,
                 entity_idx=entity.entity_idx,
                 is_explicit_memory=entity.is_explicit_memory,
+                statement_id=stmt["statement_id"],
                 created_at=utcnow_naive(),
             )
             if entity_result:
@@ -1108,6 +1609,7 @@ class Layer2Inspector:
                     try:
                         name_embedding = self.embedding_client.embed_query(entity.name)
                         if name_embedding:
+                            snap_name_embeddings[entity.name] = name_embedding
                             await self.connector.execute_query(
                                 UNRESOLVED_UPDATE_NAME_EMBEDDING,
                                 entity_id=entity_id,
@@ -1157,6 +1659,48 @@ class Layer2Inspector:
             f"创建 {len(validated.entities)} 实体, "
             f"{len(validated.triplets)} 关系边, 标记已更新"
         )
+
+        # 快照：本条 statement 的字段级变更（实体创建/用户追加/关系边/标记）
+        if snap_changes is not None:
+            for e in validated.entities:
+                if e.name.strip() == "用户":
+                    snap_changes.append(change(
+                        "entity", "append_desc", target_name="用户",
+                        field_changes=[{"field": "description", "old": None, "new": e.description}],
+                        extra={"statement_id": stmt["statement_id"]},
+                    ))
+                else:
+                    _fc = [
+                        {"field": "name", "old": None, "new": e.name},
+                        {"field": "entity_type", "old": None, "new": e.type},
+                        {"field": "description", "old": None, "new": e.description},
+                    ]
+                    # name_embedding 实际写全量向量，快照只留前 5 维便于人工核对"是否补了向量"
+                    _emb = snap_name_embeddings.get(e.name)
+                    if _emb:
+                        _fc.append({"field": "name_embedding", "old": None,
+                                    "new": ReflectionSnapshotRecorder.truncate_vectors(_emb, 5)})
+                    snap_changes.append(change(
+                        "entity", "create", target_name=e.name,
+                        field_changes=_fc,
+                        extra={"statement_id": stmt["statement_id"],
+                               "run_id": fallback_run_id, "type_id": e.type_id},
+                    ))
+            for t in validated.triplets:
+                snap_changes.append(change(
+                    "edge", "create",
+                    target_name=f"{t.subject_name} -[{t.predicate}]-> {t.object_name}",
+                    field_changes=[
+                        {"field": "subject", "old": None, "new": t.subject_name},
+                        {"field": "predicate", "old": None, "new": t.predicate},
+                        {"field": "object", "old": None, "new": t.object_name},
+                    ],
+                    extra={"run_id": fallback_run_id, "predicate_id": t.predicate_id},
+                ))
+            snap_changes.append(change(
+                "statement", "mark", target_id=stmt["statement_id"],
+                field_changes=[{"field": "unresolved_flag", "old": True, "new": False}],
+            ))
 
         # Step 5: 写反思日志（仅 resolved=true 时）
         if validated.resolved:
@@ -1284,6 +1828,23 @@ class Layer2Inspector:
             f"rename={result.should_rename_entity}"
         )
 
+        # 快照：1_input（碎片 + 已有 summary/timeline/event_timeline）+ 2_llm_raw（LLM 原始输出）
+        self._snap("description_merge", "1_input", {
+            "entity_id": entity["entity_id"], "name": entity["name"],
+            "fragment_count": len(fragments),
+            "description": description,
+            "description_summary": existing_summary,
+            "description_timeline": existing_timeline,
+            "event_timeline": _parse_timeline_full(existing_event_timeline),
+        })
+        self._snap("description_merge", "2_llm_raw", {
+            "entity_id": entity["entity_id"],
+            "description_summary": result.description_summary,
+            "operations": [o.model_dump() for o in result.operations],
+            "should_rename_entity": result.should_rename_entity,
+            "suggested_entity_name": result.suggested_entity_name,
+        })
+
         # Step 3: 兜底校验 summary
         tracker.start_step("校验", "decide")
         valid, reason = validate_summary_output(existing_summary, result)
@@ -1298,12 +1859,28 @@ class Layer2Inspector:
         # Step 4: 应用事件操作（add/delete/update）
         tracker.start_step("事件过滤", "decide")
         valid_ops = validate_event_operations(result.operations)
-        event_timeline, ev_stats = apply_event_operations(
-            existing_event_timeline, valid_ops
+        # 被 validator 丢弃的 op（filtered）：result.operations 里不在 valid_ops 的
+        valid_ids = {id(o) for o in valid_ops}
+        filtered_ops = [
+            {"op": (o.op or ""), "status": "filtered", "reason": "validator_invalid"}
+            for o in result.operations if id(o) not in valid_ids
+        ]
+        before_events = _parse_timeline_full(existing_event_timeline)
+        event_timeline, ev_stats, op_trace = apply_event_operations(
+            existing_event_timeline, valid_ops, collect_trace=True
         )
         tracker.end_step(
             f"事件操作 新增{ev_stats['added']} 更新{ev_stats['updated']} 删除{ev_stats['deleted']}"
         )
+
+        # 快照：事件时间线 before/after 全文 + 逐 op 命运（最关键的核对项）
+        self._snap("description_merge", "4_event_timeline_diff", {
+            "entity_id": entity["entity_id"],
+            "before": before_events,
+            "after": _parse_timeline_full(event_timeline),
+            "stats": ev_stats,
+            "operations": filtered_ops + op_trace,
+        })
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）
         tracker.start_step("写入", "write")
@@ -1318,8 +1895,10 @@ class Layer2Inspector:
         tracker.end_step("写入完成")
 
         # Step 6: 更名判断
+        rename_status = None
+        old_name = entity["name"]
         if result.should_rename_entity and result.suggested_entity_name:
-            await self._try_rename_entity(
+            rename_status = await self._try_rename_entity(
                 entity=entity,
                 suggested_name=result.suggested_entity_name,
                 end_user_id=end_user_id,
@@ -1352,20 +1931,62 @@ class Layer2Inspector:
             },
             execution_detail=tracker.to_dict(),
         )
+
+        # 快照：3_changes（summary/description 清空/timeline 备份 + 事件命运 + 更名）
+        snap_changes = [
+            change("entity", "update_field", target_id=entity["entity_id"],
+                   target_name=entity["name"],
+                   field_changes=[{"field": "description_summary",
+                                   "old": existing_summary or "", "new": merged_text}]),
+            change("entity", "update_field", target_id=entity["entity_id"],
+                   target_name=entity["name"],
+                   field_changes=[{"field": "description", "old": description, "new": ""}],
+                   reason="cleared_after_summary"),
+            change("entity", "update_field", target_id=entity["entity_id"],
+                   target_name=entity["name"],
+                   field_changes=[{"field": "description_timeline",
+                                   "old": existing_timeline or "", "new": timeline}]),
+        ]
+        # event_timeline 是实体的单个字符串属性（序列化后整体存回实体）：本轮事件
+        # 增删改最终落成它的一次字段级更新，只在确有变化时记一条 update_field，
+        # 不把单个属性拆成多条 event 记录，也避免 old==new 的无意义对比。
+        if (existing_event_timeline or "") != (event_timeline or ""):
+            snap_changes.append(change(
+                "entity", "update_field", target_id=entity["entity_id"],
+                target_name=entity["name"],
+                field_changes=[{"field": "event_timeline",
+                                "old": existing_event_timeline or "",
+                                "new": event_timeline}],
+            ))
+        # 更名命运（rename_status: None=未触发 / applied / skipped:* / rejected:*）
+        if rename_status:
+            st = "applied" if rename_status == "applied" else (
+                "rejected" if rename_status.startswith("rejected") else "skipped")
+            snap_changes.append(change(
+                "entity", "rename", target_id=entity["entity_id"], target_name=old_name,
+                field_changes=[{"field": "name", "old": old_name,
+                                "new": result.suggested_entity_name}],
+                status=st, reason=(None if st == "applied" else rename_status),
+            ))
+        self._snap_changes("description_merge", snap_changes)
         return True
 
     async def _try_rename_entity(self, entity: Dict, suggested_name: str,
                                  end_user_id: str):
-        """尝试更名实体，含兜底校验"""
+        """尝试更名实体，含兜底校验。
+
+        返回更名命运字符串：applied / skipped:empty / skipped:same_name /
+        skipped:is_user / rejected:conflict（供快照记录，原调用方可忽略返回值）。
+        """
         old_name = entity["name"]
 
         # 兜底校验
         if not suggested_name or not suggested_name.strip():
-            return
+            return "skipped:empty"
         if suggested_name.strip() == old_name:
-            return
+            return "skipped:same_name"
         if old_name == "用户" or suggested_name.strip() == "用户":
-            return
+            return "skipped:is_user"
 
         # 查重
         conflict_result = await self.connector.execute_query(
@@ -1379,7 +2000,7 @@ class Layer2Inspector:
                 f"更名冲突 entity={old_name} -> {suggested_name}, "
                 f"end_user_id={end_user_id}"
             )
-            return
+            return "rejected:conflict"
 
         # 执行更名
         await self.connector.execute_query(
@@ -1403,3 +2024,4 @@ class Layer2Inspector:
                 logger.warning(f"更名后补 name_embedding 失败: {emb_err}")
 
         logger.info(f"实体更名: {old_name} → {suggested_name}, entity_id={entity['entity_id']}")
+        return "applied"

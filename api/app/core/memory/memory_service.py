@@ -20,7 +20,7 @@ from app.core.memory.models.service_models import LongTermMemoryInput, MemoryCon
 from app.core.memory.pipelines.memory_read import ReadPipeLine
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
-from app.db import get_db_context, get_db_read
+from app.db import get_db_read
 from app.services.memory_config_service import MemoryConfigService
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,51 @@ class MemoryService:
         )
 
     @staticmethod
+    async def dispatch_mcp_write(
+        message: str,
+        end_user_id: str,
+        config_id: str,
+        workspace_id: str,
+        storage_type: str = "neo4j",
+        dialog_at: str = "",
+    ) -> str:
+        """MCP 单条消息写入入口。
+
+        根据 storage_type 选择走 RAG 或 Neo4j 路径。
+
+        Args:
+            message: 用户消息内容
+            end_user_id: 终端用户 ID
+            config_id: 记忆配置 ID
+            workspace_id: 工作空间 ID
+            storage_type: 存储类型 ("neo4j" | "rag")
+            dialog_at: 对话发生时间（ISO 8601）
+
+        Returns:
+            派发的任务 msg_id（RAG 路径返回空字符串）
+        """
+        from app.core.memory.pipelines.dispatcher import (
+            dispatch_mcp_write,
+            write_messages_to_rag,
+        )
+
+        if storage_type and storage_type.lower() == "rag":
+            await write_messages_to_rag(
+                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+                end_user_id=end_user_id,
+                user_rag_memory_id="",
+            )
+            return ""
+
+        return await dispatch_mcp_write(
+            message=message,
+            end_user_id=end_user_id,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            dialog_at=dialog_at,
+        )
+
+    @staticmethod
     async def write_messages_to_rag(
         messages: List[dict],
         end_user_id: str,
@@ -159,30 +204,6 @@ class MemoryService:
         """Flush 兜底任务派发。"""
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
         return dispatch_flush_conversation(conversation_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    def get_or_create_service_api_conversation(workspace_id: str, end_user_id: str) -> str:
-        """获取或创建 Service API 虚拟会话。"""
-        from app.core.memory.pipelines.dispatcher import get_or_create_service_api_conversation
-        return get_or_create_service_api_conversation(workspace_id, end_user_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    async def ensure_conversation_exists(conversation_id: str, workspace_id: str = "") -> None:
-        """确保 conversations 表中存在该记录。"""
-        from app.core.memory.pipelines.dispatcher import ensure_conversation_exists
-        await ensure_conversation_exists(conversation_id, workspace_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    def verify_unmark_safe(conversation_id: str) -> bool:
-        """验证对话是否可以安全 unmark。"""
-        from app.core.memory.pipelines.dispatcher import verify_unmark_safe
-        return verify_unmark_safe(conversation_id)
-
-    @staticmethod # 同步写入 下一个版本移除
-    def unmark_conversation_pending(conversation_id: str) -> None:
-        """将对话从 pending set 中移除。"""
-        from app.core.memory.pipelines.dispatcher import unmark_conversation_pending
-        unmark_conversation_pending(conversation_id)
 
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）

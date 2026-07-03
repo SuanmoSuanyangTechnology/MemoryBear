@@ -13,6 +13,7 @@ from app.schemas.model_schema import (
     ModelConfigCreate, ModelConfigUpdate, ModelApiKeyCreate, ModelApiKeyUpdate,
     ModelConfigQuery, ModelStats, ModelConfigQueryNew
 )
+from app.core.config import settings
 from app.core.logging_config import get_business_logger
 from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
@@ -57,6 +58,7 @@ class ModelConfigService:
     def get_model_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> List[dict]:
         """获取模型配置列表"""
         provider_groups, total = ModelConfigRepository.get_list_new(db, query, tenant_id=tenant_id)
+        _ = total
 
         items = []
         for provider, models in provider_groups.items():
@@ -116,6 +118,7 @@ class ModelConfigService:
         Returns:
             Dict: 验证结果
         """
+        _ = db
         from app.core.models import RedBearLLM, RedBearRerank
         from app.core.models.base import RedBearModelConfig
         from app.core.models.embedding import RedBearEmbeddings
@@ -533,6 +536,55 @@ class ModelApiKeyService:
     """模型API Key服务"""
 
     @staticmethod
+    def _is_public_speedbear_model(model_config: ModelConfig) -> bool:
+        return (
+            model_config.provider == ModelProvider.SPEEDBEAR
+            and bool(model_config.is_public)
+        )
+
+    @staticmethod
+    def _build_speedbear_runtime_api_key(
+        db: Session,
+        model_config: ModelConfig,
+        tenant_id: uuid.UUID | None,
+    ) -> ModelApiKey:
+        if not tenant_id:
+            raise BusinessException(
+                "SpeedBear 公共模型运行时缺少租户上下文",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        from premium.platform_admin.models import TenantSpeedBearBinding
+
+        if not model_config.is_active:
+            raise BusinessException(
+                "当前模型已禁用，无法调用",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        binding = (
+            db.query(TenantSpeedBearBinding)
+            .filter(TenantSpeedBearBinding.tenant_id == tenant_id)
+            .first()
+        )
+        if not binding:
+            raise BusinessException(
+                "当前租户未绑定 SpeedBear Key，请联系平台管理员初始化",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        base_url = f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1"
+
+        return ModelApiKey(
+            model_name=model_config.name,
+            provider=ModelProvider.SPEEDBEAR,
+            api_key=binding.gateway_api_key,
+            api_base=base_url,
+            capability=model_config.capability,
+            is_omni=model_config.is_omni,
+        )
+
+    @staticmethod
     def get_api_key_by_id(db: Session, api_key_id: uuid.UUID) -> ModelApiKey:
         """根据ID获取API Key"""
         api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
@@ -760,11 +812,21 @@ class ModelApiKeyService:
         return success
 
     @staticmethod
-    def get_available_api_key(db: Session, model_config_id: uuid.UUID) -> Optional[ModelApiKey]:
+    def get_available_api_key(
+        db: Session,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Optional[ModelApiKey]:
         """获取可用的API Key（根据负载均衡策略）"""
         model_config = ModelConfigRepository.get_by_id(db, model_config_id)
         if not model_config:
             return None
+
+        if not model_config.is_active:
+            return None
+
+        if ModelApiKeyService._is_public_speedbear_model(model_config):
+            return ModelApiKeyService._build_speedbear_runtime_api_key(db, model_config, tenant_id)
 
         api_keys = [key for key in model_config.api_keys if key.is_active]
         if not api_keys:

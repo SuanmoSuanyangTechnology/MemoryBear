@@ -270,12 +270,12 @@ class WritePipeline:
             self.language = detected if detected in ("zh", "en") else "en"
             logger.info(f"[LanguageDetect] detected={detected}, language={self.language}, text_len={len(user_content)}")
 
-        # 处理 dialog_at
-        _dialog_at = (
+        # 处理 dialog_at：三级降级，最终由 ensure_dialog_at 用服务端当前时间兜底
+        from app.core.utils.datetime_utils import ensure_dialog_at
+        _dialog_at = ensure_dialog_at(
             target_message.get("dialog_at")
             or dispatch_at
-            or target_message.get("created_at", "")
-            or ""
+            or target_message.get("created_at")
         )
         target_message = {**target_message, "dialog_at": _dialog_at}
 
@@ -650,6 +650,11 @@ class WritePipeline:
         注意：ExtractionResult.entity_nodes 已经是经过 _extract() 中
         两阶段去重消歧（_run_dedup_and_write_summary）后的结果，
         聚类直接基于去重后的实体 ID 执行。
+
+        派发方式：直接使用 run_incremental_clustering.apply_async 投递到
+        memory_heavy_tasks 队列（不再经 scheduler.push_task）。
+        同用户聚类并发导致的 Neo4j 锁竞争，由 P0 批量 UNWIND（事务毫秒级）
+        + Neo4j 死锁自动重试两层防御兜底。
         """
         if not result.entity_nodes:
             return
@@ -678,8 +683,8 @@ class WritePipeline:
             )
             logger.info(
                 f"[Clustering] 增量聚类任务已提交 - "
-                f"task_id = {task.id}, "
-                f"entity_count = {len(new_entity_ids)}, "
+                f"task_id={task.id}, "
+                f"entity_count={len(new_entity_ids)}, "
                 f"source=dedup"
             )
         except Exception as e:
@@ -698,7 +703,7 @@ class WritePipeline:
         摘要：生成情景记忆摘要 → 写入 Neo4j。
 
         摘要生成失败不影响主流程（try/except 吞掉异常）。
-        使用独立的 Neo4j 连接器，避免与主连接器的事务冲突。
+        直接复用 self._neo4j_connector，避免每次写入额外创建一个 driver。
         """
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
             memory_summary_generation,
@@ -707,7 +712,6 @@ class WritePipeline:
             add_memory_summary_statement_edges,
         )
         from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
         try:
             summaries = await memory_summary_generation(
@@ -716,15 +720,8 @@ class WritePipeline:
                 embedder_client=self._embedder_client,
                 language=self.language,
             )
-            ms_connector = Neo4jConnector()
-            try:
-                await add_memory_summary_nodes(summaries, ms_connector)
-                await add_memory_summary_statement_edges(summaries, ms_connector)
-            finally:
-                try:
-                    await ms_connector.close()
-                except Exception:
-                    pass
+            await add_memory_summary_nodes(summaries, self._neo4j_connector)
+            await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
         except Exception as e:
             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
@@ -852,6 +849,13 @@ class WritePipeline:
         if not messages:
             return
 
+        # 剪枝开关关闭时跳过 User 侧规整
+        if not self.memory_config.pruning_enabled:
+            logger.debug(
+                "[WritePipeline] target_message User 侧 pruning 跳过: 剪枝开关已关闭"
+            )
+            return
+
         target_msg = messages[0]
         target_content = target_msg.get("content", "")
 
@@ -875,8 +879,8 @@ class WritePipeline:
         if not assistant_content:
             # 没有配对的 assistant 消息，跳过 User 侧 pruning
             logger.debug(
-                f"[WritePipeline] target_message User 侧 pruning 跳过: "
-                f"context_after 中无 assistant 消息"
+                "[WritePipeline] target_message User 侧 pruning 跳过: "
+                "context_after 中无 assistant 消息"
             )
             return
 

@@ -15,7 +15,6 @@ import warnings
 
 from fastmcp import FastMCP
 
-from app.celery_task_scheduler import scheduler
 from app.controllers.service.mcp_auth_middleware import (
     mcp_config_id,
     mcp_end_user_id,
@@ -25,7 +24,6 @@ from app.controllers.service.mcp_auth_middleware import (
 from app.core.logging_config import get_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
-from app.db import get_db_context
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="scipy")
 
@@ -71,19 +69,16 @@ async def write_memory(
         from datetime import datetime, timezone
         dialog_at = datetime.now(timezone.utc).isoformat()
 
-        msg_id = scheduler.push_task(
-            "app.core.memory.agent.write_message",
-            end_user_id,
-            {
-                "end_user_id": end_user_id,
-                "messages": [{"role": "user", "content": message, "dialog_at": dialog_at}],
-                "config_id": config_id,
-                "storage_type": storage_type,
-                "user_rag_memory_id": "",
-                "workspace_id": str(workspace_id),
-            },
+        msg_id = await MemoryService.dispatch_mcp_write(
+            message=message,
+            end_user_id=end_user_id,
+            config_id=config_id,
+            workspace_id=str(workspace_id),
+            storage_type=storage_type,
+            dialog_at=dialog_at,
         )
-        logger.info(f"MCP write_memory queued: msg_id={msg_id}, end_user={end_user_id}")
+
+        logger.info(f"MCP write_memory dispatched: msg_id={msg_id}, end_user={end_user_id}")
         return {"success": True, "msg_id": msg_id}
     except Exception as e:
         logger.error(f"MCP write_memory failed for end_user={end_user_id}: {e}")

@@ -126,6 +126,7 @@ export const en = {
       platformManagement: 'Platform Management',
       systemSettings: 'System Settings',
       upgradePackage: 'Upgrade Package',
+      account: 'Account',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -2146,7 +2147,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       dislike: 'Dislike',
       triggeredAction: 'Triggered Action',
       timeout_at: 'Operation will expire {{timeout_at}} expires',
-      collect: 'Collect',
+      favorite: 'Favorite',
+      unfavorite: 'Unfavorite',
     },
     login: {
       title: 'Red Bear Memory Science',
@@ -2238,6 +2240,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       pleaseSave: 'Displayed only once, please save it properly',
       basicInfo: 'Basic Information',
       regenerate: 'Regenerate',
+      endpointConfig: 'Endpoint Configuration',
     },
     tool: {
       mcp: 'MCP Services',
@@ -2490,7 +2493,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       trigger: 'Trigger',
       start: 'Start',
       start_label: 'Start',
-      end: 'End',
+      end: 'Answer',
       end_label: 'End',
       output: 'Output',
       answer: 'Answer',

@@ -10,6 +10,7 @@ from typing import Any, Annotated, Optional
 
 import yaml
 from fastapi import Depends
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import (
@@ -47,7 +48,7 @@ from app.repositories.workflow_repository import (
     WorkflowNodeExecutionRepository,
     WorkflowNodeCacheRepository,
 )
-from app.schemas import DraftRunRequest, FileInput, FileType
+from app.schemas import DraftRunRequest, FileInput, FileType, TransferMethod
 from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
@@ -64,6 +65,9 @@ class WorkflowService:
     DEBUG_STATE_NODE_NAME = "Workflow Debug State"
     DEBUG_STATE_SOURCE = "debug_state"
 
+    # 重新生成版本上限：同一轮（同 parent_message_id）允许的最大 assistant 版本数（含原始回复）
+    MAX_REGENERATE_VERSIONS = 5
+
     def __init__(self, db: Session):
         self.db = db
         self.config_repo = WorkflowConfigRepository(db)
@@ -74,6 +78,13 @@ class WorkflowService:
         self.multimodal_service = MultimodalService(db)
 
         self.registry = PlatformAdapterRegistry
+
+    def _resolve_app_tenant_id(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        app = self.db.get(App, app_id)
+        if not app:
+            return None
+        from app.repositories.tool_repository import ToolRepository
+        return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
 
     @staticmethod
     def _build_runtime_workflow_config_from_release(
@@ -584,7 +595,12 @@ class WorkflowService:
             if not model_cfg:
                 return None
 
-            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            tenant_id = self._resolve_app_tenant_id(app_id)
+            api_key_obj = ModelApiKeyService.get_available_api_key(
+                self.db,
+                setting.model_config_id,
+                tenant_id=tenant_id,
+            )
             if not api_key_obj:
                 return None
 
@@ -3582,6 +3598,597 @@ class WorkflowService:
     def _supports_conversation(config: WorkflowConfig) -> bool:
         return getattr(config, "workflow_type", "workflow") == "workflow"
 
+    # ==================== 重新生成 ====================
+
+    def _resolve_workflow_config(
+            self,
+            app: App,
+            workspace_id: uuid.UUID,
+    ) -> WorkflowConfig:
+        """解析工作流配置：共享应用读发布快照，自有应用读草稿。复用 draft_run 的 is_shared 判定。"""
+        is_shared = app.workspace_id != workspace_id
+        if is_shared:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            release = self.db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            # 与 draft_run 共享分支保持一致：用 AppService 重建配置以带出真实 config id
+            from app.services.app_service import AppService
+            return AppService(self.db)._workflow_config_from_release(release)
+        return self.check_config(app.id)
+
+    def _assert_regenerate_quota(self, message_id: uuid.UUID) -> None:
+        """校验本轮版本数是否已达上限，超限则抛 BusinessException。
+
+        计数同 parent_message_id 下未删除的 assistant 版本（含原始回复）。
+        历史数据中 original_msg 可能未挂 parent_message_id（未计入查询），需补计 1。
+        """
+        from app.models import Message
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        parent_msg = self._locate_parent_user_message(original_msg)
+        existing = self.db.query(Message).filter(
+            Message.parent_message_id == parent_msg.id,
+            Message.role == "assistant",
+            Message.is_deleted.is_not(True),
+        ).count()
+        if not original_msg.parent_message_id:
+            existing += 1
+        if existing >= self.MAX_REGENERATE_VERSIONS:
+            raise BusinessException(
+                f"该回复已达最大版本数（{self.MAX_REGENERATE_VERSIONS} 个），无法继续重新生成",
+                BizCode.VERSION_LIMIT_EXCEEDED,
+            )
+
+    def _next_version(self, original_msg: "Message") -> int:
+        """计算重新生成的新版本号：同 parent_message_id 下最大 version + 1。
+
+        多分支场景下用户可能切换到旧版本重新生成，若用 original.version+1 会与
+        已存在的更新版本冲突，导致版本切换混乱。故取同组最大 version + 1。
+        """
+        from app.models import Message
+        base = original_msg.version or 1
+        if not original_msg.parent_message_id:
+            return base + 1
+        siblings = self.db.query(Message).filter(
+            Message.parent_message_id == original_msg.parent_message_id,
+            Message.role == "assistant",
+            Message.is_deleted.is_not(True),
+        ).all()
+        for s in siblings:
+            if s.version and s.version > base:
+                base = s.version
+        return base + 1
+
+    def _locate_parent_user_message(self, original_msg: "Message") -> "Message":
+        """定位原 assistant 消息对应的父 user 消息。
+
+        优先用 parent_message_id；为空则回溯 created_at 早于原消息的最近一条 user 消息。
+        """
+        from app.models import Message
+        if original_msg.parent_message_id:
+            parent_msg = self.db.get(Message, original_msg.parent_message_id)
+            if parent_msg and parent_msg.role == "user" and not parent_msg.is_deleted:
+                return parent_msg
+        parent_msg = self.db.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == original_msg.conversation_id,
+                Message.role == "user",
+                Message.created_at < original_msg.created_at,
+                Message.is_deleted.is_not(True),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        ).first()
+        if not parent_msg:
+            raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+        return parent_msg
+
+    def _resolve_parent_user_message(self, msg) -> Optional["MessageModel"]:
+        """只读定位 assistant 消息对应的父 user 消息(找不到返回 None,不抛异常)。
+
+        与 _locate_parent_user_message 同策略,但用于读路径(分支链/siblings 重建),
+        不能因找不到而抛异常。优先 parent_message_id(parent 为 user 时直接用);
+        为空或 parent 非 user 时回溯同会话 created_at 早于该消息的最近一条 user。
+        人工介入暂停路径的历史 assistant 消息 parent_message_id 缺失,靠此兜底。
+        """
+        from app.models import Message as MessageModel
+        if msg.parent_message_id:
+            parent = self.db.get(MessageModel, msg.parent_message_id)
+            if parent and parent.role == "user" and not parent.is_deleted:
+                return parent
+        if msg.created_at is None:
+            return None
+        return self.db.scalars(
+            select(MessageModel)
+            .where(
+                MessageModel.conversation_id == msg.conversation_id,
+                MessageModel.role == "user",
+                MessageModel.created_at < msg.created_at,
+                MessageModel.is_deleted.is_not(True),
+            )
+            .order_by(MessageModel.created_at.desc())
+            .limit(1)
+        ).first()
+
+    def _resolve_from_message_id(
+        self,
+        from_message_id: Optional[str],
+        conversation_id: Optional[uuid.UUID],
+    ) -> Optional[uuid.UUID]:
+        """解析本轮 user 消息的 parent_message_id（即上一轮 assistant 的 id）。
+
+        优先用前端传入的 from_message_id（多分支场景，显式指定从哪条分支继续）；
+        缺失时兜底取同会话最近一条非删除 assistant 消息 id（按 created_at 倒序，
+        即最新生成的那条），保证多轮对话链不断——前端漏传 from_message_id 时
+        第二轮 user 不会成为孤儿(parent=null)。第一轮无已落库 assistant 时返回 None。
+        """
+        if from_message_id:
+            try:
+                return uuid.UUID(from_message_id)
+            except (ValueError, TypeError):
+                return None
+        if not conversation_id:
+            return None
+        from app.models import Message as MessageModel
+        last = self.db.scalars(
+            select(MessageModel)
+            .where(
+                MessageModel.conversation_id == conversation_id,
+                MessageModel.role == "assistant",
+                MessageModel.is_deleted.is_not(True),
+            )
+            .order_by(MessageModel.created_at.desc())
+            .limit(1)
+        ).first()
+        return last.id if last else None
+
+    def _locate_execution_for_message(
+            self, original_msg: "Message", conversation_id: uuid.UUID
+    ) -> Optional[WorkflowExecution]:
+        """定位产生该 assistant 消息的工作流执行记录。
+
+        优先读消息 meta_data.execution_id；为空则回溯同会话 created_at 不晚于该消息的最近 completed execution。
+        """
+        exec_id = (original_msg.meta_data or {}).get("execution_id") if original_msg.meta_data else None
+        if exec_id:
+            execution = self.execution_repo.get_by_execution_id(str(exec_id))
+            if execution:
+                return execution
+        executions = self.execution_repo.get_by_conversation_id(
+            conversation_id=conversation_id,
+            status="completed",
+            limit_count=20,
+        ) or []
+        # 取 created_at 不晚于原消息的最后一条
+        candidates = [
+            e for e in executions
+            if e.created_at is not None and original_msg.created_at is not None
+            and e.created_at <= original_msg.created_at
+        ]
+        if not candidates:
+            candidates = list(executions)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda e: e.created_at or datetime.datetime.min, reverse=True)
+        return candidates[0]
+
+    def _reconstruct_input(
+            self,
+            execution: Optional[WorkflowExecution],
+            parent_msg: "Message",
+    ) -> dict[str, Any]:
+        """从原 execution.input_data 恢复完整输入（variables / files / trigger_*）。
+
+        message 不在此恢复——由调用方用 parent_msg.content（本轮用户提问）。
+        execution 不可得时回退到父消息内容与空 variables。
+        """
+        input_snapshot: dict[str, Any] = {
+            "variables": {},
+            "files": [],
+            "trigger_type": "manual",
+            "trigger_id": None,
+            "trigger_meta": None,
+            "trigger_payload": None,
+        }
+        if execution and execution.input_data and isinstance(execution.input_data, dict):
+            data = execution.input_data
+            input_snapshot["variables"] = data.get("variables", {}) or {}
+            input_snapshot["trigger_type"] = data.get("trigger_type", "manual") or "manual"
+            input_snapshot["trigger_id"] = data.get("trigger_id")
+            input_snapshot["trigger_meta"] = data.get("trigger_meta")
+            input_snapshot["trigger_payload"] = data.get("trigger_payload")
+            # files 在 input_data 中为序列化后的 dict 列表
+            raw_files = data.get("files", []) or []
+            input_snapshot["files"] = self._files_from_stored(raw_files, parent_msg)
+        else:
+            # 退化为从父消息 meta_data.files 还原
+            input_snapshot["files"] = self._files_from_stored([], parent_msg)
+        return input_snapshot
+
+    @staticmethod
+    def _files_from_stored(
+            stored_files: list[dict[str, Any]],
+            parent_msg: "Message",
+    ) -> list[FileInput]:
+        """将存储的文件 dict 还原为 FileInput 列表，回退到父消息 meta_data.files。"""
+        files: list[FileInput] = []
+        raw_list = list(stored_files or [])
+        if not raw_list and parent_msg and parent_msg.meta_data:
+            raw_list = parent_msg.meta_data.get("files", []) or []
+        for f in raw_list:
+            if isinstance(f, FileInput):
+                files.append(f)
+                continue
+            if not isinstance(f, dict):
+                continue
+            try:
+                files.append(FileInput(
+                    type=FileType.trans(f.get("type", "document")) if hasattr(FileType, "trans") else FileType.DOCUMENT,
+                    transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
+                    url=f.get("url"),
+                    file_type=f.get("file_type"),
+                    name=f.get("name"),
+                    size=f.get("size"),
+                ))
+            except Exception as e:
+                logger.warning(f"重新生成还原文件信息失败: {e}")
+                continue
+        return files
+
+    def _load_history_before_message(
+            self,
+            conversation_id: uuid.UUID,
+            parent_msg: "Message",
+    ) -> tuple[dict, list]:
+        """重新生成时加载本轮 user 之前的对话历史，沿 parent 链回溯。
+
+        从本轮 user 出发沿 parent_message_id 链回溯，得到当前分支在本次提问之前的完整上下文，
+        天然排除同轮其它重试版本（它们共享 parent 但不在本分支链上）。
+        """
+        conv_messages = self._trace_context_chain(parent_msg)
+
+        # conv_vars 从本轮 user 之前的最近 completed execution 取（会话变量累积）
+        conv_vars: dict[str, Any] = {}
+        executions = self.execution_repo.get_by_conversation_id(
+            conversation_id=conversation_id,
+            status="completed",
+            limit_count=20,
+        ) or []
+        prior_execs = [
+            e for e in executions
+            if e.created_at is not None and parent_msg.created_at is not None
+            and e.created_at < parent_msg.created_at
+        ]
+        if prior_execs:
+            prior_execs.sort(key=lambda e: e.created_at or datetime.datetime.min, reverse=True)
+            last_state = prior_execs[0].output_data
+            if isinstance(last_state, dict):
+                variables = last_state.get("variables", {}) or {}
+                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+        return conv_vars, conv_messages
+
+
+
+    async def regenerate(
+            self,
+            *,
+            message_id: uuid.UUID,
+            app_id: uuid.UUID,
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            override_variables: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """工作流重新生成（非流式，多版本支持）
+
+        保持同一会话、同一用户提问、同一前置对话上下文，用恢复的输入重跑工作流，
+        生成新版本 assistant 消息（version+1, is_current=True），原版本置为非当前。
+        """
+        from app.models import Message, Conversation
+
+        self._assert_regenerate_quota(message_id)
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        conversation_id = original_msg.conversation_id
+        parent_msg = self._locate_parent_user_message(original_msg)
+        original_execution = self._locate_execution_for_message(original_msg, conversation_id)
+
+        input_snapshot = self._reconstruct_input(original_execution, parent_msg)
+        if override_variables is not None:
+            # 合并而非整体替换：用户覆盖指定变量，未传的保留原快照值，避免空对象擦除原输入
+            merged = dict(input_snapshot.get("variables", {}) or {})
+            merged.update(override_variables)
+            input_snapshot["variables"] = merged
+
+        history = self._load_history_before_message(conversation_id, parent_msg)
+
+        # 原版本置为非当前
+        original_msg.is_current = False
+        self.db.commit()
+
+        payload = DraftRunRequest(
+            message=parent_msg.content or "",
+            conversation_id=str(conversation_id),
+            user_id=user_id,
+            stream=False,
+            variables=input_snapshot.get("variables", {}),
+            files=input_snapshot.get("files", []),
+            trigger_payload=input_snapshot.get("trigger_payload"),
+        )
+
+        # 抑制 run 内部的消息持久化，由本方法统一保存版本化消息
+        prev_suppress = getattr(self.conversation_service, "_suppress_message_save", False)
+        self.conversation_service._suppress_message_save = True
+        result = None
+        try:
+            result = await self.run(
+                app_id=app_id,
+                payload=payload,
+                config=config,
+                workspace_id=workspace_id,
+                source=HitLogSource.CONSOLE,
+                trigger_type=input_snapshot.get("trigger_type", "manual"),
+                trigger_id=input_snapshot.get("trigger_id"),
+                trigger_meta=input_snapshot.get("trigger_meta"),
+                trigger_payload=input_snapshot.get("trigger_payload"),
+                regenerate_mode=True,
+                regenerate_history=history,
+            )
+        except Exception:
+            # run 抛异常：回滚 is_current，避免出现“无当前版本”导致后续状态不一致
+            original_msg.is_current = True
+            self.db.commit()
+            raise
+        finally:
+            self.conversation_service._suppress_message_save = prev_suppress
+
+        # 失败回滚：run 返回但 status 非 completed
+        if not result or result.get("status") != "completed":
+            original_msg.is_current = True
+            self.db.commit()
+            raise BusinessException(
+                code=BizCode.INTERNAL_ERROR,
+                message=f"工作流重新生成失败: {result.get('error') if result else '无结果'}"
+            )
+
+        new_version = self._next_version(original_msg)
+        new_message_id = uuid.uuid4()
+        new_msg = Message(
+            id=new_message_id,
+            conversation_id=conversation_id,
+            role="assistant",
+            content=result.get("message") or result.get("output", "") or "",
+            version=new_version,
+            is_current=True,
+            parent_message_id=parent_msg.id,
+            meta_data={
+                "usage": result.get("token_usage", {}),
+                "audio_url": None,
+                "citations": result.get("citations", []),
+                "execution_id": result.get("execution_id"),
+                "regenerated_from": str(message_id),
+                "input_snapshot": {
+                    "variables": input_snapshot.get("variables", {}),
+                    "trigger_type": input_snapshot.get("trigger_type", "manual"),
+                },
+            },
+            status="completed",
+        )
+        self.db.add(new_msg)
+        conv = self.db.get(Conversation, conversation_id)
+        if conv:
+            conv.message_count += 1
+        self.db.commit()
+        self.db.refresh(new_msg)
+
+        logger.info(
+            "工作流重新生成成功",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": str(new_message_id),
+                "version": new_version,
+                "execution_id": result.get("execution_id"),
+                "conversation_id": str(conversation_id),
+            }
+        )
+
+        return {
+            "message_id": str(new_msg.id),
+            "message": new_msg.content,
+            "version": new_version,
+            "conversation_id": str(conversation_id),
+            "execution_id": result.get("execution_id"),
+            "citations": result.get("citations", []),
+            "token_usage": result.get("token_usage", {}),
+            "elapsed_time": result.get("elapsed_time"),
+        }
+
+    async def regenerate_stream(
+            self,
+            *,
+            message_id: uuid.UUID,
+            app_id: uuid.UUID,
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            override_variables: Optional[dict[str, Any]] = None,
+    ):
+        """工作流重新生成（流式，多版本支持）。
+
+        Yields SSE 事件：在 run_stream 事件外包裹 start（含新版本号）与最终落库。
+        """
+        from app.models import Message, Conversation
+
+        self._assert_regenerate_quota(message_id)
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        conversation_id = original_msg.conversation_id
+        parent_msg = self._locate_parent_user_message(original_msg)
+        # run_stream 执行期间会调用 self.db.close() 归还连接池（见 run_stream 内
+        # “工作流引擎执行期间不需要 db” 处）。SQLAlchemy 的 Session.close() 会 expunge
+        # 所有关联对象，使 parent_msg/original_msg 变为 detached；而 run_stream 在 close
+        # 之前的若干次 commit 又因 expire_on_commit=True 把它们的属性标记为过期。
+        # 此后再访问这些已过期属性（如 parent_msg.id）会抛 DetachedInstanceError。
+        # 故在 close 之前先把后续落库所需的主键与内容快照到局部变量，不再依赖 ORM 懒加载。
+        parent_msg_id = parent_msg.id
+        parent_msg_content = parent_msg.content or ""
+        original_execution = self._locate_execution_for_message(original_msg, conversation_id)
+
+        input_snapshot = self._reconstruct_input(original_execution, parent_msg)
+        if override_variables is not None:
+            # 合并而非整体替换：用户覆盖指定变量，未传的保留原快照值，避免空对象擦除原输入
+            merged = dict(input_snapshot.get("variables", {}) or {})
+            merged.update(override_variables)
+            input_snapshot["variables"] = merged
+
+        history = self._load_history_before_message(conversation_id, parent_msg)
+
+        original_msg.is_current = False
+        self.db.commit()
+
+        new_version = self._next_version(original_msg)
+        new_message_id = uuid.uuid4()
+
+        payload = DraftRunRequest(
+            message=parent_msg_content,
+            conversation_id=str(conversation_id),
+            user_id=user_id,
+            stream=True,
+            variables=input_snapshot.get("variables", {}),
+            files=input_snapshot.get("files", []),
+            trigger_payload=input_snapshot.get("trigger_payload"),
+        )
+
+        full_content = ""
+        token_usage: dict[str, Any] = {}
+        citations: list[Any] = []
+        elapsed_time: Optional[float] = None
+        execution_id: Optional[str] = None
+        stream_status = "completed"
+        stream_error: Optional[str] = None
+        paused_for_intervention = False
+
+        yield {
+            "event": "start",
+            "data": {
+                "conversation_id": str(conversation_id),
+                "version": new_version,
+            },
+        }
+
+        prev_suppress = getattr(self.conversation_service, "_suppress_message_save", False)
+        self.conversation_service._suppress_message_save = True
+        stream_failed = False
+        failure_error: Optional[str] = None
+        try:
+            async for event in self.run_stream(
+                    app_id=app_id,
+                    payload=payload,
+                    config=config,
+                    workspace_id=workspace_id,
+                    source=HitLogSource.CONSOLE,
+                    trigger_type=input_snapshot.get("trigger_type", "manual"),
+                    trigger_id=input_snapshot.get("trigger_id"),
+                    trigger_meta=input_snapshot.get("trigger_meta"),
+                    trigger_payload=input_snapshot.get("trigger_payload"),
+                    regenerate_mode=True,
+                    regenerate_history=history,
+                    regenerate_message_id=new_message_id,
+            ):
+                event_type = event.get("event", "message")
+                event_data = event.get("data", {}) or {}
+                if event_type == "message":
+                    full_content += event_data.get("content", "")
+                elif event_type == "workflow_start":
+                    # 重新生成：workflow_start 的 message_id 改用本方法落库的新消息 id，
+                    # 与 regenerate_end 保持一致。run_stream 内部生成的占位 id 不对应任何
+                    # 落库消息（重新生成模式下消息持久化已被 _suppress_message_save 抑制）。
+                    if isinstance(event.get("data"), dict):
+                        event["data"]["message_id"] = str(new_message_id)
+                elif event_type in ("workflow_end", "end"):
+                    token_usage = event_data.get("usage") or event_data.get("token_usage") or {}
+                    citations = event_data.get("citations", []) or []
+                    elapsed_time = event_data.get("elapsed_time")
+                    execution_id = event_data.get("execution_id") or execution_id
+                    if event_data.get("error"):
+                        stream_error = event_data.get("error")
+                        stream_status = "failed"
+                elif event_type == "intervention_required":
+                    # 重新生成命中人工介入暂停：记录 execution_id 与暂停标志，
+                    # 末尾落库新版本消息时按“等待人工”形态保存（与首次暂停一致）。
+                    execution_id = event_data.get("execution_id") or execution_id
+                    paused_for_intervention = True
+                yield event
+        except Exception as e:
+            # run_stream 抛异常：标记失败，统一在下方回滚，避免异常在流中传播导致“response already started”
+            stream_failed = True
+            failure_error = str(e)
+        finally:
+            self.conversation_service._suppress_message_save = prev_suppress
+
+        # 失败回滚：run_stream 抛异常 或 status 非 completed
+        if stream_failed or stream_status != "completed":
+            # original_msg 已被 run_stream 内 self.db.close() expunge 而脱离会话，
+            # 直接改对象属性再 commit 不会落库（静默失效）→ 改用按主键的批量 UPDATE 还原 is_current，
+            # 避免回滚失败后原版本停留在 is_current=False、本轮无当前回复的脏状态。
+            self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
+            self.db.commit()
+            yield {
+                "event": "error",
+                "data": {"error": failure_error or stream_error or "工作流重新生成失败"},
+            }
+            return
+
+        new_msg = Message(
+            id=new_message_id,
+            conversation_id=conversation_id,
+            role="assistant",
+            content=full_content,
+            version=new_version,
+            is_current=True,
+            parent_message_id=parent_msg_id,
+            meta_data={
+                "usage": token_usage,
+                "audio_url": None,
+                "citations": citations,
+                "execution_id": execution_id,
+                "regenerated_from": str(message_id),
+                **({"waiting_human": True} if paused_for_intervention else {}),
+                "input_snapshot": {
+                    "variables": input_snapshot.get("variables", {}),
+                    "trigger_type": input_snapshot.get("trigger_type", "manual"),
+                },
+            },
+            status="completed",
+        )
+        self.db.add(new_msg)
+        conv = self.db.get(Conversation, conversation_id)
+        if conv:
+            conv.message_count += 1
+        self.db.commit()
+
+        yield {
+            "event": "regenerate_end",
+            "data": {
+                "message_id": str(new_message_id),
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+                "execution_id": execution_id,
+            },
+        }
+
     def _ensure_conversation(
             self,
             *,
@@ -3612,35 +4219,336 @@ class WorkflowService:
         self.db.refresh(new_conversation)
         return conversation_id
 
+    def _trace_context_chain(self, end_msg) -> list[dict[str, Any]]:
+        """沿 parent_message_id 链回溯，返回从根到 end_msg 之前的对话消息（不含 end_msg 自身）。
+
+        树状分支模型：user.parent = 前驱 assistant（从哪条回复继续），assistant.parent = 本轮 user。
+        沿链回溯得到当前分支的完整上下文，不受同轮其它版本切换影响。
+        """
+        from app.models import Message as MessageModel
+        chain: list[MessageModel] = []
+        visited: set = set()
+        cur = end_msg
+        while cur is not None and cur.parent_message_id:
+            if cur.id in visited:
+                break  # 防环
+            visited.add(cur.id)
+            parent = self.db.get(MessageModel, cur.parent_message_id)
+            if parent is None or parent.is_deleted:
+                break
+            chain.append(parent)
+            cur = parent
+        chain.reverse()  # 根在前
+        return [
+            {"role": m.role, "content": m.content}
+            for m in chain if m.role in ("user", "assistant")
+        ]
+
+    def _load_branch_chain(self, message_id) -> list:
+        """加载 message_id 所在分支的完整线性链（向上祖先 + message_id + 向下子孙）。
+
+        向下沿 is_current 子（无则最近子）递归，得到该分支的完整后续对话。
+        返回 Message 列表（根在前）。
+        """
+        from app.models import Message as MessageModel
+        try:
+            mid = uuid.UUID(message_id) if isinstance(message_id, str) else message_id
+            msg = self.db.get(MessageModel, mid)
+        except (ValueError, TypeError):
+            return []
+        if not msg:
+            return []
+
+        # 向上：祖先链（根到 msg，不含 msg）
+        # parent_message_id 缺失时,若当前是 assistant,回溯最近一条 user 消息兜底
+        # (人工介入暂停路径的历史 assistant 消息 parent 为空,否则会丢失本轮 user)。
+        ancestors: list[MessageModel] = []
+        visited_up: set = {msg.id}
+        cur = msg
+        while cur:
+            nxt: MessageModel | None = None
+            if cur.parent_message_id and cur.parent_message_id not in visited_up:
+                parent = self.db.get(MessageModel, cur.parent_message_id)
+                if parent and not parent.is_deleted:
+                    nxt = parent
+            elif not cur.parent_message_id and cur.role == "assistant":
+                fb = self._resolve_parent_user_message(cur)
+                if fb and fb.id not in visited_up:
+                    nxt = fb
+            if nxt is None:
+                break
+            visited_up.add(nxt.id)
+            ancestors.append(nxt)
+            cur = nxt
+        ancestors.reverse()
+
+        # 向下：子孙链（沿 is_current 子，无则最近子）
+        descendants: list[MessageModel] = []
+        visited_down: set = {msg.id}
+        cur = msg
+        while True:
+            child = self.db.query(MessageModel).filter(
+                MessageModel.parent_message_id == cur.id,
+                MessageModel.is_deleted.is_not(True),
+                MessageModel.is_current.is_(True),
+            ).order_by(MessageModel.created_at.desc()).first()
+            if child is None:
+                # 无 is_current 子，取最近创建的子
+                child = self.db.query(MessageModel).filter(
+                    MessageModel.parent_message_id == cur.id,
+                    MessageModel.is_deleted.is_not(True),
+                ).order_by(MessageModel.created_at.desc()).first()
+            if child is None or child.id in visited_down:
+                break
+            visited_down.add(child.id)
+            descendants.append(child)
+            cur = child
+
+        return ancestors + [msg] + descendants
+
+    def _resolve_sibling_versions(self, m) -> list:
+        """取 assistant 消息 m 同轮的所有版本(含 m 自身),按 version 升序。
+
+        同轮 = 同一父 user 消息。优先按 parent_message_id 精确聚合;parent 缺失
+        (人工介入暂停路径的历史首轮)时 resolve 出本轮 user 再按时间窗
+        [parent_user, next_user) 聚合,确保 parent 为空的存量首轮与其重新生成的
+        兄弟版本(parent 指向 user)归为同一组。m 自身始终在结果集中(兜底补入)。
+        """
+        from app.models import Message as MessageModel
+        parent_user = self._resolve_parent_user_message(m)
+        if parent_user is None:
+            return [m]
+        next_user = None
+        if parent_user.created_at is not None:
+            next_user = self.db.scalars(
+                select(MessageModel)
+                .where(
+                    MessageModel.conversation_id == m.conversation_id,
+                    MessageModel.role == "user",
+                    MessageModel.created_at > parent_user.created_at,
+                    MessageModel.is_deleted.is_not(True),
+                )
+                .order_by(MessageModel.created_at.asc())
+                .limit(1)
+            ).first()
+        # 主集: parent 精确指向本轮 user(不限时间窗——parent 已天然限定到本轮,
+        # 避免 regenerate 新版本 created_at 晚于 next_user 被时间窗误排除)
+        siblings = self.db.query(MessageModel).filter(
+            MessageModel.conversation_id == m.conversation_id,
+            MessageModel.role == "assistant",
+            MessageModel.is_deleted.is_not(True),
+            MessageModel.parent_message_id == parent_user.id,
+        ).order_by(MessageModel.version.asc()).all()
+        existing_ids = {str(s.id) for s in siblings}
+        # 补集: parent 为空的存量孤儿首轮,无法用 parent 限定,改用时间窗圈定到本轮
+        orphan_q = self.db.query(MessageModel).filter(
+            MessageModel.conversation_id == m.conversation_id,
+            MessageModel.role == "assistant",
+            MessageModel.is_deleted.is_not(True),
+            MessageModel.parent_message_id.is_(None),
+        )
+        if parent_user.created_at is not None:
+            orphan_q = orphan_q.filter(MessageModel.created_at >= parent_user.created_at)
+        if next_user is not None:
+            orphan_q = orphan_q.filter(MessageModel.created_at < next_user.created_at)
+        for o in orphan_q.order_by(MessageModel.version.asc()).all():
+            if str(o.id) not in existing_ids:
+                siblings.append(o)
+                existing_ids.add(str(o.id))
+        # 兜底: m 自身始终在结果集
+        if str(m.id) not in existing_ids:
+            siblings.append(m)
+        siblings.sort(key=lambda s: (s.version or 0))
+        return siblings
+
+    def _build_branch_view(self, message_id, user_id: str | None = None) -> dict:
+        """构建分支视图：message_id 所在分支的完整链 + 各 assistant 版本的节点执行明细。
+
+        返回 {
+          messages: 扁平分支链 (ChatItem | ChatItem[])[]，直接对齐前端 chatList 形状——
+                    每轮一项：单消息轮次是对象，assistant 多版本轮次是子数组（同 parent 全部兄弟）。
+          node_executions_map: { <assistant_message_id>: [节点明细 dict, ...] }
+                    按消息 id 分组、复用日志系统 _build_nodes_from_output_data 序列化的节点执行明细；
+                    前端内存缓存未命中时据此重建 subContent（解决跨刷新节点明细丢失）。
+          pending_intervention: { <message_id>: {execution_id, status, interventions} }
+                    人工介入信息，结构与日志系统 /public/share 接口一致（复用
+                    AppLogService.build_pending_intervention_map），供前端切版本后回填 HITL 节点状态。
+        }
+        """
+        from app.models import Message as MessageModel, WorkflowExecution, MessageFeedback
+        from app.services.app_log_service import AppLogService, _build_nodes_from_output_data
+        chain = self._load_branch_chain(message_id)
+        if not chain:
+            return {"messages": [], "node_executions_map": {}, "pending_intervention": {}}
+
+        def serialize(m: MessageModel) -> dict:
+            return {
+                "id": str(m.id),
+                "role": m.role,
+                "content": m.content,
+                "version": m.version,
+                "is_current": m.is_current,
+                "created_at": to_timestamp_ms(m.created_at),
+                "meta_data": m.meta_data,
+                "status": m.status,
+                "parent_message_id": str(m.parent_message_id) if m.parent_message_id else None,
+                "is_favorited": m.id in favorited_ids,
+            }
+
+        # 预加载该会话所有 execution，供 meta_data.execution_id 缺失时按完成时间就近兜底匹配
+        # （原始首次运行的 assistant 消息 meta_data 不带 execution_id，与重新生成的有别）
+        conv_id = chain[0].conversation_id
+        fallback_executions = self.db.query(WorkflowExecution).filter(
+            WorkflowExecution.conversation_id == conv_id,
+            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"]),
+        ).all() if conv_id else []
+
+        def _find_execution_by_time(target_msg: MessageModel):
+            """按完成时间就近匹配 execution（同日志系统兜底策略，300s 内视为同一条）。"""
+            target = target_msg.created_at
+            best = None
+            best_diff = None
+            for ex in fallback_executions:
+                ref = ex.completed_at or ex.started_at
+                if not ref:
+                    continue
+                diff = abs((ref - target).total_seconds())
+                if best_diff is None or diff < best_diff:
+                    best_diff = diff
+                    best = ex
+            return best if (best is not None and best_diff is not None and best_diff <= 300) else None
+
+        def build_nodes(m: MessageModel) -> list[dict]:
+            """取该版本的节点执行明细（复用日志系统序列化）。
+            优先按 meta_data.execution_id 精确取；缺失时按完成时间就近兜底（原始首轮回复无 execution_id）。"""
+            meta = m.meta_data if isinstance(m.meta_data, dict) else None
+            exec_id = meta.get("execution_id") if meta else None
+            execution = self.execution_repo.get_by_execution_id(exec_id) if exec_id else _find_execution_by_time(m)
+            if not execution or not execution.output_data:
+                return []
+            nodes = _build_nodes_from_output_data(execution.output_data)
+            return [n.model_dump() for n in nodes] if nodes else []
+
+        # 先解析每轮结构（assistant 取出全部兄弟版本），收集所有消息 id，批量查当前用户收藏状态
+        turns: list[tuple[str, Any]] = []
+        all_ids: set = set()
+        for m in chain:
+            if m.role == "user":
+                turns.append(("user", m))
+                all_ids.add(m.id)
+            elif m.role == "assistant":
+                siblings = self._resolve_sibling_versions(m)
+                turns.append(("assistant", siblings))
+                for s in siblings:
+                    all_ids.add(s.id)
+
+        favorited_ids: set = set()
+        if user_id and all_ids:
+            favorited_ids = {
+                row[0]
+                for row in self.db.query(MessageFeedback.message_id)
+                .filter(
+                    MessageFeedback.message_id.in_(all_ids),
+                    MessageFeedback.user_id == user_id,
+                    MessageFeedback.is_favorite.is_(True),
+                )
+                .all()
+            }
+
+        items: list[Any] = []
+        node_executions_map: dict[str, list[dict]] = {}
+        for role, payload in turns:
+            if role == "user":
+                items.append(serialize(payload))
+            else:
+                # 同轮的所有 assistant 版本（供版本切换器）：按父 user 聚合,
+                # 兼容人工介入暂停路径 parent 缺失的存量首轮（详见 _resolve_sibling_versions）
+                siblings = payload
+                serialized = [serialize(s) for s in siblings]
+                # 单版本拍平为对象，多版本保留为数组——与前端 chatList 约定一致
+                items.append(serialized[0] if len(serialized) == 1 else serialized)
+                # 每个版本各自构建节点明细，按 message_id 入 map（前端切到任意版本都能回填 subContent）
+                for s in siblings:
+                    nodes = build_nodes(s)
+                    if nodes:
+                        node_executions_map[str(s.id)] = nodes
+        # 人工介入信息：复用日志系统聚合逻辑，结构与 /public/share 接口一致
+        pending_intervention = AppLogService(self.db).build_pending_intervention_map(conv_id)
+        return {
+            "messages": items,
+            "node_executions_map": node_executions_map,
+            "pending_intervention": pending_intervention,
+        }
+
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
+        """加载会话历史（兜底：from_message_id 为空时用）。
+
+        conv_vars 从最近 completed execution 取（会话级变量累积）；
+        conv_messages 沿最近消息的 parent 链回溯得到当前分支上下文。
+        """
+        # conv_vars 从最近 execution 取
+        conv_vars: dict[str, Any] = {}
         executions = self.execution_repo.get_by_conversation_id(
             conversation_id=conversation_id,
             status="completed",
-            limit_count=1
+            limit_count=1,
         )
+        if executions and isinstance(executions[0].output_data, dict):
+            variables = executions[0].output_data.get("variables", {}) or {}
+            conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
 
-        if executions:
-            last_state = executions[0].output_data
-            if isinstance(last_state, dict):
-                variables = last_state.get("variables", {})
-                conv_vars = variables.get("conv", {})
-                conv_messages = last_state.get("messages") or []
-                return conv_vars, conv_messages
+        # conv_messages 沿最近消息的 parent 链回溯
+        from app.models import Message as MessageModel
+        latest = self.db.scalars(
+            select(MessageModel)
+            .where(
+                MessageModel.conversation_id == conversation_id,
+                MessageModel.is_deleted.is_not(True),
+            )
+            .order_by(MessageModel.created_at.desc())
+            .limit(1)
+        ).first()
+        if not latest:
+            return None
+        conv_messages = self._trace_context_chain(latest)
+        if latest.role in ("user", "assistant"):
+            conv_messages.append({"role": latest.role, "content": latest.content})
+        return conv_vars, conv_messages
 
-        messages = self.conversation_service.message_repo.get_message_by_conversation_id(
-            conversation_id,
-            limit=None
-        )
-        if messages:
-            conv_messages = []
-            for msg in messages:
-                conv_messages.append({
-                    "role": msg.role,
-                    "content": msg.content
-                })
-            return {}, conv_messages
 
-        return None
+
+    def _get_history_from_message(self, message_id: str | None) -> tuple[dict, list] | None:
+        """从指定分支消息出发构建历史上下文（"从某分支继续聊天"）。
+
+        沿 parent_message_id 链回溯到根，得到该分支的完整上下文（含本轮 user + 之前的轮次），
+        不含同轮其它重试版本。conv_vars 从该分支对应 execution 取。
+        """
+        if not message_id:
+            return None
+        from app.models import Message as MessageModel
+        try:
+            branch_msg = self.db.get(MessageModel, uuid.UUID(message_id))
+        except (ValueError, TypeError):
+            return None
+        if not branch_msg:
+            return None
+
+        # conv_vars 从该分支对应 execution 取
+        conv_vars: dict[str, Any] = {}
+        exec_id = (branch_msg.meta_data or {}).get("execution_id") if branch_msg.meta_data else None
+        if exec_id:
+            execution = self.execution_repo.get_by_execution_id(str(exec_id))
+            if execution and isinstance(execution.output_data, dict):
+                variables = execution.output_data.get("variables", {}) or {}
+                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+
+        # conv_messages 沿 parent 链回溯，并追加 branch_msg 自身（前驱 assistant 属于当前分支上下文）
+        conv_messages = self._trace_context_chain(branch_msg)
+        if branch_msg.role in ("user", "assistant"):
+            conv_messages.append({"role": branch_msg.role, "content": branch_msg.content})
+        return conv_vars, conv_messages
+
+
 
     # ==================== 工作流执行 ====================
 
@@ -3656,6 +4564,8 @@ class WorkflowService:
             trigger_id: str | None = None,
             trigger_meta: dict[str, Any] | None = None,
             trigger_payload: dict[str, Any] | None = None,
+            regenerate_mode: bool = False,
+            regenerate_history: Optional[tuple] = None,
     ):
         """运行工作流
 
@@ -3665,6 +4575,10 @@ class WorkflowService:
             config: 配置
             payload:
             app_id: 应用 ID
+            regenerate_mode: 重新生成模式——跳过标注命中/输入审查短路、跳过消息持久化
+                （由 WorkflowService.regenerate 统一保存版本化消息）。
+            regenerate_history: 重新生成时注入的历史上下文 {"conv": {...}, "conv_messages": [...]}，
+                覆盖默认从最近 execution 读取的历史。
 
         Returns:
             执行结果（非流式）
@@ -3724,8 +4638,9 @@ class WorkflowService:
             input_data["conversation_id"] = str(conversation_id_uuid)
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
+        # 重新生成场景不短路：需走完整工作流以产出新版本回复
         annotation_match = None
-        if supports_conversation and payload.message:
+        if supports_conversation and payload.message and not regenerate_mode:
             annotation_match = self._check_annotation_match(
                 app_id, payload.message, source=source or HitLogSource.CONSOLE
             )
@@ -3795,8 +4710,9 @@ class WorkflowService:
             }
 
         # 1.5 输入审查（仅对话式工作流 AppType.WORKFLOW）
+        # 重新生成场景跳过审查短路，避免用预设响应替代重新执行
         sensitive_cfg = feature_configs.get("sensitive_word_avoidance", {})
-        if payload.message and sensitive_cfg.get("enabled"):
+        if payload.message and sensitive_cfg.get("enabled") and not regenerate_mode:
             from app.core.moderation.input_moderation import InputModeration
             moderation_type = sensitive_cfg.get("type", "keywords")
             stop, preset_response, _, _ = InputModeration().check(
@@ -3883,7 +4799,15 @@ class WorkflowService:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
-            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
+            if regenerate_mode and regenerate_history:
+                history = regenerate_history
+            elif payload.from_message_id:
+                history = self._get_history_from_message(payload.from_message_id)
+                # from_message_id 找不到对应 execution 时回退到最近 completed
+                if history is None and conversation_id_uuid:
+                    history = self._get_history_info(conversation_id_uuid)
+            else:
+                history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
@@ -3892,7 +4816,8 @@ class WorkflowService:
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
-            if is_new_conversation:
+            # 重新生成场景不重复写开场白（会话历史中已存在）
+            if is_new_conversation and not regenerate_mode:
                 opening_cfg = feature_configs.get("opening_statement", {})
                 if (
                         conversation_id_uuid
@@ -3969,12 +4894,15 @@ class WorkflowService:
                                 })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
+                _user_msg = None
                 if conversation_id_uuid:
-                    self.conversation_service.add_message(
+                    _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
+                    _user_msg = self.conversation_service.add_message(
                         conversation_id=conversation_id_uuid,
                         role="user",
                         content=human_message,
                         meta_data=human_meta,
+                        parent_message_id=_from_msg_id,
                         sync_memory=False,
                     )
                 # 过滤 citations
@@ -3990,7 +4918,7 @@ class WorkflowService:
                     filtered_citations = citations
                 else:
                     filtered_citations = []
-                assistant_meta = {"usage": token_usage, "audio_url": None}
+                assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
                 if conversation_id_uuid:
@@ -4000,6 +4928,7 @@ class WorkflowService:
                         role="assistant",
                         content=assistant_message,
                         meta_data=assistant_meta,
+                        parent_message_id=_user_msg.id if _user_msg else None,
                         sync_memory=False,
                     )
                 self.update_execution_status(
@@ -4113,6 +5042,9 @@ class WorkflowService:
             trigger_id: str | None = None,
             trigger_meta: dict[str, Any] | None = None,
             trigger_payload: dict[str, Any] | None = None,
+            regenerate_mode: bool = False,
+            regenerate_history: Optional[tuple] = None,
+            regenerate_message_id: Optional[uuid.UUID] = None,
     ):
         """运行工作流（流式）
 
@@ -4123,6 +5055,9 @@ class WorkflowService:
             payload: 请求对象（包含 message, variables, conversation_id 等）
             config: 存储类型（可选）
             public: 是否发布
+            regenerate_mode: 重新生成模式——跳过标注命中/输入审查短路、跳过消息持久化
+                （由 WorkflowService.regenerate_stream 统一保存版本化消息）。
+            regenerate_history: 重新生成时注入的历史上下文，覆盖默认从最近 execution 读取的历史。
 
         Yields:
             SSE 格式的流式事件
@@ -4180,8 +5115,9 @@ class WorkflowService:
             input_data["conversation_id"] = str(conversation_id_uuid)
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
+        # 重新生成场景不短路：需走完整工作流以产出新版本回复
         annotation_match = None
-        if supports_conversation and payload.message:
+        if supports_conversation and payload.message and not regenerate_mode:
             annotation_match = self._check_annotation_match(
                 app_id, payload.message, source=source or HitLogSource.CONSOLE
             )
@@ -4279,8 +5215,9 @@ class WorkflowService:
             return
 
         # 1.5 输入审查（仅对话式工作流 AppType.WORKFLOW）
+        # 重新生成场景跳过审查短路，避免用预设响应替代重新执行
         sensitive_cfg = feature_configs.get("sensitive_word_avoidance", {})
-        if payload.message and sensitive_cfg.get("enabled"):
+        if payload.message and sensitive_cfg.get("enabled") and not regenerate_mode:
             from app.core.moderation.input_moderation import InputModeration
             moderation_type = sensitive_cfg.get("type", "keywords")
             stop, preset_response, _, _ = InputModeration().check(
@@ -4388,19 +5325,28 @@ class WorkflowService:
             execution.input_data = input_data
             self.db.commit()
             self.update_execution_status(execution.execution_id, "running")
-            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
+            if regenerate_mode and regenerate_history:
+                history = regenerate_history
+            elif payload.from_message_id:
+                history = self._get_history_from_message(payload.from_message_id)
+                # from_message_id 找不到对应 execution 时回退到最近 completed
+                if history is None and conversation_id_uuid:
+                    history = self._get_history_info(conversation_id_uuid)
+            else:
+                history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
-            message_id = uuid.uuid4()
+            message_id = regenerate_message_id or uuid.uuid4()
             _cycle_items: dict[str, list] = {}
             intervention_list = []
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
-            if is_new_conversation:
+            # 重新生成场景不重复写开场白（会话历史中已存在）
+            if is_new_conversation and not regenerate_mode:
                 opening_cfg = feature_configs.get("opening_statement", {})
                 if (
                         conversation_id_uuid
@@ -4592,12 +5538,15 @@ class WorkflowService:
                                         })
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
+                        _user_msg = None
                         if conversation_id_uuid:
-                            self.conversation_service.add_message(
+                            _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
+                            _user_msg = self.conversation_service.add_message(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
                                 content=human_message,
                                 meta_data=human_meta,
+                                parent_message_id=_from_msg_id,
                                 sync_memory=False,
                             )
                         # 过滤 citations
@@ -4613,7 +5562,7 @@ class WorkflowService:
                             filtered_citations = citations
                         else:
                             filtered_citations = []
-                        assistant_meta = {"usage": token_usage, "audio_url": None}
+                        assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
                         if conversation_id_uuid:
@@ -4623,6 +5572,7 @@ class WorkflowService:
                                 role="assistant",
                                 content=assistant_message,
                                 meta_data=assistant_meta,
+                                parent_message_id=_user_msg.id if _user_msg else None,
                                 sync_memory=False,
                             )
                         # 输出审查触发时，将 moderation 信息写入 execution output_data
@@ -4745,8 +5695,7 @@ class WorkflowService:
                                     intervention_list, first_node_id, timeout_at
                                 )
 
-                        execution.status = "waiting_human"
-                        execution.context = {
+                        _hitl_context = {
                             **(execution.context or {}),
                             "human_intervention": {
                                 "message_id": str(message_id),
@@ -4756,7 +5705,15 @@ class WorkflowService:
                                 "intervention_backlog": intervention_list,
                             },
                         }
+                        self.db.query(WorkflowExecution).filter(
+                            WorkflowExecution.execution_id == execution.execution_id
+                        ).update(
+                            {"status": "waiting_human", "context": _hitl_context},
+                            synchronize_session=False,
+                        )
                         self.db.commit()
+                        execution.status = "waiting_human"
+                        execution.context = _hitl_context
                         self.db.close()
 
                         # Save the user message so that the conversation title
@@ -4773,12 +5730,20 @@ class WorkflowService:
                                     "name": f.get("name"),
                                     "size": f.get("size"),
                                 })
+                        # 与正常完成路径(见 run 内 _user_msg/_from_msg_id)一致地挂
+                        # parent_message_id,避免人工介入分支的首轮 user/assistant 消息
+                        # 成为孤儿(parent=null)。否则 switch-version/branch 重建分支链
+                        # 时会丢失 user 消息,且重新生成的兄弟版本因 parent 不一致无法
+                        # 聚合(详见 _build_branch_view siblings)。
+                        _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
+                        _hitl_user_msg = None
                         if conversation_id_uuid:
-                            self.conversation_service.add_message(
+                            _hitl_user_msg = self.conversation_service.add_message(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
                                 content=human_message,
                                 meta_data=human_meta,
+                                parent_message_id=_from_msg_id,
                                 sync_memory=False,
                             )
 
@@ -4799,6 +5764,7 @@ class WorkflowService:
                                 role="assistant",
                                 content="",
                                 meta_data={"waiting_human": True, "execution_id": execution.execution_id},
+                                parent_message_id=_hitl_user_msg.id if _hitl_user_msg else None,
                                 sync_memory=False,
                             )
 
@@ -4905,7 +5871,7 @@ class WorkflowService:
                             "resolved_at": to_iso_z(utcnow_naive()),
                             "resolved_kind": kind,
                         }
-                        execution.context = {
+                        _resolved_context = {
                             **(execution.context or {}),
                             "human_intervention": {
                                 **intx_ctx,
@@ -4915,7 +5881,14 @@ class WorkflowService:
                                 ],
                             },
                         }
+                        self.db.query(WorkflowExecution).filter(
+                            WorkflowExecution.execution_id == execution.execution_id
+                        ).update(
+                            {"context": _resolved_context},
+                            synchronize_session=False,
+                        )
                         self.db.commit()
+                        execution.context = _resolved_context
                         self.db.close()
 
                     # Handle timeout signal from the background scheduler

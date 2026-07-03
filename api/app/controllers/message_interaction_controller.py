@@ -4,24 +4,31 @@
 包含：重新生成、点赞/点踩、分享、举报、删除等功能
 """
 import uuid
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.response_utils import success
-from app.db import get_db
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
+from app.db import get_db, get_db_context
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User, Message
+from app.models.app_model import AppType
 from app.models.message_report_model import MessageReportType
 from app.schemas import app_schema
 from app.schemas.memory_storage_schema import ApiResponse
 from app.services.conversation_service import ConversationService
+from app.services.message_feedback_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
 from app.services.message_report_service import ReportService
 from app.services.conversation_share_service import ConversationShareService
 from app.services.draft_run_service import AgentRunService
 from app.services.app_service import AppService
+from app.services.workflow_service import WorkflowService
 from app.models import ModelConfig
 from app.core.utils.datetime_utils import to_timestamp_ms
 
@@ -70,6 +77,130 @@ async def regenerate_message(
     )
 
     return success(data=app_schema.RegenerateResponse(**result))
+
+
+# ========== 工作流重新生成 ==========
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+@router.post("/{app_id}/workflow/messages/{message_id}/regenerate", summary="工作流重新生成回复")
+@cur_workspace_access_guard()
+async def regenerate_workflow_message(
+        app_id: uuid.UUID,
+        message_id: uuid.UUID,
+        payload: app_schema.WorkflowRegenerateRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """工作流试运行窗口：对某一轮助手回复重新执行工作流，生成新版本（多版本可切换）。
+
+    - 仅 `AppType.WORKFLOW` 且为对话流（workflow_type=workflow）支持；
+      `PURE_WORKFLOW`（一次性执行）与非对话流显式拒绝。
+    - 保持同一会话、同一用户提问、同一前置对话上下文，复用原输入（variables/files/trigger）重跑。
+    - 支持流式与非流式返回。
+    """
+    workspace_id = current_user.current_workspace_id
+    workflow_service = WorkflowService(db)
+
+    # 校验应用类型与配置来源（复用 draft_run 的 is_shared 判定）
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(app_id)
+    if app.type == AppType.PURE_WORKFLOW:
+        raise BusinessException(
+            code=BizCode.APP_TYPE_NOT_SUPPORTED,
+            message="纯工作流为一次性执行，不支持重新生成",
+        )
+    if app.type != AppType.WORKFLOW:
+        raise BusinessException(
+            code=BizCode.APP_TYPE_NOT_SUPPORTED,
+            message="仅工作流应用支持此接口",
+        )
+
+    config = workflow_service._resolve_workflow_config(app, workspace_id)
+    # 仅对话流具备多轮对话语义，方可"重新生成某一轮"
+    if not workflow_service._supports_conversation(config):
+        raise BusinessException(
+            code=BizCode.BAD_REQUEST,
+            message="该工作流非对话流，不支持重新生成",
+        )
+
+    # 版本数上限校验：同轮最多 MAX_REGENERATE_VERSIONS 个版本（含原始回复），超限拒绝。
+    # 必须在 StreamingResponse 之前拒绝——流式下 SSE 已开流后无法回传干净的 HTTP 错误。
+    workflow_service._assert_regenerate_quota(message_id)
+
+    if payload.stream:
+        async def event_generator():
+            with get_db_context() as stream_db:
+                svc = WorkflowService(stream_db)
+                async for event in svc.regenerate_stream(
+                        message_id=message_id,
+                        app_id=app_id,
+                        config=config,
+                        workspace_id=workspace_id,
+                        user_id=str(current_user.id),
+                        override_variables=payload.variables,
+                ):
+                    event_type = event.get("event", "message")
+                    event_data = event.get("data", {})
+                    yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
+
+    result = await workflow_service.regenerate(
+        message_id=message_id,
+        app_id=app_id,
+        config=config,
+        workspace_id=workspace_id,
+        user_id=str(current_user.id),
+        override_variables=payload.variables,
+    )
+    return success(data=app_schema.WorkflowRegenerateResponse(**result))
+
+
+@router.post("/{app_id}/messages/{message_id}/switch-version/{version}/branch", summary="切换版本并返回该分支完整对话链（含节点明细）")
+@cur_workspace_access_guard()
+async def switch_message_version_with_branch(
+        app_id: uuid.UUID,
+        message_id: uuid.UUID,
+        version: int,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """切换展示的消息版本，并直接返回目标版本所在分支的完整对话链 + 节点执行明细。
+
+    合并两步：把目标版本置 is_current=true、同组其余置 false（复用 switch_message_version
+    的服务逻辑），随后以目标版本 id 为锚点返回该分支完整链（向上祖先 + 向下子孙）。
+
+    返回 data = { messages, node_executions_map, pending_intervention }：
+    - messages: 扁平分支链 (ChatItem | ChatItem[])[]，直接对齐前端 chatList 形状——
+      每轮一项；assistant 多版本聚成子数组，单版本拍平成对象。
+    - node_executions_map: { <assistant_message_id>: [节点明细] }，按消息 id 分组、
+      复用日志系统 _build_nodes_from_output_data 序列化的节点执行明细；前端内存缓存
+      未命中（如刷新后）时据此重建 subContent。
+    - pending_intervention: { <message_id>: {execution_id, status, interventions} }，
+      人工介入信息，结构与日志系统 /public/share 接口一致。
+
+    与 switch-version 的区别：本接口多返回分支链与节点明细，供前端一次调用完成持久化 +
+    重建 chatList；仅需切换、不要分支数据的场景用 switch-version。
+    """
+    workspace_id = current_user.current_workspace_id
+
+    conv_service = ConversationService(db)
+    result = conv_service.switch_message_version(message_id, version, workspace_id)
+
+    # 以 switch 返回的目标版本 id 为锚点取分支：即使入参 message_id 是非目标兄弟也能正确取到目标分支
+    workflow_service = WorkflowService(db)
+    branch = workflow_service._build_branch_view(result["message_id"], user_id=str(current_user.id))
+    return success(data=branch)
 
 
 # ========== 消息版本管理 ==========
@@ -146,6 +277,39 @@ async def submit_message_feedback(
     )
 
     return success(data=app_schema.MessageFeedbackResponse(**result))
+
+
+# ========== 消息收藏 ==========
+
+@router.post("/{app_id}/messages/{message_id}/favorite", summary="收藏/取消收藏消息")
+@cur_workspace_access_guard()
+async def toggle_message_favorite(
+        app_id: uuid.UUID,
+        message_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """切换消息收藏状态（试运行界面，已登录用户）
+
+    幂等：已收藏则取消，未收藏则新增。
+    """
+    workspace_id = current_user.current_workspace_id
+
+    message = db.get(Message, message_id)
+    if not message:
+        from app.core.exceptions import BusinessException
+        from app.core.error_codes import BizCode
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    favorite_service = FavoriteService(db)
+    result = favorite_service.toggle_favorite(
+        message_id=message_id,
+        conversation_id=message.conversation_id,
+        workspace_id=workspace_id,
+        user_id=str(current_user.id),
+    )
+
+    return success(data=app_schema.MessageFavoriteResponse(**result))
 
 
 @router.get("/{app_id}/messages/{message_id}/feedback", summary="获取用户对消息的反馈")

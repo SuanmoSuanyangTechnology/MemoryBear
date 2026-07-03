@@ -318,7 +318,19 @@ class AppService:
                 # 检查主 Agent 的模型配置
                 multi_agent_config.default_model_config_id = master_agent_release.default_model_config_id
 
-            model_api_key = ModelApiKeyService.get_available_api_key(self.db, multi_agent_config.default_model_config_id)
+            from app.repositories.tool_repository import ToolRepository
+            from app.models import App
+
+            db_app = self.db.get(App, app_id)
+            if not db_app:
+                raise BusinessException("应用不存在", BizCode.NOT_FOUND)
+
+            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(db_app.workspace_id))
+            model_api_key = ModelApiKeyService.get_available_api_key(
+                self.db,
+                multi_agent_config.default_model_config_id,
+                tenant_id=tenant_id,
+            )
             if not model_api_key:
                 raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
 
@@ -1759,7 +1771,7 @@ class AppService:
                 template_data = {
                     'nodes': [
                         {'id': 'start', 'type': 'start', 'name': '开始'},
-                        {'id': 'end', 'type': 'end', 'name': '结束'}
+                        {'id': 'end', 'type': 'end', 'name': '回复'}
                     ],
                     'edges': [
                         {'source': 'start', 'target': 'end'}

@@ -30,7 +30,12 @@ class RedBearEmbeddings(Embeddings):
         provider = config.provider.lower()
         # Embedding models only need connection params, never LLM-specific ones
         # (e.g. enable_thinking, model_kwargs) — build params directly.
-        if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+        if provider in [
+            ModelProvider.OPENAI,
+            ModelProvider.XINFERENCE,
+            ModelProvider.GPUSTACK,
+            ModelProvider.SPEEDBEAR,
+        ]:
             import httpx
             timeout = httpx.Timeout(timeout=config.timeout, connect=60.0)
             params = {
@@ -40,6 +45,8 @@ class RedBearEmbeddings(Embeddings):
                 "timeout": timeout,
                 "max_retries": config.max_retries,
             }
+            if provider == ModelProvider.SPEEDBEAR:
+                params["check_embedding_ctx_length"] = False
         elif provider == ModelProvider.DASHSCOPE:
             params = {
                 "model": config.model_name,

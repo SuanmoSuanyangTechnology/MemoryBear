@@ -18,8 +18,8 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ENTITIES_PAGE,
     GET_COMMUNITY_MEMBERS,
     GET_COMMUNITY_RELATIONSHIPS,
-    GET_ALL_COMMUNITY_MEMBERS_BATCH,
-    GET_ALL_ENTITY_NEIGHBORS_BATCH,
+    BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
+    GET_COMMUNITY_AVG_EMBEDDINGS_BATCH,
     GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
@@ -88,26 +88,6 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"get_entity_neighbors failed: {e}")
             return []
-
-    async def get_all_entity_neighbors_batch(
-        self, end_user_id: str
-    ) -> Dict[str, List[Dict]]:
-        """一次性批量拉取该用户下所有实体的邻居，返回 {entity_id: [neighbors]} 字典。
-        用于全量聚类预加载，避免每个实体单独查询。"""
-        try:
-            rows = await self.connector.execute_query(
-                GET_ALL_ENTITY_NEIGHBORS_BATCH,
-                end_user_id=end_user_id,
-            )
-            result: Dict[str, List[Dict]] = {}
-            for row in rows:
-                eid = row["entity_id"]
-                neighbor = {k: v for k, v in row.items() if k != "entity_id"}
-                result.setdefault(eid, []).append(neighbor)
-            return result
-        except Exception as e:
-            logger.error(f"get_all_entity_neighbors_batch failed: {e}")
-            return {}
 
     async def get_all_entities(self, end_user_id: str) -> List[Dict]:
         """拉取某用户下所有实体及其当前社区归属。"""
@@ -207,23 +187,57 @@ class CommunityRepository:
             logger.error(f"get_community_relationships failed: {e}")
             return []
 
-    async def get_all_community_members_batch(
+    async def batch_assign_entities_to_communities(
+        self, assignments: List[Dict], end_user_id: str
+    ) -> bool:
+        """批量将实体分配到社区（UNWIND，一次 Cypher 替代 N×2 次串行查询）。
+
+        Args:
+            assignments: [{"entity_id": str, "community_id": str}, ...]
+            end_user_id: 用户 ID
+
+        Returns:
+            True 表示执行成功（即使部分实体未匹配到也不抛出异常）。
+        """
+        if not assignments:
+            return True
+        try:
+            await self.connector.execute_query(
+                BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
+                assignments=assignments,
+                end_user_id=end_user_id,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"batch_assign_entities_to_communities failed: {e}")
+            return False
+
+    async def get_community_avg_embeddings_batch(
         self, community_ids: List[str], end_user_id: str
-    ) -> Dict[str, List[Dict]]:
-        """批量查询多个社区的成员，返回 {community_id: [members]} 字典。"""
+    ) -> Dict[str, Dict]:
+        """批量计算各社区的平均 name_embedding（Neo4j 侧聚合，无需拉取全量成员）。
+
+        Returns:
+            {community_id: {"member_count": int, "avg_embedding": list[float]}}
+            若某社区无带 embedding 的成员，则该 community_id 不在返回字典中。
+        """
+        if not community_ids:
+            return {}
         try:
             rows = await self.connector.execute_query(
-                GET_ALL_COMMUNITY_MEMBERS_BATCH,
+                GET_COMMUNITY_AVG_EMBEDDINGS_BATCH,
                 community_ids=community_ids,
                 end_user_id=end_user_id,
             )
-            result: Dict[str, List[Dict]] = {}
+            result: Dict[str, Dict] = {}
             for row in rows:
-                cid = row["community_id"]
-                result.setdefault(cid, []).append(row)
+                result[row["cid"]] = {
+                    "member_count": row["member_count"],
+                    "avg_embedding": row["avg_embedding"],
+                }
             return result
         except Exception as e:
-            logger.error(f"get_all_community_members_batch failed: {e}")
+            logger.error(f"get_community_avg_embeddings_batch failed: {e}")
             return {}
 
     async def has_communities(self, end_user_id: str) -> bool:

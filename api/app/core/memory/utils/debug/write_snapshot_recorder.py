@@ -27,7 +27,7 @@ class WriteSnapshotRecorder:
     内部持有一个 PipelineSnapshot 实例，对外暴露语义化方法，
     每个方法对应流水线中的一个可观测阶段。
 
-    当 PIPELINE_SNAPSHOT_ENABLED=false 时，所有方法均为空操作（no-op）。
+    当 EXTRACT_SNAPSHOT_ENABLED=false 时，所有方法均为空操作（no-op）。
     """
 
     def __init__(
@@ -77,7 +77,7 @@ class WriteSnapshotRecorder:
         """
         if not pruning_records:
             return
-        self._snapshot.save_stage("1_assistant_pruning", pruning_records)
+        self._snapshot.save_stage("1_user_assistant_pruning", pruning_records)
 
     # ── Stage 2-5: 萃取阶段各步骤输出 ──
 

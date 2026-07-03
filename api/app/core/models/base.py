@@ -230,7 +230,14 @@ class RedBearModelFactory:
                     model_kwargs["response_format"] = _json_response_format(config)
             return params
 
-        if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA, ModelProvider.VOLCANO]:
+        if provider in [
+            ModelProvider.OPENAI,
+            ModelProvider.XINFERENCE,
+            ModelProvider.GPUSTACK,
+            ModelProvider.OLLAMA,
+            ModelProvider.VOLCANO,
+            ModelProvider.SPEEDBEAR,
+        ]:
             # 使用 httpx.Timeout 对象来设置详细的超时配置
             # 这样可以分别控制连接超时和读取超时
             import httpx
@@ -285,6 +292,14 @@ class RedBearModelFactory:
                             params["reasoning_effort"] = effort
                     else:
                         extra_body["thinking"] = {"type": "disabled"}
+                elif provider == ModelProvider.SPEEDBEAR:
+                    if config.deep_thinking:
+                        params["reasoning_effort"] = "minimal"
+                        effort = _map_budget_to_reasoning_effort(config.thinking_budget_tokens)
+                        if effort is not None:
+                            params["reasoning_effort"] = effort
+                    else:
+                        params["reasoning_effort"] = "none"
                 else:
                     extra_body = params.setdefault("extra_body", {})
                     if config.deep_thinking:
@@ -409,7 +424,7 @@ class RedBearModelFactory:
     def get_rerank_model_params(cls, config: RedBearModelConfig) -> Dict[str, Any]:
         """根据提供商获取模型参数"""
         provider = config.provider.lower()
-        if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+        if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.SPEEDBEAR]:
             return {
                 "model": config.model_name,
                 "jina_api_key": config.api_key,
@@ -434,7 +449,12 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
         return CompatibleChatOpenAI
     if provider == ModelProvider.VOLCANO:
         return CompatibleChatOpenAI
-    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+    if provider in [
+        ModelProvider.OPENAI,
+        ModelProvider.XINFERENCE,
+        ModelProvider.GPUSTACK,
+        ModelProvider.SPEEDBEAR,
+    ]:
         return CompatibleChatOpenAI
         # if type == ModelType.LLM:
         #     return OpenAI
@@ -455,7 +475,12 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
 def get_provider_embedding_class(provider: str) -> type[Embeddings]:
     """根据模型提供商获取对应的模型类"""
     provider = provider.lower()
-    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+    if provider in [
+        ModelProvider.OPENAI,
+        ModelProvider.XINFERENCE,
+        ModelProvider.GPUSTACK,
+        ModelProvider.SPEEDBEAR,
+    ]:
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings
     elif provider == ModelProvider.DASHSCOPE:
@@ -474,7 +499,7 @@ def get_provider_embedding_class(provider: str) -> type[Embeddings]:
 def get_provider_rerank_class(provider: str):
     """根据模型提供商获取对应的模型类"""
     provider = provider.lower()
-    if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+    if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.SPEEDBEAR]:
         from langchain_community.document_compressors import JinaRerank
         return JinaRerank
     elif provider == ModelProvider.DASHSCOPE:

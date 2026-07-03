@@ -4,8 +4,11 @@ PruningPipeline — 单条 assistant 消息语义剪枝流水线
 职责：
 - 对单条 assistant 消息执行语义剪枝，输出剪枝后内容（A'）
 - 先查询 Redis 缓存，命中则直接返回，避免重复 LLM 调用
-- 未命中则调用 SemanticPruner 执行剪枝，结果写入 Neo4j 和 Redis 缓存
+- 未命中则调用 SemanticPruner 执行剪枝，结果写入 Redis 缓存
 - 作为 WritePipeline 的预处理步骤被调用，其结果可跨任务缓存复用
+
+流程：Redis 缓存 → LLM 剪枝 → Redis 写入
+（Neo4j 写入已迁移至 graph_build_step，通过 assistant_pruning_records metadata 统一处理），现在移除neo4j连接相关内容
 
 Redis key 格式：pruning:{conversation_id}:{message_seq}
 TTL：86400 秒（24 小时）
@@ -17,11 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
-from uuid import uuid4
-
-from app.core.utils.datetime_utils import to_iso_z
 
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
@@ -35,12 +34,12 @@ _MEMORY_TYPE_NULL = "NULL"
 class PruningPipeline:
     """单条 assistant 消息语义剪枝流水线。
 
-    对单条 assistant 消息执行语义剪枝，输出 A'，写入 Neo4j 并缓存到 Redis。
+    对单条 assistant 消息执行语义剪枝，输出 A'，缓存到 Redis。
 
     流程：
     1. 查 Redis 缓存 pruning:{conversation_id}:{message_seq}
     2. 命中 → 直接返回 A'
-    3. 未命中 → 调用 LLM 剪枝 → 写 Neo4j → 写 Redis → 返回 A'
+    3. 未命中 → 调用 LLM 剪枝 → 写 Redis → 返回 A'
     """
 
     CACHE_TTL = 86400  # 24 小时兜底
@@ -61,9 +60,8 @@ class PruningPipeline:
         self.end_user_id = end_user_id
         self.language = language
 
-        # 延迟初始化的客户端
+        # 延迟初始化的 LLM 客户端
         self._llm_client = None
-        self._neo4j_connector = None
 
     # ──────────────────────────────────────────────
     # 公开接口
@@ -81,7 +79,7 @@ class PruningPipeline:
 
         1. 查 Redis 缓存 pruning:{conversation_id}:{message_seq}
         2. 命中 → 直接返回 A'（source="cache"）
-        3. 未命中 → 调用 LLM 剪枝 → 写 Neo4j → 写 Redis → 返回 A'（source="llm"）
+        3. 未命中 → 调用 LLM 剪枝 → 写 Redis → 返回 A'（source="llm"）
 
         Args:
             conversation_id: 对话 ID
@@ -97,6 +95,14 @@ class PruningPipeline:
             - should_process_user_msg: 是否需要对 user 消息做规整
             - processed_user_msg: 规整后的 user 消息文本，不需要处理时为 None
         """
+        # pruning_enabled=False 时直接透传原内容，不做任何 LLM 调用
+        if not self.memory_config.pruning_enabled:
+            logger.debug(
+                f"[PruningPipeline] 剪枝开关已关闭，跳过: "
+                f"conv={conversation_id}, seq={message_seq}"
+            )
+            return content, False, None
+
         cache_key = self._cache_key(conversation_id, message_seq)
 
         # Step 1: 查询 Redis 缓存
@@ -137,10 +143,7 @@ class PruningPipeline:
             user_content=user_content,
         )
 
-        # Step 3: Neo4j 写入已统一移至 graph_build_step（通过 assistant_pruning_records metadata），
-        # 此处不再直接写入，避免产生重复边。
-
-        # Step 4: 写入 Redis 缓存（TTL=86400s）
+        # Step 3: 写入 Redis 缓存（TTL=86400s）
         try:
             await self._set_to_cache(cache_key, pruned_content, memory_type)
         except Exception as e:
@@ -217,7 +220,7 @@ class PruningPipeline:
         self._ensure_llm_client()
 
         pruning_config = PruningConfig(
-            pruning_switch=True,
+            pruning_switch=self.memory_config.pruning_enabled,
             pruning_scene=self.memory_config.pruning_scene or "education",
             pruning_threshold=self.memory_config.pruning_threshold,
             scene_id=(
@@ -248,166 +251,6 @@ class PruningPipeline:
             return "", result.assistant_memory_type, result.should_process_user_msg, result.processed_user_msg
 
         return result.assistant_memory_hint, result.assistant_memory_type, result.should_process_user_msg, result.processed_user_msg
-
-    # ──────────────────────────────────────────────
-    # 内部方法：Neo4j 写入
-    # ──────────────────────────────────────────────
-
-    async def _write_to_neo4j(
-        self,
-        conversation_id: str,
-        message_seq: int,
-        original_content: str,
-        pruned_content: str,
-    ) -> None:
-        """将剪枝结果写入 Neo4j（AssistantOriginal + AssistantPruned + Conversation 中心节点）。
-
-        创建：
-        - Conversation 中心节点：id == conversation_id，MERGE 幂等，跨写入复用
-        - AssistantOriginal 节点：存储原始 assistant 消息
-        - AssistantPruned 节点：存储剪枝后内容（A'）
-        - PRUNED_TO 边：连接 Original → Pruned
-        - BELONGS_TO_CONVERSATION 边：连接 Original → Conversation 中心节点，
-          使同一会话的 assistant 剪枝节点聚成一个连通子图
-
-        Args:
-            conversation_id: 对话 ID（用作 dialog_id 和 Conversation 中心节点 id）
-            message_seq: 消息序号（用于节点命名）
-            original_content: assistant 消息原始内容
-            pruned_content: 剪枝后内容（A'）
-        """
-        from app.core.memory.models.graph_models import (
-            AssistantOriginalNode,
-            AssistantPrunedNode,
-            AssistantPrunedEdge,
-            ConversationNode,
-            AssistantConversationEdge,
-        )
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.repositories.neo4j.cypher_queries import (
-            ASSISTANT_ORIGINAL_NODE_SAVE,
-            ASSISTANT_PRUNED_NODE_SAVE,
-            ASSISTANT_PRUNED_EDGE_SAVE,
-            CONVERSATION_NODE_SAVE,
-            ASSISTANT_CONVERSATION_EDGE_SAVE,
-        )
-
-        now = datetime.now(timezone.utc)
-        run_id = uuid4().hex
-        pair_id = uuid4().hex
-
-        # 构建节点 ID（基于 conversation_id + message_seq 保证幂等性）
-        original_id = f"orig_{conversation_id}_{message_seq}"
-        pruned_id = f"pruned_{conversation_id}_{message_seq}"
-
-        original_node = AssistantOriginalNode(
-            id=original_id,
-            name=f"AssistantOriginal_{message_seq}",
-            end_user_id=self.end_user_id,
-            run_id=run_id,
-            created_at=now,
-            pair_id=pair_id,
-            dialog_id=conversation_id,
-            text=original_content,
-        )
-
-        pruned_node = AssistantPrunedNode(
-            id=pruned_id,
-            name=f"AssistantPruned_{message_seq}",
-            end_user_id=self.end_user_id,
-            run_id=run_id,
-            created_at=now,
-            pair_id=pair_id,
-            dialog_id=conversation_id,
-            text=pruned_content if pruned_content else "NULL",
-            memory_type="NULL",  # 单条剪枝时 memory_type 由 LLM 返回，此处简化为 NULL
-        )
-
-        pruned_edge = AssistantPrunedEdge(
-            source=original_id,
-            target=pruned_id,
-            end_user_id=self.end_user_id,
-            run_id=run_id,
-            created_at=now,
-            pair_id=pair_id,
-        )
-
-        # Conversation 中心节点：id == conversation_id，跨写入任务用 MERGE 复用。
-        # 所有 AssistantOriginal 通过 BELONGS_TO_CONVERSATION 挂到该节点，
-        # 使同一会话的 assistant 剪枝节点在图谱中聚成一个连通子图。
-        conversation_node = ConversationNode(
-            id=conversation_id,
-            name=f"Conversation_{conversation_id}",
-            end_user_id=self.end_user_id,
-            run_id=run_id,
-            created_at=now,
-            conversation_id=conversation_id,
-        )
-
-        conversation_edge = AssistantConversationEdge(
-            source=original_id,
-            target=conversation_id,
-            end_user_id=self.end_user_id,
-            run_id=run_id,
-            created_at=now,
-        )
-
-        # 确保 Neo4j 连接器已初始化
-        self._ensure_neo4j_connector()
-
-        async def _write_in_transaction(tx):
-            # 写入 Conversation 中心节点（MERGE 幂等）
-            conversation_data = [{
-                "id": conversation_node.id,
-                "name": conversation_node.name,
-                "end_user_id": conversation_node.end_user_id,
-                "conversation_id": conversation_node.conversation_id,
-                "run_id": conversation_node.run_id,
-                "created_at": conversation_node.created_at.isoformat(),
-            }]
-            result = await tx.run(CONVERSATION_NODE_SAVE, conversations=conversation_data)
-            await result.consume()
-
-            # 写入 AssistantOriginal 节点
-            original_data = [original_node.model_dump()]
-            result = await tx.run(ASSISTANT_ORIGINAL_NODE_SAVE, originals=original_data)
-            await result.consume()
-
-            # 写入 AssistantPruned 节点
-            pruned_data = [pruned_node.model_dump()]
-            result = await tx.run(ASSISTANT_PRUNED_NODE_SAVE, pruneds=pruned_data)
-            await result.consume()
-
-            # 写入 PRUNED_TO 边
-            edge_data = [{
-                "source": pruned_edge.source,
-                "target": pruned_edge.target,
-                "pair_id": pruned_edge.pair_id,
-                "end_user_id": pruned_edge.end_user_id,
-                "run_id": pruned_edge.run_id,
-                "created_at": to_iso_z(pruned_edge.created_at),
-            }]
-            result = await tx.run(ASSISTANT_PRUNED_EDGE_SAVE, edges=edge_data)
-            await result.consume()
-
-            # 写入 BELONGS_TO_CONVERSATION 边（Original → Conversation 中心节点）
-            conv_edge_data = [{
-                "id": conversation_edge.id,
-                "source": conversation_edge.source,
-                "target": conversation_edge.target,
-                "end_user_id": conversation_edge.end_user_id,
-                "run_id": conversation_edge.run_id,
-                "created_at": conversation_edge.created_at.isoformat(),
-            }]
-            result = await tx.run(ASSISTANT_CONVERSATION_EDGE_SAVE, edges=conv_edge_data)
-            await result.consume()
-
-        await self._neo4j_connector.execute_write_transaction(_write_in_transaction)
-        logger.info(
-            f"[PruningPipeline] Neo4j 写入完成: "
-            f"conv={conversation_id}, seq={message_seq}, "
-            f"original_id={original_id}, pruned_id={pruned_id}"
-        )
 
     # ──────────────────────────────────────────────
     # 内部方法：Redis 缓存读写
@@ -499,22 +342,6 @@ class PruningPipeline:
 
         logger.info("[PruningPipeline] LLM 客户端初始化完成")
 
-    def _ensure_neo4j_connector(self) -> None:
-        """确保 Neo4j 连接器已初始化（懒加载）。"""
-        if self._neo4j_connector is not None:
-            return
-
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-
-        self._neo4j_connector = Neo4jConnector()
-        logger.info("[PruningPipeline] Neo4j 连接器初始化完成")
-
     async def close(self) -> None:
-        """释放资源：关闭 Neo4j 连接器。"""
-        if self._neo4j_connector is not None:
-            try:
-                await self._neo4j_connector.close()
-            except Exception as e:
-                logger.warning(f"[PruningPipeline] Neo4j 连接器关闭失败: {e}")
-            finally:
-                self._neo4j_connector = None
+        """资源释放（当前无持久资源，预留给将来扩展）。"""
+        pass

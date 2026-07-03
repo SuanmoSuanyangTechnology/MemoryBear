@@ -8,13 +8,13 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_config_logger, get_logger
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.memory.analytics.hot_memory_tags import (
     filter_tags_with_llm,
     get_raw_tags_batch,
@@ -40,7 +40,7 @@ config_logger = get_config_logger()
 
 # Load environment variables for Neo4j connector
 load_dotenv()
-_neo4j_connector = Neo4jConnector()
+_neo4j_connector = Neo4jConnector(shared_driver=True)
 
 
 class MemoryStorageService:
@@ -84,36 +84,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 pilot_run_stream 不需要传入（内部自行开短 session）。
         """
         self.db = db
-
-    @staticmethod
-    def _convert_timestamps_to_format(data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """将 created_at 和 updated_at 字段从 datetime 对象转换为 YYYYMMDDHHmmss 格式"""
-
-        for item in data_list:
-            for field in ['created_at', 'updated_at']:
-                if field in item and item[field] is not None:
-                    value = item[field]
-                    dt = None
-
-                    # 处理不同类型的时间值
-                    if hasattr(value, 'to_native'):
-                        # Neo4j DateTime 对象
-                        dt = value.to_native()
-                    elif isinstance(value, datetime):
-                        # Python datetime 对象
-                        dt = value
-                    elif isinstance(value, str):
-                        # 字符串格式
-                        try:
-                            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                        except Exception:
-                            pass  # 保持原值
-
-                    # 转换为 YYYYMMDDHHmmss 格式
-                    if dt:
-                        item[field] = dt.strftime('%Y%m%d%H%M%S')
-
-        return data_list
 
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（仅名称与描述）
@@ -229,7 +199,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         if needs_commit:
             self.db.commit()
 
-        # 将 ORM 对象转换为字典列表
+        # 将 ORM 对象转换为字典列表，时间字段统一转为 UTC 毫秒时间戳
         data_list = []
         for config, scene_name in results:
             # 安全地转换 user_id 为 int
@@ -275,13 +245,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "lambda_time": config.lambda_time,
                 "lambda_mem": config.lambda_mem,
                 "offset": config.offset,
-                "created_at": config.created_at,
-                "updated_at": config.updated_at,
+                "created_at": to_timestamp_ms(config.created_at),
+                "updated_at": to_timestamp_ms(config.updated_at),
             }
             data_list.append(config_dict)
 
-        # 将 created_at 和 updated_at 转换为 YYYYMMDDHHmmss 格式
-        return self._convert_timestamps_to_format(data_list)
+        return data_list
 
     async def pilot_run_stream(self, payload: ConfigPilotRun, language: str = "zh") -> AsyncGenerator[str, None]:
         """
@@ -363,7 +332,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
                 try:
                     factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id), tenant_id=memory_config.tenant_id)
                     logger.info("[PILOT_RUN_STREAM] LLM client initialized")
                 except Exception as e:
                     raise RuntimeError(f"LLM client initialization failed: {e}")

@@ -126,6 +126,7 @@ export const zh = {
       platformManagement: '平台管理',
       systemSettings: '系统设置',
       upgradePackage: '套餐升级',
+      account: '账户',
     },
     knowledgeBase: {
       home: '首页',
@@ -2140,7 +2141,8 @@ export const zh = {
       dislike: '不喜欢',
       triggeredAction: '已触发',
       timeout_at: '此操作将在 {{timeout_at}} 过期',
-      collect: '收藏',
+      favorite: '收藏',
+      unfavorite: '取消收藏',
     },
     login: {
       title: '红熊记忆科学',
@@ -2232,6 +2234,7 @@ export const zh = {
       pleaseSave: '仅展示一次，请妥善保存',
       basicInfo: '基础信息',
       regenerate: '重新生成',
+      endpointConfig: '端点配置',
     },
     tool: {
       mcp: 'MCP 服务',
@@ -2484,7 +2487,7 @@ export const zh = {
       trigger: '触发器',
       start: '开始（Start）',
       start_label: '开始',
-      end: '结束（End）',
+      end: '回复',
       end_label: '结束',
       output: '输出（Output）',
       answer: '回复（Answer）',

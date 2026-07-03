@@ -5,6 +5,26 @@ from app.core.rag.nlp import add_positions, tokenize
 from .context import ChunkContext, LogicalChunk, LogicalChunkType, MergeResult, ParseResult
 
 
+ZERO_WIDTH_TRANSLATION = str.maketrans("", "", "\u200b\u200c\u200d\ufeff")
+ZERO_WIDTH_HTML_ENTITIES = (
+    "&ZeroWidthSpace;",
+    "&zwj;",
+    "&zwnj;",
+    "&#8203;",
+    "&#8204;",
+    "&#8205;",
+    "&#65279;",
+    "&#x200b;",
+    "&#x200B;",
+    "&#x200c;",
+    "&#x200C;",
+    "&#x200d;",
+    "&#x200D;",
+    "&#xfeff;",
+    "&#xFEFF;",
+)
+
+
 class ChunkPostProcessor:
     def process(
         self,
@@ -56,7 +76,7 @@ class ChunkPostProcessor:
         merge_result: MergeResult,
         index: int,
     ) -> dict | None:
-        content = str(chunk.content or "")
+        content = self._clean_content(str(chunk.content or ""))
         if not content.strip():
             return None
         doc = copy.deepcopy(ctx.doc)
@@ -65,7 +85,9 @@ class ChunkPostProcessor:
             try:
                 doc["image"], positions = pdf_parser.crop(content, need_position=True)
                 add_positions(doc, positions)
-                content = pdf_parser.remove_tag(content)
+                content = self._clean_content(pdf_parser.remove_tag(content))
+                if not content.strip():
+                    return None
             except NotImplementedError:
                 pass
         elif chunk.positions:
@@ -74,6 +96,8 @@ class ChunkPostProcessor:
             add_positions(doc, [[index] * 5])
         if chunk.image is not None:
             doc["image"] = chunk.image
+        if chunk.metadata:
+            doc["metadata"] = copy.deepcopy(chunk.metadata)
         tokenize(doc, content, ctx.is_english)
         return doc
 
@@ -86,6 +110,7 @@ class ChunkPostProcessor:
             content = delimiter.join(str(row) for row in rows if row)
         else:
             content = str(rows)
+        content = self._clean_content(content)
         if not content.strip():
             return None
         doc = copy.deepcopy(ctx.doc)
@@ -94,6 +119,14 @@ class ChunkPostProcessor:
             doc["doc_type_kwd"] = "image"
         if chunk.positions:
             add_positions(doc, chunk.positions)
+        if chunk.metadata:
+            doc["metadata"] = copy.deepcopy(chunk.metadata)
         tokenize(doc, content, ctx.is_english)
         doc["content_with_weight"] = content
         return doc
+
+    def _clean_content(self, content: str) -> str:
+        content = content.translate(ZERO_WIDTH_TRANSLATION)
+        for entity in ZERO_WIDTH_HTML_ENTITIES:
+            content = content.replace(entity, "")
+        return content

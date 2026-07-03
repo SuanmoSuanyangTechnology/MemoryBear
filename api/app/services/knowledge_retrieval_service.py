@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearRerank
+from app.core.models import RedBearLLM, RedBearRerank
 from app.core.models.base import RedBearModelConfig
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
@@ -21,9 +21,10 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVector,
     ElasticSearchVectorFactory,
 )
-from app.models import knowledge_model, knowledgeshare_model
+from app.models import ModelType, knowledge_model, knowledgeshare_model
 from app.models.models_model import ModelApiKey
 from app.repositories import knowledge_repository
+from app.repositories.tool_repository import ToolRepository
 from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest, KnowledgeRetrievalResult
@@ -44,6 +45,22 @@ class KnowledgeRetrievalConfigError(Exception):
 
 
 class KnowledgeRetrievalService:
+    @staticmethod
+    def _resolve_tenant_id(
+            db: Session,
+            current_user: Any = None,
+            workspace_id: uuid.UUID | None = None,
+    ) -> uuid.UUID | None:
+        if current_user is not None:
+            tenant_id = getattr(current_user, "tenant_id", None)
+            if tenant_id:
+                return tenant_id
+            workspace_id = workspace_id or getattr(current_user, "current_workspace_id", None)
+
+        if not workspace_id:
+            return None
+        return ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
+
     @classmethod
     def retrieve(
             cls,
@@ -68,10 +85,17 @@ class KnowledgeRetrievalService:
         if not db_knowledge:
             raise KnowledgeRetrievalAccessDenied("The knowledge base does not exist or access is denied")
 
+        tenant_id = cls._resolve_tenant_id(
+            db=db,
+            current_user=current_user,
+            workspace_id=getattr(db_knowledge, "workspace_id", None),
+        )
+
         document_ids_include = cls._build_metadata_document_filter(
             db=db,
             request=request,
             knowledge_ids=knowledge_ids,
+            tenant_id=tenant_id,
         )
         if document_ids_include == []:
             return KnowledgeRetrievalResult(chunks=[])
@@ -83,6 +107,7 @@ class KnowledgeRetrievalService:
             workspace_ids=workspace_ids,
             db_knowledge=db_knowledge,
             document_ids_include=document_ids_include,
+            tenant_id=tenant_id,
         )
         chunks = cls._include_document_ids(chunks, document_ids_include)
         return KnowledgeRetrievalResult(chunks=chunks)
@@ -96,6 +121,7 @@ class KnowledgeRetrievalService:
             workspace_ids: list[uuid.UUID],
             db_knowledge: Any,
             document_ids_include: list[str] | None,
+            tenant_id: uuid.UUID | None,
     ) -> list[Any]:
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         indices = ",".join(f"Vector_index_{knowledge_id}_Node".lower() for knowledge_id in knowledge_ids)
@@ -116,7 +142,7 @@ class KnowledgeRetrievalService:
         if not unique_chunks:
             chunks = []
         else:
-            chunks = cls._rerank_hybrid_chunks(db, request, vector_service, unique_chunks)
+            chunks = cls._rerank_hybrid_chunks(db, request, vector_service, unique_chunks, tenant_id=tenant_id)
 
         if request.retrieve_type == RetrieveType.Graph:
             graph_doc = cls._retrieve_graph(
@@ -125,6 +151,7 @@ class KnowledgeRetrievalService:
                 knowledge_ids=knowledge_ids,
                 workspace_ids=workspace_ids,
                 db_knowledge=db_knowledge,
+                tenant_id=tenant_id,
             )
             if graph_doc:
                 chunks.insert(0, graph_doc)
@@ -174,6 +201,7 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             vector_service: ElasticSearchVector,
             chunks: list[DocumentChunk],
+            tenant_id: uuid.UUID | None,
     ) -> list[DocumentChunk]:
         if request.rerank_id:
             reranked_chunks = cls.rerank_documents(
@@ -182,6 +210,7 @@ class KnowledgeRetrievalService:
                 query=request.query,
                 docs=chunks,
                 top_k=request.top_k,
+                tenant_id=tenant_id,
             )
         else:
             reranked_chunks = vector_service.rerank(
@@ -208,11 +237,12 @@ class KnowledgeRetrievalService:
             knowledge_ids: list[uuid.UUID],
             workspace_ids: list[uuid.UUID],
             db_knowledge: Any,
+            tenant_id: uuid.UUID | None,
     ) -> Any | None:
         from app.core.rag.common.settings import kg_retriever
 
-        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id)
-        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id)
+        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id, tenant_id=tenant_id)
+        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id, tenant_id=tenant_id)
         doc = kg_retriever.retrieval(
             question=request.query,
             workspace_ids=[str(workspace_id) for workspace_id in workspace_ids],
@@ -422,6 +452,7 @@ class KnowledgeRetrievalService:
             db: Session,
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
+            tenant_id: uuid.UUID | None,
     ) -> list[str] | None:
         if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
             return None
@@ -439,6 +470,7 @@ class KnowledgeRetrievalService:
             request=request,
             knowledge_ids=knowledge_ids,
             common_metadata_defs=common_metadata_defs,
+                tenant_id=tenant_id,
         )
         if not filter_groups:
             logger.warning("[MetadataFilter] No common metadata fields matched; skipping metadata filter")
@@ -462,6 +494,7 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
             common_metadata_defs: dict[str, dict],
+            tenant_id: uuid.UUID | None,
     ) -> list[EngineFilterGroup]:
         if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
             return []
@@ -475,11 +508,20 @@ class KnowledgeRetrievalService:
             )
 
         if request.metadata_filter_mode == MetadataFilterMode.AUTO:
+            # 节点（knowledge node）在 auto 模式下已用配置好的模型提取出过滤条件，
+            # 直接采用，跳过 service 用 knowledge.llm_id 的重复提取。
+            if request.metadata_filters:
+                return cls._build_common_filter_groups(
+                    request.metadata_filters,
+                    set(common_metadata_defs.keys()),
+                )
+
             if not common_metadata_defs:
                 return []
             llm = cls._build_metadata_auto_filter_llm(
                 db=db,
                 knowledge_id=knowledge_ids[0],
+                tenant_id=tenant_id,
             )
             if not llm:
                 logger.warning("[MetadataAutoFilter] LLM is unavailable; skipping metadata filter")
@@ -500,15 +542,33 @@ class KnowledgeRetrievalService:
             cls,
             db: Session,
             knowledge_id: uuid.UUID,
-    ) -> Base | None:
+            tenant_id: uuid.UUID | None,
+    ) -> RedBearLLM | None:
         knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
         if not knowledge or not knowledge.llm_id:
             return None
 
-        api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id)
+        try:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=knowledge.llm_id)
+        except BusinessException:
+            return None
+
+        api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id, tenant_id=tenant_id)
         if not api_key:
             return None
-        return cls._build_chat_model(api_key)
+
+        # 参数折叠进 RedBearModelConfig.extra_params（与 knowledge 节点 auto 模式、LLM 节点一致）。
+        # 此兜底路径用知识库 llm_id、无 completion_params，保留原默认 temperature=0 行为。
+        rb_config = RedBearModelConfig(
+            model_name=api_key.model_name,
+            provider=api_key.provider,
+            api_key=api_key.api_key,
+            base_url=api_key.api_base,
+            is_omni=api_key.is_omni,
+            capability=api_key.capability or [],
+            extra_params={"temperature": 0},
+        )
+        return RedBearLLM(rb_config, type=ModelType(config.type))
 
     @staticmethod
     def _get_common_metadata_defs(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> dict[str, dict]:
@@ -608,16 +668,16 @@ class KnowledgeRetrievalService:
             query: str,
             docs: list[DocumentChunk],
             top_k: int,
+            tenant_id: uuid.UUID | None = None,
     ) -> list[DocumentChunk]:
-        if not rerank_id:
-            raise ValueError("rerank_id cannot be empty")
         if not docs:
             raise ValueError("retrieval chunks cannot be empty")
         if top_k <= 0:
             raise ValueError("top_k must be a positive integer")
         try:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=rerank_id)
-            api_config: ModelApiKey = config.api_keys[0]
+            api_config = ModelApiKeyService.get_available_api_key(db, rerank_id, tenant_id=tenant_id)
+            if not api_config:
+                raise ValueError("模型配置缺少 API Key")
             reranker = RedBearRerank(
                 RedBearModelConfig(
                     model_name=api_config.model_name,

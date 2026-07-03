@@ -15,12 +15,12 @@ from app.core.utils.datetime_utils import to_iso_z
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_logger
+from app.core.memory.enums import SearchStrategy
+from app.core.memory.memory_service import MemoryService
 from app.models import EndUser
 from app.models.app_model import App
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_config_schema import ConfigurationError
-from app.schemas.memory_agent_schema import WriteMemoryRequest
-from app.services.memory_agent_service import MemoryAgentService
 
 logger = get_logger(__name__)
 
@@ -258,79 +258,6 @@ class MemoryAPIService:
             "end_user_id": end_user_id,
         }
 
-    async def write_memory_sync(
-            self,
-            workspace_id: uuid.UUID,
-            end_user_id: str,
-            message: str,
-            config_id: str,
-            storage_type: str = "neo4j",
-            user_rag_memory_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Write memory synchronously (inline, no Celery).
-
-        Validates end_user, then calls MemoryAgentService.write_memory directly.
-        Blocks until the write completes. Use for cases where the caller needs
-        immediate confirmation.
-
-        Args:
-            workspace_id: Workspace ID for resource validation
-            end_user_id: End user identifier
-            message: Message content to store
-            config_id: Memory configuration ID (required)
-            storage_type: Storage backend (neo4j or rag)
-            user_rag_memory_id: Optional RAG memory ID
-
-        Returns:
-            Dict with status and end_user_id
-
-        Raises:
-            ResourceNotFoundException: If end_user not found
-            BusinessException: If write fails
-        """
-        logger.info(f"Writing memory (sync) for end_user: {end_user_id}, workspace: {workspace_id}")
-
-        self.validate_end_user(end_user_id, workspace_id)
-        self._update_end_user_config(end_user_id, config_id)
-
-        try:
-            messages = message if isinstance(message, list) else [{"role": "user", "content": message}]
-            result = await MemoryAgentService().write_memory(
-                WriteMemoryRequest(
-                    end_user_id=end_user_id,
-                    messages=messages,
-                    config_id=config_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id or "",
-                ),
-                self.db,
-            )
-
-            logger.info(f"Memory write (sync) successful for end_user: {end_user_id}")
-
-            if isinstance(result, dict):
-                return {
-                    **result,
-                    "status": result.get("status", "unknown"),
-                    "end_user_id": end_user_id,
-                }
-            return {
-                "status": result if isinstance(result, str) else "success",
-                "end_user_id": end_user_id,
-            }
-
-        except ConfigurationError as e:
-            logger.error(f"Memory configuration error for end_user {end_user_id}: {e}")
-            raise BusinessException(message=str(e), code=BizCode.MEMORY_CONFIG_NOT_FOUND)
-        except BusinessException:
-            raise
-        except Exception as e:
-            logger.error(f"Memory write (sync) failed for end_user {end_user_id}: {e}")
-            raise BusinessException(
-                message=f"Memory write failed: {str(e)}",
-                code=BizCode.MEMORY_WRITE_FAILED
-            )
-
     async def read_memory_sync(
             self,
             workspace_id: uuid.UUID,
@@ -343,7 +270,7 @@ class MemoryAPIService:
     ) -> Dict[str, Any]:
         """Read memory synchronously (inline, no Celery).
 
-        Validates end_user, then calls MemoryAgentService.read_memory directly.
+        Validates end_user, then calls MemoryService.read (via ReadPipeLine) directly.
         Blocks until the read completes. Use for cases where the caller needs
         the answer immediately.
 
@@ -369,22 +296,24 @@ class MemoryAPIService:
         self._update_end_user_config(end_user_id, config_id)
 
         try:
-            result = await MemoryAgentService().read_memory(
-                end_user_id=end_user_id,
-                message=message,
-                history=[],
-                search_switch=search_switch,
+            service = MemoryService(
                 config_id=config_id,
-                db=self.db,
+                end_user_id=end_user_id,
+                workspace_id=str(workspace_id),
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id or ""
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            result = await service.read(
+                query=message,
+                search_switch=SearchStrategy(search_switch),
+                history=[],
             )
 
             logger.info(f"Memory read (sync) successful for end_user: {end_user_id}")
 
             return {
-                "answer": result.get("answer", ""),
-                "intermediate_outputs": result.get("intermediate_outputs", []),
+                "answer": result.content,
+                "intermediate_outputs": [_.model_dump() for _ in result.memories],
                 "end_user_id": end_user_id
             }
 

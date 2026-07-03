@@ -12,6 +12,7 @@ api/res/
 .venv
 docs/
 examples/
+AGENTS.md
 
 # Environment variables
 .env
@@ -29,7 +30,8 @@ search_results.json
 redbear-mem-metrics/
 redbear-mem-benchmark/
 pitch-deck/
-output/
+output
+api/tests/rag/
 api/migrations/versions
 tmp
 files

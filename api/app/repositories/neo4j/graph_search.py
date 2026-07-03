@@ -678,22 +678,22 @@ async def search_graph_by_embedding(
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
     # Skip activation updates if only searching summaries (optimization)
-    needs_activation_update = any(
-        key in include and key in results and results[key]
-        for key in [Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY]
-    )
-
-    if needs_activation_update:
-        update_start = time.time()
-        results = await _update_search_results_activation(
-            connector=connector,
-            results=results,
-            end_user_id=end_user_id
-        )
-        update_time = time.time() - update_start
-        logger.info(f"[PERF] Activation value updates took: {update_time:.4f}s")
-    else:
-        logger.info("[PERF] Skipping activation updates (only summaries)")
+    # needs_activation_update = any(
+    #     key in include and key in results and results[key]
+    #     for key in [Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY]
+    # )
+    #
+    # if needs_activation_update:
+    #     update_start = time.time()
+    #     results = await _update_search_results_activation(
+    #         connector=connector,
+    #         results=results,
+    #         end_user_id=end_user_id
+    #     )
+    #     update_time = time.time() - update_start
+    #     logger.info(f"[PERF] Activation value updates took: {update_time:.4f}s")
+    # else:
+    #     logger.info("[PERF] Skipping activation updates (only summaries)")
 
     return results
 

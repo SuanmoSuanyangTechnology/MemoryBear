@@ -23,6 +23,29 @@ router = APIRouter(prefix="/apps/{app_id}/annotations", tags=["Annotations"])
 logger = get_business_logger()
 
 
+def _build_annotation_embedding_config(db: Session, model_config_id: uuid.UUID, tenant_id: uuid.UUID):
+    from app.models.models_model import ModelConfig
+    from app.services.model_service import ModelApiKeyService
+    from app.core.models.base import RedBearModelConfig
+
+    model_config = db.query(ModelConfig).filter(ModelConfig.id == model_config_id).first()
+    if not model_config:
+        return None
+
+    api_key_obj = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
+    if not api_key_obj:
+        return None
+
+    return RedBearModelConfig(
+        model_name=api_key_obj.model_name,
+        provider=api_key_obj.provider,
+        api_key=api_key_obj.api_key,
+        base_url=api_key_obj.api_base or None,
+        timeout=60,
+        max_retries=3,
+    )
+
+
 @router.post("", summary="创建标注")
 @cur_workspace_access_guard()
 def create_annotation(
@@ -41,22 +64,9 @@ def create_annotation(
     embedding = None
     try:
         if setting.model_config_id:
-            from app.models.models_model import ModelConfig
-            from app.services.model_service import ModelApiKeyService
-            model_config = db.query(ModelConfig).filter(ModelConfig.id == setting.model_config_id).first()
-            if model_config:
-                api_key_obj = ModelApiKeyService.get_available_api_key(db, setting.model_config_id)
-                if api_key_obj:
-                    from app.core.models.base import RedBearModelConfig
-                    config = RedBearModelConfig(
-                        model_name=api_key_obj.model_name,
-                        provider=api_key_obj.provider,
-                        api_key=api_key_obj.api_key,
-                        base_url=api_key_obj.api_base or None,
-                        timeout=60,
-                        max_retries=3,
-                    )
-                    embedding = service.generate_embedding(payload.question, config)
+            config = _build_annotation_embedding_config(db, setting.model_config_id, current_user.tenant_id)
+            if config:
+                embedding = service.generate_embedding(payload.question, config)
     except Exception as e:
         logger.warning(f"生成Embedding失败，继续创建标注: {e}")
 
@@ -237,22 +247,9 @@ def update_annotation(
     if payload.question:
         try:
             if setting.model_config_id:
-                from app.models.models_model import ModelConfig
-                from app.services.model_service import ModelApiKeyService
-                model_config = db.query(ModelConfig).filter(ModelConfig.id == setting.model_config_id).first()
-                if model_config:
-                    api_key_obj = ModelApiKeyService.get_available_api_key(db, setting.model_config_id)
-                    if api_key_obj:
-                        from app.core.models.base import RedBearModelConfig
-                        config = RedBearModelConfig(
-                            model_name=api_key_obj.model_name,
-                            provider=api_key_obj.provider,
-                            api_key=api_key_obj.api_key,
-                            base_url=api_key_obj.api_base or None,
-                            timeout=60,
-                            max_retries=3,
-                        )
-                        embedding = service.generate_embedding(payload.question, config)
+                config = _build_annotation_embedding_config(db, setting.model_config_id, current_user.tenant_id)
+                if config:
+                    embedding = service.generate_embedding(payload.question, config)
         except Exception as e:
             logger.warning(f"重新生成Embedding失败: {e}")
 
@@ -336,27 +333,9 @@ def import_annotations(
     if not setting or setting.enabled != 1:
         raise BusinessException("请先在标注设置中启用标注功能并配置Embedding模型", BizCode.BAD_REQUEST)
 
-    from app.models.models_model import ModelConfig
-    from app.services.model_service import ModelApiKeyService
-    from app.core.models.base import RedBearModelConfig
-
-    model_cfg = None
-    if setting.model_config_id:
-        model_cfg = db.query(ModelConfig).filter(ModelConfig.id == setting.model_config_id).first()
-
-    api_key_obj = None
     config = None
-    if model_cfg:
-        api_key_obj = ModelApiKeyService.get_available_api_key(db, setting.model_config_id)
-        if api_key_obj:
-            config = RedBearModelConfig(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                base_url=api_key_obj.api_base or None,
-                timeout=60,
-                max_retries=3,
-            )
+    if setting.model_config_id:
+        config = _build_annotation_embedding_config(db, setting.model_config_id, current_user.tenant_id)
 
     for item in items:
         if config:

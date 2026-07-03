@@ -51,17 +51,21 @@ class MemoryClientFactory:
         >>> embedder_client = factory.get_embedder_client(embedding_id)
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, tenant_id=None):
         from app.services.memory_config_service import MemoryConfigService
         self._config_service = MemoryConfigService(db)
+        self._tenant_id = tenant_id
 
-    def get_llm_client(self, llm_id: str) -> OpenAIClient:
+    def get_llm_client(self, llm_id: str, tenant_id=None) -> OpenAIClient:
         """Get LLM client by model ID."""
         if not llm_id:
             raise ValueError("LLM ID is required")
 
         try:
-            model_config = self._config_service.get_model_config(llm_id)
+            model_config = self._config_service.get_model_config(
+                llm_id,
+                tenant_id=tenant_id or self._tenant_id,
+            )
         except Exception as e:
             raise ValueError(f"Invalid LLM ID '{llm_id}': {str(e)}") from e
 
@@ -79,7 +83,7 @@ class MemoryClientFactory:
             model_name = model_config.get('model_name', 'unknown')
             raise ValueError(f"Failed to initialize LLM client for model '{model_name}': {str(e)}") from e
 
-    def get_embedder_client(self, embedding_id: str):
+    def get_embedder_client(self, embedding_id: str, tenant_id=None):
         """Get embedder client by model ID."""
         from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 
@@ -87,7 +91,10 @@ class MemoryClientFactory:
             raise ValueError("Embedding ID is required")
 
         try:
-            embedder_config = self._config_service.get_embedder_config(embedding_id)
+            embedder_config = self._config_service.get_embedder_config(
+                embedding_id,
+                tenant_id=tenant_id or self._tenant_id,
+            )
         except Exception as e:
             raise ValueError(f"Invalid embedding ID '{embedding_id}': {str(e)}") from e
 
@@ -104,13 +111,16 @@ class MemoryClientFactory:
             model_name = embedder_config.get('model_name', 'unknown')
             raise ValueError(f"Failed to initialize embedder client for model '{model_name}': {str(e)}") from e
 
-    def get_reranker_client(self, rerank_id: str) -> OpenAIClient:
+    def get_reranker_client(self, rerank_id: str, tenant_id=None) -> OpenAIClient:
         """Get reranker client by model ID."""
         if not rerank_id:
             raise ValueError("Rerank ID is required")
 
         try:
-            model_config = self._config_service.get_model_config(rerank_id)
+            model_config = self._config_service.get_model_config(
+                rerank_id,
+                tenant_id=tenant_id or self._tenant_id,
+            )
         except Exception as e:
             raise ValueError(f"Invalid rerank ID '{rerank_id}': {str(e)}") from e
 
@@ -144,7 +154,7 @@ class MemoryClientFactory:
             raise ValueError(
                 f"Configuration {memory_config.config_id} has no LLM model configured"
             )
-        return self.get_llm_client(str(memory_config.llm_model_id))
+        return self.get_llm_client(str(memory_config.llm_model_id), tenant_id=memory_config.tenant_id)
 
     def get_embedder_client_from_config(self, memory_config: "MemoryConfig"):
         """Get embedder client from MemoryConfig object.
@@ -162,7 +172,7 @@ class MemoryClientFactory:
             raise ValueError(
                 f"Configuration {memory_config.config_id} has no embedding model configured"
             )
-        return self.get_embedder_client(str(memory_config.embedding_model_id))
+        return self.get_embedder_client(str(memory_config.embedding_model_id), tenant_id=memory_config.tenant_id)
 
     def get_reranker_client_from_config(self, memory_config: "MemoryConfig") -> OpenAIClient:
         """Get reranker client from MemoryConfig object.
@@ -180,7 +190,7 @@ class MemoryClientFactory:
             raise ValueError(
                 f"Configuration {memory_config.config_id} has no rerank model configured"
             )
-        return self.get_reranker_client(str(memory_config.rerank_model_id))
+        return self.get_reranker_client(str(memory_config.rerank_model_id), tenant_id=memory_config.tenant_id)
 
 
 # Legacy functions for backward compatibility

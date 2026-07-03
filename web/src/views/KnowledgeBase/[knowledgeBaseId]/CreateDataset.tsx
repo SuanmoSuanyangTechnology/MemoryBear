@@ -94,7 +94,7 @@ const CreateDataset = () => {
   const [pollingLoading, setPollingLoading] = useState<boolean>(false);
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
-  const [blockSize, setBlockSize] = useState<number>(130);
+  const [blockSize, setBlockSize] = useState<number>(512);
   const [qaPrompt, setQaPrompt] = useState<string | undefined>()
   console.log('qaPrompt', qaPrompt)
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
@@ -611,6 +611,13 @@ const CreateDataset = () => {
     };
   }, [location.pathname]);
 
+  const handleChangeProcessingMethod = (method: ProcessingMethod) => {
+    if (method === 'directBlock') {
+      setBlockSize(512)
+    }
+    setProcessingMethod(method)
+  }
+
   return (<>
     <div className='rb:p-3 rb:pt-2 rb:h-full rb:flex rb:flex-col'>
       {/* <Typography.Title level={4} className='rb:!m-0 rb:!mb-4'>
@@ -795,7 +802,7 @@ const CreateDataset = () => {
               </div>
               <Radio.Group
                 value={processingMethod}
-                onChange={(e) => setProcessingMethod(e.target.value)}
+                onChange={(e) => handleChangeProcessingMethod(e.target.value as ProcessingMethod)}
                 style={style}
               >
                 <Radio value='directBlock' disabled={isParentChildMode === true} style={getActiveRadioStyle(processingMethod === 'directBlock')}>

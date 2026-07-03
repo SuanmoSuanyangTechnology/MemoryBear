@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 10:20:26
+ * @Last Modified time: 2026-06-29 14:53:58
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -27,7 +27,7 @@ import { handleSSE, type SSEMessage } from '@/utils/stream'
 
 // Memory conversation
 export const readService = (query: TestParams) => {
-  return request.post('/memory/read_service', query)
+  return request.post('/memory/read/sync', query)
 }
 /****************** Memory Dashboard APIs *******************************/
 // Memory Dashboard - Total memory count
@@ -77,19 +77,19 @@ export const getUserProfile = (end_user_id: string) => {
 
 // User Memory - Memory insight
 export const getMemoryInsightReport = (end_user_id: string) => {
-  return request.get(`/memory-storage/analytics/memory_insight/report`, { end_user_id })
+  return request.get(`/memory/analytics/memory_insight`, { end_user_id })
 }
 // User Memory - User summary
 export const getUserSummary = (end_user_id: string) => {
-  return request.get(`/memory-storage/analytics/user_summary`, { end_user_id })
+  return request.get(`/memory/analytics/user_summary`, { end_user_id })
 }
 // Memory classification
 export const getNodeStatistics = (end_user_id: string) => {
-  return request.get(`/memory-storage/analytics/node_statistics`, { end_user_id })
+  return request.get(`/memory/analytics/node_statistics`, { end_user_id })
 }
 // Get user alias and info
 export const getEndUserInfo = (end_user_id: string) => {
-  return request.get(`/memory-storage/end_user_info`, { end_user_id })
+  return request.get(`/memory/analytics/end_user_info`, { end_user_id })
 }
 // Update user alias and info
 export const updatedEndUserInfo = (values: EndUser) => {
@@ -97,15 +97,15 @@ export const updatedEndUserInfo = (values: EndUser) => {
 }
 // User Memory - Relationship network
 export const getMemorySearchEdges = (end_user_id: string, config?: AxiosRequestConfig) => {
-  return request.get(`/memory-storage/analytics/graph_data`, { end_user_id }, config)
+  return request.get(`/memory/analytics/graph_data`, { end_user_id }, config)
 }
 // User Memory - Community graph
 export const getMemoryCommunityGraph = (end_user_id: string, config?: AxiosRequestConfig) => {
-  return request.get(`/memory-storage/analytics/community_graph`, { end_user_id }, config)
+  return request.get(`/memory/analytics/community_graph`, { end_user_id }, config)
 }
 // User Memory - User interest distribution
 export const getInterestDistributionByUser = (end_user_id: string) => {
-  return request.get(`/memory/analytics/interest_distribution/by_user`, { end_user_id })
+  return request.get(`/memory/analytics/interest_distribution`, { end_user_id })
 }
 // User Memory - Total memory count
 export const getTotalMemoryCountByUser = (end_user_id: string) => {
@@ -148,7 +148,7 @@ export const generateSuggestions = (end_user_id: string) => {
   return request.post(`/memory/emotion-memory/generate_suggestions`, { end_user_id })
 }
 export const analyticsRefresh = (end_user_id: string) => {
-  return request.post('/memory-storage/analytics/generate_cache', { end_user_id })
+  return request.post('/memory/analytics/generate_cache', { end_user_id })
 }
 // Forgetting stats
 export const getForgetStats = (end_user_id: string) => {

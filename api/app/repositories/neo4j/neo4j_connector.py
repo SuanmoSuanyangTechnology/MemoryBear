@@ -8,6 +8,7 @@ Classes:
     Neo4jConnector: Neo4j数据库连接器，提供异步查询接口
 """
 
+import logging
 import os
 import threading
 from typing import Any, List, Dict
@@ -17,6 +18,8 @@ from neo4j.time import DateTime as Neo4jDateTime, Date as Neo4jDate, Time as Neo
 
 from app.core.config import settings
 from app.core.utils.datetime_utils import to_iso_z
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_neo4j_types(value: Any) -> Any:
@@ -60,6 +63,11 @@ class Neo4jConnector:
         
         从配置文件和环境变量中读取连接信息。
         
+        Args:
+            shared_driver: 是否使用进程级共享 driver。
+                True  → 所有实例共用一个 driver，通过 PID 检测 fork 后自动重建。
+                False → 每次实例化创建独立 driver（调用方需自行管理生命周期）。
+        
         Raises:
             RuntimeError: 如果NEO4J_PASSWORD环境变量未设置
         """
@@ -79,11 +87,21 @@ class Neo4jConnector:
             )
         return AsyncGraphDatabase.driver(
             uri,
-            auth=basic_auth(username, password)
+            auth=basic_auth(username, password),
+            max_connection_pool_size=settings.NEO4J_MAX_POOL_SIZE,
+            connection_acquisition_timeout=settings.NEO4J_ACQ_TIMEOUT,
+            max_connection_lifetime=settings.NEO4J_MAX_CONN_LIFETIME,
+            connection_timeout=settings.NEO4J_CONN_TIMEOUT,
         )
 
     def _create_or_get_driver(self) -> AsyncDriver:
-        """按配置返回独占或进程级共享的 driver。"""
+        """按配置返回独占或进程级共享的 driver。
+        
+        shared_driver=True 时：
+        - 检测当前 PID 是否与 _shared_driver_pid 一致
+        - PID 变化（fork 后）或首次调用时自动重建
+        - 线程安全（threading.Lock 保护）
+        """
         if not self._shared_driver_enabled:
             return self._build_driver()
 
@@ -110,6 +128,7 @@ class Neo4jConnector:
         """关闭数据库连接
 
         释放数据库连接资源。应在应用程序关闭时调用。
+        共享 driver 不在此处关闭，由 shutdown() 统一管理。
         """
         if self._shared_driver_enabled:
             return
@@ -135,7 +154,7 @@ class Neo4jConnector:
         Returns:
             List[Dict[str, Any]]: 查询结果列表，每个元素是一个字典
             
-        Example:
+
 
         """
         result = await self.driver.execute_query(
@@ -162,7 +181,7 @@ class Neo4jConnector:
         Returns:
             Any: 事务函数的返回值
             
-        Example:
+
 
         """
         async with self.driver.session(database="neo4j") as session:
@@ -180,7 +199,7 @@ class Neo4jConnector:
         Returns:
             Any: 事务函数的返回值
             
-        Example:
+
 
         """
         async with self.driver.session(database="neo4j") as session:
@@ -194,20 +213,25 @@ class Neo4jConnector:
         
         Args:
             end_user_id: 要删除的组ID
-            
-        Example:
-            Group group_123 deleted.
         """
-        # 删除节点（DETACH DELETE会同时删除相关的边）
-        await self.driver.execute_query(
-            "MATCH (n) WHERE n.end_user_id = $end_user_id DETACH DELETE n",
-            database="neo4j",
-            end_user_id=end_user_id
-        )
-        # 删除独立的边（如果有的话）
-        await self.driver.execute_query(
+        batch_size = 1000
+        total_deleted = 0
+        while True:
+            records = await self.execute_query(
+                "MATCH (n) WHERE n.end_user_id = $end_user_id "
+                "WITH n LIMIT $batch_size "
+                "DETACH DELETE n "
+                "RETURN count(n) AS deleted",
+                end_user_id=end_user_id,
+                batch_size=batch_size,
+            )
+            count = records[0]["deleted"] if records else 0
+            if count == 0:
+                break
+            total_deleted += count
+
+        await self.execute_query(
             "MATCH ()-[r]->() WHERE r.end_user_id = $end_user_id DELETE r",
-            database="neo4j",
-            end_user_id=end_user_id
+            end_user_id=end_user_id,
         )
-        print(f"Group {end_user_id} deleted.")
+        logger.info(f"Group {end_user_id} deleted ({total_deleted} nodes).")

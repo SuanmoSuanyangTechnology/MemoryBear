@@ -946,6 +946,171 @@ class EndUserRepository:
             db_logger.error(f"批量查询配置信息时出错: {str(e)}")
             raise
 
+    def get_paginated_with_memory(
+        self,
+        workspace_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+        keyword: Optional[str] = None,
+    ) -> tuple[List[EndUser], int]:
+        """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
+
+        返回结果按 created_at 从新到旧排序（NULL 值排在最后），
+        只加载接口所需列以避免加载大 Text 字段。
+
+        Args:
+            workspace_id: 工作空间ID
+            page: 页码（从1开始）
+            pagesize: 每页数量
+            keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+
+        Returns:
+            tuple[List[EndUser], int]: (当前页宿主列表, 符合条件的总数)
+        """
+        from sqlalchemy import desc, String, cast
+        from sqlalchemy.orm import load_only
+        from sqlalchemy.sql.expression import nullslast
+
+        columns = load_only(
+            EndUser.id,
+            EndUser.other_name,
+            EndUser.memory_count,
+            EndUser.app_id,
+            EndUser.memory_config_id,
+            EndUser.created_at,
+            EndUser.workspace_id,
+        )
+        query = self.db.query(EndUser).options(columns).filter(
+            EndUser.workspace_id == workspace_id,
+            EndUser.memory_count > 0,
+            EndUser.is_active == True,
+        )
+
+        if keyword:
+            keyword = keyword.strip()
+        if keyword:
+            pattern = f"%{keyword}%"
+            query = query.filter(
+                or_(
+                    EndUser.other_name.ilike(pattern),
+                    cast(EndUser.id, String).ilike(pattern),
+                )
+            )
+
+        total = query.count()
+        if total == 0:
+            return [], 0
+
+        items = (
+            query.order_by(nullslast(desc(EndUser.created_at)), desc(EndUser.id))
+            .offset((page - 1) * pagesize)
+            .limit(pagesize)
+            .all()
+        )
+        return items, total
+
+    def get_paginated_with_memory_rag(
+        self,
+        workspace_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+        keyword: Optional[str] = None,
+    ) -> tuple[list, int]:
+        """Dashboard RAG 模式：分页查询有记忆的宿主
+
+        RAG 记忆数量以 documents.chunk_num 为准：
+        - file_name = end_user_id + ".txt"
+        - 只统计当前 workspace 下 permission_id="Memory" 的用户记忆知识库
+        - 在 SQL 层过滤 chunk 总数为 0 的宿主
+
+        Args:
+            workspace_id: 工作空间ID
+            page: 页码（从1开始）
+            pagesize: 每页数量
+            keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+
+        Returns:
+            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int}], 总数)
+        """
+        from sqlalchemy import desc, String, cast, func
+        from sqlalchemy.orm import load_only
+        from sqlalchemy.sql.expression import nullslast
+        from app.models.document_model import Document
+        from app.models.knowledge_model import Knowledge
+
+        chunk_subquery = (
+            self.db.query(
+                Document.file_name.label("file_name"),
+                func.coalesce(func.sum(Document.chunk_num), 0).label("memory_count"),
+            )
+            .join(Knowledge, Document.kb_id == Knowledge.id)
+            .filter(
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status == 1,
+                Knowledge.permission_id == "Memory",
+                Document.status == 1,
+            )
+            .group_by(Document.file_name)
+            .subquery()
+        )
+
+        columns = load_only(
+            EndUser.id,
+            EndUser.other_name,
+            EndUser.memory_count,
+            EndUser.app_id,
+            EndUser.memory_config_id,
+            EndUser.created_at,
+            EndUser.workspace_id,
+        )
+
+        base_query = (
+            self.db.query(
+                EndUser,
+                chunk_subquery.c.memory_count.label("memory_count"),
+            )
+            .options(columns)
+            .join(
+                chunk_subquery,
+                chunk_subquery.c.file_name == func.concat(cast(EndUser.id, String), ".txt"),
+            )
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                chunk_subquery.c.memory_count > 0,
+                EndUser.is_active == True,
+            )
+        )
+
+        if keyword:
+            keyword = keyword.strip()
+        if keyword:
+            pattern = f"%{keyword}%"
+            base_query = base_query.filter(
+                or_(
+                    EndUser.other_name.ilike(pattern),
+                    cast(EndUser.id, String).ilike(pattern),
+                )
+            )
+
+        total = base_query.count()
+        if total == 0:
+            return [], 0
+
+        rows = (
+            base_query.order_by(nullslast(desc(EndUser.created_at)), desc(EndUser.id))
+            .offset((page - 1) * pagesize)
+            .limit(pagesize)
+            .all()
+        )
+
+        items = []
+        for end_user_orm, memory_count in rows:
+            items.append({
+                "end_user": end_user_orm,
+                "memory_count": int(memory_count or 0),
+            })
+        return items, total
+
     def update_memory_count(self, end_user_id: uuid.UUID, node_count: int) -> bool:
         """更新终端用户的记忆节点计数（仅活跃用户）"""
         try:

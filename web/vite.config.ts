@@ -37,7 +37,8 @@ const virtualModulePlugin = () => ({
         export const ReflectMemory = FallbackComponent;
         export const ReflectLogList = FallbackComponent;
         export const ContextEngine = FallbackComponent;
-        export default { BrainView, Provider };
+        export const Account = FallbackComponent;
+        export default { BrainView, Provider, ReflectMemory, ReflectLogList, ContextEngine, Account };
       `
     }
     return null
@@ -52,7 +53,7 @@ export default defineConfig({
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'http://localhost:5173',
+        target: 'http://localhost:5175',
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token

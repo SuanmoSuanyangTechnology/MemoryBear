@@ -100,12 +100,12 @@ class ParameterExtractorNode(BaseNode):
             user_prompt = f.read()
         return system_prompt, user_prompt
 
-    def _get_llm_instance(self) -> RedBearLLM:
+    def _get_llm_instance(self, variable_pool: VariablePool) -> RedBearLLM:
         """
         Retrieve a configured LLM instance based on the model ID from database.
 
         Responsibilities:
-        - Validate that the model exists and has at least one API key configured.
+        - Validate that the model exists and can resolve runtime credentials.
         - Construct RedBearLLM instance with proper credentials and model type.
         - Raise clear BusinessException if configuration is invalid.
 
@@ -123,10 +123,7 @@ class ParameterExtractorNode(BaseNode):
             if not config:
                 raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
 
-            if not config.api_keys or len(config.api_keys) == 0:
-                raise BusinessException("Model configuration is missing API Key", BizCode.INVALID_PARAMETER)
-
-            api_config = self.model_balance(config)
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
             model_name = api_config.model_name
             provider = api_config.provider
             api_key = api_config.api_key
@@ -284,7 +281,7 @@ class ParameterExtractorNode(BaseNode):
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = self._get_typed_config()
-        llm = self._get_llm_instance()
+        llm = self._get_llm_instance(variable_pool)
 
         actual_mode = self._resolve_inference_mode()
         logger.info(f"node: {self.node_id} inference_mode={actual_mode}")

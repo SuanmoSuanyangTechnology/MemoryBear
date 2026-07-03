@@ -468,11 +468,12 @@ class MemoryConfigService:
             else:
                 raise ConfigurationError(f"Failed to load configuration {config_id}: {e}")
 
-    def get_model_config(self, model_id: str) -> dict:
+    def get_model_config(self, model_id: str, tenant_id: UUID | None = None) -> dict:
         """Get LLM model configuration by ID.
         
         Args:
             model_id: Model ID to look up
+            tenant_id: 当前租户 ID，用于解析公共 SpeedBear 模型运行时 key
             
         Returns:
             Dict with model configuration including api_key, base_url, etc.
@@ -481,15 +482,21 @@ class MemoryConfigService:
         from fastapi.exceptions import HTTPException
 
         from app.core.config import settings
-        from app.models.models_model import ModelApiKey
         from app.services.model_service import ModelConfigService as ModelSvc
+        from app.services.model_service import ModelApiKeyService
 
-        config = ModelSvc.get_model_by_id(db=self.db, model_id=model_id)
+        config = ModelSvc.get_model_by_id(db=self.db, model_id=model_id, tenant_id=tenant_id)
         if not config:
             logger.warning(f"Model ID {model_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-        api_config: ModelApiKey = config.api_keys[0]
+        api_config = ModelApiKeyService.get_available_api_key(
+            self.db,
+            config.id,
+            tenant_id=tenant_id,
+        )
+        if not api_config:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型没有可用的API密钥")
 
         return {
             "model_name": api_config.model_name,
@@ -502,11 +509,12 @@ class MemoryConfigService:
             "max_retries": settings.LLM_MAX_RETRIES,
         }
 
-    def get_embedder_config(self, embedding_id: str) -> dict:
+    def get_embedder_config(self, embedding_id: str, tenant_id: UUID | None = None) -> dict:
         """Get embedding model configuration by ID.
         
         Args:
             embedding_id: Embedding model ID to look up
+            tenant_id: 当前租户 ID，用于解析公共 SpeedBear 模型运行时 key
             
         Returns:
             Dict with embedder configuration including api_key, base_url, etc.
@@ -514,15 +522,21 @@ class MemoryConfigService:
         from fastapi import status
         from fastapi.exceptions import HTTPException
 
-        from app.models.models_model import ModelApiKey
         from app.services.model_service import ModelConfigService as ModelSvc
+        from app.services.model_service import ModelApiKeyService
 
         config = ModelSvc.get_model_by_id(db=self.db, model_id=embedding_id)
         if not config:
             logger.warning(f"Embedding model ID {embedding_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型ID不存在")
 
-        api_config: ModelApiKey = config.api_keys[0]
+        api_config = ModelApiKeyService.get_available_api_key(
+            self.db,
+            config.id,
+            tenant_id=tenant_id,
+        )
+        if not api_config:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型没有可用的API密钥")
 
         return {
             "model_name": api_config.model_name,

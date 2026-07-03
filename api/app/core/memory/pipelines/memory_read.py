@@ -60,7 +60,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 return await self._quick_read(query, limit, includes)
             case SearchStrategy.EXPRESS:
                 return await self._express_read(query, limit, includes)
-            case SearchStrategy.CONV:
+            case SearchStrategy.RECENT:
                 return await self._conv_history()
             case SearchStrategy.META:
                 return await self._user_meta()
@@ -87,14 +87,22 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         """懒加载 LLM client：首次调用借短连接查 model API key，后续复用缓存。"""
         if self._llm_client is None:
             with get_db_context() as db:
-                self._llm_client = self.get_llm_client(db, self.ctx.memory_config.llm_model_id)
+                self._llm_client = self.get_llm_client(
+                    db,
+                    self.ctx.memory_config.llm_model_id,
+                    tenant_id=self.ctx.memory_config.tenant_id
+                )
         return self._llm_client
 
     def _get_embedding_client(self):
         """懒加载 embedding client：首次调用借短连接查 model API key，后续复用缓存。"""
         if self._embedding_client is None:
             with get_db_context() as db:
-                self._embedding_client = self.get_embedding_client(db, self.ctx.memory_config.embedding_model_id)
+                self._embedding_client = self.get_embedding_client(
+                    db,
+                    self.ctx.memory_config.embedding_model_id,
+                    tenant_id=self.ctx.memory_config.tenant_id
+                )
         return self._embedding_client
 
     async def _deep_read(
@@ -199,10 +207,10 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         return await service.run()
 
     def _save_short_term(
-        self,
-        query: str,
-        search_switch: SearchStrategy,
-        result: MemorySearchResult,
+            self,
+            query: str,
+            search_switch: SearchStrategy,
+            result: MemorySearchResult,
     ) -> None:
         """将本次检索结果写入 memory_short_term 表。
 

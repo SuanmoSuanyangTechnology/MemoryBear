@@ -3,8 +3,8 @@ import logging
 from typing import Any
 
 import json_repair
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.core.rag.llm.chat_model import ERROR_PREFIX
 from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
     FilterGroup as EngineFilterGroup,
@@ -89,6 +89,8 @@ class MetadataAutoFilterService:
         if not metadata_defs:
             return []
 
+        # 参数已折叠进 llm 实例（RedBearLLM 的 extra_params，经 strip_unsupported_llm_params
+        # 按 provider 剥离），此处不再单独传 gen_conf。
         raw_conditions = cls._extract_metadata_conditions(
             query=query,
             metadata_defs=metadata_defs,
@@ -120,19 +122,24 @@ class MetadataAutoFilterService:
             "You are a text metadata extract engine. Extract only metadata filters that are clearly "
             "present in the user's input and only use fields from the provided metadata list."
         )
-        history = [
-            {
-                "role": "user",
-                "content": cls._build_prompt(query=query, metadata_defs=metadata_defs),
-            }
+        # RedBearLLM.invoke 不会像 chat_model.Base.chat 那样自动把 system 注入 history，
+        # 需自己在 messages 里放一条 SystemMessage。
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=cls._build_prompt(query=query, metadata_defs=metadata_defs)),
         ]
-        response = llm.chat(
-            system=system_prompt,
-            history=history,
-            gen_conf={"temperature": 0},
-        )
-        content = response[0] if isinstance(response, tuple) else response
-        if not content or str(content).startswith(ERROR_PREFIX):
+        try:
+            response = llm.invoke(messages)
+        except Exception as e:
+            base_url = getattr(getattr(llm, "_config", None), "base_url", None)
+            logger.warning(
+                "[MetadataAutoFilter] LLM invoke failed (base_url=%r): %r",
+                base_url, e,
+            )
+            return []
+        content = response.content if hasattr(response, "content") else str(response)
+        logger.info("[MetadataAutoFilter] LLM raw output: %s", content)
+        if not content:
             logger.warning("[MetadataAutoFilter] LLM returned no usable content")
             return []
         return cls._parse_llm_response(str(content))

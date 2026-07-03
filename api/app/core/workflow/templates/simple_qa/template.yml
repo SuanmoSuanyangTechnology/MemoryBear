@@ -51,7 +51,7 @@ nodes:
 
   - id: end
     type: end
-    name: 结束
+    name: 回复
     config:
       output: "{{llm_qa.output}}"
     position:
