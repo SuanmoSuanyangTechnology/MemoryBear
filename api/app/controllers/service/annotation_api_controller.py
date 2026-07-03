@@ -30,7 +30,11 @@ def _get_annotation_service_with_app_context(
     db: Session,
     check_enabled: bool = False,
 ):
-    """从 API Key 认证信息构建标注服务上下文，返回 (service, app_id, workspace_id, current_user_id)"""
+    """从 API Key 认证信息构建标注服务上下文。
+
+    返回值固定为 (service, app_id, workspace_id, current_user_id, setting)。
+    仅当 check_enabled=True 时才会查询并校验 setting，否则 setting 为 None。
+    """
     app_id = api_key_auth.resource_id
     workspace_id = api_key_auth.workspace_id
 
@@ -38,6 +42,7 @@ def _get_annotation_service_with_app_context(
     current_user_id = api_key.creator.id
 
     service = AnnotationService(db)
+    setting = None
 
     if check_enabled:
         setting = service.get_setting(app_id)
@@ -46,9 +51,8 @@ def _get_annotation_service_with_app_context(
                 "Annotation feature is not enabled. Please enable it in the annotation settings and configure the Embedding model.",
                 BizCode.BAD_REQUEST,
             )
-        return service, app_id, workspace_id, current_user_id, setting
 
-    return service, app_id, workspace_id, current_user_id
+    return service, app_id, workspace_id, current_user_id, setting
 
 
 @router.get("", summary="获取标注列表")
@@ -62,7 +66,7 @@ async def list_annotations(
     pagesize: int = Query(20, ge=1, le=100, description="每页数量，最大 100"),
 ):
     """获取当前应用的标注列表，支持分页和关键词搜索。"""
-    service, app_id, _, _ = _get_annotation_service_with_app_context(api_key_auth, db)
+    service, app_id, _, _, _ = _get_annotation_service_with_app_context(api_key_auth, db)
     items, total = service.list_annotations(app_id, search, page, pagesize)
 
     data = [annotation_schema.AnnotationListItem.model_validate(item) for item in items]
@@ -129,7 +133,7 @@ async def get_annotation_settings(
     db: Session = Depends(get_db),
 ):
     """获取当前应用的标注设置。"""
-    service, app_id, workspace_id, _ = _get_annotation_service_with_app_context(api_key_auth, db)
+    service, app_id, workspace_id, _, _ = _get_annotation_service_with_app_context(api_key_auth, db)
     setting = service.get_setting(app_id)
     if not setting:
         return success(data={
@@ -157,7 +161,7 @@ async def update_annotation_settings(
     db: Session = Depends(get_db),
 ):
     """更新当前应用的标注设置（相似度阈值、Embedding模型、启用/禁用）。"""
-    service, app_id, workspace_id, _ = _get_annotation_service_with_app_context(api_key_auth, db)
+    service, app_id, workspace_id, _, _ = _get_annotation_service_with_app_context(api_key_auth, db)
     setting = service.update_setting(
         app_id=app_id,
         workspace_id=workspace_id,
@@ -239,7 +243,7 @@ async def delete_annotation(
     db: Session = Depends(get_db),
 ):
     """删除指定标注（软删除）。"""
-    service, app_id, _, _ = _get_annotation_service_with_app_context(api_key_auth, db)
+    service, app_id, _, _, _ = _get_annotation_service_with_app_context(api_key_auth, db)
 
     existing = service.get_annotation(annotation_id)
     if not existing or str(existing.app_id) != str(app_id):
