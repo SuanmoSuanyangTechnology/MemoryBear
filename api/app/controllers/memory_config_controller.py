@@ -537,25 +537,18 @@ def delete_config(
 
         if result["status"] == "warning":
             api_logger.warning(
-                f"记忆配置正在使用，无法删除: config_id={config_id}, "
-                f"connected_count={result['connected_count']}"
+                f"记忆配置正在使用，无法删除: config_id={config_id}"
             )
             return fail(
                 code=BizCode.RESOURCE_IN_USE,
-                msg=result["message"],
-                data={
-                    "connected_count": result["connected_count"],
-                    "force_required": result["force_required"]
-                }
+                msg=result["message"]
             )
 
         api_logger.info(
-            f"记忆配置删除成功: config_id={config_id}, "
-            f"affected_users={result['affected_users']}"
+            f"记忆配置删除成功: config_id={config_id}"
         )
         return success(
-            msg=result["message"],
-            data={"affected_users": result["affected_users"]}
+            msg=result["message"]
         )
 
     except Exception as e:
