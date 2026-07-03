@@ -958,14 +958,14 @@ async def update_workspace_models_configs(
         db_workspace.video = str(models_update.video) if models_update.video else None
 
         if default_memory_config:
-            default_memory_config.llm = str(models_update.llm) if models_update.llm else None
+            default_memory_config.llm_id = str(models_update.llm) if models_update.llm else None
             default_memory_config.reflection_model_id = str(models_update.llm) if models_update.llm else None
             default_memory_config.emotion_model_id = str(models_update.llm) if models_update.llm else None
-            default_memory_config.embedding = str(models_update.embedding) if models_update.embedding else None
-            default_memory_config.rerank = str(models_update.rerank) if models_update.rerank else None
-            default_memory_config.vision = str(models_update.vision) if models_update.vision else None
-            default_memory_config.audio = str(models_update.audio) if models_update.audio else None
-            default_memory_config.video = str(models_update.video) if models_update.video else None
+            default_memory_config.embedding_id = str(models_update.embedding) if models_update.embedding else None
+            default_memory_config.rerank_id = str(models_update.rerank) if models_update.rerank else None
+            default_memory_config.vision_id = str(models_update.vision) if models_update.vision else None
+            default_memory_config.audio_id = str(models_update.audio) if models_update.audio else None
+            default_memory_config.video_id = str(models_update.video) if models_update.video else None
 
         db.add(db_workspace)
         if default_memory_config:
