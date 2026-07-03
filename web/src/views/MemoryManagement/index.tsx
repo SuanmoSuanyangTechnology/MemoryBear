@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:55:12
+ * @Last Modified time: 2026-07-03 12:16:29
  */
 /**
  * Memory Management Page
@@ -158,7 +158,7 @@ const MemoryManagement: React.FC = () => {
           : <OnboardingGuide completed={0} onCreate={() => handleEdit()} />
       )}
 
-      <Flex align="center" justify={hasUserConfig ? 'start' : "end"} className="rb:mb-4!">
+      <Flex align="center" justify={hasUserConfig ? "end" : 'start'} className="rb:mb-4!">
         {!hasUserConfig &&
           <span className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:text-[#212332]">
             {t('memory.myConfigurations')}

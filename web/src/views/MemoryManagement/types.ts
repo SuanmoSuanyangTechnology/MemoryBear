@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:01 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 10:30:51
+ * @Last Modified time: 2026-07-03 12:16:57
  */
 /**
  * Memory management form data type
  */
 export interface MemoryFormData {
-  config_id?: number;
+  config_id?: string;
   config_name: string;
   config_desc?: string;
   scene_id?: string;
