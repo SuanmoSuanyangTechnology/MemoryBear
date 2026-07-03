@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:49:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:45:54
+ * @Last Modified time: 2026-07-03 21:10:45
  */
 /**
  * Space Modal Component
@@ -10,19 +10,19 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Steps, Button } from 'antd';
+import { Form, Input, App, Steps, Button, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceModalData, SpaceModalRef, Space, StorageType } from '../types'
 import RbModal from '@/components/RbModal'
-import { createWorkspace } from '@/api/workspaces'
+import { createWorkspace, getDefaultWorkspaceModel, getCustomWorkspaceModels } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import UploadImages from '@/components/Upload/UploadImages'
 import { getFileLink } from '@/api/fileStorage'
 import ragIcon from '@/assets/images/space/rag.png'
 import neo4jIcon from '@/assets/images/space/neo4j.png'
 import { stringRegExp } from '@/utils/validator';
-import ModelSelect from '@/components/ModelSelect';
+import type { ModelListItem } from '@/views/ModelManagement/types'
 
 const FormItem = Form.Item;
 
@@ -43,6 +43,16 @@ const typeIcons: Record<StorageType, string> = {
   neo4j: neo4jIcon
 }
 
+/** Custom config model selectors */
+const customModelFields: { name: 'llm' | 'embedding' | 'rerank' | 'vision' | 'audio' | 'video'; label: string; required?: boolean }[] = [
+  { name: 'llm', label: 'llmModel', required: true },
+  { name: 'embedding', label: 'embeddingModel', required: true },
+  { name: 'rerank', label: 'rerankModel', required: true },
+  { name: 'vision', label: 'visionModel' },
+  { name: 'audio', label: 'audioModel' },
+  { name: 'video', label: 'videoModel' },
+]
+
 const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   refresh
 }, ref) => {
@@ -53,6 +63,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   const [loading, setLoading] = useState(false)
   const [editVo, setEditVo] = useState<Space | null>(null)
   const [currentStep, setCurrentStep] = useState(0)
+  const [defaultModels, setDefaultModels] = useState<Record<string, ModelListItem>>({})
 
   const values = Form.useWatch([], form);
 
@@ -68,7 +79,17 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   const handlePrevStep = () => {
     setCurrentStep(prev => prev - 1)
   }
-
+  const handleGetDefaultModels = () => {
+    getDefaultWorkspaceModel().then(res => {
+      setDefaultModels((res || {}) as Record<string, ModelListItem>)
+    })
+  }
+  const [customModels, setCustomModels] = useState<Record<string, ModelListItem[]>>({})
+  const handleGetCustomModels = () => {
+    getCustomWorkspaceModels().then(res => {
+      setCustomModels((res || {}) as Record<string, ModelListItem[]>)
+    })
+  }
   /** Open modal with optional data */
   const handleOpen = (space?: Space) => {
     if (space) {
@@ -80,6 +101,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     } else {
       form.resetFields();
     }
+    handleGetDefaultModels()
+    handleGetCustomModels()
     setVisible(true);
   };
   /** Save or proceed to next step */
@@ -90,9 +113,15 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         if (currentStep === 0) {
           setCurrentStep(1)
         } else {
-          const { icon, ...rest } = values
-          const formData: SpaceModalData = {
-            ...rest
+          const { icon, is_default_config, ...rest } = values
+          let formData: SpaceModalData = {
+            ...rest,
+            is_default_config: is_default_config === '1',
+          }
+          if (is_default_config === '1') {
+            customModelFields.forEach(field => {
+              formData[field.name] = undefined
+            })
           }
           if (icon?.response?.data.file_id) {
             getFileLink(icon?.response?.data.file_id).then(res => {
@@ -126,6 +155,17 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         setLoading(false)
       });
   }
+  const handleChange = (value: string | null | undefined) => {
+    const resetFields = {}
+    if (value === '0') {
+      customModelFields.forEach(field => {
+        (resetFields as Record<string, any>)[field.name] = defaultModels[field.name]?.id
+      })
+    }
+    form.setFieldsValue({
+      ...resetFields,
+    })
+  }
 
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
@@ -156,6 +196,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         layout="vertical"
         initialValues={{
           storage_type: types[0],
+          is_default_config: '1',
         }}
       >
         <Form.Item
@@ -200,39 +241,57 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
 
 
         {currentStep === 1 && <>
-          <Form.Item
-            label={t('space.llmModel')}
-            name="llm"
-            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.llmModel') }) }]}
-          >
-            <ModelSelect
-              params={{ type: 'llm,chat' }}
-              placeholder={t('common.selectPlaceholder', { title: t('space.llmModel') })}
-              className="rb:w-full!"
+          <Form.Item name="is_default_config" className="rb:mb-6!">
+            <RadioGroupCard
+              allowClear={false}
+              options={[
+                {
+                  value: '1',
+                  label: t('space.defaultConfigPackage'),
+                  labelDesc: t('space.defaultConfigPackageDesc'),
+                  recommend: true,
+                },
+                {
+                  value: '0',
+                  label: t('space.customConfig'),
+                  labelDesc: t('space.customConfigDesc'),
+                },
+              ]}
+              onChange={handleChange}
             />
           </Form.Item>
-          <Form.Item
-            label={t('space.embeddingModel')}
-            name="embedding"
-            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.embeddingModel') }) }]}
-          >
-            <ModelSelect
-              params={{ type: 'embedding' }}
-              placeholder={t('common.selectPlaceholder', { title: t('space.embeddingModel') })}
-              className="rb:w-full!"
-            />
-          </Form.Item>
-          <Form.Item
-            label={t('space.rerankModel')}
-            name="rerank"
-            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.rerankModel') }) }]}
-          >
-            <ModelSelect
-              params={{ type: 'rerank' }}
-              placeholder={t('common.selectPlaceholder', { title: t('space.rerankModel') })}
-              className="rb:w-full!"
-            />
-          </Form.Item>
+
+          {values?.is_default_config === '0' ? (
+            customModelFields.map(field => (
+              <Form.Item
+                key={field.name}
+                label={t(`space.${field.label}`)}
+                name={field.name}
+                rules={[{ required: field.required, message: t('common.selectPlaceholder', { title: t(`space.${field.label}`) }) }]}
+              >
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  fieldNames={{ label: 'name', value: 'id' }}
+                  placeholder={t('common.pleaseSelect')}
+                  options={customModels[field.name]}
+                />
+              </Form.Item>
+            ))
+          ) : (
+            <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4">
+              {customModelFields.map(field => (
+                <div
+                  key={field.name}
+                  className="rb:flex rb:items-center rb:justify-between rb:py-3.5 rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
+                >
+                  <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
+                  <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </>}
       </Form>
     </RbModal>
