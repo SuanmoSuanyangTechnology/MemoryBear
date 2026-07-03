@@ -1590,12 +1590,13 @@ async def analytics_memory_types(
             agent_workflow_count = total
 
             memory_message_repo = MemoryMessageRepository(db)
-            api_mcp_count = 1 if memory_message_repo.has_api_mcp_messages(end_user_id) else 0
+            sources = memory_message_repo.get_working_memory_sources(end_user_id)
+            api_mcp_count = len(sources)  # 每个 source（service_api / mcp）有记录则各占 1
 
             work_count = agent_workflow_count + api_mcp_count
             logger.debug(
                 f"工作记忆数量: total={work_count} "
-                f"(agent_workflow={agent_workflow_count}, api_mcp={api_mcp_count}) "
+                f"(agent_workflow={agent_workflow_count}, api_mcp_sources={[s['source'] for s in sources]}) "
                 f"(end_user_id={end_user_id})"
             )
         except Exception as e:
