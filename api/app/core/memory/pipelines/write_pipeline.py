@@ -702,16 +702,7 @@ class WritePipeline:
                 kwargs={
                     "end_user_id": self.end_user_id,
                     "new_entity_ids": new_entity_ids,
-                    "llm_model_id": (
-                        str(self.memory_config.llm_model_id)
-                        if self.memory_config.llm_model_id
-                        else None
-                    ),
-                    "embedding_model_id": (
-                        str(self.memory_config.embedding_model_id)
-                        if self.memory_config.embedding_model_id
-                        else None
-                    ),
+                    "config_id": str(self.memory_config.config_id), # 跨进程只传入config_id
                     "language": self.language,
                 },
                 priority=3,

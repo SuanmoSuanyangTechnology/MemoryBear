@@ -556,9 +556,14 @@ class EmotionAnalyticsService:
                     memory_config = config_service.load_memory_config(
                         config_id=config_id
                     )
-                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-                    factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+                    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+                    # 统一经 ModelClientMixin 获取客户端，并携带 tenant_id，
+                    # 避免 SpeedBear 公共模型运行时缺失租户上下文。
+                    llm_client = ModelClientMixin.get_llm_client(
+                        db,
+                        memory_config.llm_model_id,
+                        tenant_id=memory_config.tenant_id,
+                    )
             except Exception as e:
                 logger.warning(f"无法获取 end_user {end_user_id} 的配置，将使用默认配置: {e}")
 
@@ -613,10 +618,14 @@ class EmotionAnalyticsService:
 
             # 8. 使用结构化输出直接获取 Pydantic 模型
             try:
-                suggestions_response = await llm_client.response_structured(
-                    messages=messages,
-                    response_model=EmotionSuggestionsResponse
-                )
+                from app.core.memory.utils.llm.llm_utils import StructResponse
+                # RedBearLLM（ModelClientMixin 产出）走 LangChain 接口：
+                # ainvoke 返回 AIMessage，再经 StructResponse 解析为 Pydantic 模型。
+                # prompt 模板已明确要求返回对应 JSON 结构。
+                suggestions_response = await llm_client.ainvoke(
+                    messages,
+                    config={"callbacks": []},
+                ) | StructResponse(mode="pydantic", model=EmotionSuggestionsResponse)
             except Exception as e:
                 logger.error(f"LLM 结构化输出失败: {str(e)}")
                 # 返回默认建议

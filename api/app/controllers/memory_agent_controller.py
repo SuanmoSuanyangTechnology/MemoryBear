@@ -270,6 +270,7 @@ async def get_user_profile_api(
         result = await memory_agent_service.get_user_profile(
             end_user_id=end_user_id,
             current_user_id=str(current_user.id),
+            tenant_id=current_user.tenant_id,
             db=db
         )
         return success(data=result, msg="获取用户详情成功")

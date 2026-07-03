@@ -475,12 +475,11 @@ async def delete_memory_config(
     Delete a memory config.
 
     - Default configs cannot be deleted.
-    - If end users are connected and force=False, returns a warning.
-    - If force=True, clears end user references and deletes the config.
+    - If end users are connected, returns a warning.
 
     Only configs belonging to the authorized workspace can be deleted.
     """
-    logger.info(f"V1 delete config - config_id: {config_id}, force: {force}, workspace: {api_key_auth.workspace_id}")
+    logger.info(f"V1 delete config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
     _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
 
