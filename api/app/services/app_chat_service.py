@@ -225,7 +225,7 @@ class AppChatService:
         tools.extend(kb_tools)
         if memory:
             memory_tools, _ = self.agent_service.load_memory_config(
-                config.memory, user_id, uuid.UUID(workspace_id), storage_type, user_rag_memory_id
+                config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
             )
             tools.extend(memory_tools)
 
@@ -653,7 +653,7 @@ class AppChatService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.agent_service.load_memory_config(
-                    config.memory, user_id, uuid.UUID(workspace_id), storage_type, user_rag_memory_id
+                    config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
