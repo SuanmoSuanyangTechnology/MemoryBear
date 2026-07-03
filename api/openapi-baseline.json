@@ -1,11 +1,276 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "redbera-mem",
-    "description": "redbera-mem",
+    "title": "MemoryBear",
+    "description": "MemoryBear",
     "version": "1.0.0"
   },
   "paths": {
+    "/v1/app/annotations": {
+      "get": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "获取标注列表",
+        "description": "获取当前应用的标注列表，支持分页和关键词搜索。",
+        "operationId": "list_annotations_v1_app_annotations_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "搜索关键词（匹配问题或答案）",
+              "title": "Search"
+            },
+            "description": "搜索关键词（匹配问题或答案）"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页数量，最大 100",
+              "default": 20,
+              "title": "Pagesize"
+            },
+            "description": "每页数量，最大 100"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "创建标注",
+        "description": "创建一个新的标注（QA问答对）。\n\n如果标注功能已启用Embedding模型，会自动为问题生成向量用于相似度匹配。",
+        "operationId": "create_annotation_v1_app_annotations_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/annotations/settings": {
+      "get": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "获取标注设置",
+        "description": "获取当前应用的标注设置。",
+        "operationId": "get_annotation_settings_v1_app_annotations_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "更新标注设置",
+        "description": "更新当前应用的标注设置（相似度阈值、Embedding模型、启用/禁用）。",
+        "operationId": "update_annotation_settings_v1_app_annotations_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationSettingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/annotations/{annotation_id}": {
+      "put": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "更新标注",
+        "description": "更新指定标注的问题和/或答案。\n\n如果更新了问题且已配置Embedding模型，会自动重新生成向量。",
+        "operationId": "update_annotation_v1_app_annotations__annotation_id__put",
+        "parameters": [
+          {
+            "name": "annotation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Annotation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "V1 - Annotation API"
+        ],
+        "summary": "删除标注",
+        "description": "删除指定标注（软删除）。",
+        "operationId": "delete_annotation_v1_app_annotations__annotation_id__delete",
+        "parameters": [
+          {
+            "name": "annotation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Annotation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/app": {
       "get": {
         "tags": [
@@ -6105,6 +6370,20 @@
         ],
         "title": "BatchUpdateMetadataRequest"
       },
+      "Body_active_config_api_memory_config_active_config_post": {
+        "properties": {
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_id"
+        ],
+        "title": "Body_active_config_api_memory_config_active_config_post"
+      },
       "Body_chat_v1_app_chat_post": {
         "properties": {
           "api_key_auth": {
@@ -7117,6 +7396,10 @@
       },
       "ChunkRetrieve": {
         "properties": {
+          "caller": {
+            "$ref": "#/components/schemas/KnowledgeRetrievalCaller",
+            "default": "general"
+          },
           "query": {
             "type": "string",
             "title": "Query"
@@ -7207,10 +7490,6 @@
             "title": "Top N",
             "default": 20
           },
-          "caller": {
-            "$ref": "#/components/schemas/KnowledgeRetrievalCaller",
-            "default": "general"
-          },
           "retrieve_type": {
             "anyOf": [
               {
@@ -7257,8 +7536,7 @@
         },
         "type": "object",
         "required": [
-          "query",
-          "kb_ids"
+          "query"
         ],
         "title": "ChunkRetrieve"
       },
@@ -7588,6 +7866,42 @@
             ],
             "title": "Rerank Id",
             "description": "重排序模型配置ID"
+          },
+          "vision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision Id",
+            "description": "视觉模型配置ID"
+          },
+          "audio_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Id",
+            "description": "语音模型ID"
+          },
+          "video_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Id",
+            "description": "视频模型ID"
           },
           "reflection_model_id": {
             "anyOf": [
@@ -8069,6 +8383,20 @@
             "title": "Enabled",
             "description": "是否启用上下文引擎",
             "default": false
+          },
+          "cross_session_recent_enabled": {
+            "type": "boolean",
+            "title": "Cross Session Recent Enabled",
+            "description": "是否注入同应用同用户其他会话的最近消息",
+            "default": false
+          },
+          "cross_session_recent_limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Cross Session Recent Limit",
+            "description": "跨会话注入的最近消息条数",
+            "default": 6
           }
         },
         "type": "object",
@@ -8138,6 +8466,28 @@
         ],
         "title": "CustomToolTestRequest",
         "description": "自定义工具测试请求"
+      },
+      "DeleteNodeRequest": {
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "title": "Element Id",
+            "description": "Neo4j elementId"
+          },
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id",
+            "description": "端用户 ID"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "element_id",
+          "end_user_id"
+        ],
+        "title": "DeleteNodeRequest",
+        "description": "删除单个图节点请求"
       },
       "DocumentCreate": {
         "properties": {
@@ -10324,6 +10674,8 @@
         "type": "string",
         "enum": [
           "general",
+          "ex_api",
+          "in_api",
           "agent",
           "workflow"
         ],
@@ -10954,14 +11306,6 @@
             ],
             "title": "Memory Config Id",
             "description": "选择记忆的内容类型"
-          },
-          "max_history": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 0.0,
-            "title": "Max History",
-            "description": "最大保留的历史对话轮数",
-            "default": 10
           }
         },
         "type": "object",
@@ -12228,6 +12572,7 @@
         "type": "string",
         "enum": [
           "openai",
+          "speedbear",
           "dashscope",
           "ollama",
           "xinference",
@@ -14662,6 +15007,39 @@
               }
             ],
             "title": "Rerank"
+          },
+          "vision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision"
+          },
+          "audio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio"
+          },
+          "video": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video"
           }
         },
         "type": "object",
@@ -14756,6 +15134,45 @@
             ],
             "title": "Rerank",
             "description": "重排序模型ID"
+          },
+          "vision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision",
+            "description": "视觉模型"
+          },
+          "audio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio",
+            "description": "音频模型"
+          },
+          "video": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video",
+            "description": "视频模型"
           }
         },
         "type": "object",
