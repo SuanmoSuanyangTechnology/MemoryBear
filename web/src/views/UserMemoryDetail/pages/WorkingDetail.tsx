@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:15:05
+ * @Last Modified time: 2026-07-03 11:07:08
  */
-import { type FC, useEffect, useState, useMemo, useRef } from 'react'
+import { type FC, useEffect, useState, useMemo, useRef, Fragment } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -17,22 +17,32 @@ import {
   getConversations,
   getConversationMessages,
   getConversationDetail,
+  getApiMcpDataSources,
+  getApiMcpMessages,
+  getMemoryInsightReport,
+  getUserSummary,
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
 import Empty from '@/components/Empty'
+import RbAlert from '@/components/RbAlert'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import PageLoading from '@/components/Empty/PageLoading'
+import type { Data as SummaryData } from '../components/AboutMe'
+import { type Data as InsightData, INSIGHT_KEYS } from '../components/MemoryInsight'
+import Markdown from '@/components/Markdown'
 
 /** A conversation session entry in the sidebar list. */
-interface Conversation {
+export interface Conversation {
   title: string;
   id: string;
+  /** Source/client type of the conversation, e.g. `mcp` / `api` / `mac`. */
+  type?: string;
 }
 
 /**
- * AI-generated insight for a conversation, including key takeaways,
- * open questions, and an overall summary.
+ * AI-generated insight for a single conversation (used by `conversation`-type sessions),
+ * including key takeaways, open questions, and an overall summary.
  */
 interface Detail {
   theme: string;
@@ -47,6 +57,19 @@ interface Detail {
   info_score: number;
 }
 
+interface ApiMcpListItem {
+  source: 'mcp' | 'service_api';
+  message_count: number;
+  latest_at: number;
+}
+interface ApiMcpMessageItem {
+  role: 'user' | 'assistant';
+  content: string;
+  dialog_at: number;
+  message_seq: number;
+  created_at: number;
+}
+
 /**
  * WorkingDetail – Three-column working-memory view for a user's conversations.
  *
@@ -54,7 +77,8 @@ interface Detail {
  * Centre column (fluid): real-time chat message stream for the selected conversation,
  *   with a refresh button and time-range indicator.
  * Right column (360px): AI-generated conversation insights – successful experiences
- *   (takeaways), open questions / pitfalls, and a core summary.
+ *   and user-level memory insight (overview, key findings, behavior
+ *   pattern, growth trajectory) followed by the user summary (about-me) data.
  *
  * Route param `id` is the end-user ID.
  */
@@ -66,35 +90,96 @@ const WorkingDetail: FC = () => {
   const [hasMore, setHasMore] = useState<boolean>(true)
   const pageRef = useRef<number>(1)
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
-  const [messages, setMessages] = useState<ChatItem[]>([])
+  const [messages, setMessages] = useState<ChatItem[] | ApiMcpMessageItem[]>([])
   const [detailLoading, setDetailLoading] = useState<boolean>(false)
   const [detail, setDetail] = useState<Detail | null>(null)
-  const [selected, setSelected] = useState<Conversation | null>(null)
+  const [insightLoading, setInsightLoading] = useState<boolean>(false)
+  const [insight, setInsight] = useState<InsightData>({} as InsightData)
+  const [summaryLoading, setSummaryLoading] = useState<boolean>(false)
+  const [summary, setSummary] = useState<SummaryData>({} as SummaryData)
+  const [selected, setSelected] = useState<Conversation | ApiMcpListItem | null>(null)
 
-  /* Fetch conversation list whenever the route user ID changes. */
+  /* Fetch conversation list + api/mcp data sources whenever the route user ID changes. */
   useEffect(() => {
-    if (!id) return
-    getData()
-  }, [id])
-
-  /** Load all conversations for the current user and auto-select the first one. */
-  const getData = () => {
     if (!id) return
     setLoading(true)
     setSelected(null)
     setDetail(null)
     setData([])
+    setApiMcpList([])
     setHasMore(true)
     pageRef.current = 1
-    getConversations(id, 1).then((res) => {
-      const response = res as { items: Conversation[], page: { hasnext: boolean } }
-      setData(response.items)
-      setSelected(response.items[0] || null)
-      setHasMore(response.page.hasnext)
-    })
-    .finally(() => {
-      setLoading(false)
-    })
+    Promise.all([getApiMcpList(), getData()])
+      .then(([apiMcpItems, conversations]) => {
+        // Prefer an api/mcp data source when available, otherwise fall back to the first conversation.
+        setSelected(apiMcpItems.length > 0 ? apiMcpItems[0] : (conversations[0] || null))
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+  }, [id])
+
+  const [apiMcpList, setApiMcpList] = useState<ApiMcpListItem[]>([])
+  /** Load api/mcp data sources; resolves with the fetched list. */
+  const getApiMcpList = () => {
+    if (!id) return Promise.resolve([] as ApiMcpListItem[])
+    return getApiMcpDataSources(id)
+      .then((res) => {
+        const response = (res as ApiMcpListItem[]) || []
+        setApiMcpList(response)
+        return response
+      })
+      .catch(() => [] as ApiMcpListItem[])
+  }
+  const getApiMcpDetail = (item: ApiMcpListItem) => {
+    if (!id || !item || !item.source) return
+    setDetailLoading(true)
+    getApiMcpMessages(id, { source: item.source, limit: 20 })
+      .then(res => {
+        setMessages((res as { items: ChatItem[] }).items)
+      })
+      .finally(() => {
+        setMessagesLoading(false)
+      })
+    getUserInsight()
+  }
+  /** Load the first page of conversations; resolves with the fetched items. */
+  const getData = () => {
+    if (!id) return Promise.resolve([] as Conversation[])
+    return getConversations(id, 1)
+      .then((res) => {
+        const response = res as { items: Conversation[], page: { hasnext: boolean } }
+        setData(response.items)
+        setHasMore(response.page.hasnext)
+        return response.items
+      })
+      .catch(() => [] as Conversation[])
+  }
+
+  /**
+   * Fetch user-level memory insight and user summary for the right column.
+   * Both requests run in parallel and are independent of the selected conversation.
+   */
+  const getUserInsight = () => {
+    if (!id) return
+    setInsight({} as InsightData)
+    setSummary({} as SummaryData)
+    setInsightLoading(true)
+    setSummaryLoading(true)
+    getMemoryInsightReport(id)
+      .then(res => {
+        setInsight((res as InsightData) || {})
+      })
+      .finally(() => {
+        setInsightLoading(false)
+      })
+    getUserSummary(id)
+      .then(res => {
+        setSummary((res as SummaryData) || {})
+      })
+      .finally(() => {
+        setSummaryLoading(false)
+      })
   }
 
   const loadMore = () => {
@@ -109,35 +194,42 @@ const WorkingDetail: FC = () => {
   }
 
   useEffect(() => {
-    if (!id || !selected || !selected.id) return
-    getDetail(selected.id)
+    console.log('conversationId', !id, selected, selected && !(selected as Conversation)?.id && !(selected as ApiMcpListItem)?.source)
+    if (!id || !selected || (!(selected as Conversation)?.id && !(selected as ApiMcpListItem)?.source)) return
+    getDetail(selected)
   }, [id, selected])
 
   /**
-   * Fetch both the chat messages and the AI-generated insight for a conversation.
-   * Both requests run in parallel.
+   * Fetch the chat messages for the selected conversation. For `conversation`-type
+   * sessions, also fetch the per-conversation detail (takeaways / questions / summary).
+   * `mcp` / `api` sessions instead reuse the user-level insight + summary.
    */
-  const getDetail = (conversationId: string) => {
-    if (!id || !conversationId) return
+  const getDetail = (conversation: Conversation | ApiMcpListItem) => {
+    if (!id || (!(conversation as Conversation).id && !(conversation as ApiMcpListItem).source)) return
+    const conversationId = (conversation as Conversation).id
 
     setDetail(null)
     setMessages([])
     setDetailLoading(true)
     setMessagesLoading(true)
-    getConversationMessages(id, conversationId)
-      .then(res => {
-        setMessages(res as ChatItem[])
-      })
-      .finally(() => {
-        setMessagesLoading(false)
-      })
-    getConversationDetail(id, conversationId)
-      .then(res => {
-        setDetail(res as Detail)
-      })
-      .finally(() => {
-        setDetailLoading(false)
-      })
+    if (conversationId) {
+      getConversationMessages(id, conversationId)
+        .then(res => {
+          setMessages(res as ChatItem[])
+        })
+        .finally(() => {
+          setMessagesLoading(false)
+        })
+        getConversationDetail(id, conversationId)
+          .then(res => {
+            setDetail(res as Detail)
+          })
+          .finally(() => {
+            setDetailLoading(false)
+          })
+    } else {
+      getApiMcpDetail(conversation as ApiMcpListItem)
+    }
   }
   /** Derive a human-readable date range (e.g. "2024.01 - 2024.03") from message timestamps. */
   const timeRange = useMemo(() => {
@@ -148,12 +240,26 @@ const WorkingDetail: FC = () => {
     return `${formatDateTime(minTime, 'YYYY.MM')} - ${formatDateTime(maxTime, 'YYYY.MM')}`
   }, [messages])
 
+  /** Whether the memory insight block has any renderable content. */
+  const hasInsight = useMemo(
+    () => INSIGHT_KEYS.some(key => {
+      const value = insight[key]
+      return Array.isArray(value) ? value.length > 0 : !!value
+    }),
+    [insight],
+  )
+  /** Whether the user summary block has any renderable content. */
+  const hasSummary = useMemo(
+    () => !!(summary.user_summary || summary.personality || summary.core_values || summary.one_sentence),
+    [summary],
+  )
+
   return (
     <>
       {loading
         ? <PageLoading />
-        : data.length === 0
-        ? <Empty />
+        : data.length === 0 && apiMcpList.length === 0
+        ? <Empty className="rb:h-full!" />
         :(
           <Row gutter={16} wrap={false} className="rb:h-full!">
             <Col span={5} className="rb:h-full!">
@@ -166,20 +272,35 @@ const WorkingDetail: FC = () => {
               >
                 <div id="conversation-list" className="rb:h-full! rb:overflow-y-auto">
                   <InfiniteScroll
-                    dataLength={data.length}
+                    dataLength={data.length + apiMcpList.length}
                     next={loadMore}
                     hasMore={hasMore}
                     loader={null}
                     scrollableTarget="conversation-list"
                   >
                     <Flex vertical gap={8}>
+                      {apiMcpList.map(item => (
+                        <Flex
+                          key={item.source}
+                          gap={12}
+                          align="center"
+                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
+                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.source === (selected as ApiMcpListItem)?.source,
+                          })}
+                          onClick={() => setSelected(item)}
+                        >
+                          <div className="rb:leading-5 rb:break-all rb:line-clamp-2 rb:flex-1">
+                            {t(`userMemory.${item.source}`)}
+                          </div>
+                        </Flex>
+                      ))}
                       {data.map(item => (
                         <Flex
                           key={item.id}
                           gap={12}
                           align="center"
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
-                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === selected?.id,
+                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === (selected as Conversation)?.id,
                           })}
                           onClick={() => setSelected(item)}
                         >
@@ -189,6 +310,16 @@ const WorkingDetail: FC = () => {
                               {item.title}
                             </div>
                           </Tooltip>
+                          {item.type && (
+                            <div className={clsx(
+                              "rb:shrink-0 rb:uppercase rb:text-[10px] rb:leading-4 rb:px-1.5 rb:rounded-md rb:border",
+                              item.id === (selected as Conversation)?.id
+                                ? "rb:border-white/30 rb:text-white"
+                                : "rb:border-[#E5E5E5] rb:text-[#5B6167]",
+                            )}>
+                              {item.type}
+                            </div>
+                          )}
                         </Flex>
                       ))}
                     </Flex>
@@ -199,7 +330,10 @@ const WorkingDetail: FC = () => {
             {selected && <>
               <Col flex="1" className="rb:h-full!">
                 <RbCard
-                  title={selected.title}
+                  title={
+                    (selected as Conversation).title
+                    || ((selected as ApiMcpListItem).source ? t(`userMemory.${(selected as ApiMcpListItem).source}`) : undefined)
+                  }
                   headerType="borderless"
                   headerClassName="rb:min-h-[42px]! rb:pt-4! rb:font-[MiSans-Bold] rb:font-bold"
                   bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-42px)]'
@@ -208,12 +342,44 @@ const WorkingDetail: FC = () => {
                   <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
                   <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
                     {t('workingDetail.conversationStream')}
-                    <Button className="rb:h-6!" onClick={() => getDetail(selected.id)}>{t('workingDetail.refresh')}</Button>
+                    <Button className="rb:h-6!" onClick={() => getDetail(selected)}>{t('workingDetail.refresh')}</Button>
                   </Flex>
                   {messagesLoading
                     ? <Skeleton active />
                     : messages.length === 0
                       ? <Empty />
+                      : (selected as ApiMcpListItem).source
+                      ? (
+                        <Flex vertical gap={12} className="rb:mt-5! rb:h-[calc(100%-89px)]! rb:overflow-y-auto! rb:w-full! rb:overflow-x-hidden!">
+                          {(messages as ApiMcpMessageItem[]).map((item, index) => (
+                            <div>
+                              {index !== 0 && <Divider className="rb:mt-1! rb:mb-3! rb:ml-11! rb:w-[calc(100%-44px)]!" />}
+                              <Flex
+                                align="start"
+                                gap={12}
+                              >
+                                <div className={clsx("rb:size-8 rb:bg-cover", {
+                                  'rb:bg-[url(@/assets/images/conversation/user.png)]': item.role === 'user',
+                                  'rb:bg-[url(@/assets/images/conversation/ai.png)]': item.role === 'assistant',
+                                })}></div>
+                                <div
+                                  className="rb:flex-1"
+                                >
+                                  <Flex gap={12} justify="space-between">
+                                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5 rb:mb-0.5">
+                                      {item.role === 'assistant' ? t('userMemory.assistant') : t('userMemory.user')}
+                                    </div>
+                                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5 rb:mb-0.5">
+                                      {formatDateTime(item.dialog_at)}
+                                    </div>
+                                  </Flex>
+                                  <Markdown content={item.content || ''} />
+                                </div>
+                              </Flex>
+                            </div>
+                          ))}
+                        </Flex>
+                      )
                       : (
                         <ChatContent
                           classNames="rb:h-[calc(100%-77px)] rb:pt-5"
@@ -227,52 +393,102 @@ const WorkingDetail: FC = () => {
                 </RbCard>
               </Col>
               <Col flex='360px' className="rb:h-full!">
-                <RbCard
-                  title={t('workingDetail.successfulTitle')}
-                  headerType="borderless"
-                  headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold rb:leading-5.5"
-                  bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!'
-                  className="rb:h-full!"
-                >
-                  {detailLoading
-                    ? <Skeleton active />
-                    : detail
-                      ? <>
-                        {detail.takeaways.length > 0
-                          ? (
-                            <ul className="rb:leading-5 rb:list-disc rb:ml-4">
-                              {detail.takeaways.map(vo => <li>{vo}</li>)}
-                            </ul>
-                          )
-                          : <Empty size={88} />
-                        }
+                {(selected as ApiMcpListItem).source
+                  ? (
+                    <RbCard
+                      headerType="borderless"
+                      headerClassName="rb:min-h-0!"
+                      bodyClassName='rb:p-4! rb:pt-0! rb:h-full rb:overflow-y-auto!'
+                      className="rb:h-full!"
+                    >
+                      {insightLoading || summaryLoading
+                        ? <Skeleton active />
+                        : (!hasInsight && !hasSummary)
+                          ? <Empty />
+                          : <Flex vertical gap={16}>
+                            {/* Memory insight */}
+                            {INSIGHT_KEYS.filter(key => (Array.isArray(insight[key]) && insight[key].length > 0) || (!Array.isArray(insight[key]) && insight[key])).map((key, index) => {
+                              const value = insight[key]
+                              return (
+                                <Fragment key={key}>
+                                  {index > 0 && <Divider className="rb:my-0! rb:border-t-[0.5px]!" />}
+                                  <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t(`userMemory.${key}`)}</div>
+                                  <div className="rb:leading-5 rb:text-[#5B6167]">
+                                    {Array.isArray(value)
+                                      ? value.map((vo, i) => <div key={i}>- {vo}</div>)
+                                      : value}
+                                  </div>
+                                </Fragment>
+                              )
+                            })}
+                            {/* User summary (about me) */}
+                            {hasSummary && <>
+                              {hasInsight && <Divider className="rb:my-0!" />}
+                              {['user_summary', 'personality', 'core_values'].filter((key) => summary[key]).map((key, index) => {
+                                return (
+                                  <Fragment key={key}>
+                                    {index > 0 && <Divider className="rb:my-0!" />}
+                                    <div key={key}>
+                                      <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t(`userMemory.${key}`)}</div>
+                                      {summary[key] &&
+                                        <div className="rb:leading-5 rb:text-[#5B6167]">{summary[key]}</div>
+                                      }
+                                    </div>
+                                  </Fragment>
+                                )
+                              })}
+                              {summary.one_sentence &&
+                                <RbAlert className="rb:text-[14px]!">{summary.one_sentence}</RbAlert>
+                              }
+                            </>}
+                          </Flex>
+                      }
+                    </RbCard>
+                  )
+                  : (
+                    <RbCard
+                      title={t('workingDetail.successfulTitle')}
+                      headerType="borderless"
+                      headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold rb:leading-5.5"
+                      bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!'
+                      className="rb:h-full!"
+                    >
+                      {detailLoading
+                        ? <Skeleton active />
+                        : detail
+                          ? <>
+                            {detail.takeaways.length > 0
+                              ? (
+                                <ul className="rb:leading-5 rb:list-disc rb:ml-4">
+                                  {detail.takeaways.map((vo, i) => <li key={i}>{vo}</li>)}
+                                </ul>
+                              )
+                              : <Empty size={88} />
+                            }
 
-                        <>
-                          <Divider className="rb:my-4!" />
-                          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t('workingDetail.question')}</div>
+                            <Divider className="rb:my-4!" />
+                            <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t('workingDetail.question')}</div>
+                            {detail.question.length > 0
+                              ? (
+                                <ul className="rb:leading-5 rb:list-disc rb:ml-4">
+                                  {detail.question.map((vo, i) => <li key={i}>{vo}</li>)}
+                                </ul>
+                              )
+                              : <Empty size={88} />
+                            }
 
-                          {detail.question.length > 0
-                            ? (
-                              <ul className="rb:leading-5 rb:list-disc rb:ml-4">
-                                {detail.question.map(vo => <li>{vo}</li>)}
-                              </ul>
-                            )
-                            : <Empty size={88} />
-                          }
-                        </>
-
-                        <>
-                          <Divider className="rb:my-4!" />
-                          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t('workingDetail.summary')}</div>
-                          {detail.summary
-                            ? <div className="rb:leading-5.5">{detail.summary}</div>
-                            : <Empty size={88} />
-                          }
-                        </>
-                      </>
-                      : <Empty />
-                  }
-                </RbCard>
+                            <Divider className="rb:my-4!" />
+                            <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t('workingDetail.summary')}</div>
+                            {detail.summary
+                              ? <div className="rb:leading-5.5">{detail.summary}</div>
+                              : <Empty size={88} />
+                            }
+                          </>
+                          : <Empty />
+                      }
+                    </RbCard>
+                  )
+                }
               </Col>
             </>}
           </Row>

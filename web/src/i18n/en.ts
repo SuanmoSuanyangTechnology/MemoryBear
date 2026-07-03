@@ -1930,6 +1930,8 @@ export const en = {
       relation_related: 'Related',
       relation_derived: 'Derived from Statement',
       relation_contains: 'Contains',
+      mcp: 'MCP',
+      service_api: 'API',
     },
     space: {
       createSpace: 'Create Space',
