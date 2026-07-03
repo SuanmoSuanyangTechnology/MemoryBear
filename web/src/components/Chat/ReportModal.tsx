@@ -1,38 +1,31 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-05-21 14:00:00 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 10:18:42
- */
 /**
  * ReportModal Component
- * 
- * A modal dialog for reporting chat messages.
- * Supports selecting report type and providing additional description.
- * 
+ *
+ * A shared modal dialog for reporting chat messages. It works for both the
+ * public share view (submitting through `reportMessage` with a `shareToken`)
+ * and the app-scoped debug panels (submitting through `draftRunReportMessage`
+ * with an `appId`). Exactly one of `appId` / `shareToken` is provided.
+ *
  * @component
  */
-
 import { forwardRef, useImperativeHandle, useState } from 'react'
 import { Form, Input, App } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 import RbModal from '@/components/RbModal'
-import type { ChatItem } from '@/components/Chat/types'
-import { reportTypesUrl, reportMessage } from '@/api/application'
-import type { ReportModalRef } from '../types'
 import CustomSelect from '@/components/CustomSelect'
+import type { ChatItem } from '@/components/Chat/types'
+import type { ReportModalRef } from '@/views/Conversation/types'
+import { reportTypesUrl, reportMessage, draftRunReportMessage } from '@/api/application'
 
-/** Props interface for ReportModal component */
-interface ReportModalProps {
-  /** Share token for API authentication */
-  shareToken: string
-}
+/** Props for ReportModal — provide either an app id or a share token. */
+type ReportModalProps =
+  | { appId: string; shareToken?: never }
+  | { appId?: never; shareToken: string }
 
 /** Report modal component for reporting inappropriate messages */
-const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
-  shareToken,
-}, ref) => {
+const ReportModal = forwardRef<ReportModalRef, ReportModalProps>((props, ref) => {
+  const { appId, shareToken } = props
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [visible, setVisible] = useState(false)
@@ -53,17 +46,24 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
     setVisible(true)
   }
 
-  /** Handle form submission */
+  /** Handle form submission, routing to the app / share endpoint. */
   const onSubmit = () => {
     form.validateFields()
       .then((values) => {
-        if (!currentItem?.id || !shareToken || shareToken === '') return
-        
-        setLoading(true)
-        reportMessage(shareToken, currentItem.id as string, {
+        if (!currentItem?.id) return
+        const payload = {
           ...values,
           selected_text: currentItem.content || '',
-        })
+        }
+        const request = appId
+          ? draftRunReportMessage(appId, currentItem.id as string, payload)
+          : shareToken
+            ? reportMessage(shareToken, currentItem.id as string, payload)
+            : undefined
+        if (!request) return
+
+        setLoading(true)
+        request
           .then(() => {
             message.success(t('memoryConversation.reportSuccess'))
             handleClose()
@@ -74,7 +74,7 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
       })
   }
 
-  /** Expose handleOpen and handleClose methods to parent component via ref */
+  /** Expose handleOpen method to parent component via ref */
   useImperativeHandle(ref, () => ({
     handleOpen,
   }))

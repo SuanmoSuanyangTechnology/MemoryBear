@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 12:26:51
+ * @Last Modified time: 2026-07-02 16:30:53
  */
 /**
  * Application Modal
@@ -23,6 +23,9 @@ import type { ApplicationModalData, ApplicationModalRef, Application } from '../
 import RbModal from '@/components/RbModal'
 import { addApplication, updateApplication } from '@/api/application'
 import { stringRegExp } from '@/utils/validator';
+import { getMemoryConfigList } from '@/api/memory'
+import type { Memory } from '@/views/MemoryManagement/types'
+import ActiveMemoryConfig from '@/components/ActiveMemoryConfig'
 
 const FormItem = Form.Item;
 
@@ -77,6 +80,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
 
   /** Open modal with optional application data for editing */
   const handleOpen = (application?: Application) => {
+    getActiveMemoryConfig()
     if (application) {
       setEditVo(application || null)
       form.setFieldsValue({
@@ -112,6 +116,16 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
       .catch((err) => {
         console.log('err', err)
       });
+  }
+  const [activeMemoryConfig, setActiveMemoryConfig] = useState<Memory | null>(null)
+  const getActiveMemoryConfig = () => {
+    getMemoryConfigList()
+      .then((res) => {
+        setActiveMemoryConfig((res as Memory[])[0])
+      })
+      .catch(() => {
+        setActiveMemoryConfig(null)
+      })
   }
 
   /** Expose methods to parent component */
@@ -174,6 +188,16 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
             block={true}
           />
         </FormItem>
+
+        <>
+          <div className="rb:font-medium">{t('application.memoryConfiguration')}</div>
+          <div className="rb:text-[12px] rb:text-[#5B6167]">{t('application.memoryConfigurationDesc')}</div>
+
+          <ActiveMemoryConfig
+            activeMemoryConfig={activeMemoryConfig}
+            variant="filled"
+          />
+        </>
       </Form>
     </RbModal>
   );

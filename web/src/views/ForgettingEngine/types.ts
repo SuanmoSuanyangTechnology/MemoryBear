@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:08 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:00:08 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-06-29 18:15:49
  */
 /**
  * Type definitions for Forgetting Engine
@@ -106,6 +106,8 @@ export interface ConfigForm {
   max_merge_batch_size: string | number;
   /** Forgetting interval in hours */
   forgetting_interval_hours: string | number;
+  /** Whether it's the system default */
+  is_default: boolean;
   /** Additional dynamic fields */
   [key: string]: any;
 }

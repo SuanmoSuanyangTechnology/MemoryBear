@@ -245,6 +245,7 @@ class MemoryService:
             is_pilot_run: bool = False,
             skip_cursor_advance: bool = False,
             dispatch_at: str = "",
+            source: str = "",
             progress_callback: Optional[
                 Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]
             ] = None,
@@ -262,6 +263,7 @@ class MemoryService:
             is_pilot_run: 试运行模式（只萃取不写入）
             skip_cursor_advance: 跳过 write_cursor 推进（直接写入路径）
             dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+            source: 写入来源（agent/service_api/mcp/workflow），用于快照路径和节点 ID 生成
             progress_callback: 可选的进度回调
 
         Returns:
@@ -287,6 +289,7 @@ class MemoryService:
             is_pilot_run=is_pilot_run,
             skip_cursor_advance=skip_cursor_advance,
             dispatch_at=dispatch_at,
+            source=source,
         )
 
     async def pilot_write(

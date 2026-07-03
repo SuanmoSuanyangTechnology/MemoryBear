@@ -3,19 +3,23 @@ MemoryMessageRepository — memory_messages 表的数据访问层
 
 职责：
 - 封装 memory_messages 表的 CRUD 操作
-- 提供 write_cursor 原子推进
-- 提供批量写入能力
+- 提供 write_cursor 原子推进（仅 agent/workflow 路径）
+- 提供批量写入能力，支持两条独立的 seq 序列：
+    * agent / workflow：按 conversation_id 分组
+    * service_api / mcp：按 (end_user_id, source) 分组，用 pg_advisory_xact_lock 串行化
 - 供 MemoryWriteDispatcher 共用
 """
 
 import logging
 import uuid
-from datetime import datetime
+from contextlib import contextmanager
 from typing import List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.core.memory.enums import MemoryMessageSource
 from app.core.utils.datetime_utils import ensure_dialog_at, to_iso_z, utcnow_naive
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
@@ -34,13 +38,68 @@ class MemoryMessageRepository:
         self.db = db
 
     # ──────────────────────────────────────────────
+    # 内部工具：seq 分配与并发锁
+    # ──────────────────────────────────────────────
+
+    @contextmanager
+    def _acquire_mm_seq_lock(
+        self,
+        conversation_id: Optional[str],
+        end_user_id: str,
+        source: MemoryMessageSource,
+    ):
+        """在 seq 分组维度串行化 seq 分配，防止并发请求抢到重复 seq。
+
+        使用 pg_advisory_xact_lock，事务提交/回滚时自动释放：
+        - 有 conversation_id（agent/workflow）→ 锁 key 按 conversation_id
+        - 无 conversation_id（service_api/mcp）→ 锁 key 按 (end_user_id, source)
+
+        不同分组之间互不阻塞。详见设计文档 §3.3。
+        """
+        if conversation_id is not None:
+            lock_key = f"mm_seq:conv:{conversation_id}"
+        else:
+            lock_key = f"mm_seq:{end_user_id}:{source.value}"
+        self.db.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": lock_key},
+        )
+        yield
+
+    def _next_seq(
+        self,
+        *,
+        conversation_id: Optional[str],
+        end_user_id: str,
+        source: MemoryMessageSource,
+    ) -> int:
+        """按写入路径分流查询 max(message_seq)。
+
+        - 有 conversation_id：按 conversation_id 查（agent/workflow 原逻辑）
+        - conversation_id 为 NULL：按 (end_user_id, source) 查（API/MCP 新逻辑）
+        """
+        stmt = select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
+        if conversation_id is not None:
+            stmt = stmt.where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
+        else:
+            stmt = stmt.where(
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.source == source.value,
+            )
+        return int(self.db.execute(stmt).scalar() or 0)
+
+    # ──────────────────────────────────────────────
     # 消息写入
     # ──────────────────────────────────────────────
 
     def write_batch(
         self,
-        conversation_id: str,
+        conversation_id: Optional[str],
         messages: List[dict],
+        *,
+        end_user_id: str,
+        source: MemoryMessageSource = MemoryMessageSource.AGENT,
     ) -> List[dict]:
         """批量写入 memory_messages 表，自动分配递增 message_seq。
 
@@ -48,20 +107,36 @@ class MemoryMessageRepository:
         调用方需自行 commit。
 
         Args:
-            conversation_id: 对话 ID
+            conversation_id: 对话 ID。agent/workflow 传字符串；service_api/mcp 传 None
             messages: 消息列表，每条格式 {"role": "user"|"assistant", "content": "...", "files": [...]}
+            end_user_id: 终端用户 ID（必填）
+            source: 写入来源枚举，决定 seq 分组键与 memory_messages.source 字段值
 
         Returns:
             成功写入的消息摘要列表 [{"role": "user", "message_seq": 1, "content": "..."}, ...]
             （跳过 content 为空的消息）
         """
-        written: List[dict] = []
+        # 所有路径统一持锁分配 seq，防止同一分组的并发请求抢到重复 seq
+        with self._acquire_mm_seq_lock(conversation_id, end_user_id, source):
+            return self._write_batch_inner(
+                conversation_id, messages, end_user_id, source,
+            )
 
-        max_seq_result = self.db.execute(
-            select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
-            .where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
-        ).scalar()
-        next_seq = max_seq_result or 0
+    def _write_batch_inner(
+        self,
+        conversation_id: Optional[str],
+        messages: List[dict],
+        end_user_id: str,
+        source: MemoryMessageSource,
+    ) -> List[dict]:
+        written: List[dict] = []
+        next_seq = self._next_seq(
+            conversation_id=conversation_id,
+            end_user_id=end_user_id,
+            source=source,
+        )
+
+        conv_uuid = uuid.UUID(conversation_id) if conversation_id else None
 
         for msg in messages:
             role = str(msg.get("role", "user"))
@@ -70,92 +145,34 @@ class MemoryMessageRepository:
                 continue
 
             next_seq += 1
-            mm = MemoryMessage(
+            memory_message = MemoryMessage(
                 id=uuid.uuid4(),
-                conversation_id=uuid.UUID(conversation_id),
-                original_message_id=None,
+                conversation_id=conv_uuid,
+                original_message_id=msg.get("original_message_id"),
+                end_user_id=end_user_id,
+                source=source.value,
                 role=role,
                 content=content,
                 message_seq=next_seq,
                 should_memorize=msg.get("should_memorize", True),
-                created_at=utcnow_naive(),
+                created_at=msg.get("created_at") or utcnow_naive(),
                 dialog_at=ensure_dialog_at(msg.get("dialog_at")),
                 files=msg.get("files"),
             )
-            self.db.add(mm)
+            self.db.add(memory_message)
             written.append({
                 "role": role,
                 "message_seq": next_seq,
                 "content": content,
-                "dialog_at": mm.dialog_at,
+                "dialog_at": memory_message.dialog_at,
             })
             logger.debug(
-                f"[MemoryMessageRepository] 写入 memory_messages: "
-                f"conv={conversation_id}, seq={next_seq}, role={role}"
+                "[MemoryMessageRepository] 写入 memory_messages: "
+                f"conv={conversation_id or 'NULL'}, source={source.value}, "
+                f"end_user={end_user_id}, seq={next_seq}, role={role}"
             )
 
         return written
-
-    def write_single(
-        self,
-        conversation_id: str,
-        original_message_id: Optional[uuid.UUID],
-        role: str,
-        content: str,
-        created_at: datetime,
-        should_memorize: bool = True,
-        files: Optional[list] = None,
-        dialog_at: Optional[str] = None,
-    ) -> Optional[MemoryMessage]:
-        """写入单条消息到 memory_messages 表。
-
-        自动分配递增 message_seq。调用方需自行 commit。
-
-        Args:
-            conversation_id: 会话 ID（字符串）
-            original_message_id: 原始 messages 表行的 id（用于反查源消息）
-            role: user/assistant/system
-            content: 消息内容
-            created_at: 时间戳
-            should_memorize: 是否触发 Write_Pipeline
-            files: 多模态文件信息列表
-            dialog_at: 对话发生时间 ISO 8601 格式
-
-        Returns:
-            写入成功的 MemoryMessage 实例；失败时返回 None
-        """
-        try:
-            max_seq = self.db.execute(
-                select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
-                .where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
-            ).scalar()
-            next_seq = (max_seq or 0) + 1
-
-            memory_msg = MemoryMessage(
-                id=uuid.uuid4(),
-                conversation_id=uuid.UUID(conversation_id),
-                original_message_id=original_message_id,
-                role=role,
-                content=content,
-                message_seq=next_seq,
-                should_memorize=should_memorize,
-                created_at=created_at,
-                dialog_at=ensure_dialog_at(dialog_at),
-                files=files,
-            )
-            self.db.add(memory_msg)
-            logger.debug(
-                f"[MemoryMessageRepository] 单条写入: "
-                f"conv={conversation_id}, seq={next_seq}, role={role}"
-            )
-            return memory_msg
-        except Exception as e:
-            logger.error(
-                f"[MemoryMessageRepository] 写入失败: "
-                f"conv={conversation_id}, err={e}",
-                exc_info=True,
-            )
-            return None
 
     # ──────────────────────────────────────────────
     # 消息查询
@@ -181,16 +198,7 @@ class MemoryMessageRepository:
         write_cursor: int,
         role: Optional[str] = None,
     ) -> List[MemoryMessage]:
-        """查询 message_seq > write_cursor 的待处理消息。
-
-        Args:
-            conversation_id: 对话 ID
-            write_cursor: 当前游标位置
-            role: 可选角色过滤（"user" / "assistant"）
-
-        Returns:
-            待处理消息列表，按 message_seq 升序排列
-        """
+        """查询 message_seq > write_cursor 的待处理消息（agent/workflow 路径）。"""
         stmt = (
             select(MemoryMessage)
             .where(
@@ -224,7 +232,93 @@ class MemoryMessageRepository:
         ).scalar()
 
     # ──────────────────────────────────────────────
-    # write_cursor 操作
+    # 工作记忆查询（API/MCP 展示接口）
+    # ──────────────────────────────────────────────
+
+    _API_MCP_SOURCES = ("service_api", "mcp")
+
+    def get_working_memory_sources(self, end_user_id: str) -> List[dict]:
+        """返回该用户 API/MCP 各来源的记忆摘要（每 source 一行）。
+
+        Returns:
+            [{"source": "service_api", "message_count": 30, "latest_at": datetime}, ...]
+        """
+        rows = self.db.execute(
+            select(
+                MemoryMessage.source,
+                func.count().label("message_count"),
+                func.max(MemoryMessage.created_at).label("latest_at"),
+            )
+            .where(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.source.in_(self._API_MCP_SOURCES),
+            )
+            .group_by(MemoryMessage.source)
+        ).all()
+        return [
+            {"source": r.source, "message_count": int(r.message_count), "latest_at": r.latest_at}
+            for r in rows
+        ]
+
+    def has_api_mcp_messages(self, end_user_id: str) -> bool:
+        """判断该用户是否有任何 API/MCP 来源的记忆消息（用于 work_count +1 判断）。"""
+        exists = self.db.execute(
+            select(MemoryMessage.id)
+            .where(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.source.in_(self._API_MCP_SOURCES),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        return exists is not None
+
+    def list_recent_messages_by_source(
+        self,
+        end_user_id: str,
+        source: str,
+        limit: int = 20,
+    ) -> tuple[list[MemoryMessage], int]:
+        """按来源取最近 N 条消息（从旧到新排列）+ 该来源总条数。
+
+        先按 created_at DESC 取最新 limit 条 ID，再按 created_at ASC 查询完整行返回。
+        """
+        base_filter = [
+            MemoryMessage.end_user_id == end_user_id,
+            MemoryMessage.conversation_id.is_(None),
+            MemoryMessage.source == source,
+        ]
+
+        total = int(self.db.execute(
+            select(func.count(MemoryMessage.id)).where(*base_filter)
+        ).scalar_one())
+
+        if total == 0:
+            return [], 0
+
+        # 取最新 limit 条的 ID
+        recent_ids = list(self.db.execute(
+            select(MemoryMessage.id)
+            .where(*base_filter)
+            .order_by(MemoryMessage.created_at.desc())
+            .limit(limit)
+        ).scalars().all())
+
+        if not recent_ids:
+            return [], total
+
+        # 按 created_at ASC 排序返回完整行（从旧到新）
+        rows = list(self.db.execute(
+            select(MemoryMessage)
+            .where(MemoryMessage.id.in_(recent_ids))
+            .order_by(MemoryMessage.created_at.asc())
+        ).scalars().all())
+
+        return rows, total
+
+    # ──────────────────────────────────────────────
+    # write_cursor 操作（仅服务 agent/workflow 路径）
     # ──────────────────────────────────────────────
 
     def get_write_cursor(self, conversation_id: str) -> Optional[int]:
@@ -244,12 +338,8 @@ class MemoryMessageRepository:
         UPDATE conversations SET write_cursor = :seq
         WHERE id = :conv_id AND write_cursor < :seq
 
-        Args:
-            conversation_id: 对话 ID
-            message_seq: 目标 message_seq
-
         Returns:
-            是否成功推进（True 表示推进了，False 表示 cursor 已 >= seq）
+            是否成功推进（True 表示推进了，False 表示 cursor 已 >= seq 或 conversation 不存在）
         """
         result = self.db.execute(
             update(Conversation)
@@ -268,7 +358,7 @@ class MemoryMessageRepository:
         return max_seq is None or max_seq <= cursor
 
     # ──────────────────────────────────────────────
-    # 上下文窗口查询
+    # 上下文窗口查询（agent/workflow 滑动窗口路径使用）
     # ──────────────────────────────────────────────
 
     def build_context_before(
@@ -281,9 +371,6 @@ class MemoryMessageRepository:
 
         向前查找最多 window_size 个 user 消息，取最小 message_seq 作为上边界，
         查询 [upper_bound, target_seq) 范围内所有消息。
-
-        Returns:
-            消息列表，按 message_seq 升序排列
         """
         # 向前查找 user 消息 seq
         upstream_q_seqs = self.db.execute(
@@ -323,13 +410,9 @@ class MemoryMessageRepository:
         """构建下文消息列表。
 
         向后查找最多 window_size 个 user 消息，取最大 message_seq 作为下边界，
-        查询 (target_seq, lower_bound] 范围内所有消息。
-
-        若下游无 user 消息，则返回 target_seq 之后的所有消息（包含尾部 assistant 消息），
+        查询 (target_seq, lower_bound] 范围内所有消息。若下游无 user 消息，
+        则返回 target_seq 之后的所有消息（包含尾部 assistant 消息），
         确保最后一条 assistant 消息也能作为上下文被处理。
-
-        Returns:
-            消息列表，按 message_seq 升序排列
         """
         downstream_q_seqs = self.db.execute(
             select(MemoryMessage.message_seq)

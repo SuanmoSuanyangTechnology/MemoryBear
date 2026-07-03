@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:11:30
+ * @Last Modified time: 2026-06-30 10:07:16
  */
 /**
  * Memory Extraction Engine Configuration Constants
@@ -10,6 +10,8 @@
  */
 
 import type { ConfigVo } from './types'
+import type { Capability } from '@/views/ModelManagement/types'
+
 
 /** Configuration list for memory extraction engine */
 export const configList: ConfigVo[] = [
@@ -212,7 +214,7 @@ export const configList: ConfigVo[] = [
     ]
   }
 ]
-export const modelConfigList = [
+export const modelConfigList: { key: string; type: string; params: { type: string; capability?: Capability; }; }[] = [
   {
     key: 'llm_id',
     type: 'modelSelect',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:59:56
+ * @Last Modified time: 2026-06-29 18:36:08
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -96,6 +96,7 @@ const SelfReflectionEngine: React.FC = () => {
   const [expanded, setExpanded] = useState({ conflict: true, quality: true, privacy: true });
   const [result, setResult] = useState<Result | null>(null)
   const { language } = useI18n()
+  const [isDefault, setIsDefault] = useState(true)
 
   const values = Form.useWatch([], form);
 
@@ -120,6 +121,7 @@ const SelfReflectionEngine: React.FC = () => {
         }
         console.log('initialValues', initialValues)
         setConfigData(initialValues);
+        setIsDefault(response.is_default)
         form.setFieldsValue(initialValues);
       })
       .catch(() => {
@@ -183,17 +185,18 @@ const SelfReflectionEngine: React.FC = () => {
         <RbCard
           title={t('reflectionEngine.reflectionEngineConfig')}
           extra={<Space>
-            <Button onClick={handleReset}>{t('common.reset')}</Button>
-            <Button type="primary" loading={loading} onClick={handleSave}>{t('common.save')}</Button>
+            <Button onClick={handleReset} disabled={isDefault}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} onClick={handleSave} disabled={isDefault}>{t('common.save')}</Button>
           </Space>}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
           className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-4! rb:pt-0!"
         >
-          <Form 
+          <Form
             form={form}
             layout="vertical"
+            disabled={isDefault}
             initialValues={{
               offset: 0,
               lambda_time: 0.03,
@@ -215,7 +218,7 @@ const SelfReflectionEngine: React.FC = () => {
                         <ModelSelect
                           params={config.params}
                           placeholder={t('common.pleaseSelect')}
-                          disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                          disabled={isDefault || (!values?.reflection_enabled && config.key !== 'reflection_enabled')}
                         />
                       </Form.Item>
                     </div>
@@ -237,7 +240,7 @@ const SelfReflectionEngine: React.FC = () => {
                             label: t(`reflectionEngine.${vo.label}`),
                           }))}
                           placeholder={t('common.pleaseSelect')}
-                          disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                          disabled={isDefault || (!values?.reflection_enabled && config.key !== 'reflection_enabled')}
                         />
                       </Form.Item>
                     </div>
@@ -254,7 +257,7 @@ const SelfReflectionEngine: React.FC = () => {
                       <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_desc`)}</div>
                     </>}
                     className="rb:mb-6"
-                    disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                    disabled={isDefault || (!values?.reflection_enabled && config.key !== 'reflection_enabled')}
                   />
                 )
               })}

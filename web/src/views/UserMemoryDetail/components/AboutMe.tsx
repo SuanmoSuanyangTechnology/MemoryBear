@@ -27,7 +27,7 @@ import type { AboutMeRef } from '../types'
 /**
  * User summary data
  */
-interface Data {
+export interface Data {
   user_summary: string;
   personality: string;
   core_values: string;

@@ -245,9 +245,12 @@ async def retrieve_chunks(
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
-    return await chunk_controller.retrieve_chunks(retrieve_data=retrieve_data,
-                                                  db=db,
-                                                  current_user=current_user)
+    return await chunk_controller.retrieve_chunks_with_caller(
+        retrieve_data=retrieve_data,
+        db=db,
+        current_user=current_user,
+        caller=chunk_schema.KnowledgeRetrievalCaller.EX_API,
+    )
 
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)
@@ -276,4 +279,3 @@ async def import_qa_new_doc(
         current_user=current_user,
         storage_service=storage_service,
     )
-

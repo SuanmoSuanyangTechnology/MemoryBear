@@ -441,6 +441,7 @@ class ForgettingConfigResponse(BaseModel):
     enable_llm_summary: bool = Field(..., description="是否使用 LLM 生成摘要")
     max_merge_batch_size: int = Field(..., description="单次最大融合节点对数")
     forgetting_interval_hours: int = Field(..., description="遗忘周期间隔（小时）")
+    is_default: bool = Field(..., description="是否为默认配置")
 
 
 class ForgettingConfigUpdateRequest(BaseModel):

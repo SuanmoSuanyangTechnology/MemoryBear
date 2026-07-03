@@ -99,16 +99,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         if not workspace:
             raise BusinessException(t("workspace.not_found", locale=locale))
         validation_result = await MemoryConfigService(self.db).valid_config(config_id, locale=locale)
-        warnings = validation_result.get("warnings", [])
-        success = False
-        if not warnings:
-            workspace.memory_config = config_id
-            success = True
+        workspace.memory_config = config_id
         self.db.commit()
         return {
             "config_id": config_id,
             "warnings": validation_result.get("warnings", []),
-            "success": success,
+            "success": True,
         }
 
     # --- Create ---

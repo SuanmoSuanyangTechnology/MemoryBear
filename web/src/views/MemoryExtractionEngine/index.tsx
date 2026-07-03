@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:54:40
+ * @Last Modified time: 2026-07-02 16:12:48
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -61,6 +61,7 @@ const MemoryExtractionEngine: FC = () => {
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
+  const [isDefault, setIsDefault] = useState(true)
 
   useEffect(() => {
     document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
@@ -88,6 +89,7 @@ const MemoryExtractionEngine: FC = () => {
         t_type_strict: Number(response.t_type_strict || 0),
         t_overall: Number(response.t_overall || 0),
       }
+      setIsDefault(response.is_default)
       form.setFieldsValue(initialValues)
     })
   }
@@ -131,7 +133,7 @@ const MemoryExtractionEngine: FC = () => {
 
       <Row gutter={12} className="rb:h-[calc(100%-38px)]!">
         <Col span={12} className="rb:h-full!">
-          <Form form={form} className="rb:h-full!">
+          <Form form={form} disabled={isDefault} className="rb:h-full!">
             <Flex vertical gap={12} className="rb:h-full! rb:overflow-y-auto">
               <div className="rb:bg-white rb:rounded-xl rb:py-2.5 rb:px-4">
                 <Flex
@@ -269,7 +271,7 @@ const MemoryExtractionEngine: FC = () => {
                                   >
                                     {config.control === 'select'
                                       ? <Select
-                                        disabled={config.variableName === 'iteration_period' && iterationPeriodDisabled}
+                                        disabled={isDefault || (config.variableName === 'iteration_period' && iterationPeriodDisabled)}
                                         options={config.options ? config.options.map(item => ({ ...item, label: t(`memoryExtractionEngine.${item.label}`) })) : []}
                                       />
                                       : config.control === 'slider'
@@ -307,6 +309,7 @@ const MemoryExtractionEngine: FC = () => {
           <Result
             loading={loading}
             handleSave={handleSave}
+            disabled={isDefault}
           />
         </Col>
       </Row>

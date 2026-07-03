@@ -15,7 +15,7 @@ from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db
-from app.models import Conversation, Message, User, ModelType
+from app.models import Conversation, Message, MessageFeedback, User, ModelType
 from app.models.conversation_model import ConversationDetail
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
@@ -643,6 +643,106 @@ class ConversationService:
             "limit": limit,
         }
 
+    def list_v1_conversation_feedback(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            external_user_id: str,
+            conversation_id: uuid.UUID,
+            limit: int = 50,
+    ) -> dict:
+        """获取 v1 应用对外服务的会话消息反馈（仅当前用户 feedback_type）。
+
+        供前端渲染消息列表的反馈状态；不含 is_favorite（收藏功能不在范围）。
+        校验/取消息逻辑与 list_v1_conversation_messages 完全一致。
+        """
+        if not external_user_id:
+            raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+        if limit < 1:
+            raise BusinessException("limit 必须大于等于 1", BizCode.INVALID_PARAMETER)
+        if limit > 200:
+            raise BusinessException("limit 超过最大限制", BizCode.INVALID_PARAMETER)
+
+        internal_user_id = self._resolve_v1_internal_user_id(
+            workspace_id=workspace_id,
+            external_user_id=external_user_id,
+        )
+
+        try:
+            conversation = self.conversation_repo.get_conversation_by_conversation_id(conversation_id)
+        except ResourceNotFoundException as e:
+            raise BusinessException("会话不存在", BizCode.NOT_FOUND, cause=e) from e
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话详情失败",
+                extra={"conversation_id": str(conversation_id)}
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        if internal_user_id is None:
+            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+
+        if (
+            conversation.app_id != app_id
+            or conversation.workspace_id != workspace_id
+            or conversation.user_id != internal_user_id
+            or conversation.is_active is not True
+            or conversation.is_draft is not False
+        ):
+            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+
+        try:
+            messages = self.message_repo.get_message_by_conversation_id(
+                conversation_id,
+                limit=limit,
+                current_only=True,
+            )
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话消息失败",
+                extra={"conversation_id": str(conversation_id)}
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        visible = [m for m in messages if m.role != "system"]
+
+        # 单条 IN 查询取当前用户的 feedback_type / feedback_content（防 N+1；不查 is_favorite，无收藏泄漏）
+        feedback_type_map: dict = {}
+        feedback_content_map: dict = {}
+        if visible:
+            rows = (
+                self.db.query(
+                    MessageFeedback.message_id,
+                    MessageFeedback.feedback_type,
+                    MessageFeedback.feedback_content,
+                )
+                .filter(
+                    MessageFeedback.message_id.in_([m.id for m in visible]),
+                    MessageFeedback.user_id == internal_user_id,
+                )
+                .all()
+            )
+            feedback_type_map = {row[0]: row[1] for row in rows}
+            feedback_content_map = {row[0]: row[2] for row in rows}
+
+        items = [
+            {
+                "message_id": m.id,
+                "role": m.role,
+                "feedback_type": feedback_type_map.get(m.id),
+                "feedback_content": feedback_content_map.get(m.id),
+                "created_at": m.created_at,
+            }
+            for m in visible
+        ]
+
+        return {
+            "conversation_id": conversation.id,
+            "items": items,
+            "limit": limit,
+        }
+
     def get_v1_message_suggested_questions(
             self,
             *,
@@ -933,7 +1033,15 @@ class ConversationService:
     ) -> None:
         """删除单条消息（逻辑删除）
 
-        如果消息有多个版本，则一起删除所有版本。
+        若被删消息为 AI 回复，则一并删除同一轮的全部版本（含重新生成的兄弟版本），
+        即每个版本的 is_deleted 均置为 True。
+
+        版本分组以"父用户消息"为锚点：取该 AI 回复所响应的 user 消息（优先用
+        parent_message_id，未回填则向前取同会话内最近一条 user 消息，不论是否已删除），
+        再用其下一条 user 消息界定回复组时间窗，窗内所有 assistant 消息即为同轮全部版本。
+        此方式不依赖 parent_message_id 是否回填，兼容原始版本未回填 parent_message_id
+        的历史数据（试运行 / 普通对话流程的首版 AI 回复未回填，重新生成后会成为孤儿，
+        原 parent_message_id 维度的查询会漏删 v1）。
 
         Args:
             message_id: 消息ID
@@ -951,16 +1059,61 @@ class ConversationService:
         # 删除当前消息
         message.is_deleted = True
 
-        # 如果是 assistant 消息且有 parent_message_id，删除同一 parent 下的所有版本
-        if message.role == "assistant" and message.parent_message_id:
-            sibling_messages = self.db.query(Message).filter(
-                Message.parent_message_id == message.parent_message_id,
-                Message.role == "assistant",
-                Message.is_deleted.is_not(True),
-            ).all()
+        # AI 回复：删除同一轮的全部版本
+        if message.role == "assistant":
+            # 定位该回复所响应的父用户消息（版本分组锚点）
+            parent_user_msg = None
+            if message.parent_message_id:
+                parent_user_msg = self.db.get(Message, message.parent_message_id)
+                # 防御：parent_message_id 指向非 user 消息（脏数据）时回退到按时间查找
+                if parent_user_msg and parent_user_msg.role != "user":
+                    parent_user_msg = None
+            if not parent_user_msg:
+                # 向前取最近一条 user 消息作为父消息（不按 is_deleted 过滤：被删的 user
+                # 消息仍是该 AI 回复实际响应的父消息，跳过它会错锚到更早的 user 消息）
+                parent_user_msg = (
+                    self.db.query(Message)
+                    .filter(
+                        Message.conversation_id == message.conversation_id,
+                        Message.role == "user",
+                        Message.created_at < message.created_at,
+                    )
+                    .order_by(Message.created_at.desc())
+                    .first()
+                )
 
-            for sibling in sibling_messages:
-                sibling.is_deleted = True
+            if parent_user_msg:
+                # 下一条 user 消息界定回复组时间窗上界（不存在则到会话末尾）。
+                # 不按 is_deleted 过滤：被删的 user 消息仍标志下一回复组的起点，
+                # 跳过它会让时间窗越过边界、误删下一回复组的版本。
+                next_user_msg = (
+                    self.db.query(Message)
+                    .filter(
+                        Message.conversation_id == message.conversation_id,
+                        Message.role == "user",
+                        Message.created_at > parent_user_msg.created_at,
+                    )
+                    .order_by(Message.created_at.asc())
+                    .first()
+                )
+
+                # 回复组时间窗内的全部 assistant 消息 = 同一轮的全部版本
+                siblings_query = (
+                    self.db.query(Message)
+                    .filter(
+                        Message.conversation_id == message.conversation_id,
+                        Message.role == "assistant",
+                        Message.created_at > parent_user_msg.created_at,
+                        Message.is_deleted.is_not(True),
+                    )
+                )
+                if next_user_msg:
+                    siblings_query = siblings_query.filter(
+                        Message.created_at < next_user_msg.created_at
+                    )
+
+                for sibling in siblings_query.all():
+                    sibling.is_deleted = True
 
         self.db.commit()
 

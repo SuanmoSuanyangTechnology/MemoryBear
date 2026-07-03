@@ -27,6 +27,8 @@ from app.services.message_feedback_service import FeedbackService
 from app.services.message_report_service import ReportService
 from app.services.conversation_share_service import ConversationShareService
 from app.services.draft_run_service import AgentRunService
+from app.services.app_chat_service import assert_not_opening_statement
+from app.services.app_log_service import AppLogService
 from app.services.app_service import AppService
 from app.services.workflow_service import WorkflowService
 from app.models import ModelConfig
@@ -42,20 +44,80 @@ router = APIRouter(prefix="/apps", tags=["Message Interaction"])
 async def regenerate_message(
         app_id: uuid.UUID,
         message_id: uuid.UUID,
+        payload: app_schema.RegenerateRequest,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
     """重新生成 AI 回复，支持多版本切换
 
-    核心逻辑：
-    - 保持同一上下文、同一前置对话、同一用户提问
-    - 不新增用户消息，只是复用当前会话截止到上一轮的 messages 上下文数组
-    - 再次调用 LLM 生成新回答
+    按应用类型路由：
+    - WORKFLOW：重新执行工作流（仅对话流支持），复用原输入重跑
+    - AGENT / MULTI_AGENT：保持同一上下文、同一前置对话，再次调用 LLM 生成新回答
+    - PURE_WORKFLOW：一次性执行，不支持重新生成
     - 多版本历史保留、可切换回看
     """
     workspace_id = current_user.current_workspace_id
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(app_id)
 
-    # 获取配置
+    # 开场白（无父用户消息）不支持重新生成：必须在 StreamingResponse 之前拒绝，
+    # 否则 SSE 开流后无法回传干净的 HTTP 错误，前端会白屏。
+    assert_not_opening_statement(db, message_id)
+
+    # ---- 工作流分支 ----
+    if app.type == AppType.PURE_WORKFLOW:
+        raise BusinessException(
+            code=BizCode.APP_TYPE_NOT_SUPPORTED,
+            message="纯工作流为一次性执行，不支持重新生成",
+        )
+
+    if app.type == AppType.WORKFLOW:
+        workflow_service = WorkflowService(db)
+        config = workflow_service._resolve_workflow_config(app, workspace_id)
+        # 仅对话流具备多轮对话语义，方可"重新生成某一轮"
+        if not workflow_service._supports_conversation(config):
+            raise BusinessException(
+                code=BizCode.BAD_REQUEST,
+                message="该工作流非对话流，不支持重新生成",
+            )
+
+        # 版本数上限校验：同轮最多 MAX_REGENERATE_VERSIONS 个版本（含原始回复），超限拒绝。
+        # 必须在 StreamingResponse 之前拒绝——流式下 SSE 已开流后无法回传干净的 HTTP 错误。
+        workflow_service._assert_regenerate_quota(message_id)
+
+        if payload.stream:
+            async def event_generator():
+                with get_db_context() as stream_db:
+                    svc = WorkflowService(stream_db)
+                    async for event in svc.regenerate_stream(
+                            message_id=message_id,
+                            app_id=app_id,
+                            config=config,
+                            workspace_id=workspace_id,
+                            user_id=str(current_user.id),
+                            override_variables=payload.variables,
+                    ):
+                        event_type = event.get("event", "message")
+                        event_data = event.get("data", {})
+                        yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers=_SSE_HEADERS,
+            )
+
+        result = await workflow_service.regenerate(
+            message_id=message_id,
+            app_id=app_id,
+            config=config,
+            workspace_id=workspace_id,
+            user_id=str(current_user.id),
+            override_variables=payload.variables,
+        )
+        return success(data=app_schema.WorkflowRegenerateResponse(**result))
+
+    # ---- agent 分支（AGENT / MULTI_AGENT）----
     service = AppService(db)
     agent_cfg = service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
     model_config = None
@@ -66,7 +128,27 @@ async def regenerate_message(
         from app.core.exceptions import ResourceNotFoundException
         raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
 
-    # 调用重新生成服务
+    # 流式返回
+    if payload.stream:
+        async def event_generator():
+            with get_db_context() as stream_db:
+                svc = AgentRunService(stream_db)
+                async for event in svc.regenerate_stream(
+                        message_id=message_id,
+                        agent_config=agent_cfg,
+                        model_config=model_config,
+                        workspace_id=workspace_id,
+                        user_id=str(current_user.id),
+                ):
+                    yield event
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
+
+    # 非流式返回
     draft_service = AgentRunService(db)
     result = await draft_service.regenerate(
         message_id=message_id,
@@ -79,91 +161,11 @@ async def regenerate_message(
     return success(data=app_schema.RegenerateResponse(**result))
 
 
-# ========== 工作流重新生成 ==========
-
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
 }
-
-
-@router.post("/{app_id}/workflow/messages/{message_id}/regenerate", summary="工作流重新生成回复")
-@cur_workspace_access_guard()
-async def regenerate_workflow_message(
-        app_id: uuid.UUID,
-        message_id: uuid.UUID,
-        payload: app_schema.WorkflowRegenerateRequest,
-        db: Session = Depends(get_db),
-        current_user=Depends(get_current_user),
-):
-    """工作流试运行窗口：对某一轮助手回复重新执行工作流，生成新版本（多版本可切换）。
-
-    - 仅 `AppType.WORKFLOW` 且为对话流（workflow_type=workflow）支持；
-      `PURE_WORKFLOW`（一次性执行）与非对话流显式拒绝。
-    - 保持同一会话、同一用户提问、同一前置对话上下文，复用原输入（variables/files/trigger）重跑。
-    - 支持流式与非流式返回。
-    """
-    workspace_id = current_user.current_workspace_id
-    workflow_service = WorkflowService(db)
-
-    # 校验应用类型与配置来源（复用 draft_run 的 is_shared 判定）
-    app_service = AppService(db)
-    app = app_service._get_app_or_404(app_id)
-    if app.type == AppType.PURE_WORKFLOW:
-        raise BusinessException(
-            code=BizCode.APP_TYPE_NOT_SUPPORTED,
-            message="纯工作流为一次性执行，不支持重新生成",
-        )
-    if app.type != AppType.WORKFLOW:
-        raise BusinessException(
-            code=BizCode.APP_TYPE_NOT_SUPPORTED,
-            message="仅工作流应用支持此接口",
-        )
-
-    config = workflow_service._resolve_workflow_config(app, workspace_id)
-    # 仅对话流具备多轮对话语义，方可"重新生成某一轮"
-    if not workflow_service._supports_conversation(config):
-        raise BusinessException(
-            code=BizCode.BAD_REQUEST,
-            message="该工作流非对话流，不支持重新生成",
-        )
-
-    # 版本数上限校验：同轮最多 MAX_REGENERATE_VERSIONS 个版本（含原始回复），超限拒绝。
-    # 必须在 StreamingResponse 之前拒绝——流式下 SSE 已开流后无法回传干净的 HTTP 错误。
-    workflow_service._assert_regenerate_quota(message_id)
-
-    if payload.stream:
-        async def event_generator():
-            with get_db_context() as stream_db:
-                svc = WorkflowService(stream_db)
-                async for event in svc.regenerate_stream(
-                        message_id=message_id,
-                        app_id=app_id,
-                        config=config,
-                        workspace_id=workspace_id,
-                        user_id=str(current_user.id),
-                        override_variables=payload.variables,
-                ):
-                    event_type = event.get("event", "message")
-                    event_data = event.get("data", {})
-                    yield f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers=_SSE_HEADERS,
-        )
-
-    result = await workflow_service.regenerate(
-        message_id=message_id,
-        app_id=app_id,
-        config=config,
-        workspace_id=workspace_id,
-        user_id=str(current_user.id),
-        override_variables=payload.variables,
-    )
-    return success(data=app_schema.WorkflowRegenerateResponse(**result))
 
 
 @router.post("/{app_id}/messages/{message_id}/switch-version/{version}/branch", summary="切换版本并返回该分支完整对话链（含节点明细）")
@@ -189,8 +191,9 @@ async def switch_message_version_with_branch(
     - pending_intervention: { <message_id>: {execution_id, status, interventions} }，
       人工介入信息，结构与日志系统 /public/share 接口一致。
 
-    与 switch-version 的区别：本接口多返回分支链与节点明细，供前端一次调用完成持久化 +
-    重建 chatList；仅需切换、不要分支数据的场景用 switch-version。
+    本接口为版本切换的统一入口，工作流与 agent 应用均走此路径：工作流返回的
+    pending_intervention 含人工介入信息（HITL），agent 应用该字段为 {}（无 HITL）。
+    前端一次调用即可完成版本切换持久化与 chatList 重建。
     """
     workspace_id = current_user.current_workspace_id
 
@@ -220,24 +223,6 @@ async def list_message_versions(
     versions = conv_service.get_message_versions(message_id)
 
     return success(data=[app_schema.MessageVersion(**v) for v in versions])
-
-
-@router.post("/{app_id}/messages/{message_id}/switch-version/{version}", summary="切换消息版本")
-@cur_workspace_access_guard()
-async def switch_message_version(
-        app_id: uuid.UUID,
-        message_id: uuid.UUID,
-        version: int,
-        db: Session = Depends(get_db),
-        current_user=Depends(get_current_user),
-):
-    """切换展示的消息版本"""
-    workspace_id = current_user.current_workspace_id
-
-    conv_service = ConversationService(db)
-    result = conv_service.switch_message_version(message_id, version, workspace_id)
-
-    return success(data=result)
 
 
 # ========== 点赞/点踩 ==========

@@ -55,21 +55,22 @@ class AssistantPruningRecord(BaseModel):
 class AssistantPruningResponse(BaseModel):
     """LLM 对单个 User-Assistant 消息对的剪枝结果。
 
-    - assistant_memory_hint: 从 Assistant 消息中提取的极短辅助摘要，无价值时为 "NULL"
-    - assistant_memory_type: 摘要类型枚举，无价值时为 "NULL"
-    - should_process_user_msg: 是否需要对 User 消息做规整
+    - assistant_memory_hint: 从 Assistant 消息中提取的极短辅助摘要，无价值时为 "NULL"，
+      Assistant 为空时为 null
+    - assistant_memory_type: 摘要类型枚举，无价值时为 "NULL"，Assistant 为空时为 null
+    - should_process_user_msg: 是否需要对 User 消息做规整，User 为空时为 null
     - processed_user_msg: 规整后的 User 消息文本，不需要处理时为 null
     """
 
-    assistant_memory_hint: str = Field(
-        ..., description="从 Assistant 消息提取的记忆摘要，或 'NULL'"
+    assistant_memory_hint: Optional[str] = Field(
+        default=None, description="从 Assistant 消息提取的记忆摘要，或 'NULL'，Assistant 为空时为 null"
     )
-    assistant_memory_type: str = Field(
-        ...,
-        description="comfort | suggestion | recommendation | warning | instruction | NULL",
+    assistant_memory_type: Optional[str] = Field(
+        default=None,
+        description="comfort | suggestion | recommendation | warning | instruction | NULL，Assistant 为空时为 null",
     )
-    should_process_user_msg: bool = Field(
-        default=False, description="是否需要对 User 消息做规整"
+    should_process_user_msg: Optional[bool] = Field(
+        default=None, description="是否需要对 User 消息做规整，User 为空时为 null"
     )
     processed_user_msg: Optional[str] = Field(
         default=None, description="规整后的 User 消息文本，不需要处理时为 null"
@@ -278,14 +279,14 @@ class SemanticPruner:
                 self.pruning_records.append(AssistantPruningRecord(
                     pair_id=uuid4().hex,
                     original_text=asst_msg.msg,
-                    pruned_text=result.assistant_memory_hint,
-                    memory_type=result.assistant_memory_type,
+                    pruned_text=result.assistant_memory_hint or "NULL",
+                    memory_type=result.assistant_memory_type or "NULL",
                     created_at=to_iso_z(utcnow_naive()),
                 ))
 
-                if result.assistant_memory_hint == "NULL":
+                if result.assistant_memory_hint == "NULL" or result.assistant_memory_hint is None:
                     self._log(
-                        f"  [{label}] 索引{asst_idx} → NULL，删除 "
+                        f"  [{label}] 索引{asst_idx} → NULL/None，删除 "
                         f"('{asst_msg.msg[:40]}')"
                     )
                     asst_new_text = None

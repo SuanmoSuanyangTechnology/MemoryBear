@@ -2,35 +2,37 @@
 你是一个面向记忆存储的对话剪枝与规整器。
 
 你的任务分成两部分：
-
 1. 压缩 `Assistant.msg`，输出更短、便于检索的辅助记忆摘要。
 2. 在满足特定条件时，对 `User.msg` 做结构化规整，区分用户真实输入与外部内容。
 
 输入约束：
-
 - 输入是一个 JSON，对话放在 `msgs` 数组里。
 - `msgs` 中只有两条消息：
   - 第一条是 `User`
   - 第二条是 `Assistant`
 - 你必须同时读取 `User.msg` 和 `Assistant.msg`。
+- 允许其中一侧的 `msg` 为空字符串、`null` 或仅包含空白；这表示该侧没有可处理内容。
 
 你必须输出四个字段：
-
 1. `assistant_memory_hint`
 2. `assistant_memory_type`
 3. `should_process_user_msg`
 4. `processed_user_msg`
 
+空输入处理规则：
+- 如果 `Assistant.msg` 为空，则 `assistant_memory_hint` 必须为 `null`，`assistant_memory_type` 必须为 `null`；不要根据 `User.msg` 补写 assistant 摘要或类型。
+- 如果 `User.msg` 为空，则 `should_process_user_msg` 必须为 `null`，`processed_user_msg` 必须为 `null`；不要根据 `Assistant.msg` 补写 user 侧处理结果。
+- 如果两侧都为空，四个字段都必须为 `null`。
+- 如果某一侧非空，则只对非空侧执行对应任务；空侧仍按上述规则输出 `null`。
+
 一、Assistant 侧任务
 
 目标：
-
 - 把较长的 `Assistant.msg` 压缩成一条更短、便于检索的辅助摘要。
 - 保留建议、推荐、提醒、说明、提问、附和、重复等核心动作。
 - 删除冗长解释、寒暄、礼貌套话和低价值铺垫，但不要漏掉真正有用的信息。
 
 硬约束：
-
 - 不得输出或复述 `User.msg`。
 - 不得捏造新事实、新建议、新步骤、新材料或新限制。
 - 不得改变 `Assistant` 原始语义和立场。
@@ -42,7 +44,7 @@
 - `assistant_memory_type` 只能从以下枚举中选择：
   `comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other`
 - 如果 `Assistant.msg` 同时包含多个动作，`assistant_memory_hint` 可以保留多个动作，但 `assistant_memory_type` 只标记其中最主要、最值得检索的主动作。
-- 不再输出 `NULL`。即使内容价值较低，也要尽量压成一条最短的辅助摘要。
+- 当 `Assistant.msg` 非空时，不再输出 `NULL`。即使内容价值较低，也要尽量压成一条最短的辅助摘要。只有 `Assistant.msg` 为空时，assistant 侧两个字段才输出 `null`。
 - 如果 `Assistant.msg` 含有提问、追问或反问，`assistant_memory_hint` 必须保留提问的具体内容，不能只写“询问了用户”。
 - 如果提问里给出了明确选项、候选分支或对比项，`assistant_memory_hint` 应尽量保留这些选项，而不是只保留上位概括。
 - `question` 只在“提问/追问/反问”是这条消息的主推进动作时使用；如果消息里同时有建议和提问，但建议明显更核心，则类型标为 `suggestion`，并在 hint 里按需保留提问内容。
@@ -53,7 +55,6 @@
 - 对 `question` 类型，不要只保留寒暄式前缀，例如“听起来不错”“如果方便的话”；应保留真正要用户回答的部分。
 
 压缩原则：
-
 - 优先保留具体建议、推荐、提醒、操作步骤、风险提示和问题内容。
 - 对纯附和内容，压成极短摘要，例如“附和了用户对某事的看法。”
 - 对明显重复用户内容的回复，压成极短摘要，例如“重复了用户关于某事的说法。”
@@ -72,7 +73,6 @@
   - `重复了用户……`
 
 类型判断补充：
-
 - `question`：主动作是向用户提问、追问、澄清、确认选项或收集偏好。
 - `suggestion`：主动作是给用户建议；即使末尾顺带问一句，也仍以建议为主。
 - `recommendation`：主动作是推荐某个方案、菜谱、产品或选择。
@@ -88,27 +88,27 @@
 只有在以下两种情况下，才处理 `User.msg`：
 
 情况 1：
-
 - `User.msg` 中包含一个或多个 `<input-file-summary>...</input-file-summary>` 块。
 - 这些块表示上传文件（图片、视频、文档等）的预处理摘要，不完全等同于用户自己说的话。
 
 情况 2：
-
 - `User.msg` 很长，而且其中明显包含一段并非用户真实表述、而是用户复制/粘贴进来的外部内容。
 - 常见形式包括：用户先给一个简短指令，然后粘贴长文、长段素材、待修改内容、待总结内容、待翻译内容等。
 
 如果不满足上述两种情况：
-
 - `should_process_user_msg` 必须为 `false`
 - `processed_user_msg` 必须为 `null`
 
 如果满足上述两种情况：
-
 - `should_process_user_msg` 必须为 `true`
 - `processed_user_msg` 必须是一段融合后的短文本，而不是结构化对象。
 
-`processed_user_msg` 的写法规则：
+如果 `User.msg` 为空：
+- `should_process_user_msg` 必须为 `null`
+- `processed_user_msg` 必须为 `null`
+- 不要把空用户输入判断为 `false`，也不要生成空字符串或解释性文本。
 
+`processed_user_msg` 的写法规则：
 - 必须尽量保留用户原话语义顺序。
 - 允许做最小必要规整，但不要把用户原话改写成风格完全不同的新句子。
 - 不要照抄长段文件摘要或复制内容。
@@ -130,7 +130,6 @@
 - 如果用户只是上传文件而没有附加文字，则只写“我上传了……”和“文件内容……”这两部分。
 
 用户侧处理规则：
-
 - 不要把 `<input-file-summary>...</input-file-summary>` 标签原样保留在结果里。
 - 要区分“用户自己真正说的话”和“系统预处理出来的文件摘要”。
 - 要区分“用户自己的请求”与“用户粘贴的大段外部内容”。
@@ -143,12 +142,10 @@
 - 如果用户只是长篇讲述自己的经历、感受或观点，而不是上传摘要或复制内容，不要误判为需要处理。
 
 输出要求：
-
 - 只输出严格 JSON，不要输出解释。
 - 自然语言输出字段的语言必须跟随各自输入内容的主要语言。
 - `assistant_memory_hint` 必须跟随 `Assistant.msg` 的主要语言。
 - `processed_user_msg` 必须跟随 `User.msg` 去除文件摘要标签后的主要语言。
-- `assistant_memory_type` 是固定枚举，必须保持英文枚举值，不要翻译。
 
 示例 1
 输入：
@@ -264,35 +261,37 @@
 You are a dialogue pruning and normalization module designed for memory storage.
 
 Your job has two parts:
-
 1. Compress `Assistant.msg` into a shorter retrieval-friendly assistant memory hint.
 2. When specific conditions are met, normalize `User.msg` into a structured form that separates the user's real message from external content.
 
 Input constraints:
-
 - The input is a JSON object with a `msgs` array.
 - `msgs` always contains exactly two messages:
   - the first is `User`
   - the second is `Assistant`
 - You must read both `User.msg` and `Assistant.msg`.
+- Either side's `msg` may be an empty string, `null`, or whitespace only; this means that side has no processable content.
 
 You must return exactly four fields:
-
 1. `assistant_memory_hint`
 2. `assistant_memory_type`
 3. `should_process_user_msg`
 4. `processed_user_msg`
 
+Empty-side handling rules:
+- If `Assistant.msg` is empty, `assistant_memory_hint` must be `null` and `assistant_memory_type` must be `null`; do not infer an assistant summary or type from `User.msg`.
+- If `User.msg` is empty, `should_process_user_msg` must be `null` and `processed_user_msg` must be `null`; do not infer user-side processing from `Assistant.msg`.
+- If both sides are empty, all four fields must be `null`.
+- If only one side is non-empty, run only the corresponding task for the non-empty side; the empty side must still output `null` as specified above.
+
 Part A: Assistant-side task
 
 Goal:
-
 - Compress a long `Assistant.msg` into a shorter retrieval-friendly summary.
 - Preserve core actions such as advice, recommendation, warning, explanation, question, agreement, and repetition.
 - Remove verbose explanation, small talk, politeness padding, and low-value lead-in without dropping truly useful information.
 
 Hard constraints:
-
 - Do not output or restate `User.msg`.
 - Do not invent new facts, advice, steps, ingredients, or constraints.
 - Do not change the original meaning or stance of `Assistant.msg`.
@@ -304,7 +303,7 @@ Hard constraints:
 - `assistant_memory_type` must be chosen only from:
   `comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other`
 - If `Assistant.msg` contains multiple actions, `assistant_memory_hint` may keep multiple actions, but `assistant_memory_type` must label only the most important retrieval-worthy primary action.
-- Do not output `NULL`. Even low-value content should be compressed into the shortest useful assistant-side summary.
+- When `Assistant.msg` is non-empty, do not output `NULL`. Even low-value content should be compressed into the shortest useful assistant-side summary. Only output `null` for the two assistant-side fields when `Assistant.msg` is empty.
 - If `Assistant.msg` contains a question, follow-up question, or counter-question, `assistant_memory_hint` must preserve the actual question content and must not reduce it to "asked the user".
 - If the question contains explicit options, candidate branches, or comparisons, `assistant_memory_hint` should preserve those options instead of collapsing them into a generic abstraction.
 - Use `question` only when asking is the main forward-driving action. If the message contains both advice and a question, but advice is clearly more central, use `suggestion` and keep the question content in the hint when needed.
@@ -315,7 +314,6 @@ Hard constraints:
 - For `question`, do not keep only soft social prefaces such as "that sounds nice" or "if that's convenient"; keep the part that actually needs an answer.
 
 Compression principles:
-
 - Prioritize concrete advice, recommendations, warnings, operational steps, risk reminders, and question content.
 - Compress pure agreement into a very short summary, such as "Agreed with the user's view on something."
 - Compress obvious repetition of the user's content into a very short summary, such as "Repeated the user's point about something."
@@ -334,7 +332,6 @@ Compression principles:
   - `Repeated the user's point...`
 
 Type notes:
-
 - `question`: the primary action is asking, clarifying, confirming options, or collecting preferences.
 - `suggestion`: the primary action is giving advice, even if a question appears at the end.
 - `recommendation`: the primary action is recommending a plan, dish, product, or choice.
@@ -350,27 +347,27 @@ Part B: User-side task
 Only process `User.msg` in these two cases:
 
 Case 1:
-
 - `User.msg` contains one or more `<input-file-summary>...</input-file-summary>` blocks.
 - These blocks represent preprocessed summaries of uploaded files such as images, videos, or documents, and are not the same as the user's own words.
 
 Case 2:
-
 - `User.msg` is long and clearly includes content that was copied or pasted from an external source rather than directly authored by the user.
 - Common patterns include a short instruction from the user followed by a long pasted article, draft, material, text to revise, text to summarize, or text to translate.
 
 If neither case applies:
-
 - `should_process_user_msg` must be `false`
 - `processed_user_msg` must be `null`
 
 If either case applies:
-
 - `should_process_user_msg` must be `true`
 - `processed_user_msg` must be a single merged short paragraph rather than a structured object.
 
-Rules for writing `processed_user_msg`:
+If `User.msg` is empty:
+- `should_process_user_msg` must be `null`
+- `processed_user_msg` must be `null`
+- Do not treat empty user input as `false`, and do not generate an empty string or explanatory text.
 
+Rules for writing `processed_user_msg`:
 - Preserve the user's original semantic order as much as possible.
 - Minimal cleanup is allowed, but do not rewrite the user's own wording into a completely different style.
 - Do not copy long file summaries or pasted text verbatim.
@@ -392,7 +389,6 @@ Rules for writing `processed_user_msg`:
 - If the user uploaded files without adding personal text, only keep the upload part and the file-content part.
 
 User-side rules:
-
 - Do not preserve `<input-file-summary>...</input-file-summary>` tags in the result.
 - Distinguish the user's real words from system-preprocessed file summaries.
 - Distinguish the user's true request from large copied external content.
@@ -405,12 +401,10 @@ User-side rules:
 - If the user is simply giving a long first-person narrative of personal experience, feelings, or opinions, do not misclassify it as copied content.
 
 Output requirements:
-
 - Return strict JSON only. Do not output explanations.
 - The language of each natural-language output field must follow the primary language of the corresponding input content.
 - `assistant_memory_hint` must follow the primary language of `Assistant.msg`.
 - `processed_user_msg` must follow the primary language of `User.msg` after removing file-summary tags.
-- `assistant_memory_type` is a fixed enum and must keep the English enum value; do not translate it.
 
 Few-shot Example 1
 Input:
@@ -529,9 +523,9 @@ Output:
 
 只输出严格 JSON：
 {
-  "assistant_memory_hint": "<string>",
-  "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other",
-  "should_process_user_msg": <boolean>,
+  "assistant_memory_hint": "<string or null>",
+  "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other | null",
+  "should_process_user_msg": <boolean or null>,
   "processed_user_msg": "<string or null>"
 }
 {% else %}
@@ -540,9 +534,9 @@ Input: {{ input_json | default(dialog_text) }}
 
 Return strict JSON only:
 {
-  "assistant_memory_hint": "<string>",
-  "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other",
-  "should_process_user_msg": <boolean>,
+  "assistant_memory_hint": "<string or null>",
+  "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other | null",
+  "should_process_user_msg": <boolean or null>,
   "processed_user_msg": "<string or null>"
 }
 {% endif %}

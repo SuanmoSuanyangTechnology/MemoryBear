@@ -125,7 +125,8 @@ async def validate_active_config_models(
         config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
     except BusinessException:
         from app.i18n.service import t
-        return success(data={"valid": False, "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
+        return success(data={"valid": False,
+                             "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
 
     result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
     return success(data=result)
@@ -239,7 +240,7 @@ async def start_reflection_configs(
             "reflection_model_id": result.reflection_model_id,
             "memory_verify": result.memory_verify,
             "quality_assessment": result.quality_assessment,
-            "is_default": result.is_default
+            "is_default": bool(result.is_default)
         }
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
         return success(data=reflection_config, msg="反思配置查询成功")
@@ -497,7 +498,6 @@ async def save_reflection_config(
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除记忆配置（按配置ID）
 def delete_config(
         config_id: UUID | int,
-        force: bool = Query(False, description="是否强制删除（即使有终端用户正在使用）"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ) -> dict:
@@ -517,14 +517,14 @@ def delete_config(
 
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: "
-        f"config_id={config_id}, force={force}"
+        f"config_id={config_id}"
     )
 
     try:
         from app.services.memory_config_service import MemoryConfigService
 
         config_service = MemoryConfigService(db)
-        result = config_service.delete_config(config_id=config_id, force=force)
+        result = config_service.delete_config(config_id=config_id, workspace_id=workspace_id)
 
         if result["status"] == "error":
             api_logger.warning(
@@ -538,25 +538,20 @@ def delete_config(
 
         if result["status"] == "warning":
             api_logger.warning(
-                f"记忆配置正在使用，无法删除: config_id={config_id}, "
-                f"connected_count={result['connected_count']}"
+                f"记忆配置正在使用，无法删除: config_id={config_id}"
             )
             return fail(
                 code=BizCode.RESOURCE_IN_USE,
                 msg=result["message"],
-                data={
-                    "connected_count": result["connected_count"],
-                    "force_required": result["force_required"]
-                }
+                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
             )
 
         api_logger.info(
-            f"记忆配置删除成功: config_id={config_id}, "
-            f"affected_users={result['affected_users']}"
+            f"记忆配置删除成功: config_id={config_id}"
         )
         return success(
             msg=result["message"],
-            data={"affected_users": result["affected_users"]}
+            data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
         )
 
     except Exception as e:

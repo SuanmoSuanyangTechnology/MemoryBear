@@ -55,6 +55,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
     canRedo,
     undo,
     redo,
+    activeMemoryConfig,
   } = useWorkflowGraph({ containerRef, miniMapRef, setRunOpen });
 
 
@@ -174,6 +175,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
           nodeClick={nodeClick}
           appType={appType}
           refreshCache={refreshCache}
+          activeMemoryConfig={activeMemoryConfig}
         />
       }
       <Chat

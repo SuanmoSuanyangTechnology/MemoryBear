@@ -2,10 +2,16 @@
 MemoryWriteDispatcher — 记忆写入派发层
 
 职责：
-- 统一各入口点（API Service、Agent、Workflow、Flush）向 write_message_task 的派发逻辑
+- 统一各入口点（API Service、Agent、Workflow、MCP、Flush）向 write_message_task 的派发逻辑
 - 管理 memory_messages 表的消息写入
-- 处理 Redis pending 集合和活跃 key
-- 判断滑动窗口条件是否满足
+- 处理 Redis pending 集合和活跃 key（仅 agent/workflow 路径）
+- 判断滑动窗口条件是否满足（仅 agent/workflow 路径）
+
+写入路径分成两组：
+1. **agent / workflow**：走 conversation_id 通道，产生 conversation 行，
+   有 write_cursor、滑动窗口、Redis pending 集合、Flush 兜底。
+2. **service_api / mcp**：无 conversation，写 memory_messages 时 conversation_id=NULL，
+   用 (end_user_id, source) 作为分组键，写入后立即逐条派发任务。
 
 各入口点保持原位置，通过本模块的函数进行统一派发。
 """
@@ -13,8 +19,9 @@ MemoryWriteDispatcher — 记忆写入派发层
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, List
+from typing import Any, List, Optional
 
+from app.core.memory.enums import MemoryMessageSource
 from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
 
@@ -25,7 +32,7 @@ WINDOW_SIZE = 3
 
 
 # ──────────────────────────────────────────────
-# Redis 活跃 key 管理
+# Redis 活跃 key 管理（仅 agent/workflow 路径使用）
 # ──────────────────────────────────────────────
 
 CONV_ACTIVE_KEY_PREFIX = "conv_active:"
@@ -104,115 +111,6 @@ def verify_unmark_safe(conversation_id: str) -> bool:
 
 
 # ──────────────────────────────────────────────
-# Conversation 管理
-# ──────────────────────────────────────────────
-
-# 全局哨兵 App ID（Service API 虚拟会话专用）
-SENTINEL_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-_sentinel_app_verified: bool = False
-
-
-def _ensure_sentinel_app_exists() -> None:
-    """确保哨兵 App 在 apps 表中存在。"""
-    global _sentinel_app_verified
-    if _sentinel_app_verified:
-        return
-
-    from app.models.app_model import App
-
-    try:
-        with get_db_context() as db:
-            existing = db.get(App, SENTINEL_APP_ID)
-            if existing is not None:
-                _sentinel_app_verified = True
-                return
-
-            sentinel = App(
-                id=SENTINEL_APP_ID,
-                workspace_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
-                created_by=uuid.UUID("00000000-0000-0000-0000-000000000000"),
-                name="__system_memory_service__",
-                type="agent",
-                visibility="private",
-                status="active",
-                is_active=True,
-            )
-            db.add(sentinel)
-            db.commit()
-            _sentinel_app_verified = True
-    except Exception:
-        _sentinel_app_verified = True
-
-
-def get_or_create_service_api_conversation(
-    workspace_id: str,
-    end_user_id: str,
-) -> str:
-    """按 (workspace_id, end_user_id, app_id=SENTINEL) 查找或创建虚拟会话。"""
-    from app.models.conversation_model import Conversation
-
-    _ensure_sentinel_app_exists()
-
-    try:
-        _ws_id = uuid.UUID(workspace_id)
-    except (ValueError, AttributeError) as e:
-        raise ValueError(f"workspace_id 格式非法: {workspace_id!r}") from e
-
-    with get_db_context() as db:
-        conv = (
-            db.query(Conversation)
-            .filter(
-                Conversation.workspace_id == _ws_id,
-                Conversation.app_id == SENTINEL_APP_ID,
-                Conversation.user_id == end_user_id,
-            )
-            .first()
-        )
-
-        if conv:
-            return str(conv.id)
-
-        conv = Conversation(
-            id=uuid.uuid4(),
-            app_id=SENTINEL_APP_ID,
-            workspace_id=_ws_id,
-            user_id=end_user_id,
-            is_draft=True,
-            write_cursor=0,
-        )
-        db.add(conv)
-        db.commit()
-        return str(conv.id)
-
-
-async def ensure_conversation_exists(
-    conversation_id: str,
-    workspace_id: str = "",
-) -> None:
-    """确保 conversations 表中存在该记录。"""
-    from app.models.conversation_model import Conversation
-
-    try:
-        with get_db_context() as db:
-            existing = db.get(Conversation, uuid.UUID(conversation_id))
-            if existing is not None:
-                return
-
-            _ws_id = uuid.UUID(workspace_id) if workspace_id else uuid.UUID("00000000-0000-0000-0000-000000000000")
-
-            conv = Conversation(
-                id=uuid.UUID(conversation_id),
-                app_id=SENTINEL_APP_ID,
-                workspace_id=_ws_id,
-                is_draft=True,
-            )
-            db.add(conv)
-            db.commit()
-    except Exception as e:
-        logger.warning(f"[Dispatcher] ensure_conversation_exists 失败: conv={conversation_id}, err={e}")
-
-
-# ──────────────────────────────────────────────
 # 派发函数：各入口点使用
 # ──────────────────────────────────────────────
 
@@ -226,10 +124,13 @@ def push_write_task(
     conversation_id: str,
     message_seq: int,
     language: str = "zh",
+    skip_cursor_advance: bool = False,
+    source: str = "",
 ) -> str:
     """推送单条消息写入任务到 Celery。
 
-    所有入口最终都通过这个函数派发任务。
+    所有入口最终都通过这个函数派发任务。conversation_id 允许为空字符串
+    （API/MCP 场景），下游 WritePipeline 已容忍空 conversation_id。
 
     Args:
         end_user_id: 终端用户 ID（分片键）
@@ -238,9 +139,11 @@ def push_write_task(
         context_after: 下文消息列表
         config_id: 记忆配置 ID
         workspace_id: 工作空间 ID
-        conversation_id: 对话 ID
+        conversation_id: 对话 ID；API/MCP 场景传空字符串
         message_seq: 消息序号
         language: 语言
+        skip_cursor_advance: 是否跳过 cursor 推进（API/MCP 场景为 True）
+        source: 写入来源（agent/service_api/mcp/workflow）
 
     Returns:
         任务 msg_id
@@ -260,15 +163,17 @@ def push_write_task(
             "context_after": context_after,
             "config_id": config_id,
             "workspace_id": workspace_id,
-            "conversation_id": conversation_id,
+            "conversation_id": conversation_id or "",
             "message_seq": message_seq,
             "language": language,
             "dispatch_at": dispatch_at,
+            "skip_cursor_advance": skip_cursor_advance,
+            "source": source,
         },
     )
     logger.info(
         f"[Dispatcher] 写入任务已推送: end_user={end_user_id}, "
-        f"conv={conversation_id}, seq={message_seq}, msg_id={msg_id}"
+        f"conv={conversation_id or '-'}, seq={message_seq}, msg_id={msg_id}"
     )
     return msg_id
 
@@ -334,59 +239,53 @@ async def dispatch_api_service_async(
     workspace_id: str,
     language: str = "zh",
 ) -> List[str]:
-    """API Service 异步写入入口。
+    """API Service 异步写入入口（仅写 memory_messages，无 conversation）。
 
-    1. 获取/创建虚拟 conversation
-    2. 批量写入 memory_messages 表
-    3. 逐条派发 user 消息的写入任务
+    流程（对应设计文档 §3.5）：
+    1. 批量写入 memory_messages 表（conversation_id=NULL, source=service_api）
+    2. 逐条对 user 消息派发 WritePipeline 任务，邻近 assistant 消息作为上下文
+
+    API 写入的 role 不确定——可能 user 连续、assistant 连续、也可能交替。
+    此处为每条 user 消息构建滑动窗口上下文（向前/后各找 WINDOW_SIZE 个 user 消息
+    范围内的所有消息，包含中间穿插的 assistant），确保 WritePipeline 能获取充分信息。
 
     Returns:
         派发的任务 ID 列表
     """
-    # 1. 获取/创建虚拟 conversation
-    conversation_id = get_or_create_service_api_conversation(
-        workspace_id=workspace_id,
-        end_user_id=end_user_id,
-    )
-
-    # 2. 批量写入 memory_messages 表
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        written_mms = repo.write_batch(conversation_id, messages)
+        written_mms = repo.write_batch(
+            conversation_id=None,
+            messages=messages,
+            end_user_id=end_user_id,
+            source=MemoryMessageSource.SERVICE_API,
+        )
         db.commit()
 
     if not written_mms:
         return []
 
-    # 3. 预计算上下文窗口并逐条派发
-    task_ids = []
+    # 预计算上下文窗口：找出所有 user 消息索引，为每条 user 构建 context_before/after
+    task_ids: List[str] = []
     user_indices = [i for i, m in enumerate(written_mms) if m["role"] == "user"]
-
-    # 先推进 cursor 到 max_seq，防止 flush 路径在 push_write_task 期间扫到这批消息重复派发
-    max_seq = max(mm["message_seq"] for mm in written_mms)
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        repo.advance_write_cursor(conversation_id, max_seq)
-        db.commit()
 
     for p, idx in enumerate(user_indices):
         msg = written_mms[idx]
 
-        # 上文：向前找最多 WINDOW_SIZE 个 user
+        # 上文：向前找最多 WINDOW_SIZE 个 user 消息，取最早那个的位置作为起点
         before_user_p = max(0, p - WINDOW_SIZE)
         before_start = user_indices[before_user_p]
         context_before = written_mms[before_start:idx]
 
-        # 下文：向后找最多 WINDOW_SIZE 个 user
+        # 下文：向后找最多 WINDOW_SIZE 个 user 消息，取最晚那个的下一位作为终点
         after_user_p = min(len(user_indices) - 1, p + WINDOW_SIZE)
         if after_user_p == p:
-            # 当前是最后一条 user 消息，context_after 取到列表末尾（包含尾部 assistant 消息）
+            # 当前是最后一条 user（或窗口内没有更后面的 user），取到列表末尾
             context_after = written_mms[idx + 1:]
         else:
             after_end = user_indices[after_user_p] + 1
             context_after = written_mms[idx + 1:after_end]
 
-        # 派发任务
         msg_id = push_write_task(
             end_user_id=end_user_id,
             target_message=msg,
@@ -394,9 +293,11 @@ async def dispatch_api_service_async(
             context_after=context_after,
             config_id=config_id,
             workspace_id=workspace_id,
-            conversation_id=conversation_id,
+            conversation_id="",  # API 场景无 conversation
             message_seq=msg["message_seq"],
             language=language,
+            skip_cursor_advance=True,
+            source=MemoryMessageSource.SERVICE_API.value,
         )
         task_ids.append(msg_id)
 
@@ -404,7 +305,7 @@ async def dispatch_api_service_async(
 
 
 # ──────────────────────────────────────────────
-# 入口2: Agent 消息摄入
+# 入口2: Agent 消息摄入（走 conversation_id 通道）
 # ──────────────────────────────────────────────
 
 
@@ -432,7 +333,7 @@ async def ingest_agent_message(
         files = message.meta_data.get("files")
 
     # Agent 路径：用 message.created_at 作为 dialog_at，语义上是对话真实发生的时间
-    dialog_at: str | None = None
+    dialog_at: Optional[str] = None
     if hasattr(message, "created_at") and message.created_at:
         _created = message.created_at
         if isinstance(_created, datetime):
@@ -443,17 +344,21 @@ async def ingest_agent_message(
 
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        memory_msg = repo.write_single(
+        written = repo.write_batch(
             conversation_id=str(conversation_id),
-            original_message_id=message.id,
-            role=message.role,
-            content=message.content,
-            created_at=message.created_at,
-            should_memorize=should_memorize,
-            files=files,
-            dialog_at=dialog_at,
+            messages=[{
+                "role": message.role,
+                "content": message.content,
+                "original_message_id": message.id,
+                "created_at": message.created_at,
+                "should_memorize": should_memorize,
+                "files": files,
+                "dialog_at": dialog_at,
+            }],
+            end_user_id=end_user_id,
+            source=MemoryMessageSource.AGENT,
         )
-        if memory_msg is None:
+        if not written:
             return False
         db.commit()
 
@@ -483,13 +388,21 @@ async def ingest_workflow_messages(
     workspace_id: str,
     language: str = "zh",
 ) -> None:
-    """Workflow 消息摄入：批量写入 memory_messages 表 + 触发滑动窗口派发。"""
+    """Workflow 消息摄入：批量写入 memory_messages 表 + 触发滑动窗口派发。
 
-    await ensure_conversation_exists(conversation_id, workspace_id)
-
+    MemoryWriteNode 仅存在于对话流 workflow 中，执行前已由 create_or_get_conversation
+    在 conversations 表创建真实会话，sys.conversation_id 始终有效（与 MemoryReadNode
+    的假设一致）。pure_workflow（策略工作流）没有记忆存储节点、无会话，不会走到这里。
+    因此直接走 conversation 通道，无需空值守卫或哨兵兜底。
+    """
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        repo.write_batch(conversation_id, messages)
+        repo.write_batch(
+            conversation_id=conversation_id,
+            messages=messages,
+            end_user_id=end_user_id,
+            source=MemoryMessageSource.WORKFLOW,
+        )
         db.commit()
 
     await refresh_active_key(conversation_id)
@@ -505,55 +418,45 @@ async def ingest_workflow_messages(
 
 
 # ──────────────────────────────────────────────
-# 入口4: Flush 兜底任务
+# 入口4: Flush 兜底任务（仅服务 agent/workflow 路径）
 #
-# 调用链路：
-#   dispatch_flush_conversation (扫描待处理消息)
-#     ├── _resolve_workspace_memory_config_id (按工作空间解析当前生效配置)
-#     └── dispatch_single_message [write_dispatcher] (构建上下文 + push_write_task + 推进 cursor)
-#           └── push_write_task (发 Celery 任务)
+# API/MCP 消息 conversation_id=NULL，JOIN conversations 天然扫不到，
+# 无需 flush 兜底；本函数只处理 agent/workflow 的未派发消息。
 # ──────────────────────────────────────────────
 
 
-def _resolve_workspace_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
-    """根据对话所属工作空间解析当前生效的记忆配置 ID。"""
+def _resolve_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
+    """从 conversation 所属 workspace 获取默认记忆配置 ID。
+
+    查询链路：conversations.workspace_id → get_workspace_memory_config_id(workspace_id)
+    与滑动窗口路径（conversation_service → MemoryConfigService.get_workspace_active_config_id）
+    使用同一个底层函数，确保同一会话的所有消息使用相同的记忆配置。
+    """
     try:
         from sqlalchemy import select as sa_select
         from app.models.conversation_model import Conversation
-        from app.services.memory_config_service import MemoryConfigService
+        from app.repositories.workspace_repository import get_workspace_memory_config_id
 
         with get_db_context() as db:
-            row = db.execute(
-                sa_select(
-                    Conversation.workspace_id,
-                )
-                .select_from(Conversation)
+            workspace_id = db.execute(
+                sa_select(Conversation.workspace_id)
                 .where(Conversation.id == conversation_id)
-            ).one_or_none()
+            ).scalar_one_or_none()
 
-            if row is None:
+            if workspace_id is None:
                 return None
 
-            (workspace_id,) = row
-            if not workspace_id:
-                return None
-
-            return MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
+            return get_workspace_memory_config_id(db, workspace_id)
     except Exception as e:
-        logger.error(f"[Dispatcher] 解析工作空间记忆配置异常: conv={conversation_id}, err={e}", exc_info=True)
+        logger.error(f"[Dispatcher] 解析 workspace memory_config 异常: conv={conversation_id}, err={e}", exc_info=True)
         return None
 
 
 def dispatch_flush_conversation(conversation_id: str) -> int:
     """Flush 兜底任务派发：处理单个对话的所有未写入消息。
 
+    仅服务 agent/workflow 路径。API/MCP 消息 conversation_id=NULL 不会被扫到。
     只派发 role=user + should_memorize=TRUE 的消息，其余直接推进 cursor。
-
-    Args:
-        conversation_id: 对话 ID
-
-    Returns:
-        派发的任务数
     """
     from sqlalchemy import select as sa_select
     from app.models.conversation_model import Conversation
@@ -602,16 +505,16 @@ def dispatch_flush_conversation(conversation_id: str) -> int:
                 logger.info(f"[Dispatcher] Flush 无未写入消息，跳过: conv={conversation_id}")
                 return 0
 
-        # Step 2: 解析工作空间当前生效记忆配置
-        workspace_config_id = _resolve_workspace_memory_config_id(conversation_id)
-        if not workspace_config_id:
-            logger.warning(f"[Dispatcher] Flush 未能解析工作空间记忆配置，跳过: conv={conversation_id}")
+        # Step 2: 解析 memory_config_id（走 workspace 默认配置，与滑动窗口路径一致）
+        config_id_resolved = _resolve_memory_config_id(conversation_id)
+        if not config_id_resolved:
+            logger.warning(f"[Dispatcher] Flush 未能解析 memory_config_id，跳过: conv={conversation_id}")
             return 0
-        config_id = str(workspace_config_id)
+        config_id = str(config_id_resolved)
 
         # Step 3: 逐条处理
         dispatched = 0
-        skipped_non_user = 0 # 统计在 Flush 流程中因角色不是 user 或 should_memorize=False 而被跳过（只推进游标、不派发写入任务）的消息数量
+        skipped_non_user = 0  # 因角色不是 user 或 should_memorize=False 被跳过（只推进游标）
         for msg in pending_messages:
             target_seq = msg["message_seq"]
 
@@ -658,7 +561,7 @@ async def check_sliding_window_and_dispatch(
     workspace_id: str,
     language: str = "zh",
 ) -> None:
-    """滑动窗口条件检查 + 派发。
+    """滑动窗口条件检查 + 派发（agent/workflow 路径）。
 
     检查 pending user 消息下文是否 ≥ WINDOW_SIZE，满足则构建上下文并 push_write_task。
     一次只派发一条。
@@ -731,6 +634,7 @@ async def check_sliding_window_and_dispatch(
             conversation_id=conversation_id,
             message_seq=target_seq,
             language=language,
+            source=MemoryMessageSource.AGENT.value,
         )
 
         # 一次只派发一条
@@ -744,11 +648,7 @@ def dispatch_single_message(
     config_id: str,
     workspace_id: str,
 ) -> bool:
-    """为单条 user 消息构建上下文并派发写入任务（Flush 路径使用）。
-
-    Returns:
-        True 表示成功派发，False 表示消息不存在
-    """
+    """为单条 user 消息构建上下文并派发写入任务（Flush 路径使用）。"""
     from app.repositories.memory_message_repository import message_to_dict
 
     with get_db_context() as db:
@@ -782,13 +682,14 @@ def dispatch_single_message(
         workspace_id=workspace_id,
         conversation_id=conversation_id,
         message_seq=target_seq,
+        source=MemoryMessageSource.AGENT.value,
     )
 
     return True
 
 
 # ──────────────────────────────────────────────
-# 入口5: MCP 写入
+# 入口5: MCP 写入（无 conversation，直接派发）
 # ──────────────────────────────────────────────
 
 
@@ -802,11 +703,9 @@ async def dispatch_mcp_write(
     """MCP 写入入口。
 
     MCP 每次仅写入单条 user message，不需要上下文窗口。
-    流程：
-    1. 获取/创建虚拟 conversation（复用哨兵 App）
-    2. 写入 memory_messages 表
-    3. 立即推进 write_cursor
-    4. 直接派发写入任务（context_before=[], context_after=[]）
+    流程（对应设计文档 §3.5）：
+    1. 写入 memory_messages 表（conversation_id=NULL, source=mcp, end_user_id=X）
+    2. 直接派发写入任务（context_before=[], context_after=[]）
 
     Args:
         message: 用户消息内容
@@ -818,42 +717,39 @@ async def dispatch_mcp_write(
     Returns:
         派发的任务 msg_id
     """
-    # 1. 获取/创建虚拟 conversation
-    conversation_id = get_or_create_service_api_conversation(
-        workspace_id=workspace_id,
-        end_user_id=end_user_id,
-    )
-
-    # 2. 写入 memory_messages 表
-    messages = [{"role": "user", "content": message, "dialog_at": dialog_at}]
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        written_mms = repo.write_batch(conversation_id, messages)
+        written = repo.write_batch(
+            conversation_id=None,
+            messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+            end_user_id=end_user_id,
+            source=MemoryMessageSource.MCP,
+        )
         db.commit()
 
-    target_msg = written_mms[0]
+    if not written:
+        return ""
+
+    target_msg = written[0]
     target_seq = target_msg["message_seq"]
 
-    # 3. 推进 write_cursor
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        repo.advance_write_cursor(conversation_id, target_seq)
-        db.commit()
-
-    # 4. 直接派发写入任务（无上下文）
+    # 在 target_message 上添加标记，告知 WritePipeline 需要追加空 assistant 配对
+    target_msg_with_marker = {**target_msg, "_mcp_pair_assistant": True}
     msg_id = push_write_task(
         end_user_id=end_user_id,
-        target_message=target_msg,
+        target_message=target_msg_with_marker,
         context_before=[],
         context_after=[],
-        config_id=config_id,
+        config_id=str(config_id),
         workspace_id=workspace_id,
-        conversation_id=conversation_id,
+        conversation_id="",  # MCP 无 conversation
         message_seq=target_seq,
+        skip_cursor_advance=True,
+        source=MemoryMessageSource.MCP.value,
     )
 
     logger.info(
         f"[Dispatcher] MCP 写入任务已推送: end_user={end_user_id}, "
-        f"conv={conversation_id}, seq={target_seq}, msg_id={msg_id}"
+        f"source=mcp, seq={target_seq}, msg_id={msg_id}"
     )
     return msg_id
