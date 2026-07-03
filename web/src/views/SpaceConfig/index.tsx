@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-03 21:17:09
+ * @Last Modified time: 2026-07-03 21:32:20
  */
 /**
  * Space Configuration Page
@@ -31,6 +31,7 @@ const multimodalModelFields: { name: string; label: string; capability: Capabili
   { name: 'audio', label: 'audioModel', capability: 'audio' },
   { name: 'video', label: 'videoModel', capability: 'video' },
 ]
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 const SpaceConfig: FC = () => {
   const { t } = useTranslation();
@@ -43,6 +44,9 @@ const SpaceConfig: FC = () => {
 
   const [defaultModels, setDefaultModels] = useState<Record<string, ModelListItem>>({})
   const handleGetDefaultModels = () => {
+    if (!isSaas) {
+      return
+    }
     getDefaultWorkspaceModel().then(res => {
       setDefaultModels((res || {}) as Record<string, ModelListItem>)
     })
@@ -59,7 +63,7 @@ const SpaceConfig: FC = () => {
     getWorkspaceModels().then((res) => {
       const { is_default_config, llm, embedding, rerank, vision, audio, video } = res as SpaceConfigData
       form.setFieldsValue({
-        is_default_config: is_default_config ? '1' : '0',
+        is_default_config: is_default_config && isSaas ? '1' : '0',
         llm,
         embedding,
         rerank,
@@ -80,13 +84,14 @@ const SpaceConfig: FC = () => {
     form
       .validateFields()
       .then(({ is_default_config, ...rest }: SpaceConfigData) => {
-        if (is_default_config === '1') {
+        const isDefaultConfig = is_default_config === '1' && isSaas && Object.keys(defaultModels).length > 0
+        if (isDefaultConfig) {
           [...baseModelFields, ...multimodalModelFields].map(field => {
             (rest as Record<string, any>)[field.name] = undefined
           })
         }
         setLoading(true)
-        updateWorkspaceModels({ ...rest, is_default_config: is_default_config === '1' })
+        updateWorkspaceModels({ ...rest, is_default_config: isDefaultConfig })
           .then(() => {
             setLoading(false)
             message.success(t('common.updateSuccess'))
@@ -109,28 +114,30 @@ const SpaceConfig: FC = () => {
         : <Form
           form={form}
           layout="vertical"
-          initialValues={{ is_default_config: '1' }}
+          initialValues={{ is_default_config: isSaas ? '1' : '0' }}
         >
-          <Form.Item name="is_default_config" className="rb:mb-6! rb:max-w-137.5">
-            <RadioGroupCard
-              allowClear={false}
-              options={[
-                {
-                  value: '1',
-                  label: t('space.defaultConfigPackage'),
-                  labelDesc: t('space.defaultConfigPackageDesc'),
-                  recommend: true,
-                },
-                {
-                  value: '0',
-                  label: t('space.customConfig'),
-                  labelDesc: t('space.customConfigDesc'),
-                },
-              ]}
-            />
-          </Form.Item>
+          {isSaas && Object.keys(defaultModels).length > 0 &&
+            <Form.Item name="is_default_config" className="rb:mb-6! rb:max-w-137.5">
+              <RadioGroupCard
+                allowClear={false}
+                options={[
+                  {
+                    value: '1',
+                    label: t('space.defaultConfigPackage'),
+                    labelDesc: t('space.defaultConfigPackageDesc'),
+                    recommend: true,
+                  },
+                  {
+                    value: '0',
+                    label: t('space.customConfig'),
+                    labelDesc: t('space.customConfigDesc'),
+                  },
+                ]}
+              />
+            </Form.Item>
+          }
 
-          {values?.is_default_config === '0' ? (
+          {!isSaas || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
             <>
               <div className="rb:flex rb:items-baseline rb:gap-2 rb:pb-3 rb:mb-6 rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
                 <span className="rb:font-medium rb:text-[#212332]">{t('space.baseModel')}</span>

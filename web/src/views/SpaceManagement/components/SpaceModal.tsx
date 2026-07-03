@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:49:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-03 21:10:45
+ * @Last Modified time: 2026-07-03 21:32:55
  */
 /**
  * Space Modal Component
@@ -53,6 +53,7 @@ const customModelFields: { name: 'llm' | 'embedding' | 'rerank' | 'vision' | 'au
   { name: 'video', label: 'videoModel' },
 ]
 
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   refresh
 }, ref) => {
@@ -80,6 +81,9 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     setCurrentStep(prev => prev - 1)
   }
   const handleGetDefaultModels = () => {
+    if (!isSaas) {
+      return
+    }
     getDefaultWorkspaceModel().then(res => {
       setDefaultModels((res || {}) as Record<string, ModelListItem>)
     })
@@ -114,11 +118,12 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           setCurrentStep(1)
         } else {
           const { icon, is_default_config, ...rest } = values
+          const isDefaultConfig = is_default_config === '1' && isSaas && Object.keys(defaultModels).length > 0
           let formData: SpaceModalData = {
             ...rest,
-            is_default_config: is_default_config === '1',
+            is_default_config: isDefaultConfig,
           }
-          if (is_default_config === '1') {
+          if (isDefaultConfig) {
             customModelFields.forEach(field => {
               formData[field.name] = undefined
             })
@@ -196,7 +201,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         layout="vertical"
         initialValues={{
           storage_type: types[0],
-          is_default_config: '1',
+          is_default_config: isSaas ? '1' : '0',
         }}
       >
         <Form.Item
@@ -241,27 +246,29 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
 
 
         {currentStep === 1 && <>
-          <Form.Item name="is_default_config" className="rb:mb-6!">
-            <RadioGroupCard
-              allowClear={false}
-              options={[
-                {
-                  value: '1',
-                  label: t('space.defaultConfigPackage'),
-                  labelDesc: t('space.defaultConfigPackageDesc'),
-                  recommend: true,
-                },
-                {
-                  value: '0',
-                  label: t('space.customConfig'),
-                  labelDesc: t('space.customConfigDesc'),
-                },
-              ]}
-              onChange={handleChange}
-            />
-          </Form.Item>
+          {isSaas && Object.keys(defaultModels).length > 0 &&
+            <Form.Item name="is_default_config" className="rb:mb-6!">
+              <RadioGroupCard
+                allowClear={false}
+                options={[
+                  {
+                    value: '1',
+                    label: t('space.defaultConfigPackage'),
+                    labelDesc: t('space.defaultConfigPackageDesc'),
+                    recommend: true,
+                  },
+                  {
+                    value: '0',
+                    label: t('space.customConfig'),
+                    labelDesc: t('space.customConfigDesc'),
+                  },
+                ]}
+                onChange={handleChange}
+              />
+            </Form.Item>
+          }
 
-          {values?.is_default_config === '0' ? (
+          {!isSaas || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
             customModelFields.map(field => (
               <Form.Item
                 key={field.name}
