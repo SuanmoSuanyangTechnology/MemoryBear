@@ -130,6 +130,12 @@ async def get_preview_chunks(
             parser_config=db_document.parser_config,
             is_root=False,
             chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
+            tenant_id=str(current_user.tenant_id),
+            workspace_id=str(db_knowledge.workspace_id),
+            knowledge_id=str(db_document.kb_id),
+            document_id=str(db_document.id),
+            source_file_id=str(db_document.file_id),
+            source_file_name=db_file.file_name,
         )
         # Combine parent and child chunks for preview
         parent_id_to_doc_id = {}
@@ -183,7 +189,13 @@ async def get_preview_chunks(
                     callback=progress_callback,
                     vision_model=vision_model,
                     parser_config=db_document.parser_config,
-                    is_root=False)
+                    is_root=False,
+                    tenant_id=str(current_user.tenant_id),
+                    workspace_id=str(db_knowledge.workspace_id),
+                    knowledge_id=str(db_document.kb_id),
+                    document_id=str(db_document.id),
+                    source_file_id=str(db_document.file_id),
+                    source_file_name=db_file.file_name)
 
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize
@@ -328,6 +340,12 @@ async def get_preview_chunks_hierarchy(
                 parser_config=parser_config,
                 is_root=False,
                 chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
+                tenant_id=str(current_user.tenant_id),
+                workspace_id=str(db_knowledge.workspace_id),
+                knowledge_id=str(db_document.kb_id),
+                document_id=str(db_document.id),
+                source_file_id=str(db_document.file_id),
+                source_file_name=db_file.file_name,
             )
             hierarchy = _build_preview_hierarchy(
                 child_res,
@@ -345,6 +363,12 @@ async def get_preview_chunks_hierarchy(
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                tenant_id=str(current_user.tenant_id),
+                workspace_id=str(db_knowledge.workspace_id),
+                knowledge_id=str(db_document.kb_id),
+                document_id=str(db_document.id),
+                source_file_id=str(db_document.file_id),
+                source_file_name=db_file.file_name,
             )
             hierarchy = _build_preview_hierarchy(res, chunk_mode="qa")
         else:
@@ -357,6 +381,12 @@ async def get_preview_chunks_hierarchy(
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                tenant_id=str(current_user.tenant_id),
+                workspace_id=str(db_knowledge.workspace_id),
+                knowledge_id=str(db_document.kb_id),
+                document_id=str(db_document.id),
+                source_file_id=str(db_document.file_id),
+                source_file_name=db_file.file_name,
             )
             hierarchy = _build_preview_hierarchy(res, chunk_mode="normal")
     except Exception as e:

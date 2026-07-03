@@ -16,7 +16,7 @@ from app.core.rag.metadata.filter_engine import (
     FilterGroup as EngineFilterGroup,
     MetadataFilterEngine,
 )
-from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVector,
     ElasticSearchVectorFactory,
@@ -671,7 +671,7 @@ class KnowledgeRetrievalService:
             )
             documents = [
                 Document(
-                    page_content=doc.page_content,
+                    page_content=chunk_retrieval_content(doc),
                     metadata=doc.metadata or {},
                 )
                 for doc in docs

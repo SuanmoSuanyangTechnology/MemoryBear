@@ -21,7 +21,7 @@ from app.models.models_model import ModelApiKey
 from app.models.knowledge_model import Knowledge
 from app.core.rag.vdb.field import Field
 from app.core.rag.vdb.vector_base import BaseVector
-from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,8 @@ class ElasticSearchVector(BaseVector):
             if chunk_type in ("source", "parent"):
                 # source 和 parent chunk 不需要向量索引
                 texts_for_embedding.append("")
-            elif chunk_type == "qa":
-                # QA chunk: 用 question 字段做 embedding
-                texts_for_embedding.append((chunk.metadata or {}).get("question", chunk.page_content))
             else:
-                # 普通 chunk / child chunk: 用 page_content 做 embedding
-                texts_for_embedding.append(chunk.page_content)
+                texts_for_embedding.append(chunk_retrieval_content(chunk))
 
         if self.is_multimodal_embedding:
             embeddings = self.embeddings.embed_batch(texts_for_embedding)
@@ -271,12 +267,11 @@ class ElasticSearchVector(BaseVector):
 
         if query:
             query_str["query"]["bool"]["must"].append({
-                "match": {
-                    Field.CONTENT_KEY.value: {
-                        "query": query,
-                        "analyzer": "ik_max_word"  # Use the same analyzer as in create_collection
-                    }
-                }
+                "multi_match": {
+                    "query": query,
+                    "fields": [Field.CONTENT_KEY.value, Field.VISION_TEXT.value],
+                    "analyzer": "ik_max_word",
+                },
             })
 
         if chunk_types:
@@ -398,13 +393,11 @@ class ElasticSearchVector(BaseVector):
         indices = kwargs.get("indices", self._collection_name)
         chunk_type = (chunk.metadata or {}).get("chunk_type")
 
-        # QA chunk: embedding 基于 question；source chunk: 不更新向量
+        # QA chunks use question for embedding; source chunks do not update vectors.
         if chunk_type == "source":
             embed_text = ""
-        elif chunk_type == "qa":
-            embed_text = (chunk.metadata or {}).get("question", chunk.page_content)
         else:
-            embed_text = chunk.page_content
+            embed_text = chunk_retrieval_content(chunk)
 
         if chunk_type != "source":
             if self.is_multimodal_embedding:
@@ -693,16 +686,16 @@ class ElasticSearchVector(BaseVector):
         file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
 
         # Basic Query（BM25）
+        content_match_query = {
+            "multi_match": {
+                "query": query,
+                "fields": [Field.CONTENT_KEY.value, Field.VISION_TEXT.value],
+                "analyzer": "ik_max_word",
+            }
+        }
         query_str: dict[str, Any] = {
             "bool": {
-                "must": {
-                    "match": {
-                        Field.CONTENT_KEY.value: {
-                            "query": query,
-                            "analyzer": "ik_max_word"  # tokenizer
-                        }
-                    }
-                },
+                "must": content_match_query,
                 "filter": [
                     {"term": {"metadata.status": 1}},
                 ]
@@ -713,14 +706,7 @@ class ElasticSearchVector(BaseVector):
         if file_names_filter:
             query_str = {
                 "bool": {
-                    "must": {
-                        "match": {
-                            Field.CONTENT_KEY.value: {
-                                "query": query,
-                                "analyzer": "ik_max_word"  # tokenizer
-                            }
-                        }
-                    },
+                    "must": content_match_query,
                     "filter": [
                         {"term": {"metadata.status": 1}},
                         {"terms": {"metadata.file_name": file_names_filter}},
@@ -875,7 +861,7 @@ class ElasticSearchVector(BaseVector):
         try:
             documents = [
                 Document(
-                    page_content=doc.page_content,
+                    page_content=chunk_retrieval_content(doc),
                     metadata=doc.metadata or {}
                 )
                 for doc in docs
@@ -947,6 +933,10 @@ class ElasticSearchVector(BaseVector):
                                 },
                                 "parent_id": {
                                     "type": "keyword"
+                                },
+                                "vision_text": {
+                                    "type": "text",
+                                    "analyzer": "ik_max_word"
                                 }
                             }
                         },
@@ -1146,9 +1136,16 @@ class ElasticSearchVectorIndexOps:
 
             update_body: dict[str, Any] = {"properties": {}}
 
+            metadata_update_properties: dict[str, Any] = {}
             if metadata_props.get("parent_id", {}).get("type") != "keyword":
+                metadata_update_properties["parent_id"] = {"type": "keyword"}
+            vision_text_mapping = metadata_props.get("vision_text", {})
+            if vision_text_mapping.get("type") != "text":
+                metadata_update_properties["vision_text"] = {"type": "text", "analyzer": "ik_max_word"}
+
+            if metadata_update_properties:
                 update_body["properties"]["metadata"] = {
-                    "properties": {"parent_id": {"type": "keyword"}}
+                    "properties": metadata_update_properties
                 }
 
             if props.get(Field.PARENT_ID.value, {}).get("type") != "keyword":
