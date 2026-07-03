@@ -55,7 +55,7 @@ def _get_annotation_service_with_app_context(
 @require_api_key(scopes=["app"])
 async def list_annotations(
     request: Request,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；lambda:None 仅防被 FastAPI 当 body 字段
+    api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
     search: Optional[str] = Query(None, description="搜索关键词（匹配问题或答案）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
@@ -75,7 +75,7 @@ async def list_annotations(
 async def create_annotation(
     request: Request,
     payload: annotation_schema.AnnotationCreate,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；lambda:None 仅防被 FastAPI 当 body 字段
+    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；用 Depends 避免与 payload 一起被当作嵌套 Body 字段
     db: Session = Depends(get_db),
 ):
     """创建一个新的标注（QA问答对）。
@@ -125,7 +125,7 @@ async def create_annotation(
 @require_api_key(scopes=["app"])
 async def get_annotation_settings(
     request: Request,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；lambda:None 仅防被 FastAPI 当 body 字段
+    api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
 ):
     """获取当前应用的标注设置。"""
@@ -153,7 +153,7 @@ async def get_annotation_settings(
 async def update_annotation_settings(
     request: Request,
     payload: annotation_schema.AnnotationSettingUpdate,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；lambda:None 仅防被 FastAPI 当 body 字段
+    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；用 Depends 避免与 payload 一起被当作嵌套 Body 字段
     db: Session = Depends(get_db),
 ):
     """更新当前应用的标注设置（相似度阈值、Embedding模型、启用/禁用）。"""
@@ -180,7 +180,7 @@ async def update_annotation(
     request: Request,
     annotation_id: uuid.UUID,
     payload: annotation_schema.AnnotationUpdate,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；lambda:None 仅防被 FastAPI 当 body 字段
+    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；用 Depends 避免与 payload 一起被当作嵌套 Body 字段
     db: Session = Depends(get_db),
 ):
     """更新指定标注的问题和/或答案。
@@ -235,7 +235,7 @@ async def update_annotation(
 async def delete_annotation(
     request: Request,
     annotation_id: uuid.UUID,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),  # 真实值由 @require_api_key 注入；lambda:None 仅防被 FastAPI 当 body 字段
+    api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
 ):
     """删除指定标注（软删除）。"""
