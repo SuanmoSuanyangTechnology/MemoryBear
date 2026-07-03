@@ -74,6 +74,7 @@ class RetrievalParams:
     top_k: int
     top_n: int
     retrieve_type: RetrieveType
+    rerank_score_threshold: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -415,6 +416,13 @@ class KnowledgeRetrievalService:
             if config and "vector_similarity_weight" in explicit_fields
             else request.vector_similarity_weight
         )
+        rerank_score_threshold = (
+            config.rerank_score_threshold
+            if config and "rerank_score_threshold" in explicit_fields
+            else config.vector_similarity_weight
+            if config and "vector_similarity_weight" in explicit_fields
+            else request.rerank_score_threshold or request.vector_similarity_weight or 0.1
+        )
         top_n = max(top_k, request.top_n or top_k)
         return RetrievalParams(
             similarity_threshold=similarity_threshold,
@@ -422,6 +430,7 @@ class KnowledgeRetrievalService:
             top_k=top_k,
             top_n=top_n,
             retrieve_type=retrieve_type,
+            rerank_score_threshold=rerank_score_threshold,
         )
 
     @classmethod
@@ -756,6 +765,11 @@ class KnowledgeRetrievalService:
             docs=unique_chunks,
             top_k=target.params.top_k,
         )
+        chunks = [
+            chunk
+            for chunk in chunks
+            if (chunk.metadata or {}).get("score", 0) > target.params.rerank_score_threshold
+        ]
         if log_id:
             logger.info(
                 "[Retrieval] target_done %s",
