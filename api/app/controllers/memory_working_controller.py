@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
+from app.core.memory.enums import MemoryMessageSource
 from app.core.response_utils import success
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.db import get_db
@@ -175,7 +176,7 @@ def get_sources(
     """
     memory_message_repo = MemoryMessageRepository(db)
     sources = memory_message_repo.get_working_memory_sources(str(end_user_id))
-    items = [
+    data = [
         {
             "source": row["source"],
             "message_count": row["message_count"],
@@ -183,7 +184,7 @@ def get_sources(
         }
         for row in sources
     ]
-    return success(data={"items": items}, msg="查询成功")
+    return success(data=data, msg="查询成功")
 
 
 @router.get("/{end_user_id}/source_messages", response_model=ApiResponse)
@@ -201,7 +202,7 @@ def get_source_messages(
         source: service_api 或 mcp
         limit: 返回条数上限（默认 20，最大 100）
     """
-    allowed_sources = {"service_api", "mcp"}
+    allowed_sources = {MemoryMessageSource.SERVICE_API.value, MemoryMessageSource.MCP.value}
     if source not in allowed_sources:
         return success(data={"items": [], "total": 0, "source": source}, msg="unsupported source")
 

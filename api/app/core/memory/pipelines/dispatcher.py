@@ -733,13 +733,6 @@ async def dispatch_mcp_write(
     target_msg = written[0]
     target_seq = target_msg["message_seq"]
 
-    # 3. 推进 write_cursor
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        repo.advance_write_cursor(conversation_id, target_seq)
-        db.commit()
-
-    # 4. 直接派发写入任务（空 assistant 通过标记传递给 pipeline）
     # 在 target_message 上添加标记，告知 WritePipeline 需要追加空 assistant 配对
     target_msg_with_marker = {**target_msg, "_mcp_pair_assistant": True}
     msg_id = push_write_task(

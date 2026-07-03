@@ -44,17 +44,25 @@ class MemoryMessageRepository:
     @contextmanager
     def _acquire_mm_seq_lock(
         self,
+        conversation_id: Optional[str],
         end_user_id: str,
         source: MemoryMessageSource,
     ):
-        """在同一 (end_user_id, source) 内串行化 seq 分配。
+        """在 seq 分组维度串行化 seq 分配，防止并发请求抢到重复 seq。
 
-        使用 pg_advisory_xact_lock，事务提交/回滚时自动释放；锁 key 按 source 区分，
-        API 并发不阻塞 MCP，反之亦然。详见设计文档 §3.3。
+        使用 pg_advisory_xact_lock，事务提交/回滚时自动释放：
+        - 有 conversation_id（agent/workflow）→ 锁 key 按 conversation_id
+        - 无 conversation_id（service_api/mcp）→ 锁 key 按 (end_user_id, source)
+
+        不同分组之间互不阻塞。详见设计文档 §3.3。
         """
+        if conversation_id is not None:
+            lock_key = f"mm_seq:conv:{conversation_id}"
+        else:
+            lock_key = f"mm_seq:{end_user_id}:{source.value}"
         self.db.execute(
             sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"mm_seq:{end_user_id}:{source.value}"},
+            {"key": lock_key},
         )
         yield
 
@@ -108,15 +116,11 @@ class MemoryMessageRepository:
             成功写入的消息摘要列表 [{"role": "user", "message_seq": 1, "content": "..."}, ...]
             （跳过 content 为空的消息）
         """
-        if conversation_id is None:
-            # API/MCP 路径：先拿分布式锁再分配 seq
-            with self._acquire_mm_seq_lock(end_user_id, source):
-                return self._write_batch_inner(
-                    None, messages, end_user_id, source,
-                )
-        return self._write_batch_inner(
-            conversation_id, messages, end_user_id, source,
-        )
+        # 所有路径统一持锁分配 seq，防止同一分组的并发请求抢到重复 seq
+        with self._acquire_mm_seq_lock(conversation_id, end_user_id, source):
+            return self._write_batch_inner(
+                conversation_id, messages, end_user_id, source,
+            )
 
     def _write_batch_inner(
         self,
@@ -287,9 +291,7 @@ class MemoryMessageRepository:
         ]
 
         total = int(self.db.execute(
-            select(func.count()).select_from(
-                select(MemoryMessage.id).where(*base_filter).subquery()
-            )
+            select(func.count(MemoryMessage.id)).where(*base_filter)
         ).scalar_one())
 
         if total == 0:
