@@ -125,7 +125,8 @@ async def validate_active_config_models(
         config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
     except BusinessException:
         from app.i18n.service import t
-        return success(data={"valid": False, "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
+        return success(data={"valid": False,
+                             "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
 
     result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
     return success(data=result)
@@ -504,8 +505,7 @@ def delete_config(
 
     - 检查是否为默认配置，默认配置不允许删除
     - 检查是否有终端用户连接到该配置
-    - 如果有连接且 force=False，返回警告
-    - 如果 force=True，清除终端用户引用后删除配置
+    - 如果有连接，返回警告
     """
     workspace_id = current_user.current_workspace_id
     config_id = resolve_config_id(config_id, db)
@@ -537,25 +537,20 @@ def delete_config(
 
         if result["status"] == "warning":
             api_logger.warning(
-                f"记忆配置正在使用，无法删除: config_id={config_id}, "
-                f"connected_count={result['connected_count']}"
+                f"记忆配置正在使用，无法删除: config_id={config_id}"
             )
             return fail(
                 code=BizCode.RESOURCE_IN_USE,
                 msg=result["message"],
-                data={
-                    "connected_count": result["connected_count"],
-                    "force_required": result["force_required"]
-                }
+                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
             )
 
         api_logger.info(
-            f"记忆配置删除成功: config_id={config_id}, "
-            f"affected_users={result['affected_users']}"
+            f"记忆配置删除成功: config_id={config_id}"
         )
         return success(
             msg=result["message"],
-            data={"affected_users": result["affected_users"]}
+            data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
         )
 
     except Exception as e:

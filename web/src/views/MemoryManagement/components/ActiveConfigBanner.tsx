@@ -52,7 +52,7 @@ const ActiveConfigBanner: FC<ActiveConfigBannerProps> = ({ config }) => {
 
   return (
     <div className="rb:rb-border rb:rounded-xl rb:bg-white rb:p-5! rb:mb-4">
-      <Flex align="center" gap={12} className="rb:mb-4">
+      <Flex align="center" gap={12} className="rb:mb-4!">
         <Flex align="center" gap={8}>
           <span className="rb:size-1.5 rb:rounded-full rb:bg-[#12B76A]"></span>
           <span className="rb:text-[14px] rb:font-medium rb:leading-5 rb:text-[#212332]">

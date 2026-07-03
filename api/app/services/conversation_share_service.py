@@ -148,8 +148,8 @@ class ConversationShareService:
                     "content": msg.content,
                     "created_at": to_timestamp_ms(msg.created_at),
                     "meta_data": msg.meta_data,
-                    "feedback_type": msg.feedbacks[0].feedback_type if msg.feedbacks else None,
-                    "feedback_content": msg.feedbacks[0].feedback_content if msg.feedbacks else None
+                    "feedback_type": None,
+                    "feedback_content": None,
                 }
                 for msg in messages
             ],

@@ -38,6 +38,39 @@ from app.services.tool_orchestrator import ToolOrchestrator
 logger = get_business_logger()
 
 
+def assert_not_opening_statement(db, message_id: uuid.UUID) -> None:
+    """开场白（会话第一条 assistant 消息、无 parent_message_id 且无前置用户消息）
+    不支持重新生成——重新生成依赖父用户消息复现上下文。
+
+    必须在 StreamingResponse 之前调用：SSE 一旦开流（200 OK）后，generator 内抛出的
+    异常无法被 FastAPI 转成干净的 HTTP 错误，前端 handleSSE 也无法弹 toast，会直接白屏。
+    在此提前抛 BusinessException → 400 → 前端 handleSSE 自动 message.warning(msg)。
+
+    软删除的 user 消息也算作"前置提问"——后续 _locate_or_restore_parent_user_message
+    会把它恢复为 is_deleted=False 后继续重新生成。直接过滤掉会让"用户误删提问后想重新
+    生成"被误判为开场白并报错。
+    """
+    from sqlalchemy import select
+    from app.models import Message
+    msg = db.get(Message, message_id)
+    # 仅关心 assistant 消息；非 assistant 或不存在交给后续 regenerate 内的校验处理
+    if not msg or msg.role != "assistant":
+        return
+    # 有父用户消息则不是开场白
+    if msg.parent_message_id:
+        return
+    # 无父消息时复用 regenerate_stream 的回退逻辑：查前置用户消息；都没有即为开场白
+    preceding_user = db.scalars(
+        select(Message).where(
+            Message.conversation_id == msg.conversation_id,
+            Message.role == "user",
+            Message.created_at <= msg.created_at,
+        ).order_by(Message.created_at.desc()).limit(1)
+    ).first()
+    if not preceding_user:
+        raise BusinessException("该消息是开场白，不支持重新生成", BizCode.BAD_REQUEST)
+
+
 class AppChatService:
     """基于分享链接的聊天服务"""
 
@@ -143,6 +176,7 @@ class AppChatService:
         """聊天（非流式）"""
         start_time = time.time()
         message_id = uuid.uuid4()
+        user_message_id = uuid.uuid4()
 
         # 检查标注命中
         from app.models.annotation_model import HitLogSource
@@ -153,7 +187,9 @@ class AppChatService:
         )
         if annotation_match:
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
             self.conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
@@ -170,6 +206,7 @@ class AppChatService:
             return {
                 "conversation_id": str(conversation_id),
                 "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
                 "message": annotation_match["answer"],
                 "reasoning_content": None,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -225,7 +262,7 @@ class AppChatService:
         tools.extend(kb_tools)
         if memory:
             memory_tools, _ = self.agent_service.load_memory_config(
-                config.memory, user_id, uuid.UUID(workspace_id), storage_type, user_rag_memory_id
+                config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
             )
             tools.extend(memory_tools)
 
@@ -480,6 +517,7 @@ class AppChatService:
         # 这里不再触发老的 write_long_term 路径。
         if not skip_save:
             self.conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
@@ -540,6 +578,7 @@ class AppChatService:
         return {
             "conversation_id": conversation_id,
             "message_id": str(message_id),
+            "user_message_id": str(user_message_id),
             "message": result["content"],
             "reasoning_content": result.get("reasoning_content"),
             "usage": result.get("usage", {
@@ -578,6 +617,7 @@ class AppChatService:
         try:
             start_time = time.time()
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
 
             # 检查标注命中
             from app.models.annotation_model import HitLogSource
@@ -588,6 +628,7 @@ class AppChatService:
             )
             if annotation_match:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
@@ -600,7 +641,7 @@ class AppChatService:
                     content=annotation_match["answer"],
                     meta_data={"usage": {}}
                 )
-                yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
                 return
@@ -616,7 +657,7 @@ class AppChatService:
             # 校验文件上传
             self.agent_service._validate_file_upload(features_config, files)
 
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
 
             variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
@@ -653,7 +694,7 @@ class AppChatService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.agent_service.load_memory_config(
-                    config.memory, user_id, uuid.UUID(workspace_id), storage_type, user_rag_memory_id
+                    config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
@@ -964,6 +1005,7 @@ class AppChatService:
             # 这里不再触发老的 write_long_term 路径。
             if not skip_save:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
@@ -1041,6 +1083,7 @@ class AppChatService:
             # 保存失败的消息，使前端可以展示失败状态
             try:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
@@ -1086,6 +1129,7 @@ class AppChatService:
         """多 Agent 聊天（非流式）"""
 
         start_time = time.time()
+        user_message_id = uuid.uuid4()
         actual_config_id = None
         config_id = actual_config_id
 
@@ -1110,6 +1154,7 @@ class AppChatService:
 
         # 保存消息
         self.conversation_service.add_message(
+            message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
             content=message
@@ -1134,6 +1179,7 @@ class AppChatService:
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
             "message_id": str(ai_message.id),
+            "user_message_id": str(user_message_id),
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -1163,8 +1209,9 @@ class AppChatService:
 
         try:
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
             # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
             total_tokens = 0
@@ -1209,6 +1256,7 @@ class AppChatService:
 
             # 保存消息
             self.conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message
@@ -1343,6 +1391,68 @@ class AppChatService:
 
     # ==================== 重新生成功能 ====================
 
+    def _locate_or_restore_parent_user_message(self, original_msg: "Message") -> "Message":
+        """定位原 assistant 消息对应的父 user 消息。
+
+        查找顺序：
+        1. 优先用已回填的 parent_message_id（若其指向的消息非 user，视为脏数据忽略）；
+        2. 否则回溯同会话 created_at 早于或等于原消息的最近一条 user 消息
+           （不按 is_deleted 过滤，因为该消息即使已被删除仍是本轮实际提问；
+           用 <= 而非 < 是为了兼容 user/assistant 同毫秒入库的边界场景）；
+        3. 仍找不到时再放宽到本会话内最近一条 user 消息（兜底，覆盖
+           created_at 顺序异常的脏数据）。
+
+        若最终定位到的父消息已被逻辑删除（用户重新生成前误删了原提问），自动恢复
+        （is_deleted 置回 False）后继续，而非直接抛"无法找到原始用户消息"——
+        避免误删提问导致该轮回复彻底无法重新生成。
+        """
+        from sqlalchemy import select
+        parent_msg = None
+        if original_msg.parent_message_id:
+            candidate = self.db.get(Message, original_msg.parent_message_id)
+            if candidate and candidate.role == "user":
+                parent_msg = candidate
+        if not parent_msg:
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at <= original_msg.created_at,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+        if not parent_msg:
+            # 兜底：同会话内最近一条 user 消息（不论时间顺序），覆盖 created_at 异常的脏数据
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+        if not parent_msg:
+            raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+        # 回填 parent_message_id 便于后续版本化关联
+        if original_msg.parent_message_id != parent_msg.id:
+            original_msg.parent_message_id = parent_msg.id
+            self.db.commit()
+        if parent_msg.is_deleted:
+            parent_msg.is_deleted = False
+            self.db.commit()
+            logger.info(
+                "重新生成时自动恢复被删除的父 user 消息",
+                extra={
+                    "parent_message_id": str(parent_msg.id),
+                    "assistant_message_id": str(original_msg.id),
+                    "conversation_id": str(original_msg.conversation_id),
+                },
+            )
+        return parent_msg
+
     async def regenerate(
             self,
             message_id: uuid.UUID,
@@ -1378,28 +1488,10 @@ class AppChatService:
         if original_msg.is_deleted:
             raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
 
-        # 2. 获取父用户消息
-        parent_msg_id = original_msg.parent_message_id
-        if not parent_msg_id:
-            from sqlalchemy import select
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at < original_msg.created_at,
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
-            if not parent_msg:
-                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-            original_msg.parent_message_id = parent_msg.id
-            self.db.commit()
-            parent_msg_id = parent_msg.id
-        else:
-            parent_msg = self.db.get(Message, parent_msg_id)
+        # 2. 获取父用户消息（找不到已回填的 parent_message_id 时按 created_at 回溯；
+        # 若定位到的父消息已被逻辑删除则自动恢复，见 _locate_or_restore_parent_user_message）
+        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
 
@@ -1533,28 +1625,10 @@ class AppChatService:
         if original_msg.is_deleted:
             raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
 
-        # 2. 获取父用户消息
-        parent_msg_id = original_msg.parent_message_id
-        if not parent_msg_id:
-            from sqlalchemy import select
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at < original_msg.created_at,
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
-            if not parent_msg:
-                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-            original_msg.parent_message_id = parent_msg.id
-            self.db.commit()
-            parent_msg_id = parent_msg.id
-        else:
-            parent_msg = self.db.get(Message, parent_msg_id)
+        # 2. 获取父用户消息（找不到已回填的 parent_message_id 时按 created_at 回溯；
+        # 若定位到的父消息已被逻辑删除则自动恢复，见 _locate_or_restore_parent_user_message）
+        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
 

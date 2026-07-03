@@ -627,7 +627,11 @@ async def draft_run(
         payload.user_id = str(new_end_user.id)
 
     # pure_workflow 不强制会话；其他类型仍沿用会话逻辑。
-    if app.type != AppType.PURE_WORKFLOW or payload.conversation_id:
+    # AGENT 新会话例外：不在控制器层预创建，交由 run/run_stream 的 _ensure_conversation
+    # 创建会话并写入开场白（与 draft/run/compare 路径一致，避免预创建导致 run() 内
+    # is_new_conversation=False 而跳过开场白）；已有 conversation_id 时仍做校验。
+    is_agent_new_conversation = app.type == AppType.AGENT and not payload.conversation_id
+    if not is_agent_new_conversation and (app.type != AppType.PURE_WORKFLOW or payload.conversation_id):
         conversation_id = await draft_service._ensure_conversation(
             conversation_id=payload.conversation_id,
             app_id=app_id,

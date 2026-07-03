@@ -1926,6 +1926,8 @@ export const zh = {
       relation_related: '相关',
       relation_derived: '派生陈述',
       relation_contains: '包含',
+      mcp: 'MCP',
+      service_api: 'API',
     },
     space: {
       createSpace: '创建空间',

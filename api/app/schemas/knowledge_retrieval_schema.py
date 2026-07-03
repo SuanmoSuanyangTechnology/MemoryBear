@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
+from app.schemas.chunk_schema import KnowledgeBaseConfig, KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 
 
@@ -11,6 +11,7 @@ class KnowledgeRetrievalRequest(BaseModel):
     query: str
     kb_ids: list[UUID] = Field(default_factory=list)
     ex_ids: list[str] = Field(default_factory=list)
+    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] = Field(default_factory=list)
     similarity_threshold: float = Field(default=0.3, ge=0, le=1)
     vector_similarity_weight: float = Field(default=0.3, ge=0, le=1)
@@ -33,8 +34,8 @@ class KnowledgeRetrievalRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "KnowledgeRetrievalRequest":
-        if not self.kb_ids and not self.ex_ids:
-            raise ValueError("kb_ids and ex_ids cannot both be empty")
+        if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
+            raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
         if self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(self.top_k, 20)
         elif self.top_n < self.top_k:

@@ -293,7 +293,7 @@ class MemoryAgentService:
             config_id=config_id
         )
 
-        status = await status_typle(message, memory_config.llm_model_id)
+        status = await status_typle(message, memory_config.llm_model_id, tenant_id=memory_config.tenant_id)
         logger.debug(f"Message type: {status}")
         return status
 
@@ -493,6 +493,7 @@ class MemoryAgentService:
             end_user_id: Optional[str] = None,
             current_user_id: Optional[str] = None,
             llm_id: Optional[str] = None,
+            tenant_id=None,
             db: Session = None
     ) -> Dict[str, Any]:
         """
@@ -578,8 +579,8 @@ class MemoryAgentService:
 
                 # 使用LLM提取标签
                 with get_db_context() as db:
-                    factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(llm_id)
+                    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+                    llm_client = ModelClientMixin.get_llm_client(db, uuid.UUID(llm_id), tenant_id=tenant_id)
 
                 # 定义标签提取的结构
                 class UserTags(BaseModel):

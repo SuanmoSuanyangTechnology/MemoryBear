@@ -38,7 +38,7 @@ const OnboardingGuide: FC<OnboardingGuideProps> = ({ completed = 0, onCreate }) 
 
   return (
     <div className="rb:rb-border rb:rounded-xl rb:bg-white rb:p-5! rb:mb-4">
-      <Flex align="center" justify="space-between" className="rb:mb-4">
+      <Flex align="center" justify="space-between" className="rb:mb-4!">
         <Flex align="center" gap={12}>
           <span className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:text-[#212332]">
             {t('memory.onboardingTitle')}
@@ -66,7 +66,7 @@ const OnboardingGuide: FC<OnboardingGuideProps> = ({ completed = 0, onCreate }) 
               })}
             >
               <div>
-                <Flex align="center" gap={8} className="rb:mb-2">
+                <Flex align="center" gap={8} className="rb:mb-2!">
                   <span className={clsx('rb:size-5 rb:rounded-full rb:flex rb:items-center rb:justify-center rb:text-[12px] rb:font-medium', {
                     'rb:bg-[#171719] rb:text-white': isActive,
                     'rb:bg-[#F0F0F0] rb:text-[#9A9A9A]': !isActive,
