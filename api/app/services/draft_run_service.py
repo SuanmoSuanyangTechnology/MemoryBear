@@ -3316,6 +3316,67 @@ class AgentRunService:
 
     # ==================== 重新生成功能 ====================
 
+    def _locate_or_restore_parent_user_message(self, original_msg: "Message") -> "Message":
+        """定位原 assistant 消息对应的父 user 消息。
+
+        查找顺序：
+        1. 优先用已回填的 parent_message_id（若其指向的消息非 user，视为脏数据忽略）；
+        2. 否则回溯同会话 created_at 早于或等于原消息的最近一条 user 消息
+           （不按 is_deleted 过滤，因为该消息即使已被删除仍是本轮实际提问；
+           用 <= 而非 < 是为了兼容 user/assistant 同毫秒入库的边界场景）；
+        3. 仍找不到时再放宽到本会话内最近一条 user 消息（兜底，覆盖
+           created_at 顺序异常的脏数据）。
+
+        若最终定位到的父消息已被逻辑删除（用户重新生成前误删了原提问），自动恢复
+        （is_deleted 置回 False）后继续，而非直接抛"无法找到原始用户消息"——
+        避免误删提问导致该轮回复彻底无法重新生成。
+        """
+        from app.models import Message
+        parent_msg = None
+        if original_msg.parent_message_id:
+            candidate = self.db.get(Message, original_msg.parent_message_id)
+            if candidate and candidate.role == "user":
+                parent_msg = candidate
+        if not parent_msg:
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at <= original_msg.created_at,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+        if not parent_msg:
+            # 兜底：同会话内最近一条 user 消息（不论时间顺序），覆盖 created_at 异常的脏数据
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+        if not parent_msg:
+            raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+        if original_msg.parent_message_id != parent_msg.id:
+            original_msg.parent_message_id = parent_msg.id
+            self.db.commit()
+        if parent_msg.is_deleted:
+            parent_msg.is_deleted = False
+            self.db.commit()
+            logger.info(
+                "重新生成时自动恢复被删除的父 user 消息",
+                extra={
+                    "parent_message_id": str(parent_msg.id),
+                    "assistant_message_id": str(original_msg.id),
+                    "conversation_id": str(original_msg.conversation_id),
+                },
+            )
+        return parent_msg
+
     async def regenerate(
             self,
             *,
@@ -3361,26 +3422,10 @@ class AgentRunService:
         original_msg.is_current = False
         self.db.commit()
 
-        # 3. 获取父用户消息（用于提取原始问题）
-        parent_msg_id = original_msg.parent_message_id
-        if not parent_msg_id:
-            # 如果没有 parent_message_id，则查找上一条 user 消息
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at < original_msg.created_at,
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
-            if not parent_msg:
-                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-            parent_msg_id = parent_msg.id
-        else:
-            parent_msg = self.db.get(Message, parent_msg_id)
+        # 3. 获取父用户消息（用于提取原始问题；若已被逻辑删除则自动恢复，
+        # 见 _locate_or_restore_parent_user_message）
+        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
 
@@ -3520,25 +3565,10 @@ class AgentRunService:
         original_msg.is_current = False
         self.db.commit()
 
-        # 3. 获取父用户消息（用于提取原始问题）
-        parent_msg_id = original_msg.parent_message_id
-        if not parent_msg_id:
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at < original_msg.created_at,
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
-            if not parent_msg:
-                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-            parent_msg_id = parent_msg.id
-        else:
-            parent_msg = self.db.get(Message, parent_msg_id)
+        # 3. 获取父用户消息（用于提取原始问题；若已被逻辑删除则自动恢复，
+        # 见 _locate_or_restore_parent_user_message）
+        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
 
