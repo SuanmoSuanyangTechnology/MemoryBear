@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "redbera-mem",
-    "description": "redbera-mem",
+    "title": "MemoryBear",
+    "description": "MemoryBear",
     "version": "1.0.0"
   },
   "paths": {
@@ -241,6 +241,144 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/messages/{message_id}/feedback": {
+      "post": {
+        "tags": [
+          "V1 - App Message Feedback"
+        ],
+        "summary": "提交消息反馈（点赞/点踩）",
+        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）\n\n幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。\n\n请求体无需 payload 包裹，直接传 {\"feedback_type\": \"like|dislike\", \"feedback_content\": \"...\"}。\n与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，\n避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。",
+        "operationId": "submit_message_feedback_v1_app_messages__message_id__feedback_post",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "外部系统用户 ID（other_id）",
+              "title": "User Id"
+            },
+            "description": "外部系统用户 ID（other_id）"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_submit_message_feedback_v1_app_messages__message_id__feedback_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app/conversations/{conversation_id}/messages/feedbacks": {
+      "get": {
+        "tags": [
+          "V1 - App Message Feedback"
+        ],
+        "summary": "获取会话下消息的点赞与反馈",
+        "description": "获取会话下所有消息的反馈状态（供前端渲染）\n\n返回每条消息的 like_count/dislike_count/report_count 及当前用户的 feedback_type。\n不含 is_favorite（收藏功能不在本接口范围）。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。",
+        "operationId": "get_conversation_feedback_v1_app_conversations__conversation_id__messages_feedbacks_get",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "外部系统用户 ID（other_id）",
+              "title": "User Id"
+            },
+            "description": "外部系统用户 ID（other_id）"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "返回消息数量，最大 200",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "返回消息数量，最大 200"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
               }
             }
           }
@@ -6105,6 +6243,20 @@
         ],
         "title": "BatchUpdateMetadataRequest"
       },
+      "Body_active_config_api_memory_config_active_config_post": {
+        "properties": {
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_id"
+        ],
+        "title": "Body_active_config_api_memory_config_active_config_post"
+      },
       "Body_chat_v1_app_chat_post": {
         "properties": {
           "api_key_auth": {
@@ -6612,6 +6764,20 @@
           "action_id"
         ],
         "title": "Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
+      },
+      "Body_submit_message_feedback_v1_app_messages__message_id__feedback_post": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "body_placeholder": {
+            "type": "string",
+            "title": "Body Placeholder",
+            "description": "占位参数，实际请求体通过 request.json() 解析"
+          }
+        },
+        "type": "object",
+        "title": "Body_submit_message_feedback_v1_app_messages__message_id__feedback_post"
       },
       "Body_update_chunk_v1_chunks__kb_id___document_id___doc_id__put": {
         "properties": {
@@ -7589,6 +7755,42 @@
             "title": "Rerank Id",
             "description": "重排序模型配置ID"
           },
+          "vision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision Id",
+            "description": "视觉模型配置ID"
+          },
+          "audio_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Id",
+            "description": "语音模型ID"
+          },
+          "video_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Id",
+            "description": "视频模型ID"
+          },
           "reflection_model_id": {
             "anyOf": [
               {
@@ -8069,6 +8271,20 @@
             "title": "Enabled",
             "description": "是否启用上下文引擎",
             "default": false
+          },
+          "cross_session_recent_enabled": {
+            "type": "boolean",
+            "title": "Cross Session Recent Enabled",
+            "description": "是否注入同应用同用户其他会话的最近消息",
+            "default": false
+          },
+          "cross_session_recent_limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Cross Session Recent Limit",
+            "description": "跨会话注入的最近消息条数",
+            "default": 6
           }
         },
         "type": "object",
@@ -8138,6 +8354,28 @@
         ],
         "title": "CustomToolTestRequest",
         "description": "自定义工具测试请求"
+      },
+      "DeleteNodeRequest": {
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "title": "Element Id",
+            "description": "Neo4j elementId"
+          },
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id",
+            "description": "端用户 ID"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "element_id",
+          "end_user_id"
+        ],
+        "title": "DeleteNodeRequest",
+        "description": "删除单个图节点请求"
       },
       "DocumentCreate": {
         "properties": {
@@ -10954,14 +11192,6 @@
             ],
             "title": "Memory Config Id",
             "description": "选择记忆的内容类型"
-          },
-          "max_history": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 0.0,
-            "title": "Max History",
-            "description": "最大保留的历史对话轮数",
-            "default": 10
           }
         },
         "type": "object",
@@ -12228,6 +12458,7 @@
         "type": "string",
         "enum": [
           "openai",
+          "speedbear",
           "dashscope",
           "ollama",
           "xinference",
@@ -14483,32 +14714,6 @@
         "title": "WorkflowImportSave",
         "description": "工作流导入请求"
       },
-      "WorkflowRegenerateRequest": {
-        "properties": {
-          "stream": {
-            "type": "boolean",
-            "title": "Stream",
-            "description": "是否流式返回",
-            "default": true
-          },
-          "variables": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Variables",
-            "description": "覆盖原输入快照中的开始节点变量；为空则完全沿用原输入"
-          }
-        },
-        "type": "object",
-        "title": "WorkflowRegenerateRequest",
-        "description": "工作流重新生成请求（对某一轮助手回复重新执行工作流）"
-      },
       "WorkflowToolCreateRequest": {
         "properties": {
           "name": {
@@ -14662,6 +14867,39 @@
               }
             ],
             "title": "Rerank"
+          },
+          "vision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision"
+          },
+          "audio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio"
+          },
+          "video": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video"
           }
         },
         "type": "object",
@@ -14756,6 +14994,45 @@
             ],
             "title": "Rerank",
             "description": "重排序模型ID"
+          },
+          "vision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision",
+            "description": "视觉模型"
+          },
+          "audio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio",
+            "description": "音频模型"
+          },
+          "video": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video",
+            "description": "视频模型"
           }
         },
         "type": "object",

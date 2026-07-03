@@ -3461,7 +3461,8 @@ class WorkflowService:
                     "data": {
                         "conversation_id": payload.get("conversation_id"),
                         "message_id": payload.get("message_id"),
-                        "execution_id": payload.get("execution_id")
+                        "execution_id": payload.get("execution_id"),
+                        "user_message_id": payload.get("user_message_id"),
                     }
                 }
             case "workflow_end":
@@ -3698,7 +3699,7 @@ class WorkflowService:
         from app.models import Message as MessageModel
         if msg.parent_message_id:
             parent = self.db.get(MessageModel, msg.parent_message_id)
-            if parent and parent.role == "user" and not parent.is_deleted:
+            if parent and parent.role == "user":
                 return parent
         if msg.created_at is None:
             return None
@@ -3708,7 +3709,6 @@ class WorkflowService:
                 MessageModel.conversation_id == msg.conversation_id,
                 MessageModel.role == "user",
                 MessageModel.created_at < msg.created_at,
-                MessageModel.is_deleted.is_not(True),
             )
             .order_by(MessageModel.created_at.desc())
             .limit(1)
@@ -3734,6 +3734,24 @@ class WorkflowService:
         if not conversation_id:
             return None
         from app.models import Message as MessageModel
+        # ★ 修复：兜底优先取 is_current=True 的 assistant（即用户当前选择的版本），
+        # 而非最近创建的（regenerate 出的新版本 created_at 更晚但用户可能已切回旧版本）。
+        # 否则用户在版本1视角发新消息时，parent 会错误指向版本2，导致该消息在版本1
+        # 分支看不到、却出现在版本2下面。与 _get_last_current_assistant_id 策略对齐。
+        last = self.db.scalars(
+            select(MessageModel)
+            .where(
+                MessageModel.conversation_id == conversation_id,
+                MessageModel.role == "assistant",
+                MessageModel.is_deleted.is_not(True),
+                MessageModel.is_current.is_(True),
+            )
+            .order_by(MessageModel.created_at.desc())
+            .limit(1)
+        ).first()
+        if last:
+            return last.id
+        # 无 is_current 的 assistant（历史数据/异常态）时，回退到最近一条
         last = self.db.scalars(
             select(MessageModel)
             .where(
@@ -4269,7 +4287,7 @@ class WorkflowService:
             nxt: MessageModel | None = None
             if cur.parent_message_id and cur.parent_message_id not in visited_up:
                 parent = self.db.get(MessageModel, cur.parent_message_id)
-                if parent and not parent.is_deleted:
+                if parent:
                     nxt = parent
             elif not cur.parent_message_id and cur.role == "assistant":
                 fb = self._resolve_parent_user_message(cur)
@@ -4282,22 +4300,33 @@ class WorkflowService:
             cur = nxt
         ancestors.reverse()
 
-        # 向下：子孙链（沿 is_current 子，无则最近子）
+        # 向下：子孙链（沿 parent_message_id 子；agent 历史 user 消息 parent 为空时，
+        # 从 assistant 按时间兜底找下一条 parent 为空的 user，不误拉其它分支下文）
         descendants: list[MessageModel] = []
         visited_down: set = {msg.id}
         cur = msg
         while True:
+            # 优先按 parent_message_id 找 is_current 子
             child = self.db.query(MessageModel).filter(
                 MessageModel.parent_message_id == cur.id,
-                MessageModel.is_deleted.is_not(True),
                 MessageModel.is_current.is_(True),
             ).order_by(MessageModel.created_at.desc()).first()
             if child is None:
-                # 无 is_current 子，取最近创建的子
+                # 无 is_current 子，取 parent 指向 cur 的最近子
                 child = self.db.query(MessageModel).filter(
                     MessageModel.parent_message_id == cur.id,
-                    MessageModel.is_deleted.is_not(True),
                 ).order_by(MessageModel.created_at.desc()).first()
+            if child is None and cur.created_at is not None and cur.role == "assistant":
+                # 兜底：agent 历史 user 消息 parent 为空，从 assistant 按时间找下一条
+                # user；仅当该 user parent 为空时才作为子（兼容历史），若 parent 指向别的
+                # assistant 则属于其它分支，不误拉。
+                child = self.db.query(MessageModel).filter(
+                    MessageModel.conversation_id == cur.conversation_id,
+                    MessageModel.is_deleted.is_not(True),
+                    MessageModel.created_at > cur.created_at,
+                    MessageModel.role == "user",
+                    MessageModel.parent_message_id.is_(None),
+                ).order_by(MessageModel.created_at.asc()).first()
             if child is None or child.id in visited_down:
                 break
             visited_down.add(child.id)
@@ -4382,6 +4411,7 @@ class WorkflowService:
             return {"messages": [], "node_executions_map": {}, "pending_intervention": {}}
 
         def serialize(m: MessageModel) -> dict:
+            fb_type, fb_content = feedback_map.get(m.id, (None, None))
             return {
                 "id": str(m.id),
                 "role": m.role,
@@ -4393,6 +4423,8 @@ class WorkflowService:
                 "status": m.status,
                 "parent_message_id": str(m.parent_message_id) if m.parent_message_id else None,
                 "is_favorited": m.id in favorited_ids,
+                "feedback_type": fb_type,
+                "feedback_content": fb_content,
             }
 
         # 预加载该会话所有 execution，供 meta_data.execution_id 缺失时按完成时间就近兜底匹配
@@ -4420,19 +4452,57 @@ class WorkflowService:
 
         def build_nodes(m: MessageModel) -> list[dict]:
             """取该版本的节点执行明细（复用日志系统序列化）。
-            优先按 meta_data.execution_id 精确取；缺失时按完成时间就近兜底（原始首轮回复无 execution_id）。"""
+            优先按 meta_data.execution_id 精确取；缺失时按完成时间就近兜底（原始首轮回复无 execution_id）。
+            WorkflowExecution 未命中（agent 应用落 AgentExecution）时回退到
+            AppLogService.get_message_node_executions，保证 agent 试运行切版本也能回填 subContent。"""
             meta = m.meta_data if isinstance(m.meta_data, dict) else None
+            # 开场白等非执行产生的 assistant 消息无真实执行记录：其 meta_data 不含任何执行痕迹
+            # （execution_id / regenerated_from / usage），跳过兜底匹配避免被时间就近误吸附到邻近执行
+            if meta and not any(k in meta for k in ("execution_id", "regenerated_from", "usage")):
+                return []
             exec_id = meta.get("execution_id") if meta else None
             execution = self.execution_repo.get_by_execution_id(exec_id) if exec_id else _find_execution_by_time(m)
-            if not execution or not execution.output_data:
-                return []
-            nodes = _build_nodes_from_output_data(execution.output_data)
-            return [n.model_dump() for n in nodes] if nodes else []
+            if execution:
+                # ★ 优先从 WorkflowNodeExecution 表读（由 _persist_workflow_node_executions
+                # 落库的最终态，最准）。解决 output_data 里 HITL 节点
+                # status 仍为 waiting（execution 对象 detached 未落库导致）的存量问题。
+                from app.models import WorkflowNodeExecution as _WNE
+                from app.schemas.app_log_schema import AppLogNodeExecution as _NE
+                tbl_nodes = self.node_execution_repo.get_by_execution_id(execution.id) if execution.id else []
+                if tbl_nodes:
+                    _ordered = sorted(tbl_nodes, key=lambda n: n.execution_order or 0)
+                    _result = []
+                    for n in _ordered:
+                        _result.append(_NE(
+                            node_id=n.node_id,
+                            node_type=n.node_type or "unknown",
+                            node_name=n.node_name,
+                            status=n.status or "completed",
+                            error=n.error_message,
+                            input=n.input_data,
+                            process=(n.meta_data or {}).get("process_data") if isinstance(n.meta_data, dict) else None,
+                            output=n.output_data,
+                            elapsed_time=n.elapsed_time,
+                            token_usage=n.token_usage,
+                            meta=n.meta_data,
+                        ))
+                    if _result:
+                        return [n.model_dump() for n in _result]
+                # 表无记录，回退到 output_data（waiting_human 未跑完 resume 的场景）
+                if execution.output_data:
+                    nodes = _build_nodes_from_output_data(execution.output_data)
+                    if nodes:
+                        return [n.model_dump() for n in nodes]
+            # Agent 兜底：agent 应用落 AgentExecution.steps，无 WorkflowExecution
+            # （regenerate 跳过 save 的版本无 agent_execution，返回 [] —— 已知限制）
+            return AppLogService(self.db).get_message_node_executions(m.id)
 
         # 先解析每轮结构（assistant 取出全部兄弟版本），收集所有消息 id，批量查当前用户收藏状态
         turns: list[tuple[str, Any]] = []
         all_ids: set = set()
         for m in chain:
+            if m.is_deleted:
+                continue
             if m.role == "user":
                 turns.append(("user", m))
                 all_ids.add(m.id)
@@ -4454,6 +4524,23 @@ class WorkflowService:
                 )
                 .all()
             }
+
+        # 按当前用户预查反馈，避免 feedbacks[0] 串显（多用户下取任意行导致状态错位）
+        feedback_map: dict = {}
+        if user_id and all_ids:
+            feedback_rows = (
+                self.db.query(
+                    MessageFeedback.message_id,
+                    MessageFeedback.feedback_type,
+                    MessageFeedback.feedback_content,
+                )
+                .filter(
+                    MessageFeedback.message_id.in_(all_ids),
+                    MessageFeedback.user_id == user_id,
+                )
+                .all()
+            )
+            feedback_map = {row[0]: (row[1], row[2]) for row in feedback_rows}
 
         items: list[Any] = []
         node_executions_map: dict[str, list[dict]] = {}
@@ -4510,7 +4597,12 @@ class WorkflowService:
         ).first()
         if not latest:
             return None
+        # _trace_context_chain 不含 end_msg 自身，latest（=上一轮 AI 回复）会被丢弃，
+        # 导致 LLM 节点历史缺少上一轮 assistant 回复。追加 latest 自身，与
+        # _get_history_from_message(:4631-4633) 对齐。
         conv_messages = self._trace_context_chain(latest)
+        if latest.role in ("user", "assistant"):
+            conv_messages.append({"role": latest.role, "content": latest.content})
         return conv_vars, conv_messages
 
 
@@ -4644,12 +4736,14 @@ class WorkflowService:
             )
         if annotation_match:
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
             prev_messages = []
             history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             if conversation_id_uuid:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=payload.message,
@@ -4698,6 +4792,7 @@ class WorkflowService:
                 "answer": annotation_match["answer"],
                 "messages": output_messages,
                 "conversation_id": str(conversation_id_uuid),
+                "user_message_id": str(user_message_id),
                 "token_usage": {},
                 "elapsed_time": 0,
                 "annotation_hit": {
@@ -4723,8 +4818,10 @@ class WorkflowService:
             )
             if stop:
                 message_id = uuid.uuid4()
+                user_message_id = uuid.uuid4()
                 if conversation_id_uuid:
                     self.conversation_service.add_message(
+                        message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
                         role="user",
                         content=payload.message,
@@ -4757,6 +4854,7 @@ class WorkflowService:
                     "output": preset_response,
                     "message": preset_response,
                     "message_id": str(message_id),
+                    "user_message_id": str(user_message_id),
                     "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
                     "error_message": None,
                     "elapsed_time": 0,
@@ -4794,6 +4892,10 @@ class WorkflowService:
             execution.input_data = input_data
             self.db.commit()
             message_id = uuid.uuid4()
+            # 预生成 user_message_id：重新生成模式不创建新 user 消息，置 None
+            # （add_message 收到 None 时内部生成 id，行为同原先；仅非重新生成场景
+            # 需要把 id 经由 response 返回给前端，供"未刷新即删除 user 消息"使用）
+            user_message_id = None if regenerate_mode else uuid.uuid4()
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
@@ -4902,6 +5004,7 @@ class WorkflowService:
                         meta_data=human_meta,
                         parent_message_id=_from_msg_id,
                         sync_memory=False,
+                        message_id=user_message_id,
                     )
                 # 过滤 citations
                 citations = result.get("citations", [])
@@ -4971,6 +5074,7 @@ class WorkflowService:
                 "output": result.get("output"),
                 "message": result.get("output"),
                 "message_id": str(message_id),
+                "user_message_id": str(user_message_id) if user_message_id else None,
                 "conversation_id": result.get("conversation_id") or (str(conversation_id_uuid) if conversation_id_uuid else None),
                 "error_message": result.get("error"),
                 "elapsed_time": result.get("elapsed_time"),
@@ -5121,12 +5225,14 @@ class WorkflowService:
             )
         if annotation_match:
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
             prev_messages = []
             history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             if conversation_id_uuid:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=payload.message,
@@ -5174,7 +5280,8 @@ class WorkflowService:
                 "event": "workflow_start",
                 "data": {
                     "conversation_id": str(conversation_id_uuid),
-                    "message_id": str(message_id)
+                    "message_id": str(message_id),
+                    "user_message_id": str(user_message_id)
                 }
             }
             start_event = self._emit(public, start_internal_event)
@@ -5228,8 +5335,10 @@ class WorkflowService:
             )
             if stop:
                 message_id = uuid.uuid4()
+                user_message_id = uuid.uuid4()
                 if conversation_id_uuid:
                     self.conversation_service.add_message(
+                        message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
                         role="user",
                         content=payload.message,
@@ -5261,7 +5370,8 @@ class WorkflowService:
                     "event": "workflow_start",
                     "data": {
                         "conversation_id": str(conversation_id_uuid),
-                        "message_id": str(message_id)
+                        "message_id": str(message_id),
+                        "user_message_id": str(user_message_id)
                     }
                 }
                 start_event = self._emit(public, start_internal_event)
@@ -5338,6 +5448,10 @@ class WorkflowService:
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = regenerate_message_id or uuid.uuid4()
+            # 预生成 user_message_id（重新生成模式不创建新 user 消息，置 None）。
+            # 主流程 user 消息在 workflow_end 后才落库(:5550)，而 workflow_start 事件
+            # (:5822) 在其之前发射，故先预生成 id 经事件返回前端，落库时用同一 id。
+            user_message_id = None if regenerate_mode else uuid.uuid4()
             _cycle_items: dict[str, list] = {}
             intervention_list = []
 
@@ -5427,6 +5541,7 @@ class WorkflowService:
                         )
                         if conversation_id_uuid:
                             self.conversation_service.add_message(
+                                message_id=user_message_id,
                                 conversation_id=conversation_id_uuid,
                                 role="user",
                                 content=human_message,
@@ -5547,6 +5662,7 @@ class WorkflowService:
                                 meta_data=human_meta,
                                 parent_message_id=_from_msg_id,
                                 sync_memory=False,
+                                message_id=user_message_id,
                             )
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
@@ -5660,29 +5776,29 @@ class WorkflowService:
                                 registry_node_ids.add(intr_info["node_id"])
                             intervention_list.append(intr_info)
 
-                            if execution.output_data is not None:
-                                import copy as _copy
-                                new_output_data = _copy.deepcopy(execution.output_data or {})
-                                node_outputs = new_output_data.setdefault("node_outputs", {})
-                                node_outputs[intr_info["node_id"]] = {
-                                    "node_type": "human-intervention",
-                                    "node_name": intr_raw.get("node_name", ""),
-                                    "status": "waiting",
-                                    "input": None,
-                                    "output": {
-                                        "rendered_content": intr_info["rendered_content"],
-                                        "actions": intr_info["actions"],
-                                        "delivery_method": intr_raw.get("delivery_method", {
-                                            "webapp": {"enabled": True},
-                                            "email": {"enabled": False},
-                                        }),
-                                    },
-                                    "elapsed_time": None,
-                                    "token_usage": None,
-                                    "error": None,
-                                    "execution_order": max_exec_order + 1,
-                                }
-                                execution.output_data = new_output_data
+                            # Always write intervention node details; deepcopy tolerates None via `or {}`
+                            import copy as _copy
+                            new_output_data = _copy.deepcopy(execution.output_data or {})
+                            node_outputs = new_output_data.setdefault("node_outputs", {})
+                            node_outputs[intr_info["node_id"]] = {
+                                "node_type": "human-intervention",
+                                "node_name": intr_raw.get("node_name", ""),
+                                "status": "waiting",
+                                "input": None,
+                                "output": {
+                                    "rendered_content": intr_info["rendered_content"],
+                                    "actions": intr_info["actions"],
+                                    "delivery_method": intr_raw.get("delivery_method", {
+                                        "webapp": {"enabled": True},
+                                        "email": {"enabled": False},
+                                    }),
+                                },
+                                "elapsed_time": None,
+                                "token_usage": None,
+                                "error": None,
+                                "execution_order": max_exec_order + 1,
+                            }
+                            execution.output_data = new_output_data
 
                         if intervention_list:
                             first_node_id = intervention_list[0].get("node_id", "")
@@ -5694,8 +5810,7 @@ class WorkflowService:
                                     intervention_list, first_node_id, timeout_at
                                 )
 
-                        execution.status = "waiting_human"
-                        execution.context = {
+                        _hitl_context = {
                             **(execution.context or {}),
                             "human_intervention": {
                                 "message_id": str(message_id),
@@ -5705,7 +5820,20 @@ class WorkflowService:
                                 "intervention_backlog": intervention_list,
                             },
                         }
+                        # ★ 修复 node_executions_map 为空：前面 5694/5751 把 node_outputs
+                        # 合并进 execution.output_data（ORM 内存），但 Core query.update
+                        # 原来只更 status+context，丢弃了 output_data 脏属性，导致 waiting_human
+                        # 时节点明细不落库，switch-version/branch 读取时
+                        # node_executions_map 为空。故把 output_data 纳入 update 列。
+                        self.db.query(WorkflowExecution).filter(
+                            WorkflowExecution.execution_id == execution.execution_id
+                        ).update(
+                            {"status": "waiting_human", "context": _hitl_context, "output_data": execution.output_data},
+                            synchronize_session=False,
+                        )
                         self.db.commit()
+                        execution.status = "waiting_human"
+                        execution.context = _hitl_context
                         self.db.close()
 
                         # Save the user message so that the conversation title
@@ -5737,6 +5865,7 @@ class WorkflowService:
                                 meta_data=human_meta,
                                 parent_message_id=_from_msg_id,
                                 sync_memory=False,
+                                message_id=user_message_id,
                             )
 
                             # Save an assistant message marked as waiting_human.
@@ -5813,6 +5942,8 @@ class WorkflowService:
                         self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
+                    if user_message_id:
+                        event["data"]["user_message_id"] = str(user_message_id)
                 # 记录活跃 LLM 节点：node_start 加入，node_end 移除，合成时只为活跃节点补发
                 if event_type == "node_start" and event_data.get("node_id") in llm_node_ids:
                     active_llm_nodes.add(event_data.get("node_id"))
@@ -5863,7 +5994,7 @@ class WorkflowService:
                             "resolved_at": to_iso_z(utcnow_naive()),
                             "resolved_kind": kind,
                         }
-                        execution.context = {
+                        _new_ctx = {
                             **(execution.context or {}),
                             "human_intervention": {
                                 **intx_ctx,
@@ -5873,6 +6004,12 @@ class WorkflowService:
                                 ],
                             },
                         }
+                        # ★ 修复：execution 在 5787 close 后 detached，ORM 赋值 context 不落库，
+                        # 改用 Core query.update 显式更新 context，确保 resolved_interventions 持久化
+                        self.db.query(WorkflowExecution).filter(
+                            WorkflowExecution.execution_id == execution.execution_id
+                        ).update({"context": _new_ctx}, synchronize_session=False)
+                        execution.context = _new_ctx
                         self.db.commit()
                         self.db.close()
 
@@ -5996,11 +6133,12 @@ class WorkflowService:
                                 # yielded to the client. We must synthesize a
                                 # proper "completed" workflow_end here so the
                                 # frontend knows the workflow has finished.
-                                execution.status = "completed"
-                                execution.completed_at = utcnow_naive()
-                                execution.elapsed_time = (
-                                    execution.completed_at - execution.started_at
-                                ).total_seconds()
+                                # ★ 修复：execution 在 5787 self.db.close() 后已 detached，
+                                # 后续 ORM 赋值在 6129 commit 时不会发 UPDATE，导致 resume 完成
+                                # 后 status 乌为 waiting_human、output_data 乌旧值。改用 Core query.update
+                                # 显式落库，绕开 session 跟踪问题。
+                                _completed_at = utcnow_naive()
+                                _elapsed_time = (_completed_at - execution.started_at).total_seconds() if execution.started_at else 0.0
 
                                 # Save the formatted output (built by
                                 # resume_workflow_stream via build_final_output)
@@ -6008,13 +6146,36 @@ class WorkflowService:
                                 # correct End node outputs, not a raw state dump.
                                 # Use accumulated_content (from message events) as the
                                 # final output to avoid duplicating content across cycles.
+                                _final_output_data = None
+                                _final_token_usage = None
                                 if captured_formatted_output:
                                     if not accumulated_content and captured_formatted_output.get("output"):
                                         accumulated_content = captured_formatted_output["output"]
                                     captured_formatted_output["output"] = accumulated_content
-                                    execution.output_data = captured_formatted_output
+                                    _final_output_data = captured_formatted_output
                                     if captured_formatted_output.get("token_usage"):
-                                        execution.token_usage = captured_formatted_output["token_usage"]
+                                        _final_token_usage = captured_formatted_output["token_usage"]
+
+                                _update_fields = {
+                                    "status": "completed",
+                                    "completed_at": _completed_at,
+                                    "elapsed_time": _elapsed_time,
+                                }
+                                if _final_output_data is not None:
+                                    _update_fields["output_data"] = _final_output_data
+                                if _final_token_usage is not None:
+                                    _update_fields["token_usage"] = _final_token_usage
+                                self.db.query(WorkflowExecution).filter(
+                                    WorkflowExecution.execution_id == execution.execution_id
+                                ).update(_update_fields, synchronize_session=False)
+                                # 同步内存对象，供后续 _persist_workflow_node_executions 使用
+                                execution.status = "completed"
+                                execution.completed_at = _completed_at
+                                execution.elapsed_time = _elapsed_time
+                                if _final_output_data is not None:
+                                    execution.output_data = _final_output_data
+                                if _final_token_usage is not None:
+                                    execution.token_usage = _final_token_usage
 
                                 # ★ Always clear waiting_human on the original
                                 # message, even when accumulated_content is empty
@@ -6098,10 +6259,24 @@ class WorkflowService:
                                     accumulated_content = resume_data["output"]
 
                                 resume_data["output"] = accumulated_content
+                                # ★ 同 6080 段修复：execution detached 后 ORM 赋值不落库，改用 Core query.update
+                                _completed_at2 = utcnow_naive()
+                                _elapsed_time2 = (_completed_at2 - execution.started_at).total_seconds() if execution.started_at else 0.0
+                                _update_fields2 = {
+                                    "status": "completed",
+                                    "completed_at": _completed_at2,
+                                    "elapsed_time": _elapsed_time2,
+                                    "output_data": resume_data,
+                                }
+                                if resume_data.get("token_usage"):
+                                    _update_fields2["token_usage"] = resume_data["token_usage"]
+                                self.db.query(WorkflowExecution).filter(
+                                    WorkflowExecution.execution_id == execution.execution_id
+                                ).update(_update_fields2, synchronize_session=False)
                                 execution.output_data = resume_data
                                 execution.status = "completed"
-                                execution.completed_at = utcnow_naive()
-                                execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
+                                execution.completed_at = _completed_at2
+                                execution.elapsed_time = _elapsed_time2
                                 if resume_data.get("token_usage"):
                                     execution.token_usage = resume_data["token_usage"]
 

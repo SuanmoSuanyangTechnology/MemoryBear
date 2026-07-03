@@ -38,6 +38,36 @@ from app.services.tool_orchestrator import ToolOrchestrator
 logger = get_business_logger()
 
 
+def assert_not_opening_statement(db, message_id: uuid.UUID) -> None:
+    """开场白（会话第一条 assistant 消息、无 parent_message_id 且无前置用户消息）
+    不支持重新生成——重新生成依赖父用户消息复现上下文。
+
+    必须在 StreamingResponse 之前调用：SSE 一旦开流（200 OK）后，generator 内抛出的
+    异常无法被 FastAPI 转成干净的 HTTP 错误，前端 handleSSE 也无法弹 toast，会直接白屏。
+    在此提前抛 BusinessException → 400 → 前端 handleSSE 自动 message.warning(msg)。
+    """
+    from sqlalchemy import select
+    from app.models import Message
+    msg = db.get(Message, message_id)
+    # 仅关心 assistant 消息；非 assistant 或不存在交给后续 regenerate 内的校验处理
+    if not msg or msg.role != "assistant":
+        return
+    # 有父用户消息则不是开场白
+    if msg.parent_message_id:
+        return
+    # 无父消息时复用 regenerate_stream 的回退逻辑：查前置用户消息；都没有即为开场白
+    preceding_user = db.scalars(
+        select(Message).where(
+            Message.conversation_id == msg.conversation_id,
+            Message.role == "user",
+            Message.created_at < msg.created_at,
+            Message.is_deleted.is_not(True),
+        ).order_by(Message.created_at.desc()).limit(1)
+    ).first()
+    if not preceding_user:
+        raise BusinessException("该消息是开场白，不支持重新生成", BizCode.BAD_REQUEST)
+
+
 class AppChatService:
     """基于分享链接的聊天服务"""
 
@@ -143,6 +173,7 @@ class AppChatService:
         """聊天（非流式）"""
         start_time = time.time()
         message_id = uuid.uuid4()
+        user_message_id = uuid.uuid4()
 
         # 检查标注命中
         from app.models.annotation_model import HitLogSource
@@ -153,7 +184,9 @@ class AppChatService:
         )
         if annotation_match:
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
             self.conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
@@ -170,6 +203,7 @@ class AppChatService:
             return {
                 "conversation_id": str(conversation_id),
                 "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
                 "message": annotation_match["answer"],
                 "reasoning_content": None,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -480,6 +514,7 @@ class AppChatService:
         # 这里不再触发老的 write_long_term 路径。
         if not skip_save:
             self.conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
@@ -540,6 +575,7 @@ class AppChatService:
         return {
             "conversation_id": conversation_id,
             "message_id": str(message_id),
+            "user_message_id": str(user_message_id),
             "message": result["content"],
             "reasoning_content": result.get("reasoning_content"),
             "usage": result.get("usage", {
@@ -578,6 +614,7 @@ class AppChatService:
         try:
             start_time = time.time()
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
 
             # 检查标注命中
             from app.models.annotation_model import HitLogSource
@@ -588,6 +625,7 @@ class AppChatService:
             )
             if annotation_match:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
@@ -600,7 +638,7 @@ class AppChatService:
                     content=annotation_match["answer"],
                     meta_data={"usage": {}}
                 )
-                yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
                 return
@@ -616,7 +654,7 @@ class AppChatService:
             # 校验文件上传
             self.agent_service._validate_file_upload(features_config, files)
 
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
 
             variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
@@ -964,6 +1002,7 @@ class AppChatService:
             # 这里不再触发老的 write_long_term 路径。
             if not skip_save:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
@@ -1041,6 +1080,7 @@ class AppChatService:
             # 保存失败的消息，使前端可以展示失败状态
             try:
                 self.conversation_service.add_message(
+                    message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
@@ -1086,6 +1126,7 @@ class AppChatService:
         """多 Agent 聊天（非流式）"""
 
         start_time = time.time()
+        user_message_id = uuid.uuid4()
         actual_config_id = None
         config_id = actual_config_id
 
@@ -1110,6 +1151,7 @@ class AppChatService:
 
         # 保存消息
         self.conversation_service.add_message(
+            message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
             content=message
@@ -1134,6 +1176,7 @@ class AppChatService:
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
             "message_id": str(ai_message.id),
+            "user_message_id": str(user_message_id),
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -1163,8 +1206,9 @@ class AppChatService:
 
         try:
             message_id = uuid.uuid4()
+            user_message_id = uuid.uuid4()
             # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
             total_tokens = 0
@@ -1209,6 +1253,7 @@ class AppChatService:
 
             # 保存消息
             self.conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message
