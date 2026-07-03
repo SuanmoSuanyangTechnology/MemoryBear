@@ -194,7 +194,7 @@ async def chat(
                     _chat_service = _AppChatService(stream_db)
                     async for event in _chat_service.agent_chat_stream(
                             message=payload.message,
-                             conversation_id=_conversation_id,
+                            conversation_id=_conversation_id,
                             user_id=end_user_id,
                             variables=payload.variables,
                             web_search=web_search,
@@ -242,7 +242,7 @@ async def chat(
                     _chat_service = _AppChatService(stream_db)
                     async for event in _chat_service.multi_agent_chat_stream(
                             message=payload.message,
-                             conversation_id=_conversation_id,
+                            conversation_id=_conversation_id,
                             user_id=end_user_id,
                             variables=payload.variables,
                             config=config,
@@ -287,7 +287,7 @@ async def chat(
                     _chat_service = _AppChatService(stream_db)
                     async for event in _chat_service.workflow_chat_stream(
                             message=payload.message,
-                             conversation_id=_conversation_id,
+                            conversation_id=_conversation_id,
                             user_id=end_user_id,
                             variables=payload.variables,
                             files=payload.files,
@@ -296,9 +296,9 @@ async def chat(
                             memory=memory,
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
-                             app_id=_app_id,
+                            app_id=_app_id,
                             workspace_id=workspace_id,
-                             release_id=_release_id,
+                            release_id=_release_id,
                             public=True
                     ):
                         event_type = event.get("event", "message")
