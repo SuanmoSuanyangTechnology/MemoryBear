@@ -3708,7 +3708,7 @@
           "V1 - Memory Config API"
         ],
         "summary": "Delete Memory Config",
-        "description": "Delete a memory config.\n\n- Default configs cannot be deleted.\n- If end users are connected and force=False, returns a warning.\n- If force=True, clears end user references and deletes the config.\n\nOnly configs belonging to the authorized workspace can be deleted.",
+        "description": "Delete a memory config.\n\n- Default configs cannot be deleted.\n- If end users are connected, returns a warning.\n\nOnly configs belonging to the authorized workspace can be deleted.",
         "operationId": "delete_memory_config_v1_memory_config_delete_config_delete",
         "parameters": [
           {
@@ -3719,18 +3719,6 @@
               "type": "string",
               "title": "Config Id"
             }
-          },
-          {
-            "name": "force",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "是否强制删除（即使有终端用户正在使用）",
-              "default": false,
-              "title": "Force"
-            },
-            "description": "是否强制删除（即使有终端用户正在使用）"
           }
         ],
         "requestBody": {
