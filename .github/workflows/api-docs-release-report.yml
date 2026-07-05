@@ -119,6 +119,7 @@ jobs:
           # 如果 base 版本没有 export 脚本，从 current 版本拷贝
           if [ ! -f scripts/export_openapi.py ]; then
             echo "::notice::Base ref 缺少 export_openapi.py，从 current ref 复制"
+            mkdir -p scripts
             git show ${{ steps.refs.outputs.current_sha }}:api/scripts/export_openapi.py > scripts/export_openapi.py
           fi
           uv run python scripts/export_openapi.py --v1-only -o ../artifacts/openapi-base.json
