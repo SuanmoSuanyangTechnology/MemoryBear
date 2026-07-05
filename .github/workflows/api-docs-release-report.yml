@@ -126,7 +126,9 @@ jobs:
 
       # ─── 恢复当前版本 ───
       - name: Restore current ref
-        run: git checkout ${{ steps.refs.outputs.current_sha }}
+        run: |
+          # 清除 base 导出阶段可能创建的 untracked 文件（避免 checkout 冲突）
+          git checkout -f ${{ steps.refs.outputs.current_sha }}
 
       # ─── 生成 Markdown API 文档 ───
       - name: Setup Node.js
