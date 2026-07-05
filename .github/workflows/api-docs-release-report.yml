@@ -169,6 +169,44 @@ jobs:
           chmod +x /usr/local/bin/oasdiff
           oasdiff --version
 
+      - name: Patch OpenAPI schemas for oasdiff compatibility
+        run: |
+          # oasdiff 的底层解析器不支持 OpenAPI 3.1 的 exclusiveMinimum/Maximum (数字格式)
+          # 需要转换为 3.0 兼容格式 (布尔 + minimum/maximum)
+          python3 << 'PYEOF'
+          import json, pathlib
+
+          def patch_schema_for_oasdiff(filepath):
+              """将 OpenAPI 3.1 的 exclusiveMinimum/Maximum 数字格式转为 3.0 兼容格式"""
+              path = pathlib.Path(filepath)
+              schema = json.loads(path.read_text(encoding="utf-8"))
+
+              def fix(obj):
+                  if isinstance(obj, dict):
+                      # exclusiveMinimum: number → minimum: number + exclusiveMinimum: true
+                      if "exclusiveMinimum" in obj and isinstance(obj["exclusiveMinimum"], (int, float)):
+                          val = obj.pop("exclusiveMinimum")
+                          obj["minimum"] = val
+                          obj["exclusiveMinimum"] = True
+                      # exclusiveMaximum: number → maximum: number + exclusiveMaximum: true
+                      if "exclusiveMaximum" in obj and isinstance(obj["exclusiveMaximum"], (int, float)):
+                          val = obj.pop("exclusiveMaximum")
+                          obj["maximum"] = val
+                          obj["exclusiveMaximum"] = True
+                      for v in obj.values():
+                          fix(v)
+                  elif isinstance(obj, list):
+                      for item in obj:
+                          fix(item)
+
+              fix(schema)
+              path.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+              print(f"Patched: {filepath}")
+
+          patch_schema_for_oasdiff("artifacts/openapi-base.json")
+          patch_schema_for_oasdiff("artifacts/openapi-current.json")
+          PYEOF
+
       - name: Generate API change report
         id: report
         env:
