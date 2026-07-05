@@ -39,16 +39,20 @@ jobs:
           else
             # push 事件：current = 当前推送的分支, base = 上一个 patch 版本
             CURRENT_REF="${{ github.ref_name }}"
-            VERSION=$(echo "$CURRENT_REF" | sed 's|release/||')
+            # 统一去除 release/ 前缀和 v 前缀，解析纯数字版本号
+            # release/v0.3.11 → 0.3.11
+            VERSION=$(echo "$CURRENT_REF" | sed 's|^release/||; s|^v||')
             MAJOR=$(echo "$VERSION" | cut -d. -f1)
             MINOR=$(echo "$VERSION" | cut -d. -f2)
-            PATCH=$(echo "$VERSION" | sed 's/^v//' | cut -d. -f3)
-            PREV_PATCH=$((PATCH - 1))
-            if [ "$PREV_PATCH" -lt 0 ]; then
-              echo "::error::无法计算上一个 release 版本：$CURRENT_REF (patch=0)"
+            PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+            if [ -z "$PATCH" ] || [ "$PATCH" -eq 0 ]; then
+              echo "::error::当前版本 $CURRENT_REF 是 minor/major 的首个 patch (patch=0 或为空)，无法自动推断基线版本。请使用 workflow_dispatch 手动指定 base_ref。"
               exit 1
             fi
-            BASE_REF="release/${MAJOR}.${MINOR}.${PREV_PATCH}"
+
+            PREV_PATCH=$((PATCH - 1))
+            BASE_REF="release/v${MAJOR}.${MINOR}.${PREV_PATCH}"
           fi
 
           echo "current_ref=$CURRENT_REF" >> $GITHUB_OUTPUT
@@ -64,7 +68,7 @@ jobs:
 
           BASE_SHA=$(git rev-parse "origin/$BASE_REF" 2>/dev/null || git rev-parse "$BASE_REF" 2>/dev/null || true)
           if [ -z "$BASE_SHA" ]; then
-            echo "::error::无法解析 base ref: $BASE_REF — 该分支是否存在？"
+            echo "::error::无法解析 base ref: $BASE_REF — 该分支是否存在？如果是跨 minor 版本升级，请使用 workflow_dispatch 手动指定。"
             exit 1
           fi
           BASE_SHORT=$(git rev-parse --short "$BASE_SHA")
@@ -74,8 +78,8 @@ jobs:
           echo "base_sha=$BASE_SHA" >> $GITHUB_OUTPUT
           echo "base_short=$BASE_SHORT" >> $GITHUB_OUTPUT
 
-          CURRENT_VERSION=$(echo "$CURRENT_REF" | sed 's|release/||')
-          BASE_VERSION=$(echo "$BASE_REF" | sed 's|release/||')
+          CURRENT_VERSION=$(echo "$CURRENT_REF" | sed 's|^release/||')
+          BASE_VERSION=$(echo "$BASE_REF" | sed 's|^release/||')
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
 
@@ -100,6 +104,7 @@ jobs:
         run: uv sync
 
       - name: Export current OpenAPI schema
+        id: export_current
         working-directory: api
         run: |
           mkdir -p ../artifacts/raw
@@ -107,13 +112,19 @@ jobs:
 
       # ─── 导出基线版本 OpenAPI schema ───
       - name: Checkout base ref
-        run: git checkout ${{ steps.refs.outputs.base_sha }}
+        run: |
+          # 清理 current 阶段可能产生的未跟踪文件，避免 checkout 冲突
+          git clean -fd
+          git checkout ${{ steps.refs.outputs.base_sha }}
 
       - name: Install dependencies (base)
         working-directory: api
-        run: uv sync
+        run: |
+          # base 版本的 lock 文件可能与当前 uv 版本不完全兼容，允许重新解析
+          uv sync || uv sync --no-frozen || pip install -e . 2>/dev/null || true
 
       - name: Export base OpenAPI schema
+        id: export_base
         working-directory: api
         run: |
           # 如果 base 版本没有 export 脚本，从 current 版本拷贝
@@ -126,7 +137,9 @@ jobs:
 
       # ─── 恢复当前版本 ───
       - name: Restore current ref
-        run: git checkout ${{ steps.refs.outputs.current_sha }}
+        run: |
+          git clean -fd
+          git checkout -f ${{ steps.refs.outputs.current_sha }}
 
       # ─── 生成 Markdown API 文档 ───
       - name: Setup Node.js
@@ -146,9 +159,16 @@ jobs:
       # ─── 生成变更报告（oasdiff） ───
       - name: Install oasdiff
         run: |
-          curl -sSfL https://raw.githubusercontent.com/Tufin/oasdiff/main/install.sh | sudo sh
+          # 使用固定版本 release binary，避免依赖 raw GitHub URL 的 install.sh
+          OASDIFF_VERSION="1.10.25"
+          curl -sSfL "https://github.com/Tufin/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/oasdiff.tar.gz
+          tar -xzf /tmp/oasdiff.tar.gz -C /usr/local/bin oasdiff
+          chmod +x /usr/local/bin/oasdiff
+          oasdiff --version
 
       - name: Generate API change report
+        id: report
         env:
           BASE_REF: ${{ steps.refs.outputs.base_ref }}
           BASE_VERSION: ${{ steps.refs.outputs.base_version }}
@@ -171,13 +191,14 @@ jobs:
             artifacts/openapi-current.json \
             --format text > artifacts/raw/oasdiff-breaking.txt 2>&1 || true
 
-          # openapi-diff（与 breaking-change workflow 保持一致）
+          # openapi-diff（预拉镜像，失败不阻塞）
+          docker pull openapitools/openapi-diff:2.1.0-beta.11 || true
           docker run --rm \
             -v "${{ github.workspace }}/artifacts:/work" \
             openapitools/openapi-diff:2.1.0-beta.11 \
             /work/openapi-base.json \
             /work/openapi-current.json \
-            --markdown /work/raw/openapi-diff-output.md 2>&1 || true
+            --markdown /work/raw/openapi-diff-output.md 2>&1 || echo "::warning::openapi-diff 执行失败，跳过该部分报告"
 
           # 生成中文 Markdown 报告
           python3 << 'PYEOF'
@@ -255,6 +276,8 @@ jobs:
           print(f"报告已生成：{base_version} → {current_version}")
           PYEOF
 
+          echo "report_generated=true" >> $GITHUB_OUTPUT
+
       # ─── 上传产物 ───
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -263,9 +286,9 @@ jobs:
           path: artifacts/
           retention-days: 90
 
-      # ─── 发送企业微信通知 ───
+      # ─── 发送企业微信通知（仅在报告成功生成时） ───
       - name: Notify WeChat
-        if: always()
+        if: steps.report.outputs.report_generated == 'true'
         env:
           WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
           BASE_VERSION: ${{ steps.refs.outputs.base_version }}
