@@ -336,7 +336,7 @@ jobs:
           # 构建企业微信 Markdown 消息
           status_icon = "⚠️" if has_breaking else "✅"
           content = (
-              f"## 📋 API 变更报告\n"
+              f"## 📋 Release 发布通知 — API 变更报告\n"
               f"> **版本对比**: {base_ver} → {current_ver}\n"
               f"> **Commit**: `{base_short}` → `{current_short}`\n\n"
               f"### 摘要\n"
