@@ -113,8 +113,8 @@ jobs:
       # ─── 导出基线版本 OpenAPI schema ───
       - name: Checkout base ref
         run: |
-          # 清理 current 阶段可能产生的未跟踪文件，避免 checkout 冲突
-          git clean -fd
+          # 清理 current 阶段可能产生的未跟踪文件，但保留 artifacts/
+          git clean -fd --exclude=artifacts
           git checkout ${{ steps.refs.outputs.base_sha }}
 
       - name: Install dependencies (base)
@@ -127,6 +127,8 @@ jobs:
         id: export_base
         working-directory: api
         run: |
+          # 确保 artifacts 目录存在（git clean 可能已删除）
+          mkdir -p ../artifacts/raw
           # 如果 base 版本没有 export 脚本，从 current 版本拷贝
           if [ ! -f scripts/export_openapi.py ]; then
             echo "::notice::Base ref 缺少 export_openapi.py，从 current ref 复制"
@@ -138,7 +140,7 @@ jobs:
       # ─── 恢复当前版本 ───
       - name: Restore current ref
         run: |
-          git clean -fd
+          git clean -fd --exclude=artifacts
           git checkout -f ${{ steps.refs.outputs.current_sha }}
 
       # ─── 生成 Markdown API 文档 ───
