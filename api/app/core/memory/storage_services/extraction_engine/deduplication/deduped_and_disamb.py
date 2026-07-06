@@ -196,10 +196,16 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
     except Exception:
         pass
 
-    # 时间范围合并
+    # 时间范围合并（取更接近现在的时间）
     try:
-        if getattr(ent, "created_at", None) and getattr(canonical, "created_at", None) and ent.created_at < canonical.created_at:
+        if getattr(ent, "created_at", None) and getattr(canonical, "created_at", None) and ent.created_at > canonical.created_at:
             canonical.created_at = ent.created_at
+    except Exception:
+        pass
+
+    # 提取次数累加
+    try:
+        canonical.extraction_count = getattr(canonical, "extraction_count", 1) + getattr(ent, "extraction_count", 1)
     except Exception:
         pass
 
