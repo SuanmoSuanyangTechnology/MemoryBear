@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearRerank
+from app.core.models import RedBearLLM, RedBearRerank
 from app.core.models.base import RedBearModelConfig
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
@@ -27,7 +27,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
     ElasticSearchVectorIndexOps,
 )
-from app.models import knowledge_model, knowledgeshare_model
+from app.models import ModelType, knowledge_model, knowledgeshare_model
 from app.models.models_model import ModelApiKey
 from app.repositories import knowledge_repository
 from app.repositories.tool_repository import ToolRepository
@@ -37,7 +37,7 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest, Kn
 from app.services import knowledge_service, knowledgeshare_service
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,7 @@ class RetrievalParams:
     top_k: int
     top_n: int
     retrieve_type: RetrieveType
+    rerank_score_threshold: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -398,6 +399,26 @@ class KnowledgeRetrievalService:
         )
 
     @staticmethod
+    def _resolve_rerank_score_threshold(
+            request: KnowledgeRetrievalRequest,
+            config: KnowledgeBaseConfig | None = None,
+    ) -> float:
+        explicit_fields = config.model_fields_set if config else set()
+        if (
+                config
+                and "rerank_score_threshold" in explicit_fields
+                and config.rerank_score_threshold is not None
+        ):
+            return config.rerank_score_threshold
+        if config and "vector_similarity_weight" in explicit_fields:
+            return config.vector_similarity_weight
+        if request.rerank_score_threshold is not None:
+            return request.rerank_score_threshold
+        if request.vector_similarity_weight is not None:
+            return request.vector_similarity_weight
+        return 0.1
+
+    @staticmethod
     def _build_retrieval_params(
             request: KnowledgeRetrievalRequest,
             config: KnowledgeBaseConfig | None = None,
@@ -415,6 +436,7 @@ class KnowledgeRetrievalService:
             if config and "vector_similarity_weight" in explicit_fields
             else request.vector_similarity_weight
         )
+        rerank_score_threshold = KnowledgeRetrievalService._resolve_rerank_score_threshold(request, config)
         top_n = max(top_k, request.top_n or top_k)
         return RetrievalParams(
             similarity_threshold=similarity_threshold,
@@ -422,6 +444,7 @@ class KnowledgeRetrievalService:
             top_k=top_k,
             top_n=top_n,
             retrieve_type=retrieve_type,
+            rerank_score_threshold=rerank_score_threshold,
         )
 
     @classmethod
@@ -756,6 +779,11 @@ class KnowledgeRetrievalService:
             docs=unique_chunks,
             top_k=target.params.top_k,
         )
+        chunks = [
+            chunk
+            for chunk in chunks
+            if (chunk.metadata or {}).get("score", 0) > target.params.rerank_score_threshold
+        ]
         if log_id:
             logger.info(
                 "[Retrieval] target_done %s",
@@ -865,7 +893,7 @@ class KnowledgeRetrievalService:
             used_rerank: bool,
     ) -> float:
         if used_rerank:
-            return request.rerank_score_threshold or request.vector_similarity_weight or 0.1
+            return KnowledgeRetrievalService._resolve_rerank_score_threshold(request)
 
         retrieve_types = {target.params.retrieve_type for target in targets}
         if retrieve_types == {RetrieveType.PARTICIPLE}:
@@ -985,7 +1013,7 @@ class KnowledgeRetrievalService:
 
         logger.debug(f"[rerank]rerank_id:{request.rerank_id}, returned {len(reranked_chunks)} docs")
 
-        rerank_score_threshold = request.rerank_score_threshold or request.vector_similarity_weight or 0.1
+        rerank_score_threshold = cls._resolve_rerank_score_threshold(request)
 
         filtered_chunks = [
             chunk
@@ -1356,15 +1384,32 @@ class KnowledgeRetrievalService:
             db: Session,
             knowledge_id: uuid.UUID,
             tenant_id: uuid.UUID | None,
-    ) -> Base | None:
+    ) -> RedBearLLM | None:
         knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
         if not knowledge or not knowledge.llm_id:
+            return None
+
+        try:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=knowledge.llm_id)
+        except BusinessException:
             return None
 
         api_key = ModelApiKeyService.get_available_api_key(db, knowledge.llm_id, tenant_id=tenant_id)
         if not api_key:
             return None
-        return cls._build_chat_model(api_key)
+
+        # 参数折叠进 RedBearModelConfig.extra_params（与 knowledge 节点 auto 模式、LLM 节点一致）。
+        # 此兜底路径用知识库 llm_id、无 completion_params，保留原默认 temperature=0 行为。
+        rb_config = RedBearModelConfig(
+            model_name=api_key.model_name,
+            provider=api_key.provider,
+            api_key=api_key.api_key,
+            base_url=api_key.api_base,
+            is_omni=api_key.is_omni,
+            capability=api_key.capability or [],
+            extra_params={"temperature": 0},
+        )
+        return RedBearLLM(rb_config, type=ModelType(config.type))
 
     @staticmethod
     def _get_common_metadata_defs(metadata_defs_by_kb: dict[Any, dict[str, dict]]) -> dict[str, dict]:

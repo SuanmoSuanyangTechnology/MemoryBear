@@ -92,6 +92,15 @@ def parse_timestamp_to_utc_naive(timestamp: int | float | None) -> datetime | No
     return datetime.fromtimestamp(timestamp, UTC).replace(tzinfo=None)
 
 
+def parse_timestamp_to_utc(timestamp: int | float | None) -> datetime | None:
+    """Convert a second/millisecond timestamp to UTC datetime."""
+    if timestamp is None:
+        return None
+    if timestamp > 1e10:
+        timestamp = timestamp / 1000
+    return datetime.fromtimestamp(timestamp, UTC)
+
+
 def parse_iso_to_utc_naive(value: str | None) -> datetime | None:
     """Parse an ISO datetime and normalize it to naive UTC."""
     if not value:

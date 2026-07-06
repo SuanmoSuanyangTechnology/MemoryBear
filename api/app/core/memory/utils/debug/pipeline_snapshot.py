@@ -18,7 +18,7 @@ Output structure (OSS):
                         2_statement_outputs.json
                         ...
 
-Controlled by env var PIPELINE_SNAPSHOT_ENABLED (default: false).
+Controlled by env var EXTRACT_SNAPSHOT_ENABLED (default: false).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ _OSS_SNAPSHOT_PREFIX = "extract_snapshot"
 def _is_enabled() -> bool:
     global _ENABLED
     if _ENABLED is None:
-        _ENABLED = os.getenv("PIPELINE_SNAPSHOT_ENABLED", "false").lower() == "true"
+        _ENABLED = os.getenv("EXTRACT_SNAPSHOT_ENABLED", "false").lower() == "true"
     return _ENABLED
 
 

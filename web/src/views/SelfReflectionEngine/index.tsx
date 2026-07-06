@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-29 18:36:08
+ * @Last Modified time: 2026-07-02 13:42:43
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -287,7 +287,7 @@ const SelfReflectionEngine: React.FC = () => {
                 <span className="rb:text-[#5B6167]">{t(`reflectionEngine.baseline`)}: {t(`reflectionEngine.${result.baseline}`)}</span>
               </Flex>
 
-              {result.reflexion_data.length > 0 &&
+              {result.reflexion_data?.length > 0 &&
                 <Flex vertical gap={12} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5.5">
                   <Flex justify="space-between" className="rb:font-medium rb:text-[#212332] rb:cursor-pointer" onClick={() => setExpanded(p => ({ ...p, conflict: !p.conflict }))}>
                     {t('reflectionEngine.conflictDetection')}
@@ -314,7 +314,7 @@ const SelfReflectionEngine: React.FC = () => {
 
                 </Flex>
               }
-              {result.quality_assessments.length > 0 &&
+              {result.quality_assessments?.length > 0 &&
                 <Flex vertical gap={12} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5.5">
                   <Flex justify="space-between" className="rb:font-medium rb:text-[#212332] rb:cursor-pointer" onClick={() => setExpanded(p => ({ ...p, quality: !p.quality }))}>
                     {t('reflectionEngine.qualityAssessment')}
@@ -337,7 +337,7 @@ const SelfReflectionEngine: React.FC = () => {
 
                 </Flex>
               }
-              {result.memory_verifies.length > 0 &&
+              {result.memory_verifies?.length > 0 &&
                 <Flex vertical gap={12} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5.5">
                   <Flex justify="space-between" className="rb:font-medium rb:text-[#212332] rb:cursor-pointer" onClick={() => setExpanded(p => ({ ...p, privacy: !p.privacy }))}>
                     {t('reflectionEngine.privacyAudit')}

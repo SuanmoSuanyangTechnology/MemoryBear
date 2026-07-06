@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 
 from app.core.logging_config import get_memory_logger
 from app.core.memory.llm_tools.openai_client import OpenAIClient
@@ -191,49 +191,3 @@ class TripletExtractor:
 
         return statement_triplet_map
 
-    def save_triplets(self, triplet_responses: List[TripletExtractionResponse], output_path: str = None) -> str:
-        """Save extracted triplets and entities to a file
-
-        Args:
-            triplet_responses: List of TripletExtractionResponse objects
-            output_path: Optional path to save the results
-
-        Returns:
-            Path where the triplets were saved
-        """
-        if output_path is None:
-            from app.core.config import settings
-            settings.ensure_memory_output_dir()
-            output_path = settings.get_memory_output_path("extracted_triplets.txt")
-
-        # Flatten all triplets and entities
-        all_triplets = []
-        all_entities = []
-
-        for response in triplet_responses:
-            all_triplets.extend(response.triplets)
-            all_entities.extend(response.entities)
-
-        # Save to file
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(f"=== EXTRACTED TRIPLETS ({len(all_triplets)} total) ===\n\n")
-            for i, triplet in enumerate(all_triplets, 1):
-                f.write(f"Triplet {i}:\n")
-                f.write(f"  Subject: {triplet.subject_name} (ID: {triplet.subject_id})\n")
-                f.write(f"  Predicate: {triplet.predicate}\n")
-                f.write(f"  Object: {triplet.object_name} (ID: {triplet.object_id})\n")
-                if triplet.value:
-                    f.write(f"  Value: {triplet.value}\n")
-                f.write("\n")
-
-            f.write(f"\n=== EXTRACTED ENTITIES ({len(all_entities)} total) ===\n\n")
-            for i, entity in enumerate(all_entities, 1):
-                f.write(f"Entity {i}:\n")
-                f.write(f"  ID: {entity.entity_idx}\n")
-                f.write(f"  Name: {entity.name}\n")
-                f.write(f"  Type: {entity.type}\n")
-                f.write(f"  Description: {entity.description}\n")
-                f.write("\n")
-
-        logger.info(f"Saved {len(all_triplets)} triplets and {len(all_entities)} entities to: {output_path}")
-        return output_path

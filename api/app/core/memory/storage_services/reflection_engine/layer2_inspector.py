@@ -659,7 +659,7 @@ class Layer2Inspector:
             if merged_count >= config.max_merges_per_run:
                 break
             if decision and decision.same_entity and decision.confidence >= config.llm_merge_threshold:
-                success = await self._apply_dedup_merge(pair, end_user_id, baseline, llm_decision=decision, step_timing=step_timing)
+                success = await self._apply_dedup_merge(pair, end_user_id, baseline, llm_decision=decision, step_timing=step_timing, keeper_state_overrides=keeper_state_overrides)
                 if success:
                     merged_count += 1
                     # 快照：LLM 确认合并
@@ -1079,8 +1079,14 @@ class Layer2Inspector:
         )
 
     async def _apply_dedup_merge(self, pair, end_user_id: str, baseline: str,
-                                llm_decision=None, step_timing=None) -> bool:
-        """执行单对合并 + 写 ReflectionLog"""
+                                llm_decision=None, step_timing=None,
+                                keeper_state_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
+        """执行单对合并 + 写 ReflectionLog
+
+        keeper_state_overrides: 可选 {entity_id: {description, aliases}}。同一去重轮内若某实体
+            已是前次合并的 keeper，从这里取累积态覆盖 pair 上的召回快照，避免连环合并时用旧
+            aliases/description 覆盖掉前次已并入的内容（与直合池 _apply_direct_merge 一致）。
+        """
         from .deterministic.cypher_merger import (
             choose_keeper, execute_merge, build_merged_aliases,
             # fetch_degrees,  # 暂时关闭度数优先,下版打开
@@ -1114,6 +1120,14 @@ class Layer2Inspector:
                     "description": pair.a_desc, "aliases": pair.a_aliases}
         entity_b = {"entity_id": pair.b_id, "name": pair.b_name, "entity_type": pair.entity_type,
                     "description": pair.b_desc, "aliases": pair.b_aliases}
+        # 同一去重轮内该实体若已是前次合并的 keeper，用累积态覆盖召回快照，
+        # 避免连环合并用旧 aliases/description 覆盖掉前次已并入的内容。
+        if keeper_state_overrides:
+            for ent in (entity_a, entity_b):
+                ov = keeper_state_overrides.get(ent["entity_id"])
+                if ov:
+                    ent["description"] = ov.get("description", ent.get("description", ""))
+                    ent["aliases"] = ov.get("aliases", ent.get("aliases", []))
         winner = llm_decision.winner_id if llm_decision else None
 
         # 度数查询：用于 keeper 选择 + 超级节点保护
@@ -1147,6 +1161,15 @@ class Layer2Inspector:
             tracker.end_step("合并失败", success=False)
             return False
         tracker.end_step("合并完成")
+
+        # 回写 keeper 累积态，供同一去重轮后续涉及同一 keeper 的合并使用（与直合池一致），
+        # 避免下一对用召回旧快照覆盖本次已并入的 aliases/description。
+        if keeper_state_overrides is not None:
+            keeper_state_overrides[keeper["entity_id"]] = {
+                "description": self._merged_description(
+                    keeper.get("description", ""), loser.get("description", "")),
+                "aliases": merged_aliases,
+            }
 
         # Step 5.5: name 变更则重算 name_embedding
         await self._reembed_if_name_changed(keeper, merged_name)

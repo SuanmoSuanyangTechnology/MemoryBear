@@ -6047,6 +6047,7 @@ class WorkflowService:
                         ).update({"context": _new_ctx}, synchronize_session=False)
                         execution.context = _new_ctx
                         self.db.commit()
+                        execution.context = _resolved_context
                         self.db.close()
 
                     # Handle timeout signal from the background scheduler

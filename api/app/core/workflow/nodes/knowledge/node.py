@@ -1,20 +1,25 @@
 import asyncio
+import json
 import logging
 import re
 from typing import Any
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.rag.llm.chat_model import Base as ChatModelBase
+from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
+from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller
+from app.models import ModelType
+from app.models.models_model import ModelCapability
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
+from app.schemas.model_schema import ModelInfo
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
@@ -158,11 +163,18 @@ class KnowledgeRetrievalNode(BaseNode):
                 })
         return citations
 
-    def _build_auto_filter_llm(self, db) -> ChatModelBase:
-        """auto 模式：用节点配置的模型 + 参数构造 LLM
+    def _build_auto_filter_llm(self, db) -> RedBearLLM:
+        """auto 模式：照搬 LLM 节点 _prepare_llm 的构造方式，用 RedBearLLM + extra_params。
 
-        复用 service._build_chat_model 的构造方式（chat_model.Base），与
-        MetadataAutoFilterService.generate_filter_groups 期望的 llm.chat() 接口一致。
+        参数折叠进 RedBearModelConfig.extra_params，经 strip_unsupported_llm_params 按 provider
+        剔除不支持的键并打 warning；stop 等经 RedBearModelFactory.get_model_params 路由到顶层，
+        provider 真正认（旧 chat_model.Base 路径下 stop 不生效的根因即在此）。与
+        MetadataAutoFilterService.generate_filter_groups 期望的 llm.invoke() 接口一致。
+
+        api-key 选取沿用旧 chat_model.Base 路径的 model_balance（取 config.api_keys[0]，直接用
+        其 api_base），不切到 get_runtime_api_config：后者对 SpeedBear 公共模型会走
+        _build_speedbear_runtime_api_key，base_url 指向 SPEEDBEAR_BASE_URL 网关，本地开发网络下
+        不可达会触发 Connection error。stop 修复只依赖 RedBearLLM 构造，与 api-key 来源无关。
         """
         model_cfg = self.typed_config.metadata_model
         config = ModelConfigService.get_model_by_id(db=db, model_id=model_cfg.model_id)
@@ -170,77 +182,96 @@ class KnowledgeRetrievalNode(BaseNode):
             raise BusinessException(
                 "auto 模式配置的模型不存在", code=BizCode.NOT_FOUND
             )
-        if not config.api_keys:
-            raise BusinessException(
-                "auto 模式配置的模型缺少 API Key", code=BizCode.INVALID_PARAMETER
-            )
-        api_key = self.model_balance(config)  # BaseNode.model_balance -> ModelApiKey
-        return ChatModelBase(
-            key=api_key.api_key,
+        api_key = self.model_balance(config)
+        model_info = ModelInfo(
             model_name=api_key.model_name,
-            base_url=api_key.api_base,
+            model_type=ModelType(config.type),
+            api_key=api_key.api_key,
+            api_base=api_key.api_base,
+            provider=api_key.provider or config.provider,
+            is_omni=api_key.is_omni if api_key.is_omni is not None else config.is_omni,
+            capability=api_key.capability or config.capability or [],
         )
 
-    def _build_gen_conf(self) -> dict:
-        """AgentModelConfig.completion_params -> chat_model.Base 的 gen_conf
-
-        auto 模式底层 LLM 是知识库工程师 generate_filter_groups 定好的 chat_model.Base，
-        其 _chat 将 gen_conf 直接透传给 OpenAI chat.completions.create(**gen_conf)，
-        并经 _clean_conf 过滤掉不支持的键。
-
-        因此配置层与 agent 节点完全一致（不阉割），运行时按 OpenAI API 参数语义全量映射；
-        少数 chat_model.Base 不支持的键（top_k / repetition_penalty 等）会被 _clean_conf 自动丢弃，
-        并在此给出 warning 告知用户该参数在 auto 过滤场景下不生效。
-        """
-        import json as _json
-
-        p = self.typed_config.metadata_model.completion_params
-        conf: dict[str, Any] = {}
-        # 基础生成参数（OpenAI API 原生支持）
+        p = model_cfg.completion_params
+        extra_params: dict[str, Any] = {}
+        # enable 门与 LLM 节点完全一致：temperature/max_tokens 无 enable 门，其余需 enable=true
         if p.temperature is not None:
-            conf["temperature"] = p.temperature
+            extra_params["temperature"] = p.temperature
         if p.max_tokens is not None:
-            # chat_model.Base._clean_conf 会删掉 max_tokens，改用 OpenAI 的 max_completion_tokens
-            conf["max_completion_tokens"] = p.max_tokens
+            extra_params["max_tokens"] = p.max_tokens
         if p.top_p.enable and p.top_p.value is not None:
-            conf["top_p"] = p.top_p.value
+            extra_params["top_p"] = p.top_p.value
+        if p.top_k.enable and p.top_k.value is not None:
+            extra_params["top_k"] = p.top_k.value
         if p.seed.enable and p.seed.value is not None:
-            conf["seed"] = p.seed.value
+            extra_params["seed"] = p.seed.value
+        if p.repetition_penalty.enable and p.repetition_penalty.value is not None:
+            extra_params["repetition_penalty"] = p.repetition_penalty.value
         if p.frequency_penalty.enable and p.frequency_penalty.value is not None:
-            conf["frequency_penalty"] = p.frequency_penalty.value
+            extra_params["frequency_penalty"] = p.frequency_penalty.value
         if p.presence_penalty.enable and p.presence_penalty.value is not None:
-            conf["presence_penalty"] = p.presence_penalty.value
+            extra_params["presence_penalty"] = p.presence_penalty.value
         if p.stop.enable and p.stop.value:
-            conf["stop"] = p.stop.value[:4]
-        if p.response_format.enable and p.response_format.value:
-            conf["response_format"] = {"type": p.response_format.value}
+            extra_params["stop"] = p.stop.value[:4]
+        if p.search:
+            extra_params["enable_search"] = True
+
+        deep_thinking = p.thinking.enable
+        thinking_budget_tokens = p.thinking.budget.value if (
+            p.thinking.budget.enable and p.thinking.budget.value is not None
+        ) else None
+
+        capability_set = set(model_info.capability or [])
+        json_output = bool(p.json_output)
+        if (
+            p.response_format.enable
+            and p.response_format.value == "json_object"
+            and ModelCapability.JSON_OUTPUT in capability_set
+        ):
+            extra_params["response_format"] = {"type": "json_object"}
+
         if p.extra_headers.enable and p.extra_headers.value:
             try:
-                conf["extra_headers"] = _json.loads(p.extra_headers.value)
+                extra_params["default_headers"] = json.loads(p.extra_headers.value)
             except (ValueError, TypeError) as e:
                 logger.warning(
                     f"node: {self.node_id} auto filter: extra_headers JSON parse failed: {e}"
                 )
 
-        # 下列参数 chat_model.Base 不支持（_clean_conf 会丢弃），配了也不生效，给出 warning 提示
-        unsupported_hits = []
-        if p.top_k.enable and p.top_k.value is not None:
-            unsupported_hits.append("top_k")
-            conf["top_k"] = p.top_k.value
-        if p.repetition_penalty.enable and p.repetition_penalty.value is not None:
-            unsupported_hits.append("repetition_penalty")
-            conf["repetition_penalty"] = p.repetition_penalty.value
-        if getattr(p, "search", False):
-            unsupported_hits.append("search")
-        if getattr(p.thinking, "enable", False):
-            unsupported_hits.append("thinking")
-        if unsupported_hits:
+        # 按 provider 剔除不支持的参数并打 warning（与 LLM 节点 strip_unsupported_llm_params 一致）
+        extra_params, strip_warnings = strip_unsupported_llm_params(
+            extra_params, model_info.provider or "", model_info.is_omni
+        )
+        for w in strip_warnings:
             logger.warning(
-                f"node: {self.node_id} auto filter: parameters {unsupported_hits} are not supported "
-                f"by the underlying chat_model.Base and will be ignored"
+                f"节点 {self.node_id} auto filter 参数安全剥离: {w} "
+                f"(模型={model_info.model_name}, 提供商={model_info.provider})"
             )
 
-        return conf
+        logger.info(
+            f"节点 {self.node_id} auto filter: provider={model_info.provider}, "
+            f"model={model_info.model_name}, is_omni={model_info.is_omni}, "
+            f"is_public={getattr(config, 'is_public', None)}, "
+            f"base_url={model_info.api_base!r}, api_key_set={bool(model_info.api_key)}, "
+            f"extra_params={extra_params}"
+        )
+
+        return RedBearLLM(
+            RedBearModelConfig(
+                model_name=model_info.model_name,
+                provider=model_info.provider,
+                api_key=model_info.api_key,
+                base_url=model_info.api_base,
+                is_omni=model_info.is_omni,
+                capability=model_info.capability,
+                deep_thinking=deep_thinking,
+                thinking_budget_tokens=thinking_budget_tokens,
+                json_output=json_output,
+                extra_params=extra_params,
+            ),
+            type=model_info.model_type,
+        )
 
     def _extract_auto_filter_groups(
         self,
@@ -274,20 +305,18 @@ class KnowledgeRetrievalNode(BaseNode):
                 )
                 return []
 
-            # 2. 构造配置好的 LLM（含模型参数）
+            # 2. 构造配置好的 LLM（含模型参数，照搬 LLM 节点 RedBearLLM 构造）
             llm = self._build_auto_filter_llm(db)
 
-        # 3. 调用知识库工程师已写好的提取方法，传入自定义 gen_conf（应用模型参数）
-        gen_conf = self._build_gen_conf()
+        # 3. 调用提取方法（参数已在 llm 实例上，不再单独传 gen_conf）
         logger.info(
-            "node: %s auto filter: query=%r, fields=%s, gen_conf=%s",
-            self.node_id, query, list(common_metadata_defs.keys()), gen_conf,
+            "node: %s auto filter: query=%r, fields=%s",
+            self.node_id, query, list(common_metadata_defs.keys()),
         )
         filter_groups = MetadataAutoFilterService.generate_filter_groups(
             query=query,
             metadata_defs=common_metadata_defs,
             llm=llm,
-            gen_conf=gen_conf,
         )
         # generate_filter_groups 返回引擎层 EngineFilterGroup；metadata_filters 字段装的是配置层 FilterGroup，
         # 这里无损转成配置层类型（引擎层 logic 大写，由 config 校验器统一转小写）。
@@ -349,7 +378,7 @@ class KnowledgeRetrievalNode(BaseNode):
         # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
         auto_filter_groups: list | None = None
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            # generate_filter_groups 内部走同步 LLM.chat 网络调用，放到工作线程避免阻塞事件循环
+            # generate_filter_groups 内部走同步 llm.invoke 网络调用，放到工作线程避免阻塞事件循环
             auto_filter_groups = await asyncio.to_thread(
                 self._extract_auto_filter_groups, query
             )

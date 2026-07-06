@@ -16,7 +16,7 @@ from langchain_core.documents import Document
 from app.core.models.base import RedBearModelConfig
 from app.core.models import RedBearRerank
 from app.core.models.embedding import RedBearEmbeddings
-from app.models.models_model import ModelApiKey
+from app.models.models_model import ModelApiKey, ModelProvider
 
 from app.models.knowledge_model import Knowledge
 from app.core.rag.vdb.field import Field
@@ -1230,12 +1230,11 @@ class ElasticSearchVectorFactory:
             raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
-        if not knowledge.embedding.api_keys:
-            raise ValueError(f"No embedding api key found for knowledge {knowledge.id}")
-        if not knowledge.reranker.api_keys:
-            raise ValueError(f"No reranker api key found for knowledge {knowledge.id}")
-        embedding_config = knowledge.embedding.api_keys[0]
-        reranker_config = knowledge.reranker.api_keys[0]
+
+        tenant_id = cls._resolve_tenant_id(knowledge)
+
+        embedding_config = cls._resolve_api_key(knowledge.embedding, knowledge.id, "embedding", tenant_id)
+        reranker_config = cls._resolve_api_key(knowledge.reranker, knowledge.id, "reranker", tenant_id)
 
         return ElasticSearchVector(
             index_name=collection_name,
@@ -1259,3 +1258,34 @@ class ElasticSearchVectorFactory:
             embedding_config=embedding_config,
             reranker_config=reranker_config,
         )
+    @staticmethod
+    def _resolve_tenant_id(knowledge: Knowledge):
+        """Look up tenant_id via the knowledge's workspace."""
+        from app.db import get_db_context
+        from app.models.workspace_model import Workspace
+        with get_db_context() as db:
+            ws = db.query(Workspace).filter(Workspace.id == knowledge.workspace_id).first()
+            return ws.tenant_id if ws else None
+
+    @staticmethod
+    def _resolve_api_key(model_config, knowledge_id, role: str, tenant_id) -> ModelApiKey:
+        """Resolve ModelApiKey, handling public SpeedBear models that have no stored api_keys."""
+        is_public_speedbear = (
+            model_config.provider == ModelProvider.SPEEDBEAR
+            and bool(model_config.is_public)
+        )
+        if is_public_speedbear:
+            from app.db import get_db_context
+            from app.services.model_service import ModelApiKeyService
+            with get_db_context() as db:
+                api_key = ModelApiKeyService.get_available_api_key(db, model_config.id, tenant_id)
+            if not api_key:
+                raise ValueError(
+                    f"No {role} api key found for knowledge {knowledge_id} "
+                    f"(SpeedBear tenant binding missing)"
+                )
+            return api_key
+
+        if not model_config.api_keys:
+            raise ValueError(f"No {role} api key found for knowledge {knowledge_id}")
+        return model_config.api_keys[0]

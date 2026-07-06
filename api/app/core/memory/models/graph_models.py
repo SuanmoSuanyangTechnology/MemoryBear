@@ -479,6 +479,7 @@ class ExtractedEntityNode(Node):
     beliefs_or_stances: List[str] = Field(default_factory=list, description="Stable beliefs, values, or stances")
     anchors: List[str] = Field(default_factory=list, description="Personally meaningful objects or symbols")
     events: List[str] = Field(default_factory=list, description="Durable personal experiences or milestones")
+    extraction_count: int = Field(default=1, description="Number of times this entity was extracted")
 
     @field_validator('aliases', mode='before')
     @classmethod

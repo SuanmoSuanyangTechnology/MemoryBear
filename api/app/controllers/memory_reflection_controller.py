@@ -37,7 +37,7 @@ from app.services.memory_reflection_service import (
 )
 from app.services.model_service import ModelConfigService
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException, status,Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,7 @@ from app.schemas.memory_reflection_schemas import (
 )
 from app.core.response_utils import fail
 from app.core.error_codes import BizCode
+
 # Load environment variables for configuration
 load_dotenv()
 
@@ -66,11 +67,12 @@ router = APIRouter(
     tags=["Memory"],
 )
 
+
 @router.get("/reflection/logs/stats")
 def get_reflection_log_stats(
-    end_user_id: str = Query(..., description="终端用户ID"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str = Query(..., description="终端用户ID"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     """获取反思日志统计概览
 
@@ -102,9 +104,9 @@ def get_reflection_log_stats(
 
 @router.get("/reflection/logs/{log_id}")
 def get_reflection_log_detail(
-    log_id: str = Path(..., description="日志ID"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        log_id: str = Path(..., description="日志ID"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     """获取反思日志详情
 
@@ -132,14 +134,14 @@ def get_reflection_log_detail(
 
 @router.get("/reflection/logs")
 def get_reflection_logs(
-    end_user_id: str = Query(..., description="终端用户ID"),
-    sub_problem: Optional[SubProblemEnum] = Query(None, description="子问题类型筛选"),
-    status: Optional[LogStatusEnum] = Query(None, description="状态筛选"),
-    trigger_type: Optional[TriggerTypeEnum] = Query(None, description="触发方式筛选"),
-    page: int = Query(1, ge=1, description="页码，从1开始"),
-    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str = Query(..., description="终端用户ID"),
+        sub_problem: Optional[SubProblemEnum] = Query(None, description="子问题类型筛选"),
+        status: Optional[LogStatusEnum] = Query(None, description="状态筛选"),
+        trigger_type: Optional[TriggerTypeEnum] = Query(None, description="触发方式筛选"),
+        page: int = Query(1, ge=1, description="页码，从1开始"),
+        pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     """获取反思日志列表（分页）
 
@@ -198,8 +200,8 @@ def get_reflection_logs(
 
 @router.get("/reflection")
 async def start_workspace_reflection(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
     Start reflection functionality for all matching applications in workspace
@@ -254,9 +256,9 @@ async def start_workspace_reflection(
         with get_db_context() as query_db:
             service = WorkspaceAppService(query_db)
             result = service.get_workspace_apps_detailed(workspace_id)
-        
+
         reflection_results = []
-        
+
         # Process each application in the workspace
         for data in result['apps_detailed_info']:
             # Skip applications without configurations
@@ -325,10 +327,10 @@ async def start_workspace_reflection(
 
 @router.get("/reflection/run")
 async def reflection_run(
-    config_id: UUID|int,
-    language_type: str = Header(default=None, alias="X-Language-Type"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        config_id: UUID | int,
+        language_type: str = Header(default=None, alias="X-Language-Type"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
     Execute reflection engine with specified configuration
@@ -388,7 +390,7 @@ async def reflection_run(
 
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
     config_id = resolve_config_id(config_id, db)
-    
+
     # Query reflection configuration using MemoryConfigRepository
     result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
     if not result:
@@ -403,7 +405,7 @@ async def reflection_run(
     model_id = result.reflection_model_id
     if model_id:
         try:
-            ModelConfigService.get_model_by_id(db=db, model_id=uuid.UUID(model_id))
+            ModelConfigService.get_model_by_id(db=db, model_id=uuid.UUID(model_id), tenant_id=current_user.tenant_id)
             api_logger.info(f"模型ID验证成功: {model_id}")
         except Exception as e:
             api_logger.warning(f"模型ID '{model_id}' 不存在，将使用默认模型: {str(e)}")
@@ -423,18 +425,15 @@ async def reflection_run(
         model_id=model_id,
         language_type=language_type
     )
-    
+
     # Initialize Neo4j connector and reflection engine
     connector = Neo4jConnector()
     engine = ReflectionEngine(
         config=config,
         neo4j_connector=connector,
-        llm_client=model_id  # Pass validated model_id
+        llm_client=model_id,  # Pass validated model_id
+        tenant_id=current_user.tenant_id
     )
 
-    result=await (engine.reflection_run())
+    result = await (engine.reflection_run())
     return success(data=result, msg="反思试运行")
-
-
-
-
