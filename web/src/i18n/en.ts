@@ -999,6 +999,8 @@ export const en = {
         feishuFolderTokenPlaceholder: 'Enter your Feishu Folder Token',
       },
       csvTemplate: 'Click to download CSV template',
+      exportQa: 'Export QA',
+      exportQaSuccess: 'QA exported successfully',
     },
     api: {
       pageTitle: 'Memory library IAP document',

@@ -481,6 +481,8 @@ export const zh = {
         feishuFolderTokenPlaceholder: '请输入您的飞书文件夹 Token',
       },
       csvTemplate: '点击下载 CSV 模板',
+      exportQa: '导出QA',
+      exportQaSuccess: 'QA 导出成功',
     },
     application: {
       searchPlaceholder: '搜索应用',
