@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-03 12:16:29
+ * @Last Modified time: 2026-07-06 10:05:34
  */
 /**
  * Memory Management Page
@@ -146,9 +146,7 @@ const MemoryManagement: React.FC = () => {
   /** 是否存在用户自建配置（非系统默认） */
   const hasUserConfig = data.some((item) => !item.is_system_default)
   /** 当前线上生效配置：优先取已生效的，其次系统默认，最后取第一条 */
-  const activeConfig = data.find((item) => item.state)
-    || data.find((item) => item.is_system_default)
-    || data[0]
+  const activeConfig = data.find((item) => item.is_active) || data[0]
 
   return (
     <>
