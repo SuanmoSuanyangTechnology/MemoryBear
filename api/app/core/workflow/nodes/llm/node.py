@@ -652,7 +652,6 @@ class LLMNode(BaseNode):
             has_vision_capability = ModelCapability.VISION in capability_set
             is_compatible = (
                 provider_enum in _MULTIMODAL_COMPATIBLE_PROVIDERS
-                or (provider_enum == ModelProvider.DASHSCOPE and model_info.is_omni)
                 or has_vision_capability
             )
             if not is_compatible:
