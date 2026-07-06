@@ -74,6 +74,30 @@ class PdfChunkPipeline(ChunkPipeline):
 
 class PresentationChunkPipeline(ChunkPipeline):
     def parse(self, ctx: ChunkContext) -> ParseResult:
+        self._callback(ctx, 0.1, "Start to parse.")
+        if self._file_extension(ctx) == ".pptx":
+            try:
+                parse_result = MinerUV3Parser().parse(ctx)
+                self._callback(ctx, 0.8, "Finish parsing.")
+                return parse_result
+            except Exception as exc:
+                LOGGER.warning(
+                    "[MinerUV3] presentation parse failed, fallback started: file_name=%s, fallback=converted_pdf, error=%s",
+                    ctx.filename,
+                    exc,
+                )
+                self._callback(ctx, 0.78, "MinerU V3 failed, fallback to converted PDF flow.")
+
+        return self._parse_converted_pdf(ctx)
+
+    def _file_extension(self, ctx: ChunkContext) -> str:
+        return os.path.splitext(ctx.filename)[1].lower()
+
+    def _callback(self, ctx: ChunkContext, progress, message: str) -> None:
+        if ctx.callback:
+            ctx.callback(progress, message)
+
+    def _parse_converted_pdf(self, ctx: ChunkContext) -> ParseResult:
         tmp_file = None
         dest_pdf_path = None
         try:
