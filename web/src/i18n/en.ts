@@ -481,6 +481,9 @@ export const en = {
       updated_at: 'Updated At',
       callbackUrlInvalid: 'Please enter a valid URL',
       switchSpace: 'Switch Space',
+      number: 'number',
+      or: 'or',
+      variable: 'variable',
     },
     model: {
       searchPlaceholder: 'search model…',
