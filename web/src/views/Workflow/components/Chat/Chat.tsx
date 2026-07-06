@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 15:45:38
+ * @Last Modified time: 2026-07-06 18:51:50
  */
 /**
  * Workflow Chat Component
@@ -493,34 +493,36 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
         className="rb:h-full!"
         bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
-    >
-      <ChatContent
-        classNames="rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-134px)]"
-        contentClassNames="rb:max-w-[400px]!'"
-        empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
-        data={chatList}
-        streamLoading={streamLoading}
-        labelPosition="bottom"
-        labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-        // errorDesc={t('application.ReplyException')}
-        renderRuntime={(item, index) => {
-          return <Runtime item={item} index={index} source="workflow" />
-        }}
-        onSend={handleSend}
-        handleInterventionActionClick={handleInterventionActionClick}
-        isEnded={chatIsEnded.current}
-        isSupportTools={isWorkflow}
-        isAlwaysShowAssistantTools={isWorkflow}
-        handleFavorite={isWorkflow ? handleFavorite : undefined}
-        handleFeedback={isWorkflow ? handleFeedback : undefined}
-        deleteMsg={isWorkflow ? deleteMsg : undefined}
-        reportMsg={isWorkflow ? reportMsg : undefined}
-        regenerateMaxCount={5}
-        regenerateMessages={isWorkflow ? regenerateMessages : undefined}
-        handleVersionChange={isWorkflow ? handleVersionChange : undefined}
-      />
+      >
+        <ChatContent
+          classNames={clsx("rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-130px)]", {
+            'rb:h-[calc(100%-194px)]': fileList.length > 0
+          })}
+          contentClassNames="rb:max-w-[400px]!'"
+          empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
+          data={chatList}
+          streamLoading={streamLoading}
+          labelPosition="bottom"
+          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+          // errorDesc={t('application.ReplyException')}
+          renderRuntime={(item, index) => {
+            return <Runtime item={item} index={index} source="workflow" />
+          }}
+          onSend={handleSend}
+          handleInterventionActionClick={handleInterventionActionClick}
+          isEnded={chatIsEnded.current}
+          isSupportTools={isWorkflow}
+          isAlwaysShowAssistantTools={isWorkflow}
+          handleFavorite={isWorkflow ? handleFavorite : undefined}
+          handleFeedback={isWorkflow ? handleFeedback : undefined}
+          deleteMsg={isWorkflow ? deleteMsg : undefined}
+          reportMsg={isWorkflow ? reportMsg : undefined}
+          regenerateMaxCount={5}
+          regenerateMessages={isWorkflow ? regenerateMessages : undefined}
+          handleVersionChange={isWorkflow ? handleVersionChange : undefined}
+        />
         {isWorkflow &&
-          <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
+          <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-0!">
             <ChatInput
               message={message}
               className="rb:relative!"
