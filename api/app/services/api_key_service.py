@@ -490,7 +490,7 @@ class ApiKeyAuthService:
 
     @staticmethod
     async def validate_api_key_async(
-            db,
+            db: AsyncSession,
             api_key: str
     ) -> Optional[ApiKey]:
         """Async version of validate_api_key."""
@@ -525,7 +525,7 @@ class ApiKeyAuthService:
             raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
 
     @staticmethod
-    async def check_app_published_async(db, api_key_obj: ApiKey) -> None:
+    async def check_app_published_async(db: AsyncSession, api_key_obj: ApiKey) -> None:
         """Async version of check_app_published."""
         if not api_key_obj.resource_id:
             return

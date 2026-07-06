@@ -4,6 +4,7 @@ import uuid
 from typing import List, Optional
 
 from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
@@ -821,7 +822,7 @@ def _check_workspace_member_permission(db: Session, workspace_id: uuid.UUID, use
     return db_workspace
 
 
-async def _check_workspace_member_permission_async(db, workspace_id: uuid.UUID, user: User) -> Workspace | None:
+async def _check_workspace_member_permission_async(db: AsyncSession, workspace_id: uuid.UUID, user: User) -> Workspace | None:
     """Async version of _check_workspace_member_permission."""
     # 获取工作空间信息
     result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))

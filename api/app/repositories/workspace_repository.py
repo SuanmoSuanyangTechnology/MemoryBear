@@ -457,6 +457,6 @@ def get_workspace_memory_config_id(db: Session, workspace_id: uuid.UUID) -> uuid
     return repo.get_workspace_memory_config_id(workspace_id)
 
 
-async def get_workspace_memory_config_id_async(db: Session, workspace_id: uuid.UUID) -> uuid.UUID | None:
+async def get_workspace_memory_config_id_async(db: AsyncSession, workspace_id: uuid.UUID) -> uuid.UUID | None:
     repo = WorkspaceRepository(db)
     return await repo.get_workspace_memory_config_id_async(workspace_id)

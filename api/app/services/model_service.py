@@ -1,4 +1,6 @@
 from datetime import datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import uuid
@@ -887,7 +889,7 @@ class ModelApiKeyService:
 
     @staticmethod
     async def get_available_api_key_async(
-        db,
+        db: AsyncSession,
         model_config_id: uuid.UUID,
         tenant_id: uuid.UUID | None = None,
     ) -> Optional[ModelApiKey]:

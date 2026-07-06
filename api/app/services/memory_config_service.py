@@ -148,7 +148,7 @@ def _load_ontology_class_infos(db: Session, scene_id) -> list:
         return []
 
 
-async def _load_ontology_class_infos_async(db, scene_id) -> list:
+async def _load_ontology_class_infos_async(db: AsyncSession, scene_id) -> list:
     """Async version of _load_ontology_class_infos — delegates to OntologyClassRepository."""
     if not scene_id:
         return []
