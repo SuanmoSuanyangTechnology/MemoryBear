@@ -25,7 +25,6 @@ import { useNavigationBreadcrumbs } from '@/hooks/useNavigationBreadcrumbs';
 import AppHeader from '@/components/Header';
 import Sider from '@/components/SiderMenu'
 import { useUser } from '@/store/user';
-import { cookieUtils } from '@/utils/request';
 
 
 const { Content } = Layout;
@@ -45,7 +44,7 @@ const AuthLayout: FC = () => {
   
   // Check authentication token and fetch user info on mount
   useEffect(() => {
-    const authToken = cookieUtils.get('authToken')
+    const authToken = localStorage.getItem('authToken')
     if (!authToken && !window.location.hash.includes('#/login')) {
       window.location.href = `/#/login`;
     } else {

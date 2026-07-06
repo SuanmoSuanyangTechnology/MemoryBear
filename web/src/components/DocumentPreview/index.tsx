@@ -17,7 +17,6 @@ import {
   ZoomOutOutlined,
 } from '@ant-design/icons';
 import RbMarkdown from '../Markdown';
-import { cookieUtils } from '@/utils/request';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -108,7 +107,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     const response = await fetch(requestUrl, {
       credentials: 'include',
       headers: {
-        'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
+        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
       },
     });
     if (!response.ok) {
@@ -260,7 +259,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       const response = await fetch(requestUrl, {
         credentials: 'include',
         headers: {
-          'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
         },
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -322,7 +321,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   const fetchFileBufferWithLimit = async (url: string, maxBytes?: number): Promise<ArrayBuffer> => {
     const requestUrl = getRequestUrl(url);
     const headers: Record<string, string> = {
-      'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
+      'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
     };
     if (maxBytes) {
       headers['Range'] = `bytes=0-${maxBytes - 1}`;

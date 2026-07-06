@@ -27,7 +27,6 @@ import 'dayjs/locale/en'
 import 'dayjs/locale/zh-cn'
 import 'dayjs/plugin/timezone'
 import 'dayjs/plugin/utc'
-import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
 import { Provider as PrivateProvider } from '@redbear/memory-brick'
 
@@ -106,7 +105,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const authToken = cookieUtils.get('authToken')
+    const authToken = localStorage.getItem('authToken')
     if (
       !authToken && !window.location.hash.includes('#/login')
       && !window.location.hash.includes('#/conversation/')

@@ -2,12 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-04 18:34:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 15:49:29
+ * @Last Modified time: 2026-07-06 12:28:03
  */
 import { useEffect, type FC } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { cookieUtils } from '@/utils/request'
 import { useI18n } from '@/store/locale'
 import { clearAuthData } from '@/utils/auth'
 
@@ -38,12 +37,12 @@ const JumpPage: FC = () => {
 
     if (language) {
       changeLanguage(language)
-      cookieUtils.set('language', language)
+      localStorage.setItem('language', language)
     }
 
     // Store authentication tokens in cookies for API authorization
-    cookieUtils.set('authToken', access_token)
-    cookieUtils.set('refreshToken', refresh_token)
+    localStorage.setItem('authToken', access_token)
+    localStorage.setItem('refreshToken', refresh_token)
 
     // Redirect to the target page if specified
     if (target) {

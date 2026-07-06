@@ -24,8 +24,6 @@ import type { GetProp, UploadFile, UploadProps } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 
-import PlusIcon from '@/assets/images/plus.svg'
-import { cookieUtils } from '@/utils/request'
 import { fileUploadUrl } from '@/api/fileStorage'
 import styles from './index.module.less'
 
@@ -209,7 +207,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization: `Bearer ${cookieUtils.get('authToken') }`,
+      authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
     },
     onPreview: handlePreview,
     onRemove: handleRemove,

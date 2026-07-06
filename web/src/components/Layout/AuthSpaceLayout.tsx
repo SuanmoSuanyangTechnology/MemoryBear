@@ -26,7 +26,6 @@ import { useNavigationBreadcrumbs } from '@/hooks/useNavigationBreadcrumbs';
 import AppHeader from '@/components/Header';
 import Sider from '@/components/SiderMenu';
 import { useUser } from '@/store/user';
-import { cookieUtils } from '@/utils/request';
 
 
 const { Content } = Layout;
@@ -46,7 +45,7 @@ const AuthSpaceLayout: FC = () => {
   
   // Check authentication token, fetch user info and storage type on mount
   useEffect(() => {
-    const authToken = cookieUtils.get('authToken')
+    const authToken = localStorage.getItem('authToken')
     if (!authToken && !window.location.hash.includes('#/login')) {
       window.location.href = `/#/login`;
     } else {

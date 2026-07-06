@@ -6,7 +6,6 @@
  */
 import { request } from '@/utils/request'
 import type { CreateModalData, ChangeEmailModalForm } from '@/views/UserManagement/types'
-import { cookieUtils } from '@/utils/request'
 
 // User info
 export const getUsers = () => {
@@ -22,7 +21,7 @@ export const login = (data: { email: string; password: string; invite?: string; 
 // Refresh token
 export const refreshTokenUrl = '/refresh'
 export const refreshToken = () => {
-  return request.post(refreshTokenUrl, { refresh_token: cookieUtils.get('refreshToken') })
+  return request.post(refreshTokenUrl, { refresh_token: localStorage.getItem('refreshToken') })
 }
 // Reset password
 export const changePassword = (data: { user_id: string; new_password: string }) => {

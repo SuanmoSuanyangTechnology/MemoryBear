@@ -22,7 +22,6 @@ import { clearAuthData } from '@/utils/auth';
 import type { User } from '@/views/UserManagement/types'
 import { getUsers, refreshToken, logout } from '@/api/user'
 import { getWorkspaceStorageType } from '@/api/workspaces';
-import { cookieUtils } from '@/utils/request'
 
 /** Login information interface */
 export interface LoginInfo {
@@ -69,12 +68,12 @@ export const useUser = create<UserState>((set, get) => ({
   loginInfo: {} as LoginInfo,
   storageType: null,
   updateLoginInfo: (values: LoginInfo) => {
-    cookieUtils.set('authToken', values.access_token);
-    cookieUtils.set('refreshToken', values.refresh_token);
+    localStorage.setItem('authToken', values.access_token);
+    localStorage.setItem('refreshToken', values.refresh_token);
     set({ loginInfo: values });
   },
   getUserInfo: async (flag?: boolean, notNeedJump?: boolean) => {
-    if (!cookieUtils.get('authToken')) {
+    if (!localStorage.getItem('authToken')) {
       return
     }
     const { checkJump } = get()
@@ -115,7 +114,7 @@ export const useUser = create<UserState>((set, get) => ({
     refreshToken()
       .then((res) => {
         const response = res as { refresh_token: string }
-        cookieUtils.set('authToken', response.refresh_token);
+        localStorage.setItem('authToken', response.refresh_token);
       })
       .catch((err) => {
         console.error('Failed to refresh token:', err)

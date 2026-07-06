@@ -20,7 +20,6 @@ import { refreshToken } from '@/api/user';
 import i18n from '@/i18n';
 import { message } from 'antd';
 import { clearAuthData } from './auth';
-import { cookieUtils } from './request';
 const API_PREFIX = '/api'
 
 // Token refresh state
@@ -39,13 +38,13 @@ const refreshTokenForSSE = async (): Promise<string> => {
   isRefreshing = true;
   refreshPromise = (async () => {
     try {
-      const refresh_token = cookieUtils.get('refreshToken');
+      const refresh_token = localStorage.getItem('refreshToken');
       if (!refresh_token) {
         throw new Error(i18n.t('common.refreshTokenNotExist'));
       }
       const response: any = await refreshToken();
       const newToken = response.access_token;
-      cookieUtils.set('authToken', newToken);
+      localStorage.setItem('authToken', newToken);
       return newToken;
     } catch (error) {
       clearAuthData();
@@ -174,7 +173,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
   onAbort?.(abort);
 
   try {
-    let token = cookieUtils.get('authToken');
+    let token = localStorage.getItem('authToken');
     let response = await makeSSERequest(url, data, token || '', config, controller.signal);
 
     switch (response.status) {

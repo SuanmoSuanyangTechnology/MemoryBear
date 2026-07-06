@@ -12,8 +12,6 @@
  * @module auth
  */
 
-import { cookieUtils } from './request'
-
 /**
  * Clear all authentication data and cookies
  * Removes user info, breadcrumbs, and all cookies
@@ -22,5 +20,6 @@ export const clearAuthData = () => {
   console.log("Clearing auth data and redirecting to login");
   localStorage.removeItem('user')
   localStorage.removeItem('breadcrumbs')
-  cookieUtils.clear();
+  localStorage.removeItem('authToken')
+  localStorage.removeItem('refreshToken')
 }

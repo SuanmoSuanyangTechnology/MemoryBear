@@ -1,4 +1,4 @@
-import { request, cookieUtils } from "@/utils/request";
+import { request } from "@/utils/request";
 import type { AxiosProgressEvent } from "axios";
 import type {
   ShareRequestParams,
@@ -170,7 +170,7 @@ export const uploadQaFile = async (data: FormData, options?: UploadFileOptions) 
 
 // 下载文件
 export const downloadFile = async (fileId: string, fileName?: string, original?: boolean) => {
-  const token = cookieUtils.get('authToken');
+  const token = localStorage.getItem('authToken');
   const url = `/api/files/${fileId}${original ? '?original=true' : ''}`;
   
   try {

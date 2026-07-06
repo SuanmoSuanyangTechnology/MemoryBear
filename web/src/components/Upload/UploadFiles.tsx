@@ -1,14 +1,9 @@
-import { useState, useEffect, forwardRef, useImperativeHandle, useRef } from 'react';
-import { Upload, Button, Modal, Progress, App } from 'antd';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { Upload, Button, Progress, App } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import type { UploadProps, UploadFile } from 'antd';
-import type { UploadRequestOption } from 'rc-upload/lib/interface';
-// import { request } from '@/utils/request';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
-import CloudUploadOutlined from '@/assets/images/CloudUploadOutlined.png'
 import { useTranslation } from 'react-i18next';
-import { cookieUtils } from '@/utils/request'
-import { fileUpload } from '@/api/fileStorage'
 
 const { Dragger } = Upload;
 
@@ -204,7 +199,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     fileList,
     beforeUpload,
     headers: {
-      authorization: `Bearer ${cookieUtils.get('authToken') || ''}`,
+      authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
     },
     onRemove: handleRemove,
     onChange: handleChange,

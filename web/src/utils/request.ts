@@ -75,7 +75,7 @@ let requests: RequestQueueItem[] = [];
 service.interceptors.request.use(
   (config) => {
     if (!config.headers.Authorization) {
-      const token = cookieUtils.get('authToken');
+      const token = localStorage.getItem('authToken');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -98,7 +98,7 @@ service.interceptors.request.use(
  */
 const tokenRefresh = async (): Promise<string> => {
   try {
-    const refresh_token = cookieUtils.get('refreshToken');
+    const refresh_token = localStorage.getItem('refreshToken');
     if (window.location.hash.includes('#/invite-register')) {
       throw new Error(i18n.t('common.refreshTokenNotExist'));
     }
@@ -108,7 +108,7 @@ const tokenRefresh = async (): Promise<string> => {
     // Use native axios to call refresh API, avoiding interceptor circular calls
     const response: any = await refreshToken();
     const newToken = response.access_token;
-    cookieUtils.set('authToken', newToken);
+    localStorage.setItem('authToken', newToken);
     return newToken;
   } catch (error) {
     // If refresh API also returns 401, logout
@@ -376,51 +376,5 @@ export const request = {
       });
   }
 };
-
-
-
-/**
- * Get parent domain for cookie setting
- * @returns Parent domain or IP address
- */
-const isIp = (hostname: string) => /^\d+\.\d+\.\d+\.\d+$/.test(hostname)
-
-const getParentDomain = () => {
-  const hostname = window.location.hostname
-  if (isIp(hostname)) return hostname
-  const parts = hostname.split('.')
-  return parts.length > 2 ? `.${parts.slice(-2).join('.')}` : hostname
-}
-
-/**
- * Cookie utility functions
- */
-export const cookieUtils = {
-  set: (name: string, value: string, domain = getParentDomain()) => {
-    const ip = isIp(window.location.hostname)
-    const domainPart = ip ? '' : `; domain=${domain}`
-    const securePart = window.location.protocol === 'https:' ? '; secure' : ''
-    document.cookie = `${name}=${value}${domainPart}; path=/${securePart}; samesite=strict`
-  },
-  get: (name: string) => {
-    const value = `; ${document.cookie}`
-    const parts = value.split(`; ${name}=`)
-    return parts.length === 2 ? parts.pop()?.split(';').shift() : null
-  },
-  remove: (name: string, domain = getParentDomain()) => {
-    document.cookie = `${name}=; domain=${domain}; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
-  },
-  clear: (domain = getParentDomain()) => {
-    document.cookie.split(';').forEach(cookie => {
-      const eqPos = cookie.indexOf('=');
-      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-      if (name) {
-        document.cookie = `${name}=; domain=${domain}; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-        document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-      }
-    });
-  },
-}
-
 
 export default service;
