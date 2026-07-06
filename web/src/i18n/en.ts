@@ -2828,6 +2828,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           max_attempts: 'Max Retry Attempts',
           retry_interval: 'Retry Interval',
           errorBranch: 'Error Branch',
+          importCurl: 'Import cURL',
+          curlPlaceholder: 'Paste cURL string',
+          curlParseError: 'Failed to parse cURL, please check the format',
+          curlEmpty: 'Please paste a cURL string',
+          curlImportSuccess: 'Imported successfully',
         },
         'jinja-render': {
           template: 'Code',
