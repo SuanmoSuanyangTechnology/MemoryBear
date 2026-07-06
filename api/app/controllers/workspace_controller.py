@@ -111,7 +111,7 @@ def get_workspaces(
 
 @router.post("", response_model=ApiResponse)
 @check_workspace_quota
-def create_workspace(
+async def create_workspace(
     workspace: WorkspaceCreate,
     language_type: str = Header(default="zh", alias="X-Language-Type"),
     db: Session = Depends(get_db),
@@ -130,7 +130,7 @@ def create_workspace(
         f"language={language}"
     )
 
-    result = workspace_service.create_workspace(
+    result = await workspace_service.create_workspace(
         db=db, workspace=workspace, user=current_user, language=language
     )
 
