@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-04-10 18:11:19 
  */
 import { create } from 'zustand'
-import type { NodeCheckResult } from '@/views/Workflow/components/CheckList'
+import type { NodeCheckResult } from '@/views/Workflow/hooks/useWorkflowCheck'
 import type { ChatItem } from '@/components/Chat/types'
 
 interface WorkflowState {

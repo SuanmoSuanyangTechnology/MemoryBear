@@ -1286,6 +1286,9 @@ export const zh = {
       updated_at: '更新时间',
       callbackUrlInvalid: '请输入有效的 URL',
       switchSpace: '切换空间',
+      number: '数字',
+      or: '或',
+      variable: '变量',
     },
     model: {
       searchPlaceholder: '搜索模型…',
