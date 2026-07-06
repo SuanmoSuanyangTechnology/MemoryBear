@@ -585,6 +585,52 @@ class ModelApiKeyService:
         )
 
     @staticmethod
+    async def _build_speedbear_runtime_api_key_async(
+        db,
+        model_config: ModelConfig,
+        tenant_id: uuid.UUID | None,
+    ) -> ModelApiKey:
+        """Async version of _build_speedbear_runtime_api_key."""
+        from sqlalchemy import select
+
+        from premium.platform_admin.models import TenantSpeedBearBinding
+
+        if not tenant_id:
+            raise BusinessException(
+                "SpeedBear 公共模型运行时缺少租户上下文",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        if not model_config.is_active:
+            raise BusinessException(
+                "当前模型已禁用，无法调用",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        stmt = (
+            select(TenantSpeedBearBinding)
+            .filter(TenantSpeedBearBinding.tenant_id == tenant_id)
+        )
+        result = await db.execute(stmt)
+        binding = result.scalars().first()
+        if not binding:
+            raise BusinessException(
+                "当前租户未绑定 SpeedBear Key，请联系平台管理员初始化",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        base_url = f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1"
+
+        return ModelApiKey(
+            model_name=model_config.name,
+            provider=ModelProvider.SPEEDBEAR,
+            api_key=binding.gateway_api_key,
+            api_base=base_url,
+            capability=model_config.capability,
+            is_omni=model_config.is_omni,
+        )
+
+    @staticmethod
     def get_api_key_by_id(db: Session, api_key_id: uuid.UUID) -> ModelApiKey:
         """根据ID获取API Key"""
         api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
@@ -837,6 +883,32 @@ class ModelApiKeyService:
             return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
 
         # 否则返回第一个
+        return api_keys[0]
+
+    @staticmethod
+    async def get_available_api_key_async(
+        db,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Optional[ModelApiKey]:
+        """Async version of get_available_api_key."""
+        model_config = await ModelConfigRepository.get_by_id_async(db, model_config_id)
+        if not model_config:
+            return None
+
+        if not model_config.is_active:
+            return None
+
+        if ModelApiKeyService._is_public_speedbear_model(model_config):
+            return await ModelApiKeyService._build_speedbear_runtime_api_key_async(db, model_config, tenant_id)
+
+        api_keys = [key for key in model_config.api_keys if key.is_active]
+        if not api_keys:
+            return None
+
+        if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+            return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
+
         return api_keys[0]
 
     @staticmethod

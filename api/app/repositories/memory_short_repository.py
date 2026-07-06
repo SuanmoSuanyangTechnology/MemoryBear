@@ -1,14 +1,17 @@
 """
 记忆仓储模块 - 短期记忆和长期记忆的数据访问层
 """
-from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
-import uuid
 import datetime
+import uuid
+from typing import List, Optional, Dict
 
-from app.models.memory_short_model import ShortTermMemory, LongTermMemory
-from app.core.utils.datetime_utils import utcnow_naive
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+
 from app.core.logging_config import get_db_logger
+from app.core.utils.datetime_utils import utcnow_naive
+from app.models.memory_short_model import ShortTermMemory, LongTermMemory
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
@@ -267,6 +270,61 @@ class ShortTermMemoryRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"创建或更新短期记忆记录时出错: {str(e)}")
+            raise
+
+    @staticmethod
+    async def upsert_async(
+            db: AsyncSession,
+            end_user_id: str,
+            messages: str,
+            aimessages: str = None,
+            search_switch: str = None,
+            retrieved_content: List[Dict] = None,
+    ) -> ShortTermMemory:
+        """Async version of upsert.
+
+        根据 end_user_id、messages 和 aimessages 查找现有记录：
+        - 如果找到匹配的记录，则更新
+        - 如果没有找到匹配的记录，则创建新记录
+        """
+        try:
+            stmt = select(ShortTermMemory).where(
+                ShortTermMemory.end_user_id == end_user_id,
+                ShortTermMemory.messages == messages,
+            )
+            if aimessages is not None:
+                stmt = stmt.where(ShortTermMemory.aimessages == aimessages)
+            else:
+                stmt = stmt.where(ShortTermMemory.aimessages.is_(None))
+
+            result = await db.execute(stmt)
+            existing_memory = result.scalars().first()
+
+            if existing_memory:
+                existing_memory.messages = messages
+                existing_memory.aimessages = aimessages
+                existing_memory.search_switch = search_switch
+                existing_memory.retrieved_content = retrieved_content or []
+                await db.commit()
+                await db.refresh(existing_memory)
+                db_logger.info(f"成功更新短期记忆记录 (async): {existing_memory.id} for user {end_user_id}")
+                return existing_memory
+            else:
+                new_memory = ShortTermMemory(
+                    end_user_id=end_user_id,
+                    messages=messages,
+                    aimessages=aimessages,
+                    search_switch=search_switch,
+                    retrieved_content=retrieved_content or [],
+                )
+                db.add(new_memory)
+                await db.commit()
+                await db.refresh(new_memory)
+                db_logger.info(f"成功创建新的短期记忆记录 (async): {new_memory.id} for user {end_user_id}")
+                return new_memory
+        except Exception as e:
+            await db.rollback()
+            db_logger.error(f"创建或更新短期记忆记录时出错 (async): {str(e)}")
             raise
 
 

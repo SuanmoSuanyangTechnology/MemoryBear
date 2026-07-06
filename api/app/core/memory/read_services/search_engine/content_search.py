@@ -6,7 +6,7 @@ import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import Neo4jNodeType, TripletPredicate, StorageType
 from app.core.memory.models.service_models import (
@@ -24,7 +24,7 @@ from app.core.memory.read_services.search_engine.tools import make_entity_search
 from app.core.memory.utils.llm.llm_utils import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
-from app.db import get_db_context
+from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
@@ -439,10 +439,10 @@ class RAGSearchService:
         """RAG 不支持纯全文检索，回退到 hybrid_search。"""
         return await self.hybrid_search(query, limit)
 
-    def get_kb_config(self, db: Session, limit: int) -> dict:
+    async def get_kb_config(self, db: AsyncSession, limit: int) -> dict:
         if self.ctx.user_rag_memory_id is None:
             raise RuntimeError("Knowledge base ID not specified")
-        knowledge_config = knowledge_repository.get_knowledge_by_id(
+        knowledge_config = await knowledge_repository.get_knowledge_by_id_async(
             db,
             knowledge_id=uuid.UUID(self.ctx.user_rag_memory_id)
         )
@@ -467,8 +467,8 @@ class RAGSearchService:
 
     async def hybrid_search(self, query: str, limit: int) -> MemorySearchResult:
         try:
-            with get_db_context() as db:
-                kb_config = self.get_kb_config(db, limit)
+            async with get_async_db_context() as db:
+                kb_config = await self.get_kb_config(db, limit)
         except RuntimeError as e:
             logger.error(f"[MemorySearch] get_kb_config error: {self.ctx.user_rag_memory_id} - {e}")
             return MemorySearchResult(memories=[])
@@ -501,28 +501,31 @@ class HistorySearchService:
         self.ctx = ctx
 
     async def run(self) -> MemorySearchResult:
-        with get_db_context() as db:
-            conversation: Conversation | None = db.scalar(
+        async with get_async_db_context() as db:
+            conv_result = await db.execute(
                 select(Conversation).where(
                     Conversation.user_id == self.ctx.end_user_id,
                     Conversation.id != self.ctx.conversation_id,
-                    Conversation.app_id != "00000000-0000-0000-0000-000000000001"
+                    Conversation.app_id != "00000000-0000-0000-0000-000000000001",
                 ).order_by(
                     Conversation.updated_at.desc()
                 ).limit(1)
             )
+            conversation: Conversation | None = conv_result.scalars().first()
 
             if conversation is None:
                 return MemorySearchResult(memories=[])
 
             cursor = conversation.write_cursor
-            messages: list[MemoryMessage] | None = list(db.scalars(
+            msg_result = await db.execute(
                 select(MemoryMessage).where(
                     MemoryMessage.conversation_id == conversation.id,
-                    MemoryMessage.message_seq > cursor
+                    MemoryMessage.message_seq > cursor,
                 ).order_by(MemoryMessage.message_seq)
-            ))
-            if messages is None:
+            )
+            messages: list[MemoryMessage] = list(msg_result.scalars().all())
+
+            if not messages:
                 return MemorySearchResult(memories=[])
 
             messages_lst = []
@@ -541,7 +544,7 @@ class HistorySearchService:
                 source=Neo4jNodeType.HISTORY,
                 query="",
                 id=str(conversation.id),
-                data={"messages": messages_lst}
+                data={"messages": messages_lst},
             )
         return MemorySearchResult(memories=[memory])
 

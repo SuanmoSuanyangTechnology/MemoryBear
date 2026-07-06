@@ -159,6 +159,86 @@ def validate_model_exists_and_active(
         raise
 
 
+async def validate_model_exists_and_active_async(
+    model_id: UUID,
+    model_type: str,
+    db,
+    tenant_id: Optional[UUID] = None,
+    config_id: Optional[UUID] = None,
+    workspace_id: Optional[UUID] = None,
+) -> tuple[str, bool]:
+    """Async version of validate_model_exists_and_active."""
+    from app.repositories.model_repository import ModelConfigRepository
+
+    start_time = time.time()
+
+    try:
+        model = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id)
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        if not model:
+            model_without_tenant = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id=None)
+
+            if model_without_tenant:
+                logger.warning(
+                    "Model belongs to different tenant",
+                    extra={
+                        "model_id": str(model_id),
+                        "model_type": model_type,
+                        "model_name": model_without_tenant.name,
+                        "model_tenant_id": str(model_without_tenant.tenant_id),
+                        "requested_tenant_id": str(tenant_id),
+                        "is_public": model_without_tenant.is_public,
+                        "elapsed_ms": elapsed_ms,
+                    },
+                )
+                raise ModelNotFoundError(
+                    model_id=model_id,
+                    model_type=model_type,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    message=f"{model_type.title()} model {model_id} ({model_without_tenant.name}) belongs to a different tenant",
+                )
+            else:
+                logger.warning(
+                    "Model not found",
+                    extra={"model_id": str(model_id), "model_type": model_type, "elapsed_ms": elapsed_ms},
+                )
+                raise ModelNotFoundError(
+                    model_id=model_id,
+                    model_type=model_type,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    message=f"{model_type.title()} model {model_id} not found",
+                )
+
+        if not model.is_active:
+            logger.warning(
+                "Model inactive",
+                extra={"model_id": str(model_id), "model_name": model.name, "elapsed_ms": elapsed_ms},
+            )
+            raise ModelInactiveError(
+                model_id=model_id,
+                model_name=model.name,
+                model_type=model_type,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type.title()} model {model_id} ({model.name}) is inactive",
+            )
+
+        logger.debug(
+            "Model validation successful",
+            extra={"model_id": str(model_id), "model_name": model.name, "elapsed_ms": elapsed_ms},
+        )
+        return model.name, model.is_active
+
+    except (ModelNotFoundError, ModelInactiveError):
+        raise
+    except Exception as e:
+        logger.error(f"Model validation failed: {e}", exc_info=True)
+        raise
+
+
 def validate_and_resolve_model_id(
     model_id_str: Union[str, UUID, None],
     model_type: str,
@@ -198,6 +278,45 @@ def validate_and_resolve_model_id(
     
     model_name, _ = validate_model_exists_and_active(
         model_uuid, model_type, db, tenant_id, config_id, workspace_id
+    )
+    return model_uuid, model_name
+
+
+async def validate_and_resolve_model_id_async(
+    model_id_str: Union[str, UUID, None],
+    model_type: str,
+    db,
+    tenant_id: Optional[UUID] = None,
+    required: bool = False,
+    config_id: Optional[UUID] = None,
+    workspace_id: Optional[UUID] = None,
+) -> tuple[Optional[UUID], Optional[str]]:
+    """Async version of validate_and_resolve_model_id."""
+    if model_id_str is None or (isinstance(model_id_str, str) and not model_id_str.strip()):
+        if required:
+            raise InvalidConfigError(
+                f"{model_type.title()} model ID is required",
+                field_name=f"{model_type}_model_id",
+                invalid_value=model_id_str,
+                config_id=config_id,
+                workspace_id=workspace_id,
+            )
+        return None, None
+
+    model_uuid = _parse_model_id(model_id_str, model_type, config_id, workspace_id)
+    if model_uuid is None:
+        if required:
+            raise InvalidConfigError(
+                f"{model_type.title()} model ID is required",
+                field_name=f"{model_type}_model_id",
+                invalid_value=model_id_str,
+                config_id=config_id,
+                workspace_id=workspace_id,
+            )
+        return None, None
+
+    model_name, _ = await validate_model_exists_and_active_async(
+        model_uuid, model_type, db, tenant_id, config_id, workspace_id,
     )
     return model_uuid, model_name
 
