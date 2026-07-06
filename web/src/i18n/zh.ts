@@ -481,6 +481,8 @@ export const zh = {
         feishuFolderTokenPlaceholder: '请输入您的飞书文件夹 Token',
       },
       csvTemplate: '点击下载 CSV 模板',
+      exportQa: '导出QA',
+      exportQaSuccess: 'QA 导出成功',
     },
     application: {
       searchPlaceholder: '搜索应用',
@@ -1286,6 +1288,9 @@ export const zh = {
       updated_at: '更新时间',
       callbackUrlInvalid: '请输入有效的 URL',
       switchSpace: '切换空间',
+      number: '数字',
+      or: '或',
+      variable: '变量',
     },
     model: {
       searchPlaceholder: '搜索模型…',

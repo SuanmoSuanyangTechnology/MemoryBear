@@ -481,6 +481,9 @@ export const en = {
       updated_at: 'Updated At',
       callbackUrlInvalid: 'Please enter a valid URL',
       switchSpace: 'Switch Space',
+      number: 'number',
+      or: 'or',
+      variable: 'variable',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -996,6 +999,8 @@ export const en = {
         feishuFolderTokenPlaceholder: 'Enter your Feishu Folder Token',
       },
       csvTemplate: 'Click to download CSV template',
+      exportQa: 'Export QA',
+      exportQaSuccess: 'QA exported successfully',
     },
     api: {
       pageTitle: 'Memory library IAP document',

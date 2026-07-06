@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:30:53
+ * @Last Modified time: 2026-07-06 16:01:16
  */
 /**
  * Application Modal
@@ -121,7 +121,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
   const getActiveMemoryConfig = () => {
     getMemoryConfigList()
       .then((res) => {
-        setActiveMemoryConfig((res as Memory[])[0])
+        setActiveMemoryConfig((res as Memory[]).find(item => item.is_active) || null)
       })
       .catch(() => {
         setActiveMemoryConfig(null)

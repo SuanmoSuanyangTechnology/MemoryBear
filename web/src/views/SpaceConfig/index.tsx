@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-03 21:32:20
+ * @Last Modified time: 2026-07-06 15:52:33
  */
 /**
  * Space Configuration Page
@@ -57,6 +57,22 @@ const SpaceConfig: FC = () => {
       setCustomModels((res || {}) as Record<string, ModelListItem[]>)
     })
   }
+
+  useEffect(() => {
+    const allFields = [...baseModelFields, ...multimodalModelFields]
+    const currentValues = form.getFieldsValue() as Record<string, string | undefined>
+    
+    allFields.forEach(field => {
+      const currentValue = currentValues[field.name]
+      if (currentValue) {
+        const availableModels = customModels[field.name] || []
+        const exists = availableModels.some(model => model.model_id === currentValue || (model as any).id === currentValue)
+        if (!exists) {
+          form.setFieldsValue({ [field.name]: undefined })
+        }
+      }
+    })
+  }, [customModels])
 
   useEffect(() => {
     setPageLoading(true)

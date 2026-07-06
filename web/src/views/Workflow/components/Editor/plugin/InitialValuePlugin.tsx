@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:16:40
+ * @Last Modified time: 2026-07-06 11:31:31
  */
 import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -61,9 +61,29 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
   useEffect(() => {
     if (value !== prevValueRef.current) {
       if (isUserInputRef.current) {
-        prevValueRef.current = value;
-        isUserInputRef.current = false;
-        return;
+        let currentEditorText = '';
+        editor.getEditorState().read(() => {
+          const root = $getRoot();
+          const paragraphs: string[] = [];
+          root.getChildren().forEach(child => {
+            if ($isParagraphNode(child)) {
+              const paragraphText = child.getChildren().map(n => {
+                if ($isFormFieldNode(n)) {
+                  return n.getTextContent();
+                }
+                return n.getTextContent();
+              }).join('');
+              paragraphs.push(paragraphText);
+            }
+          });
+          currentEditorText = paragraphs.join('\n');
+        });
+
+        if (value === currentEditorText) {
+          prevValueRef.current = value;
+          isUserInputRef.current = false;
+          return;
+        }
       }
       prevValueRef.current = value;
       isUserInputRef.current = false;
@@ -73,7 +93,8 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           const root = $getRoot();
           root.clear();
 
-          const parts = (value ?? '').split(/(\{\{[^}]+\}\}|\n)/);
+          const strValue = value === null || value === undefined ? '' : String(value);
+          const parts = strValue.split(/(\{\{[^}]+\}\}|\n)/);
           let paragraph = $createParagraphNode();
 
             parts.forEach(part => {
