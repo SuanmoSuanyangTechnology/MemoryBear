@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 19:07:11
+ * @Last Modified time: 2026-07-06 15:58:16
  */
 import { type FC, useMemo, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,9 @@ import { CaretDownOutlined, CaretRightOutlined, SettingOutlined } from '@ant-des
 import Editor from '../../Editor'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import AuthConfigModal from './AuthConfigModal'
+import ImportCurlModal from './ImportCurlModal'
+import type { ImportCurlModalRef } from './ImportCurlModal'
+import type { ParsedCurl } from './parseCurl'
 import type { AuthConfigModalRef, HttpRequestConfigForm } from './types'
 import MessageEditor from '../MessageEditor'
 import EditableTable from './EditableTable'
@@ -27,6 +30,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
   const form = Form.useFormInstance();
   const values = Form.useWatch([], form) || {}
   const authConfigModalRef = useRef<AuthConfigModalRef>(null)
+  const importCurlModalRef = useRef<ImportCurlModalRef>(null)
 
   const handleChangeAuth = () => {
     authConfigModalRef.current?.handleOpen(values?.auth)
@@ -34,6 +38,22 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
   const handleRefresh = (auth: HttpRequestConfigForm['auth']) => {
     console.log('handleRefresh', auth)
     form.setFieldsValue({ auth })
+  }
+
+  const handleOpenImportCurl = () => {
+    importCurlModalRef.current?.handleOpen()
+  }
+
+  /** 将解析后的 cURL 信息回填到对应表单字段，未涉及的字段保持不变。 */
+  const handleImportCurl = (parsed: ParsedCurl) => {
+    const patch: Record<string, any> = {}
+    if (parsed.method) patch.method = parsed.method
+    if (parsed.url !== undefined) patch.url = parsed.url
+    if (parsed.headers) patch.headers = parsed.headers
+    if (parsed.params) patch.params = parsed.params
+    if (parsed.body) patch.body = parsed.body
+    if (parsed.auth) patch.auth = parsed.auth
+    form.setFieldsValue(patch)
   }
 
   const handleChangeBodyContentType = () => {
@@ -162,12 +182,19 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">
           <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>API
         </div>
-        <Button onClick={handleChangeAuth}
-          size="small"
-          type="text"
-          icon={<SettingOutlined />}
-          className="rb:mt-1 rb:text-[12px]!"
-        >{t('workflow.config.http-request.auth')}: {!values?.auth?.auth_type || values?.auth?.auth_type === 'none' ? t('workflow.config.http-request.none') : t('workflow.config.http-request.apiKey')}</Button>
+        <Flex align="center" gap={4}>
+          <Button onClick={handleChangeAuth}
+            size="small"
+            type="text"
+            icon={<SettingOutlined />}
+            className="rb:mt-1 rb:text-[12px]!"
+          >{t('workflow.config.http-request.auth')}: {!values?.auth?.auth_type || values?.auth?.auth_type === 'none' ? t('workflow.config.http-request.none') : t('workflow.config.http-request.apiKey')}</Button>
+          <Button onClick={handleOpenImportCurl}
+            size="small"
+            type="text"
+            className="rb:mt-1 rb:text-[12px]!"
+          >{t('workflow.config.http-request.importCurl')}</Button>
+        </Flex>
       </Flex>
       <Row gutter={4}>
         <Col span={8}>
@@ -434,9 +461,14 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
       }
       <Divider />
 
-      <AuthConfigModal 
+      <AuthConfigModal
         ref={authConfigModalRef}
         refresh={handleRefresh}
+      />
+
+      <ImportCurlModal
+        ref={importCurlModalRef}
+        onImport={handleImportCurl}
       />
     </>
   );

@@ -2837,6 +2837,11 @@ export const zh = {
           max_attempts: '最大重试次数',
           retry_interval: '重试间隔',
           errorBranch: '异常分支',
+          importCurl: '导入 cURL',
+          curlPlaceholder: '粘贴 cURL 字符串',
+          curlParseError: 'cURL 解析失败，请检查格式',
+          curlEmpty: '请粘贴 cURL 字符串',
+          curlImportSuccess: '导入成功',
         },
         'jinja-render': {
           template: '代码',
