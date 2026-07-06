@@ -95,7 +95,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const getActiveMemoryConfig = () => {
     getMemoryConfigList()
       .then((res) => {
-        setActiveMemoryConfig((res as Memory[])[0])
+        setActiveMemoryConfig((res as Memory[]).find(item => item.is_active) || null)
       })
       .catch(() => {
         setActiveMemoryConfig(null)

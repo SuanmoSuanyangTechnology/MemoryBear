@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:50:05
+ * @Last Modified time: 2026-07-06 16:01:59
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   Scroller,
@@ -157,7 +157,7 @@ export const useWorkflowGraph = ({
   const getActiveMemoryConfig = () => {
     getMemoryConfigList()
       .then((res) => {
-        setActiveMemoryConfig((res as Memory[])[0])
+        setActiveMemoryConfig((res as Memory[]).find(item => item.is_active) || null)
       })
       .catch(() => {
         setActiveMemoryConfig(null)
