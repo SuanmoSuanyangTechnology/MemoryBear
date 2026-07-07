@@ -82,7 +82,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
             const params: RecallTestParams = {
                 query: values.query || '',
                 kb_ids: knowledgeBaseId ? [knowledgeBaseId] : [],
-                similarity_threshold: values.similarity_threshold || 0.2,
+                similarity_threshold: retrieveType === 'participle' ? undefined :values.similarity_threshold || 0.2,
                 vector_similarity_weight: values.vector_similarity_weight || 0.3,
                 top_k: values.top_k || 100,
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
@@ -135,7 +135,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               </Form.Item>
 
               {/* Show when retrieve_type = semantic or hybrid */}
-              {(retrieveType === 'participle' || retrieveType === 'hybrid') && (
+              {(retrieveType === 'hybrid') && (
                   <Form.Item name="similarity_threshold" label={t('knowledgeBase.similarityThreshold')}>
                       <Select
                           options={[
