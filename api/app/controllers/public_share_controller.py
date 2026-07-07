@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import uuid
 from typing import Annotated
 
@@ -43,6 +44,21 @@ from app.models import Message, MessageFeedback
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
+
+# 体验分享 regenerate 接口只透传给 end-user 一组精简的 SSE 事件。
+# 前端只关心 `message` 文本流、`start` / `error` / `regenerate_end` / `end` 这几个
+# 端点事件、以及内容审核时的 `message_replace`。
+SHARE_FORWARD_EVENTS = frozenset({
+    "start",
+    "message",
+    "message_replace",
+    "end",
+    "error",
+    "regenerate_end",
+})
+
+# SSE 字符串中 `event: <type>` 行的正则——AGENT 路径吐出来的是已序列化的 SSE 字符串，
+SSE_EVENT_LINE = re.compile(r"^event:\s*(\S+)\s*$", re.MULTILINE)
 
 
 def _to_ms(iso_str: str | None) -> int | None:
@@ -1325,8 +1341,13 @@ async def regenerate_message(
                             workspace_id=workspace_id,
                             user_id=str(end_user.id),
                             override_variables=payload.variables,
+                            pre_create_execution=True,  # 让 start 事件携带真实 execution_id
                     ):
                         event_type = event.get("event", "message")
+                        # 体验分享端：只透出内容类事件与端点事件，过滤掉
+                        # node_*/workflow_*/cycle_item/intervention_* 等节点类事件
+                        if event_type not in SHARE_FORWARD_EVENTS:
+                            continue
                         event_data = event.get("data", {})
                         yield f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
 
@@ -1389,6 +1410,11 @@ async def regenerate_message(
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
             ):
+                # AGENT 路径吐出来的是已序列化的 SSE 字符串（f"event: ...\ndata: ...\n\n"）。
+                # 解析 `event:` 行做白名单过滤，丢弃 reasoning/tool_*/agent_log/
+                m = SSE_EVENT_LINE.search(event)
+                if m and m.group(1) not in SHARE_FORWARD_EVENTS:
+                    continue
                 yield event
 
         return StreamingResponse(
