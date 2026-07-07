@@ -46,7 +46,6 @@ router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
 
 # 体验分享 regenerate 接口只透传给 end-user 一组精简的 SSE 事件。
-# 这里把工作流/agent/multi-agent 的所有"节点"类事件统一过滤掉——
 # 前端只关心 `message` 文本流、`start` / `error` / `regenerate_end` / `end` 这几个
 # 端点事件、以及内容审核时的 `message_replace`。
 SHARE_FORWARD_EVENTS = frozenset({
@@ -59,7 +58,6 @@ SHARE_FORWARD_EVENTS = frozenset({
 })
 
 # SSE 字符串中 `event: <type>` 行的正则——AGENT 路径吐出来的是已序列化的 SSE 字符串，
-# 控制器需要先把事件名解析出来再做白名单判断。MULTILINE 模式确保只匹配行首。
 SSE_EVENT_LINE = re.compile(r"^event:\s*(\S+)\s*$", re.MULTILINE)
 
 
@@ -1414,7 +1412,6 @@ async def regenerate_message(
             ):
                 # AGENT 路径吐出来的是已序列化的 SSE 字符串（f"event: ...\ndata: ...\n\n"）。
                 # 解析 `event:` 行做白名单过滤，丢弃 reasoning/tool_*/agent_log/
-                # multi-agent 编排事件等节点类事件。
                 m = SSE_EVENT_LINE.search(event)
                 if m and m.group(1) not in SHARE_FORWARD_EVENTS:
                     continue
