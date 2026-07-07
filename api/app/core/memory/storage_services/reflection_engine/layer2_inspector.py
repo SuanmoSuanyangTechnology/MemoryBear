@@ -7,7 +7,12 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 
-from app.core.utils.datetime_utils import utcnow_naive
+from datetime import datetime
+from app.core.utils.datetime_utils import (
+    utcnow_naive,
+    as_utc_aware,
+    convert_neo4j_datetime_to_python,
+)
 from app.core.memory.storage_services.reflection_engine.deterministic.description_checker import (
     scan_merge_candidates,
 )
@@ -44,6 +49,16 @@ from app.repositories.neo4j.cypher_queries import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_last_seen(raw) -> datetime | None:
+    """把 statement 的 dialog_at 归一为 naive UTC datetime，作为实体 created_at（最近被看到时间）。
+
+    无法解析时返回 None（不兜底当前时间），此时 created_at 留空由 Cypher 处理。
+    """
+    dt = convert_neo4j_datetime_to_python(raw)
+    return as_utc_aware(dt).replace(tzinfo=None) if dt is not None else None
+
 
 # 快照体积控制（仅调试用、不影响写库）：低频 1_input 逐实体存 description，超长会让快照过大、
 # 上传慢，故截断；aliases 是短词不限长。
@@ -1566,6 +1581,8 @@ class Layer2Inspector:
         # 同 statement 内所有派生实体/边共用一个 run_id：优先复用来源 statement 的 run_id，
         # 老数据为空时一次性兜底，避免实体和关系边拿到不同的随机 run_id。
         fallback_run_id = stmt.get("run_id") or uuid.uuid4().hex
+        # 本条 statement 的最近被看到时间，作为其派生实体的 created_at
+        entity_last_seen = _resolve_last_seen(stmt.get("dialog_at"))
 
         # 4.1 创建实体
         for entity in validated.entities:
@@ -1597,7 +1614,7 @@ class Layer2Inspector:
                 entity_idx=entity.entity_idx,
                 is_explicit_memory=entity.is_explicit_memory,
                 statement_id=stmt["statement_id"],
-                created_at=utcnow_naive(),
+                created_at=entity_last_seen,
             )
             if entity_result:
                 entity_id = entity_result[0].get("entity_id", "")
