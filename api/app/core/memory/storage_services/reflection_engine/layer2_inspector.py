@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 
 from datetime import datetime
+from app.core.config import settings
 from app.core.utils.datetime_utils import (
     utcnow_naive,
     as_utc_aware,
