@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 15:52:33
+ * @Last Modified time: 2026-07-07 10:18:37
  */
 /**
  * Space Configuration Page
@@ -52,6 +52,7 @@ const SpaceConfig: FC = () => {
     })
   }
   const [customModels, setCustomModels] = useState<Record<string, ModelListItem[]>>({})
+  const [lastConfig, setLastConfig] = useState<SpaceConfigData>({})
   const handleGetCustomModels = () => {
     getCustomWorkspaceModels().then(res => {
       setCustomModels((res || {}) as Record<string, ModelListItem[]>)
@@ -60,33 +61,28 @@ const SpaceConfig: FC = () => {
 
   useEffect(() => {
     const allFields = [...baseModelFields, ...multimodalModelFields]
-    const currentValues = form.getFieldsValue() as Record<string, string | undefined>
     
     allFields.forEach(field => {
-      const currentValue = currentValues[field.name]
+      const currentValue = lastConfig[field.name as keyof SpaceConfigData]
       if (currentValue) {
         const availableModels = customModels[field.name] || []
         const exists = availableModels.some(model => model.model_id === currentValue || (model as any).id === currentValue)
+
         if (!exists) {
           form.setFieldsValue({ [field.name]: undefined })
+        } else {
+          form.setFieldsValue({ [field.name]: currentValue })
         }
       }
     })
-  }, [customModels])
+  }, [customModels, lastConfig])
 
   useEffect(() => {
     setPageLoading(true)
     getWorkspaceModels().then((res) => {
-      const { is_default_config, llm, embedding, rerank, vision, audio, video } = res as SpaceConfigData
-      form.setFieldsValue({
-        is_default_config: is_default_config && isSaas ? '1' : '0',
-        llm,
-        embedding,
-        rerank,
-        vision,
-        audio,
-        video,
-      })
+      const { is_default_config } = res as SpaceConfigData
+      form.setFieldValue('is_default_config', is_default_config && isSaas ? '1' : '0')
+      setLastConfig(res as SpaceConfigData)
     })
     .finally(() => {
       setPageLoading(false)
