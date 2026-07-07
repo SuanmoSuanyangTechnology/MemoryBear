@@ -661,11 +661,13 @@ class MemoryConfigService:
             "model_name": api_config.model_name,
             "provider": api_config.provider,
             "api_key": api_config.api_key,
+            "capability": api_config.capability,
             "base_url": api_config.api_base,
             "model_config_id": str(config.id),
             "type": config.type,
             "timeout": settings.LLM_TIMEOUT,
             "max_retries": settings.LLM_MAX_RETRIES,
+            "is_omni": api_config.is_omni,
         }
 
     def get_embedder_config(self, embedding_id: str, tenant_id: UUID | None = None) -> dict:

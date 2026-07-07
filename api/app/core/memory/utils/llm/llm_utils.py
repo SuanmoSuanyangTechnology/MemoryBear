@@ -75,7 +75,9 @@ class MemoryClientFactory:
                     model_name=model_config.get("model_name"),
                     provider=model_config.get("provider"),
                     api_key=model_config.get("api_key"),
-                    base_url=model_config.get("base_url")
+                    base_url=model_config.get("base_url"),
+                    is_omni=model_config.get("is_omni"),
+                    capability=model_config.get("capability")
                 ),
                 type_=model_config.get("type")
             )
@@ -130,7 +132,9 @@ class MemoryClientFactory:
                     model_name=model_config.get("model_name"),
                     provider=model_config.get("provider"),
                     api_key=model_config.get("api_key"),
-                    base_url=model_config.get("base_url")
+                    base_url=model_config.get("base_url"),
+                    is_omni=model_config.get("is_omni"),
+                    capability=model_config.get("capability")
                 ),
                 type_=model_config.get("type")
             )
