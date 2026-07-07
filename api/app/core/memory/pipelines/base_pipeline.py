@@ -17,6 +17,7 @@ class ModelClientMixin(ABC):
             RedBearModelConfig(
                 model_name=api_config.model_name,
                 provider=api_config.provider,
+                capability=api_config.capability,
                 api_key=api_config.api_key,
                 base_url=api_config.api_base,
                 is_omni=api_config.is_omni
