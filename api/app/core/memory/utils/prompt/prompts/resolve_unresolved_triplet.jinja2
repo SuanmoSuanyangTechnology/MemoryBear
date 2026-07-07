@@ -35,7 +35,7 @@ Resolve unresolved references and extract entities and knowledge triplets from t
 - But you MUST resolve references before extraction.
 - Normalize user self-reference such as "I", "me", and "myself" to `用户`.
 - The entity `name` for the user themself MUST always be `用户`; do not output `user`, `the user`, or any translated variant as the user entity name.
-- Normalize user possessive expressions by input language: for Chinese source text, use `用户的X`; for English source text, use `the user's X`; never output mixed possessives such as `用户'sX`, `用户's X`, or `user的X`.
+- Normalize user possessive expressions by the primary language of `statement_text`: for Chinese source text, use `用户的X`; for English source text, use `the user's X`; never output mixed possessives such as `用户'sX`, `用户's X`, or `user的X`.
 - For non-user pronouns or demonstratives such as "he", "she", "it", "this", "that", "this company", "that place", if a stable referent can be resolved from `supporting_context`, replace them with the resolved entity name.
 - If such references cannot be resolved stably, use descriptive names for forced extraction.
 - This prompt is a second-pass repair stage for statements already skipped by the write-time hard gate; do not return the empty result merely because `has_unsolved_reference=true`.
@@ -44,13 +44,14 @@ Resolve unresolved references and extract entities and knowledge triplets from t
 - If a reference still cannot be resolved stably, create a descriptive weak entity using time, scene, action, or relationship qualifiers from the statement when useful.
 - Output triplets only when the statement itself expresses a valid relation. Do not force `关联于` as a fallback just because resolution failed.
 - Newly introduced names in naming or alias expressions must stay in their original form.
-- Generate `description` in English.
+- Natural-language output is determined by the primary language of `statement_text`, not by the external `language` parameter. `supporting_context` is only used to resolve references and must not change the output language.
+- Generate `description` in the primary language of `statement_text`.
 - Every entity `description` MUST start with the input `dialog_at` timestamp, formatted as `[dialog_at] description text`; if `dialog_at` is empty or absent, use `[NULL]`.
 - Always generate `type` and `predicate` using the predefined Chinese labels above.
 - Every entity MUST include `type_id`, and it MUST exactly match the ontology ID for `type`.
 - Every triplet MUST include `predicate_id`, and it MUST exactly match the ontology ID for `predicate`.
 - Every triplet MUST include `predicate_surface`: use the source-text relation phrase that expresses this relation when available; otherwise use the canonical `predicate`.
-- Except for `type` and `predicate`, all other output text fields must match the input language; therefore under English input, `type_description` and `predicate_description` must be written in English.
+- Except for `type`, `predicate`, and the fixed user entity name `用户`, all other output text fields must match the primary language of `statement_text`; therefore under Chinese statements they must be Chinese, and under English statements they must be English or source surface forms.
 - Every `triplet` MUST include `valid_at` and `invalid_at`, copied directly from the input fields with the same names; do not rewrite or infer new temporal bounds.
   {% endif %}
 
@@ -500,16 +501,16 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - If a statement expresses the user's belief, judgment, opinion, wish, or goal tendency but the referenced abstract concepts are not worth keeping as standalone entities, keep only the relevant high-value entities and do not create those low-value concept entities; write the unextracted content into an entity `description` only when it is suitable as a stable description of that entity.
 - In the current stage, do not extract emotional or psychological states as entities. States such as nervousness, happiness, sadness, anxiety, or relief should not be mapped to `知识能力`, `偏好习惯`, `具体目标`, or any other approximate type.
 - The triplet stage must not re-run the hard gate. Extract expressible entities from the current statement; use descriptive weak entity names for unresolved references.
-- Entity `name` must be as specific as possible to avoid same-name same-type false merges. Naming priority: 1) if there is a proper name or upstream has resolved the mention to a concrete entity, use that concrete name, such as `Haidilao`; 2) if there is no proper name but the statement expresses a stable relation, use a stable semantic qualifier, such as `the company where the user works`, `the library the user often visits`, or `the user's phone`; 3) if there is only a generic name, complete `name` using concrete time, action, purpose, content, location, or scene qualifiers already present in `statement_text` or resolved from context, such as `the restaurant where the user will eat on the morning of 2026-05-15`, rather than only `restaurant`.
+- Entity `name` must be as specific as possible to avoid same-name same-type false merges. Naming priority: 1) if there is a proper name or upstream has resolved the mention to a concrete entity, use that concrete name, such as `Haidilao` / `海底捞`; 2) if there is no proper name but the statement expresses a stable relation, use a stable semantic qualifier in the primary language of `statement_text`, such as English `the company where the user works`, `the library the user often visits`, `the user's phone`, or Chinese `用户就职的公司`, `用户常去的图书馆`, `用户的手机`; 3) if there is only a generic name, complete `name` using concrete time, action, purpose, content, location, or scene qualifiers already present in `statement_text` or resolved from context, such as English `the restaurant where the user will eat on the morning of 2026-05-15` or Chinese `2026-05-15早上去吃饭的饭店`, rather than only `restaurant` / `饭店`.
 - When completing `name`, use only information already present in `statement_text` or resolved upstream. Do not introduce external inference, and do not use unresolved relative time.
-- Weak entities must still use their true semantic type, not default to `称呼别名` or `角色职业`. For example, `the unnamed person who joined this company in March 2026` is `生命体`, and `the company mentioned in the statement` is `组织`.
+- Weak entities must still use their true semantic type, not default to `称呼别名` or `角色职业`. For English statements, write weak names such as `the unnamed person who joined this company in March 2026`; for Chinese statements, write `2026年3月加入这家公司的未具名人员`. Both are `生命体`; `the company mentioned in the statement` / `statement中提到的这家公司` is `组织`.
 - Weak entities that refer to multiple people, customers, coworkers, or visitors should use `群体`, not `生命体`.
 - For `文档媒体`, `物品设备`, `地点设施`, `组织`, `群体`, and `识别联系信息`, especially avoid generic names. If a proper name, stable owner, platform, topic, content, purpose, location, time, or scene qualifier is available, include it in `name`.
 - `角色职业` is an exception: role and occupation categories may themselves be entities, such as `导师` or `程序员`; but stable relations involving specific people should be represented through triplets or descriptions.
-- The user node itself must be named `用户`; entities owned by, affiliated with, or associated with the user should use a complete possessive phrase, affiliation phrase, or stable semantic qualifier, such as `the user's dog`, `the user's GitHub account`, `the user's company office`, or `the company where the user works`. Do not collapse these names to `dog` or `account`, and never use mixed forms such as `用户's dog`.
-- Do not extract generic mentions such as `a dog` or `dogs as a species`. In this second-pass repair stage, weak entities are allowed only when they include statement-specific qualifiers; do not output bare generic names such as `some friend`, `an account`, or `some office`.
-- `description` must be in English.
-- `type` must use the predefined Chinese label above, while `type_description` must explain that predefined type in English.
+- The user node itself must be named `用户`; entities owned by, affiliated with, or associated with the user should use a complete possessive phrase, affiliation phrase, or stable semantic qualifier in the primary language of `statement_text`, such as English `the user's dog`, `the user's GitHub account`, `the user's company office`, `the company where the user works`, or Chinese `用户的小狗`, `用户的 GitHub 账号`, `用户的公司办公室`, `用户就职的公司`. Do not collapse these names to `dog` / `account` / `小狗` / `账号`, and never use mixed forms such as `用户's dog`.
+- Do not extract generic mentions such as `a dog`, `dogs as a species`, `一只狗`, or `狗这种动物`. In this second-pass repair stage, weak entities are allowed only when they include statement-specific qualifiers; do not output bare generic names such as `some friend`, `an account`, `some office`, `某个朋友`, `一个账号`, or `某个办公室`.
+- `description` must use the primary language of `statement_text`.
+- `type` must use the predefined Chinese label above, while `type_description` must explain that predefined type in the primary language of `statement_text`.
   {% endif %}
 
 **Same-Name Entity Deduplication:**
@@ -565,9 +566,10 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - 如果实体应保留，但当前 statement 中没有适合长期附着在该实体上的稳定描述，则 `description` 仍必须保留时间戳前缀，可写为 `[dialog_at]` 或 `[NULL]`，不要输出空字符串。
   {% else %}
 - `description` MUST start with `[dialog_at]`, where `dialog_at` is copied directly from the input `dialog_at` field (ISO 8601 timestamp); if `dialog_at` is empty or absent, write `[NULL]`. Format example: `[2025-03-15T10:00:00Z] The speaker who lives in Paris`.
+- The body of `description` must follow the primary language of `statement_text`; if the statement is Chinese, write Chinese after the timestamp, such as `[2025-03-15T10:00:00Z] 居住在巴黎的说话者`.
 - `description` should be concise, context-grounded, and discriminative.
 - Prefer describing the entity's role, identity, relation, ownership, and qualifiers in the current statement and necessary supporting context; include directly related contextual qualifiers as much as possible without adding unsupported inference.
-- For identification/contact information such as accounts, usernames, IDs, emails, or phone numbers, `description` should specify which entity, account/platform, or contact method it belongs to, such as `the username of the user's GitHub account`, rather than a generic `username`.
+- For identification/contact information such as accounts, usernames, IDs, emails, or phone numbers, `description` should specify which entity, account/platform, or contact method it belongs to; for English statements use `the username of the user's GitHub account`, and for Chinese statements use `用户的 GitHub 账号的用户名`, rather than a generic `username` / `用户名`.
 - `description` should keep only information suitable to remain attached to the entity over time, such as stable identity, stable relations, long-term preferences/interests/habits, relatively stable beliefs, or persistent distinguishing traits.
 - Do not put short-lived states, one-off events, temporary plans, current emotions, concrete time anchors, or information that only briefly holds in the current sentence into `description`.
 - If an entity should be retained but the current statement does not provide any suitable stable description for it, `description` must still keep the timestamp prefix and may be `[dialog_at]` or `[NULL]`; do not output an empty string.
@@ -975,11 +977,11 @@ JSON 要求：
 - No Chinese quotation marks
 - No line breaks inside string values
 - `name`, `subject_name`, and `object_name` keep their original surface forms by default, but user self-reference must be normalized to `用户` and other stably resolvable references must be replaced by their resolved entity names
-- `description` must be in English, and every entity description must start with the bracketed input `dialog_at` timestamp; if `dialog_at` is empty or absent, start with `[NULL]`
-- `type` and `predicate` must use the predefined Chinese labels above; `type_description` and `predicate_description` must be written in English
+- `description` must use the primary language of `statement_text`, and every entity description must start with the bracketed input `dialog_at` timestamp; if `dialog_at` is empty or absent, start with `[NULL]`
+- `type` and `predicate` must use the predefined Chinese labels above; `type_description` and `predicate_description` must use the primary language of `statement_text`
 - Every entity must include `type_id`, exactly matching the ontology ID for `type`
 - Every triplet must include `predicate_id`, exactly matching the ontology ID for `predicate`
-- Every triplet must include `predicate_surface`; for English input, use English or the source-text relation expression
+- Every triplet must include `predicate_surface`; prefer the source-text relation expression from `statement_text`, and do not translate it into another language
 - Every triplet must include `valid_at` and `invalid_at`, exactly matching the input fields with the same names
 - Output must include `resolved` (bool) and `resolution_note` (string) fields
 - `resolved` is true only if all key references were resolved to stable entity names from context; false if at least one key reference uses a descriptive weak entity name
