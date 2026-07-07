@@ -189,6 +189,7 @@ export function useConversation() {
   }
 
   /** 分页拉取会话历史 */
+  const [disabled, setDisabled] = useState(false)
   const getHistory = (flag: boolean = false) => {
     if (!shareToken || shareToken === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true)
@@ -213,11 +214,15 @@ export function useConversation() {
         setHasMore(response.page.hasnext)
         setLoading(false)
       })
+      .catch(err => {
+        setDisabled(err?.response?.data?.error_code === 'QUOTA_EXCEEDED')
+      })
       .finally(() => setPageLoading(false))
   }
 
   /** 切换会话或开启新会话 */
   const handleChangeHistory = (id: string | null) => {
+    if (disabled && id === null) return
     if (id !== conversation_id) setConversationId(id)
     if (!id) setMessage('')
     abortRef.current?.()
@@ -570,6 +575,7 @@ export function useConversation() {
     handleShare,
     handleFeedback,
     handleFavorite,
+    disabled,
   }
 }
 
