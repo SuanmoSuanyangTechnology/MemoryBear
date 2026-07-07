@@ -224,9 +224,23 @@ export function useConversation() {
   const handleChangeHistory = (id: string | null) => {
     if (disabled && id === null) return
     if (id !== conversation_id) setConversationId(id)
-    if (!id) setMessage('')
+    if (abortRef.current) {
+      getHistory(true)
+    }
     abortRef.current?.()
     abortRef.current = null
+    if (!id) {
+      setMessage('')
+      // 新对话流式输出中 conversation_id 仍为 null，setConversationId 不会触发 useEffect，
+      // 需手动重置聊天列表与流式状态
+      const variables = toolbarRef.current?.getVariables() || []
+      const openingMsg = buildOpeningStatementMessage(features?.opening_statement, {
+        variables,
+        withTimestamp: true,
+        extra: { is_hidden_refresh: true },
+      })
+      setChatList(openingMsg ? [openingMsg] : [])
+    }
   }
 
   const getChatDetail = () => {
