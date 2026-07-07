@@ -244,7 +244,7 @@ def _resolve_workspace_model_update_target(
             models_update.is_default_config
             if mode_explicit
             else (
-                False if any(getattr(models_update, slot) is not None for slot in _WORKSPACE_MODEL_SLOTS)
+                False if any(slot in models_update.model_fields_set for slot in _WORKSPACE_MODEL_SLOTS)
                 else bool(workspace.is_default_config)
             )
         )
@@ -255,7 +255,7 @@ def _resolve_workspace_model_update_target(
                 slot: (
                     str(getattr(models_update, slot))
                     if getattr(models_update, slot) is not None
-                    else selection.get(slot)
+                    else None
                 )
                 for slot in _WORKSPACE_MODEL_SLOTS
             }
