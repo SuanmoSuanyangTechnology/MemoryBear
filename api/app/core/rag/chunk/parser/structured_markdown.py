@@ -15,6 +15,10 @@ from app.core.rag.nlp import find_codec
 IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+.*$")
 LIST_PATTERN = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+).*$")
+EMPTY_HTML_ANCHOR_PATTERN = re.compile(
+    r"<a\b(?=[^>]*(?:\bid\s*=\s*['\"][^'\"]+['\"]|\bname\s*=\s*['\"][^'\"]+['\"]))(?![^>]*\bhref\s*=)[^>]*>\s*</a>",
+    re.IGNORECASE,
+)
 
 
 class StructMarkdownParser(DocumentParser):
@@ -25,7 +29,7 @@ class StructMarkdownParser(DocumentParser):
     def parse_text(self, text: str) -> list[ParsedBlock]:
         self._seq = 0
         self.blocks: list[ParsedBlock] = []
-        self.lines = text.split("\n")
+        self.lines = self._strip_empty_html_anchors_outside_code(text.split("\n"))
 
         index = 0
         while index < len(self.lines):
@@ -60,6 +64,24 @@ class StructMarkdownParser(DocumentParser):
             index = self._append_text(index)
 
         return self.blocks
+
+    def _strip_empty_html_anchors_outside_code(self, lines: list[str]) -> list[str]:
+        cleaned_lines = []
+        in_code = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                cleaned_lines.append(line)
+                in_code = not in_code
+                continue
+            if in_code:
+                cleaned_lines.append(line)
+                continue
+            cleaned_lines.append(self._strip_empty_html_anchors(line))
+        return cleaned_lines
+
+    def _strip_empty_html_anchors(self, line: str) -> str:
+        return EMPTY_HTML_ANCHOR_PATTERN.sub("", line)
 
     def md_to_html(self, text: str):
         if not text:
