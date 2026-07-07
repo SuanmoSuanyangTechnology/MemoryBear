@@ -267,7 +267,6 @@ class ToolOldConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """记忆配置"""
     enabled: bool = Field(default=True, description="是否启用对话历史记忆")
-    memory_config_id: Optional[str] = Field(default=None, description="选择记忆的内容类型")
 
 
 class ModelParameters(BaseModel):

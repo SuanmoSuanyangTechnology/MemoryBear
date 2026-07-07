@@ -2005,8 +2005,13 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
         with get_db_context() as db:
             service = WorkspaceAppService(db)
             memory_config_service = MemoryConfigService(db)
-            config_id = memory_config_service.get_workspace_active_config_id(ws_id_uuid)
-            config = memory_config_service.load_memory_config(config_id)
+            try:
+                config_id = memory_config_service.get_workspace_active_config_id(ws_id_uuid)
+                config = memory_config_service.load_memory_config(config_id)
+            except Exception as e:
+                # 单个 workspace 配置异常（无启用配置 / 缺 embedding / 模型被删）只跳过该 workspace
+                logger.warning(f"高频反思scan 跳过配置异常的 workspace={ws_id}: {e}")
+                continue
             iteration_period = config.reflexion_iteration_period or 24
             end_users = get_end_users_by_workspace(db, ws_id_uuid)
             for user in end_users:
@@ -2205,8 +2210,13 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
         ws_id_uuid = uuid.UUID(ws_id)
         with get_db_context() as db:
             memory_config_service = MemoryConfigService(db)
-            config_id = memory_config_service.get_workspace_active_config_id(ws_id_uuid)
-            config = memory_config_service.load_memory_config(config_id)
+            try:
+                config_id = memory_config_service.get_workspace_active_config_id(ws_id_uuid)
+                config = memory_config_service.load_memory_config(config_id)
+            except Exception as e:
+                # 单个 workspace 配置异常（无启用配置 / 缺 embedding / 模型被删）只跳过该 workspace
+                logger.warning(f"反思低频去重scan 跳过配置异常的 workspace={ws_id}: {e}")
+                continue
             if not config.reflexion_enabled:
                 continue
             for user in get_end_users_by_workspace(db, ws_id_uuid):

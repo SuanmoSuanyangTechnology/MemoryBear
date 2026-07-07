@@ -4074,10 +4074,17 @@ class WorkflowService:
             workspace_id: uuid.UUID,
             user_id: str,
             override_variables: Optional[dict[str, Any]] = None,
+            pre_create_execution: bool = False,
     ):
         """工作流重新生成（流式，多版本支持）。
 
         Yields SSE 事件：在 run_stream 事件外包裹 start（含新版本号）与最终落库。
+
+        Args:
+            pre_create_execution: 若为 True，在 yield `start` 事件之前预创建
+                `WorkflowExecution` 行，并把 execution 对象传入 `run_stream` 复用，
+                避免在 run_stream 内部二次创建。预创建后 start 事件携带真实
+                `execution_id`，供体验分享场景在流开头就把 ID 返回给前端。
         """
         from app.models import Message, Conversation
 
@@ -4125,11 +4132,35 @@ class WorkflowService:
             trigger_payload=input_snapshot.get("trigger_payload"),
         )
 
+        # 体验分享场景：yield start 之前预创建 execution，让 start 事件携带真实
+        # execution_id；同时把 execution 对象透传给 run_stream 复用，避免其内部
+        # create_execution 二次落库。
+        preserved_execution = None
+        if pre_create_execution:
+            # WorkflowConfig 运行时对象没有 release_id/workflow_config_id 属性
+            # （只有 `id`，对应 workflow_config_id）；release_id 复用原始
+            # execution 的记录，与非预创建路径下 run_stream 内部创建 execution
+            # 时的取值来源一致。
+            preserved_execution = self.create_execution(
+                workflow_config_id=config.id,
+                app_id=app_id,
+                release_id=original_execution.release_id if original_execution else None,
+                trigger_type=input_snapshot.get("trigger_type", "manual"),
+                # triggered_by 外键指向内部 users 表；user_id 这里可能是终端访客
+                # （end_user）的 ID，不是 users.id，传入会触发外键违反，与
+                # run_stream 内部其它 create_execution 调用（均传 None）保持一致。
+                triggered_by=None,
+                conversation_id=conversation_id,
+                input_data=input_snapshot,
+            )
+
         full_content = ""
         token_usage: dict[str, Any] = {}
         citations: list[Any] = []
         elapsed_time: Optional[float] = None
-        execution_id: Optional[str] = None
+        execution_id: Optional[str] = (
+            preserved_execution.execution_id if preserved_execution is not None else None
+        )
         stream_status = "completed"
         stream_error: Optional[str] = None
         paused_for_intervention = False
@@ -4138,6 +4169,9 @@ class WorkflowService:
             "event": "start",
             "data": {
                 "conversation_id": str(conversation_id),
+                "message_id": str(new_message_id),
+                "execution_id": execution_id,
+                "user_message_id": str(parent_msg_id),
                 "version": new_version,
             },
         }
@@ -4160,6 +4194,7 @@ class WorkflowService:
                     regenerate_mode=True,
                     regenerate_history=history,
                     regenerate_message_id=new_message_id,
+                    preserved_execution=preserved_execution,
             ):
                 event_type = event.get("event", "message")
                 event_data = event.get("data", {}) or {}
@@ -4232,6 +4267,21 @@ class WorkflowService:
         if conv:
             conv.message_count += 1
         self.db.commit()
+
+        # run_stream 内部吐出的收尾事件类型是 workflow_end（不是 end），不在体验
+        # 分享控制器的 SHARE_FORWARD_EVENTS 白名单里会被过滤掉，导致流里直接从
+        # 内容事件跳到 regenerate_end、中间缺一个 end。这里显式补一个标准 end
+        # 事件，语义与非重新生成首轮对话的 end 事件保持一致。
+        yield {
+            "event": "end",
+            "data": {
+                "status": stream_status,
+                "elapsed_time": elapsed_time,
+                "message_length": len(full_content),
+                "error": stream_error,
+                "output": full_content,
+            },
+        }
 
         yield {
             "event": "regenerate_end",
@@ -4870,15 +4920,18 @@ class WorkflowService:
                         content=preset_response,
                         meta_data={"usage": {}, "moderation_flagged": True},
                     )
-                execution = self.create_execution(
-                    workflow_config_id=config.id,
-                    app_id=app_id,
-                    trigger_type="manual",
-                    triggered_by=None,
-                    conversation_id=conversation_id_uuid,
-                    input_data={"message": payload.message, "moderation_flagged": True},
-                    release_id=release_id,
-                )
+                if preserved_execution is not None:
+                    execution = preserved_execution
+                else:
+                    execution = self.create_execution(
+                        workflow_config_id=config.id,
+                        app_id=app_id,
+                        trigger_type="manual",
+                        triggered_by=None,
+                        conversation_id=conversation_id_uuid,
+                        input_data={"message": payload.message, "moderation_flagged": True},
+                        release_id=release_id,
+                    )
                 execution.status = "completed"
                 execution.output_data = {"answer": preset_response, "moderation_flagged": True}
                 execution.elapsed_time = 0
@@ -5183,7 +5236,12 @@ class WorkflowService:
             regenerate_mode: bool = False,
             regenerate_history: Optional[tuple] = None,
             regenerate_message_id: Optional[uuid.UUID] = None,
+            preserved_execution: "WorkflowExecution | None" = None,
     ):
+        """当 `preserved_execution` 不为 None 时，跳过本方法内部三处
+        `create_execution` 调用，复用调用方已创建的 WorkflowExecution 行。
+        主要用于体验分享 regenerate 场景在 yield `start` 事件前先拿到
+        execution_id。"""
         """运行工作流（流式）
 
         Args:
@@ -5283,15 +5341,18 @@ class WorkflowService:
                 )
 
             # 创建 WorkflowExecution 记录，用于日志显示
-            execution = self.create_execution(
-                workflow_config_id=config.id,
-                app_id=app_id,
-                trigger_type=trigger_type,
-                triggered_by=None,
-                conversation_id=conversation_id_uuid,
-                input_data=input_data,
-                release_id=release_id,
-            )
+            if preserved_execution is not None:
+                execution = preserved_execution
+            else:
+                execution = self.create_execution(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type=trigger_type,
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data=input_data,
+                    release_id=release_id,
+                )
             self._store_trigger_meta(execution, trigger_id, trigger_meta)
             execution.status = "completed"
             output_messages = prev_messages + [
@@ -5387,15 +5448,18 @@ class WorkflowService:
                         content=preset_response,
                         meta_data={"usage": {}, "moderation_flagged": True},
                     )
-                execution = self.create_execution(
-                    workflow_config_id=config.id,
-                    app_id=app_id,
-                    trigger_type="manual",
-                    triggered_by=None,
-                    conversation_id=conversation_id_uuid,
-                    input_data={"message": payload.message, "moderation_flagged": True},
-                    release_id=release_id,
-                )
+                if preserved_execution is not None:
+                    execution = preserved_execution
+                else:
+                    execution = self.create_execution(
+                        workflow_config_id=config.id,
+                        app_id=app_id,
+                        trigger_type="manual",
+                        triggered_by=None,
+                        conversation_id=conversation_id_uuid,
+                        input_data={"message": payload.message, "moderation_flagged": True},
+                        release_id=release_id,
+                    )
                 execution.status = "completed"
                 execution.output_data = {"answer": preset_response, "moderation_flagged": True}
                 execution.elapsed_time = 0
@@ -5441,15 +5505,18 @@ class WorkflowService:
                 return
 
         # 2. 创建执行记录
-        execution = self.create_execution(
-            workflow_config_id=config.id,
-            app_id=app_id,
-            trigger_type=trigger_type,
-            triggered_by=None,
-            conversation_id=conversation_id_uuid,
-            input_data=input_data,
-            release_id=release_id,
-        )
+        if preserved_execution is not None:
+            execution = preserved_execution
+        else:
+            execution = self.create_execution(
+                workflow_config_id=config.id,
+                app_id=app_id,
+                trigger_type=trigger_type,
+                triggered_by=None,
+                conversation_id=conversation_id_uuid,
+                input_data=input_data,
+                release_id=release_id,
+            )
         self._store_trigger_meta(execution, trigger_id, trigger_meta)
         self.db.commit()
 

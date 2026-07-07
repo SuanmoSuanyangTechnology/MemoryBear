@@ -538,7 +538,7 @@ def _create_workspace_only(
         raise
 
 
-def create_workspace(
+async def create_workspace(
         db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
     business_logger.info(
@@ -551,6 +551,20 @@ def create_workspace(
             code=BizCode.RESOURCE_ALREADY_EXISTS
         )
     workspace = _resolve_workspace_create_payload(db, workspace, user.tenant_id)
+
+    validation_slots = _WORKSPACE_MODEL_SLOTS if workspace.is_default_config else _REQUIRED_WORKSPACE_MODEL_SLOTS
+    selection = _extract_workspace_model_values(workspace)
+    warnings = await _validate_workspace_model_runtime(
+        db,
+        selection,
+        user.tenant_id,
+        None,
+        locale=language,
+        slots_to_validate=validation_slots,
+    )
+    if warnings:
+        raise BusinessException(warnings[0]["message"], BizCode.INVALID_PARAMETER)
+
     llm = workspace.llm
     embedding = workspace.embedding
     rerank = workspace.rerank

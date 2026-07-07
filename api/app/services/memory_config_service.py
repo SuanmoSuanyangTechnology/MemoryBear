@@ -1023,6 +1023,9 @@ class MemoryConfigService:
             llm_id=str(workspace.llm) if workspace.llm else None,
             embedding_id=str(workspace.embedding) if workspace.embedding else None,
             rerank_id=str(workspace.rerank) if workspace.rerank else None,
+            vision_id=str(workspace.vision) if workspace.vision else None,
+            audio_id=str(workspace.audio) if workspace.audio else None,
+            video_id=str(workspace.video) if workspace.video else None,
             scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
             pruning_scene=pruing_scene_name,  # 语义剪枝场景直接使用 scene_name
             state=True,  # Active by default

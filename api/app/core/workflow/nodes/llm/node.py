@@ -640,16 +640,19 @@ class LLMNode(BaseNode):
 
         # Vision: only enable for providers whose LLM class accepts
         # OpenAI-style multimodal content format ([{type: text, text: ...}]).
-        # DashScope non-Omni (ChatTongyi) rejects this format.
+        # DashScope non-Omni (ChatTongyi) rejects this format by default,
+        # but if the model itself declares the VISION capability we trust
+        # that flag and pass multimodal content through.
         effective_vision = self.typed_config.vision
         if effective_vision:
             try:
                 provider_enum = ModelProvider(model_info.provider.lower())
             except ValueError:
                 provider_enum = None
+            has_vision_capability = ModelCapability.VISION in capability_set
             is_compatible = (
                 provider_enum in _MULTIMODAL_COMPATIBLE_PROVIDERS
-                or (provider_enum == ModelProvider.DASHSCOPE and model_info.is_omni)
+                or has_vision_capability
             )
             if not is_compatible:
                 effective_vision = False

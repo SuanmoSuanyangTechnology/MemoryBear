@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { Node } from '@antv/x6';
 
 import type { WorkflowRef } from '@/views/ApplicationConfig/types'
-import type { NodeCheckResult } from '.'
+import type { NodeCheckResult } from '../../hooks/useWorkflowCheck'
 import RbDrawer from '@/components/RbDrawer'
 
 export interface CheckListDrawerRef {
