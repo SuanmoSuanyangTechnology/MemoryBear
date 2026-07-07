@@ -1066,7 +1066,7 @@ class AppChatService:
             # 更新 Agent 执行记录为 completed
             all_node_executions = orchestrator_node_executions + node_executions
             agent_exec_repo.update_completed(
-                    execution_id=_agent_execution_id,
+                execution_id=_agent_execution_id,
                 steps=all_node_executions,
                 status="completed",
                 elapsed_time=elapsed_time,
@@ -1093,18 +1093,19 @@ class AppChatService:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
             try:
+                _human_meta = human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}}
                 self.conversation_service.add_message(
                     message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
-                    meta_data=human_meta,
+                    meta_data=_human_meta,
                 )
                 self.conversation_service.add_message(
                     message_id=message_id,
                     conversation_id=conversation_id,
                     role="assistant",
-                    content="",
+                    content=full_content if 'full_content' in locals() else "",
                     meta_data={"error": str(e)[:2000]},
                     status="failed",
                 )
