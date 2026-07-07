@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Optional, Tuple
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.aioRedis import aio_redis
@@ -374,19 +375,22 @@ class RateLimiterService:
     async def check_all_limits(
             self,
             api_key: ApiKey,
-            db: Optional[Session] = None,
+            db: Optional[Session | AsyncSession] = None,
     ) -> Tuple[bool, str, dict]:
         """
         检查所有限制，按以下顺序：
         1. API Key QPS：取 api_key.rate_limit 与套餐 api_ops_rate_limit 的最小值作为限额
         2. API Key 日调用量
+
+        ``db`` 支持 ``Session`` 和 ``AsyncSession``，自动按类型选择同步/异步查询。
         """
         # 1. 取套餐限额与 api_key 自身限额的最小值
         effective_limit = api_key.rate_limit
+        tenant_limit = None
         if db is not None:
             try:
                 from app.models.workspace_model import Workspace
-                from app.core.quota_manager import get_api_ops_rate_limit
+                from app.core.quota_manager import get_api_ops_rate_limit, get_api_ops_rate_limit_async
 
                 cache_key = f"tenant_api_ops_limit:{api_key.workspace_id}"
                 cached = await self.redis.get(cache_key)
@@ -398,9 +402,17 @@ class RateLimiterService:
                         tenant_limit = None
 
                 if cached is None:
-                    workspace = db.query(Workspace).filter(Workspace.id == api_key.workspace_id).first()
+                    stmt = select(Workspace).where(Workspace.id == api_key.workspace_id)
+                    if isinstance(db, AsyncSession):
+                        result = await db.execute(stmt)
+                    else:
+                        result = db.execute(stmt)
+                    workspace = result.scalars().first()
                     if workspace:
-                        tenant_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
+                        if isinstance(db, AsyncSession):
+                            tenant_limit = await get_api_ops_rate_limit_async(db, workspace.tenant_id)
+                        else:
+                            tenant_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
                         await self.redis.set(cache_key, str(tenant_limit) if tenant_limit else "0", ex=60)
                     else:
                         tenant_limit = None
@@ -477,6 +489,28 @@ class ApiKeyAuthService:
         return api_key_obj
 
     @staticmethod
+    async def validate_api_key_async(
+            db: AsyncSession,
+            api_key: str
+    ) -> Optional[ApiKey]:
+        """Async version of validate_api_key."""
+        api_key_obj = await ApiKeyRepository.get_by_api_key_async(db, api_key)
+
+        if not api_key_obj:
+            return None
+
+        if not api_key_obj.is_active:
+            return None
+
+        if api_key_obj.expires_at and utcnow_naive() > api_key_obj.expires_at:
+            return None
+
+        if api_key_obj.quota_limit and api_key_obj.quota_used >= api_key_obj.quota_limit:
+            return None
+
+        return api_key_obj
+
+    @staticmethod
     def check_app_published(db: Session, api_key_obj: ApiKey) -> None:
         """
         检查应用是否已发布，未发布则抛出异常
@@ -487,6 +521,17 @@ class ApiKeyAuthService:
         if api_key_obj.type == ApiKeyType.SERVICE.value:
             return
         app = db.get(App, api_key_obj.resource_id)
+        if not app or not app.current_release_id:
+            raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
+
+    @staticmethod
+    async def check_app_published_async(db: AsyncSession, api_key_obj: ApiKey) -> None:
+        """Async version of check_app_published."""
+        if not api_key_obj.resource_id:
+            return
+        if api_key_obj.type == ApiKeyType.SERVICE.value:
+            return
+        app = await db.get(App, api_key_obj.resource_id)
         if not app or not app.current_release_id:
             raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
 

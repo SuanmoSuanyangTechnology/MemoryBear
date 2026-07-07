@@ -1,11 +1,79 @@
 from __future__ import annotations
-from typing import Any, Iterator, AsyncIterator, List, Optional
+from typing import Any, Iterator, AsyncIterator, List, Optional, Literal, Type
+
+from json_repair import json_repair
 from langchain_core.callbacks import CallbackManagerForLLMRun, AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import BaseLLM
+from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult, GenerationChunk
-
 from app.core.models import RedBearModelConfig, RedBearModelFactory, get_provider_llm_class
 from app.models.models_model import ModelType
+
+
+class StructResponse:
+    """Fallback post-processor: extract text, repair JSON, convert to target format.
+
+    The *schema* parameter mirrors ``with_structured_output``:
+    - Pydantic class → returns Pydantic instance (``model_validate``)
+    - ``dict`` (JSON Schema) → returns ``dict``
+    - ``TypedDict`` → returns ``dict``
+
+    Designed as a fallback when the provider does not implement
+    ``with_structured_output`` (raises ``NotImplementedError``).
+
+    Pipe usage::
+
+        ai_msg | StructResponse(MyModel)      → MyModel instance
+        ai_msg | StructResponse(json_schema)   → dict
+
+    Direct parse::
+
+        StructResponse.parse(text, MyModel)    → MyModel instance
+        StructResponse.parse(text, schema)     → dict
+    """
+
+    def __init__(self, schema: dict[str, Any] | type):
+        self.schema = schema
+
+    # ── Pipe target ──────────────────────────────────────────────────
+
+    def __ror__(self, other: AIMessage | str) -> Any:
+        """``left | self`` — extract text, repair JSON, convert."""
+        text = self.extract_text(other)
+        return self._convert(text)
+
+    # ── Direct parse ─────────────────────────────────────────────────
+
+    @staticmethod
+    def parse(text: str, schema: dict[str, Any] | type) -> Any:
+        """Parse *text* directly without using the pipe operator."""
+        return StructResponse(schema)._convert(text)
+
+    # ── Internal helpers ─────────────────────────────────────────────
+
+    @staticmethod
+    def extract_text(other: AIMessage | str) -> str:
+        if isinstance(other, str):
+            return other
+        if isinstance(other, AIMessage):
+            content = getattr(other, "content", None)
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                text = ""
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text += block.get("text", "")
+                return text
+            return str(content) if content else ""
+        raise RuntimeError(f"Unsupported struct type {type(other)}")
+
+    def _convert(self, text: str) -> Any:
+        fixed_json = json_repair.repair_json(text, return_objects=True)
+        schema = self.schema
+        if isinstance(schema, type) and hasattr(schema, "model_validate"):
+            return schema.model_validate(fixed_json)
+        return fixed_json
 
 
 class RedBearLLM(BaseLLM):
@@ -39,29 +107,29 @@ class RedBearLLM(BaseLLM):
         return getattr(self._model, '_llm_type', 'redbear_llm')
 
     # ==================== Core Methods (Required by BaseLLM) ====================
-    
+
     def _generate(
-        self,
-        prompts: List[str],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any
+            self,
+            prompts: List[str],
+            stop: Optional[List[str]] = None,
+            run_manager: Optional[CallbackManagerForLLMRun] = None,
+            **kwargs: Any
     ) -> LLMResult:
         """Synchronous text generation (required by BaseLLM)"""
         return self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
 
     async def _agenerate(
-        self,
-        prompts: List[str],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
-        **kwargs: Any
+            self,
+            prompts: List[str],
+            stop: Optional[List[str]] = None,
+            run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+            **kwargs: Any
     ) -> LLMResult:
         """Asynchronous text generation (required by BaseLLM)"""
         return await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
 
     # ==================== Advanced Methods (Support Message Lists) ====================
-    
+
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         """Synchronous model invocation
         
@@ -113,14 +181,14 @@ class RedBearLLM(BaseLLM):
             raise
 
     # ==================== Streaming Methods (Critical) ====================
-    
+
     def stream(
-        self,
-        input: Any,
-        config: Optional[dict] = None,
-        *,
-        stop: Optional[List[str]] = None,
-        **kwargs: Any
+            self,
+            input: Any,
+            config: Optional[dict] = None,
+            *,
+            stop: Optional[List[str]] = None,
+            **kwargs: Any
     ) -> Iterator[GenerationChunk]:
         """Synchronous streaming model invocation
         
@@ -143,14 +211,14 @@ class RedBearLLM(BaseLLM):
                 raise
         except Exception:
             raise
-    
+
     async def astream(
-        self,
-        input: Any,
-        config: Optional[dict] = None,
-        *,
-        stop: Optional[List[str]] = None,
-        **kwargs: Any
+            self,
+            input: Any,
+            config: Optional[dict] = None,
+            *,
+            stop: Optional[List[str]] = None,
+            **kwargs: Any
     ) -> AsyncIterator[GenerationChunk]:
         """Asynchronous streaming model invocation
         
@@ -180,8 +248,68 @@ class RedBearLLM(BaseLLM):
         except Exception:
             raise
 
+    # ==================== Structured Output ====================
+
+    def with_structured_output(self, schema: dict[str, Any] | type, **kwargs: Any) -> Any:
+        """Delegate to the underlying model's with_structured_output.
+
+        Must be explicitly overridden because RedBearLLM inherits from BaseLLM →
+        BaseLanguageModel, which already defines with_structured_output as a stub
+        that raises NotImplementedError.  Without this override, Python's MRO
+        lookup finds the stub and __getattr__ is never invoked.
+        """
+        with_so = getattr(self._model, "with_structured_output", None)
+        if callable(with_so):
+            return with_so(schema, **kwargs)
+        raise NotImplementedError(
+            f"Underlying model {type(self._model).__name__} does not implement "
+            f"with_structured_output"
+        )
+
+    async def call_structured(
+            self,
+            input: Any,
+            schema: dict[str, Any] | type,
+            **kwargs: Any,
+    ) -> Any:
+        """Shortcut: build a structured-output chain and invoke it in one step.
+
+        Primary path uses the provider's native ``with_structured_output``.
+        If the provider does not support it (``NotImplementedError``), falls
+        back to a normal ``ainvoke`` + :class:`StructResponse` which repairs
+        JSON via ``json_repair`` and validates against the schema.
+
+        Equivalent to::
+
+            chain = llm.with_structured_output(schema, **kwargs)
+            result = await chain.ainvoke(input)
+
+        Args:
+            input: Messages (list of dicts) or a string prompt.
+            schema: A Pydantic class, TypedDict, or JSON Schema dict.
+            **kwargs: Forwarded to ``with_structured_output`` (e.g. ``method``, ``strict``).
+
+        Returns:
+            A Pydantic instance (when *schema* is a Pydantic class) or a dict.
+        """
+        import logging
+        _logger = logging.getLogger(__name__)
+
+        try:
+            chain = self.with_structured_output(schema, **kwargs)
+            return await chain.ainvoke(input)
+        except NotImplementedError:
+            _logger.warning(
+                "call_structured: with_structured_output not supported by %s, "
+                "falling back to ainvoke + StructResponse",
+                type(self._model).__name__,
+            )
+
+        response = await self.ainvoke(input)
+        return response | StructResponse(schema)
+
     # ==================== Dynamic Proxy ====================
-    
+
     def __getattr__(self, name: str) -> Any:
         """Dynamic proxy: delegate undefined attributes and method calls to internal model
         
@@ -200,11 +328,11 @@ class RedBearLLM(BaseLLM):
         # Avoid recursion: raise error directly for special attributes
         if name in ('__isabstractmethod__', '__dict__', '__class__', '_model', '_config'):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        
+
         # Try to get attribute from internal model
         try:
             attr = object.__getattribute__(self._model, name)
-            
+
             # If it's callable (a method)
             if callable(attr):
                 # Streaming methods are returned directly to maintain generator characteristics
@@ -212,7 +340,7 @@ class RedBearLLM(BaseLLM):
                 # this is kept to handle internal methods like _stream/_astream
                 if name in ('_stream', '_astream'):
                     return attr
-                
+
                 # Wrap other methods for easier debugging and error handling
                 def method_wrapper(*args, **kwargs):
                     try:
@@ -220,26 +348,26 @@ class RedBearLLM(BaseLLM):
                     except Exception:
                         # Can add logging or error handling here
                         raise
-                
+
                 # Preserve method metadata
                 method_wrapper.__name__ = name
                 method_wrapper.__doc__ = getattr(attr, '__doc__', f"Delegated method: {name}")
                 return method_wrapper
-            
+
             # If it's a regular attribute, return directly
             return attr
-            
+
         except AttributeError:
             # Internal model doesn't have this attribute either
             pass
-        
+
         # Check if there's a fallback method
         fallback_name = f'_fallback_{name}'
         try:
             return object.__getattribute__(self, fallback_name)
         except AttributeError:
             pass
-        
+
         # Nothing found, raise error
         raise AttributeError(
             f"'{type(self).__name__}' object has no attribute '{name}'. "
@@ -247,7 +375,7 @@ class RedBearLLM(BaseLLM):
         )
 
     # ==================== Helper Methods ====================
-    
+
     def _create_model(self, config: RedBearModelConfig, type: ModelType) -> BaseLLM:
         """Create internal model instance
         
@@ -274,7 +402,7 @@ class RedBearLLM(BaseLLM):
         # ===== 调试日志 END =====
 
         return llm_class(**model_params)
-    
+
     def get_config(self) -> RedBearModelConfig:
         """Get model configuration
         
@@ -282,7 +410,7 @@ class RedBearLLM(BaseLLM):
             Model configuration object
         """
         return self._config
-    
+
     def get_underlying_model(self) -> BaseLLM:
         """Get underlying model instance
         
@@ -290,7 +418,7 @@ class RedBearLLM(BaseLLM):
             Underlying model instance
         """
         return self._model
-    
+
     def __repr__(self) -> str:
         """Return string representation of the object"""
         return (
