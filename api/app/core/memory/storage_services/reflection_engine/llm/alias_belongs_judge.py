@@ -52,8 +52,6 @@ async def judge_alias_belongs(
         已判定的候选列表，每项：{alias_id, decision("merge"|"drop"), confidence, reason}。
         未拿到有效判定（LLM 异常/缺失/越界/非法分数）的候选不在返回中 —— 调用方据此 skip（保留边）。
     """
-    from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
-
     if not candidates:
         return []
 
@@ -65,7 +63,7 @@ async def judge_alias_belongs(
             language=language,
         )
         messages = [{"role": "user", "content": rendered_prompt}]
-        response = await call_structured(llm_client, messages, AliasBatchJudgeOutput)
+        response = await llm_client.call_structured(messages, AliasBatchJudgeOutput)
 
         if not isinstance(response, AliasBatchJudgeOutput):
             logger.warning("[AliasJudge] LLM 返回类型异常，整组按 skip 处理")

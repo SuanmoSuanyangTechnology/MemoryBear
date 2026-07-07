@@ -116,8 +116,6 @@ async def resolve_unresolved_statement(
 ) -> Optional[UnresolvedResult]:
     """调用 LLM 对 unresolved statement 进行消解 + 三元组提取"""
     try:
-        from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
-
         template = _prompt_env.get_template("resolve_unresolved_triplet.jinja2")
 
         input_json = {
@@ -141,7 +139,7 @@ async def resolve_unresolved_statement(
         )
 
         messages = [{"role": "user", "content": rendered_prompt}]
-        response = await call_structured(llm_client, messages, UnresolvedResult)
+        response = await llm_client.call_structured(messages, UnresolvedResult)
 
         if isinstance(response, UnresolvedResult):
             return response
