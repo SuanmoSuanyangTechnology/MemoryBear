@@ -186,7 +186,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       onOk={handleSave}
       footer={[
         <Button key="close" onClick={currentStep === 0 ? handleClose : handlePrevStep}>{t(currentStep === 0 ? 'common.cancel' : 'common.prevStep')}</Button>,
-        <Button key="submit" type="primary" onClick={handleSave}>{t(currentStep === 0 ? 'common.nextStep' : 'common.save')}</Button>,
+        <Button key="submit" type="primary" loading={loading} onClick={handleSave}>{t(currentStep === 0 ? 'common.nextStep' : 'common.save')}</Button>,
       ]}
       confirmLoading={loading}
     >

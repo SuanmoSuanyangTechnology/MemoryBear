@@ -58,12 +58,10 @@ async def read_memory_sync(
     """
     body = await request.json()
     payload = UserInput(**body)
-
     with get_db_read() as db:
         validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
-
+        config_id = MemoryConfigService(db).get_config_id_by_end_user(payload.end_user_id)
     logger.info(f"V1 memory read (sync) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
-    config_id = MemoryConfigService(db).get_config_id_by_end_user(payload.end_user_id)
     service = MemoryService(
         config_id,
         end_user_id=payload.end_user_id,
