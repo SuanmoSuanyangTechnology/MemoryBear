@@ -72,6 +72,8 @@ class MemoryTransService:
                         base_url=model_config.get("base_url"),
                         timeout=model_config.get("timeout", 30),
                         max_retries=model_config.get("max_retries", 3),
+                        is_omni=model_config.get("is_omni"),
+                        capability=model_config.get("capability"),
                         extra_params=extra_params
                     ),
                     type_=model_config.get("type")
