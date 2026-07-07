@@ -481,6 +481,8 @@ export const zh = {
         feishuFolderTokenPlaceholder: '请输入您的飞书文件夹 Token',
       },
       csvTemplate: '点击下载 CSV 模板',
+      exportQa: '导出QA',
+      exportQaSuccess: 'QA 导出成功',
     },
     application: {
       searchPlaceholder: '搜索应用',
@@ -2837,6 +2839,11 @@ export const zh = {
           max_attempts: '最大重试次数',
           retry_interval: '重试间隔',
           errorBranch: '异常分支',
+          importCurl: '导入 cURL',
+          curlPlaceholder: '粘贴 cURL 字符串',
+          curlParseError: 'cURL 解析失败，请检查格式',
+          curlEmpty: '请粘贴 cURL 字符串',
+          curlImportSuccess: '导入成功',
         },
         'jinja-render': {
           template: '代码',

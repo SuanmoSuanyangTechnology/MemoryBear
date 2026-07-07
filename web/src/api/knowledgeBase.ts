@@ -345,6 +345,10 @@ export const batchDownloadFilesByKb = async (kb_id: string, fileName: string, ca
   const response = await request.downloadFile(`/knowledges/${kb_id}/batch-download`, fileName, undefined, callback);
   return response;
 };
+// 知识库 QA 对导出接口
+export const exportQaByKb = (kb_id: string, file_name: string, callback: () => void) => {
+  return request.getDownloadFile(`/knowledges/${kb_id}/qa/export`, file_name, undefined, callback);
+}
 // 知识库分块模式
 export const knowledgesChunkPolicy = async (kb_id: string) => {
   return request.get(`/knowledges/${kb_id}/chunk-policy`);

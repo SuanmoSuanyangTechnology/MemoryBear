@@ -14,7 +14,7 @@ import textIcon from '@/assets/images/knowledgeBase/text.png';
 
 // import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
 // import imageIcon from '@/assets/images/knowledgeBase/image.png'
-import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb, exportQaByKb } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
   type KnowledgeBaseListItem, 
@@ -804,6 +804,11 @@ const Private: FC = () => {
       messageApi.success(t('knowledgeBase.batchDownloadSuccess'))
     })
   }
+  const handleExportQa = () => {
+    exportQaByKb(knowledgeBase.id, `${knowledgeBase.name}.csv`, () => {
+      messageApi.success(t('knowledgeBase.exportQaSuccess'))
+    })
+  }
 
   return (
     <>
@@ -889,9 +894,11 @@ const Private: FC = () => {
                   onClick: handleSetting,
                 },
                 {
-                  title: t('knowledgeBase.batchDownload'),
                   icon: "rb:bg-[url('@/assets/images/knowledgeBase/export.svg')]",
-                  onClick: handleBatchDownload,
+                  items: [
+                    { key: 'batchDownload', label: t('knowledgeBase.batchDownload'), onClick: handleBatchDownload },
+                    { key: 'exportQa', label: t('knowledgeBase.exportQa'), onClick: handleExportQa },
+                  ]
                 },
               ]}
             />

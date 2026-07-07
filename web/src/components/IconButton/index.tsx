@@ -11,34 +11,46 @@ import { Tooltip, Flex, Badge } from 'antd';
 import clsx from 'clsx';
 
 interface IconButtonProps {
-  title: ReactNode;
+  title?: ReactNode;
   icon: string;
-  onClick: () => void;
+  onClick?: () => void;
   className?: string;
   badge?: number;
+  hideTooltip?: boolean;
 }
 
-const IconButton: FC<IconButtonProps> = ({ title, icon, onClick, className, badge }) => {
-  return (
-    <Tooltip title={title}>
-      <Flex
-        align="center"
-        justify="center"
-        className={clsx("rb:relative rb:size-7.5 rb:cursor-pointer rb:rounded-lg rb:hover:bg-[#F6F6F6] rb:overflow-visible", className)}
-        onClick={onClick}
+const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge }) => (
+  <Flex
+    align="center"
+    justify="center"
+    className={clsx("rb:relative rb:size-7.5 rb:cursor-pointer rb:rounded-lg rb:hover:bg-[#F6F6F6] rb:overflow-visible", className)}
+    onClick={onClick}
+  >
+    {badge !== undefined && badge !== null ? (
+      <Badge
+        count={badge}
+        size="small"
+        overflowCount={99}
       >
-        {badge !== undefined && badge !== null ? (
-          <Badge
-            count={badge}
-            size="small"
-            overflowCount={99}
-          >
-            <div className={`rb:size-4 rb:bg-cover ${icon}`} />
-          </Badge>
-        ) : (
-          <div className={`rb:size-4 rb:bg-cover ${icon}`} />
-        )}
-      </Flex>
+        <div className={`rb:size-4 rb:bg-cover ${icon}`} />
+      </Badge>
+    ) : (
+      <div className={`rb:size-4 rb:bg-cover ${icon}`} />
+    )}
+  </Flex>
+)
+
+const IconButton: FC<IconButtonProps> = ({ title, icon, onClick, className, badge, hideTooltip = false }) => {
+  if (hideTooltip || !title) {
+    return (
+      <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} />
+    )
+  }
+  return (
+    <Tooltip title={title} trigger="hover">
+      <span>
+        <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} />
+      </span>
     </Tooltip>
   );
 };
