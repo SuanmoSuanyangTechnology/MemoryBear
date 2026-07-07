@@ -57,7 +57,7 @@ class MemoryReadNode(BaseNode):
             conversation_id=variable_pool.get_value("sys.conversation_id"),
         )
         query = self._render_template(self.typed_config.message, variable_pool)
-        self._process = {"query": query, "config_id": config_id}
+        self._process = {"query": query, "config_id": str(config_id)}
         # TODO: Historical Messages -> Used to refer to coreference resolution
         search_result = await memory_service.read(
             query,
