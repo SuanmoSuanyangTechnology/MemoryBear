@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:50 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-30 16:00:54
+ * @Last Modified time: 2026-07-06 18:02:10
  */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +23,7 @@ import { formatDateTime } from '@/utils/format';
 import Tag from '@/components/Tag'
 import { maskApiKeys } from '@/utils/apiKeyReplacer';
 import RbDescriptions from '@/components/RbDescriptions';
+import { openHelpCenter } from '@/utils/help';
 
 /**
  * API Key Management page component
@@ -81,7 +82,7 @@ const ApiKeyManagement: React.FC = () => {
     message.success(t('common.copySuccess'))
   }
   const handleGotoEndpointConfig = () => {
-    window.open(`/docs/?lang=${i18n.language}`, '_blank')
+    openHelpCenter(i18n.language as 'zh' | 'en', 'api-key')
   }
   return (
     <>

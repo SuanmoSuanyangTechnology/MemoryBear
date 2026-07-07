@@ -4,6 +4,7 @@ import json
 import time
 import uuid
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
+from datetime import datetime
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -36,6 +37,16 @@ from app.models.file_metadata_model import FileMetadata
 from app.services.tool_orchestrator import ToolOrchestrator
 
 logger = get_business_logger()
+
+
+class CustomJsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        # 原生抛出你看到的那段报错
+        return super().default(obj)
 
 
 def assert_not_opening_statement(db, message_id: uuid.UUID) -> None:
@@ -808,8 +819,8 @@ class AppChatService:
                 # 把已完成的工具调用步骤作为事件补发给前端
                 for step in orchestrator_node_executions:
                     event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
-                    yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, ensure_ascii=False)}\n\n"
-                    yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, ensure_ascii=False)}\n\n"
+                    yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
 
             # 创建 LangChain Agent
@@ -904,13 +915,13 @@ class AppChatService:
                 elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
                     node_executions = chunk.get("data", [])
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
-                    yield f"event: tool_start\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'input': chunk.get('input'), 'meta': chunk.get('meta')}, ensure_ascii=False)}\n\n"
+                    yield f"event: tool_start\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'input': chunk.get('input'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
-                    yield f"event: tool_end\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'output': chunk.get('output'), 'meta': chunk.get('meta')}, ensure_ascii=False)}\n\n"
+                    yield f"event: tool_end\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'output': chunk.get('output'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
-                    yield f"event: tool_error\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'error': chunk.get('error')}, ensure_ascii=False)}\n\n"
+                    yield f"event: tool_error\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'error': chunk.get('error')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
-                    yield f"event: agent_log\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    yield f"event: agent_log\ndata: {json.dumps(chunk, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, str):
                     full_content += chunk
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
