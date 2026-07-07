@@ -362,33 +362,29 @@ class WritePipeline:
                         after_count=len(context_after_pruned),
                         pruned_count=len(pruning_records),
                     )
-                    recorder = getattr(self, "_recorder", None)
-                    if recorder is not None:
-                        recorder.record_pruning_results(pruning_records)
 
                 messages = [target_message]
-
-                # MCP 路径：追加空 assistant 占位消息，使 get_chunked_dialogs 内的
-                # prune_dataset 能配对出 (user, assistant) 并对 user 执行规整
-                if target_message.get("_mcp_pair_assistant"):
-                    messages.append({
-                        "role": "assistant",
-                        "content": "",
-                        "dialog_at": target_message.get("dialog_at", ""),
-                    })
 
                 # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
                 await self._preprocess_files(messages)
                 await self._preprocess_files(context_before_pruned)
                 await self._preprocess_files(context_after_pruned)
 
-                # target_message User 侧 pruning
-                await self._prune_target_message_user_side(
+                # target_message User 侧 pruning（允许空 assistant 配对）
+                await self._prune_target_message(
                     messages=messages,
                     context_after_original=context_after,
                     conversation_id=conversation_id,
+                    message_seq=message_seq,
                     pruning_pipeline=pruning_pipeline,
+                    pruning_records=pruning_records,
                 )
+
+                # 记录统一剪枝快照（context 剪枝 + target 规整，按 message_seq 排序）
+                # 只要剪枝开关开启就输出快照，即使没有实际剪枝结果
+                recorder = getattr(self, "_recorder", None)
+                if recorder is not None and self.memory_config.pruning_enabled:
+                    recorder.record_pruning_results(pruning_records)
 
                 # Step 2: 预处理 - 消息分块
                 async with bear.step(2, 6, "预处理", "消息分块") as s:
@@ -482,12 +478,11 @@ class WritePipeline:
 
     async def _preprocess(self, messages: List[dict], ref_id: str) -> List[DialogData]:
         """
-        预处理：消息校验 → AI消息语义剪枝 → 对话分块。
+        预处理：消息校验 → 对话分块。
 
         委托给 get_chunked_dialogs()，保持现有预处理逻辑不变。
         get_dialogs.py 内部已包含：
           - 消息格式校验（role/content 必填）
-          - AI消息语义剪枝（根据 config 中 pruning_enabled 决定）
           - DialogueChunker 分块
         """
         from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -850,76 +845,88 @@ class WritePipeline:
                         exc_info=True,
                     )
 
-    async def _prune_target_message_user_side(
+    async def _prune_target_message(
         self,
         messages: List[dict],
         context_after_original: List[dict],
         conversation_id: str,
+        message_seq: int,
         pruning_pipeline: "PruningPipeline",
+        pruning_records: Optional[list] = None,
     ) -> None:
-        """对 target_message 执行 User 侧 pruning（规整）。
+        """对 target_message 执行统一剪枝（User 侧规整）。
 
-        当 target_message 的 content 包含 <input-file-summary> 标签或长文复制内容时，
-        pruning LLM 会判断 should_process_user_msg=true 并返回 processed_user_msg。
-        此时用 processed_user_msg 替换 target_message 的 content 进入后续流程。
+        配对策略：
+        - 优先从 context_after 找第一条 assistant 作为配对
+        - 找不到 → 使用空字符串作为 assistant（触发 prompt 空侧规则）
+        - 一次 LLM 调用同时判断 user 规整和 assistant 压缩
 
-        配对逻辑：使用 context_after 中第一条原始 assistant 消息作为配对。
-        若 context_after 中没有 assistant 消息，则跳过 pruning。
+        与旧版 _prune_target_message_user_side 的区别：
+        - 不再依赖 context_after 中必须存在 assistant
+        - 保留 content 长度/file-summary 的前置判断（避免无意义 LLM 调用）
 
         Args:
             messages: [target_message] 列表（原地修改）
             context_after_original: 原始（未剪枝）的下文消息列表
             conversation_id: 对话 ID
+            message_seq: 目标消息的 message_seq
             pruning_pipeline: 已初始化的 PruningPipeline 实例
+            pruning_records: 可选的列表，若传入则将本次剪枝记录追加到其中
         """
         if not messages:
             return
 
-        # 剪枝开关关闭时跳过 User 侧规整
+        # 剪枝开关关闭时跳过
         if not self.memory_config.pruning_enabled:
             logger.debug(
-                "[WritePipeline] target_message User 侧 pruning 跳过: 剪枝开关已关闭"
+                "[WritePipeline] target_message pruning 跳过: 剪枝开关已关闭"
             )
             return
 
         target_msg = messages[0]
         target_content = target_msg.get("content", "")
+        if not target_content.strip():
+            return
 
-        # 只有 content 中包含 <input-file-summary> 或内容较长时才需要 User 侧规整
+        # 短消息且无 file-summary 标签时跳过，避免无意义的 LLM 调用
         if "<input-file-summary>" not in target_content and len(target_content) < 500:
             logger.debug(
-                f"[WritePipeline] target_message User 侧 pruning 跳过: "
+                f"[WritePipeline] target_message pruning 跳过: "
                 f"无 <input-file-summary> 且长度 {len(target_content)} < 500"
             )
+            if pruning_records is not None:
+                pruning_records.append({
+                    "conversation_id": conversation_id,
+                    "message_seq": message_seq,
+                    "source": "skipped",
+                    "type": "target_user_pruning",
+                    "reason": f"无 <input-file-summary> 且长度 {len(target_content)} < 500",
+                    "input": {
+                        "msgs": [
+                            {"role": "User", "msg": target_content},
+                        ]
+                    },
+                    "output": None,
+                })
             return
 
-        # 从原始 context_after 中找第一条 assistant 消息作为配对
+        # 从 context_after 找紧邻 target 的下一条消息，仅当它是 assistant 时才配对
+        # 如果中间隔了其他 user 消息，说明 assistant 不是对当前 target 的回复，无法辅助规整判断
         assistant_content = ""
-        assistant_seq = 0
-        for msg in (context_after_original or []):
-            if msg.get("role") == "assistant":
-                assistant_content = msg.get("content", "")
-                assistant_seq = msg.get("message_seq", 0)
-                break
-
-        if not assistant_content:
-            # 没有配对的 assistant 消息，跳过 User 侧 pruning
-            logger.debug(
-                "[WritePipeline] target_message User 侧 pruning 跳过: "
-                "context_after 中无 assistant 消息"
-            )
-            return
+        if context_after_original and context_after_original[0].get("role") == "assistant":
+            assistant_content = context_after_original[0].get("content", "")
 
         logger.info(
-            f"[WritePipeline] target_message User 侧 pruning 开始: "
-            f"content_len={len(target_content)}, assistant_seq={assistant_seq}"
+            f"[WritePipeline] target_message pruning 开始: "
+            f"content_len={len(target_content)}, "
+            f"has_assistant_pair={bool(assistant_content)}"
         )
 
         try:
-            # 直接调用 LLM 剪枝，不走缓存（避免与 _build_pruned_context 的缓存冲突）
+            # 调用 LLM 剪枝，不走缓存（避免与 _build_pruned_context 的缓存冲突）
             _, _, should_process, processed_msg = await pruning_pipeline._call_llm_prune(
-                content=assistant_content,
-                user_content=target_content,
+                content=assistant_content,  # assistant 侧（可能为空）
+                user_content=target_content,  # user 侧
             )
 
             if should_process and processed_msg and processed_msg.strip():
@@ -931,12 +938,31 @@ class WritePipeline:
                 messages[0]["content"] = processed_msg
             else:
                 logger.info(
-                    f"[WritePipeline] target_message User 侧 pruning: LLM 判断无需规整 "
+                    f"[WritePipeline] target_message pruning: LLM 判断无需规整 "
                     f"(should_process={should_process})"
                 )
+
+            # 追加剪枝记录（无论是否规整，都记录 LLM 的判断结果）
+            if pruning_records is not None:
+                pruning_records.append({
+                    "conversation_id": conversation_id,
+                    "message_seq": message_seq,
+                    "source": "llm",
+                    "type": "target_user_pruning",
+                    "input": {
+                        "msgs": [
+                            {"role": "User", "msg": target_content},
+                            {"role": "Assistant", "msg": assistant_content},
+                        ]
+                    },
+                    "output": {
+                        "should_process_user_msg": should_process,
+                        "processed_user_msg": processed_msg,
+                    },
+                })
         except Exception as e:
             logger.warning(
-                f"[WritePipeline] target_message User 侧 pruning 失败（不影响主流程）: "
+                f"[WritePipeline] target_message pruning 失败（不影响主流程）: "
                 f"conv={conversation_id}, err={e}",
                 exc_info=True,
             )
