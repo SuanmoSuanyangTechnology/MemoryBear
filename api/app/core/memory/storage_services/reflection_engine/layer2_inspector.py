@@ -8,7 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 
 from datetime import datetime
-from app.core.utils.datetime_utils import utcnow_naive, as_utc_aware, parse_iso_to_utc_naive
+from app.core.utils.datetime_utils import (
+    utcnow_naive,
+    as_utc_aware,
+    convert_neo4j_datetime_to_python,
+)
 from app.core.memory.storage_services.reflection_engine.deterministic.description_checker import (
     scan_merge_candidates,
 )
@@ -47,25 +51,13 @@ from app.repositories.neo4j.cypher_queries import (
 logger = logging.getLogger(__name__)
 
 
-def _resolve_last_seen(raw) -> datetime:
+def _resolve_last_seen(raw) -> datetime | None:
     """把 statement 的 dialog_at 归一为 naive UTC datetime，作为实体 created_at（最近被看到时间）。
 
-    raw 可能是 neo4j 时序对象（execute_query 默认返回 record.data()，dialog_at 为
-    neo4j.time.DateTime）、Python datetime，或字符串。无法解析时回退当前 UTC，不抛异常。
+    无法解析时返回 None（不兜底当前时间），此时 created_at 留空由 Cypher 处理。
     """
-    if raw is None or raw == "":
-        return utcnow_naive()
-    if isinstance(raw, datetime):
-        return as_utc_aware(raw).replace(tzinfo=None)
-    if hasattr(raw, "to_native"):
-        return as_utc_aware(raw.to_native()).replace(tzinfo=None)
-    try:
-        parsed = parse_iso_to_utc_naive(str(raw))
-        if parsed is not None:
-            return parsed
-    except Exception:
-        pass
-    return utcnow_naive()
+    dt = convert_neo4j_datetime_to_python(raw)
+    return as_utc_aware(dt).replace(tzinfo=None) if dt is not None else None
 
 
 # 快照体积控制（仅调试用、不影响写库）：低频 1_input 逐实体存 description，超长会让快照过大、
