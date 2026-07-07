@@ -19,6 +19,7 @@ class ModelClientMixin(ABC):
                 model_name=api_config.model_name,
                 provider=api_config.provider,
                 api_key=api_config.api_key,
+                capability=api_config.capability,
                 base_url=api_config.api_base,
                 is_omni=api_config.is_omni
             )
@@ -61,6 +62,7 @@ class ModelClientMixin(ABC):
         config = RedBearModelConfig(
             model_name=api_config.model_name,
             provider=api_config.provider,
+            capability=api_config.capability,
             api_key=api_config.api_key,
             base_url=api_config.api_base,
             is_omni=api_config.is_omni,

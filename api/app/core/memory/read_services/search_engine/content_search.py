@@ -21,7 +21,7 @@ from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool
-from app.core.memory.utils.llm.llm_utils import StructResponse
+from app.core.models.llm import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_async_db_context
@@ -68,7 +68,7 @@ class Neo4jSearchService:
         if includes is None:
             self.includes = [
                 Neo4jNodeType.STATEMENT,
-                # Neo4jNodeType.CHUNK,
+                Neo4jNodeType.CHUNK,
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
                 Neo4jNodeType.PERCEPTUAL,
@@ -289,7 +289,7 @@ class Neo4jSearchService:
             messages[-1],
         )
         try:
-            return final_message | StructResponse(mode="pydantic", model=RelationSearchResult)
+            return final_message | StructResponse(RelationSearchResult)
         except Exception:
             logger.debug(
                 "[RelationSearch] LLM final message parsing failed, "
