@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 VECTOR_SEARCH_MODE_ENV = "ELASTICSEARCH_VECTOR_SEARCH_MODE"
 VECTOR_SEARCH_MODE_KNN = "knn"
 VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
+DEFAULT_INDEX_REFRESH_INTERVAL = "1s"
 
 
 class ElasticSearchVector(BaseVector):
@@ -951,6 +952,11 @@ class ElasticSearchVector(BaseVector):
     ):
         if not self._client.indices.exists(index=self._collection_name):
             index_mapping = {
+                "settings": {
+                    "index": {
+                        "refresh_interval": DEFAULT_INDEX_REFRESH_INTERVAL,
+                    },
+                },
                 "mappings": {
                     "properties": {
                         Field.CONTENT_KEY.value: {
