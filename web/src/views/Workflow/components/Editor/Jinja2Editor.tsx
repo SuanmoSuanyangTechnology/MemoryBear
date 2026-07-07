@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-02 15:15:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 11:34:41
+ * @Last Modified time: 2026-07-06 11:08:23
  */
 import { type FC, useEffect, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -18,6 +18,7 @@ import Jinja2AutocompletePlugin from './plugin/Jinja2AutocompletePlugin';
 import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
 import Jinja2BlurPlugin from './plugin/Jinja2BlurPlugin';
 import LineNumberPlugin from './plugin/LineNumberPlugin';
+import OnBlurPlugin from './plugin/OnBlurPlugin';
 
 const jinja2Theme = {
   paragraph: 'editor-paragraph',
@@ -85,6 +86,7 @@ export interface Jinja2EditorProps {
   height?: number;
   size?: 'default' | 'small';
   className?: string;
+  onBlur?: () => void;
 }
 
 const Jinja2Editor: FC<Jinja2EditorProps> = ({
@@ -96,6 +98,7 @@ const Jinja2Editor: FC<Jinja2EditorProps> = ({
   size = 'default',
   height,
   className,
+  onBlur,
 }) => {
   useEffect(() => {
     if (!document.getElementById(STYLE_ID)) {
@@ -177,6 +180,7 @@ const Jinja2Editor: FC<Jinja2EditorProps> = ({
         <Jinjia2CharacterCountPlugin setCount={() => {}} />
         <Jinja2InitialValuePlugin value={value} onChange={onChange} />
         <Jinja2BlurPlugin />
+        <OnBlurPlugin onBlur={onBlur} />
       </div>
     </LexicalComposer>
   );

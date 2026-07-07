@@ -166,3 +166,22 @@ def parse_metadata_time_to_utc_naive(value: str | int | float | datetime | None)
         return parse_timestamp_to_utc_naive(timestamp)
 
     return parse_iso_to_utc_naive(stripped)
+
+
+def convert_neo4j_datetime_to_python(value) -> datetime | None:
+    """Neo4j 时序对象 / 字符串 / datetime → Python datetime；无法解析或 None 返回 None。
+
+    不做时区归一，aware/naive 取决于来源；需要 naive UTC 的写库场景由调用方自行归一。
+    """
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "to_native"):
+            return value.to_native()
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None

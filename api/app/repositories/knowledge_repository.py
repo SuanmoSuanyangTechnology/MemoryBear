@@ -1,5 +1,6 @@
 import uuid
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.models.document_model import Document
 from app.models.knowledge_model import Knowledge, PermissionType
@@ -110,6 +111,24 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | Non
         return knowledge
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge base based on the ID: knowledge_id={knowledge_id} - {str(e)}")
+        raise
+
+
+async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -> Knowledge | None:
+    """Async version of get_knowledge_by_id."""
+    db_logger.debug(f"Query knowledge base based on ID (async): knowledge_id={knowledge_id}")
+
+    try:
+        stmt = select(Knowledge).where(Knowledge.id == knowledge_id)
+        result = await db.execute(stmt)
+        knowledge = result.scalars().first()
+        if knowledge:
+            db_logger.debug(f"knowledge base query successful (async): {knowledge.name} (ID: {knowledge_id})")
+        else:
+            db_logger.debug(f"knowledge base does not exist (async): knowledge_id={knowledge_id}")
+        return knowledge
+    except Exception as e:
+        db_logger.error(f"Failed to query the knowledge base based on the ID (async): knowledge_id={knowledge_id} - {str(e)}")
         raise
 
 
@@ -244,6 +263,27 @@ def get_knowledge_by_name(db: Session, name: str, workspace_id: uuid.UUID) -> Kn
         return knowledge
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge base based on the name and workspace_id: name={name}, workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+async def get_knowledge_by_name_async(db: AsyncSession, name: str, workspace_id: uuid.UUID) -> Knowledge | None:
+    """Async version of get_knowledge_by_name."""
+    db_logger.debug(f"Query knowledge base based on name and workspace_id (async): name={name}, workspace_id={workspace_id}")
+
+    try:
+        stmt = (
+            select(Knowledge)
+            .where(Knowledge.name == name, Knowledge.workspace_id == workspace_id, Knowledge.status == 1)
+        )
+        result = await db.execute(stmt)
+        knowledge = result.scalars().first()
+        if knowledge:
+            db_logger.debug(f"knowledge base query successful (async): {name} (ID: {knowledge.id})")
+        else:
+            db_logger.debug(f"knowledge base does not exist (async): name={name}, workspace_id={workspace_id}")
+        return knowledge
+    except Exception as e:
+        db_logger.error(f"Failed to query the knowledge base based on the name and workspace_id (async): {str(e)}")
         raise
 
 

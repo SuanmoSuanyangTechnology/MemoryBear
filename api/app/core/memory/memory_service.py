@@ -21,7 +21,7 @@ from app.core.memory.models.service_models import LongTermMemoryInput, MemoryCon
 from app.core.memory.pipelines.memory_read import ReadPipeLine
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
-from app.db import get_db_read
+from app.db import get_db_read, get_async_db_context
 from app.services.memory_config_service import MemoryConfigService
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,10 @@ class MemoryService:
       配置加载的职责留在调用方（MemoryAgentService），
       因为调用方需要 config 做其他事情（如感知记忆处理）。
     - 未实现的方法抛出 NotImplementedError，明确标记待实现状态。
+
+    异步初始化：
+    - 推荐使用 ``await MemoryService.create(...)`` 工厂方法，避免同步 DB 调用阻塞事件循环。
+    - ``__init__`` 仍保留同步路径以兼容存量调用方。
     """
 
     def __init__(
@@ -72,6 +76,52 @@ class MemoryService:
             conversation_id=conversation_id,
             draft=draft
         )
+
+    @classmethod
+    async def create(
+            cls,
+            config_id: uuid.UUID | None,
+            end_user_id: str,
+            workspace_id: str | None = None,
+            storage_type: str = "neo4j",
+            user_rag_memory_id: str | None = None,
+            conversation_id: str | None = None,
+            language: str = "zh",
+            draft=False,
+    ) -> "MemoryService":
+        """Async factory — loads MemoryConfig with true async DB calls.
+
+        Uses ``get_async_db_context()`` + ``load_memory_config_async`` so the
+        event loop is never blocked on sync I/O during initialization.
+
+        All parameters mirror ``__init__``.
+        """
+        instance = object.__new__(cls)
+        async with get_async_db_context() as db:
+            config_service = MemoryConfigService(db)
+            memory_config = None
+            if config_id is not None:
+                memory_config = await config_service.load_memory_config_async(
+                    config_id=config_id
+                )
+
+        if memory_config is None and storage_type.lower() == "neo4j":
+            logger.warning(
+                "MemoryService 初始化时未提供 memory config（config_id=None），"
+                "write/read/pilot_write 方法将不可用"
+            )
+
+        instance.ctx = MemoryContext(
+            end_user_id=end_user_id,
+            config_id=config_id,
+            memory_config=memory_config,
+            storage_type=StorageType(storage_type),
+            user_rag_memory_id=user_rag_memory_id,
+            language=language,
+            conversation_id=conversation_id,
+            draft=draft,
+        )
+        return instance
 
     # ──────────────────────────────────────────────
     # 静态方法：摄入/派发（不需要实例化，不加载 config）
@@ -445,7 +495,7 @@ def create_long_term_memory_tool(
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            memory_service = MemoryService(config_id, end_user_id, workspace_id=workspace_id)
+            memory_service = await MemoryService.create(config_id, end_user_id, workspace_id=workspace_id)
             search_result = await memory_service.read(question, SearchStrategy(search_mode))
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:

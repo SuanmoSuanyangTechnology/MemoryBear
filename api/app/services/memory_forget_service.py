@@ -16,7 +16,11 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from app.core.utils.datetime_utils import (
+    to_timestamp_ms,
+    utcnow_naive,
+    convert_neo4j_datetime_to_python as _convert_neo4j_datetime_to_python,
+)
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
@@ -34,37 +38,11 @@ api_logger = get_api_logger()
 
 
 def convert_neo4j_datetime_to_python(value: Any) -> Optional[datetime]:
+    """将 Neo4j 时序对象 / 字符串 / datetime 转为 Python datetime，无法解析返回 None。
+
+    实现下沉到 datetime_utils，此处保留同名封装以兼容既有引用。
     """
-    将 Neo4j DateTime 对象转换为 Python datetime 对象
-    
-    Args:
-        value: Neo4j DateTime 对象、Python datetime 对象或字符串
-    
-    Returns:
-        Python datetime 对象或 None
-    """
-    if value is None:
-        return None
-    
-    try:
-        # Neo4j DateTime 对象
-        if hasattr(value, 'to_native'):
-            return value.to_native()
-        # Python datetime 对象
-        elif isinstance(value, datetime):
-            return value
-        # 字符串格式
-        elif isinstance(value, str):
-            if value.endswith('Z'):
-                return datetime.fromisoformat(value.replace('Z', '+00:00'))
-            else:
-                return datetime.fromisoformat(value)
-        # 其他类型，尝试转换为字符串
-        else:
-            return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-    except Exception as e:
-        api_logger.warning(f"转换时间失败: {value} (类型: {type(value).__name__}), 错误: {e}")
-        return None
+    return _convert_neo4j_datetime_to_python(value)
 
 
 class MemoryForgetService:

@@ -116,7 +116,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {!['semantic', 'graph'].includes(values?.retrieve_type || '') &&
+        {!['participle', 'semantic', 'graph'].includes(values?.retrieve_type || '') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}

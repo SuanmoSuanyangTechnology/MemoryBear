@@ -4,6 +4,7 @@ import datetime
 from typing import Optional, List, Tuple
 
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -32,6 +33,13 @@ class ApiKeyRepository:
         """根据 API Key 获取 API Key"""
         stmt = select(ApiKey).where(ApiKey.api_key == api_key)
         return db.scalars(stmt).first()
+
+    @staticmethod
+    async def get_by_api_key_async(db: AsyncSession, api_key: str) -> Optional[ApiKey]:
+        """Async version of get_by_api_key."""
+        stmt = select(ApiKey).where(ApiKey.api_key == api_key)
+        result = await db.execute(stmt)
+        return result.scalars().first()
 
     @staticmethod
     def list_by_workspace(
@@ -99,6 +107,18 @@ class ApiKeyRepository:
         return False
 
     @staticmethod
+    async def update_usage_async(db: AsyncSession, api_key_id: uuid.UUID) -> bool:
+        """Async version of update_usage."""
+        api_key = await db.get(ApiKey, api_key_id)
+        if api_key:
+            api_key.usage_count += 1
+            api_key.quota_used += 1
+            api_key.last_used_at = utcnow_naive()
+            await db.flush()
+            return True
+        return False
+
+    @staticmethod
     def get_stats(db: Session, api_key_id: uuid.UUID) -> dict:
         """获取使用统计"""
         api_key = db.get(ApiKey, api_key_id)
@@ -141,6 +161,14 @@ class ApiKeyLogRepository:
         log = ApiKeyLog(**log_data)
         db.add(log)
         db.flush()
+        return log
+
+    @staticmethod
+    async def create_async(db: AsyncSession, log_data: dict) -> ApiKeyLog:
+        """Async version of create."""
+        log = ApiKeyLog(**log_data)
+        db.add(log)
+        await db.flush()
         return log
 
     @staticmethod

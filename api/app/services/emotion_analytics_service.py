@@ -618,14 +618,14 @@ class EmotionAnalyticsService:
 
             # 8. 使用结构化输出直接获取 Pydantic 模型
             try:
-                from app.core.memory.utils.llm.llm_utils import StructResponse
+                from app.core.models.llm import StructResponse
                 # RedBearLLM（ModelClientMixin 产出）走 LangChain 接口：
                 # ainvoke 返回 AIMessage，再经 StructResponse 解析为 Pydantic 模型。
                 # prompt 模板已明确要求返回对应 JSON 结构。
                 suggestions_response = await llm_client.ainvoke(
                     messages,
                     config={"callbacks": []},
-                ) | StructResponse(mode="pydantic", model=EmotionSuggestionsResponse)
+                ) | StructResponse(EmotionSuggestionsResponse)
             except Exception as e:
                 logger.error(f"LLM 结构化输出失败: {str(e)}")
                 # 返回默认建议

@@ -1,6 +1,7 @@
 import uuid
 from typing import List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select
 
@@ -16,7 +17,7 @@ db_logger = get_db_logger()
 class WorkspaceRepository:
     """工作空间数据访问层"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def create_workspace(self, workspace_data: WorkspaceCreate, tenant_id: uuid.UUID) -> Workspace:
@@ -334,6 +335,17 @@ class WorkspaceRepository:
             db_logger.error(f"查询空间记忆配置失败 - {str(e)}")
             raise
 
+    async def get_workspace_memory_config_id_async(self, workspace_id: uuid.UUID) -> Optional[uuid.UUID]:
+        try:
+            stmt = select(Workspace.memory_config).where(
+                Workspace.id == workspace_id,
+                Workspace.is_active.is_(True),
+            )
+            return await self.db.scalar(stmt)
+        except Exception as e:
+            db_logger.error(f"查询空间记忆配置失败 - {str(e)}")
+            raise
+
 
 # 保持向后兼容的函数
 def get_workspace_by_id(db: Session, workspace_id: uuid.UUID) -> Workspace | None:
@@ -443,3 +455,8 @@ def get_workspace_models_configs(db: Session, workspace_id: uuid.UUID) -> Option
 def get_workspace_memory_config_id(db: Session, workspace_id: uuid.UUID) -> uuid.UUID | None:
     repo = WorkspaceRepository(db)
     return repo.get_workspace_memory_config_id(workspace_id)
+
+
+async def get_workspace_memory_config_id_async(db: AsyncSession, workspace_id: uuid.UUID) -> uuid.UUID | None:
+    repo = WorkspaceRepository(db)
+    return await repo.get_workspace_memory_config_id_async(workspace_id)

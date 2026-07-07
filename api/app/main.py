@@ -82,11 +82,18 @@ async def lifespan(app: FastAPI):
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
     start_timeout_scanner()
 
+    # Start async log-writer consumer (single connection, bounded queue)
+    from app.core.api_key_auth import start_log_consumer
+    await start_log_consumer()
+
     logger.info("应用程序启动完成")
 
     async with mcp_app.lifespan(app):
         yield
     # 应用关闭事件
+    from app.core.api_key_auth import stop_log_consumer
+    await stop_log_consumer()
+
     from app.services.intervention_timeout_scheduler import stop as stop_timeout_scanner
     stop_timeout_scanner()
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector

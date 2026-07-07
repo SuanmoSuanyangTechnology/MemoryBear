@@ -129,18 +129,54 @@ def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def _get_quota_config_async(db, tenant_id: UUID) -> Optional[Dict[str, Any]]:
+    """Async version of _get_quota_config.
+
+    Community edition: db is unused (falls through to DEFAULT_FREE_PLAN).
+    SaaS edition: premium's TenantSubscriptionService path still sync; callers
+    with AsyncSession should be aware until premium provides an async counterpart.
+    """
+    # 尝试从 premium 模块获取（SaaS 版）
+    try:
+        from premium.platform_admin.package_plan_service import TenantSubscriptionService
+        quota_config = await TenantSubscriptionService(db).get_effective_quota_async(tenant_id)
+        if quota_config:
+            logger.debug(f"从 premium 模块获取租户 {tenant_id} 配额配置")
+            return quota_config
+        logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
+    except (ModuleNotFoundError, ImportError):
+        logger.debug("premium 模块不存在，使用社区版免费套餐配额")
+
+    # 降级到社区版配置文件
+    try:
+        from app.config.default_free_plan import DEFAULT_FREE_PLAN
+        logger.debug(f"使用社区版免费套餐配额: tenant={tenant_id}")
+        return DEFAULT_FREE_PLAN.get("quotas")
+    except Exception as e:
+        logger.error(f"无法从配置文件获取配额: {e}")
+        return None
+
+
 def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     """
     获取租户套餐的 API 操作速率限制（QPS 上限）
-    
+
     该函数兼容社区版和 SaaS 版：
     - SaaS 版：从 premium 模块的套餐配额读取
     - 社区版：从 default_free_plan.py 配置文件读取
-    
+
     Returns:
         int: api_ops_rate_limit 值，如果未配置则返回 None
     """
     quota_config = _get_quota_config(db, tenant_id)
+    if quota_config:
+        return quota_config.get("api_ops_rate_limit")
+    return None
+
+
+async def get_api_ops_rate_limit_async(db, tenant_id: UUID) -> Optional[int]:
+    """Async version of get_api_ops_rate_limit."""
+    quota_config = await _get_quota_config_async(db, tenant_id)
     if quota_config:
         return quota_config.get("api_ops_rate_limit")
     return None

@@ -2148,10 +2148,11 @@ SET keeper.name = $merged_name,
       WHEN coalesce(loser.importance_score, 0) > coalesce(keeper.importance_score, 0)
       THEN loser.importance_score ELSE keeper.importance_score END,
     keeper.access_count = coalesce(keeper.access_count, 0) + coalesce(loser.access_count, 0),
+    keeper.extraction_count = coalesce(keeper.extraction_count, 1) + coalesce(loser.extraction_count, 1),
     keeper.created_at = CASE
       WHEN keeper.created_at IS NULL THEN loser.created_at
       WHEN loser.created_at IS NULL THEN keeper.created_at
-      WHEN loser.created_at < keeper.created_at THEN loser.created_at
+      WHEN loser.created_at > keeper.created_at THEN loser.created_at
       ELSE keeper.created_at END,
     keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
     keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
@@ -2275,12 +2276,19 @@ ON CREATE SET
   e.access_count = 0,
   e.last_access_time = null,
   e.is_explicit_memory = $is_explicit_memory,
-  e.created_at = $created_at
+  e.created_at = $created_at,
+  e.extraction_count = 1
 ON MATCH SET
   e.description = CASE
     WHEN e.description IS NULL OR e.description = "" THEN $description
     ELSE e.description + '；' + $description
-  END
+  END,
+  e.extraction_count = coalesce(e.extraction_count, 1) + 1,
+  e.created_at = CASE
+    WHEN e.created_at IS NULL THEN $created_at
+    WHEN $created_at IS NULL THEN e.created_at
+    WHEN $created_at > e.created_at THEN $created_at
+    ELSE e.created_at END
 RETURN e.id AS entity_id, e.name AS name
 """
 

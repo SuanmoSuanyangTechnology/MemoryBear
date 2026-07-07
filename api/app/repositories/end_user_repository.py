@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import sqlalchemy as sa
 from sqlalchemy import select, or_
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
@@ -24,8 +25,9 @@ def is_uuid(value: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+
 class EndUserRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     @contextmanager
@@ -104,6 +106,22 @@ class EndUserRepository:
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
 
+    async def get_end_user_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
+        try:
+            result = await self.db.execute(
+                select(EndUser).filter(EndUser.id == end_user_id, EndUser.is_active == True)
+            )
+            end_user = result.scalars().first()
+            if end_user:
+                db_logger.info(f"成功查询到宿主 {end_user_id}")
+            else:
+                db_logger.info(f"未找到宿主 {end_user_id}")
+            return end_user
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
+            raise
+
     def get_end_user_by_other_id(self, workspace_id: uuid.UUID, other_id: str) -> Optional["EndUser"]:
         """按 workspace_id + other_id 查找终端用户，不存在返回 None"""
         return (
@@ -117,12 +135,12 @@ class EndUserRepository:
         )
 
     def get_or_create_end_user(
-        self,
-        app_id: uuid.UUID,
-        workspace_id: uuid.UUID,
-        other_id: str,
-        original_user_id: Optional[str] = None,
-        other_name: Optional[str] = None
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            other_id: str,
+            original_user_id: Optional[str] = None,
+            other_name: Optional[str] = None
     ) -> EndUser:
         """获取或创建终端用户
         
@@ -175,10 +193,10 @@ class EndUserRepository:
                 # 一起提交
                 self.db.commit()
             self.db.refresh(end_user)
-            
+
             db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
             return end_user
-            
+
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
@@ -244,12 +262,12 @@ class EndUserRepository:
             raise
 
     def get_or_create_end_user_with_config(
-        self,
-        app_id: Optional[uuid.UUID],
-        workspace_id: uuid.UUID,
-        other_id: str,
-        memory_config_id: Optional[uuid.UUID] = None,
-        other_name: Optional[str] = None
+            self,
+            app_id: Optional[uuid.UUID],
+            workspace_id: uuid.UUID,
+            other_id: str,
+            memory_config_id: Optional[uuid.UUID] = None,
+            other_name: Optional[str] = None
     ) -> EndUser:
         """获取或创建终端用户，并在单次事务中关联记忆配置。
         
@@ -346,12 +364,12 @@ class EndUserRepository:
             raise
 
     def update_memory_insight(
-        self, 
-        end_user_id: uuid.UUID, 
-        memory_insight: str,
-        behavior_pattern: str,
-        key_findings: str,
-        growth_trajectory: str
+            self,
+            end_user_id: uuid.UUID,
+            memory_insight: str,
+            behavior_pattern: str,
+            key_findings: str,
+            growth_trajectory: str
     ) -> bool:
         """更新记忆洞察缓存（四个维度）
         
@@ -380,28 +398,28 @@ class EndUserRepository:
                     synchronize_session=False
                 )
             )
-            
+
             self.db.commit()
-            
+
             if updated_count > 0:
                 db_logger.info(f"成功更新终端用户 {end_user_id} 的记忆洞察缓存（四维度）")
                 return True
             else:
                 db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新记忆洞察缓存")
                 return False
-                
+
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"更新终端用户 {end_user_id} 的记忆洞察缓存时出错: {str(e)}")
             raise
 
     def update_user_summary(
-        self, 
-        end_user_id: uuid.UUID, 
-        user_summary: str,
-        personality: str,
-        core_values: str,
-        one_sentence: str
+            self,
+            end_user_id: uuid.UUID,
+            user_summary: str,
+            personality: str,
+            core_values: str,
+            one_sentence: str
     ) -> bool:
         """更新用户摘要缓存（四个部分）
         
@@ -430,27 +448,27 @@ class EndUserRepository:
                     synchronize_session=False
                 )
             )
-            
+
             self.db.commit()
-            
+
             if updated_count > 0:
                 db_logger.info(f"成功更新终端用户 {end_user_id} 的用户摘要缓存（四部分）")
                 return True
             else:
                 db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新用户摘要缓存")
                 return False
-                
+
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"更新终端用户 {end_user_id} 的用户摘要缓存时出错: {str(e)}")
             raise
 
     def update_rag_summary_tags(
-        self,
-        end_user_id: uuid.UUID,
-        user_summary: str,
-        rag_tags: str,
-        rag_personas: str,
+            self,
+            end_user_id: uuid.UUID,
+            user_summary: str,
+            rag_tags: str,
+            rag_personas: str,
     ) -> bool:
         """更新RAG模式下的用户摘要、标签和人物形象缓存
         
@@ -490,9 +508,9 @@ class EndUserRepository:
             raise
 
     def update_rag_insight(
-        self,
-        end_user_id: uuid.UUID,
-        memory_insight: str,
+            self,
+            end_user_id: uuid.UUID,
+            memory_insight: str,
     ) -> bool:
         """更新RAG模式下的记忆洞察缓存
         
@@ -550,7 +568,7 @@ class EndUserRepository:
             raise
 
     def get_cache_refresh_fields_by_workspace(
-        self, workspace_id: uuid.UUID
+            self, workspace_id: uuid.UUID
     ) -> List[tuple]:
         """获取工作空间下所有活跃终端用户的「缓存刷新判定」所需字段（列裁剪）。
 
@@ -584,13 +602,13 @@ class EndUserRepository:
             raise
 
     def get_filtered_by_workspace(
-        self,
-        workspace_id: uuid.UUID,
-        end_user_id: Optional[uuid.UUID] = None,
-        other_id: Optional[str] = None,
-        other_name: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: Optional[uuid.UUID] = None,
+            other_id: Optional[str] = None,
+            other_name: Optional[str] = None,
+            limit: Optional[int] = None,
+            offset: int = 0,
     ) -> tuple[List[EndUser], int]:
         """获取工作空间下按条件过滤的终端用户（分页）
 
@@ -677,7 +695,7 @@ class EndUserRepository:
                 )
             )
             self.db.commit()
-            
+
             if updated_count > 0:
                 db_logger.debug(f"成功更新终端用户 {end_user_id} 的 memory_config_id: {memory_config_id}")
                 return True
@@ -764,7 +782,7 @@ class EndUserRepository:
         """批量更新工作空间下所有终端用户的 memory_config_id"""
         try:
             from sqlalchemy import update
-            
+
             stmt = (
                 update(EndUser)
                 .where(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
@@ -809,7 +827,7 @@ class EndUserRepository:
         """
         try:
             from sqlalchemy import update
-            
+
             stmt = (
                 update(EndUser)
                 .where(EndUser.app_id == app_id, EndUser.is_active == True)
@@ -836,8 +854,8 @@ class EndUserRepository:
             raise
 
     def count_by_memory_config_id(
-        self,
-        memory_config_id: uuid.UUID
+            self,
+            memory_config_id: uuid.UUID
     ) -> int:
         """统计使用指定记忆配置的终端用户数量
         
@@ -849,26 +867,26 @@ class EndUserRepository:
         """
         try:
             from sqlalchemy import func, select
-            
+
             stmt = (
                 select(func.count(EndUser.id))
                 .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
             )
-            
+
             count = self.db.execute(stmt).scalar() or 0
-            
+
             db_logger.debug(f"统计记忆配置使用数: memory_config_id={memory_config_id}, count={count}")
-            
+
             return count
-            
+
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"统计记忆配置使用数时出错: memory_config_id={memory_config_id}, error={str(e)}")
             raise
 
     def clear_memory_config_id(
-        self,
-        memory_config_id: uuid.UUID
+            self,
+            memory_config_id: uuid.UUID
     ) -> int:
         """清除所有使用指定记忆配置的终端用户的 memory_config_id
         
@@ -888,19 +906,19 @@ class EndUserRepository:
                 .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
                 .values(memory_config_id=None)
             )
-            
+
             result = self.db.execute(stmt)
             self.db.commit()
-            
+
             cleared_count = result.rowcount
-            
+
             db_logger.warning(
                 f"清除终端用户记忆配置引用: memory_config_id={memory_config_id}, "
                 f"cleared_count={cleared_count}"
             )
-            
+
             return cleared_count
-            
+
         except Exception as e:
             self.db.rollback()
             db_logger.error(
@@ -1031,11 +1049,11 @@ class EndUserRepository:
             raise
 
     def get_paginated_with_memory(
-        self,
-        workspace_id: uuid.UUID,
-        page: int,
-        pagesize: int,
-        keyword: Optional[str] = None,
+            self,
+            workspace_id: uuid.UUID,
+            page: int,
+            pagesize: int,
+            keyword: Optional[str] = None,
     ) -> tuple[List[EndUser], int]:
         """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
 
@@ -1094,11 +1112,11 @@ class EndUserRepository:
         return items, total
 
     def get_paginated_with_memory_rag(
-        self,
-        workspace_id: uuid.UUID,
-        page: int,
-        pagesize: int,
-        keyword: Optional[str] = None,
+            self,
+            workspace_id: uuid.UUID,
+            page: int,
+            pagesize: int,
+            keyword: Optional[str] = None,
     ) -> tuple[list, int]:
         """Dashboard RAG 模式：分页查询有记忆的宿主
 
@@ -1210,6 +1228,7 @@ class EndUserRepository:
             db_logger.error(f"更新记忆计数失败: end_user_id={end_user_id}, error={str(e)}")
             raise
 
+
 # def get_end_users_by_app_id(db: Session, app_id: uuid.UUID) -> List[EndUser]:
 #     """根据应用ID查询宿主（返回 EndUser ORM 列表）"""
 #     repo = EndUserRepository(db)
@@ -1222,15 +1241,23 @@ def get_end_users_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[End
     end_users = repo.get_end_users_by_workspace(workspace_id)
     return end_users
 
+
 def get_end_users_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> int:
     repo = EndUserRepository(db)
     end_users_count = repo.get_end_users_count_by_workspace(workspace_id)
     return end_users_count
 
+
 def get_end_user_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:
     """根据 end_user_id 查询对应宿主"""
     repo = EndUserRepository(db)
     end_user = repo.get_end_user_by_id(end_user_id)
+    return end_user
+
+
+async def get_end_user_by_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> Optional[EndUser]:
+    repo = EndUserRepository(db)
+    end_user = await repo.get_end_user_by_id_async(end_user_id)
     return end_user
 
 
@@ -1245,40 +1272,45 @@ def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optiona
         .scalar()
     )
 
+
 # 新增的缓存操作函数（保持与类方法一致的接口）
 def get_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:
     """根据ID获取终端用户（用于缓存操作）"""
     repo = EndUserRepository(db)
     return repo.get_by_id(end_user_id)
 
+
 def update_memory_insight(
-    db: Session, 
-    end_user_id: uuid.UUID, 
-    memory_insight: str,
-    behavior_pattern: str,
-    key_findings: str,
-    growth_trajectory: str
+        db: Session,
+        end_user_id: uuid.UUID,
+        memory_insight: str,
+        behavior_pattern: str,
+        key_findings: str,
+        growth_trajectory: str
 ) -> bool:
     """更新记忆洞察缓存（四个维度）"""
     repo = EndUserRepository(db)
     return repo.update_memory_insight(end_user_id, memory_insight, behavior_pattern, key_findings, growth_trajectory)
 
+
 def update_user_summary(
-    db: Session, 
-    end_user_id: uuid.UUID, 
-    user_summary: str,
-    personality: str,
-    core_values: str,
-    one_sentence: str
+        db: Session,
+        end_user_id: uuid.UUID,
+        user_summary: str,
+        personality: str,
+        core_values: str,
+        one_sentence: str
 ) -> bool:
     """更新用户摘要缓存（四个部分）"""
     repo = EndUserRepository(db)
     return repo.update_user_summary(end_user_id, user_summary, personality, core_values, one_sentence)
 
+
 def get_all_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[EndUser]:
     """获取工作空间的所有终端用户"""
     repo = EndUserRepository(db)
     return repo.get_all_by_workspace(workspace_id)
+
 
 def get_all_active_workspaces(db: Session) -> List[uuid.UUID]:
     """获取所有活动工作空间的ID"""

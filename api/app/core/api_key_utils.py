@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, Union
 
 from sqlalchemy.orm import Session as _Session
+from sqlalchemy.ext.asyncio.session import AsyncSession
 from app.core.error_codes import BizCode as _BizCode
 from app.core.exceptions import BusinessException as _BusinessException
 from app.models.end_user_model import EndUser as _EndUser
@@ -119,6 +120,37 @@ def validate_end_user_in_workspace(
 
     end_user_repo = _EndUserRepository(db)
     end_user = end_user_repo.get_end_user_by_id(end_user_id)
+
+    if end_user is None:
+        raise _BusinessException(
+            "End user not found",
+            _BizCode.USER_NOT_FOUND,
+        )
+
+    if str(end_user.workspace_id) != str(workspace_id):
+        raise _BusinessException(
+            "End user does not belong to this workspace",
+            _BizCode.PERMISSION_DENIED,
+        )
+
+    return end_user
+
+
+async def validate_end_user_in_workspace_async(
+    db: AsyncSession,
+    end_user_id: str,
+    workspace_id,
+) -> _EndUser:
+    try:
+        end_user_id = _uuid.UUID(end_user_id)
+    except (ValueError, AttributeError):
+        raise _BusinessException(
+            f"Invalid end_user_id format: {end_user_id}",
+            _BizCode.INVALID_PARAMETER,
+        )
+
+    end_user_repo = _EndUserRepository(db)
+    end_user = await end_user_repo.get_end_user_by_id_async(end_user_id)
 
     if end_user is None:
         raise _BusinessException(
