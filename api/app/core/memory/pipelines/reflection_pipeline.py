@@ -70,7 +70,7 @@ class ReflectionPipeline:
     def _lazy_init(self):
         """延迟初始化依赖，避免循环导入和不必要的连接创建"""
         if self._llm_client is None:
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
             from app.db import get_db_context
 
             llm_id = (
@@ -79,10 +79,10 @@ class ReflectionPipeline:
                 or getattr(self.memory_config, 'llm_id', None)
             )
 
-            with get_db_context() as db:
-                if llm_id:
-                    factory = MemoryClientFactory(db, tenant_id=getattr(self.memory_config, "tenant_id", None))
-                    self._llm_client = factory.get_llm_client(
+            if llm_id:
+                with get_db_context() as db:
+                    self._llm_client = ModelClientMixin.get_llm_client(
+                        db,
                         llm_id,
                         tenant_id=getattr(self.memory_config, "tenant_id", None),
                     )

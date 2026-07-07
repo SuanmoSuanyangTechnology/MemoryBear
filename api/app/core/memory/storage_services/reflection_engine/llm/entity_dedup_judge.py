@@ -52,8 +52,6 @@ async def judge_pair_for_dedup(
     entity_a/entity_b 需有 name, entity_type, description, description_summary, aliases 属性。
     """
     try:
-        from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
-
         template = _prompt_env.get_template("entity_dedup_reflection.jinja2")
         rendered_prompt = template.render(
             entity_a={
@@ -75,7 +73,7 @@ async def judge_pair_for_dedup(
         )
 
         messages = [{"role": "user", "content": rendered_prompt}]
-        response = await call_structured(llm_client, messages, DedupJudgeOutput)
+        response = await llm_client.call_structured(messages, DedupJudgeOutput)
 
         if isinstance(response, DedupJudgeOutput):
             # new_name 为空时回退到 canonical_idx 对应实体名

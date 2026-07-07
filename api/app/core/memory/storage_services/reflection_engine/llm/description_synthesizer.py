@@ -46,8 +46,6 @@ async def merge_description(
         合并后的纯文本摘要，失败返回 None
     """
     try:
-        from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
-
         template = _prompt_env.get_template("description_merge.jinja2")
         json_schema = json.dumps(DescriptionMergeOutput.model_json_schema(), indent=2)
 
@@ -62,7 +60,7 @@ async def merge_description(
         )
 
         messages = [{"role": "user", "content": rendered_prompt}]
-        response = await call_structured(llm_client, messages, DescriptionMergeOutput)
+        response = await llm_client.call_structured(messages, DescriptionMergeOutput)
 
         if isinstance(response, DescriptionMergeOutput):
             result = response.merged_description
@@ -207,8 +205,6 @@ async def summarize_extract_and_rename(
         SummarizeExtractRenameOutput 实例，失败返回 None
     """
     try:
-        from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
-
         template = _prompt_env.get_template("reflection_summary_timeline.prompt.jinja2")
 
         input_data = {
@@ -225,7 +221,7 @@ async def summarize_extract_and_rename(
         )
 
         messages = [{"role": "user", "content": rendered_prompt}]
-        response = await call_structured(llm_client, messages, SummarizeExtractRenameOutput)
+        response = await llm_client.call_structured(messages, SummarizeExtractRenameOutput)
 
         if isinstance(response, SummarizeExtractRenameOutput):
             result = response
