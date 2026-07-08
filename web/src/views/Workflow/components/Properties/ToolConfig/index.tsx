@@ -230,7 +230,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
       <Form.Item name="tool_id" hidden />
       <Form.Item name={['tool_parameters', 'operation']} hidden />
       {parameters.map((parameter) => {
-        const isIntegerType = parameter.type === 'integer'
+        const isIntegerNumberType = ['integer', 'number'].includes(parameter.type)
         return (
           <div key={parameter.name}>
             <Form.Item
@@ -243,7 +243,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
               </>}
               rules={[
                 { required: parameter.required, message: t('common.pleaseEnter') },
-                ...(isIntegerType ? [{
+                ...(isIntegerNumberType ? [{
                   validator(_: any, value: any) {
                     if (value === undefined || value === null || value === '') return Promise.resolve()
                     if (/^-?\d+(\.\d+)?$/.test(String(value)) || /^\{\{(([^.]+\.[^}]+))\}\}$/.test(String(value))) return Promise.resolve()
@@ -266,7 +266,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                   height={28}
                   options={getFilterOptions(parameter.type)}
                   placeholder={t('common.pleaseEnter')}
-                  onBlur={isIntegerType ? () => {
+                  onBlur={isIntegerNumberType ? () => {
                     const fieldKey = ['tool_parameters', parameter.name]
                     form.validateFields([fieldKey])
                       .then((values) => {
@@ -279,8 +279,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                         }
                         form.setFieldValue(fieldKey, normalizedValue)
                       })
-                      .catch((err) => {
-                        console.log('isIntegerType', isIntegerType, fieldKey, err)
+                      .catch(() => {
                         form.setFieldValue(fieldKey, null)
                       })
                   } : undefined}
