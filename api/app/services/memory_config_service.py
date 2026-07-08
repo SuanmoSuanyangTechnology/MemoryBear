@@ -828,6 +828,7 @@ class MemoryConfigService:
             config_desc="工作空间创建时自动生成的默认记忆配置",
             workspace_id=workspace.id,
             llm_id=str(workspace.llm) if workspace.llm else None,
+            reflection_model_id=str(workspace.llm) if workspace.llm else None,
             embedding_id=str(workspace.embedding) if workspace.embedding else None,
             rerank_id=str(workspace.rerank) if workspace.rerank else None,
             vision_id=str(workspace.vision) if workspace.vision else None,
