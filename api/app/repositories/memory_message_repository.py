@@ -452,6 +452,102 @@ class MemoryMessageRepository:
             ).scalars().all()
         )
 
+    def batch_update_pruned_content(
+        self,
+        updates: List[tuple],
+        conversation_id: Optional[str] = None,
+        end_user_id: str = "",
+        source: str = "",
+    ) -> None:
+        """批量回写 pruned_content 到 memory_messages 表。
+
+        使用 CASE WHEN 单条 SQL 完成多行更新，避免 N 次 roundtrip。
+
+        Args:
+            updates: [(message_seq, pruned_content), ...] 列表
+            conversation_id: 对话 ID（agent/workflow 路径）
+            end_user_id: 终端用户 ID（API/MCP 路径）
+            source: 写入来源（API/MCP 路径）
+        """
+        if not updates:
+            return
+
+        seqs = [seq for seq, _ in updates]
+
+        # 构建 CASE WHEN 表达式
+        case_whens = {seq: content for seq, content in updates}
+        case_expr = sa.case(
+            case_whens,
+            value=MemoryMessage.message_seq,
+        )
+
+        # 构建 WHERE 条件
+        if conversation_id:
+            conv_uuid = uuid.UUID(conversation_id)
+            where_clause = sa.and_(
+                MemoryMessage.conversation_id == conv_uuid,
+                MemoryMessage.message_seq.in_(seqs),
+            )
+        else:
+            where_clause = sa.and_(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.source == source,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.message_seq.in_(seqs),
+            )
+
+        self.db.execute(
+            update(MemoryMessage)
+            .where(where_clause)
+            .values(pruned_content=case_expr)
+        )
+
+    def batch_get_pruned_content(
+        self,
+        seqs: List[int],
+        conversation_id: Optional[str] = None,
+        end_user_id: str = "",
+        source: str = "",
+    ) -> dict:
+        """批量查询指定消息的 pruned_content（仅返回非 NULL 的结果）。
+
+        用于 WritePipeline 执行时刷新 dispatcher 快照中尚未回写的 pruned_content。
+
+        Args:
+            seqs: 需要查询的 message_seq 列表
+            conversation_id: 对话 ID（agent/workflow 路径）
+            end_user_id: 终端用户 ID（API/MCP 路径）
+            source: 写入来源（API/MCP 路径）
+
+        Returns:
+            {message_seq: pruned_content} 字典，只包含 pruned_content 非 NULL 的行
+        """
+        if not seqs:
+            return {}
+
+        if conversation_id:
+            conv_uuid = uuid.UUID(conversation_id)
+            where_clause = sa.and_(
+                MemoryMessage.conversation_id == conv_uuid,
+                MemoryMessage.message_seq.in_(seqs),
+                MemoryMessage.pruned_content.isnot(None),
+            )
+        else:
+            where_clause = sa.and_(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.source == source,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.message_seq.in_(seqs),
+                MemoryMessage.pruned_content.isnot(None),
+            )
+
+        rows = self.db.execute(
+            select(MemoryMessage.message_seq, MemoryMessage.pruned_content)
+            .where(where_clause)
+        ).all()
+
+        return {row.message_seq: row.pruned_content for row in rows}
+
 
 def message_to_dict(message: MemoryMessage) -> dict:
     """将 MemoryMessage ORM 对象转换为字典格式。"""
@@ -463,4 +559,5 @@ def message_to_dict(message: MemoryMessage) -> dict:
         "created_at": to_iso_z(message.created_at) if message.created_at else None,
         "dialog_at": message.dialog_at,
         "files": message.files,
+        "pruned_content": message.pruned_content,
     }
