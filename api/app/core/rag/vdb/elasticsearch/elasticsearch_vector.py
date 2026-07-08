@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -32,9 +33,27 @@ VECTOR_SEARCH_MODE_KNN = "knn"
 VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
 
 
+@dataclass(frozen=True)
+class ModelApiKeyRuntimeConfig:
+    model_name: str
+    provider: str
+    api_key: str
+    api_base: str | None
+
+    @classmethod
+    def from_api_key(cls, api_key: ModelApiKey) -> "ModelApiKeyRuntimeConfig":
+        return cls(
+            model_name=api_key.model_name,
+            provider=api_key.provider,
+            api_key=api_key.api_key,
+            api_base=api_key.api_base,
+        )
+
+
 class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
-                 embedding_config: ModelApiKey, reranker_config: ModelApiKey):
+                 embedding_config: ModelApiKey | ModelApiKeyRuntimeConfig,
+                 reranker_config: ModelApiKey | ModelApiKeyRuntimeConfig):
         super().__init__(index_name.lower())
 
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
@@ -1249,8 +1268,8 @@ class ElasticSearchVectorFactory:
     def init_vector_from_configs(
         cls,
         index_name: str,
-        embedding_config: ModelApiKey,
-        reranker_config: ModelApiKey,
+        embedding_config: ModelApiKey | ModelApiKeyRuntimeConfig,
+        reranker_config: ModelApiKey | ModelApiKeyRuntimeConfig,
     ) -> ElasticSearchVector:
         """Create a vector service from resolved model config snapshots."""
         client = ElasticSearchVectorClientProvider.get_shared_client()
@@ -1269,10 +1288,10 @@ class ElasticSearchVectorFactory:
             return ws.tenant_id if ws else None
 
     @staticmethod
-    def _resolve_api_key(model_config_id, knowledge_id, role: str, tenant_id) -> ModelApiKey:
+    def _resolve_api_key(model_config_id, knowledge_id, role: str, tenant_id) -> ModelApiKeyRuntimeConfig:
         """Resolve ModelApiKey through the shared model-key selector."""
         with get_db_context() as db:
             api_key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
-        if not api_key:
-            raise ValueError(f"No {role} api key found for knowledge {knowledge_id}")
-        return api_key
+            if not api_key:
+                raise ValueError(f"No {role} api key found for knowledge {knowledge_id}")
+            return ModelApiKeyRuntimeConfig.from_api_key(api_key)
