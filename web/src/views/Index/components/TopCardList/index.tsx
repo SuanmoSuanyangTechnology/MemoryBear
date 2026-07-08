@@ -10,45 +10,21 @@ const list = [
   {
     key: 'models',
     icon: 'rb:bg-[url("@/assets/images/index/models.svg")]',
-    value: '24',
-    // trendValue: '12.5%',
-    trend: 'up',
-    // trendDesc: 'comparedToYesterday',
-    rate:"up",
-    rateValue: '12%',
     background: 'linear-gradient( 136deg, rgba(21,94,239,0.06) 0%, rgba(251,253,255,0) 100%)'
   },
   {
     key: 'spaces',
     icon: 'rb:bg-[url("@/assets/images/index/spaces.svg")]',
-    value: '156',
-    trendValue: '+8',
-    trend: 'down',
-    rate:"up",
-    rateValue: '5.4%',
-    // trendDesc: 'comparedToYesterday',
     background: 'linear-gradient( 134deg, rgba(54,159,33,0.06) 0%, rgba(251,253,255,0) 100%)',
   },
   {
     key: 'users',
     icon: 'rb:bg-[url("@/assets/images/index/users.svg")]',
-    value: '1,248',
-    trendValue: '+42',
-    trend: 'up',
-    rate:"up",
-    rateValue: '12%',
-    // trendDesc: 'thisWeek',
     background: 'linear-gradient( 136deg, rgba(77,168,255,0.06) 0%, rgba(251,253,255,0) 100%)',
   },
   {
     key: 'running_apps',
     icon: 'rb:bg-[url("@/assets/images/index/apps.svg")]',
-    value: '12.8k',
-    trendValue: '98.7%',
-    trend: 'up',
-    rate:"down",
-    rateValue: '2.1%',
-    // trendDesc: 'comparedToYesterday',
     background: 'linear-gradient( 136deg, rgba(156,111,255,0.06) 0%, rgba(251,253,255,0) 100%)',
   },
 ]
@@ -69,8 +45,8 @@ const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
 
             <div className="rb:mt-5 rb:font-[MiSans-Bold] rb:font-bold rb:text-[24px] rb:leading-8">
               {item.key === 'spaces' && String(data?.active_workspaces || 0)}
-              {item.key === 'running_apps' &&  String(data?.[`${item.key}` as keyof DataResponse] || item.value || 0)}
-              {item.key !== 'spaces' && item.key !== 'running_apps' && String(data?.[`total_${item.key}` as keyof DataResponse] || item.value || 0)}
+              {item.key === 'running_apps' &&  String(data?.[`${item.key}` as keyof DataResponse] || 0)}
+              {item.key !== 'spaces' && item.key !== 'running_apps' && String(data?.[`total_${item.key}` as keyof DataResponse] || 0)}
             </div>
             <div className='rb:flex rb:flex-col rb:items-start rb:mt-2'>
               {item.key === 'models'
