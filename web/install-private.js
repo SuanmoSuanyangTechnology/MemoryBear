@@ -1,6 +1,6 @@
 const { execSync } = await import('child_process');
 // 企业私有配置（自行替换）
-const PRIVATE_PACKAGE = '@redbear/memory-brick@0.0.13-beta.1';
+const PRIVATE_PACKAGE = '@redbear/memory-brick';
 const PRIVATE_REGISTRY = 'http://10.206.16.48:4873';
 
 console.log('🔍 检测内网环境，校验私有模块权限...');
