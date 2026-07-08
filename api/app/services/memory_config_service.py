@@ -305,7 +305,7 @@ class MemoryConfigService:
 
         _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
-        async def _validate_one(model_type: str, model_id: str) -> dict | None:
+        async def _validate_one(model_type: str, model_id: str, source: str) -> dict | None:
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
                 await self._validate_model_connectivity(
@@ -322,11 +322,11 @@ class MemoryConfigService:
                     f"模型 {model_type} API 验证失败: {e}",
                     extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
                 )
-                return {"model_type": model_type, "model_id": str(model_id), "message": e.err_message}
+                return {"model_type": model_type, "model_id": str(model_id), "source": source, "message": e.err_message}
 
         tasks = [
-            _validate_one(model_type, model_id)
-            for model_type, model_id, _ in all_models
+            _validate_one(model_type, model_id, source)
+            for model_type, model_id, source in all_models
             if model_id
         ]
         if tasks:
