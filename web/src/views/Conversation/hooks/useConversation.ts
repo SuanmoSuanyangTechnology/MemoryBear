@@ -189,6 +189,7 @@ export function useConversation() {
   }
 
   /** 分页拉取会话历史 */
+  const [disabled, setDisabled] = useState(false)
   const getHistory = (flag: boolean = false) => {
     if (!shareToken || shareToken === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true)
@@ -213,15 +214,33 @@ export function useConversation() {
         setHasMore(response.page.hasnext)
         setLoading(false)
       })
+      .catch(err => {
+        setDisabled(err?.response?.data?.error_code === 'QUOTA_EXCEEDED')
+      })
       .finally(() => setPageLoading(false))
   }
 
   /** 切换会话或开启新会话 */
   const handleChangeHistory = (id: string | null) => {
+    if (disabled && id === null) return
     if (id !== conversation_id) setConversationId(id)
-    if (!id) setMessage('')
+    if (abortRef.current) {
+      getHistory(true)
+    }
     abortRef.current?.()
     abortRef.current = null
+    if (!id) {
+      setMessage('')
+      // 新对话流式输出中 conversation_id 仍为 null，setConversationId 不会触发 useEffect，
+      // 需手动重置聊天列表与流式状态
+      const variables = toolbarRef.current?.getVariables() || []
+      const openingMsg = buildOpeningStatementMessage(features?.opening_statement, {
+        variables,
+        withTimestamp: true,
+        extra: { is_hidden_refresh: true },
+      })
+      setChatList(openingMsg ? [openingMsg] : [])
+    }
   }
 
   const getChatDetail = () => {
@@ -570,6 +589,7 @@ export function useConversation() {
     handleShare,
     handleFeedback,
     handleFavorite,
+    disabled,
   }
 }
 

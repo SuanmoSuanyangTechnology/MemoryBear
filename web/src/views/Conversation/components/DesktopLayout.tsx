@@ -25,7 +25,7 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
   const {
     t, conversation_id, historyList, groupHistoryList, hasMore, scrollRef, toolbarCallbackRef, config,
     isShare, chatTitle,
-    getHistory, handleChangeHistory, handleShare,
+    getHistory, handleChangeHistory, handleShare, disabled,
   } = ctx
 
   return (
@@ -45,7 +45,10 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
           </Flex>
 
           <Flex align="center" gap={12}
-            className="rb:cursor-pointer rb:border rb:border-[#155EEF] rb:rounded-xl rb:p-3! rb:mx-4! rb:text-[16px] rb:font-medium rb:text-[#155EEF] rb:h-12! rb:mb-5!"
+            className={clsx("rb:border rb:border-[#155EEF] rb:rounded-xl rb:p-3! rb:mx-4! rb:text-[16px] rb:font-medium rb:text-[#155EEF] rb:h-12! rb:mb-5!", {
+              'rb:cursor-not-allowed rb:opacity-65': disabled,
+              'rb:cursor-pointer': !disabled,
+            })}
             onClick={() => handleChangeHistory(null)}
           >
             <div
@@ -114,6 +117,7 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
             {...buildSharedChatProps(ctx)}
             empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320, 180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
             labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
+            readOnly={disabled}
           >
             <ChatToolbar
               ref={toolbarCallbackRef}
