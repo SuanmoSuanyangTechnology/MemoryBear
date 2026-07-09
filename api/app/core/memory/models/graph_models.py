@@ -661,3 +661,35 @@ class ConversationNode(Node):
 class AssistantConversationEdge(Edge):
     """Edge connecting an AssistantOriginal node to its Conversation hub node (BELONGS_TO_CONVERSATION)."""
     pass
+
+
+class UserOriginalContentNode(Node):
+    """Node storing the original text of a User message before pruning.
+
+    When a user message is pruned/regularized (e.g., a recipe is compressed to a summary),
+    this node preserves the full original text so that downstream retrieval can trace back
+    from extracted entities to the complete user input.
+
+    Attributes:
+        message_seq: The message sequence number in memory_messages table
+        conversation_id: Conversation ID or deterministic hub ID
+        original_text: Full original text before pruning
+        pruned_text: The pruned/regularized text after processing
+        content_type: Type of the original content (file_summary / copied_content / mixed)
+        text_embedding: Embedding vector of original_text for semantic retrieval
+    """
+    message_seq: int = Field(..., description="Message sequence number in memory_messages")
+    conversation_id: str = Field(..., description="Conversation ID or deterministic hub ID")
+    original_text: str = Field(..., description="Full original user message text before pruning")
+    pruned_text: str = Field(..., description="Pruned/regularized text after processing")
+    content_type: str = Field(default="mixed", description="Content type: file_summary / copied_content / mixed")
+    text_embedding: Optional[List[float]] = Field(None, description="Embedding vector of original_text")
+
+
+class UserOriginalContentEntityEdge(Edge):
+    """Edge connecting a UserOriginalContent node to an ExtractedEntity node (HAS_ORIGINAL_CONTENT).
+
+    Semantics: the original user message contains/references this entity.
+    Retrieval path: Entity → UserOriginalContent → original_text
+    """
+    pass

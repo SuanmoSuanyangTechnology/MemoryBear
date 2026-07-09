@@ -173,6 +173,8 @@ async def save_dialog_and_statements_to_neo4j(
         assistant_pruned_edges: Optional[List[AssistantPrunedEdge]] = None,
         conversation_nodes: Optional[List[ConversationNode]] = None,
         assistant_conversation_edges: Optional[List[AssistantConversationEdge]] = None,
+        user_original_content_nodes=None,
+        user_original_content_edges=None,
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
@@ -433,6 +435,31 @@ async def save_dialog_and_statements_to_neo4j(
             conv_edge_uuids = [record["uuid"] async for record in result]
             results['assistant_conversation_edges'] = conv_edge_uuids
             logger.debug(f"Successfully saved {len(conv_edge_uuids)} BELONGS_TO_CONVERSATION edges to Neo4j")
+
+        # 13. Save UserOriginalContent nodes
+        if user_original_content_nodes:
+            from app.repositories.neo4j.cypher_queries import USER_ORIGINAL_CONTENT_NODE_SAVE
+            node_data = [node.model_dump() for node in user_original_content_nodes]
+            result = await tx.run(USER_ORIGINAL_CONTENT_NODE_SAVE, nodes=node_data)
+            uoc_uuids = [record["uuid"] async for record in result]
+            results['user_original_content_nodes'] = uoc_uuids
+            logger.debug(f"Successfully saved {len(uoc_uuids)} UserOriginalContent nodes to Neo4j")
+
+        # 14. Save HAS_ORIGINAL_CONTENT edges (UserOriginalContent → ExtractedEntity)
+        if user_original_content_edges:
+            from app.repositories.neo4j.cypher_queries import USER_ORIGINAL_CONTENT_ENTITY_EDGE_SAVE
+            edge_data = [{
+                "id": edge.id,
+                "source": edge.source,
+                "target": edge.target,
+                "end_user_id": edge.end_user_id,
+                "run_id": edge.run_id,
+                "created_at": to_iso_z(edge.created_at),
+            } for edge in user_original_content_edges]
+            result = await tx.run(USER_ORIGINAL_CONTENT_ENTITY_EDGE_SAVE, edges=edge_data)
+            uoc_edge_uuids = [record["uuid"] async for record in result]
+            results['user_original_content_edges'] = uoc_edge_uuids
+            logger.debug(f"Successfully saved {len(uoc_edge_uuids)} HAS_ORIGINAL_CONTENT edges to Neo4j")
 
         return results
 

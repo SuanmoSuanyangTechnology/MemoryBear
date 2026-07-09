@@ -153,6 +153,8 @@ class ExtractionResult(BaseModel):
     assistant_pruned_edges: List[Any] = Field(default_factory=list)
     conversation_nodes: List[Any] = Field(default_factory=list)
     assistant_conversation_edges: List[Any] = Field(default_factory=list)
+    user_original_content_nodes: List[Any] = Field(default_factory=list)
+    user_original_content_edges: List[Any] = Field(default_factory=list)
     dialog_data_list: List[Any] = Field(
         default_factory=list,
         description="原始 DialogData 列表，类型为 Any 以避免循环依赖",
@@ -371,6 +373,27 @@ class WritePipeline:
                 if recorder is not None and self.memory_config.pruning_enabled:
                     recorder.record_pruning_results(pruning_records)
 
+                # 从 pruning_records 提取 target user 规整信息（用于后续构建 UserOriginalContent 节点）
+                self._user_pruning_info = None
+                if pruning_records:
+                    target_pruning = next(
+                        (r for r in pruning_records
+                         if r.get("message_seq") == message_seq
+                         and r.get("type") == "user_pruning"
+                         and r.get("output", {}).get("should_process_user_msg")),
+                        None,
+                    )
+                    if target_pruning:
+                        _orig_text = target_pruning["input"]["msgs"][0]["msg"]
+                        _pruned_text = target_pruning["output"].get("processed_user_msg", "")
+                        self._user_pruning_info = {
+                            "original_text": _orig_text,
+                            "pruned_text": _pruned_text,
+                            "message_seq": message_seq,
+                            "conversation_id": conversation_id or f"{self.end_user_id}_{source}",
+                            "content_type": self._detect_content_type(_orig_text),
+                        }
+
                 # Step 2: 预处理 - 消息分块
                 async with bear.step(2, 6, "预处理", "消息分块") as s:
                     from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -429,6 +452,10 @@ class WritePipeline:
                         extraction=extraction_result.stats,
                         elapsed_seconds=0.0,
                     )
+
+                # Step 3.5: 构建 UserOriginalContent 子图（剪枝原文 → 实体连边）
+                if self._user_pruning_info:
+                    await self._build_original_content_subgraph(extraction_result)
 
                 async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
@@ -632,6 +659,8 @@ class WritePipeline:
                     assistant_pruned_edges=result.assistant_pruned_edges,
                     conversation_nodes=result.conversation_nodes,
                     assistant_conversation_edges=result.assistant_conversation_edges,
+                    user_original_content_nodes=result.user_original_content_nodes,
+                    user_original_content_edges=result.user_original_content_edges,
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
@@ -650,6 +679,92 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     raise
+
+    # ──────────────────────────────────────────────
+    # Step 3.5: 构建 UserOriginalContent 子图
+    # ──────────────────────────────────────────────
+
+    async def _build_original_content_subgraph(self, result: ExtractionResult) -> None:
+        """构建 UserOriginalContent 节点和 HAS_ORIGINAL_CONTENT 边。
+
+        当用户消息被剪枝/规整后，创建一个 UserOriginalContent 节点保存原文，
+        并通过 HAS_ORIGINAL_CONTENT 边连接到从该消息萃取出的所有 Entity 节点，
+        为检索侧提供 "Entity → 原文" 的回溯路径。
+
+        前置条件：self._user_pruning_info 已在 Step 1 后设置。
+        """
+        from app.core.memory.models.graph_models import (
+            UserOriginalContentNode,
+            UserOriginalContentEntityEdge,
+        )
+
+        info = self._user_pruning_info
+        if not info:
+            return
+
+        # 生成 embedding
+        text_embedding = None
+        if self._embedder_client and info["original_text"]:
+            try:
+                text_embedding = await self._embedder_client.embed_query(info["original_text"])
+            except Exception as e:
+                logger.warning(f"[UserOriginalContent] 生成 embedding 失败（不影响写入）: {e}")
+
+        # 构建节点
+        node_id = uuid.uuid4().hex
+        now_iso = datetime.now().isoformat()
+        run_id = result.dialogue_nodes[0].run_id if result.dialogue_nodes else uuid.uuid4().hex
+
+        uoc_node = UserOriginalContentNode(
+            id=node_id,
+            name=f"OriginalContent_{node_id[:8]}",
+            end_user_id=self.end_user_id,
+            run_id=run_id,
+            created_at=now_iso,
+            message_seq=info["message_seq"],
+            conversation_id=info["conversation_id"],
+            original_text=info["original_text"],
+            pruned_text=info["pruned_text"],
+            content_type=info["content_type"],
+            text_embedding=text_embedding,
+        )
+
+        # 为每个萃取出的 entity 创建 HAS_ORIGINAL_CONTENT 边
+        edges = []
+        for entity in result.entity_nodes:
+            edge = UserOriginalContentEntityEdge(
+                id=uuid.uuid4().hex,
+                source=node_id,
+                target=entity.id,
+                end_user_id=self.end_user_id,
+                run_id=run_id,
+                created_at=now_iso,
+            )
+            edges.append(edge)
+
+        result.user_original_content_nodes = [uoc_node]
+        result.user_original_content_edges = edges
+
+        logger.info(
+            f"[UserOriginalContent] 构建完成 - node_id={node_id[:8]}, "
+            f"edges={len(edges)}, content_type={info['content_type']}, "
+            f"original_len={len(info['original_text'])}"
+        )
+
+    @staticmethod
+    def _detect_content_type(text: str) -> str:
+        """检测原文内容类型。
+
+        Returns:
+            file_summary: 含 <input-file-summary> 标签
+            copied_content: 纯长文（≥500 字符）
+            mixed: 其他
+        """
+        if "<input-file-summary>" in text:
+            return "file_summary"
+        if len(text) >= 500:
+            return "copied_content"
+        return "mixed"
 
     # ──────────────────────────────────────────────
     # Step 4: 聚类
