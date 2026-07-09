@@ -906,22 +906,16 @@ class KnowledgeRetrievalService:
                 reverse=True,
             )
 
-        skip_score_threshold = cls._is_single_target_type(targets, RetrieveType.PARTICIPLE)
-        if skip_score_threshold:
-            threshold = None
-            filtered_chunks = ranked_chunks
-        else:
-            # Apply the final global score threshold after optional cross-KB rerank.
-            threshold = cls._resolve_global_score_threshold(
-                request=request,
-                targets=targets,
-                used_rerank=needs_global_rerank,
-            )
+        if needs_global_rerank:
+            threshold = cls._resolve_rerank_score_threshold(request)
             filtered_chunks = [
                 chunk
                 for chunk in ranked_chunks
                 if (chunk.metadata or {}).get("score", 0) > threshold
             ]
+        else:
+            threshold = None
+            filtered_chunks = ranked_chunks
         result_chunks = filtered_chunks[:request.top_k]
         if log_id:
             logger.info(
