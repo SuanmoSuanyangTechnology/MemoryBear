@@ -34,6 +34,7 @@ from app.core.workflow.triggers import (
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
+# Workflow 始终在主进程执行（依赖重，隔离收益低）；只有 Agent 走 E2B sandbox
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE

@@ -1,0 +1,224 @@
+import logging
+from typing import Any
+
+from langgraph.graph import StateGraph
+from langgraph.graph.state import CompiledStateGraph
+
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.cycle_graph import LoopNodeConfig, IterationNodeConfig
+from app.core.workflow.nodes.cycle_graph.iteration import IterationRuntime
+from app.core.workflow.nodes.cycle_graph.loop import LoopRuntime
+from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.variable.base_variable import VariableType
+
+logger = logging.getLogger(__name__)
+
+
+class CycleGraphNode(BaseNode):
+    """
+    Node representing a cyclic (loop or iteration) subgraph within the workflow.
+
+    A CycleGraphNode is a structural node that:
+    - Extracts a group of nodes marked as belonging to the same cycle
+    - Builds an isolated internal StateGraph (subgraph)
+    - Delegates runtime execution to LoopRuntime or IterationRuntime
+      depending on the node type
+
+    This node itself does NOT execute business logic directly.
+    It acts as a container and execution controller for a subgraph.
+    """
+
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
+        self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
+        self.start_node_id = None  # ID of the start node within the cycle
+
+        self.graph: StateGraph | CompiledStateGraph | None = None
+        self.child_variable_pool: VariablePool | None = None
+
+    def _output_types(self) -> dict[str, VariableType]:
+        outputs = {"__child_state": VariableType.ARRAY_OBJECT}
+        if self.node_type == NodeType.LOOP:
+            # Loop node outputs the final state of the loop
+            config = LoopNodeConfig(**self.config)
+            for var_def in config.cycle_vars:
+                outputs[var_def.name] = var_def.type
+            return outputs
+        elif self.node_type == NodeType.ITERATION:
+            # Iteration node outputs the processed collection
+            config = IterationNodeConfig(**self.config)
+            if not config.output_type:
+                outputs['output'] = VariableType.ANY
+                return outputs
+            if config.output_type in [
+                VariableType.ARRAY_FILE,
+                VariableType.ARRAY_STRING,
+                VariableType.ARRAY_NUMBER,
+                VariableType.ARRAY_OBJECT,
+                VariableType.ARRAY_BOOLEAN
+            ]:
+                if config.flatten:
+                    outputs['output'] = config.output_type
+                else:
+                    outputs['output'] = VariableType.NESTED_ARRAY
+            else:
+                outputs['output'] = VariableType(f"array[{config.output_type}]")
+            return outputs
+        else:
+            raise KeyError(f"Valid Cycle Node Type - {self.node_type}")
+
+    def pure_cycle_graph(self) -> tuple[list, list]:
+        """
+        Extract cycle-scoped nodes and internal edges from the workflow configuration.
+
+        This method:
+        - Identifies all nodes marked with `cycle == self.node_id`
+        - Collects edges that fully connect cycle nodes
+        - Removes extracted nodes and edges from the global workflow configuration
+
+        Safety check:
+        - Raises an error if a cycle node is connected to an external node
+
+        Returns:
+            tuple[list, list]:
+                - cycle_nodes: Nodes belonging to this cycle
+                - cycle_edges: Edges connecting nodes within the cycle
+
+        Raises:
+            ValueError: If a cycle node is improperly connected to an external node.
+        """
+        nodes = self.workflow_config.get("nodes", [])
+        edges = self.workflow_config.get("edges", [])
+
+        # Select all nodes that belong to the current cycle
+        cycle_nodes = [node for node in nodes if node.get("cycle") == self.node_id]
+        cycle_node_ids = {node.get("id") for node in cycle_nodes}
+
+        cycle_edges = []
+        remain_edges = []
+
+        for edge in edges:
+            source_in = edge.get("source") in cycle_node_ids
+            target_in = edge.get("target") in cycle_node_ids
+
+            # Raise error if cycle nodes are connected with external nodes
+            if source_in ^ target_in:
+                raise ValueError(
+                    f"Cycle node is connected to external node, "
+                    f"source: {edge.get('source')}, target: {edge.get('target')}"
+                )
+
+            if source_in and target_in:
+                cycle_edges.append(edge)
+            else:
+                remain_edges.append(edge)
+
+        # # Update workflow_config by removing cycle nodes and internal edges
+        # self.workflow_config["nodes"] = [
+        #     node for node in nodes if node.get("cycle") != self.node_id
+        # ]
+        # self.workflow_config["edges"] = remain_edges
+
+        return cycle_nodes, cycle_edges
+
+    def build_graph(self, variable_pool: VariablePool):
+        """
+        Build and compile the internal subgraph for this cycle node.
+
+        Steps:
+        1. Extract cycle nodes and internal edges from the workflow
+        2. Construct a StateGraph using GraphBuilder in subgraph mode
+        3. Compile the graph for runtime execution
+        """
+        from app.core.workflow.engine.graph_builder import GraphBuilder
+
+        self.child_variable_pool = VariablePool()
+        self.child_variable_pool.copy(variable_pool)
+        builder = GraphBuilder(
+            {
+                "nodes": self.cycle_nodes,
+                "edges": self.cycle_edges,
+            },
+            variable_pool=self.child_variable_pool,
+            cycle=self.node_id
+        )
+        self.graph = builder.build()
+        self.start_node_id = builder.start_node_id
+        self.child_variable_pool = builder.variable_pool
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
+        """
+        Execute the cycle node at runtime.
+
+        Based on the node type:
+        - LOOP: Executes LoopRuntime, repeatedly invoking the subgraph
+        - ITERATION: Executes IterationRuntime, iterating over a collection
+
+        Args:
+            state: The current workflow state when entering the cycle node.
+            variable_pool: Variable Pool
+
+        Returns:
+            Any: The runtime result produced by the loop or iteration executor.
+
+        Raises:
+            RuntimeError: If the node type is unsupported.
+        """
+        if self.node_type == NodeType.LOOP:
+            self.build_graph(variable_pool)
+            return await LoopRuntime(
+                start_id=self.start_node_id,
+                stream=False,
+                graph=self.graph,
+                node_id=self.node_id,
+                config=self.config,
+                state=state,
+                variable_pool=variable_pool,
+                child_variable_pool=self.child_variable_pool,
+            ).run()
+        if self.node_type == NodeType.ITERATION:
+            return await IterationRuntime(
+                stream=False,
+                node_id=self.node_id,
+                config=self.config,
+                state=state,
+                variable_pool=variable_pool,
+                cycle_nodes=self.cycle_nodes,
+                cycle_edges=self.cycle_edges,
+            ).run()
+        raise RuntimeError("Unknown cycle node type")
+
+    async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
+        if self.node_type == NodeType.LOOP:
+            self.build_graph(variable_pool)
+            yield {
+                "__final__": True,
+                "result": await LoopRuntime(
+                    start_id=self.start_node_id,
+                    stream=True,
+                    graph=self.graph,
+                    node_id=self.node_id,
+                    config=self.config,
+                    state=state,
+                    variable_pool=variable_pool,
+                    child_variable_pool=self.child_variable_pool,
+                ).run()
+            }
+            return
+        if self.node_type == NodeType.ITERATION:
+            yield {
+                "__final__": True,
+                "result": await IterationRuntime(
+                    stream=True,
+                    node_id=self.node_id,
+                    config=self.config,
+                    state=state,
+                    variable_pool=variable_pool,
+                    cycle_nodes=self.cycle_nodes,
+                    cycle_edges=self.cycle_edges,
+                ).run()
+            }
+            return
+        raise RuntimeError("Unknown cycle node type")

@@ -88,6 +88,13 @@ async def lifespan(app: FastAPI):
 
     logger.info("应用程序启动完成")
 
+    # Start E2B warm sandbox pool (if enabled)
+    if settings.E2B_ENABLED:
+        from app.services.e2b_sandbox_service import get_sandbox_service
+        _e2b_service = get_sandbox_service()
+        await _e2b_service.ensure_warm_pool()
+        logger.info("E2B warm pool initialized")
+
     async with mcp_app.lifespan(app):
         yield
     # 应用关闭事件
@@ -157,6 +164,10 @@ app.include_router(service_router, prefix="/v1")
 
 # MCP
 app.mount("/v1/mcp", mcp_app)
+
+# Internal Sandbox Callback API (E2B sandbox → API)
+from app.controllers.internal_sandbox_controller import router as sandbox_callback_router
+app.include_router(sandbox_callback_router)
 
 logger.info("所有路由已注册完成")
 

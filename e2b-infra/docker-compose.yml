@@ -1,0 +1,144 @@
+# E2B Self-Hosted Infrastructure for MemoryBear
+# 基于 E2B 开源 infra 架构的精简自建部署（Phase 1: Docker Backend）
+#
+# 组件说明：
+# - orchestrator: Sandbox 生命周期管理 API（创建/销毁/列举沙箱）
+# - template-builder: 从 Dockerfile 构建沙箱模板镜像
+# - sandbox-proxy: WebSocket/HTTP 代理，将请求路由到对应的 sandbox
+#
+# Phase 1 前置要求：
+# - Docker Desktop 或 Docker Engine
+# - 至少 4GB RAM
+
+services:
+  # ============================================================
+  # Orchestrator API - Sandbox 生命周期管理
+  # ============================================================
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: e2b-orchestrator
+    ports:
+      - "3001:3001"
+    environment:
+      - ORCHESTRATOR_PORT=3001
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-e2b_redis_pass}@redis:6379/10
+      - TEMPLATE_STORAGE_PATH=/var/e2b/templates
+      - SANDBOX_STORAGE_PATH=/var/e2b/sandboxes
+      - SANDBOX_BACKEND=docker
+      - MAX_SANDBOXES=${MAX_SANDBOXES:-50}
+      - DEFAULT_SANDBOX_TIMEOUT=${DEFAULT_SANDBOX_TIMEOUT:-300}
+      - MAX_SANDBOX_TIMEOUT=${MAX_SANDBOX_TIMEOUT:-3600}
+      - API_SECRET=${E2B_ORCHESTRATOR_SECRET:-changeme}
+      - CALLBACK_ALLOWED_HOSTS=${CALLBACK_ALLOWED_HOSTS:-*}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - E2B_HOST_APP_PATH=${E2B_HOST_APP_PATH:-}
+      - E2B_HOST_STUBS_PATH=${E2B_HOST_STUBS_PATH:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - e2b-templates:/var/e2b/templates
+      - /tmp/e2b-sockets:/tmp/e2b-sockets
+    restart: unless-stopped
+    networks:
+      - e2b-internal
+      - e2b-public
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================
+  # Template Builder - 构建 sandbox 模板镜像
+  # ============================================================
+  template-builder:
+    build:
+      context: ./template-builder
+      dockerfile: Dockerfile
+    container_name: e2b-template-builder
+    ports:
+      - "3002:3002"
+    environment:
+      - BUILDER_PORT=3002
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-e2b_redis_pass}@redis:6379/10
+      - TEMPLATE_STORAGE_PATH=/var/e2b/templates
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - API_SECRET=${E2B_ORCHESTRATOR_SECRET:-changeme}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - e2b-templates:/var/e2b/templates
+    restart: unless-stopped
+    networks:
+      - e2b-internal
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================
+  # Sandbox Proxy - 连接代理（WebSocket + HTTP → sandbox）
+  # ============================================================
+  sandbox-proxy:
+    build:
+      context: ./sandbox-proxy
+      dockerfile: Dockerfile
+    container_name: e2b-sandbox-proxy
+    ports:
+      - "3003:3003"
+    environment:
+      - PROXY_PORT=3003
+      - ORCHESTRATOR_URL=http://orchestrator:3001
+      - API_SECRET=${E2B_ORCHESTRATOR_SECRET:-changeme}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - /tmp/e2b-sockets:/tmp/e2b-sockets
+    restart: unless-stopped
+    networks:
+      - e2b-internal
+      - e2b-public
+    depends_on:
+      - orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================
+  # Redis - 状态存储（sandbox 元数据、模板注册表）
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: e2b-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-e2b_redis_pass} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6399:6379"
+    volumes:
+      - e2b-redis-data:/data
+    restart: unless-stopped
+    networks:
+      - e2b-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-e2b_redis_pass}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  e2b-templates:
+    driver: local
+  e2b-redis-data:
+    driver: local
+
+networks:
+  e2b-internal:
+    driver: bridge
+  e2b-public:
+    driver: bridge

@@ -767,6 +767,38 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
+
+            # ═══ E2B Sandbox 执行路径（非流式）═══
+            from app.core.config import settings
+            if settings.E2B_ENABLED and not sub_agent:
+                from app.services.e2b_execution_router import E2BExecutionRouter
+                e2b_router = E2BExecutionRouter(self.db)
+                if e2b_router.should_use_sandbox(agent_config):
+                    _vars = self.prepare_variables(variables, agent_config.variables) if not sub_agent else (variables or {})
+                    system_prompt_text = render_prompt_message(
+                        agent_config.system_prompt,
+                        PromptMessageRole.USER,
+                        _vars
+                    ).get_text_content() or "你是一个专业的AI助手"
+
+                    _history = history
+                    if not _history and conversation_id:
+                        _history = await self._load_conversation_history(conversation_id)
+
+                    return await e2b_router.run_agent(
+                        agent_config=agent_config,
+                        model_config=model_config,
+                        api_key_config=api_key_config,
+                        message=message,
+                        workspace_id=workspace_id,
+                        user_id=user_id or "",
+                        conversation_id=conversation_id or "",
+                        system_prompt=system_prompt_text,
+                        history=_history,
+                        variables=_vars,
+                    )
+            # ═══ E2B 路径结束 ═══
+
             logger.debug(
                 "API Key 配置获取成功",
                 extra={
@@ -1197,6 +1229,43 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
+
+            # ═══ E2B Sandbox 执行路径 ═══
+            # 当 E2B_ENABLED=true 且不是 sub_agent 调用时，将执行委托给 sandbox
+            from app.core.config import settings
+            if settings.E2B_ENABLED and not sub_agent:
+                from app.services.e2b_execution_router import E2BExecutionRouter
+                e2b_router = E2BExecutionRouter(self.db)
+                if e2b_router.should_use_sandbox(agent_config):
+                    if not sub_agent:
+                        variables = self.prepare_variables(variables, agent_config.variables)
+                    system_prompt_text = render_prompt_message(
+                        agent_config.system_prompt,
+                        PromptMessageRole.USER,
+                        variables or {}
+                    ).get_text_content() or "你是一个专业的AI助手"
+
+                    # 获取历史消息
+                    _history = history
+                    if not _history and conversation_id:
+                        _history = await self._load_conversation_history(conversation_id)
+
+                    async for event in e2b_router.run_agent_stream(
+                        agent_config=agent_config,
+                        model_config=model_config,
+                        api_key_config=api_key_config,
+                        message=message,
+                        workspace_id=workspace_id,
+                        user_id=user_id or "",
+                        conversation_id=conversation_id or "",
+                        system_prompt=system_prompt_text,
+                        history=_history,
+                        variables=variables,
+                    ):
+                        yield event
+                    return
+            # ═══ E2B Sandbox 路径结束，以下是原有 in-process 路径 ═══
+
             if not sub_agent:
                 variables = self.prepare_variables(variables, agent_config.variables)
             else:

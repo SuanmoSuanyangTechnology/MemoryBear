@@ -268,6 +268,17 @@ class Settings:
     
     SANDBOX_URL: str = os.getenv("SANDBOX_URL", "")
 
+    # ─── E2B Sandbox Configuration (自建 E2B 基础设施) ───
+    E2B_ENABLED: bool = os.getenv("E2B_ENABLED", "false").lower() == "true"
+    E2B_ORCHESTRATOR_URL: str = os.getenv("E2B_ORCHESTRATOR_URL", "http://e2b-orchestrator:3001")
+    E2B_ORCHESTRATOR_SECRET: str = os.getenv("E2B_ORCHESTRATOR_SECRET", "changeme")
+    E2B_TEMPLATE_ID: str = os.getenv("E2B_TEMPLATE_ID", "agent-runtime")
+    E2B_SANDBOX_TIMEOUT: int = int(os.getenv("E2B_SANDBOX_TIMEOUT", "300"))
+    E2B_SANDBOX_CPU: int = int(os.getenv("E2B_SANDBOX_CPU", "2"))
+    E2B_SANDBOX_MEMORY_MB: int = int(os.getenv("E2B_SANDBOX_MEMORY_MB", "512"))
+    E2B_CALLBACK_URL: str = os.getenv("E2B_CALLBACK_URL", "http://api:8000")
+    E2B_CALLBACK_SECRET: str = os.getenv("E2B_CALLBACK_SECRET", "sandbox-callback-secret")
+
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
     REFLECTION_INTERVAL_TIME: Optional[str] = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
