@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 10:05:34
+ * @Last Modified time: 2026-07-09 14:57:28
  */
 /**
  * Memory Management Page
@@ -27,6 +27,7 @@ import PageLoading from '@/components/Empty/PageLoading'
 import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
 import { formatDateTime } from '@/utils/format';
 import Tag from '@/components/Tag'
+import { MemoryEngine } from '@redbear/memory-brick';
 
 const MemoryManagement: React.FC = () => {
   const { t } = useTranslation();
@@ -219,6 +220,7 @@ const MemoryManagement: React.FC = () => {
                             ></div>
                           </Flex>
                         ))}
+                        {MemoryEngine && <MemoryEngine item={item} />}
                       </div>
 
                       <Flex
