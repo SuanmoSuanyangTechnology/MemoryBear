@@ -38,14 +38,15 @@ async def sync_end_user_memory_count_from_neo4j(
         tenant_id = get_tenant_id_by_end_user_id(db, end_user_id)
         memory_limit = get_end_user_memory_limit(db, tenant_id)
     redis_client = get_thread_safe_redis()
-    if memory_node_count > memory_limit:
-        await redis_client.sadd("forget:candidates", end_user_id)
-        _logger.info(
-            f"{_LOG_PREFIX} 加入遗忘候选: end_user_id={end_user_id}, "
-            f"count={memory_node_count}, limit={memory_limit}"
-        )
-    else:
-        await redis_client.srem("forget:candidates", end_user_id)
+    if redis_client:
+        if memory_node_count > memory_limit:
+            await redis_client.sadd("forget:candidates", end_user_id)
+            _logger.info(
+                f"{_LOG_PREFIX} 加入遗忘候选: end_user_id={end_user_id}, "
+                f"count={memory_node_count}, limit={memory_limit}"
+            )
+        else:
+            await redis_client.srem("forget:candidates", end_user_id)
 
     _logger.info(f"{_LOG_PREFIX} 同步完成: end_user_id={end_user_id}, count={node_count}")
     return node_count

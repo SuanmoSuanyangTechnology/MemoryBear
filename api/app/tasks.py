@@ -3078,7 +3078,6 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
             return {"status": "FAILED", "message": "Redis 不可用"}
 
         candidates = await redis_client.smembers(_FORGET_CANDIDATES_KEY)
-        print(candidates)
         if not candidates:
             return {"status": "SUCCESS", "dispatched": 0}
 
