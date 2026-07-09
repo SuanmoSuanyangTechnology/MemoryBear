@@ -652,8 +652,8 @@ async def _update_knowledge(
                     },
                 )
 
-        # 4. Return the updated knowledge base
-        return db_knowledge
+        # 4. Return the updated knowledge base with async-safe relationships loaded
+        return await knowledge_repository.get_knowledge_by_id_async(db=db, knowledge_id=db_knowledge.id) or db_knowledge
     except HTTPException:
         raise
     except Exception as e:

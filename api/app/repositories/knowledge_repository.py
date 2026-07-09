@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.document_model import Document
 from app.models.knowledge_model import Knowledge, PermissionType
 from app.schemas import knowledge_schema
@@ -9,6 +9,16 @@ from app.core.logging_config import get_db_logger
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
+
+
+def _knowledge_relationship_load_options():
+    return (
+        selectinload(Knowledge.created_user),
+        selectinload(Knowledge.embedding),
+        selectinload(Knowledge.reranker),
+        selectinload(Knowledge.llm),
+        selectinload(Knowledge.image2text),
+    )
 
 
 def get_knowledges_paginated(
@@ -70,7 +80,7 @@ async def get_knowledges_paginated_async(
     )
 
     try:
-        stmt = select(Knowledge)
+        stmt = select(Knowledge).options(*_knowledge_relationship_load_options())
         for filter_cond in filters:
             stmt = stmt.where(filter_cond)
 
@@ -166,8 +176,9 @@ async def create_knowledge_async(db: AsyncSession, knowledge: knowledge_schema.K
         db.add(db_knowledge)
         await db.commit()
         await db.refresh(db_knowledge)
+        loaded_knowledge = await get_knowledge_by_id_async(db, db_knowledge.id)
         db_logger.info(f"knowledge base record created successfully (async): {knowledge.name} (ID: {db_knowledge.id})")
-        return db_knowledge
+        return loaded_knowledge or db_knowledge
     except Exception as e:
         db_logger.error(f"Failed to create a knowledge base record (async): name={knowledge.name} - {str(e)}")
         await db.rollback()
@@ -194,7 +205,7 @@ async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -
     db_logger.debug(f"Query knowledge base based on ID (async): knowledge_id={knowledge_id}")
 
     try:
-        stmt = select(Knowledge).where(Knowledge.id == knowledge_id)
+        stmt = select(Knowledge).options(*_knowledge_relationship_load_options()).where(Knowledge.id == knowledge_id)
         result = await db.execute(stmt)
         knowledge = result.scalars().first()
         if knowledge:
@@ -233,7 +244,7 @@ async def get_knowledge_by_external_id_async(
 ) -> Knowledge | None:
     """Async version of get_knowledge_by_external_id."""
     try:
-        stmt = select(Knowledge).where(
+        stmt = select(Knowledge).options(*_knowledge_relationship_load_options()).where(
             Knowledge.external_id == external_id,
             Knowledge.workspace_id == workspace_id,
             Knowledge.status == 1,
@@ -350,7 +361,7 @@ async def get_knowledges_by_parent_ids_async(
         return []
 
     try:
-        stmt = select(Knowledge).where(
+        stmt = select(Knowledge).options(*_knowledge_relationship_load_options()).where(
             Knowledge.parent_id.in_(parent_ids),
             Knowledge.workspace_id == workspace_id,
             Knowledge.status != 2,
@@ -445,6 +456,7 @@ async def get_knowledge_by_name_async(db: AsyncSession, name: str, workspace_id:
     try:
         stmt = (
             select(Knowledge)
+            .options(*_knowledge_relationship_load_options())
             .where(Knowledge.name == name, Knowledge.workspace_id == workspace_id, Knowledge.status == 1)
         )
         result = await db.execute(stmt)
