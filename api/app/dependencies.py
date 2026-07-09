@@ -4,10 +4,13 @@ from functools import wraps
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
-from app.db import get_db, get_db_read, SessionLocal
+from app.db import get_async_db, get_db, get_db_read, SessionLocal
 from app.models import App
 from app.schemas import token_schema
 from app.core.config import settings
@@ -147,6 +150,92 @@ async def get_current_user(
         auth_logger.info(f"用户认证成功: {user.username} (ID: {user.id})")
         return user
 
+    except Exception as e:
+        auth_logger.error(f"查询用户信息时发生错误: {str(e)}")
+        raise credentials_exception
+
+
+async def get_current_user_async(
+        token: str = Depends(oauth2_scheme),
+        db: AsyncSession = Depends(get_async_db)
+) -> User:
+    """
+    Async version of get_current_user for async request chains.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        auth_logger.debug("开始解析JWT token")
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+
+        if user_id is None:
+            auth_logger.warning("JWT token中缺少用户ID")
+            raise credentials_exception
+
+        token_data = token_schema.TokenData(userId=user_id)
+        auth_logger.debug(f"JWT解析成功，用户ID: {user_id}")
+
+    except JWTError as e:
+        auth_logger.warning(f"JWT解析失败: {str(e)}")
+        raise credentials_exception
+
+    try:
+        auth_logger.debug("检查单点登录黑名单")
+        token_id = get_token_id(token)
+        session_service = SessionService()
+
+        if await session_service.is_token_blacklisted(token_id):
+            auth_logger.warning(f"Token已被列入黑名单: {token_id}")
+            raise credentials_exception
+
+        invalidation_time_str = await session_service.get_user_token_invalidation_time(user_id)
+        if invalidation_time_str:
+            from datetime import datetime, timezone
+            invalidation_time = datetime.fromisoformat(invalidation_time_str)
+            token_issued_at = datetime.fromtimestamp(payload.get("iat", 0), tz=timezone.utc) if payload.get(
+                "iat") else None
+
+            if token_issued_at and token_issued_at < invalidation_time:
+                auth_logger.warning(f"Token在密码重置前签发，已失效: user_id={user_id}")
+                raise credentials_exception
+
+        auth_logger.debug("单点登录检查通过")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        auth_logger.error(f"检查token有效性时发生错误: {str(e)}")
+        raise credentials_exception
+
+    try:
+        auth_logger.debug(f"查询用户信息: {token_data.userId}")
+        result = await db.execute(
+            select(User)
+            .options(joinedload(User.tenant))
+            .where(User.id == token_data.userId, User.is_active.is_(True))
+        )
+        user = result.scalars().first()
+
+        if user is None:
+            auth_logger.warning(f"用户不存在: {token_data.userId}")
+            raise credentials_exception
+        if user.tenant and not user.tenant.is_active:
+            auth_logger.warning(f"用户 {user.username} (ID: {user.id}) 所属租户 {user.tenant_id} 已被禁用")
+            raise credentials_exception
+        if not user.is_active:
+            auth_logger.warning(f"用户已被停用: {user.username} (ID: {user.id})")
+            raise credentials_exception
+
+        auth_logger.info(f"用户认证成功: {user.username} (ID: {user.id})")
+        return user
+
+    except HTTPException:
+        raise
     except Exception as e:
         auth_logger.error(f"查询用户信息时发生错误: {str(e)}")
         raise credentials_exception
@@ -632,5 +721,4 @@ async def get_app_or_workspace(
     except Exception as e:
         auth_logger.error(f"Error validating API Key: {str(e)}", exc_info=True)
         raise credentials_exception
-
 

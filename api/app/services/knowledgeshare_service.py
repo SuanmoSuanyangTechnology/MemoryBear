@@ -1,4 +1,5 @@
 import uuid
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.models.user_model import User
 from app.models.knowledgeshare_model import KnowledgeShare
@@ -37,6 +38,34 @@ def get_knowledgeshares_paginated(
         raise
 
 
+async def get_knowledgeshares_paginated_async(
+        db: AsyncSession,
+        current_user: User,
+        filters: list,
+        page: int,
+        pagesize: int,
+        orderby: str = None,
+        desc: bool = False
+) -> tuple[int, list]:
+    business_logger.debug(
+        f"Query knowledge base sharing in pages (async): username={current_user.username}, "
+        f"page={page}, pagesize={pagesize}, orderby={orderby}, desc={desc}"
+    )
+
+    try:
+        return await knowledgeshare_repository.get_knowledgeshares_paginated_async(
+            db=db,
+            filters=filters,
+            page=page,
+            pagesize=pagesize,
+            orderby=orderby,
+            desc=desc,
+        )
+    except Exception as e:
+        business_logger.error(f"Querying knowledge base sharing pagination failed (async): username={current_user.username} - {str(e)}")
+        raise
+
+
 def get_source_kb_ids_by_target_kb_id(
         db: Session,
         current_user: User,
@@ -53,6 +82,24 @@ def get_source_kb_ids_by_target_kb_id(
         return items
     except Exception as e:
         business_logger.error(f"Failed to query the original knowledge base ID list through knowledge base sharing: username={current_user.username} - {str(e)}")
+        raise
+
+
+async def get_source_kb_ids_by_target_kb_id_async(
+        db: AsyncSession,
+        current_user: User,
+        filters: list
+) -> list:
+    try:
+        return await knowledgeshare_repository.get_source_kb_ids_by_target_kb_id_async(
+            db=db,
+            filters=filters,
+        )
+    except Exception as e:
+        business_logger.error(
+            f"Failed to query source KB ID list through knowledge share (async): "
+            f"username={current_user.username} - {str(e)}"
+        )
         raise
 
 
@@ -75,6 +122,22 @@ def create_knowledgeshare(
         raise
 
 
+async def create_knowledgeshare_async(
+        db: AsyncSession, knowledgeshare: KnowledgeShareCreate, current_user: User
+) -> KnowledgeShare:
+    business_logger.info(f"Create a knowledge base sharing (async): creator: {current_user.username}")
+
+    try:
+        knowledgeshare.source_workspace_id = current_user.current_workspace_id
+        knowledgeshare.shared_by = current_user.id
+        return await knowledgeshare_repository.create_knowledgeshare_async(
+            db=db, knowledgeshare=knowledgeshare
+        )
+    except Exception as e:
+        business_logger.error(f"Failed to create knowledge base sharing (async) - {str(e)}")
+        raise
+
+
 def get_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID, current_user: User) -> KnowledgeShare | None:
     business_logger.debug(f"Query knowledge base sharing based on ID: knowledgeshare_id={knowledgeshare_id}, username: {current_user.username}")
 
@@ -87,6 +150,21 @@ def get_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID, current_
         return knowledgeshare
     except Exception as e:
         business_logger.error(f"Failed to query the knowledge base sharing: knowledgeshare_id={knowledgeshare_id} - {str(e)}")
+        raise
+
+
+async def get_knowledgeshare_by_id_async(
+        db: AsyncSession,
+        knowledgeshare_id: uuid.UUID,
+        current_user: User
+) -> KnowledgeShare | None:
+    try:
+        return await knowledgeshare_repository.get_knowledgeshare_by_id_async(
+            db=db,
+            knowledgeshare_id=knowledgeshare_id,
+        )
+    except Exception as e:
+        business_logger.error(f"Failed to query knowledge share (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
         raise
 
 
@@ -105,4 +183,21 @@ def delete_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID, curre
         business_logger.info(f"knowledge base sharing deleted successfully: knowledgeshare_id={knowledgeshare_id}, operator: {current_user.username}")
     except Exception as e:
         business_logger.error(f"Failed to delete knowledge base sharing: knowledgeshare_id={knowledgeshare_id} - {str(e)}")
+        raise
+
+
+async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID, current_user: User) -> None:
+    business_logger.info(f"Delete knowledge base sharing (async): knowledgeshare_id={knowledgeshare_id}, operator: {current_user.username}")
+
+    try:
+        await knowledgeshare_repository.delete_knowledgeshare_by_id_async(
+            db=db,
+            knowledgeshare_id=knowledgeshare_id,
+        )
+        business_logger.info(
+            f"knowledge base sharing deleted successfully (async): "
+            f"knowledgeshare_id={knowledgeshare_id}, operator: {current_user.username}"
+        )
+    except Exception as e:
+        business_logger.error(f"Failed to delete knowledge base sharing (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
         raise

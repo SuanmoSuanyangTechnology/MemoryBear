@@ -8,6 +8,7 @@ import datetime
 import json
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from langchain.tools import tool
@@ -25,7 +26,7 @@ from app.core.logging_config import get_business_logger
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
-from app.db import get_db_context
+from app.db import get_async_db_context, get_db_context
 from app.models import App, AgentConfig, ModelConfig, Message
 from app.models.agent_execution_model import AgentExecution
 from app.models.models_model import ModelCapability, ModelType
@@ -55,6 +56,16 @@ class KnowledgeRetrievalInput(BaseModel):
 class WebSearchInput(BaseModel):
     """网络搜索工具输入参数"""
     query: str = Field(description="需要搜索的问题或关键词")
+
+
+def _run_async_blocking(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(coro)).result()
 
 
 def create_web_search_tool(web_search_config: Dict[str, Any]):
@@ -101,7 +112,7 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
-def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
+async def _retrieve_chunks_via_standard_async(query: str, kb_config: Dict[str, Any]) -> list:
     """标准化知识库检索：走 KnowledgeRetrievalService + KnowledgeRetrievalRequest。
 
     读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
@@ -152,10 +163,51 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
         rerank_id=rerank_id,
     )
 
-    with get_db_context() as db:
-        result = KnowledgeRetrievalService.retrieve(db=db, request=request, current_user=None)
+    async with get_async_db_context() as db:
+        result = await KnowledgeRetrievalService.retrieve_async(db=db, request=request, current_user=None)
 
     return result.chunks
+
+
+def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
+    return _run_async_blocking(_retrieve_chunks_via_standard_async(query, kb_config))
+
+
+async def _load_knowledge_retrieval_kb_names_async(kb_ids: List[str]) -> List[Dict[str, str]]:
+    valid_kb_ids = []
+    for kid in kb_ids:
+        try:
+            valid_kb_ids.append(kid if isinstance(kid, uuid.UUID) else uuid.UUID(str(kid)))
+        except (TypeError, ValueError):
+            continue
+
+    if not valid_kb_ids:
+        return []
+
+    from app.models import Knowledge
+    from app.models.knowledgeshare_model import KnowledgeShare
+
+    async with get_async_db_context() as db:
+        rows_result = await db.execute(
+            select(Knowledge.id, Knowledge.name).where(Knowledge.id.in_(valid_kb_ids))
+        )
+        rows = rows_result.all()
+        kb_names = [{"id": str(kb_id), "name": name} for kb_id, name in rows]
+
+        share_result = await db.execute(
+            select(KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id).where(
+                KnowledgeShare.target_kb_id.in_(valid_kb_ids)
+            )
+        )
+        share_rows = share_result.all()
+        if share_rows:
+            id_to_name = {str(kb_id): name for kb_id, name in rows}
+            for source_kb_id, target_kb_id in share_rows:
+                source_name = id_to_name.get(str(target_kb_id))
+                if source_name:
+                    kb_names.append({"id": str(source_kb_id), "name": source_name})
+
+    return kb_names
 
 
 def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None, kb_names: Optional[List[Dict]] = None):
@@ -550,27 +602,7 @@ class AgentRunService:
             # 查询知识库名称
             kb_names = []
             try:
-                from app.models import Knowledge
-                rows = self.db.query(Knowledge.id, Knowledge.name).filter(
-                    Knowledge.id.in_(kb_ids)
-                ).all()
-                kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
-
-                # 对于共享知识库，chunk元数据中的knowledge_id是source_kb_id，
-                # 需要将source_kb_id也映射到名称，否则会显示为ID
-                from app.models.knowledgeshare_model import KnowledgeShare
-                target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
-                share_rows = self.db.query(
-                    KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id
-                ).filter(
-                    KnowledgeShare.target_kb_id.in_(target_kb_ids)
-                ).all()
-                if share_rows:
-                    id_to_name = {str(r.id): r.name for r in rows}
-                    for sr in share_rows:
-                        source_name = id_to_name.get(str(sr.target_kb_id))
-                        if source_name:
-                            kb_names.append({"id": str(sr.source_kb_id), "name": source_name})
+                kb_names = _run_async_blocking(_load_knowledge_retrieval_kb_names_async(kb_ids))
             except Exception:
                 kb_names = [{"id": kid, "name": kid} for kid in kb_ids]
 

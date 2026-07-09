@@ -1,4 +1,5 @@
 import csv as csv_module
+import asyncio
 import datetime
 import io
 import json
@@ -8,8 +9,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
@@ -28,8 +29,8 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorIndexOps,
 )
 from app.core.response_utils import success, fail
-from app.db import get_db, get_db_context
-from app.dependencies import get_current_user
+from app.db import get_async_db, get_async_db_context
+from app.dependencies import get_current_user_async
 from app.models import knowledge_model
 from app.models import file_model
 from app.models.document_model import Document
@@ -40,9 +41,8 @@ from app.schemas.response_schema import ApiResponse
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
 from app.services import file_service
-from app.services.file_service import _is_qa_doc
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
-from app.services.model_service import ModelConfigService
+from app.repositories.model_repository import ModelConfigRepository
 from app.services.qa_export_service import iter_qa_csv_chunks, make_qa_export_filename
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -63,7 +63,7 @@ _SHARE_MIRRORED_MODEL_FIELDS = (
 router = APIRouter(
     prefix="/knowledges",
     tags=["knowledges"],
-    dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
+    dependencies=[Depends(get_current_user_async)]  # Apply auth to all routes in this controller
 )
 
 
@@ -104,19 +104,22 @@ def _build_qa_export_content(vector_service: Any, document_id: uuid.UUID | str, 
     return text_output.getvalue().encode("utf-8-sig")
 
 
-def _dispatch_reparse_tasks_for_knowledge(db: Session, knowledge_id: uuid.UUID) -> dict[str, int]:
-    """Dispatch parse tasks for all active documents in a knowledge base."""
+async def _dispatch_reparse_tasks_for_knowledge_async(
+        db: AsyncSession,
+        knowledge_id: uuid.UUID,
+) -> dict[str, int]:
+    """Dispatch parse tasks for all active documents in a knowledge base using async DB reads."""
     result = {"queued": 0, "skipped": 0, "already_running": 0, "failed": 0}
 
-    rows = (
-        db.query(Document, file_model.File)
+    rows_result = await db.execute(
+        select(Document, file_model.File)
         .join(file_model.File, Document.file_id == file_model.File.id)
-        .filter(
+        .where(
             Document.kb_id == knowledge_id,
             Document.status == 1,
         )
-        .all()
     )
+    rows = rows_result.all()
 
     for db_document, db_file in rows:
         file_key = getattr(db_file, "file_key", None)
@@ -188,15 +191,15 @@ def _dispatch_reparse_tasks_for_knowledge(db: Session, knowledge_id: uuid.UUID) 
     return result
 
 
-def _build_knowledge_detail_data(
-        db: Session,
-        db_knowledge: knowledge_model.Knowledge
+async def _build_knowledge_detail_data_async(
+        db: AsyncSession,
+        db_knowledge: knowledge_model.Knowledge,
 ) -> dict:
     data = jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge))
     if db_knowledge.permission_id != knowledge_model.PermissionType.Share:
         return data
 
-    knowledgeshare = knowledgeshare_repository.get_knowledgeshare_by_id(db, db_knowledge.id)
+    knowledgeshare = await knowledgeshare_repository.get_knowledgeshare_by_id_async(db, db_knowledge.id)
     if not knowledgeshare:
         api_logger.warning(
             "Share relation not found when mirroring knowledge model fields: knowledge_id=%s",
@@ -204,7 +207,7 @@ def _build_knowledge_detail_data(
         )
         return data
 
-    source_knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledgeshare.source_kb_id)
+    source_knowledge = await knowledge_repository.get_knowledge_by_id_async(db=db, knowledge_id=knowledgeshare.source_kb_id)
     if not source_knowledge or source_knowledge.status == 2:
         api_logger.warning(
             "Source knowledge not available when mirroring share model fields: "
@@ -240,8 +243,8 @@ def get_parser_types():
 async def get_knowledge_graph_entity_types(
         llm_id: uuid.UUID,
         scenario: str,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     get knowledge graph entity types based on llm_id
@@ -251,7 +254,7 @@ async def get_knowledge_graph_entity_types(
     try:
         # 1. Check whether the model exists
         api_logger.debug(f"Check whether the model exists: {llm_id}")
-        config = ModelConfigService.get_model_by_id(db=db, model_id=llm_id)
+        config = await ModelConfigRepository.get_by_id_async(db=db, model_id=llm_id)
 
         if not config:
             api_logger.warning(
@@ -284,8 +287,8 @@ async def get_knowledges(
         desc: Optional[bool] = Query(False, description="Is it descending order"),
         keywords: Optional[str] = Query(None, description="Search keywords (knowledge base name)"),
         kb_ids: Optional[str] = Query(None, description="Knowledge base ids, separated by commas"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Query the knowledge base list in pages
@@ -331,7 +334,7 @@ async def get_knowledges(
     # 3. Execute paged query
     try:
         api_logger.debug("Start executing knowledge base paging query")
-        total, items = knowledge_service.get_knowledges_paginated(
+        total, items = await knowledge_service.get_knowledges_paginated_async(
             db=db,
             filters=filters,
             page=page,
@@ -365,8 +368,8 @@ async def get_knowledges(
 @check_knowledge_capacity_quota
 async def create_knowledge(
         create_data: knowledge_schema.KnowledgeCreate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     create knowledge
@@ -376,14 +379,14 @@ async def create_knowledge(
     try:
         api_logger.debug(f"Start creating the knowledge base: {create_data.name}")
         # 1. Check if the knowledge base name already exists
-        db_knowledge_exist = knowledge_service.get_knowledge_by_name(db, name=create_data.name, current_user=current_user)
+        db_knowledge_exist = await knowledge_service.get_knowledge_by_name_async(db, name=create_data.name, current_user=current_user)
         if db_knowledge_exist:
             api_logger.warning(f"The knowledge base name already exists: {create_data.name}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"The knowledge base name already exists: {create_data.name}"
             )
-        db_knowledge = knowledge_service.create_knowledge(db=db, knowledge=create_data, current_user=current_user)
+        db_knowledge = await knowledge_service.create_knowledge_async(db=db, knowledge=create_data, current_user=current_user)
         api_logger.info(f"The knowledge base has been successfully created: {db_knowledge.name} (ID: {db_knowledge.id})")
         return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base has been successfully created")
     except Exception as e:
@@ -394,8 +397,8 @@ async def create_knowledge(
 @router.get("/{knowledge_id}", response_model=ApiResponse)
 async def get_knowledge(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Retrieve knowledge base information based on knowledge_id
@@ -405,7 +408,7 @@ async def get_knowledge(
     try:
         # 1. Query knowledge base information from the database
         api_logger.debug(f"Query knowledge base: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
         if not db_knowledge:
             api_logger.warning(f"The knowledge base does not exist or access is denied: knowledge_id={knowledge_id}")
             raise HTTPException(
@@ -414,7 +417,7 @@ async def get_knowledge(
             )
 
         api_logger.info(f"Knowledge base query successful: {db_knowledge.name} (ID: {db_knowledge.id})")
-        return success(data=_build_knowledge_detail_data(db, db_knowledge), msg="Successfully obtained knowledge base information")
+        return success(data=await _build_knowledge_detail_data_async(db, db_knowledge), msg="Successfully obtained knowledge base information")
     except HTTPException:
         raise
     except Exception as e:
@@ -425,8 +428,8 @@ async def get_knowledge(
 @router.get("/{knowledge_id}/chunk-policy", response_model=ApiResponse)
 async def get_knowledge_chunk_policy(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     查询知识库的分块策略锁定状态
@@ -437,7 +440,7 @@ async def get_knowledge_chunk_policy(
     api_logger.info(f"Query knowledge base chunk policy: knowledge_id={knowledge_id}, username: {current_user.username}")
 
     # 1. 验证知识库存在
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -461,8 +464,8 @@ async def get_knowledge_chunk_policy(
 async def update_knowledge(
         knowledge_id: uuid.UUID,
         update_data: knowledge_schema.KnowledgeUpdate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     api_logger.info(f"Update knowledge base request: knowledge_id={knowledge_id}, username: {current_user.username}")
     db_knowledge = await _update_knowledge(knowledge_id=knowledge_id, update_data=update_data, db=db, current_user=current_user)
@@ -472,13 +475,13 @@ async def update_knowledge(
 @router.get("/{kb_id}/qa/export")
 async def export_knowledge_qa_csv(
         kb_id: uuid.UUID,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(get_current_user_async),
 ):
     """Export all active QA pairs in a knowledge base as a two-column CSV."""
     api_logger.info(f"KB QA CSV export: kb_id={kb_id}, username={current_user.username}")
 
-    with get_db_context() as db:
-        db_knowledge = knowledge_service.get_knowledge_by_id(
+    async with get_async_db_context() as db:
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(
             db, knowledge_id=kb_id, current_user=current_user
         )
         if not db_knowledge:
@@ -502,25 +505,28 @@ async def export_knowledge_qa_csv(
 @router.post("/{kb_id}/batch-download")
 async def kb_batch_download(
         kb_id: uuid.UUID,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(get_current_user_async),
         storage_service: FileStorageService = Depends(get_file_storage_service),
         request_body: file_schema.KBBatchDownloadRequest = file_schema.KBBatchDownloadRequest(),
 ):
     """知识库文件一键下载 — 将该知识库下所有文件打包为 ZIP 流式下载"""
     api_logger.info(f"KB batch download: kb_id={kb_id}, username={current_user.username}")
 
-    with get_db_context() as db:
-        db_knowledge = knowledge_service.get_knowledge_by_id(
+    async with get_async_db_context() as db:
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(
             db, knowledge_id=kb_id, current_user=current_user
         )
         if not db_knowledge:
             raise BusinessException("知识库不存在或无权访问", BizCode.NOT_FOUND)
 
-        files = db.query(file_model.File).filter(
-            file_model.File.kb_id == kb_id,
-            file_model.File.file_key.isnot(None),
-            file_model.File.file_key != "",
-        ).all()
+        files_result = await db.execute(
+            select(file_model.File).where(
+                file_model.File.kb_id == kb_id,
+                file_model.File.file_key.isnot(None),
+                file_model.File.file_key != "",
+            )
+        )
+        files = list(files_result.scalars().all())
 
         if not files:
             raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
@@ -528,11 +534,12 @@ async def kb_batch_download(
         qa_export_specs = []
         qa_vector_service = None
         for f in files:
-            if _is_qa_doc(db, f.id):
-                doc = db.query(Document).filter(Document.file_id == f.id).first()
+            doc_result = await db.execute(select(Document).where(Document.file_id == f.id))
+            doc = doc_result.scalars().first()
+            if doc and (doc.parser_config or {}).get("doc_type") == "qa":
                 if doc:
                     if qa_vector_service is None:
-                        qa_vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+                        qa_vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
                     qa_export_specs.append((f.file_key, f.file_ext, doc.id, qa_vector_service))
 
         entries = file_service.build_zip_arcnames(files)
@@ -542,7 +549,7 @@ async def kb_batch_download(
     # Prefetch QA document content before streaming so the generator does not hold a DB session.
     pre_fetched: dict[str, bytes] = {}
     for file_key, file_ext, document_id, vector_service in qa_export_specs:
-        content = _build_qa_export_content(vector_service, document_id, file_ext)
+        content = await asyncio.to_thread(_build_qa_export_content, vector_service, document_id, file_ext)
         if content:
             pre_fetched[file_key] = content
 
@@ -560,8 +567,8 @@ async def kb_batch_download(
 async def _update_knowledge(
         knowledge_id: uuid.UUID,
         update_data: knowledge_schema.KnowledgeUpdate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ) -> knowledge_schema.Knowledge:
     """
     Update knowledge base information
@@ -569,7 +576,7 @@ async def _update_knowledge(
     try:
         # 1. Check whether the knowledge base exists
         api_logger.debug(f"Query the knowledge base to be updated: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
 
         if not db_knowledge:
             api_logger.warning(f"The knowledge base does not exist or you do not have permission to access it: knowledge_id={knowledge_id}")
@@ -585,7 +592,7 @@ async def _update_knowledge(
             name = update_dict["name"]
             if name != db_knowledge.name:
                 # Check if the knowledge base name already exists
-                db_knowledge_exist = knowledge_service.get_knowledge_by_name(db, name=name, current_user=current_user)
+                db_knowledge_exist = await knowledge_service.get_knowledge_by_name_async(db, name=name, current_user=current_user)
                 if db_knowledge_exist:
                     api_logger.warning(f"The knowledge base name already exists: {name}")
                     raise HTTPException(
@@ -597,8 +604,8 @@ async def _update_knowledge(
             if embedding_id != db_knowledge.embedding_id:
                 embedding_changed = True
                 if db_knowledge.embedding_id and db_knowledge.reranker_id:
-                    ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_index()
-                document_service.reset_documents_progress_by_kb_id(db, kb_id=db_knowledge.id, current_user=current_user)
+                    await asyncio.to_thread(ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_index)
+                await document_service.reset_documents_progress_by_kb_id_async(db, kb_id=db_knowledge.id, current_user=current_user)
 
         # 2. Update fields (only update non-null fields)
         api_logger.debug(f"Start updating the knowledge base fields: {knowledge_id}")
@@ -622,13 +629,13 @@ async def _update_knowledge(
         db_knowledge.updated_at = utcnow_naive()
 
         # 3. Save to database
-        db.commit()
-        db.refresh(db_knowledge)
+        await db.commit()
+        await db.refresh(db_knowledge)
         api_logger.info(f"The knowledge base has been successfully updated: {db_knowledge.name} (ID: {db_knowledge.id})")
 
         if embedding_changed:
             try:
-                dispatch_result = _dispatch_reparse_tasks_for_knowledge(db=db, knowledge_id=db_knowledge.id)
+                dispatch_result = await _dispatch_reparse_tasks_for_knowledge_async(db=db, knowledge_id=db_knowledge.id)
                 api_logger.info(
                     "Knowledge base embedding changed, document reparse tasks dispatched",
                     extra={
@@ -650,7 +657,7 @@ async def _update_knowledge(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         api_logger.error(f"Knowledge base update failed: knowledge_id={knowledge_id} - {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -661,8 +668,8 @@ async def _update_knowledge(
 @router.delete("/{knowledge_id}", response_model=ApiResponse)
 async def delete_knowledge(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Soft-delete knowledge base
@@ -672,7 +679,7 @@ async def delete_knowledge(
     try:
         # 1. Check whether the knowledge base exists
         api_logger.debug(f"Check whether the knowledge base exists: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
 
         if not db_knowledge:
             api_logger.warning(f"The knowledge base does not exist or you do not have permission to access it: knowledge_id={knowledge_id}")
@@ -685,7 +692,7 @@ async def delete_knowledge(
         api_logger.debug(f"Perform a soft delete: {db_knowledge.name} (ID: {knowledge_id})")
         db_knowledge.status = 2
         db_knowledge.updated_at = utcnow_naive()
-        db.commit()
+        await db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
         return success(msg="The knowledge base has been successfully deleted")
     except Exception as e:
@@ -696,8 +703,8 @@ async def delete_knowledge(
 @router.get("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 async def get_knowledge_graph(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Retrieve knowledge_graph base information based on knowledge_id
@@ -707,7 +714,7 @@ async def get_knowledge_graph(
     try:
         # 1. Query knowledge base information from the database
         api_logger.debug(f"Query knowledge base: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
         if not db_knowledge:
             api_logger.warning(f"The knowledge base does not exist or access is denied: knowledge_id={knowledge_id}")
             raise HTTPException(
@@ -721,9 +728,19 @@ async def get_knowledge_graph(
         }
 
         obj = {"graph": {}, "mind_map": {}}
-        if not settings.docStoreConn.indexExist(search.index_name(str(db_knowledge.workspace_id)), str(db_knowledge.id)):
+        index_exists = await asyncio.to_thread(
+            settings.docStoreConn.indexExist,
+            search.index_name(str(db_knowledge.workspace_id)),
+            str(db_knowledge.id),
+        )
+        if not index_exists:
             return success(data=obj, msg="Successfully obtained knowledge graph information")
-        sres = settings.retriever.search(req, search.index_name(str(db_knowledge.workspace_id)), [str(db_knowledge.id)])
+        sres = await asyncio.to_thread(
+            settings.retriever.search,
+            req,
+            search.index_name(str(db_knowledge.workspace_id)),
+            [str(db_knowledge.id)],
+        )
         if not len(sres.ids):
             return success(data=obj, msg="Successfully obtained knowledge graph information")
 
@@ -753,8 +770,8 @@ async def get_knowledge_graph(
 @router.delete("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 async def delete_knowledge_graph(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     delete knowledge graph
@@ -764,7 +781,7 @@ async def delete_knowledge_graph(
     try:
         # 1. Check whether the knowledge base exists
         api_logger.debug(f"Check whether the knowledge base exists: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
 
         if not db_knowledge:
             api_logger.warning(f"The knowledge base does not exist or you do not have permission to access it: knowledge_id={knowledge_id}")
@@ -774,7 +791,12 @@ async def delete_knowledge_graph(
             )
 
         # 2. delete knowledge graph
-        settings.docStoreConn.delete({"knowledge_graph_kwd": ["graph", "subgraph", "entity", "relation"]}, search.index_name(str(db_knowledge.workspace_id)), str(db_knowledge.id))
+        await asyncio.to_thread(
+            settings.docStoreConn.delete,
+            {"knowledge_graph_kwd": ["graph", "subgraph", "entity", "relation"]},
+            search.index_name(str(db_knowledge.workspace_id)),
+            str(db_knowledge.id),
+        )
         api_logger.info(f"The knowledge graph has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
         return success(msg="The knowledge graph has been successfully deleted")
     except Exception as e:
@@ -785,8 +807,8 @@ async def delete_knowledge_graph(
 @router.post("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 async def rebuild_knowledge_graph(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     rebuild knowledge graph
@@ -796,7 +818,7 @@ async def rebuild_knowledge_graph(
     try:
         # 1. Check whether the knowledge base exists
         api_logger.debug(f"Check whether the knowledge base exists: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
 
         if not db_knowledge:
             api_logger.warning(
@@ -807,7 +829,12 @@ async def rebuild_knowledge_graph(
             )
 
         # 2. delete knowledge graph
-        settings.docStoreConn.delete({"knowledge_graph_kwd": ["graph", "subgraph", "entity", "relation"]}, search.index_name(str(db_knowledge.workspace_id)), str(db_knowledge.id))
+        await asyncio.to_thread(
+            settings.docStoreConn.delete,
+            {"knowledge_graph_kwd": ["graph", "subgraph", "entity", "relation"]},
+            search.index_name(str(db_knowledge.workspace_id)),
+            str(db_knowledge.id),
+        )
 
         # 3. build knowledge graph
         # from app.tasks import build_graphrag_for_kb
@@ -826,8 +853,8 @@ async def rebuild_knowledge_graph(
 async def check_yuque_auth(
         yuque_user_id: str,
         yuque_token: str,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     check yuque auth info
@@ -856,8 +883,8 @@ async def check_feishu_auth(
         feishu_app_id: str,
         feishu_app_secret: str,
         feishu_folder_token: str,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     check feishu auth info
@@ -884,8 +911,8 @@ async def check_feishu_auth(
 @router.post("/{knowledge_id}/sync", response_model=ApiResponse)
 async def sync_knowledge(
         knowledge_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     sync knowledge base information based on knowledge_id
@@ -895,7 +922,7 @@ async def sync_knowledge(
     try:
         # 1. Query knowledge base information from the database
         api_logger.debug(f"Query knowledge base: {knowledge_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=knowledge_id, current_user=current_user)
         if not db_knowledge:
             api_logger.warning(f"The knowledge base does not exist or access is denied: knowledge_id={knowledge_id}")
             raise HTTPException(

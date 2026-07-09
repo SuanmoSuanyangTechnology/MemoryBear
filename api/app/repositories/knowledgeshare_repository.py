@@ -1,4 +1,6 @@
 import uuid
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.models.knowledgeshare_model import KnowledgeShare
 from app.schemas import knowledgeshare_schema
@@ -55,6 +57,36 @@ def get_knowledgeshares_paginated(
         raise
 
 
+async def get_knowledgeshares_paginated_async(
+        db: AsyncSession,
+        filters: list,
+        page: int,
+        pagesize: int,
+        orderby: str = None,
+        desc: bool = False
+) -> tuple[int, list]:
+    """Async version of get_knowledgeshares_paginated."""
+    try:
+        stmt = select(KnowledgeShare)
+        for filter_cond in filters:
+            stmt = stmt.where(filter_cond)
+
+        total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        total = total_result.scalar_one()
+
+        if orderby:
+            order_attr = getattr(KnowledgeShare, orderby, None)
+            if order_attr is not None:
+                stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
+
+        result = await db.execute(stmt.offset((page - 1) * pagesize).limit(pagesize))
+        items = result.scalars().all()
+        return total, [knowledgeshare_schema.KnowledgeShare.model_validate(item) for item in items]
+    except Exception as e:
+        db_logger.error(f"Querying knowledge base sharing pagination failed (async): page={page}, pagesize={pagesize} - {str(e)}")
+        raise
+
+
 def get_source_kb_ids_by_target_kb_id(
         db: Session,
         filters: list
@@ -85,6 +117,22 @@ def get_source_kb_ids_by_target_kb_id(
         raise
 
 
+async def get_source_kb_ids_by_target_kb_id_async(
+        db: AsyncSession,
+        filters: list
+) -> list:
+    """Async version of get_source_kb_ids_by_target_kb_id."""
+    try:
+        stmt = select(KnowledgeShare.source_kb_id, KnowledgeShare.source_workspace_id)
+        for filter_cond in filters:
+            stmt = stmt.where(filter_cond)
+        result = await db.execute(stmt)
+        return result.all()
+    except Exception as e:
+        db_logger.error(f"Failed to query source KB IDs through knowledge share (async): {str(e)}")
+        raise
+
+
 def create_knowledgeshare(db: Session, knowledgeshare: knowledgeshare_schema.KnowledgeShareCreate) -> KnowledgeShare:
     db_logger.debug(f"Create a knowledge base sharing record: source_kb_id={knowledgeshare.source_kb_id}")
 
@@ -97,6 +145,26 @@ def create_knowledgeshare(db: Session, knowledgeshare: knowledgeshare_schema.Kno
     except Exception as e:
         db_logger.error(f"Failed to create a knowledge base sharing record: source_kb_id={knowledgeshare.source_kb_id} - {str(e)}")
         db.rollback()
+        raise
+
+
+async def create_knowledgeshare_async(
+        db: AsyncSession,
+        knowledgeshare: knowledgeshare_schema.KnowledgeShareCreate
+) -> KnowledgeShare:
+    """Async version of create_knowledgeshare."""
+    try:
+        db_knowledgeshare = KnowledgeShare(**knowledgeshare.model_dump())
+        db.add(db_knowledgeshare)
+        await db.commit()
+        await db.refresh(db_knowledgeshare)
+        return db_knowledgeshare
+    except Exception as e:
+        db_logger.error(
+            f"Failed to create a knowledge base sharing record (async): "
+            f"source_kb_id={knowledgeshare.source_kb_id} - {str(e)}"
+        )
+        await db.rollback()
         raise
 
 
@@ -120,6 +188,22 @@ def get_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID) -> Knowl
         raise
 
 
+async def get_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID) -> KnowledgeShare | None:
+    """Async version of get_knowledgeshare_by_id."""
+    try:
+        stmt = select(KnowledgeShare).where(
+            or_(
+                KnowledgeShare.id == knowledgeshare_id,
+                KnowledgeShare.target_kb_id == knowledgeshare_id,
+            )
+        )
+        result = await db.execute(stmt)
+        return result.scalars().first()
+    except Exception as e:
+        db_logger.error(f"Failed to query knowledge share by ID (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
+        raise
+
+
 def delete_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID):
     db_logger.debug(f"Delete knowledge base sharing record: knowledgeshare_id={knowledgeshare_id}")
 
@@ -139,4 +223,26 @@ def delete_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID):
     except Exception as e:
         db_logger.error(f"Failed to delete knowledge base sharing record: knowledgeshare_id={knowledgeshare_id} - {str(e)}")
         db.rollback()
+        raise
+
+
+async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID):
+    """Async version of delete_knowledgeshare_by_id."""
+    try:
+        result = await db.execute(
+            delete(KnowledgeShare).where(
+                or_(
+                    KnowledgeShare.id == knowledgeshare_id,
+                    KnowledgeShare.target_kb_id == knowledgeshare_id,
+                )
+            )
+        )
+        await db.commit()
+        if result.rowcount and result.rowcount > 0:
+            db_logger.info(f"knowledge base sharing record deleted successfully (async): (ID: {knowledgeshare_id})")
+        else:
+            db_logger.warning(f"The knowledge base sharing record does not exist, and cannot be deleted (async): knowledgeshare_id={knowledgeshare_id}")
+    except Exception as e:
+        db_logger.error(f"Failed to delete knowledge share record (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
+        await db.rollback()
         raise
