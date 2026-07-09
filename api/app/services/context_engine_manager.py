@@ -549,6 +549,8 @@ class ContextEngineManager:
                 for msg in cross_session_records
             ]
             provider_recent_messages.extend(self._strip_workflow_seq(recent_messages))
+            if not provider_recent_messages and not (state and state.get("summary_text")):
+                return None
             prepared = await provider.prepare_messages(
                 session_id=self._build_session_id(conversation_uuid, scope_key),
                 system_prompt=None,

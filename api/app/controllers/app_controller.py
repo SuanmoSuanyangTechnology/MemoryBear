@@ -1,11 +1,14 @@
 import uuid
 import io
 import json
+import time
+from dataclasses import dataclass
 from typing import Optional, Annotated
 
 import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
 from fastapi.responses import StreamingResponse, Response
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 
@@ -13,8 +16,8 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success, fail
-from app.db import get_db, get_db_context
-from app.dependencies import get_current_user, cur_workspace_access_guard
+from app.db import get_db, get_db_context, get_async_db_context
+from app.dependencies import get_current_user, get_current_user_async, cur_workspace_access_guard
 from app.models import User
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
@@ -36,6 +39,237 @@ from app.core.quota_stub import check_app_quota
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
+
+
+@dataclass(frozen=True)
+class _DraftRunAppSnapshot:
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    type: str
+    current_release_id: uuid.UUID | None
+
+
+async def _load_draft_run_app_snapshot(
+        app_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
+) -> _DraftRunAppSnapshot:
+    from app.models import App, AppShare
+
+    async with get_async_db_context() as db:
+        app = await db.scalar(
+            select(App).where(App.id == app_id).limit(1)
+        )
+        if not app:
+            raise BusinessException("应用不存在", BizCode.NOT_FOUND)
+
+        if workspace_id is not None and app.workspace_id != workspace_id:
+            share_exists = await db.scalar(
+                select(AppShare.id).where(
+                    AppShare.source_app_id == app.id,
+                    AppShare.target_workspace_id == workspace_id,
+                    AppShare.is_active.is_(True),
+                ).limit(1)
+            )
+            if not share_exists:
+                raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
+
+        return _DraftRunAppSnapshot(
+            id=app.id,
+            workspace_id=app.workspace_id,
+            type=app.type,
+            current_release_id=app.current_release_id,
+        )
+
+
+async def _get_or_create_draft_end_user_id(
+        *,
+        app_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        other_id: str,
+) -> str:
+    from app.models import EndUser, EndUserInfo
+
+    async with get_async_db_context() as db:
+        existing_end_user = await db.scalar(
+            select(EndUser).where(
+                EndUser.workspace_id == workspace_id,
+                EndUser.other_id == other_id,
+                EndUser.is_active.is_(True),
+            ).order_by(EndUser.created_at.asc()).limit(1)
+        )
+        if existing_end_user and existing_end_user.app_id == app_id:
+            return str(existing_end_user.id)
+
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"{workspace_id}|{other_id}"},
+        )
+        end_user = await db.scalar(
+            select(EndUser).where(
+                EndUser.workspace_id == workspace_id,
+                EndUser.other_id == other_id,
+                EndUser.is_active.is_(True),
+            ).order_by(EndUser.created_at.asc()).limit(1)
+        )
+        if end_user:
+            end_user.app_id = app_id
+            await db.commit()
+            return str(end_user.id)
+
+        end_user = EndUser(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            other_id=other_id,
+        )
+        db.add(end_user)
+        await db.flush()
+        db.add(
+            EndUserInfo(
+                end_user_id=end_user.id,
+                other_name="",
+                aliases=[],
+                meta_data={},
+            )
+        )
+        await db.commit()
+        return str(end_user.id)
+
+
+async def _ensure_workflow_conversation_ready(
+        *,
+        conversation_id: Optional[str],
+        app_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+) -> Optional[str]:
+    if not conversation_id:
+        return conversation_id
+
+    from app.models import AppShare, Conversation
+
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except Exception as exc:
+        raise BusinessException(
+            f"会话不存在: {conversation_id}",
+            BizCode.NOT_FOUND,
+            cause=exc,
+        ) from exc
+
+    async with get_async_db_context() as db:
+        conversation = await db.get(Conversation, conv_uuid)
+        if not conversation:
+            raise BusinessException(f"会话不存在: {conversation_id}", BizCode.NOT_FOUND)
+
+        if conversation.workspace_id != workspace_id:
+            share_exists = await db.scalar(
+                select(AppShare.id).where(
+                    AppShare.source_app_id == app_id,
+                    AppShare.target_workspace_id == workspace_id,
+                    AppShare.is_active.is_(True),
+                ).limit(1)
+            )
+            same_app = conversation.app_id == app_id
+            if not share_exists and not same_app:
+                raise BusinessException("会话不属于当前工作空间", BizCode.PERMISSION_DENIED)
+
+    return conversation_id
+
+
+async def _load_workflow_runtime_config(
+        *,
+        app_id: uuid.UUID,
+        app_workspace_id: uuid.UUID,
+        current_release_id: uuid.UUID | None,
+        workspace_id: uuid.UUID | None,
+) -> tuple[object, bool]:
+    from app.core.utils.datetime_utils import utcnow_naive
+    from app.core.workflow.validator import validate_workflow_config
+    from app.models import AppRelease, WorkflowConfig
+
+    is_shared = app_workspace_id != workspace_id
+    workflow_service = WorkflowService()
+
+    if is_shared:
+        if not current_release_id:
+            raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+
+        async with get_async_db_context() as db:
+            release = await db.get(AppRelease, current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            real_config_id = await db.scalar(
+                select(WorkflowConfig.id).where(
+                    WorkflowConfig.app_id == release.app_id,
+                    WorkflowConfig.is_active.is_(True),
+                ).limit(1)
+            )
+            cfg = release.config or {}
+            now = release.created_at or utcnow_naive()
+
+        return WorkflowConfig(
+            id=real_config_id or uuid.uuid4(),
+            app_id=app_id,
+            nodes=cfg.get("nodes", []),
+            edges=cfg.get("edges", []),
+            variables=cfg.get("variables", []),
+            environment_variables=cfg.get("environment_variables") or [],
+            execution_config=cfg.get("execution_config", {}),
+            triggers=cfg.get("triggers", []),
+            features=cfg.get("features", {}),
+            workflow_type=workflow_service._normalize_workflow_type(cfg.get("workflow_type")),
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        ), True
+
+    async with get_async_db_context() as db:
+        config = await db.scalar(
+            select(WorkflowConfig).where(
+                WorkflowConfig.app_id == app_id,
+                WorkflowConfig.is_active.is_(True),
+            ).limit(1)
+        )
+        if not config:
+            raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
+
+        config_id = config.id
+        config_app_id = config.app_id
+        config_is_active = config.is_active
+        config_created_at = config.created_at
+        config_updated_at = config.updated_at
+        config_dict = workflow_service._prepare_workflow_config_dict(
+            nodes=config.nodes,
+            edges=config.edges,
+            variables=config.variables,
+            environment_variables=config.environment_variables,
+            execution_config=config.execution_config,
+            features=config.features,
+            triggers=config.triggers,
+            workflow_type=config.workflow_type,
+        )
+
+    is_valid, errors = validate_workflow_config(config_dict, for_publish=False)
+    if not is_valid:
+        raise BusinessException(
+            code=BizCode.INVALID_PARAMETER,
+            message=f"工作流配置无效: {'; '.join(errors)}",
+        )
+
+    return WorkflowConfig(
+        id=config_id,
+        app_id=config_app_id,
+        nodes=config_dict["nodes"],
+        edges=config_dict["edges"],
+        variables=config_dict["variables"],
+        environment_variables=config_dict["environment_variables"],
+        execution_config=config_dict["execution_config"],
+        features=config_dict["features"],
+        triggers=config_dict["triggers"],
+        workflow_type=config_dict["workflow_type"],
+        is_active=config_is_active,
+        created_at=config_created_at,
+        updated_at=config_updated_at,
+    ), False
 
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
@@ -563,9 +797,7 @@ def remove_shared_app(
 async def draft_run(
         app_id: uuid.UUID,
         payload: app_schema.DraftRunRequest,
-        db: Session = Depends(get_db),
-        current_user=Depends(get_current_user),
-        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None
+        current_user=Depends(get_current_user_async),
 ):
     """
     试运行 Agent，使用当前的草稿配置（未发布的配置）
@@ -574,283 +806,85 @@ async def draft_run(
     - 使用当前的 AgentConfig 配置
     - 支持流式和非流式返回
     """
-    workspace_id = current_user.current_workspace_id
+    draft_run_started_at = time.perf_counter()
+    draft_run_last_checkpoint_at = draft_run_started_at
 
-    # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
-    if storage_type is None:
-        storage_type = 'neo4j'
-    user_rag_memory_id = ''
-    if workspace_id:
-
-        knowledge = knowledge_repository.get_knowledge_by_name(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id
+    def _log_draft_run_timing(stage: str, **extra) -> None:
+        nonlocal draft_run_last_checkpoint_at
+        now = time.perf_counter()
+        payload_items = {
+            "stage": stage,
+            "app_id": str(app_id),
+            "elapsed_ms": round((now - draft_run_started_at) * 1000, 2),
+            "step_ms": round((now - draft_run_last_checkpoint_at) * 1000, 2),
+        }
+        payload_items.update(extra)
+        logger.info(
+            "[TIMING] app_controller.draft_run %s",
+            " ".join(f"{k}={v}" for k, v in payload_items.items()),
         )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
+        draft_run_last_checkpoint_at = now
 
-    # 提前验证和准备（在流式响应开始前完成）
-    from app.services.app_service import AppService
-    from app.services.multi_agent_service import MultiAgentService
-    from app.models import AgentConfig, ModelConfig, AppRelease
-    from sqlalchemy import select
-    from app.services.draft_run_service import AgentRunService
+    workspace_id = current_user.current_workspace_id
+    current_user_id = str(current_user.id)
+    _log_draft_run_timing(
+        "entered",
+        workspace_id=str(workspace_id) if workspace_id else None,
+        has_payload_user_id=payload.user_id is not None,
+        stream=payload.stream,
+    )
+    storage_type: str | None = None
+    user_rag_memory_id = ""
 
-    service = AppService(db)
-    draft_service = AgentRunService(db)
-
-    # 1. 验证应用
-    app = service._get_app_or_404(app_id)
-    if app.type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+    app = await _load_draft_run_app_snapshot(app_id, workspace_id)
+    app_type = AppType(app.type)
+    _log_draft_run_timing("app_loaded", app_type=str(app_type), app_workspace_id=str(app.workspace_id))
+    if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         raise BusinessException("只有 Agent , Workflow 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-    if app.type != AppType.PURE_WORKFLOW and not payload.message:
+    if app_type != AppType.PURE_WORKFLOW and not payload.message:
         raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
 
-    # 只读操作，允许访问共享应用
-    service._validate_app_accessible(app, workspace_id)
+    _log_draft_run_timing("app_access_validated")
 
     if payload.user_id is None:
-        # 先获取 app 的 workspace_id
-        end_user_repo = EndUserRepository(db)
-        new_end_user = end_user_repo.get_or_create_end_user(
+        payload.user_id = await _get_or_create_draft_end_user_id(
             app_id=app_id,
             workspace_id=app.workspace_id,
-            other_id=str(current_user.id),
+            other_id=current_user_id,
         )
-        payload.user_id = str(new_end_user.id)
+    _log_draft_run_timing("end_user_ready", has_payload_user_id=payload.user_id is not None)
 
-    # pure_workflow 不强制会话；其他类型仍沿用会话逻辑。
-    # AGENT 新会话例外：不在控制器层预创建，交由 run/run_stream 的 _ensure_conversation
-    # 创建会话并写入开场白（与 draft/run/compare 路径一致，避免预创建导致 run() 内
-    # is_new_conversation=False 而跳过开场白）；已有 conversation_id 时仍做校验。
-    is_agent_new_conversation = app.type == AppType.AGENT and not payload.conversation_id
-    if not is_agent_new_conversation and (app.type != AppType.PURE_WORKFLOW or payload.conversation_id):
-        conversation_id = await draft_service._ensure_conversation(
-            conversation_id=payload.conversation_id,
+    is_agent_new_conversation = app_type == AppType.AGENT and not payload.conversation_id
+    should_prepare_conversation = (
+        not is_agent_new_conversation
+        and (payload.conversation_id or app_type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW))
+    )
+
+    if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        if should_prepare_conversation:
+            payload.conversation_id = await _ensure_workflow_conversation_ready(
+                conversation_id=payload.conversation_id,
+                app_id=app_id,
+                workspace_id=workspace_id,
+            )
+        _log_draft_run_timing(
+            "conversation_ready",
+            has_conversation_id=bool(payload.conversation_id),
+            is_agent_new_conversation=is_agent_new_conversation,
+        )
+
+        config, is_shared = await _load_workflow_runtime_config(
             app_id=app_id,
+            app_workspace_id=app.workspace_id,
+            current_release_id=app.current_release_id,
             workspace_id=workspace_id,
-            user_id=payload.user_id
         )
-        payload.conversation_id = conversation_id
-
-    if app.type == AppType.AGENT:
-        service._check_agent_config(app_id)
-
-        # 2. 获取 Agent 配置
-        # 共享应用：从最新发布版本读配置快照，而非草稿
-        is_shared = app.workspace_id != workspace_id
-        if is_shared:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = db.get(AppRelease, app.current_release_id)
-            if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
-            agent_cfg = service._agent_config_from_release(release)
-            model_config = db.get(ModelConfig, release.default_model_config_id) if release.default_model_config_id else None
-        else:
-            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-            agent_cfg = db.scalars(stmt).first()
-            if not agent_cfg:
-                raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
-
-            # 3. 获取模型配置
-            model_config = None
-            if agent_cfg.default_model_config_id:
-                model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
-                if not model_config:
-                    from app.core.exceptions import ResourceNotFoundException
-                    raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
-
-        # 流式返回
-        if payload.stream:
-            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
-            # 提前提取 current_user 的值，避免闭包持有 ORM 对象引用导致 db 连接不释放
-            _current_user_id = str(current_user.id)
-            async def event_generator():
-                with get_db_context() as stream_db:
-                    from app.services.draft_run_service import AgentRunService as _AgentRunService
-                    _draft_service = _AgentRunService(stream_db)
-                    async for event in _draft_service.run_stream(
-                            agent_config=agent_cfg,
-                            model_config=model_config,
-                            message=payload.message,
-                            workspace_id=workspace_id,
-                            conversation_id=payload.conversation_id,
-                            user_id=payload.user_id or _current_user_id,
-                            variables=payload.variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            files=payload.files,
-                            source=source
-                    ):
-                        yield event
-
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
-            )
-
-        # 非流式返回
-        logger.debug(
-            "开始非流式试运行",
-            extra={
-                "app_id": str(app_id),
-                "message_length": len(payload.message or ""),
-                "has_conversation_id": bool(payload.conversation_id),
-                "has_variables": bool(payload.variables),
-                "has_files": bool(payload.files)
-            }
+        _log_draft_run_timing(
+            "workflow_config_ready",
+            is_shared=is_shared,
+            config_id=str(config.id) if getattr(config, "id", None) else None,
         )
-
-        from app.services.draft_run_service import AgentRunService
-        draft_service = AgentRunService(db)
-        source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
-        result = await draft_service.run(
-            agent_config=agent_cfg,
-            model_config=model_config,
-            message=payload.message,
-            workspace_id=workspace_id,
-            conversation_id=payload.conversation_id,
-            user_id=payload.user_id or str(current_user.id),
-            variables=payload.variables,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            files=payload.files,  # 传递多模态文件
-            source=source
-        )
-
-        logger.debug(
-            "试运行返回结果",
-            extra={
-                "result_type": str(type(result)),
-                "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict"
-            }
-        )
-
-        # 验证结果
-        try:
-            validated_result = app_schema.DraftRunResponse.model_validate(result)
-            logger.debug("结果验证成功")
-            return success(data=validated_result)
-        except Exception as e:
-            logger.error(
-                "结果验证失败",
-                extra={
-                    "error": str(e),
-                    "error_type": str(type(e)),
-                    "result": str(result)[:200]
-                }
-            )
-            raise
-    elif app.type == AppType.MULTI_AGENT:
-        # 1. 检查多智能体配置完整性
-        service._check_multi_agent_config(app_id)
-
-        # 2. 构建多智能体运行请求
-        from app.schemas.multi_agent_schema import MultiAgentRunRequest
-
-        multi_agent_request = MultiAgentRunRequest(
-            message=payload.message,
-            conversation_id=payload.conversation_id,
-            user_id=payload.user_id or str(current_user.id),
-            variables=payload.variables or {},
-            use_llm_routing=True  # 默认启用 LLM 路由
-        )
-
-        # 3. 流式返回
-        if payload.stream:
-            logger.debug(
-                "开始多智能体流式试运行",
-                extra={
-                    "app_id": str(app_id),
-                    "message_length": len(payload.message or ""),
-                    "has_conversation_id": bool(payload.conversation_id)
-                }
-            )
-
-            async def event_generator():
-                """多智能体流式事件生成器"""
-                with get_db_context() as stream_db:
-                    from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
-                    multiservice = _MultiAgentService(stream_db)
-
-                    # 调用多智能体服务的流式方法
-                    async for event in multiservice.run_stream(
-                            app_id=app_id,
-                            request=multi_agent_request,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id
-
-                    ):
-                        yield event
-
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
-            )
-
-        # 4. 非流式返回
-        logger.debug(
-            "开始多智能体非流式试运行",
-            extra={
-                "app_id": str(app_id),
-                "message_length": len(payload.message or ""),
-                "has_conversation_id": bool(payload.conversation_id)
-            }
-        )
-
-        multiservice = MultiAgentService(db)
-        result = await multiservice.run(app_id, multi_agent_request)
-
-        logger.debug(
-            "多智能体试运行返回结果",
-            extra={
-                "result_type": str(type(result)),
-                "has_response": "response" in result if isinstance(result, dict) else False
-            }
-        )
-
-        return success(
-            data=result,
-            msg="多 Agent 任务执行成功"
-        )
-    elif app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):  # 工作流 / 对话流
-        # 共享应用：从最新发布版本读配置快照，而非草稿
-        is_shared = app.workspace_id != workspace_id
-        if is_shared:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = db.get(AppRelease, app.current_release_id)
-            if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
-            config = service._workflow_config_from_release(release)
-        else:
-            config = workflow_service.check_config(app_id)
-            # check_config 完成后立即将 config 从 session 脱离，并关闭连接归还连接池
-            # 避免 workflow_service.db 在整个流式期间处于 idle in transaction 状态
-            _config_id = config.id
-            from sqlalchemy.orm import make_transient
-            make_transient(config)
-            config.id = _config_id
-            workflow_service.db.close()
-        # 3. 流式返回
         if payload.stream:
             logger.debug(
                 "开始工作流流式试运行",
@@ -862,30 +896,24 @@ async def draft_run(
             )
 
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+            _log_draft_run_timing("workflow_stream_start")
+
             async def event_generator():
-                """工作流事件生成器
-                
-                将事件转换为标准 SSE 格式：
-                event: <event_type>
-                data: <json_data>
-                """
                 import json
-                with get_db_context() as stream_db:
-                    from app.services.workflow_service import WorkflowService as _WorkflowService
-                    _wf_service = _WorkflowService(stream_db)
-                    # 调用工作流服务的流式方法
-                    async for event in _wf_service.run_stream(
-                            app_id=app_id,
-                            payload=payload,
-                            config=config,
-                            workspace_id=workspace_id,
-                            source=source,
-                            trigger_payload=payload.trigger_payload
-                    ):
-                        event_type = event.get("event", "message")
-                        event_data = event.get("data", {})
-                        sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                        yield sse_message
+                from app.services.workflow_service import WorkflowService as _WorkflowService
+                _wf_service = _WorkflowService()
+                async for event in _wf_service.run_stream(
+                        app_id=app_id,
+                        payload=payload,
+                        config=config,
+                        workspace_id=workspace_id,
+                        source=source,
+                        trigger_payload=payload.trigger_payload
+                ):
+                    event_type = event.get("event", "message")
+                    event_data = event.get("data", {})
+                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                    yield sse_message
 
             return StreamingResponse(
                 event_generator(),
@@ -897,35 +925,288 @@ async def draft_run(
                 }
             )
 
-        # 4. 非流式返回
-        logger.debug(
-            "开始非流式试运行",
-            extra={
-                "app_id": str(app_id),
-                "message_length": len(payload.message or ""),
-                "has_conversation_id": bool(payload.conversation_id)
-            }
+        db_ctx = get_db_context()
+        db = db_ctx.__enter__()
+        workflow_service = WorkflowService(db)
+        try:
+            logger.debug(
+                "开始非流式试运行",
+                extra={
+                    "app_id": str(app_id),
+                    "message_length": len(payload.message or ""),
+                    "has_conversation_id": bool(payload.conversation_id)
+                }
+            )
+
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+            result = await workflow_service.run(
+                app_id,
+                payload,
+                config,
+                workspace_id,
+                source=source,
+                trigger_payload=payload.trigger_payload,
+            )
+
+            logger.debug(
+                "工作流试运行返回结果",
+                extra={
+                    "result_type": str(type(result)),
+                    "has_response": "response" in result if isinstance(result, dict) else False
+                }
+            )
+            return success(
+                data=result,
+                msg="工作流任务执行成功"
+            )
+        finally:
+            db_ctx.__exit__(None, None, None)
+
+    db_ctx = get_db_context()
+    db = db_ctx.__enter__()
+    workflow_service = WorkflowService(db)
+
+    try:
+        def _prepare_memory_context() -> None:
+            nonlocal storage_type, user_rag_memory_id
+            if storage_type is not None:
+                return
+            storage_type = workspace_service.get_workspace_storage_type(
+                db=db,
+                workspace_id=workspace_id,
+                user=current_user
+            )
+            if storage_type is None:
+                storage_type = "neo4j"
+            _log_draft_run_timing("storage_type_ready", storage_type=storage_type)
+            if workspace_id:
+                knowledge = knowledge_repository.get_knowledge_by_name(
+                    db=db,
+                    name="USER_RAG_MERORY",
+                    workspace_id=workspace_id
+                )
+                if knowledge:
+                    user_rag_memory_id = str(knowledge.id)
+            _log_draft_run_timing(
+                "user_rag_memory_ready",
+                has_user_rag_memory_id=bool(user_rag_memory_id),
+            )
+
+        # 提前验证和准备（在流式响应开始前完成）
+        from app.services.app_service import AppService
+        from app.services.multi_agent_service import MultiAgentService
+        from app.models import AgentConfig, ModelConfig, AppRelease
+        from app.services.draft_run_service import AgentRunService
+
+        service = AppService(db)
+        draft_service = AgentRunService(db)
+
+        if should_prepare_conversation:
+            conversation_id = await draft_service._ensure_conversation(
+                conversation_id=payload.conversation_id,
+                app_id=app_id,
+                workspace_id=workspace_id,
+                user_id=payload.user_id
+            )
+            payload.conversation_id = conversation_id
+        _log_draft_run_timing(
+            "conversation_ready",
+            has_conversation_id=bool(payload.conversation_id),
+            is_agent_new_conversation=is_agent_new_conversation,
         )
 
-        source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
-        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id, source=source, trigger_payload=payload.trigger_payload)
+        if app_type == AppType.AGENT:
+            _prepare_memory_context()
+            service._check_agent_config(app_id)
 
-        logger.debug(
-            "工作流试运行返回结果",
-            extra={
-                "result_type": str(type(result)),
-                "has_response": "response" in result if isinstance(result, dict) else False
-            }
-        )
-        return success(
-            data=result,
-            msg="工作流任务执行成功"
-        )
-    else:
-        return fail(
-            msg="未知应用类型",
-            code=422
-        )
+            # 2. 获取 Agent 配置
+            # 共享应用：从最新发布版本读配置快照，而非草稿
+            is_shared = app.workspace_id != workspace_id
+            if is_shared:
+                if not app.current_release_id:
+                    raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                release = db.get(AppRelease, app.current_release_id)
+                if not release:
+                    raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                agent_cfg = service._agent_config_from_release(release)
+                model_config = db.get(ModelConfig, release.default_model_config_id) if release.default_model_config_id else None
+            else:
+                stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
+                agent_cfg = db.scalars(stmt).first()
+                if not agent_cfg:
+                    raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
+
+                # 3. 获取模型配置
+                model_config = None
+                if agent_cfg.default_model_config_id:
+                    model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
+                    if not model_config:
+                        from app.core.exceptions import ResourceNotFoundException
+                        raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
+
+            # 流式返回
+            if payload.stream:
+                source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+
+                async def event_generator():
+                    with get_db_context() as stream_db:
+                        from app.services.draft_run_service import AgentRunService as _AgentRunService
+                        _draft_service = _AgentRunService(stream_db)
+                        async for event in _draft_service.run_stream(
+                                agent_config=agent_cfg,
+                                model_config=model_config,
+                                message=payload.message,
+                                workspace_id=workspace_id,
+                                conversation_id=payload.conversation_id,
+                                user_id=payload.user_id or current_user_id,
+                                variables=payload.variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                files=payload.files,
+                                source=source
+                        ):
+                            yield event
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no"
+                    }
+                )
+
+            # 非流式返回
+            logger.debug(
+                "开始非流式试运行",
+                extra={
+                    "app_id": str(app_id),
+                    "message_length": len(payload.message or ""),
+                    "has_conversation_id": bool(payload.conversation_id),
+                    "has_variables": bool(payload.variables),
+                    "has_files": bool(payload.files)
+                }
+            )
+
+            from app.services.draft_run_service import AgentRunService
+            draft_service = AgentRunService(db)
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+            result = await draft_service.run(
+                agent_config=agent_cfg,
+                model_config=model_config,
+                message=payload.message,
+                workspace_id=workspace_id,
+                conversation_id=payload.conversation_id,
+                user_id=payload.user_id or current_user_id,
+                variables=payload.variables,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                files=payload.files,  # 传递多模态文件
+                source=source
+            )
+
+            logger.debug(
+                "试运行返回结果",
+                extra={
+                    "result_type": str(type(result)),
+                    "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict"
+                }
+            )
+
+            try:
+                validated_result = app_schema.DraftRunResponse.model_validate(result)
+                logger.debug("结果验证成功")
+                return success(data=validated_result)
+            except Exception as e:
+                logger.error(
+                    "结果验证失败",
+                    extra={
+                        "error": str(e),
+                        "error_type": str(type(e)),
+                        "result": str(result)[:200]
+                    }
+                )
+                raise
+
+        elif app_type == AppType.MULTI_AGENT:
+            _prepare_memory_context()
+            service._check_multi_agent_config(app_id)
+
+            from app.schemas.multi_agent_schema import MultiAgentRunRequest
+
+            multi_agent_request = MultiAgentRunRequest(
+                message=payload.message,
+                conversation_id=payload.conversation_id,
+                user_id=payload.user_id or current_user_id,
+                variables=payload.variables or {},
+                use_llm_routing=True
+            )
+
+            if payload.stream:
+                logger.debug(
+                    "开始多智能体流式试运行",
+                    extra={
+                        "app_id": str(app_id),
+                        "message_length": len(payload.message or ""),
+                        "has_conversation_id": bool(payload.conversation_id)
+                    }
+                )
+
+                async def event_generator():
+                    with get_db_context() as stream_db:
+                        from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
+                        multiservice = _MultiAgentService(stream_db)
+                        async for event in multiservice.run_stream(
+                                app_id=app_id,
+                                request=multi_agent_request,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id
+                        ):
+                            yield event
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no"
+                    }
+                )
+
+            logger.debug(
+                "开始多智能体非流式试运行",
+                extra={
+                    "app_id": str(app_id),
+                    "message_length": len(payload.message or ""),
+                    "has_conversation_id": bool(payload.conversation_id)
+                }
+            )
+
+            multiservice = MultiAgentService(db)
+            result = await multiservice.run(app_id, multi_agent_request)
+
+            logger.debug(
+                "多智能体试运行返回结果",
+                extra={
+                    "result_type": str(type(result)),
+                    "has_response": "response" in result if isinstance(result, dict) else False
+                }
+            )
+
+            return success(
+                data=result,
+                msg="多 Agent 任务执行成功"
+            )
+
+        else:
+            return fail(
+                msg="未知应用类型",
+                code=422
+            )
+    finally:
+        db_ctx.__exit__(None, None, None)
 
 
 @router.post("/{app_id}/draft/run/compare", summary="多模型对比试运行")

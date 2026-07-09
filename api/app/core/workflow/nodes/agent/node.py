@@ -16,6 +16,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
+from sqlalchemy import select
 
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.error_codes import BizCode
@@ -27,8 +28,10 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, validate_llm_param_constraints
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read, get_db_context
+from app.db import get_async_db_context, get_db_read, get_db_context
 from app.models import ModelCapability, ModelType
+from app.models.tool_model import ToolType
+from app.models.workspace_model import Workspace
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
@@ -92,13 +95,38 @@ class AgentNode(BaseNode):
                 tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, workspace_id)
         return tenant_id
 
-    def _load_tools(self, variable_pool: VariablePool) -> list:
+    async def _resolve_tenant_id_async(self, variable_pool: VariablePool) -> Any:
+        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        if tenant_id:
+            return tenant_id
+
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        if not workspace_id:
+            return None
+
+        async with get_async_db_context() as db:
+            return (
+                await db.execute(
+                    select(Workspace.tenant_id).where(Workspace.id == workspace_id)
+                )
+            ).scalar_one_or_none()
+
+    def _load_single_tool_sync(self, selector: Any, tenant_id: Any, user_id: Any, workspace_id: Any):
+        with get_db_read() as db:
+            tool_service = ToolService(db)
+            tool_instance = tool_service.get_tool_instance(selector.tool_id, tenant_id)
+            if not tool_instance:
+                return None
+            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+            return tool_instance.to_langchain_tool(selector.operation)
+
+    async def _load_tools_async(self, variable_pool: VariablePool) -> list:
         """根据配置加载工具并转换为 LangChain BaseTool 列表"""
         selectors = [s for s in (self.typed_config.tools or []) if s.enabled]
         if not selectors:
             return []
 
-        tenant_id = self._resolve_tenant_id(variable_pool)
+        tenant_id = await self._resolve_tenant_id_async(variable_pool)
         if not tenant_id:
             logger.warning(f"节点 {self.node_id}: 缺少租户 ID，无法加载工具，Agent 将仅使用推理能力")
             return []
@@ -107,23 +135,92 @@ class AgentNode(BaseNode):
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
 
         langchain_tools = []
-        with get_db_read() as db:
+        async with get_async_db_context() as db:
             tool_service = ToolService(db)
             for selector in selectors:
                 try:
-                    tool_instance = tool_service.get_tool_instance(selector.tool_id, tenant_id)
-                    if not tool_instance:
+                    tool_config = await tool_service.get_tool_config_async(str(selector.tool_id), tenant_id)
+                    if not tool_config:
                         logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
                         continue
-                    tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
-                    langchain_tools.append(
-                        tool_instance.to_langchain_tool(selector.operation)
-                    )
+
+                    if tool_config.tool_type == ToolType.WORKFLOW.value:
+                        # ponytail: workflow tools still bind sync WorkflowService; keep fallback isolated off the async hot path.
+                        langchain_tool = await asyncio.to_thread(
+                            self._load_single_tool_sync,
+                            selector,
+                            tenant_id,
+                            user_id,
+                            workspace_id,
+                        )
+                    else:
+                        tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
+                        if not tool_instance:
+                            logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
+                            continue
+                        tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+                        langchain_tool = tool_instance.to_langchain_tool(selector.operation)
+
+                    if langchain_tool:
+                        langchain_tools.append(langchain_tool)
                 except Exception as e:
                     logger.error(f"节点 {self.node_id}: 加载工具 {selector.tool_id} 失败: {e}")
 
         logger.debug(f"节点 {self.node_id} 加载了 {len(langchain_tools)} 个工具")
         return langchain_tools
+
+    def _load_model_info_sync(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
+        with get_db_read() as db:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+            if not config:
+                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
+
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
+            return ModelInfo(
+                model_name=api_config.model_name,
+                model_type=ModelType(config.type),
+                api_key=api_config.api_key,
+                api_base=api_config.api_base,
+                provider=api_config.provider,
+                is_omni=api_config.is_omni,
+                capability=api_config.capability,
+            )
+
+    async def _load_model_info_async(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
+        return await asyncio.to_thread(self._load_model_info_sync, model_id, variable_pool)
+
+    async def _prepare_history_prefix_async(
+            self,
+            *,
+            features: dict[str, Any],
+            conversation_id: str,
+            message: str,
+            workflow_messages: list[dict[str, Any]],
+            window_size: int,
+            model_config_id: str,
+    ) -> list[dict[str, Any]] | None:
+        def _run() -> list[dict[str, Any]] | None:
+            with get_db_context() as db:
+                return asyncio.run(
+                    ContextEngineManager(db).prepare_workflow_history_prefix(
+                        features=features,
+                        conversation_id=conversation_id,
+                        scope_key=f"node:{self.node_id}",
+                        current_input=message,
+                        workflow_messages=workflow_messages,
+                        window_size=window_size,
+                        model_config_id=model_config_id,
+                    )
+                )
+
+        return await asyncio.to_thread(_run)
+
+    async def _run_after_workflow_turn_async(self, **kwargs: Any) -> None:
+        def _run() -> None:
+            with get_db_context() as db:
+                asyncio.run(ContextEngineManager(db).after_workflow_turn(**kwargs))
+
+        await asyncio.to_thread(_run)
 
     def _build_history(self, state: WorkflowState) -> list[dict[str, str]]:
         """构建历史消息（启用 memory 时）"""
@@ -240,22 +337,8 @@ class AgentNode(BaseNode):
         self._rendered_context = context
 
         # 2. 获取模型配置
-        with get_db_read() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            model_info = ModelInfo(
-                model_name=api_config.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_config.api_key,
-                api_base=api_config.api_base,
-                provider=api_config.provider,
-                is_omni=api_config.is_omni,
-                capability=api_config.capability
-            )
-            self.model_info = model_info
+        model_info = await self._load_model_info_async(model_id, variable_pool)
+        self.model_info = model_info
 
         param_warnings = validate_llm_param_constraints(
             config=params,
@@ -272,24 +355,21 @@ class AgentNode(BaseNode):
             self._param_warnings.extend(param_warnings)
 
         # 3. 加载工具
-        langchain_tools = self._load_tools(variable_pool)
+        langchain_tools = await self._load_tools_async(variable_pool)
 
         # 4. 构建历史
         history = self._build_history(state)
         if self.typed_config.memory.enable:
             conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
             if conversation_id:
-                with get_db_context() as db:
-                    context_engine_manager = ContextEngineManager(db)
-                    history_prefix = await context_engine_manager.prepare_workflow_history_prefix(
-                        features=self.workflow_config.get("features", {}),
-                        conversation_id=conversation_id,
-                        scope_key=f"node:{self.node_id}",
-                        current_input=message,
-                        workflow_messages=state.get("messages", []),
-                        window_size=self.typed_config.memory.window_size,
-                        model_config_id=model_id,
-                    )
+                history_prefix = await self._prepare_history_prefix_async(
+                    features=self.workflow_config.get("features", {}),
+                    conversation_id=conversation_id,
+                    message=message,
+                    workflow_messages=state.get("messages", []),
+                    window_size=self.typed_config.memory.window_size,
+                    model_config_id=model_id,
+                )
                 if history_prefix is not None:
                     system_prompt, history = self._merge_context_prefix_into_agent(system_prompt, history_prefix)
 
@@ -412,10 +492,7 @@ class AgentNode(BaseNode):
                         window_size=self.typed_config.memory.window_size,
                         model_config_id=self.typed_config.model.model_id,
                     )
-                    async def _run_after_workflow_turn(kwargs=_kwargs):
-                        with get_db_context() as db:
-                            await ContextEngineManager(db).after_workflow_turn(**kwargs)
-                    asyncio.create_task(_run_after_workflow_turn())
+                    asyncio.create_task(self._run_after_workflow_turn_async(**_kwargs))
 
             return {
                 "llm_result": AIMessage(
@@ -509,10 +586,7 @@ class AgentNode(BaseNode):
                         window_size=self.typed_config.memory.window_size,
                         model_config_id=self.typed_config.model.model_id,
                     )
-                    async def _run_after_workflow_turn(kwargs=_kwargs):
-                        with get_db_context() as db:
-                            await ContextEngineManager(db).after_workflow_turn(**kwargs)
-                    asyncio.create_task(_run_after_workflow_turn())
+                    asyncio.create_task(self._run_after_workflow_turn_async(**_kwargs))
 
             final_message = AIMessage(
                 content=full_response,

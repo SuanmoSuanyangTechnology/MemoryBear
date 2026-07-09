@@ -1,4 +1,5 @@
 import os
+import logging
 from contextlib import contextmanager, asynccontextmanager
 from typing import Generator, AsyncGenerator
 from sqlalchemy import create_engine, text
@@ -24,6 +25,7 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+logger = logging.getLogger(__name__)
 
 
 # Dependency to get a DB session (FastAPI Depends 专用)
@@ -101,8 +103,12 @@ async def get_async_db_context() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        finally:
+        except Exception:
             await session.rollback()
+            raise
+        finally:
+            if session.in_transaction():
+                await session.rollback()
 
 
 # ==================== 连接池监控 ====================
@@ -117,5 +123,19 @@ def get_pool_status():
         "overflow": pool.overflow(),
         "total": pool.size() + pool.overflow(),
         "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
-                                                                                                            pool.size() + pool.overflow()) > 0 else 0
+            pool.size() + pool.overflow()) > 0 else 0
+    }
+
+
+def get_async_pool_status():
+    """获取 async 连接池状态（用于热点链路埋点）"""
+    pool = async_engine.pool
+    return {
+        "pool_size": pool.size(),
+        "checked_in": pool.checkedin(),
+        "checked_out": pool.checkedout(),
+        "overflow": pool.overflow(),
+        "total": pool.size() + pool.overflow(),
+        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
+            pool.size() + pool.overflow()) > 0 else 0,
     }
