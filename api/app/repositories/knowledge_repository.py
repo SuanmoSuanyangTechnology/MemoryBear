@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 from app.models.document_model import Document
 from app.models.knowledge_model import Knowledge, PermissionType
+from app.models.models_model import ModelApiKey, ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
 
@@ -12,12 +13,20 @@ db_logger = get_db_logger()
 
 
 def _knowledge_relationship_load_options():
+    def model_config_options(relationship_attr):
+        return (
+            selectinload(relationship_attr).selectinload(ModelConfig.model_base),
+            selectinload(relationship_attr)
+            .selectinload(ModelConfig.api_keys)
+            .selectinload(ModelApiKey.model_configs),
+        )
+
     return (
         selectinload(Knowledge.created_user),
-        selectinload(Knowledge.embedding),
-        selectinload(Knowledge.reranker),
-        selectinload(Knowledge.llm),
-        selectinload(Knowledge.image2text),
+        *model_config_options(Knowledge.embedding),
+        *model_config_options(Knowledge.reranker),
+        *model_config_options(Knowledge.llm),
+        *model_config_options(Knowledge.image2text),
     )
 
 
