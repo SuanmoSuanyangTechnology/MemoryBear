@@ -66,51 +66,66 @@ export const InnerConfigData: Record<string, InnerConfigItem> = {
   MinerUTool: {
     link: 'https://MinerUTool.ai/',
     config: {
-      api_key: {
-        name: ['config', 'parameters', 'api_key'],
+      api_url: {
+        name: ['config', 'parameters', 'api_url'],
         type: 'input',
-        desc: 'MinerUTool_api_key_desc',
         rules: [
           { required: true, message: 'common.pleaseEnter' }
         ]
       },
-      api_address: {
-        name: ['config', 'parameters', 'api_address'],
+      api_key: {
+        name: ['config', 'parameters', 'api_key'],
         type: 'input',
-        desc: 'MinerUTool_api_address_desc',
-        defaultValue: 'https://api.MinerUTool.ai/v1'
+        desc: 'MinerUTool_api_key_desc',
       },
-      parsing_mode: {
-        name: ['config', 'parameters', 'parsing_mode'],
+      lang_list: {
+        name: ['config', 'parameters', 'lang_list'],
         type: 'select',
         options: [
-          { label: 'auto_recognition', value: 'auto_recognition' },
-          { label: 'pure_text_mode', value: 'pure_text_mode' },
-          { label: 'table_priority', value: 'table_priority' },
-          { label: 'image_priority', value: 'image_priority' },
+          { label: 'ch', value: 'ch' },
+          { label: 'en', value: 'en' },
         ],
-        defaultValue: 'auto_recognition'
+      },
+      parse_method: {
+        name: ['config', 'parameters', 'parse_method'],
+        type: 'select',
+        options: [
+          { label: 'auto', value: 'auto' },
+          { label: 'text', value: 'text' },
+          { label: 'ocr', value: 'ocr' },
+        ],
+      },
+      formula_enable: {
+        name: ['config', 'parameters', 'formula_enable'],
+        type: 'switch',
+        defaultValue: false,
+      },
+      table_enable: {
+        name: ['config', 'parameters', 'table_enable'],
+        type: 'switch',
+        defaultValue: false,
       },
       timeout: {
         name: ['config', 'parameters', 'timeout'],
         type: 'number',
         min: 10,
-        max: 300,
+        max: 3600,
         step: 1,
-        defaultValue: 60,
-        desc: 'MinerUTool_timeout_desc'
       },
-      MinerUTool_enable: {
-        name: ['config', 'is_enabled'],
-        type: 'checkbox',
-        defaultValue: true,
+      start_page_id: {
+        name: ['config', 'parameters', 'start_page_id'],
+        type: 'number',
+        min: 0,
+        step: 1,
+        desc: 'MinerUTool_start_page_id_desc',
       },
-      MinerUTool_extract_images_enable: {
-        name: ['config', 'images_enable'],
-        type: 'checkbox',
-        defaultValue: true,
-        desc: 'MinerUTool_extract_images_enable_desc'
-      }
+      end_page_id: {
+        name: ['config', 'parameters', 'end_page_id'],
+        type: 'number',
+        min: 0,
+        step: 1,
+        desc: 'MinerUTool_end_page_id_desc',
+      },
     },
     features: [
       'pdfParser',
@@ -224,5 +239,20 @@ export const InnerConfigData: Record<string, InnerConfigItem> = {
       'multimodalInteraction',
       'remoteAgent'
     ],
-  }
+  },
+  DatabaseTool: {
+    config: {
+      is_enabled: {
+        name: ['config', 'is_enabled'],
+        type: 'checkbox',
+        defaultValue: true,
+      },
+    },
+    features: [
+      'queryDatabase',
+      'queryFields',
+      'listTableStruct',
+      'executeSQL',
+    ],
+  },
 }

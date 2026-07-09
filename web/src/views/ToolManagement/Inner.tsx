@@ -9,7 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import dayjs, { type Dayjs } from 'dayjs'
 
-import type { ToolItem, TimeToolModalRef, JsonToolModalRef, InnerToolModalRef } from './types';
+import type { ToolItem, TimeToolModalRef, JsonToolModalRef, InnerToolModalRef, DatabaseToolModalRef } from './types';
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import RbCard from '@/components/RbCard'
 import TimeToolModal from './components/TimeToolModal'
@@ -19,6 +19,8 @@ import { getTools } from '@/api/tools'
 import { InnerConfigData } from './constant'
 import OverflowTags from '@/components/OverflowTags'
 import Tag from '@/components/Tag'
+import MoreDropdown from '@/components/MoreDropdown'
+import DatabaseToolModal from './components/DatabaseToolModal'
 
 const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }> = ({ getStatusTag, keyword }) => {
   const { t } = useTranslation();
@@ -28,6 +30,7 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
   const timeToolModalRef = useRef<TimeToolModalRef>(null)
   const jsonToolModalRef = useRef<JsonToolModalRef>(null)
   const innerToolModalRef = useRef<InnerToolModalRef>(null)
+  const databaseToolModalRef = useRef<DatabaseToolModalRef>(null)
 
   useEffect(() => {
     getData()
@@ -67,6 +70,9 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
         break;
     }
   }
+  const handleTest = (data: ToolItem) => {
+    databaseToolModalRef.current?.handleOpen(data);
+  }
 
   return (
     <>
@@ -86,12 +92,31 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                       </Tooltip>
                       {getStatusTag(item.status)}
                     </Space>
-                    <Flex align="center" justify="center" className="rb:size-5.5 rb:hover:bg-[#F6F6F6] rb:rounded-md">
+                    {item.config_data.tool_class === 'DatabaseTool' && item.status === 'available'
+                    ? (<MoreDropdown
+                        items={[
+                          {
+                            key: 'edit',
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
+                            label: t('common.edit'),
+                            onClick: () => handleEdit(item),
+                          },
+                          {
+                            key: 'link',
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/link.svg')]" />,
+                            label: t('tool.testLink'),
+                            onClick: () => handleTest(item),
+                          },
+                        ]}
+                      />
+                    )
+                    : (<Flex align="center" justify="center" className="rb:size-5.5 rb:hover:bg-[#F6F6F6] rb:rounded-md">
                       <div
                         className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]"
                         onClick={() => handleEdit(item)}
                       />
                     </Flex>
+                    )}
                   </Flex>
                 }
                 isNeedTooltip={false}
@@ -126,7 +151,10 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                       </Col>
                       : <Col span={24}>
                         <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.configStatus')}</div>
-                        {t(`tool.${item.status}_desc`)}
+                        {['MinerUTool', 'DatabaseTool'].includes(item.config_data.tool_class)
+                          ? t(`tool.${item.config_data.tool_class}_${item.status}_desc`)
+                          : t(`tool.${item.status}_desc`)
+                        }
                       </Col>
                   }
                 </Row>
@@ -145,6 +173,9 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
       <InnerToolModal
         ref={innerToolModalRef}
         refreshTable={getData}
+      />
+      <DatabaseToolModal
+        ref={databaseToolModalRef}
       />
     </>
   );
