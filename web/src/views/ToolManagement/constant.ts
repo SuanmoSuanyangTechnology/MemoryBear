@@ -78,54 +78,6 @@ export const InnerConfigData: Record<string, InnerConfigItem> = {
         type: 'input',
         desc: 'MinerUTool_api_key_desc',
       },
-      lang_list: {
-        name: ['config', 'parameters', 'lang_list'],
-        type: 'select',
-        options: [
-          { label: 'ch', value: 'ch' },
-          { label: 'en', value: 'en' },
-        ],
-      },
-      parse_method: {
-        name: ['config', 'parameters', 'parse_method'],
-        type: 'select',
-        options: [
-          { label: 'auto', value: 'auto' },
-          { label: 'text', value: 'text' },
-          { label: 'ocr', value: 'ocr' },
-        ],
-      },
-      formula_enable: {
-        name: ['config', 'parameters', 'formula_enable'],
-        type: 'switch',
-        defaultValue: false,
-      },
-      table_enable: {
-        name: ['config', 'parameters', 'table_enable'],
-        type: 'switch',
-        defaultValue: false,
-      },
-      timeout: {
-        name: ['config', 'parameters', 'timeout'],
-        type: 'number',
-        min: 10,
-        max: 3600,
-        step: 1,
-      },
-      start_page_id: {
-        name: ['config', 'parameters', 'start_page_id'],
-        type: 'number',
-        min: 0,
-        step: 1,
-        desc: 'MinerUTool_start_page_id_desc',
-      },
-      end_page_id: {
-        name: ['config', 'parameters', 'end_page_id'],
-        type: 'number',
-        min: 0,
-        step: 1,
-        desc: 'MinerUTool_end_page_id_desc',
-      },
     },
     features: [
       'pdfParser',

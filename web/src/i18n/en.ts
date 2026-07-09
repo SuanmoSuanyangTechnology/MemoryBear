@@ -2560,13 +2560,6 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       requestHeaderKeyInvalid: 'Only English letters, numbers, hyphens (-), and underscores (_) are allowed, and cannot start or end with a hyphen or underscore',
 
       api_url: 'API URL',
-      ch: 'ch',
-      en: 'en',
-      auto: 'Auto',
-      text: 'Text',
-      ocr: 'OCR',
-      MinerUTool_start_page_id_desc: 'PDF Start Page ID (starts from 0)',
-      MinerUTool_end_page_id_desc: 'PDF End Page ID must be greater than Start Page ID, max value is total pages in PDF',
       DatabaseTool_desc: 'Database Tool',
       DatabaseTool_features: 'Database Tool — Connect to database, execute SQL statements, and query data',
       DatabaseTool_config_desc: 'Configure database connection.',

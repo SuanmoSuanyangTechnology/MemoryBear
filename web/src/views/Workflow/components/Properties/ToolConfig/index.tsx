@@ -5,6 +5,7 @@ import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
 import Editor from "../../Editor";
+import { filterChildrenWithTypes } from '../hooks/useVariableList';
 
 interface Option {
   value?: string | number | null;
@@ -178,39 +179,16 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   // boolean -> boolean【只能选true/false】
   // array -> array[file]/array[object]/array[string]/array[number]/array[boolean]
   // object -> object/file
+  // file -> file/array[file]
   const getFilterOptions = (type: string) => {
-    const filterList: Suggestion[] = [];
-    options.forEach(vo => {
-      if (vo.children && vo.children?.length > 0) {
-        const childOptions = vo.children?.filter(child => child.dataType === type || (type === 'integer' && child.dataType === 'number'))
+    const customMatcher = (dataType: string) =>
+      (dataType === 'secret' && type === 'string')
+      || (type === 'integer' && dataType === 'number')
+      || (type === 'array' && dataType.includes(type))
+      || (type === 'object' && dataType === 'file')
+      || (type === 'file' && dataType === 'array[file]')
 
-        if (vo.dataType === type
-          || (vo.dataType === 'secret' && type === 'string')
-          || (type === 'integer' && vo.dataType === 'number')
-          || (type === 'array' && vo.dataType.includes(type))
-          || (type === 'object' && vo.dataType === 'object')
-        ) {
-          filterList.push({
-            ...vo,
-            children: childOptions
-          })
-        } else if (childOptions.length > 0) {
-          filterList.push({
-            ...vo,
-            disabled: true,
-            children: childOptions
-          })
-        }
-      } else if (vo.dataType === type
-        || (vo.dataType === 'secret' && type === 'string')
-        || (type === 'integer' && vo.dataType === 'number')
-        || (type === 'array' && vo.dataType.includes(type))
-        || (type === 'object' && vo.dataType === 'object')) {
-        filterList.push(vo)
-      }
-    })
-
-    return filterList
+    return filterChildrenWithTypes(options, [type], customMatcher)
   }
 
   return (

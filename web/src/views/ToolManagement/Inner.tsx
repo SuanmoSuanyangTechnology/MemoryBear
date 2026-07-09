@@ -19,7 +19,6 @@ import { getTools } from '@/api/tools'
 import { InnerConfigData } from './constant'
 import OverflowTags from '@/components/OverflowTags'
 import Tag from '@/components/Tag'
-import MoreDropdown from '@/components/MoreDropdown'
 import DatabaseToolModal from './components/DatabaseToolModal'
 
 const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }> = ({ getStatusTag, keyword }) => {
@@ -65,13 +64,13 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
       case 'JsonTool':
         jsonToolModalRef.current?.handleOpen(data);
         break
+      case 'DatabaseTool':
+        databaseToolModalRef.current?.handleOpen(data);
+        break
       default: 
         innerToolModalRef.current?.handleOpen(data);
         break;
     }
-  }
-  const handleTest = (data: ToolItem) => {
-    databaseToolModalRef.current?.handleOpen(data);
   }
 
   return (
@@ -92,31 +91,12 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                       </Tooltip>
                       {getStatusTag(item.status)}
                     </Space>
-                    {item.config_data.tool_class === 'DatabaseTool' && item.status === 'available'
-                    ? (<MoreDropdown
-                        items={[
-                          {
-                            key: 'edit',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
-                            label: t('common.edit'),
-                            onClick: () => handleEdit(item),
-                          },
-                          {
-                            key: 'link',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/link.svg')]" />,
-                            label: t('tool.testLink'),
-                            onClick: () => handleTest(item),
-                          },
-                        ]}
-                      />
-                    )
-                    : (<Flex align="center" justify="center" className="rb:size-5.5 rb:hover:bg-[#F6F6F6] rb:rounded-md">
+                    <Flex align="center" justify="center" className="rb:size-5.5 rb:hover:bg-[#F6F6F6] rb:rounded-md">
                       <div
                         className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]"
                         onClick={() => handleEdit(item)}
                       />
                     </Flex>
-                    )}
                   </Flex>
                 }
                 isNeedTooltip={false}

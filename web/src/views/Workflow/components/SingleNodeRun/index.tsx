@@ -256,7 +256,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
           headerType="borderless"
           headerClassName="rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!"
           className="rb:h-full! rb:hover:shadow-none!"
-          bodyClassName="rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:px-3! rb:pt-0! rb:pb-3!"
+          bodyClassName="rb:overflow-y-auto! rb:h-[calc(100%-80px)]! rb:px-3! rb:pt-0! rb:pb-3!"
         >
           <Form form={form} layout="vertical" size="small" className="rb:mb-0!">
             <Flex vertical gap={12}>
