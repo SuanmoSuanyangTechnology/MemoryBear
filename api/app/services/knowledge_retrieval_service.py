@@ -447,6 +447,18 @@ class KnowledgeRetrievalService:
             rerank_score_threshold=rerank_score_threshold,
         )
 
+    @staticmethod
+    def _is_single_target_type(targets: list[RetrievalTarget], retrieve_type: RetrieveType) -> bool:
+        return len(targets) == 1 and targets[0].params.retrieve_type == retrieve_type
+
+    @classmethod
+    def _single_hybrid_uses_request_rerank(
+            cls,
+            request: KnowledgeRetrievalRequest,
+            targets: list[RetrievalTarget],
+    ) -> bool:
+        return request.rerank_id is not None and cls._is_single_target_type(targets, RetrieveType.HYBRID)
+
     @classmethod
     def _resolve_retrievable_knowledge_refs(
             cls,
@@ -647,6 +659,26 @@ class KnowledgeRetrievalService:
                 "[Retrieval] targets %s",
                 cls._format_log_fields(cls._build_targets_log_fields(log_id, request, targets, max_workers)),
             )
+        if cls._single_hybrid_uses_request_rerank(request, targets):
+            candidates = cls._retrieve_single_target(
+                request=request,
+                target=targets[0],
+                document_ids_include=document_ids_include,
+                log_id=log_id,
+                target_position=1,
+                db=db,
+                tenant_id=tenant_id,
+                use_request_rerank=True,
+            )
+            return cls._finalize_retrieval_chunks(
+                db=db,
+                request=request,
+                targets=targets,
+                chunks=candidates,
+                tenant_id=tenant_id,
+                log_id=log_id,
+            )
+
         results_by_index: list[list[DocumentChunk]] = [[] for _ in targets]
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="knowledge-retrieval") as executor:
             futures = {
@@ -692,6 +724,9 @@ class KnowledgeRetrievalService:
             document_ids_include: list[str] | None,
             log_id: str | None = None,
             target_position: int = 0,
+            db: Session | None = None,
+            tenant_id: uuid.UUID | None = None,
+            use_request_rerank: bool = False,
     ) -> list[DocumentChunk]:
         started_at = time.perf_counter()
         vector_service = ElasticSearchVectorFactory.init_vector_from_configs(
@@ -774,11 +809,21 @@ class KnowledgeRetrievalService:
         unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
         # if len(unique_chunks) <= target.params.top_k:
         #     return unique_chunks
-        chunks = vector_service.rerank(
-            query=request.query,
-            docs=unique_chunks,
-            top_k=target.params.top_k,
-        )
+        if use_request_rerank and request.rerank_id:
+            chunks = cls.rerank_documents(
+                db=db,
+                rerank_id=request.rerank_id,
+                query=request.query,
+                docs=unique_chunks,
+                top_k=target.params.top_k,
+                tenant_id=tenant_id,
+            )
+        else:
+            chunks = vector_service.rerank(
+                query=request.query,
+                docs=unique_chunks,
+                top_k=target.params.top_k,
+            )
         chunks = [
             chunk
             for chunk in chunks
@@ -829,8 +874,11 @@ class KnowledgeRetrievalService:
                 )
             return []
 
-        needs_global_rerank = request.rerank_id is not None or len(targets) > 1
-        if request.rerank_id:
+        single_hybrid_uses_request_rerank = cls._single_hybrid_uses_request_rerank(request, targets)
+        needs_global_rerank = len(targets) > 1 or (
+                request.rerank_id is not None and not single_hybrid_uses_request_rerank
+        )
+        if request.rerank_id and not single_hybrid_uses_request_rerank:
             ranked_chunks = cls.rerank_documents(
                 db=db,
                 rerank_id=request.rerank_id,
@@ -858,17 +906,16 @@ class KnowledgeRetrievalService:
                 reverse=True,
             )
 
-        # Apply the final global score threshold after optional cross-KB rerank.
-        threshold = cls._resolve_global_score_threshold(
-            request=request,
-            targets=targets,
-            used_rerank=needs_global_rerank,
-        )
-        filtered_chunks = [
-            chunk
-            for chunk in ranked_chunks
-            if (chunk.metadata or {}).get("score", 0) > threshold
-        ]
+        if needs_global_rerank:
+            threshold = cls._resolve_rerank_score_threshold(request)
+            filtered_chunks = [
+                chunk
+                for chunk in ranked_chunks
+                if (chunk.metadata or {}).get("score", 0) > threshold
+            ]
+        else:
+            threshold = None
+            filtered_chunks = ranked_chunks
         result_chunks = filtered_chunks[:request.top_k]
         if log_id:
             logger.info(
@@ -879,7 +926,7 @@ class KnowledgeRetrievalService:
                     "deduped": len(unique_chunks),
                     "global_rerank": needs_global_rerank,
                     "ranked": len(ranked_chunks),
-                    "threshold": threshold,
+                    "threshold": threshold if threshold is not None else "none",
                     "filtered": len(filtered_chunks),
                     "result_count": len(result_chunks),
                 }),
