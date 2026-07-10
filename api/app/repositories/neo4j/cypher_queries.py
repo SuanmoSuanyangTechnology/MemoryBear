@@ -2664,32 +2664,30 @@ WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
 RETURN e.id AS id, e.name AS name
 """
 
-# --- UserOriginalContent: 保存用户规整前的原文节点 ---
+# --- UserSource: 保存用户规整前的原文节点 ---
 
-USER_ORIGINAL_CONTENT_NODE_SAVE = """
+USER_SOURCE_NODE_SAVE = """
 UNWIND $nodes AS n
-MERGE (uoc:UserOriginalContent {id: n.id})
-SET uoc += {
+MERGE (us:UserSource {id: n.id})
+SET us += {
     id: n.id,
     name: n.name,
     end_user_id: n.end_user_id,
     run_id: n.run_id,
     created_at: n.created_at,
     message_seq: n.message_seq,
-    conversation_id: n.conversation_id,
     original_text: n.original_text,
     pruned_text: n.pruned_text,
-    content_type: n.content_type,
     text_embedding: n.text_embedding
 }
 RETURN n.id AS uuid
 """
 
-USER_ORIGINAL_CONTENT_ENTITY_EDGE_SAVE = """
+USER_SOURCE_ENTITY_EDGE_SAVE = """
 UNWIND $edges AS edge
-MATCH (uoc:UserOriginalContent {id: edge.source, end_user_id: edge.end_user_id})
+MATCH (us:UserSource {id: edge.source, end_user_id: edge.end_user_id})
 MATCH (e:ExtractedEntity {id: edge.target, end_user_id: edge.end_user_id})
-MERGE (uoc)-[r:HAS_ORIGINAL_CONTENT]->(e)
+MERGE (us)-[r:HAS_ORIGINAL_CONTENT]->(e)
 ON CREATE SET r.id = edge.id,
     r.end_user_id = edge.end_user_id,
     r.run_id = edge.run_id,

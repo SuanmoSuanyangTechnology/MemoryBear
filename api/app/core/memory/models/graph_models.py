@@ -662,34 +662,31 @@ class AssistantConversationEdge(Edge):
     """Edge connecting an AssistantOriginal node to its Conversation hub node (BELONGS_TO_CONVERSATION)."""
     pass
 
+class UserSourceNode(Node):
+    """存储 user 消息被剪枝/规整前的完整原文，类似 dialog 节点。
 
-class UserOriginalContentNode(Node):
-    """Node storing the original text of a User message before pruning.
+    当 user 消息被语义剪枝后，生成 UserSource 节点保存该条 user 消息的
+    完整原文（即剪枝/规整前的 memory_messages.content），为检索侧提供
+    "Entity → 原文" 的回溯路径。
 
-    When a user message is pruned/regularized (e.g., a recipe is compressed to a summary),
-    this node preserves the full original text so that downstream retrieval can trace back
-    from extracted entities to the complete user input.
+    name 属性值来自 LLM 产出的 processed_user_topic_entity_hint（实体锚点）。
 
     Attributes:
         message_seq: The message sequence number in memory_messages table
-        conversation_id: Conversation ID or deterministic hub ID
-        original_text: Full original text before pruning
-        pruned_text: The pruned/regularized text after processing
-        content_type: Type of the original content (file_summary / copied_content / mixed)
+        original_text: Full original user message text before pruning
+        pruned_text: The pruned/regularized text after processing (processed_user_msg)
         text_embedding: Embedding vector of original_text for semantic retrieval
     """
     message_seq: int = Field(..., description="Message sequence number in memory_messages")
-    conversation_id: str = Field(..., description="Conversation ID or deterministic hub ID")
     original_text: str = Field(..., description="Full original user message text before pruning")
-    pruned_text: str = Field(..., description="Pruned/regularized text after processing")
-    content_type: str = Field(default="mixed", description="Content type: file_summary / copied_content / mixed")
+    pruned_text: str = Field(..., description="Pruned/regularized text after processing (processed_user_msg)")
     text_embedding: Optional[List[float]] = Field(None, description="Embedding vector of original_text")
 
 
-class UserOriginalContentEntityEdge(Edge):
-    """Edge connecting a UserOriginalContent node to an ExtractedEntity node (HAS_ORIGINAL_CONTENT).
+class UserSourceEntityEdge(Edge):
+    """Edge connecting a UserSource node to an ExtractedEntity node (HAS_ORIGINAL_CONTENT).
 
     Semantics: the original user message contains/references this entity.
-    Retrieval path: Entity → UserOriginalContent → original_text
+    Retrieval path: Entity → UserSource → original_text
     """
     pass

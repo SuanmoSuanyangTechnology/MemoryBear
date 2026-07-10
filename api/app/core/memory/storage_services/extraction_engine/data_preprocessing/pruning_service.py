@@ -29,6 +29,7 @@ class PruneResult(NamedTuple):
     memory_type: str
     should_process_user_msg: bool
     processed_user_msg: Optional[str]
+    processed_user_topic_entity_hint: Optional[str]
 
 
 async def prune_messages(
@@ -160,6 +161,7 @@ async def prune_messages(
                     "output": {
                         "should_process_user_msg": pr.should_process_user_msg,
                         "processed_user_msg": pr.processed_user_msg,
+                        "processed_user_topic_entity_hint": pr.processed_user_topic_entity_hint,
                     },
                 })
             elif role_type == "assistant":
@@ -296,6 +298,7 @@ async def _call_llm_prune(
         memory_type=result.assistant_memory_type,
         should_process_user_msg=result.should_process_user_msg,
         processed_user_msg=result.processed_user_msg,
+        processed_user_topic_entity_hint=result.processed_user_topic_entity_hint,
     )
 
 

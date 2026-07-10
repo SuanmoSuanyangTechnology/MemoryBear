@@ -40,6 +40,9 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
     StatementNode,
 )
+from app.core.memory.storage_services.clustering_engine.label_propagation import (
+    _cosine_similarity,
+)
 
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
@@ -153,8 +156,8 @@ class ExtractionResult(BaseModel):
     assistant_pruned_edges: List[Any] = Field(default_factory=list)
     conversation_nodes: List[Any] = Field(default_factory=list)
     assistant_conversation_edges: List[Any] = Field(default_factory=list)
-    user_original_content_nodes: List[Any] = Field(default_factory=list)
-    user_original_content_edges: List[Any] = Field(default_factory=list)
+    user_source_nodes: List[Any] = Field(default_factory=list)
+    user_source_edges: List[Any] = Field(default_factory=list)
     dialog_data_list: List[Any] = Field(
         default_factory=list,
         description="原始 DialogData 列表，类型为 Any 以避免循环依赖",
@@ -373,7 +376,9 @@ class WritePipeline:
                 if recorder is not None and self.memory_config.pruning_enabled:
                     recorder.record_pruning_results(pruning_records)
 
-                # 从 pruning_records 提取 target user 规整信息（用于后续构建 UserOriginalContent 节点）
+                # 从 pruning_records 提取 target user 规整信息（用于后续构建 UserSource 节点）
+                # 如果 user 内容有被剪枝，保存原文作为 UserSource 节点（类似 dialog 节点），
+                # 可以直接取 dialog 节点的内容作为 UserSource 节点的内容
                 self._user_pruning_info = None
                 if pruning_records:
                     target_pruning = next(
@@ -385,13 +390,13 @@ class WritePipeline:
                     )
                     if target_pruning:
                         _orig_text = target_pruning["input"]["msgs"][0]["msg"]
-                        _pruned_text = target_pruning["output"].get("processed_user_msg", "")
+                        _output = target_pruning["output"]
                         self._user_pruning_info = {
                             "original_text": _orig_text,
-                            "pruned_text": _pruned_text,
+                            "pruned_text": _output.get("processed_user_msg", ""),
                             "message_seq": message_seq,
                             "conversation_id": conversation_id or f"{self.end_user_id}_{source}",
-                            "content_type": self._detect_content_type(_orig_text),
+                            "topic_entity_hint": _output.get("processed_user_topic_entity_hint", ""),
                         }
 
                 # Step 2: 预处理 - 消息分块
@@ -453,9 +458,9 @@ class WritePipeline:
                         elapsed_seconds=0.0,
                     )
 
-                # Step 3.5: 构建 UserOriginalContent 子图（剪枝原文 → 实体连边）
+                # Step 3.5: 构建 UserSource 子图（剪枝原文 → 实体连边）
                 if self._user_pruning_info:
-                    await self._build_original_content_subgraph(extraction_result)
+                    await self._build_user_source_subgraph(extraction_result)
 
                 async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
@@ -659,8 +664,8 @@ class WritePipeline:
                     assistant_pruned_edges=result.assistant_pruned_edges,
                     conversation_nodes=result.conversation_nodes,
                     assistant_conversation_edges=result.assistant_conversation_edges,
-                    user_original_content_nodes=result.user_original_content_nodes,
-                    user_original_content_edges=result.user_original_content_edges,
+                    user_source_nodes=result.user_source_nodes,
+                    user_source_edges=result.user_source_edges,
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
@@ -681,58 +686,78 @@ class WritePipeline:
                     raise
 
     # ──────────────────────────────────────────────
-    # Step 3.5: 构建 UserOriginalContent 子图
+    # Step 3.5: 构建 UserSource 子图
     # ──────────────────────────────────────────────
 
-    async def _build_original_content_subgraph(self, result: ExtractionResult) -> None:
-        """构建 UserOriginalContent 节点和 HAS_ORIGINAL_CONTENT 边。
+    # 通用角色实体排除列表，这些实体不应与 UserSource 建边
+    _USER_SOURCE_EXCLUDED_ENTITY_NAMES = frozenset({
+        "用户", "我", "user", "i", "ai助手", "助手", "助理", "ai", "assistant", "ai回复", "ai assistant",
+    })
 
-        当用户消息被剪枝/规整后，创建一个 UserOriginalContent 节点保存原文，
-        并通过 HAS_ORIGINAL_CONTENT 边连接到从该消息萃取出的所有 Entity 节点，
+    # UserSource → Entity 建边的余弦相似度阈值
+    _USER_SOURCE_SIMILARITY_THRESHOLD = 0.5
+
+    async def _build_user_source_subgraph(self, result: ExtractionResult) -> None:
+        """构建 UserSource 节点和 HAS_ORIGINAL_CONTENT 边。
+
+        当 user 消息被剪枝/规整后，创建 UserSource 节点保存原文（类似 dialog 节点），
+        并通过 HAS_ORIGINAL_CONTENT 边连接到**语义相关的** Entity 节点，
         为检索侧提供 "Entity → 原文" 的回溯路径。
+
+        连边逻辑：
+        1. 预先排除通用角色实体（"用户""AI助手"等）
+        2. 用 UserSourceNode.name（= processed_user_topic_entity_hint）的 embedding
+           与每个 ExtractedEntity.name_embedding 做余弦相似度匹配
+        3. 只对超过阈值的 entity 建 HAS_ORIGINAL_CONTENT 边
+
+        节点 name 属性使用 LLM 产出的 processed_user_topic_entity_hint（实体锚点）。
+        原文来源：直接取 dialog 节点的内容（memory_messages.content）。
 
         前置条件：self._user_pruning_info 已在 Step 1 后设置。
         """
         from app.core.memory.models.graph_models import (
-            UserOriginalContentNode,
-            UserOriginalContentEntityEdge,
+            UserSourceNode,
+            UserSourceEntityEdge,
         )
 
         info = self._user_pruning_info
         if not info:
             return
 
-        # 生成 embedding
+        # 生成 original_text 的 embedding（存入节点，供向量检索回溯）
         text_embedding = None
         if self._embedder_client and info["original_text"]:
             try:
                 text_embedding = await self._embedder_client.embed_query(info["original_text"])
             except Exception as e:
-                logger.warning(f"[UserOriginalContent] 生成 embedding 失败（不影响写入）: {e}")
+                logger.warning(f"[UserSource] 生成 text_embedding 失败（不影响写入）: {e}")
 
         # 构建节点
         node_id = uuid.uuid4().hex
         now_iso = datetime.now().isoformat()
         run_id = result.dialogue_nodes[0].run_id if result.dialogue_nodes else uuid.uuid4().hex
 
-        uoc_node = UserOriginalContentNode(
+        # name 使用 LLM 产出的实体锚点（processed_user_topic_entity_hint）
+        node_name = info.get("topic_entity_hint") or f"UserSource_{node_id[:8]}"
+
+        us_node = UserSourceNode(
             id=node_id,
-            name=f"OriginalContent_{node_id[:8]}",
+            name=node_name,
             end_user_id=self.end_user_id,
             run_id=run_id,
             created_at=now_iso,
             message_seq=info["message_seq"],
-            conversation_id=info["conversation_id"],
             original_text=info["original_text"],
             pruned_text=info["pruned_text"],
-            content_type=info["content_type"],
             text_embedding=text_embedding,
         )
 
-        # 为每个萃取出的 entity 创建 HAS_ORIGINAL_CONTENT 边
-        edges = []
-        for entity in result.entity_nodes:
-            edge = UserOriginalContentEntityEdge(
+        # 选择性建边：排除角色实体 + embedding 相似度匹配
+        matched = await self._select_entities_for_user_source(node_name, result.entity_nodes)
+
+        # 为匹配的 entity 创建 HAS_ORIGINAL_CONTENT 边
+        edges = [
+            UserSourceEntityEdge(
                 id=uuid.uuid4().hex,
                 source=node_id,
                 target=entity.id,
@@ -740,31 +765,63 @@ class WritePipeline:
                 run_id=run_id,
                 created_at=now_iso,
             )
-            edges.append(edge)
+            for entity in matched
+        ]
 
-        result.user_original_content_nodes = [uoc_node]
-        result.user_original_content_edges = edges
+        result.user_source_nodes = [us_node]
+        result.user_source_edges = edges
 
         logger.info(
-            f"[UserOriginalContent] 构建完成 - node_id={node_id[:8]}, "
-            f"edges={len(edges)}, content_type={info['content_type']}, "
+            f"[UserSource] 构建完成 - node_id={node_id[:8]}, name={node_name}, "
+            f"total_entities={len(result.entity_nodes)}, matched={len(matched)}, "
             f"original_len={len(info['original_text'])}"
         )
 
-    @staticmethod
-    def _detect_content_type(text: str) -> str:
-        """检测原文内容类型。
+    async def _select_entities_for_user_source(
+        self, hint_name: str, entities: list
+    ) -> list:
+        """筛选与 UserSource 语义相关的 entity（排除角色实体 + embedding 匹配）。
+
+        Args:
+            hint_name: UserSourceNode.name（= processed_user_topic_entity_hint）
+            entities: 本次萃取出的 ExtractedEntityNode 列表
 
         Returns:
-            file_summary: 含 <input-file-summary> 标签
-            copied_content: 纯长文（≥500 字符）
-            mixed: 其他
+            通过过滤和相似度匹配的 entity 子集
         """
-        if "<input-file-summary>" in text:
-            return "file_summary"
-        if len(text) >= 500:
-            return "copied_content"
-        return "mixed"
+        # 生成 hint_name 的 embedding
+        hint_emb = None
+        if self._embedder_client and hint_name:
+            try:
+                hint_emb = await self._embedder_client.embed_query(hint_name)
+            except Exception as e:
+                logger.warning(f"[UserSource] hint embedding 失败，降级全连: {e}")
+
+        excluded = self._USER_SOURCE_EXCLUDED_ENTITY_NAMES
+        threshold = self._USER_SOURCE_SIMILARITY_THRESHOLD
+
+        matched = []
+        skipped_role = 0
+        skipped_sim = 0
+
+        for entity in entities:
+            # 排除通用角色实体
+            if entity.name and entity.name.lower().strip() in excluded:
+                skipped_role += 1
+                continue
+            # embedding 相似度匹配
+            if hint_emb:
+                emb = entity.name_embedding
+                if emb and _cosine_similarity(hint_emb, emb) < threshold:
+                    skipped_sim += 1
+                    continue
+            matched.append(entity)
+
+        logger.debug(
+            f"[UserSource] entity 匹配 - hint={hint_name}, "
+            f"skipped_role={skipped_role}, skipped_sim={skipped_sim}, matched={len(matched)}"
+        )
+        return matched
 
     # ──────────────────────────────────────────────
     # Step 4: 聚类
