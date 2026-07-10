@@ -101,9 +101,8 @@ async def get_async_db_context() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        except Exception:
+        finally:
             await session.rollback()
-            raise
 
 
 # ==================== 连接池监控 ====================

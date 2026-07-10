@@ -7,12 +7,13 @@
 Classes:
     MemoryConfigRepository: 记忆配置仓储类，提供CRUD操作
 """
-
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
@@ -630,6 +631,94 @@ class MemoryConfigRepository:
                 exc_info=True
             )
 
+            db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_config_with_workspace_async(
+            db: AsyncSession,
+            config_id: uuid.UUID,
+    ):
+        start_time = time.perf_counter()
+        try:
+            # Use join query to get both config and workspace
+            stmt = (
+                select(MemoryConfig, Workspace)
+                .join(
+                    Workspace,
+                    MemoryConfig.workspace_id == Workspace.id,
+                )
+                .where(MemoryConfig.config_id == config_id)
+            )
+
+            result = await db.execute(stmt)
+            row = result.first()
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            if not row:
+                # Check if config exists but workspace is missing
+                stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+                config_only = await db.scalar(stmt)
+                if config_only:
+                    if config_only.workspace_id is None:
+                        config_logger.error(
+                            "Configuration has no associated workspace ID",
+                            extra={
+                                "operation": "get_config_with_workspace",
+                                "config_id": config_id,
+                                "workspace_id": None,
+                                "load_result": "no_workspace_id",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
+                        db_logger.error(f"Memory config {config_id} has no associated workspace ID")
+                        raise ValueError(f"Configuration {config_id} has no associated workspace")
+                    else:
+                        config_logger.error(
+                            "Configuration references non-existent workspace",
+                            extra={
+                                "operation": "get_config_with_workspace",
+                                "config_id": config_id,
+                                "workspace_id": str(config_only.workspace_id),
+                                "load_result": "workspace_not_found",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
+                        db_logger.error(
+                            f"Memory config {config_id} references non-existent workspace {config_only.workspace_id}")
+                        raise ValueError(
+                            f"Workspace {config_only.workspace_id} not found for configuration {config_id}")
+
+                config_logger.debug(
+                    "Configuration not found",
+                    extra={
+                        "operation": "get_config_with_workspace",
+                        "config_id": config_id,
+                        "load_result": "not_found",
+                        "elapsed_ms": elapsed_ms
+                    }
+                )
+                db_logger.debug(f"Memory config not found: config_id={config_id}")
+                return None
+
+            config, workspace = row
+
+            # Log successful configuration loading
+            config_logger.info(
+                "Configuration with workspace loaded successfully",
+            )
+
+            db_logger.debug(
+                f"Memory config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
+            return config, workspace
+
+        except ValueError:
+            # Re-raise known business exceptions
+            raise
+        except Exception as e:
+            config_logger.error(
+                "Failed to load configuration with workspace",
+                exc_info=True
+            )
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
 

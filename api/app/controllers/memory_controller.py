@@ -17,7 +17,7 @@ from app.core.logging_config import get_api_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
-from app.db import get_db, get_db_read
+from app.db import get_db, get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user
 from app.models.user_model import User
 from app.repositories import knowledge_repository
@@ -132,21 +132,17 @@ async def read_server(
     config_id = user_input.config_id
     workspace_id = current_user.current_workspace_id
 
-    with get_db_read() as db:
-        storage_type = workspace_service.get_workspace_storage_type(
-            db=db,
-            workspace_id=workspace_id,
-            user=current_user
+    async with get_async_db_context() as db:
+        storage_type = await workspace_service.get_workspace_storage_type_async(
+            db=db, workspace_id=workspace_id, user=current_user
         )
         if storage_type is None:
             storage_type = 'neo4j'
         user_rag_memory_id = ''
-        memory_config_id = MemoryConfigService(db).get_config_id_by_end_user(user_input.end_user_id)
+        memory_config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(user_input.end_user_id)
         if workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db,
-                name="USER_RAG_MERORY",
-                workspace_id=workspace_id
+            knowledge = await knowledge_repository.get_knowledge_by_name_async(
+                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id,
             )
             if knowledge:
                 user_rag_memory_id = str(knowledge.id)
@@ -156,7 +152,7 @@ async def read_server(
     api_logger.info(
         f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, session_id={session_id}")
     try:
-        service = MemoryService(
+        service = await MemoryService.create(
             memory_config_id,
             end_user_id=user_input.end_user_id,
             draft=True

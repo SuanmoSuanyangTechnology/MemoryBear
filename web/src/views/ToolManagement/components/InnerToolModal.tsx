@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Select, Checkbox, InputNumber, Button, App } from 'antd';
+import { Form, Input, Select, Checkbox, InputNumber, Switch, Button, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { InnerToolModalRef, ToolItem, InnerConfigItem, InnerToolItem } from '../types'
@@ -62,12 +62,18 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
         } as any)
           .then((res: any) => {
             message.success(t('common.saveSuccess'));
-            testConnection(res.tool_id || editVo?.id)
-              .finally(() => {
-                setLoading(false);
-                handleClose();
-                refreshTable()
-              })
+            if (editVo?.config_data?.tool_class !== 'DatabaseTool') {
+              testConnection(res.tool_id || editVo?.id)
+                .finally(() => {
+                  setLoading(false);
+                  handleClose();
+                  refreshTable()
+                })
+            } else {
+              setLoading(false);
+              handleClose();
+              refreshTable()
+            }
           })
           .catch(() => {
             setLoading(false);
@@ -89,18 +95,22 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
       title={`${editVo.name} ${t('tool.config')}`}
       open={visible}
       onCancel={handleClose}
-      okText={t('tool.saveAndTest')}
+      okText={editVo?.config_data?.tool_class === 'DatabaseTool' ? t('common.save') : t('tool.saveAndTest')}
       onOk={handleSave}
       confirmLoading={loading}
     >
       {editVo?.config_data?.tool_class && config && <>
-        <RbAlert className="rb:mb-3!">
-          <div>
-            <div className="rb:text-[14px] rb:font-medium">{t('tool.configDesc')}</div>
-            <div className="rb:mt-2">{t(`tool.${editVo?.config_data?.tool_class}_config_desc`)}</div>
-            <div className="rb:font-medium">{t('tool.link')}: <Button size="small" type="link">{InnerConfigData[editVo?.config_data?.tool_class].link}</Button></div>
-          </div>
-        </RbAlert>
+        {editVo?.config_data?.tool_class !== 'DatabaseTool' &&
+          <RbAlert className="rb:mb-3!">
+            <div>
+              <div className="rb:text-[14px] rb:font-medium">{t('tool.configDesc')}</div>
+              <div className="rb:mt-2">{t(`tool.${editVo?.config_data?.tool_class}_config_desc`)}</div>
+              {InnerConfigData[editVo?.config_data?.tool_class].link &&
+                <div className="rb:font-medium">{t('tool.link')}: <Button size="small" type="link">{InnerConfigData[editVo?.config_data?.tool_class].link}</Button></div>
+              }
+            </div>
+          </RbAlert>
+        }
         <Form
           form={form}
           layout="vertical"
@@ -118,6 +128,7 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
                   ...vo,
                   message: t(vo.message)
                 })) : []}
+                layout={config[key].type === 'switch' ? 'horizontal' : 'vertical'}
               >
                 {config[key].type === 'input'
                   ? <Input placeholder={t('common.inputPlaceholder', { title: t(`tool.${key}`) })} />
@@ -139,6 +150,10 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
                         label: t(`tool.${vo.label}`)
                       }))}
                   />
+                  : config[key].type === 'switch'
+                  ? <Switch />
+                  : config[key].type === 'password'
+                  ? <Input.Password placeholder={t('common.pleaseEnter')} />
                   : null
                 }
               </FormItem>

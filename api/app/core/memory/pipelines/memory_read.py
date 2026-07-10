@@ -12,10 +12,8 @@ from app.core.memory.read_services.search_engine.content_search import (
     HistorySearchService,
     MetaSearchService
 )
-from app.db import get_db_context
-from app.repositories.memory_short_repository import (
-    ShortTermMemoryRepository,
-)
+from app.db import get_async_db_context
+from app.repositories.memory_short_repository import ShortTermMemoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -68,37 +66,45 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 raise RuntimeError("Unsupported search strategy")
 
         if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
-            self._save_short_term(query, search_switch, res)
+            await self._save_short_term(query, search_switch, res)
 
         return res
 
-    def _get_search_service(self, includes=None, need_embedder=True, need_llm=True):
+    async def _get_search_service(self, includes=None, need_embedder=True, need_llm=True):
         if self.ctx.storage_type == StorageType.NEO4J:
+            if need_embedder and need_llm:
+                embedder, llm = await asyncio.gather(
+                    self._get_embedding_client(),
+                    self._get_llm_client(),
+                )
+            else:
+                embedder = (await self._get_embedding_client()) if need_embedder else None
+                llm = (await self._get_llm_client()) if need_llm else None
             return Neo4jSearchService(
                 self.ctx,
-                embedder=self._get_embedding_client() if need_embedder else None,
-                llm=self._get_llm_client() if need_llm else None,
+                embedder=embedder,
+                llm=llm,
                 includes=includes,
             )
         else:
             return RAGSearchService(self.ctx)
 
-    def _get_llm_client(self):
+    async def _get_llm_client(self):
         """懒加载 LLM client：首次调用借短连接查 model API key，后续复用缓存。"""
         if self._llm_client is None:
-            with get_db_context() as db:
-                self._llm_client = self.get_llm_client(
+            async with get_async_db_context() as db:
+                self._llm_client = await self.get_llm_client_async(
                     db,
                     self.ctx.memory_config.llm_model_id,
                     tenant_id=self.ctx.memory_config.tenant_id
                 )
         return self._llm_client
 
-    def _get_embedding_client(self):
+    async def _get_embedding_client(self):
         """懒加载 embedding client：首次调用借短连接查 model API key，后续复用缓存。"""
         if self._embedding_client is None:
-            with get_db_context() as db:
-                self._embedding_client = self.get_embedding_client(
+            async with get_async_db_context() as db:
+                self._embedding_client = await self.get_embedding_client_async(
                     db,
                     self.ctx.memory_config.embedding_model_id,
                     tenant_id=self.ctx.memory_config.tenant_id
@@ -112,13 +118,13 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             limit: int,
             includes=None,
     ) -> MemorySearchResult:
-        search_service = self._get_search_service(includes)
+        search_service = await self._get_search_service(includes)
         memory_l0 = await self._user_meta()
         questions, memory_evidence = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
-            self._get_llm_client()
+            await self._get_llm_client()
         )
         if memory_evidence:
             memory_l0.content_str = memory_evidence
@@ -145,7 +151,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             query,
             results.content,
             memory_l0.content if memory_l0 else '',
-            self._get_llm_client()
+            await self._get_llm_client()
         )
 
         return memory_l0 + results
@@ -156,14 +162,14 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             limit: int,
             includes=None,
     ) -> MemorySearchResult:
-        search_service = self._get_search_service(includes)
+        search_service = await self._get_search_service(includes)
 
         memory_l0 = await self._user_meta()
         questions, memory_evidence = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
-            self._get_llm_client()
+            await self._get_llm_client()
         )
         if memory_evidence:
             memory_l0.content_str = memory_evidence
@@ -179,21 +185,21 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             query,
             results.content,
             memory_l0.content if memory_l0 else '',
-            self._get_llm_client()
+            await self._get_llm_client()
         )
         return memory_l0 + results
 
     async def _express_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
         """仅全文检索模式：不做 embedding、关系检索、query 拆分、摘要生成。"""
         meta_task = asyncio.ensure_future(self._user_meta())
-        search_service = self._get_search_service(includes, need_embedder=False, need_llm=False)
+        search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)
         express_res = await search_service.keyword_search(query, limit)
         memory_l0 = await meta_task
         return memory_l0 + express_res
 
     async def _quick_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
         meta_task = asyncio.ensure_future(self._user_meta())
-        search_service = self._get_search_service(includes, need_llm=False)
+        search_service = await self._get_search_service(includes, need_llm=False)
         quick_res = await search_service.hybrid_search(query, limit)
         memory_l0 = await meta_task
         return memory_l0 + quick_res
@@ -206,7 +212,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         service = MetaSearchService(self.ctx)
         return await service.run()
 
-    def _save_short_term(
+    async def _save_short_term(
             self,
             query: str,
             search_switch: SearchStrategy,
@@ -244,15 +250,16 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 {q: contents} for q, contents in query_groups.items()
             ]
 
-            with get_db_context() as db:
-                repo = ShortTermMemoryRepository(db)
-                repo.upsert(
+            async with get_async_db_context() as db:
+                await ShortTermMemoryRepository.upsert_async(
+                    db=db,
                     end_user_id=self.ctx.end_user_id,
                     messages=query,
                     aimessages=aimessages,
                     retrieved_content=retrieved_content,
                     search_switch=search_switch.value,
                 )
+
             logger.info(
                 f"[ReadPipeLine] short_term 写入成功: "
                 f"end_user_id={self.ctx.end_user_id}, "

@@ -1,9 +1,10 @@
 import logging
 import re
 
+from app.core.memory.models.service_models import QuestionSplit
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.prompt import prompt_manager
-from app.core.memory.utils.llm.llm_utils import StructResponse
+from app.core.models.llm import StructResponse
 from app.core.models import RedBearLLM
 from app.schemas.memory_agent_schema import AgentMemoryDataset
 
@@ -35,9 +36,9 @@ class QueryPreprocessor:
         try:
             sub_queries = await llm_client.ainvoke(messages, config={
                 "callbacks": []
-            }) | StructResponse(mode='json')
-            queries = sub_queries["questions"]
-            memory_evidence = sub_queries.get("memory_evidence") or ""
+            }) | StructResponse(QuestionSplit)
+            queries = sub_queries.questions
+            memory_evidence = sub_queries.memory_evidence
         except Exception as e:
             logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")
             queries = [query]

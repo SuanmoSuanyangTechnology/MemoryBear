@@ -25,7 +25,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
   const {
     t, conversation_id, historyList, hasMore, scrollRef, toolbarCallbackRef, config,
     isShare, isIframe, isFloatBtn, isSmallScreen, chatTitle, showHistory, setShowHistory,
-    getHistory, handleChangeHistory, handleShare,
+    getHistory, handleChangeHistory, handleShare, disabled,
   } = ctx
 
   return (
@@ -67,8 +67,10 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
               }
               <Tooltip placement="left" title={t('memoryConversation.startANewConversation')}>
                 <div
-                  className={clsx("rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh_dark.svg')]", {
+                  className={clsx("rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/refresh_dark.svg')]", {
                     "rb:bg-[url('@/assets/images/refresh_white.svg')]": isFloatBtn,
+                    'rb:cursor-not-allowed rb:opacity-65': disabled,
+                    'rb:cursor-pointer': !disabled,
                   })}
                   onClick={() => handleChangeHistory(null)}
                 ></div>
@@ -94,6 +96,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
             {...buildSharedChatProps(ctx)}
             empty={isShare ? null : <Empty url={ChatEmpty} className="rb:h-full" size={[320, 180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
             labelFormat={(item) => isFloatBtn ? formatDateTime(item.created_at, 'HH:mm') : formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
+            readOnly={disabled}
           >
             <ChatToolbar
               ref={toolbarCallbackRef}

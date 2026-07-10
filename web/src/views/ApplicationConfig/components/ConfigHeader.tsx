@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 12:30:24
+ * @Last Modified time: 2026-07-08 19:04:14
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -103,16 +103,24 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         applicationModalRef.current?.handleOpen(application)
         break;
       case 'copy':
-        appRef?.current?.handleSave(false)
-          .then(() => {
-            copyModalRef.current?.handleOpen()
-          })
+        if (appRef?.current?.handleSave) {
+          appRef?.current?.handleSave(false)
+            .then(() => {
+              copyModalRef.current?.handleOpen()
+            })
+        } else {
+          copyModalRef.current?.handleOpen()
+        }
         break;
       case 'export':
-        appRef?.current?.handleSave(false)
-          .then(() => {
-            appExport(application.id, application.name)
-          })
+        if (appRef?.current?.handleSave) {
+          appRef?.current?.handleSave(false)
+            .then(() => {
+              appExport(application.id, application.name)
+            })
+        } else {
+          appExport(application.id, application.name)
+        }
         break;
       case 'delete':
         handleDelete()
@@ -183,7 +191,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             className={styles.tabs}
           />
         </Flex>}
-        extra={application?.type.includes('workflow') && source !== 'sharing' && activeTab === 'arrangement'
+        extra={!application?.type || (application?.type.includes('workflow') && source !== 'sharing' && activeTab === 'arrangement')
           ? null
           : <Flex justify="flex-end">
             <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>

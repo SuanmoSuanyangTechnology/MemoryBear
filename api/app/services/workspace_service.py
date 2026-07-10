@@ -3,7 +3,8 @@ import secrets
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
@@ -537,7 +538,7 @@ def _create_workspace_only(
         raise
 
 
-def create_workspace(
+async def create_workspace(
         db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
     business_logger.info(
@@ -550,6 +551,20 @@ def create_workspace(
             code=BizCode.RESOURCE_ALREADY_EXISTS
         )
     workspace = _resolve_workspace_create_payload(db, workspace, user.tenant_id)
+
+    validation_slots = _WORKSPACE_MODEL_SLOTS if workspace.is_default_config else _REQUIRED_WORKSPACE_MODEL_SLOTS
+    selection = _extract_workspace_model_values(workspace)
+    warnings = await _validate_workspace_model_runtime(
+        db,
+        selection,
+        user.tenant_id,
+        None,
+        locale=language,
+        slots_to_validate=validation_slots,
+    )
+    if warnings:
+        raise BusinessException(warnings[0]["message"], BizCode.INVALID_PARAMETER)
+
     llm = workspace.llm
     embedding = workspace.embedding
     rerank = workspace.rerank
@@ -813,6 +828,39 @@ def _check_workspace_member_permission(db: Session, workspace_id: uuid.UUID, use
             Action.READ,
             resource,
             error_message=f"用户 {user.username} 不是工作空间 {workspace_id} 的成员"
+        )
+        business_logger.debug(f"用户 {user.username} 是工作空间 {workspace_id} 的成员或超级管理员")
+    except PermissionDeniedException as e:
+        business_logger.warning(f"权限不足: 用户 {user.username} 尝试访问工作空间 {workspace_id}")
+        raise BusinessException(str(e), BizCode.WORKSPACE_NO_ACCESS)
+    return db_workspace
+
+
+async def _check_workspace_member_permission_async(db: AsyncSession, workspace_id: uuid.UUID, user: User) -> Workspace | None:
+    """Async version of _check_workspace_member_permission."""
+    # 获取工作空间信息
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    db_workspace = result.scalars().first()
+    if not db_workspace:
+        raise BusinessException(message="Workspace not found", code=BizCode.WORKSPACE_NOT_FOUND)
+
+    # 检查用户是否为工作空间成员
+    member = await db.scalar(
+        select(WorkspaceMember).where(
+            WorkspaceMember.user_id == user.id,
+            WorkspaceMember.workspace_id == workspace_id,
+        )
+    )
+    workspace_memberships = {workspace_id} if member else set()
+    from app.core.permissions import Action, Resource, Subject, permission_service
+
+    subject = Subject.from_user(user, workspace_memberships=workspace_memberships)
+    resource = Resource.from_workspace(db_workspace)
+
+    try:
+        permission_service.require_permission(
+            subject, Action.READ, resource,
+            error_message=f"用户 {user.username} 不是工作空间 {workspace_id} 的成员",
         )
         business_logger.debug(f"用户 {user.username} 是工作空间 {workspace_id} 的成员或超级管理员")
     except PermissionDeniedException as e:
@@ -1247,6 +1295,26 @@ def get_workspace_storage_type(
             code=BizCode.WORKSPACE_NOT_FOUND,
             message="工作空间不存在"
         )
+
+    business_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {workspace.storage_type}")
+    return workspace.storage_type
+
+
+async def get_workspace_storage_type_async(
+        db,
+        workspace_id: uuid.UUID,
+        user: User,
+) -> Optional[str]:
+    """Async version of get_workspace_storage_type."""
+    from app.models.workspace_model import Workspace
+
+    await _check_workspace_member_permission_async(db, workspace_id, user)
+
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = result.scalars().first()
+    if not workspace:
+        business_logger.error(f"工作空间不存在: workspace_id={workspace_id}")
+        raise BusinessException(code=BizCode.WORKSPACE_NOT_FOUND, message="工作空间不存在")
 
     business_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {workspace.storage_type}")
     return workspace.storage_type

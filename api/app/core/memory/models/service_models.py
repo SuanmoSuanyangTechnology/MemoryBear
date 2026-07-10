@@ -58,6 +58,11 @@ class RelationMemory(BaseModel):
         return self.source, self.relation, self.target
 
 
+class QuestionSplit(BaseModel):
+    questions: list = Field(default_factory=list)
+    memory_evidence: str = Field(default_factory=str)
+
+
 class EntityPair(BaseModel):
     source_id: str = ""
     target_id: str = ""

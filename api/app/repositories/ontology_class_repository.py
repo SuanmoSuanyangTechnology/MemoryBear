@@ -10,6 +10,8 @@ Classes:
 from typing import List, Optional
 from uuid import UUID
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
@@ -29,7 +31,7 @@ class OntologyClassRepository:
         db: SQLAlchemy数据库会话
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         """初始化Repository
         
         Args:
@@ -230,14 +232,39 @@ class OntologyClassRepository:
             )
             
             return classes
-            
+
         except Exception as e:
             logger.error(
                 f"Failed to get ontology classes by scene: {str(e)}",
                 exc_info=True
             )
             raise
-    
+
+    async def get_classes_by_scene_async(self, scene_id: UUID) -> List[OntologyClass]:
+        """Async version of get_classes_by_scene — uses select() for AsyncSession."""
+        try:
+            logger.debug(f"Getting ontology classes by scene (async): {scene_id}")
+
+            stmt = (
+                select(OntologyClass)
+                .where(OntologyClass.scene_id == scene_id)
+                .order_by(OntologyClass.created_at.desc())
+            )
+            result = await self.db.execute(stmt)
+            classes = result.scalars().all()
+
+            logger.info(
+                f"Found {len(classes)} ontology classes in scene_id: {scene_id}"
+            )
+            return classes
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get ontology classes by scene (async): {str(e)}",
+                exc_info=True,
+            )
+            raise
+
     def update(self, class_id: UUID, update_data: dict) -> Optional[OntologyClass]:
         """更新类型信息
         

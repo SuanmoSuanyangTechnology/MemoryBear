@@ -31,6 +31,7 @@ import PageTabs from '@/components/PageTabs'
 import AudioPlayer from './AudioPlayer'
 import VideoPlayer from './VideoPlayer'
 import EdgeDetailPanel from './EdgeDetailPanel'
+import ForgetMemoryConfirmModal, { type ForgetMemoryConfirmModalRef } from './ForgetMemoryConfirmModal'
 
 export const KEYS: Record<string, string[]> = {
   image: ['summary', 'keywords', 'topic', 'domain', 'scene'],
@@ -72,6 +73,21 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
 
   console.log('categories', categories)
   const edgeAbortRef = useRef<AbortController | null>(null)
+  const forgetModalRef = useRef<ForgetMemoryConfirmModalRef>(null)
+
+  /** Open the confirmation dialog to manually forget the currently selected node. */
+  const handleForget = () => {
+    if (!id || !selectedNode) return
+    const nodeId = selectedNode.id
+    forgetModalRef.current?.handleOpen({
+      endUserId: id,
+      nodeId,
+      nodeLabel: (selectedNode as GraphNode).label,
+      name: (selectedNode as GraphNode).name || `${t(`userMemory.${(selectedNode as GraphNode).caption}`)}_${nodeId.slice(-5)}`,
+      relations: (selectedNode as Node).properties?.associative_memory || 0,
+      associated: (selectedNode as Node).properties?.associative_memory || 0,
+    })
+  }
 
   /** Fetch relationship network data */
   const getEdgeData = useCallback(() => {
@@ -522,16 +538,28 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
               </div>
 
               {activeTab !== 'communityNetwork' &&
-                <>
-                  <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
-                    {t('userMemory.completeMemory')}
+                <div className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6">
+                  <Flex align="center" gap={12}>
+                    <Flex align="center" justify="center" gap={6} className="rb:flex-1 rb:border rb:border-[#E5E6EB] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:text-[#212332] rb:cursor-pointer rb:hover:border-[#171719]" onClick={handleForget}>
+                      {t('userMemory.forgetThisMemory')}
+                    </Flex>
+                    <Flex align="center" justify="center" className="rb:flex-1 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
+                      {t('userMemory.completeMemory')}
+                    </Flex>
                   </Flex>
-                </>
+                </div>
               }
             </>
           }
         </RbCard>
       }
+      <ForgetMemoryConfirmModal
+        ref={forgetModalRef}
+        onSuccess={() => {
+          setSelectedNode(null)
+          getEdgeData()
+        }}
+      />
     </div>
   )
 }

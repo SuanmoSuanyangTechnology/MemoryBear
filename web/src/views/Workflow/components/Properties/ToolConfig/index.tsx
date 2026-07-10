@@ -5,6 +5,7 @@ import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
 import Editor from "../../Editor";
+import { filterChildrenWithTypes } from '../hooks/useVariableList';
 
 interface Option {
   value?: string | number | null;
@@ -167,7 +168,9 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
       initialValue.tool_parameters[vo.name] = vo.default
     })
 
-    form.setFieldsValue(initialValue)
+    setTimeout(() => {
+      form.setFieldsValue(initialValue)
+    }, 0)
   }
 
   // string -> string
@@ -176,39 +179,16 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   // boolean -> boolean【只能选true/false】
   // array -> array[file]/array[object]/array[string]/array[number]/array[boolean]
   // object -> object/file
+  // file -> file/array[file]
   const getFilterOptions = (type: string) => {
-    const filterList: Suggestion[] = [];
-    options.forEach(vo => {
-      if (vo.children && vo.children?.length > 0) {
-        const childOptions = vo.children?.filter(child => child.dataType === type || (type === 'integer' && child.dataType === 'number'))
+    const customMatcher = (dataType: string) =>
+      (dataType === 'secret' && type === 'string')
+      || (type === 'integer' && dataType === 'number')
+      || (type === 'array' && dataType.includes(type))
+      || (type === 'object' && dataType === 'file')
+      || (type === 'file' && dataType === 'array[file]')
 
-        if (vo.dataType === type
-          || (vo.dataType === 'secret' && type === 'string')
-          || (type === 'integer' && vo.dataType === 'number')
-          || (type === 'array' && vo.dataType.includes(type))
-          || (type === 'object' && vo.dataType === 'object')
-        ) {
-          filterList.push({
-            ...vo,
-            children: childOptions
-          })
-        } else if (childOptions.length > 0) {
-          filterList.push({
-            ...vo,
-            disabled: true,
-            children: childOptions
-          })
-        }
-      } else if (vo.dataType === type
-        || (vo.dataType === 'secret' && type === 'string')
-        || (type === 'integer' && vo.dataType === 'number')
-        || (type === 'array' && vo.dataType.includes(type))
-        || (type === 'object' && vo.dataType === 'object')) {
-        filterList.push(vo)
-      }
-    })
-
-    return filterList
+    return filterChildrenWithTypes(options, [type], customMatcher)
   }
 
   return (
@@ -228,6 +208,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
       <Form.Item name="tool_id" hidden />
       <Form.Item name={['tool_parameters', 'operation']} hidden />
       {parameters.map((parameter) => {
+        const isIntegerNumberType = ['integer', 'number'].includes(parameter.type)
         return (
           <div key={parameter.name}>
             <Form.Item
@@ -239,7 +220,14 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                 </Tooltip>
               </>}
               rules={[
-                { required: parameter.required, message: t('common.pleaseEnter') }
+                { required: parameter.required, message: t('common.pleaseEnter') },
+                ...(isIntegerNumberType ? [{
+                  validator(_: any, value: any) {
+                    if (value === undefined || value === null || value === '') return Promise.resolve()
+                    if (/^-?\d+(\.\d+)?$/.test(String(value)) || /^\{\{(([^.]+\.[^}]+))\}\}$/.test(String(value))) return Promise.resolve()
+                    return Promise.reject(new Error(t('common.pleaseEnter') + ' ' + t('common.number') + ' ' + t('common.or') + ' ' + t('common.variable')))
+                  }
+                }] : [])
               ]}
               layout={parameter.type === 'boolean' ? 'horizontal' : 'vertical'}
               className={parameter.type === 'boolean' ? 'rb:mb-0!' : ''}
@@ -247,16 +235,33 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
               {parameter.type === 'string' && parameter.enum && parameter.enum.length > 0
                 ? <Select key={values.tool_id} size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
                 : parameter.type === 'boolean'
-                  ? <Switch key={values.tool_id} size="small" />
-                  : <Editor
-                    key={values.tool_id}
-                    variant="outlined"
-                    type="input"
-                    size="small"
-                    height={28}
-                    options={getFilterOptions(parameter.type)}
-                    placeholder={t('common.pleaseEnter')}
-                  />
+                ? <Switch key={values.tool_id} size="small" />
+                : <Editor
+                  key={values.tool_id}
+                  variant="outlined"
+                  type="input"
+                  size="small"
+                  height={28}
+                  options={getFilterOptions(parameter.type)}
+                  placeholder={t('common.pleaseEnter')}
+                  onBlur={isIntegerNumberType ? () => {
+                    const fieldKey = ['tool_parameters', parameter.name]
+                    form.validateFields([fieldKey])
+                      .then((values) => {
+                        const value = values.tool_parameters?.[parameter.name]
+                        let normalizedValue = value
+                        if (value === undefined || value === null || value === '') {
+                          normalizedValue = null
+                        } else if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(String(value))) {
+                          normalizedValue = Number(value)
+                        }
+                        form.setFieldValue(fieldKey, normalizedValue)
+                      })
+                      .catch(() => {
+                        form.setFieldValue(fieldKey, null)
+                      })
+                  } : undefined}
+                />
               }
             </Form.Item>
             {parameter.type === 'boolean' && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mb-6">{parameter.description}</div>}

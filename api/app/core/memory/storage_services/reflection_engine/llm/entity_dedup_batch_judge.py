@@ -49,8 +49,6 @@ async def judge_batch_dedup(
     Returns:
         [(idx_a, idx_b, confidence, reason), ...] 索引从0开始（内部已转换）
     """
-    from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
-
     try:
         template = _prompt_env.get_template("entity_dedup_batch.jinja2")
         rendered_prompt = template.render(
@@ -60,7 +58,7 @@ async def judge_batch_dedup(
         )
 
         messages = [{"role": "user", "content": rendered_prompt}]
-        response = await call_structured(llm_client, messages, BatchDedupOutput)
+        response = await llm_client.call_structured(messages, BatchDedupOutput)
 
         if not isinstance(response, BatchDedupOutput):
             return []
