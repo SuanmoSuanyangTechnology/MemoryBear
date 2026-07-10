@@ -109,14 +109,14 @@ class EmbeddingStep:
     async def _batch_embed(self, texts: List[str]) -> List[List[float]]:
         """Call the embedder in batches of ``self.batch_size``."""
         if len(texts) <= self.batch_size:
-            return await self.embedder_client.response(texts)
+            return await self.embedder_client.aembed_documents(texts)
 
         batches = [
             texts[i : i + self.batch_size]
             for i in range(0, len(texts), self.batch_size)
         ]
         batch_results = await asyncio.gather(
-            *(self.embedder_client.response(b) for b in batches)
+            *(self.embedder_client.aembed_documents(b) for b in batches)
         )
         embeddings: List[List[float]] = []
         for result in batch_results:

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-26 11:57:50
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 15:12:21
+ * @Last Modified time: 2026-07-08 15:31:23
  */
 export type ToolType = 'mcp' | 'builtin' | 'custom' | 'workflow'
 export interface Query {
@@ -145,7 +145,7 @@ export interface InnerToolModalRef {
 
 export interface ConfigItem {
   name: string | string[];
-  type: 'input' | 'select' | 'checkbox' | 'number';
+  type: 'input' | 'select' | 'checkbox' | 'number' | 'switch' | 'password' | 'textarea';
   desc?: string;
   rules?: any[];
   options?: { label: string; value: string }[];
@@ -165,7 +165,7 @@ export interface InnerConfigItem {
 export interface ExecuteData {
   tool_id: string;
   parameters: {
-    operation: string;
+    operation?: string;
     // 时间戳转换日期时间
     input_value?: string;
     output_format?: string;
@@ -177,6 +177,15 @@ export interface ExecuteData {
     sort_keys?: boolean;
     input_data?: string;
     json_path?: string;
+
+    driver?: string;
+    host?: string;
+    port?: number;
+    user?: string;
+    password?: string;
+    connect_timeout?: number;
+    database?: string;
+    sql?: string;
   }
 }
 export interface CustomToolModalRef {
@@ -199,4 +208,7 @@ export interface CustomRef {
 }
 export interface WorkflowToolModalRef {
   handleOpen: (data: WorkflowToolItem) => void;
+}
+export interface DatabaseToolModalRef {
+  handleOpen: (data: ToolItem) => void;
 }

@@ -6,15 +6,17 @@ import time
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
-from app.db import get_async_db_context, get_db, get_db_read, get_db_context, SessionLocal
+from app.db import get_async_db, get_async_db_context, get_db, get_db_read, get_db_context, SessionLocal
 from app.models import App
 from app.schemas import token_schema
 from app.core.config import settings
 from app.core.security import get_token_id
-from app.repositories import user_repository
+from app.repositories import user_repository, tenant_repository
 from app.repositories import workspace_repository
 from app.models.user_model import User
 from app.models.tenant_model import Tenants
@@ -86,6 +88,7 @@ class CurrentUserSnapshot:
     tenant_id: uuid.UUID
     preferred_language: str | None = None
     roles: tuple[str, ...] = ()
+
 async def get_current_user(
         token: str = Depends(oauth2_scheme),
         db: Session = Depends(get_db)
@@ -804,3 +807,4 @@ async def get_app_or_workspace(
     except Exception as e:
         auth_logger.error(f"Error validating API Key: {str(e)}", exc_info=True)
         raise credentials_exception
+

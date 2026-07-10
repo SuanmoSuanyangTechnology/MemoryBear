@@ -309,7 +309,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         """
         from pathlib import Path
         from app.db import get_db_read
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 
         project_root = str(Path(__file__).resolve().parents[2])
 
@@ -361,8 +361,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
                 # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
                 try:
-                    factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id), tenant_id=memory_config.tenant_id)
+                    llm_client = ModelClientMixin.get_llm_client(db, memory_config.llm_model_id, memory_config.tenant_id)
                     logger.info("[PILOT_RUN_STREAM] LLM client initialized")
                 except Exception as e:
                     raise RuntimeError(f"LLM client initialization failed: {e}")

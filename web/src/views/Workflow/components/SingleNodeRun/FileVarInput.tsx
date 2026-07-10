@@ -15,19 +15,21 @@ import FileList from '@/components/Chat/FileList'
 import { getFileInfoByUrl } from '@/api/fileStorage'
 
 interface FileVarInputProps {
-  name: string | string[];
+  name: string | (string | number)[];
+  fullName?: string | (string | number)[];
   dataType: string;
   form: FormInstance;
   defaultValue?: any[];
+  rules?: any[];
 }
 
-const FileVarInput: FC<FileVarInputProps> = ({ name, form, defaultValue = [] }) => {
+const FileVarInput: FC<FileVarInputProps> = ({ name, fullName, form, defaultValue = [], rules }) => {
   const { t } = useTranslation()
   const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
   const [fileList, setFileList] = useState<any[]>(Array.isArray(defaultValue) ? defaultValue : defaultValue ? [defaultValue] : [])
 
   const setFormFileValue = (updated: any[]) => {
-    form.setFieldValue(name, updated)
+    form.setFieldValue(fullName ?? name, updated)
   }
 
   const fileChange = (file?: any) => {
@@ -97,28 +99,38 @@ const FileVarInput: FC<FileVarInputProps> = ({ name, form, defaultValue = [] }) 
   return (
     <>
       <UploadFileListModal ref={uploadFileListModalRef} refresh={addFileList} />
-      <Form.Item name={name} hidden noStyle />
-      <Form.Item>
-        <Row gutter={8}>
-          <Col span={12}>
-            <UploadFiles
-              onChange={fileChange}
-              block={true}
-              textType="button"
-              disabled={fileList.length > 0}
-            />
-          </Col>
-          <Col span={12}>
-            <Button block
-              disabled={fileList.length > 0}
-              onClick={() => uploadFileListModalRef.current?.handleOpen()}>
-              {t('memoryConversation.addRemoteFile')}
-            </Button>
-          </Col>
-        </Row>
-        {previewFileList.length > 0 && (
-          <FileList wrap="wrap" fileList={previewFileList} onDelete={handleDelete} className="rb:mt-2!" />
-        )}
+      <Form.Item name={name} hidden noStyle rules={rules} />
+      <Form.Item shouldUpdate noStyle>
+        {() => {
+          const errors = form.getFieldError(fullName ?? name)
+          return (
+            <Form.Item
+              validateStatus={errors.length ? 'error' : undefined}
+              help={errors[0]}
+            >
+              <Row gutter={8}>
+                <Col span={12}>
+                  <UploadFiles
+                    onChange={fileChange}
+                    block={true}
+                    textType="button"
+                    disabled={fileList.length > 0}
+                  />
+                </Col>
+                <Col span={12}>
+                  <Button block
+                    disabled={fileList.length > 0}
+                    onClick={() => uploadFileListModalRef.current?.handleOpen()}>
+                    {t('memoryConversation.addRemoteFile')}
+                  </Button>
+                </Col>
+              </Row>
+              {previewFileList.length > 0 && (
+                <FileList wrap="wrap" fileList={previewFileList} onDelete={handleDelete} className="rb:mt-2!" />
+              )}
+            </Form.Item>
+          )
+        }}
       </Form.Item>
     </>
   )

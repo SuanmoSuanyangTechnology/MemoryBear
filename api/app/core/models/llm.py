@@ -298,11 +298,11 @@ class RedBearLLM(BaseLLM):
         try:
             chain = self.with_structured_output(schema, **kwargs)
             return await chain.ainvoke(input)
-        except NotImplementedError:
+        except Exception:
             _logger.warning(
                 "call_structured: with_structured_output not supported by %s, "
                 "falling back to ainvoke + StructResponse",
-                type(self._model).__name__,
+                type(self._model).__name__, exc_info=True
             )
 
         response = await self.ainvoke(input)

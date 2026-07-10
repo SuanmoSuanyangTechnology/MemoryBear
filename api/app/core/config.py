@@ -303,6 +303,11 @@ class Settings:
         Annotated[int, Field(ge=0, le=59, description="forgetting cycle cron minute [0, 59]")]
     ).validate_python(int(os.getenv("FORGETTING_CYCLE_MINUTE", "0")))
 
+    # scan-forget-candidates 定时任务扫描间隔（分钟）
+    FORGET_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="forget candidates scan interval in minutes, must be >= 1")]
+    ).validate_python(int(os.getenv("FORGET_SCAN_INTERVAL_MINUTES", "5")))
+
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）
     IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  

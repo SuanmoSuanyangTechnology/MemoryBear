@@ -497,14 +497,16 @@ class AppDslService:
     def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
         if not ref:
             return None
+        from sqlalchemy import or_
+        tenant_filter = or_(ModelConfig.tenant_id == tenant_id, ModelConfig.is_public.is_(True))
         model_id = ref.get("id")
         if model_id:
             try:
                 model_uuid = uuid.UUID(str(model_id))
                 m = self.db.query(ModelConfig).filter(
                     ModelConfig.id == model_uuid,
-                    ModelConfig.tenant_id == tenant_id,
-                    ModelConfig.is_active.is_(True)
+                    ModelConfig.is_active.is_(True),
+                    tenant_filter,
                 ).first()
                 if m:
                     return str(m.id)
@@ -513,7 +515,7 @@ class AppDslService:
         model_name = ref.get("name")
         if model_name:
             q = self.db.query(ModelConfig).filter(
-                ModelConfig.tenant_id == tenant_id,
+                tenant_filter,
                 ModelConfig.name == model_name,
                 ModelConfig.is_active.is_(True)
             )

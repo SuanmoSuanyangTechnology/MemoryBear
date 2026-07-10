@@ -103,6 +103,10 @@ export const updatedEndUserInfo = (values: EndUser) => {
 export const getMemorySearchEdges = (end_user_id: string, config?: AxiosRequestConfig) => {
   return request.get(`/memory/analytics/graph_data`, { end_user_id }, config)
 }
+// User Memory - Delete memory node
+export const deleteMemoryNode = (data: { end_user_id: string; element_id: string }) => {
+  return request.post(`/memory-storage/node/delete`, data)
+}
 // User Memory - Community graph
 export const getMemoryCommunityGraph = (end_user_id: string, config?: AxiosRequestConfig) => {
   return request.get(`/memory/analytics/community_graph`, { end_user_id }, config)

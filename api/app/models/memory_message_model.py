@@ -97,6 +97,13 @@ class MemoryMessage(Base):
         comment="业务侧会话发生时间（ISO 8601），调用方未提供时为 NULL",
     )
 
+    # 剪枝/规整后内容持久化
+    pruned_content = Column(
+        Text,
+        nullable=True,
+        comment="剪枝/规整后内容；NULL=未处理",
+    )
+
     # 时间戳
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 

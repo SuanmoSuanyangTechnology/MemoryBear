@@ -475,4 +475,4 @@ Step 8  使用管理员账号登录前端页面
 
 [![Star History Chart](https://api.star-history.com/svg?repos=SuanmoSuanyangTechnology/MemoryBear&type=Date)](https://star-history.com/#SuanmoSuanyangTechnology/MemoryBear&Date)
 
-- **联系我们**：tianyou_hubm@redbearai.com
+- **联系我们**：jiezhimin@redbearai.com

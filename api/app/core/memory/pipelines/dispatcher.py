@@ -733,11 +733,9 @@ async def dispatch_mcp_write(
     target_msg = written[0]
     target_seq = target_msg["message_seq"]
 
-    # 在 target_message 上添加标记，告知 WritePipeline 需要追加空 assistant 配对
-    target_msg_with_marker = {**target_msg, "_mcp_pair_assistant": True}
     msg_id = push_write_task(
         end_user_id=end_user_id,
-        target_message=target_msg_with_marker,
+        target_message=target_msg,
         context_before=[],
         context_after=[],
         config_id=str(config_id),

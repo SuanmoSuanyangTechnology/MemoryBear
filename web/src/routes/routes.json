@@ -24,6 +24,7 @@
       { "path": "/user-memory/:id", "element": "UserMemoryDetail" },
       { "path": "/member", "element": "MemberManagement" },
       { "path": "/memory", "element": "MemoryManagement" },
+      { "path": "/memory-engine/:type/:id", "element": "MemoryEngine" },
       { "path": "/forgetting-engine/:id", "element": "ForgettingEngine" },
       { "path": "/memory-extraction-engine/:id", "element": "MemoryExtractionEngine" },
       { "path": "/application", "element": "ApplicationManagement" },

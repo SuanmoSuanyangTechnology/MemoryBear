@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:33:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 16:53:15
+ * @Last Modified time: 2026-07-09 15:07:20
  */
 /**
  * Route Configuration
@@ -91,6 +91,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Skills: lazy(() => import('@/views/Skills')),
   SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
   Account: lazy(() => import('@/views/Account')),
+  MemoryEngine: lazy(() => import('@/views/MemoryEngine')),
   Jump: lazy(() => import('@/views/JumpPage')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),

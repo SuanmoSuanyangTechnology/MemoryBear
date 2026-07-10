@@ -60,6 +60,8 @@ class OpenAIClient(LLMClient):
                 api_key=self.api_key,
                 base_url=self.base_url,
                 max_retries=self.max_retries,
+                is_omni=self.is_omni,
+                capability=self.capability,
                 timeout=self.timeout,
             ),
             type=type_

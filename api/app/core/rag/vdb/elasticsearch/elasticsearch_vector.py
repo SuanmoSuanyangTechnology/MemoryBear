@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,7 +17,9 @@ from langchain_core.documents import Document
 from app.core.models.base import RedBearModelConfig
 from app.core.models import RedBearRerank
 from app.core.models.embedding import RedBearEmbeddings
-from app.models.models_model import ModelApiKey, ModelProvider
+from app.db import get_db_context
+from app.models.models_model import ModelApiKey
+from app.services.model_service import ModelApiKeyService
 
 from app.models.knowledge_model import Knowledge
 from app.core.rag.vdb.field import Field
@@ -28,11 +31,30 @@ logger = logging.getLogger(__name__)
 VECTOR_SEARCH_MODE_ENV = "ELASTICSEARCH_VECTOR_SEARCH_MODE"
 VECTOR_SEARCH_MODE_KNN = "knn"
 VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
+DEFAULT_INDEX_REFRESH_INTERVAL = "1s"
+
+
+@dataclass(frozen=True)
+class ModelApiKeyRuntimeConfig:
+    model_name: str
+    provider: str
+    api_key: str
+    api_base: str | None
+
+    @classmethod
+    def from_api_key(cls, api_key: ModelApiKey) -> "ModelApiKeyRuntimeConfig":
+        return cls(
+            model_name=api_key.model_name,
+            provider=api_key.provider,
+            api_key=api_key.api_key,
+            api_base=api_key.api_base,
+        )
 
 
 class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
-                 embedding_config: ModelApiKey, reranker_config: ModelApiKey):
+                 embedding_config: ModelApiKey | ModelApiKeyRuntimeConfig,
+                 reranker_config: ModelApiKey | ModelApiKeyRuntimeConfig):
         super().__init__(index_name.lower())
 
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
@@ -951,6 +973,11 @@ class ElasticSearchVector(BaseVector):
     ):
         if not self._client.indices.exists(index=self._collection_name):
             index_mapping = {
+                "settings": {
+                    "index": {
+                        "refresh_interval": DEFAULT_INDEX_REFRESH_INTERVAL,
+                    },
+                },
                 "mappings": {
                     "properties": {
                         Field.CONTENT_KEY.value: {
@@ -1226,15 +1253,15 @@ class ElasticSearchVectorFactory:
         client = ElasticSearchVectorClientProvider.get_shared_client()
         collection_name = ElasticSearchVectorIndexOps.collection_name_for_knowledge(knowledge.id)
 
-        if knowledge.embedding is None:
-            raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
-        if knowledge.reranker is None:
-            raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        if not knowledge.embedding_id:
+            raise ValueError(f"embedding_id config error: {str(knowledge.id)}")
+        if not knowledge.reranker_id:
+            raise ValueError(f"reranker_id config error: {str(knowledge.id)}")
 
         tenant_id = cls._resolve_tenant_id(knowledge)
 
-        embedding_config = cls._resolve_api_key(knowledge.embedding, knowledge.id, "embedding", tenant_id)
-        reranker_config = cls._resolve_api_key(knowledge.reranker, knowledge.id, "reranker", tenant_id)
+        embedding_config = cls._resolve_api_key(knowledge.embedding_id, knowledge.id, "embedding", tenant_id)
+        reranker_config = cls._resolve_api_key(knowledge.reranker_id, knowledge.id, "reranker", tenant_id)
 
         return ElasticSearchVector(
             index_name=collection_name,
@@ -1247,8 +1274,8 @@ class ElasticSearchVectorFactory:
     def init_vector_from_configs(
         cls,
         index_name: str,
-        embedding_config: ModelApiKey,
-        reranker_config: ModelApiKey,
+        embedding_config: ModelApiKey | ModelApiKeyRuntimeConfig,
+        reranker_config: ModelApiKey | ModelApiKeyRuntimeConfig,
     ) -> ElasticSearchVector:
         """Create a vector service from resolved model config snapshots."""
         client = ElasticSearchVectorClientProvider.get_shared_client()
@@ -1261,31 +1288,16 @@ class ElasticSearchVectorFactory:
     @staticmethod
     def _resolve_tenant_id(knowledge: Knowledge):
         """Look up tenant_id via the knowledge's workspace."""
-        from app.db import get_db_context
         from app.models.workspace_model import Workspace
         with get_db_context() as db:
             ws = db.query(Workspace).filter(Workspace.id == knowledge.workspace_id).first()
             return ws.tenant_id if ws else None
 
     @staticmethod
-    def _resolve_api_key(model_config, knowledge_id, role: str, tenant_id) -> ModelApiKey:
-        """Resolve ModelApiKey, handling public SpeedBear models that have no stored api_keys."""
-        is_public_speedbear = (
-            model_config.provider == ModelProvider.SPEEDBEAR
-            and bool(model_config.is_public)
-        )
-        if is_public_speedbear:
-            from app.db import get_db_context
-            from app.services.model_service import ModelApiKeyService
-            with get_db_context() as db:
-                api_key = ModelApiKeyService.get_available_api_key(db, model_config.id, tenant_id)
+    def _resolve_api_key(model_config_id, knowledge_id, role: str, tenant_id) -> ModelApiKeyRuntimeConfig:
+        """Resolve ModelApiKey through the shared model-key selector."""
+        with get_db_context() as db:
+            api_key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
             if not api_key:
-                raise ValueError(
-                    f"No {role} api key found for knowledge {knowledge_id} "
-                    f"(SpeedBear tenant binding missing)"
-                )
-            return api_key
-
-        if not model_config.api_keys:
-            raise ValueError(f"No {role} api key found for knowledge {knowledge_id}")
-        return model_config.api_keys[0]
+                raise ValueError(f"No {role} api key found for knowledge {knowledge_id}")
+            return ModelApiKeyRuntimeConfig.from_api_key(api_key)

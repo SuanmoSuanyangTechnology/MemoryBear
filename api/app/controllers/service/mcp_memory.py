@@ -88,7 +88,7 @@ async def write_memory(
 @mcp.tool
 async def read_memory(
         message: str,
-        search_switch: str = "quick",
+        search_switch: str = "express",
 ) -> dict:
     """检索与当前上下文相关的历史记忆。
 
@@ -104,7 +104,9 @@ async def read_memory(
                  例如："用户对咖啡有什么偏好"、"上次讨论的旅行计划"。
         search_switch: - "deep"=深度检索+交叉验证（适合复杂问题）
                        - "normal"=深度检索（适合一般回忆）
-                       - "quick"=快速检索（默认，适合简单查询）
+                       - "quick"=快速混合检索（适合简单查询）
+                       - "express"=极速关键词检索（默认，不拆解/不汇总，适合简单查询）
+                       - "meta"=元数据检索（仅返回用户画像、偏好、习惯，适合用户档案类问题）
     """
     try:
         workspace_id, end_user_id, config_id, storage_type = _resolve_context()

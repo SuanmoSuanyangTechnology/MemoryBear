@@ -9,7 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import dayjs, { type Dayjs } from 'dayjs'
 
-import type { ToolItem, TimeToolModalRef, JsonToolModalRef, InnerToolModalRef } from './types';
+import type { ToolItem, TimeToolModalRef, JsonToolModalRef, InnerToolModalRef, DatabaseToolModalRef } from './types';
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import RbCard from '@/components/RbCard'
 import TimeToolModal from './components/TimeToolModal'
@@ -19,6 +19,7 @@ import { getTools } from '@/api/tools'
 import { InnerConfigData } from './constant'
 import OverflowTags from '@/components/OverflowTags'
 import Tag from '@/components/Tag'
+import DatabaseToolModal from './components/DatabaseToolModal'
 
 const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }> = ({ getStatusTag, keyword }) => {
   const { t } = useTranslation();
@@ -28,6 +29,7 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
   const timeToolModalRef = useRef<TimeToolModalRef>(null)
   const jsonToolModalRef = useRef<JsonToolModalRef>(null)
   const innerToolModalRef = useRef<InnerToolModalRef>(null)
+  const databaseToolModalRef = useRef<DatabaseToolModalRef>(null)
 
   useEffect(() => {
     getData()
@@ -61,6 +63,9 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
         break
       case 'JsonTool':
         jsonToolModalRef.current?.handleOpen(data);
+        break
+      case 'DatabaseTool':
+        databaseToolModalRef.current?.handleOpen(data);
         break
       default: 
         innerToolModalRef.current?.handleOpen(data);
@@ -126,7 +131,10 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                       </Col>
                       : <Col span={24}>
                         <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.configStatus')}</div>
-                        {t(`tool.${item.status}_desc`)}
+                        {['MinerUTool', 'DatabaseTool'].includes(item.config_data.tool_class)
+                          ? t(`tool.${item.config_data.tool_class}_${item.status}_desc`)
+                          : t(`tool.${item.status}_desc`)
+                        }
                       </Col>
                   }
                 </Row>
@@ -145,6 +153,9 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
       <InnerToolModal
         ref={innerToolModalRef}
         refreshTable={getData}
+      />
+      <DatabaseToolModal
+        ref={databaseToolModalRef}
       />
     </>
   );

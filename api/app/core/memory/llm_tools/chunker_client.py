@@ -22,11 +22,6 @@ from chonkie import (
 from app.core.memory.models.config_models import ChunkerConfig
 from app.core.memory.models.message_models import DialogData, Chunk
 
-try:
-    from app.core.memory.llm_tools.openai_client import OpenAIClient
-except Exception:
-    OpenAIClient = Any
-
 # Initialize logger
 logger = logging.getLogger(__name__)
 
@@ -34,7 +29,7 @@ logger = logging.getLogger(__name__)
 class LLMChunker:
     """LLM-based intelligent chunking strategy"""
 
-    def __init__(self, llm_client: OpenAIClient, chunk_size: int = 1000):
+    def __init__(self, llm_client, chunk_size: int = 1000):
         self.llm_client = llm_client
         self.chunk_size = chunk_size
 
@@ -54,12 +49,8 @@ class LLMChunker:
         ]
 
         try:
-            # 使用异步的 achat 方法
-            if hasattr(self.llm_client, 'achat'):
-                response = await self.llm_client.achat(messages)
-            else:
-                # 如果没有异步方法，使用同步方法并转换为异步
-                response = await asyncio.to_thread(self.llm_client.chat, messages)
+            # 使用 ainvoke 方法
+            response = await self.llm_client.ainvoke(messages)
 
             # 检查响应格式并提取内容
             if hasattr(response, 'choices') and len(response.choices) > 0:
@@ -115,7 +106,7 @@ class HybridChunker:
 
 
 class ChunkerClient:
-    def __init__(self, chunker_config: ChunkerConfig, llm_client: OpenAIClient = None):
+    def __init__(self, chunker_config: ChunkerConfig, llm_client=None):
         self.chunker_config = chunker_config
         self.embedding_model = chunker_config.embedding_model
         self.chunk_size = chunker_config.chunk_size
