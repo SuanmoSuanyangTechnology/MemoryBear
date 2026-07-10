@@ -194,7 +194,7 @@ def _refresh_pruned_content(
     messages: List[dict], conversation_id: str, end_user_id: str, source: str
 ) -> None:
     """从 DB 刷新 pruned_content=NULL 的消息。"""
-    null_seqs = [m["message_seq"] for m in messages if m.get("pruned_content") is None and m.get("message_seq")]
+    null_seqs = [m.get("message_seq") for m in messages if m.get("pruned_content") is None and m.get("message_seq")]
     if not null_seqs:
         return
     try:

@@ -179,7 +179,7 @@ async def generate_chunk_insight_sections(
         messages = [{"role": "user", "content": rendered_prompt}]
         llm_client = _get_llm_client(end_user_id)
         response = await llm_client.ainvoke(messages)
-        raw_text = response.content.strip() if response else ""
+        raw_text = response.content.strip() if response and hasattr(response, "content") else ""
 
         sections = _parse_sections(raw_text, language=language)
         sections["_raw"] = raw_text
