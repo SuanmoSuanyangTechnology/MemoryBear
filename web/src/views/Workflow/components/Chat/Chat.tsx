@@ -109,15 +109,21 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
    * Initializes chat with opening statement if configured
    */
   useEffect(() => {
-    const openingMsg = open
-      ? buildOpeningStatementMessage(features?.opening_statement, { withTimestamp: true })
-      : null
-    if (openingMsg) {
-      setChatList([openingMsg])
-    } else {
+    if (open) {
+      const openingMsg = open
+        ? buildOpeningStatementMessage(features?.opening_statement, { withTimestamp: true })
+        : null
+      if (openingMsg) {
+        setChatList([openingMsg])
+      } else {
+        handleClose(false)
+      }
+      getVariables()
+    }
+
+    return () => {
       handleClose(false)
     }
-    getVariables()
   }, [open])
 
   useEffect(() => {

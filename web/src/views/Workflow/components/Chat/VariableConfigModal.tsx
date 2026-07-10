@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState, Fragment } from 'react';
 import { Form, Input, InputNumber, Checkbox, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -72,12 +72,20 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                 const field = initialValues[index]
                 if (field.type.includes('file')) {
                   return (
-                    <FileVarInput
-                      name={[name, 'value'] as string[]}
-                      dataType={field.type}
-                      form={form}
-                      defaultValue={field.defaultValue || []}
-                    />
+                    <Fragment key={name}>
+                      <label className={field.required ? "ant-form-item-required" : ""}>
+                        {field.required ? <span className="rb:text-[#ff5d34] rb:mr-1 rb:text-[14px] rb:font-[SimSun,sans-serif]">*</span> : ""}
+                        {[Array.isArray(field.name) ? field.name.join('.') : field.name, field.display_name || field.description].filter(Boolean).join('·')}
+                      </label>
+                      <FileVarInput
+                        name={[name, 'value']}
+                        fullName={['variables', name, 'value']}
+                        dataType={field.type}
+                        form={form}
+                        defaultValue={field.value || []}
+                        rules={[{ required: field.required, message: t('common.pleaseSelect') }]}
+                      />
+                    </Fragment>
                   )
                 }
                 return (
