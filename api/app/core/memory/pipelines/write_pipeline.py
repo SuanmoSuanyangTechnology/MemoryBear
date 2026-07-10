@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from app.core.memory.utils.log.bear_logger import BearLogger
@@ -758,8 +758,8 @@ class WritePipeline:
 
         # 构建节点
         node_id = uuid.uuid4().hex
-        from app.core.utils.datetime_utils import to_iso_z
-        now_iso = to_iso_z(datetime.now(timezone.utc))
+        from app.core.utils.datetime_utils import to_iso_z, utcnow
+        now_iso = to_iso_z(utcnow())
         run_id = result.dialogue_nodes[0].run_id if result.dialogue_nodes else uuid.uuid4().hex
 
         # name 使用 LLM 产出的实体锚点（processed_user_topic_entity_hint）
