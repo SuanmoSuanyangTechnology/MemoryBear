@@ -5,6 +5,7 @@ import math
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -253,36 +254,37 @@ class Neo4jSearchService:
         ]
 
         for _ in range(RELATIONSHIP_LOOP_LIMIT):
-            response: AIMessage = await llm_with_tools.ainvoke(
-                messages,
-                config={
-                    "callbacks": [],
-                }
+            _config_token = var_child_runnable_config.set(
+                RunnableConfig(callbacks=[], tags=[], metadata={})
             )
-            messages.append(response)
+            try:
+                response: AIMessage = await llm_with_tools.ainvoke(messages)
+                messages.append(response)
 
-            if not response.tool_calls:
-                break
+                if not response.tool_calls:
+                    break
 
-            async def run_tool(tc):
-                tool = tool_map[tc["name"]]
-                try:
-                    result = await tool.ainvoke(tc["args"])
-                    return ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        tool_call_id=tc["id"],
-                    )
-                except Exception as e:
-                    return ToolMessage(
-                        content=json.dumps({"error": str(e)}),
-                        tool_call_id=tc["id"],
-                    )
+                async def run_tool(tc):
+                    tool = tool_map[tc["name"]]
+                    try:
+                        result = await tool.ainvoke(tc["args"])
+                        return ToolMessage(
+                            content=json.dumps(result, ensure_ascii=False),
+                            tool_call_id=tc["id"],
+                        )
+                    except Exception as e:
+                        return ToolMessage(
+                            content=json.dumps({"error": str(e)}),
+                            tool_call_id=tc["id"],
+                        )
 
-            tool_messages = await asyncio.gather(*[
-                run_tool(tc) for tc in response.tool_calls
-            ])
+                tool_messages = await asyncio.gather(*[
+                    run_tool(tc) for tc in response.tool_calls
+                ])
 
-            messages.extend(tool_messages)
+                messages.extend(tool_messages)
+            finally:
+                var_child_runnable_config.reset(_config_token)
 
         final_message = next(
             (m for m in reversed(messages) if isinstance(m, AIMessage)),

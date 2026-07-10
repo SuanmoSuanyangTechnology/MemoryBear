@@ -14,7 +14,7 @@ class KnowledgeRetrievalRequest(BaseModel):
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] = Field(default_factory=list)
     similarity_threshold: float = Field(default=0.3, ge=0, le=1)
-    vector_similarity_weight: float = Field(default=0.3, ge=0, le=1)
+    vector_similarity_weight: float | None = Field(default=0.3, ge=0, le=1)
     top_k: int = Field(default=100, ge=1, le=100)
     top_n: int | None = Field(default=None, ge=1, le=100)
     caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL

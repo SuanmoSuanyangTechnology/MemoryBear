@@ -6,12 +6,14 @@ from app.core.tools.builtin.json_tool import JsonTool
 from app.core.tools.builtin.baidu_search_tool import BaiduSearchTool
 from app.core.tools.builtin.mineru_tool import MinerUTool
 from app.core.tools.builtin.textin_tool import TextInTool
+from app.core.tools.builtin.database_tool import DatabaseTool
 
 __all__ = [
     "BuiltinTool",
     "DateTimeTool",
-    "JsonTool", 
+    "JsonTool",
     "BaiduSearchTool",
     "MinerUTool",
-    "TextInTool"
+    "TextInTool",
+    "DatabaseTool",
 ]

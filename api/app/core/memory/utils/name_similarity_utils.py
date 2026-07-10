@@ -45,8 +45,11 @@ def _jaccard(a_tokens: List[str], b_tokens: List[str]) -> float:
         return 0.0
 
 
-def _cosine(a: List[float], b: List[float]) -> float:
-    """余弦相似度：计算两个向量的夹角余弦值"""
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    """余弦相似度：计算两个向量的夹角余弦值。
+
+    任一向量为空或长度不匹配时返回 0.0。
+    """
     try:
         if not a or not b or len(a) != len(b):
             return 0.0
@@ -58,7 +61,6 @@ def _cosine(a: List[float], b: List[float]) -> float:
         return dot / (na * nb)
     except Exception:
         return 0.0
-
 
 def _tokenize_chars(s: str) -> List[str]:
     """中文逐字分词：中文字符按单字切分，英文与数字按连续串切分。
@@ -177,7 +179,7 @@ def name_similarity_with_aliases(
     """
     # 1. 主名称向量相似度：优先用外部传入（Neo4j 已算），否则 Python 兜底
     if emb_sim is None:
-        emb_sim = _cosine(
+        emb_sim = cosine_similarity(
             getattr(e1, "name_embedding", []) or [],
             getattr(e2, "name_embedding", []) or [],
         )
@@ -240,7 +242,7 @@ def _name_similarity_with_aliases_legacy(
     """
     # 1. 主名称向量相似度：优先用外部传入（Neo4j 已算），否则 Python 兜底计算
     if emb_sim is None:
-        emb_sim = _cosine(
+        emb_sim = cosine_similarity(
             getattr(e1, "name_embedding", []) or [],
             getattr(e2, "name_embedding", []) or [],
         )

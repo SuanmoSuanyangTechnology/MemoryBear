@@ -53,6 +53,8 @@ class AssistantPruningResponse(BaseModel):
     - assistant_memory_type: 摘要类型枚举，无价值时为 "NULL"，Assistant 为空时为 null
     - should_process_user_msg: 是否需要对 User 消息做规整，User 为空时为 null
     - processed_user_msg: 规整后的 User 消息文本，不需要处理时为 null
+    - processed_user_topic_entity_hint: 规整后最应通过 embedding 连接的实体锚点，
+      should_process_user_msg 非 true 时为 null
     """
 
     assistant_memory_hint: Optional[str] = Field(
@@ -67,6 +69,9 @@ class AssistantPruningResponse(BaseModel):
     )
     processed_user_msg: Optional[str] = Field(
         default=None, description="规整后的 User 消息文本，不需要处理时为 null"
+    )
+    processed_user_topic_entity_hint: Optional[str] = Field(
+        default=None, description="规整后最应通过 embedding 连接的实体锚点，should_process_user_msg 非 true 时为 null"
     )
 
 
@@ -158,6 +163,8 @@ class SemanticPruner:
         for attempt in range(max_retries):
             try:
                 result = await self.llm_client.call_structured(messages, AssistantPruningResponse)
+                if result is None:
+                    raise ValueError("call_structured 返回 None（LLM 输出解析失败）")
                 return result
             except Exception as e:
                 if attempt < max_retries - 1:

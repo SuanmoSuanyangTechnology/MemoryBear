@@ -379,12 +379,13 @@ class MemoryService:
             search_switch: SearchStrategy,
             history: list | None = None,
             limit: int = 10,
+            includes: list | None = None,
     ) -> MemorySearchResult:
         if history is None:
             history = []
         if self.ctx.memory_config is None:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
-        return await ReadPipeLine(self.ctx).run(query, search_switch, history, limit)
+        return await ReadPipeLine(self.ctx).run(query, search_switch, history, limit, includes=includes)
 
     async def forget(self) -> dict:
         return await ForgettingPipeline(self.ctx).run()

@@ -29,6 +29,7 @@ class PruneResult(NamedTuple):
     memory_type: str
     should_process_user_msg: bool
     processed_user_msg: Optional[str]
+    processed_user_topic_entity_hint: Optional[str]
 
 
 async def prune_messages(
@@ -87,14 +88,17 @@ async def prune_messages(
                 "source": "db",
                 "type": f"{role}_pruning",
                 "input": {"msgs": [{"role": role.title(), "msg": content}]},
-                "output": {"pruned_content": msg["pruned_content"]},
+                "output": {
+                    "pruned_content": msg["pruned_content"],
+                    "topic_entity_hint": msg.get("topic_entity_hint"),
+                },
             })
             continue
 
         if role == "user":
             if _should_skip_user(content):
                 result[i] = msg
-                db_updates.append((seq, content))
+                db_updates.append((seq, content, None))
                 pruning_records.append({
                     "conversation_id": conversation_id,
                     "message_seq": seq,
@@ -139,15 +143,15 @@ async def prune_messages(
                 # LLM 失败 → 截断原文前 500 字符作为兜底，写入 DB 标记已处理
                 fallback = content[:500]
                 result[idx] = {**msg, "content": fallback}
-                db_updates.append((seq, fallback))
+                db_updates.append((seq, fallback, None))
             elif role_type == "user":
                 pr: PruneResult = llm_result
                 if pr.should_process_user_msg and pr.processed_user_msg and pr.processed_user_msg.strip():
                     result[idx] = {**msg, "content": pr.processed_user_msg}
-                    db_updates.append((seq, pr.processed_user_msg))
+                    db_updates.append((seq, pr.processed_user_msg, pr.processed_user_topic_entity_hint))
                 else:
                     result[idx] = msg
-                    db_updates.append((seq, content))
+                    db_updates.append((seq, content, None))
                 pruning_records.append({
                     "conversation_id": conversation_id,
                     "message_seq": seq,
@@ -160,13 +164,14 @@ async def prune_messages(
                     "output": {
                         "should_process_user_msg": pr.should_process_user_msg,
                         "processed_user_msg": pr.processed_user_msg,
+                        "processed_user_topic_entity_hint": pr.processed_user_topic_entity_hint,
                     },
                 })
             elif role_type == "assistant":
                 pr: PruneResult = llm_result
                 to_write = pr.pruned_content if pr.pruned_content else content
                 result[idx] = {**msg, "content": to_write}
-                db_updates.append((seq, to_write))
+                db_updates.append((seq, to_write, None))
                 pruning_records.append({
                     "conversation_id": conversation_id,
                     "message_seq": seq,
@@ -193,7 +198,7 @@ async def prune_messages(
 def _refresh_pruned_content(
     messages: List[dict], conversation_id: str, end_user_id: str, source: str
 ) -> None:
-    """从 DB 刷新 pruned_content=NULL 的消息。"""
+    """从 DB 刷新 pruned_content 和 topic_entity_hint。"""
     null_seqs = [m.get("message_seq") for m in messages if m.get("pruned_content") is None and m.get("message_seq")]
     if not null_seqs:
         return
@@ -208,8 +213,11 @@ def _refresh_pruned_content(
                 source=source,
             )
         for msg in messages:
-            if msg.get("pruned_content") is None and msg["message_seq"] in fresh:
-                msg["pruned_content"] = fresh[msg["message_seq"]]
+            seq = msg.get("message_seq")
+            if msg.get("pruned_content") is None and seq in fresh:
+                data = fresh[seq]
+                msg["pruned_content"] = data["pruned_content"]
+                msg["topic_entity_hint"] = data.get("topic_entity_hint")
     except Exception as e:
         logger.warning(f"[Pruning] DB 刷新失败（不影响主流程）: {e}", exc_info=True)
 
@@ -296,6 +304,7 @@ async def _call_llm_prune(
         memory_type=result.assistant_memory_type,
         should_process_user_msg=result.should_process_user_msg,
         processed_user_msg=result.processed_user_msg,
+        processed_user_topic_entity_hint=result.processed_user_topic_entity_hint,
     )
 
 
