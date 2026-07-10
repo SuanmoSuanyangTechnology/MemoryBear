@@ -43,6 +43,20 @@ class UserInput(BaseModel):
     config_id: Optional[str] = None
 
 
+class InternalReadInput(BaseModel):
+    """Internal read request schema — extends UserInput with include / limit."""
+    message: str
+    search_switch: str
+    end_user_id: str
+    session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    config_id: Optional[str] = None
+    includes: Optional[List[str]] = Field(
+        default=None,
+        description="要包含的 Neo4j 节点类型列表，如 CHUNK, COMMUNITY, DIALOGUE 等。不传则包含全部类型。",
+    )
+    limit: int = Field(default=10, description="返回的记忆数量上限", ge=1, le=100)
+
+
 class WriteMessageItem(BaseModel):
     """写入记忆的单条消息"""
     role: str = Field(..., description="消息角色: user 或 assistant")
