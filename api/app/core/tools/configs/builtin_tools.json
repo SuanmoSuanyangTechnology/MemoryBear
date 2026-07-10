@@ -44,6 +44,16 @@
       "api_key": {"type": "string", "description": "OpenClaw API Key", "sensitive": true, "required": true}
     }
   },
+  "database": {
+    "name": "数据库查询",
+    "description": "PostgreSQL 数据库工具：无需预先配置任何连接信息，启用后 Agent/工作流调用时需自行提供数据库连接信息（host/port/user/password）、要操作的 database 和 sql，可执行任意 SQL（包含写操作/DDL，不做限制），请谨慎使用",
+    "tool_class": "DatabaseTool",
+    "category": "data",
+    "requires_config": false,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {}
+  },
   "mineru": {
     "name": "MinerU 文档解析",
     "description": "MinerU 私有化部署的 PDF/文档解析工具,走 V3 异步 /tasks 协议(与 RAG 解析管道同源),供工作流文档提取器节点使用。注意:工具不返回抽取的图片。",
