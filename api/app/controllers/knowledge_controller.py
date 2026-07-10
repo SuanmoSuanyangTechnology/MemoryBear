@@ -42,7 +42,7 @@ from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
 from app.services import file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
-from app.repositories.model_repository import ModelConfigRepository
+from app.services.model_service import ModelConfigService
 from app.services.qa_export_service import iter_qa_csv_chunks, make_qa_export_filename
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -254,15 +254,7 @@ async def get_knowledge_graph_entity_types(
     try:
         # 1. Check whether the model exists
         api_logger.debug(f"Check whether the model exists: {llm_id}")
-        config = await ModelConfigRepository.get_by_id_async(db=db, model_id=llm_id)
-
-        if not config:
-            api_logger.warning(
-                f"The model does not exist or you do not have permission to access it: llm_id={llm_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="The model does not exist or you do not have permission to access it"
-            )
+        config = await ModelConfigService.get_model_by_id_async(db=db, model_id=llm_id)
         # 2. Prepare to configure chat_mdl information
         chat_model = Base(
             key=config.api_keys[0].api_key,
