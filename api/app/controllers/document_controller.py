@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import os
 from typing import Optional
@@ -5,12 +6,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
-from app.controllers import file_controller
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.utils.redis_conn import REDIS_CONN
@@ -21,14 +22,15 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.response_utils import success
-from app.db import get_db
-from app.dependencies import get_current_user
+from app.db import get_async_db
+from app.dependencies import get_current_user_async
 from app.models import document_model
+from app.models import file_model
 from app.models.user_model import User
 from app.schemas import document_schema
 from app.schemas.response_schema import ApiResponse
-from app.services import document_service, file_service, knowledge_service
-from app.services.rag_access_service import require_current_workspace_document
+from app.services import document_service, knowledge_service
+from app.services.rag_access_service import require_current_workspace_document_async
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.schemas import knowledge_metadata_schema as metadata_schema
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
@@ -46,8 +48,40 @@ _PARSE_CANCEL_TTL = 60  # 1 minute
 router = APIRouter(
     prefix="/documents",
     tags=["documents"],
-    dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
+    dependencies=[Depends(get_current_user_async)]  # Apply auth to all routes in this controller
 )
+
+
+async def _delete_file_record_async(
+        db: AsyncSession,
+        file_id: uuid.UUID,
+        storage_service: FileStorageService,
+) -> None:
+    db_file = await db.get(file_model.File, file_id)
+    if not db_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    if db_file.file_ext == "folder":
+        result = await db.execute(
+            select(file_model.File).where(file_model.File.parent_id == db_file.id)
+        )
+        child_files = list(result.scalars().all())
+        for child in child_files:
+            if child.file_key:
+                try:
+                    await storage_service.delete_file(child.file_key)
+                except Exception as e:
+                    api_logger.warning(f"Failed to delete child file from storage: {child.file_key} - {e}")
+            await db.delete(child)
+    else:
+        if db_file.file_key:
+            try:
+                await storage_service.delete_file(db_file.file_key)
+            except Exception as e:
+                api_logger.warning(f"Failed to delete file from storage: {db_file.file_key} - {e}")
+
+    await db.delete(db_file)
+    await db.commit()
 
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)
@@ -60,8 +94,8 @@ async def get_documents(
         desc: Optional[bool] = Query(False, description="Is it descending order"),
         keywords: Optional[str] = Query(None, description="Search keywords (file name)"),
         document_ids: Optional[str] = Query(None, description="document ids, separated by commas"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Paged query document list
@@ -85,7 +119,10 @@ async def get_documents(
     ]
 
     if parent_id:
-        files = file_service.get_files_by_parent_id(db=db, parent_id=parent_id, current_user=current_user)
+        file_result = await db.execute(
+            select(file_model.File).where(file_model.File.parent_id == parent_id)
+        )
+        files = list(file_result.scalars().all())
         files_ids = [item.id for item in files]
         filters.append(document_model.Document.file_id.in_(files_ids))
 
@@ -100,7 +137,7 @@ async def get_documents(
     # 3. Execute paged query
     try:
         api_logger.debug("Start executing document paging query")
-        total, items = document_service.get_documents_paginated(
+        total, items = await document_service.get_documents_paginated_async(
             db=db,
             filters=filters,
             page=page,
@@ -133,8 +170,8 @@ async def get_documents(
 @router.post("/document", response_model=ApiResponse)
 async def create_document(
         create_data: document_schema.DocumentCreate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     create document
@@ -143,7 +180,7 @@ async def create_document(
 
     try:
         api_logger.debug(f"Start creating a document: {create_data.file_name}")
-        db_document = document_service.create_document(db=db, document=create_data, current_user=current_user)
+        db_document = await document_service.create_document_async(db=db, document=create_data, current_user=current_user)
         api_logger.info(f"Document created successfully: {db_document.file_name} (ID: {db_document.id})")
         return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="Document creation successful")
     except Exception as e:
@@ -154,8 +191,8 @@ async def create_document(
 @router.get("/{document_id}", response_model=ApiResponse)
 async def get_document(
         document_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Retrieve document information based on document_id
@@ -165,7 +202,7 @@ async def get_document(
     try:
         # 1. Query document information from the database
         api_logger.debug(f"query documentation: {document_id}")
-        db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+        db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
         if not db_document:
             api_logger.warning(f"The document does not exist or you do not have access: document_id={document_id}")
             raise HTTPException(
@@ -186,15 +223,15 @@ async def get_document(
 async def update_document(
         document_id: uuid.UUID,
         update_data: document_schema.DocumentUpdate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Update document information
     """
     # 1. Check if the document exists
     api_logger.debug(f"Query the document to be updated: {document_id}")
-    db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
 
     if not db_document:
         api_logger.warning(f"The document does not exist or you do not have permission to access it: document_id={document_id}")
@@ -203,7 +240,7 @@ async def update_document(
             detail="The document does not exist or you do not have permission to access it"
         )
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=db_document.kb_id, current_user=current_user)
 
     # 2. 校验并处理 parser_config 更新
     update_dict = update_data.dict(exclude_unset=True)
@@ -235,7 +272,8 @@ async def update_document(
     if "status" in update_dict:
         new_status = update_dict["status"]
         if new_status != db_document.status:
-            ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).change_document_status(
+            await asyncio.to_thread(
+                ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).change_document_status,
                 document_id=str(document_id),
                 status=new_status,
             )
@@ -258,11 +296,11 @@ async def update_document(
 
     # 4. Save to database
     try:
-        db.commit()
-        db.refresh(db_document)
+        await db.commit()
+        await db.refresh(db_document)
         api_logger.info(f"The document has been successfully updated: {db_document.file_name} (ID: {db_document.id})")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         api_logger.error(f"Document update failed: document_id={document_id} - {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -276,8 +314,8 @@ async def update_document(
 @router.delete("/{document_id}", response_model=ApiResponse)
 async def delete_document(
         document_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async),
         storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
@@ -288,7 +326,7 @@ async def delete_document(
     try:
         # 1. Check if the document exists
         api_logger.debug(f"Check whether the document exists: {document_id}")
-        db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+        db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
 
         if not db_document:
             api_logger.warning(f"The document does not exist or you do not have permission to access it: document_id={document_id}")
@@ -316,23 +354,24 @@ async def delete_document(
         REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
 
         # 3. Delete vector index (non-404 failures raise, caught by except below)
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
-        ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field(
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
+        await asyncio.to_thread(
+            ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field,
             key="document_id",
             value=str(document_id),
         )
 
         # 4. Delete file (storage errors are swallowed internally)
-        await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)
+        await _delete_file_record_async(db=db, file_id=file_id, storage_service=storage_service)
 
         # 5. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
         api_logger.debug(f"Delete metadata bindings for document: {document_id}")
-        KnowledgeMetadataService.delete_document_metadata(db, document_id)
+        await KnowledgeMetadataService.delete_document_metadata_async(db, document_id)
 
         # 6. Delete document from DB (last — if DB fails, external resources are already cleaned)
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
-        db.delete(db_document)
-        db.commit()
+        await db.delete(db_document)
+        await db.commit()
 
         api_logger.info(f"The document has been successfully deleted: {db_document.file_name} (ID: {document_id})")
         return success(msg="The document has been successfully deleted")
@@ -344,8 +383,8 @@ async def delete_document(
 @router.post("/{document_id}/chunks", response_model=ApiResponse)
 async def parse_documents(
         document_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     parse document
@@ -355,7 +394,7 @@ async def parse_documents(
     try:
         # 1. Check if the document exists
         api_logger.debug(f"Check whether the document exists: {document_id}")
-        db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+        db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
 
         if not db_document:
             api_logger.warning(f"The document does not exist or you do not have permission to access it: document_id={document_id}")
@@ -366,7 +405,7 @@ async def parse_documents(
 
         # 2. Check if the file exists
         api_logger.debug(f"Check whether the file exists: {db_document.file_id}")
-        db_file = file_service.get_file_by_id(db, file_id=db_document.file_id)
+        db_file = await db.get(file_model.File, db_document.file_id)
 
         if not db_file:
             api_logger.warning(f"The file does not exist or you do not have permission to access it: file_id={db_document.file_id}")
@@ -394,7 +433,7 @@ async def parse_documents(
 
         # 5. Obtain knowledge base information
         api_logger.info(f"Obtain details of the knowledge base: knowledge_id={db_document.kb_id}")
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=db_document.kb_id, current_user=current_user)
         if not db_knowledge:
             # Rollback Redis claim on failure
             REDIS_CONN.delete(task_key)
@@ -426,8 +465,8 @@ async def parse_documents(
 @router.post("/metadata/batch", response_model=ApiResponse)
 async def batch_update_document_metadata(
     data: metadata_schema.BatchUpdateMetadataRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
 ):
     """
     批量更新文档元数据
@@ -440,7 +479,7 @@ async def batch_update_document_metadata(
 
     # 1. 校验所有文档的权限和归属（必须属于当前 workspace）
     for item in data.items:
-        db_document = require_current_workspace_document(
+        db_document = await require_current_workspace_document_async(
             db=db,
             document_id=item.document_id,
             current_user=current_user,
@@ -459,7 +498,7 @@ async def batch_update_document_metadata(
         for item in data.items
     ]
 
-    result = KnowledgeMetadataService.batch_update_document_metadata(
+    result = await KnowledgeMetadataService.batch_update_document_metadata_async(
         db=db,
         items=items,
         tenant_id=current_user.tenant_id,
@@ -473,8 +512,8 @@ async def batch_update_document_metadata(
 async def update_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataUpdateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
 ):
     """
     更新单个文档的元数据
@@ -486,7 +525,7 @@ async def update_document_metadata(
     )
 
     # 1. 校验文档存在且有权访问
-    db_document = require_current_workspace_document(
+    db_document = await require_current_workspace_document_async(
         db=db,
         document_id=document_id,
         current_user=current_user
@@ -498,7 +537,7 @@ async def update_document_metadata(
         )
 
     # 2. 调用 Service 更新
-    result = KnowledgeMetadataService.update_document_metadata(
+    result = await KnowledgeMetadataService.update_document_metadata_async(
         db=db,
         document_id=document_id,
         metadata=data.metadata,
@@ -515,8 +554,8 @@ async def update_document_metadata(
 @router.get("/{document_id}/metadata", response_model=ApiResponse)
 async def get_document_metadata(
     document_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
 ):
     """获取单个文档的元数据"""
     api_logger.info(
@@ -524,7 +563,7 @@ async def get_document_metadata(
     )
 
     # 校验文档存在且有权访问
-    db_document = require_current_workspace_document(
+    db_document = await require_current_workspace_document_async(
         db=db,
         document_id=document_id,
         current_user=current_user
@@ -535,7 +574,7 @@ async def get_document_metadata(
             detail="The document does not exist or you do not have permission to access it"
         )
 
-    result = KnowledgeMetadataService.get_document_metadata(
+    result = await KnowledgeMetadataService.get_document_metadata_async(
         db=db,
         document_id=document_id,
     )
@@ -550,8 +589,8 @@ async def get_document_metadata(
 async def delete_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataDeleteRequest | None = Body(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user_async),
 ):
     """
     删除单个文档的元数据
@@ -563,7 +602,7 @@ async def delete_document_metadata(
     )
 
     # 校验文档存在且有权访问
-    db_document = require_current_workspace_document(
+    db_document = await require_current_workspace_document_async(
         db=db,
         document_id=document_id,
         current_user=current_user
@@ -576,7 +615,7 @@ async def delete_document_metadata(
 
     field_names = data.field_names if data else None
 
-    result = KnowledgeMetadataService.delete_document_metadata(
+    result = await KnowledgeMetadataService.delete_document_metadata_async(
         db=db,
         document_id=document_id,
         field_names=field_names,

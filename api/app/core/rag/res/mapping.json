@@ -3,7 +3,7 @@
     "index": {
       "number_of_shards": 2,
       "number_of_replicas": 0,
-      "refresh_interval": "1000ms"
+      "refresh_interval": "1s"
     },
     "similarity": {
       "scripted_sim": {

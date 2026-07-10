@@ -1,16 +1,15 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from uuid import uuid4
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_memory_logger
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
+
 from app.core.memory.models.base_response import RobustLLMResponse
 from app.core.memory.models.graph_models import MemorySummaryNode
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
 from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
 from app.core.language_utils import validate_language  # 使用集中化的语言校验
 from pydantic import Field
@@ -84,7 +83,7 @@ async def generate_title_and_type_for_summary(
             {"role": "user", "content": prompt}
         ]
         
-        response = await llm_client.chat(messages=messages)
+        response = await llm_client.ainvoke(messages)
         
         # 3. 解析LLM响应
         content_response = response.content
@@ -159,7 +158,7 @@ async def _process_chunk_summary(
     dialog: DialogData,
     chunk,
     llm_client,
-    embedder: OpenAIEmbedderClient,
+    embedder: Any,
     language: str = "zh",
 ) -> Optional[MemorySummaryNode]:
     """Process a single chunk to generate a memory summary node."""
@@ -185,8 +184,7 @@ async def _process_chunk_summary(
         ]
 
         # Generate structured summary with the existing LLM client
-        structured = await call_structured(
-            llm_client,
+        structured = await llm_client.call_structured(
             messages,
             MemorySummaryResponse,
         )
@@ -206,7 +204,7 @@ async def _process_chunk_summary(
             # Continue without title and type
 
         # Embed the summary
-        embedding = (await embedder.response([summary_text]))[0]
+        embedding = (await embedder.aembed_documents([summary_text]))[0]
 
         # Build node per chunk
         # Note: title is stored in the 'name' field, type is stored in 'memory_type' field
@@ -237,7 +235,7 @@ async def _process_chunk_summary(
 async def memory_summary_generation(
     chunked_dialogs: List[DialogData],
     llm_client,
-    embedder_client: OpenAIEmbedderClient,
+    embedder_client: Any,
     language: str = "zh",
 ) -> List[MemorySummaryNode]:
     """Generate memory summaries per chunk, embed them, and return nodes.

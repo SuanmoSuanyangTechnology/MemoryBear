@@ -480,27 +480,23 @@ export const filterChildrenWithTypes = (
   types: string[],
   customMatcher?: (dataType: string) => boolean
 ): Suggestion[] => {
-  return variables.filter((variable) => {
+  return variables.flatMap((variable): Suggestion[] => {
     const matches = types.includes(variable.dataType) || (customMatcher?.(variable.dataType) ?? false)
     if (matches) {
       if (variable.children && variable.children?.length > 0) {
         const filteredChildren = filterChildrenWithTypes(variable.children, types, customMatcher)
-        Object.assign(variable, { children: filteredChildren })
+        return [{ ...variable, children: filteredChildren, disabled: false }]
       }
-      return true
+      return [{ ...variable, disabled: false }]
     }
     if (variable.children && variable.children?.length > 0) {
-      const stringChildren = filterChildrenWithTypes(variable.children, types, customMatcher)
-      if (stringChildren.length > 0) {
-        Object.assign(variable, {
-          disabled: true,
-          children: stringChildren
-        })
-        return true
+      const filteredChildren = filterChildrenWithTypes(variable.children, types, customMatcher)
+      if (filteredChildren.length > 0) {
+        return [{ ...variable, disabled: true, children: filteredChildren }]
       }
     }
-    return false
-  });
+    return []
+  })
 }
 
 /**

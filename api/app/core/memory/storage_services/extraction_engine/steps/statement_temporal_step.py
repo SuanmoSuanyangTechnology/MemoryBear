@@ -155,7 +155,7 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
             },
             {"role": "user", "content": prompt},
         ]
-        return await self.call_structured(
+        return await self.llm_client.call_structured(
             messages, _StatementExtractionResponse
         )
 

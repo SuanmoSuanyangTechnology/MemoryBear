@@ -13,7 +13,6 @@ import logging
 import time
 from typing import List, Optional
 
-from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.models.ontology_scenario_models import (
     OntologyClass,
     OntologyExtractionResponse,
@@ -36,16 +35,16 @@ class OntologyExtractor:
     2. OWL semantic validation (consistency checking, circular inheritance)
     
     Attributes:
-        llm_client: OpenAI client for LLM calls
+        llm_client: LLM client for LLM calls
         validator: String validator for class names and descriptions
         owl_validator: OWL validator for semantic validation
     """
     
-    def __init__(self, llm_client: OpenAIClient):
+    def __init__(self, llm_client):
         """Initialize the OntologyExtractor.
         
         Args:
-            llm_client: OpenAIClient instance for LLM processing
+            llm_client: LLM client instance (RedBearLLM) for LLM processing
         """
         self.llm_client = llm_client
         self.validator = OntologyValidator()
@@ -320,10 +319,7 @@ class OntologyExtractor:
                 f"max_tokens={llm_max_tokens}"
             )
             
-            response = await self.llm_client.response_structured(
-                messages=messages,
-                response_model=OntologyExtractionResponse,
-            )
+            response = await self.llm_client.call_structured(messages, OntologyExtractionResponse)
             
             logger.info(
                 f"LLM extraction successful - extracted {len(response.classes)} classes"

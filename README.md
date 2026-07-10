@@ -472,4 +472,4 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 
 [![Star History Chart](https://api.star-history.com/svg?repos=SuanmoSuanyangTechnology/MemoryBear&type=Date)](https://star-history.com/#SuanmoSuanyangTechnology/MemoryBear&Date)
 
-- **Contact**: tianyou_hubm@redbearai.com
+- **Contact**: jiezhimin@redbearai.com

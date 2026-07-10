@@ -10,7 +10,6 @@ import logging
 from typing import List, Tuple, Dict
 import anyio
 
-from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.models.graph_models import ExtractedEntityNode, StatementEntityEdge, EntityEntityEdge
 from app.core.memory.models.dedup_models import EntityDedupDecision, EntityDisambDecision
 from app.core.memory.utils.prompt.prompt_utils import render_entity_dedup_prompt
@@ -158,7 +157,7 @@ def _choose_canonical(a: ExtractedEntityNode, b: ExtractedEntityNode) -> int: # 
 
 # _judge_pair（单对实体的 LLM 判断） 已经有分块迭代的函数内容是否还需要单对LLM判断--这是已经创建的工具服务于分块迭代的函数
 async def _judge_pair(
-    llm_client: OpenAIClient,
+    llm_client,
     a: ExtractedEntityNode,
     b: ExtractedEntityNode,
     statement_edges: List[StatementEntityEdge],
@@ -219,12 +218,12 @@ async def _judge_pair(
         {"role": "user", "content": prompt},
     ]
 
-    decision = await llm_client.response_structured(messages, EntityDedupDecision)
+    decision = await llm_client.call_structured(messages, EntityDedupDecision)
     return decision, ctx
 
 # 消歧场景（同名不同类型）下的LLM判断
 async def _judge_pair_disamb(
-    llm_client: OpenAIClient,
+    llm_client,
     a: ExtractedEntityNode,
     b: ExtractedEntityNode,
     statement_edges: List[StatementEntityEdge],
@@ -277,7 +276,7 @@ async def _judge_pair_disamb(
         {"role": "system", "content": "You disambiguate same-name different-type entities. Return valid JSON only."},
         {"role": "user", "content": prompt},
     ]
-    decision = await llm_client.response_structured(messages, EntityDisambDecision)
+    decision = await llm_client.call_structured(messages, EntityDisambDecision)
     return decision, ctx
 
 # llm_dedup_entities（单轮实体去重）
@@ -287,7 +286,7 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
     entity_nodes: List[ExtractedEntityNode],
     statement_entity_edges: List[StatementEntityEdge],
     entity_entity_edges: List[EntityEntityEdge],
-    llm_client: OpenAIClient,
+    llm_client,
     max_concurrency: int = 4,
     auto_merge_threshold: float = 0.90,
     co_ctx_threshold: float = 0.83,
@@ -448,12 +447,13 @@ async def llm_dedup_entities(  # 保留对偶判断作为子流程，是为了�
 
     return id_redirect_updates, records
 
-# 迭代分块去重，这才是重点
+# 迭代分块去重，这才是重点 
+# 这是最高层，没有地方调用这个function，没有地方传入llm_client
 async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
     entity_nodes: List[ExtractedEntityNode], # 待去重实体列表（需先经过精确去重），LLM决策属于模糊匹配下
     statement_entity_edges: List[StatementEntityEdge],
     entity_entity_edges: List[EntityEntityEdge],
-    llm_client: OpenAIClient,
+    llm_client,
     block_size: int = 50,
     block_concurrency: int = 4,
     pair_concurrency: int = 4,
@@ -620,11 +620,12 @@ async def llm_dedup_entities_iterative_blocks( # 迭代分块并发 LLM 去重
 
 
 # LLM 消歧：同名不同类型的实体对，输出合并建议与阻断对列表
+# 写入阶段已经没有消息，这部分内容可以准备删除，包含llm_client
 async def llm_disambiguate_pairs_iterative(
     entity_nodes: List[ExtractedEntityNode],
     statement_entity_edges: List[StatementEntityEdge],
     entity_entity_edges: List[EntityEntityEdge],
-    llm_client: OpenAIClient,
+    llm_client,
     max_concurrency: int = 4,
     merge_conf_threshold: float = 0.88,
     block_conf_threshold: float = 0.60,

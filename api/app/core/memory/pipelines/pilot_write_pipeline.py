@@ -81,7 +81,7 @@ class PilotWritePipeline:
         self.language = language
         self.progress_callback = progress_callback
 
-        # 延迟初始化的客户端
+        # 客户端延迟初始化：_init_clients() 需要 DB 连接，在 run() 中调用
         self._llm_client = None
         self._embedder_client = None
 
@@ -138,14 +138,15 @@ class PilotWritePipeline:
 
     def _init_clients(self) -> None:
         """从 MemoryConfig 构建 LLM 和 Embedding 客户端。"""
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
         from app.db import get_db_context
 
         with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            self._llm_client = factory.get_llm_client_from_config(self.memory_config)
-            self._embedder_client = factory.get_embedder_client_from_config(
-                self.memory_config
+            self._llm_client = ModelClientMixin.get_llm_client(
+                db, self.memory_config.llm_model_id, self.memory_config.tenant_id
+            )
+            self._embedder_client = ModelClientMixin.get_embedding_client(
+                db, self.memory_config.embedding_model_id, self.memory_config.tenant_id
             )
         logger.info("Pilot pipeline: LLM and embedding clients constructed")
 

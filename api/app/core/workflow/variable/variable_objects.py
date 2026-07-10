@@ -69,9 +69,44 @@ class FileVariable(BaseVariable):
         if value is None:
             return None
         if isinstance(value, dict):
-            if not value.get("is_file"):
-                raise TypeError(f"Value must be a FileObject  - {type(value)}:{value}")
-            return FileObject(**value)
+            # 字段映射：前端格式 -> FileObject 格式
+            mapped = dict(value)
+            
+            # 1. file_id 映射：优先 file_id，然后 upload_file_id，然后 uid，最后生成临时 ID
+            if "file_id" not in mapped:
+                if "upload_file_id" in mapped:
+                    mapped["file_id"] = mapped["upload_file_id"]
+                elif "uid" in mapped:
+                    mapped["file_id"] = mapped["uid"]
+                else:
+                    # 远程 URL 文件没有 file_id，生成临时 ID
+                    import uuid
+                    mapped["file_id"] = str(uuid.uuid4())
+            
+            # 2. type: MIME 类型 -> 枚举值
+            file_type = mapped.get("type")
+            if file_type and file_type not in ["image", "document", "audio", "video"]:
+                # 从 MIME 类型推断文件类型
+                if file_type.startswith("image/"):
+                    mapped["type"] = "image"
+                elif file_type.startswith("audio/"):
+                    mapped["type"] = "audio"
+                elif file_type.startswith("video/"):
+                    mapped["type"] = "video"
+                else:
+                    mapped["type"] = "document"
+            
+            # 3. 补充缺失字段
+            mapped.setdefault("is_file", True)
+            mapped.setdefault("url", "")
+            mapped.setdefault("origin_file_type", mapped.get("type", "document"))
+            mapped.setdefault("transfer_method", "local_file" if mapped.get("upload_file_id") else "remote_url")
+            
+            try:
+                return FileObject(**mapped)
+            except Exception as e:
+                raise TypeError(f"Failed to create FileObject from {value}: {e}")
+        
         if isinstance(value, FileObject):
             return value
         raise TypeError(f"Value must be a FileObject - {type(value)}:{value}")
@@ -119,8 +154,11 @@ class ArrayVariable(BaseVariable, Generic[T]):
         for v in value:
             try:
                 final_value.append(self.child_type(v))
-            except:
-                raise TypeError(f"All elements must be of type {self.child_type.type}")
+            except Exception as e:
+                raise TypeError(
+                    f"All elements must be of type {self.child_type.type}: "
+                    f"element={type(v).__name__}:{v!r}, error={e}"
+                )
         return final_value
 
     def to_literal(self) -> str:

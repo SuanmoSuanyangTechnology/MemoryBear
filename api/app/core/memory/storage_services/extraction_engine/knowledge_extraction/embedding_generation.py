@@ -6,32 +6,29 @@
 
 import asyncio
 import logging
+import uuid
 from typing import Any, Dict, List, Tuple
+
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
 from app.core.memory.models.message_models import DialogData
-from app.core.models.base import RedBearModelConfig
-from app.db import get_db_context
-from app.services.memory_config_service import MemoryConfigService
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 
 
 class EmbeddingGenerator:
     """嵌入向量生成器"""
 
-    def __init__(self, embedding_id: str):
+    def __init__(self, db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID):
         """初始化嵌入向量生成器
 
         Args:
-            embedding_id: 嵌入模型 ID
+            db: 数据库 session
+            model_id: 嵌入模型 ID
+            tenant_id: 租户 ID
         """
-        with get_db_context() as db:
-            config_service = MemoryConfigService(db)
-            embedder_config = config_service.get_embedder_config(embedding_id)
-        self.embedder_client = OpenAIEmbedderClient(
-            model_config=RedBearModelConfig.model_validate(embedder_config),
-        )
+        self.embedder_client = ModelClientMixin.get_embedding_client(db, model_id, tenant_id)
 
     async def _generate_embeddings(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
         """生成一批文本的嵌入向量（支持分批并行）
@@ -48,7 +45,7 @@ class EmbeddingGenerator:
         
         # 如果文本数量小于批次大小，直接处理
         if len(texts) <= batch_size:
-            return await self.embedder_client.response(texts)
+            return await self.embedder_client.aembed_documents(texts)
         
         # 分批并行处理
         logger.info(f"文本数量 {len(texts)} 超过批次大小 {batch_size}，分批并行处理")
@@ -57,7 +54,7 @@ class EmbeddingGenerator:
         
         # 并行发送所有批次
         batch_results = await asyncio.gather(*[
-            self.embedder_client.response(batch) for batch in batches
+            self.embedder_client.aembed_documents(batch) for batch in batches
         ])
         
         # 合并结果
@@ -241,7 +238,9 @@ class EmbeddingGenerator:
 # 保持向后兼容的函数接口
 async def embedding_generation(
     chunked_dialogs: List[DialogData],
-    embedding_id: str
+    db: Session,
+    model_id: uuid.UUID,
+    tenant_id: uuid.UUID,
 ) -> Tuple[
     List[Dict[str, List[float]]],
     List[Dict[str, List[float]]],
@@ -251,36 +250,44 @@ async def embedding_generation(
 
     Args:
         chunked_dialogs: 包含分块和陈述句的对话列表
-        embedding_id: 嵌入模型 ID
+        db: 数据库 session
+        model_id: 嵌入模型 ID
+        tenant_id: 租户 ID
 
     Returns:
         (陈述句嵌入映射列表, 分块嵌入映射列表, 对话嵌入列表)
     """
-    generator = EmbeddingGenerator(embedding_id)
+    generator = EmbeddingGenerator(db, model_id, tenant_id)
     return await generator.generate_all_embeddings(chunked_dialogs)
 
 
 async def generate_entity_embeddings_from_triplets(
     triplet_maps: List[Dict[str, Any]],
-    embedding_id: str
+    db: Session,
+    model_id: uuid.UUID,
+    tenant_id: uuid.UUID,
 ) -> List[Dict[str, Any]]:
     """为三元组中的实体生成嵌入向量（向后兼容接口）
 
     Args:
         triplet_maps: 三元组映射列表
-        embedding_id: 嵌入模型 ID
+        db: 数据库 session
+        model_id: 嵌入模型 ID
+        tenant_id: 租户 ID
 
     Returns:
         更新后的三元组映射列表（实体包含嵌入向量）
     """
-    generator = EmbeddingGenerator(embedding_id)
+    generator = EmbeddingGenerator(db, model_id, tenant_id)
     return await generator.generate_entity_embeddings(triplet_maps)
 
 
 async def embedding_generation_all(
     chunked_dialogs: List[DialogData],
     triplet_maps: List[Dict[str, Any]],
-    embedding_id: str
+    db: Session,
+    model_id: uuid.UUID,
+    tenant_id: uuid.UUID,
 ) -> Tuple[
     List[Dict[str, List[float]]],
     List[Dict[str, List[float]]],
@@ -292,14 +299,16 @@ async def embedding_generation_all(
     Args:
         chunked_dialogs: 包含分块和陈述句的对话列表
         triplet_maps: 三元组映射列表
-        embedding_id: 嵌入模型 ID
+        db: 数据库 session
+        model_id: 嵌入模型 ID
+        tenant_id: 租户 ID
 
     Returns:
         (陈述句嵌入映射列表, 分块嵌入映射列表, 对话嵌入列表, 更新后的三元组映射列表)
     """
     logger.debug("=== 综合嵌入向量生成（陈述句/分块/对话 + 实体）===")
 
-    generator = EmbeddingGenerator(embedding_id)
+    generator = EmbeddingGenerator(db, model_id, tenant_id)
 
     # 生成陈述句、分块和对话的嵌入向量
     stmt_embedding_maps, chunk_embedding_maps, dialog_embeddings = await generator.generate_all_embeddings(

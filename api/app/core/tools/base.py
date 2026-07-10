@@ -125,14 +125,29 @@ class BaseTool(ABC):
         """验证参数类型"""
         if value is None:
             return not param_def.required
-        
+
+        # 数值类型：工作流模板渲染 / 表单输入常把数字传成字符串（如 "0"），
+        # 只要能转换成数字就认为类型合法，交由工具自身按需 int()/float()。
+        if param_def.type in (ParameterType.INTEGER, ParameterType.NUMBER):
+            if isinstance(value, bool):
+                return False
+            if isinstance(value, (int, float)):
+                return True
+            if isinstance(value, str):
+                try:
+                    float(value)
+                    return True
+                except ValueError:
+                    return False
+            return False
+
         type_mapping = {
             ParameterType.STRING: str,
-            ParameterType.INTEGER: int,
-            ParameterType.NUMBER: (int, float),
             ParameterType.BOOLEAN: bool,
             ParameterType.ARRAY: list,
-            ParameterType.OBJECT: dict
+            ParameterType.OBJECT: dict,
+            # file 类型: 同时接受 file variable (list/dict) 和 URL 字符串
+            ParameterType.FILE: (str, list, dict),
         }
         
         expected_type = type_mapping.get(param_def.type)
@@ -152,9 +167,13 @@ class BaseTool(ABC):
         
         # 数值范围检查
         if param_def.type in [ParameterType.INTEGER, ParameterType.NUMBER]:
-            if param_def.minimum is not None and value < param_def.minimum:
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                return f"Value must be a number, got {value!r}"
+            if param_def.minimum is not None and numeric_value < param_def.minimum:
                 return f"Value must be >= {param_def.minimum}"
-            if param_def.maximum is not None and value > param_def.maximum:
+            if param_def.maximum is not None and numeric_value > param_def.maximum:
                 return f"Value must be <= {param_def.maximum}"
         
         # 字符串模式检查

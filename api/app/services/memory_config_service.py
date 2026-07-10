@@ -493,7 +493,7 @@ class MemoryConfigService:
 
         _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
-        async def _validate_one(model_type: str, model_id: str) -> dict | None:
+        async def _validate_one(model_type: str, model_id: str, source: str) -> dict | None:
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
                 await self._validate_model_connectivity(
@@ -510,11 +510,11 @@ class MemoryConfigService:
                     f"模型 {model_type} API 验证失败: {e}",
                     extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
                 )
-                return {"model_type": model_type, "model_id": str(model_id), "message": e.err_message}
+                return {"model_type": model_type, "model_id": str(model_id), "source": source, "message": e.err_message}
 
         tasks = [
-            _validate_one(model_type, model_id)
-            for model_type, model_id, _ in all_models
+            _validate_one(model_type, model_id, source)
+            for model_type, model_id, source in all_models
             if model_id
         ]
         if tasks:
@@ -856,11 +856,13 @@ class MemoryConfigService:
             "model_name": api_config.model_name,
             "provider": api_config.provider,
             "api_key": api_config.api_key,
+            "capability": api_config.capability,
             "base_url": api_config.api_base,
             "model_config_id": str(config.id),
             "type": config.type,
             "timeout": settings.LLM_TIMEOUT,
             "max_retries": settings.LLM_MAX_RETRIES,
+            "is_omni": api_config.is_omni,
         }
 
     def get_embedder_config(self, embedding_id: str, tenant_id: UUID | None = None) -> dict:
@@ -1021,6 +1023,7 @@ class MemoryConfigService:
             config_desc="工作空间创建时自动生成的默认记忆配置",
             workspace_id=workspace.id,
             llm_id=str(workspace.llm) if workspace.llm else None,
+            reflection_model_id=str(workspace.llm) if workspace.llm else None,
             embedding_id=str(workspace.embedding) if workspace.embedding else None,
             rerank_id=str(workspace.rerank) if workspace.rerank else None,
             vision_id=str(workspace.vision) if workspace.vision else None,

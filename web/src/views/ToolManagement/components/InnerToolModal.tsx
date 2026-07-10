@@ -100,7 +100,7 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
       confirmLoading={loading}
     >
       {editVo?.config_data?.tool_class && config && <>
-        {editVo?.config_data?.tool_class !== 'DatabaseTool' &&
+        {!['DatabaseTool', 'MinerUTool'].includes(editVo?.config_data?.tool_class) &&
           <RbAlert className="rb:mb-3!">
             <div>
               <div className="rb:text-[14px] rb:font-medium">{t('tool.configDesc')}</div>
@@ -159,7 +159,7 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
               </FormItem>
             )
           })}
-      </Form>
+        </Form>
       </>}
     </RbModal>
   );

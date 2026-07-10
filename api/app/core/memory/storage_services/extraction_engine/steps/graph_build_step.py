@@ -179,7 +179,7 @@ async def build_graph_nodes_and_edges(
                 summary_embedding = None
                 if embedder_client and p.summary:
                     try:
-                        summary_embedding = (await embedder_client.response([p.summary]))[0]
+                        summary_embedding = (await embedder_client.aembed_documents([p.summary]))[0]
                     except Exception as emb_err:
                         logger.warning(f"Failed to embed perceptual summary: {emb_err}")
 

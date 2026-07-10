@@ -47,9 +47,8 @@ async def status_typle(messages: str, llm_model_id: str, tenant_id=None) -> dict
         llm_client = ModelClientMixin.get_llm_client(db, llm_model_id, tenant_id=tenant_id)
 
     try:
-        structured = await llm_client.response_structured(
-            messages=[{"role": "system", "content": system_prompt}],
-            response_model=DistinguishTypeResponse
+        structured = await llm_client.call_structured(
+            [{"role": "system", "content": system_prompt}], DistinguishTypeResponse
         )
         return structured.model_dump()
     except Exception as e:

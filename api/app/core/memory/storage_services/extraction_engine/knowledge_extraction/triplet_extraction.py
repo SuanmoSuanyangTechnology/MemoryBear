@@ -1,8 +1,11 @@
 import asyncio
+import uuid
 from typing import Dict, Optional
 
+from sqlalchemy.orm import Session
+
 from app.core.logging_config import get_memory_logger
-from app.core.memory.llm_tools.openai_client import OpenAIClient
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_prompt
 from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS
 from app.core.memory.models.triplet_models import TripletExtractionResponse
@@ -18,19 +21,23 @@ class TripletExtractor:
 
     def __init__(
             self,
-            llm_client: OpenAIClient,
+            db: Session,
+            model_id: uuid.UUID,
+            tenant_id: uuid.UUID,
             ontology_types: Optional[OntologyTypeList] = None,
             language: str = "zh"
     ):
         """Initialize the TripletExtractor with an LLM client
 
         Args:
-            llm_client: OpenAIClient instance for processing
+            db: 数据库 session
+            model_id: LLM 模型 ID
+            tenant_id: 租户 ID
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             ontology_types: Optional OntologyTypeList containing predefined ontology types
                 for entity classification guidance
         """
-        self.llm_client = llm_client
+        self.llm_client = ModelClientMixin.get_llm_client(db, model_id, tenant_id)
         self.ontology_types = ontology_types
         self.language = language
 
@@ -72,7 +79,7 @@ class TripletExtractor:
 
         try:
             # Get structured response from LLM
-            response = await self.llm_client.response_structured(messages, TripletExtractionResponse)
+            response = await self.llm_client.call_structured(messages, TripletExtractionResponse)
             # Create new triplets with statement_id set during creation
             updated_triplets = []
             for triplet in response.triplets:

@@ -1262,15 +1262,23 @@ async def get_end_user_by_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> 
 
 
 def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
-    """根据 end_user_id 查询对应的 tenant_id，单次 JOIN 查询，不加载 ORM 对象"""
-    from app.models.workspace_model import Workspace
-
-    return (
-        db.query(Workspace.tenant_id)
+    stmt = (
+        select(Workspace.tenant_id)
         .join(EndUser, EndUser.workspace_id == Workspace.id)
         .filter(EndUser.id == end_user_id, EndUser.is_active == True)
-        .scalar()
     )
+    result = db.execute(stmt)
+    return result.scalar()
+
+
+async def get_tenant_id_by_end_user_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
+    stmt = (
+        select(Workspace.tenant_id)
+        .join(EndUser, EndUser.workspace_id == Workspace.id)
+        .filter(EndUser.id == end_user_id, EndUser.is_active == True)
+    )
+    result = await db.execute(stmt)
+    return result.scalar()
 
 
 # 新增的缓存操作函数（保持与类方法一致的接口）

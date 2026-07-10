@@ -3,7 +3,7 @@ import uuid
 import datetime
 from typing import Optional, List, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
@@ -27,6 +27,13 @@ class ApiKeyRepository:
     def get_by_id(db: Session, api_key_id: uuid.UUID) -> Optional[ApiKey]:
         """根据 ID 获取 API Key"""
         return db.get(ApiKey, api_key_id)
+
+    @staticmethod
+    async def get_by_id_async(db: AsyncSession, api_key_id: uuid.UUID) -> Optional[ApiKey]:
+        """Async version of get_by_id with creator eager-loaded."""
+        stmt = select(ApiKey).options(joinedload(ApiKey.creator)).where(ApiKey.id == api_key_id)
+        result = await db.execute(stmt)
+        return result.scalars().first()
 
     @staticmethod
     def get_by_api_key(db: Session, api_key: str) -> Optional[ApiKey]:
