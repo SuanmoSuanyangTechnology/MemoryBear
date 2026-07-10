@@ -1,8 +1,10 @@
 """Sandbox API endpoints"""
+import time
+
 from fastapi import APIRouter, Depends
 
 from app.middleware.auth import verify_api_key
-from app.middleware.concurrency import concurrency_guard
+from app.middleware.concurrency import queue_controller
 
 from app.models import (
     RunCodeRequest,
@@ -16,6 +18,9 @@ from app.services.python_service import (
     list_python_dependencies,
     update_python_dependencies
 )
+from app.logger import get_logger
+
+logger = get_logger()
 
 router = APIRouter(
     prefix="/v1/sandbox",
@@ -24,19 +29,32 @@ router = APIRouter(
 )
 
 
-@router.post(
-    "/run",
-    response_model=ApiResponse,
-    dependencies=[Depends(concurrency_guard)]
-)
+@router.post("/run", response_model=ApiResponse)
 async def run_code(request: RunCodeRequest):
-    """Execute code in sandbox"""
-    if request.language == "python3":
-        return await run_python_code(request.code, request.preload, request.options)
-    elif request.language == "javascript":
-        return await run_nodejs_code(request.code, request.preload, request.options)
-    else:
-        return error_response(400, "unsupported language")
+    """Execute code in sandbox (queue-based concurrency)"""
+    t_enqueue = time.perf_counter()
+
+    async def _execute():
+        t_exec = time.perf_counter()
+        try:
+            if request.language == "python3":
+                result = await run_python_code(request.code, request.preload, request.options)
+            elif request.language == "javascript":
+                result = await run_nodejs_code(request.code, request.preload, request.options)
+            else:
+                result = error_response(400, "unsupported language")
+        finally:
+            elapsed = (time.perf_counter() - t_exec) * 1000
+            queue_wait = (t_exec - t_enqueue) * 1000
+            total = elapsed + queue_wait
+            logger.info(
+                "request done lang=%s queue_wait=%.1fms exec=%.1fms total=%.1fms queue_depth=%d",
+                request.language, queue_wait, elapsed, total,
+                queue_controller.stats["queue_size"],
+            )
+        return result
+
+    return await queue_controller.submit(_execute)
 
 
 @router.get("/dependencies", response_model=ApiResponse)

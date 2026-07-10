@@ -892,8 +892,13 @@ class BaseNode(ABC):
             return content
 
         elif isinstance(content, FileObject):
-            if content.content_cache.get(f"{provider}_{api_config.is_omni}"):
-                return content.content_cache[f"{provider}_{api_config.is_omni}"]
+            # 缓存键必须包含 capability：不同能力的模型对同一文件产出不同格式
+            # （支持 audio 的模型产出音频段，不支持的应过滤掉）。若漏掉 capability，
+            # 先被支持 audio 的模型处理过的内容会被不支持 audio 的模型直接复用，
+            # 导致语音信息未过滤就传入不支持的模型。
+            cache_key = f"{provider}_{api_config.is_omni}_{'-'.join(sorted(api_config.capability or []))}"
+            if content.content_cache.get(cache_key):
+                return content.content_cache[cache_key]
             with get_db_read() as db:
                 multimodal_service = MultimodalService(db, api_config=api_config)
                 file_obj = FileInput(
@@ -909,7 +914,7 @@ class BaseNode(ABC):
                 )
                 content.set_content(file_obj.get_content())
                 if message:
-                    content.content_cache[f"{provider}_{api_config.is_omni}"] = message
+                    content.content_cache[cache_key] = message
                     return message
                 return None
         raise TypeError(f'Unexpected input value type - {type(content)}')

@@ -1395,6 +1395,34 @@ SET c.member_count = cnt
 RETURN c.community_id AS community_id, cnt AS member_count
 """
 
+# ─── 聚类收尾对账（兜底去重/反思并发删实体留下的脏数据）───────────────────────
+# 删除该用户下所有"没有任何成员"的社区（含空社区 + member_count=1 但无成员边的孤儿社区）
+RECONCILE_DELETE_EMPTY_COMMUNITIES = """
+MATCH (c:Community {end_user_id: $end_user_id})
+WHERE NOT (:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+DETACH DELETE c
+RETURN count(c) AS deleted
+"""
+
+# 重算该用户下所有存活社区的 member_count（一次性，按真实成员边计数）
+RECONCILE_REFRESH_ALL_MEMBER_COUNTS = """
+MATCH (c:Community {end_user_id: $end_user_id})
+OPTIONAL MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+WITH c, count(e) AS cnt
+SET c.member_count = cnt
+RETURN count(c) AS refreshed
+"""
+
+# 仅重算指定社区的 member_count（增量聚类后使用，避免对全用户社区写放大）
+RECONCILE_REFRESH_MEMBER_COUNTS_SCOPED = """
+MATCH (c:Community {end_user_id: $end_user_id})
+WHERE c.community_id IN $community_ids
+OPTIONAL MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+WITH c, count(e) AS cnt
+SET c.member_count = cnt
+RETURN count(c) AS refreshed
+"""
+
 UPDATE_COMMUNITY_METADATA = """
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
 SET c.id               = coalesce(c.id, $community_id),
@@ -2460,4 +2488,11 @@ SPECIAL_ENTITY_QUERY = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
 RETURN e.id AS id, e.name AS name
+"""
+
+DELETE_NODE_BY_ELEMENT_ID = """
+MATCH (n)
+WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id
+DETACH DELETE n
+RETURN count(n) AS deleted
 """

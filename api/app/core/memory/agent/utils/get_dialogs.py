@@ -56,13 +56,14 @@ async def get_chunked_dialogs(
         if role not in ['user', 'assistant']:
             raise ValueError(f"Message {idx} role must be 'user' or 'assistant', got: {role}")
 
-        if content.strip():
-            conversation_messages.append(ConversationMessage(
-                role=role,
-                msg=content.strip(),
-                dialog_at=msg.get("dialog_at"),
-                files=files,
-            ))
+        # 允许空 content 的消息进入列表（MCP 场景需要空 assistant 占位以便配对剪枝）
+        # 空 content 用空字符串表示，后续 _pair_user_assistant 仍可正常配对
+        conversation_messages.append(ConversationMessage(
+            role=role,
+            msg=content.strip() if content.strip() else "",
+            dialog_at=msg.get("dialog_at"),
+            files=files,
+        ))
 
     if not conversation_messages:
         raise ValueError("Message list cannot be empty after filtering")
@@ -91,9 +92,7 @@ async def get_chunked_dialogs(
                 with get_db_context() as db:
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
-                        config_id=config_id,
-                        workspace_id=workspace_id,
-                        service_name="semantic_pruning"
+                        config_id=config_id
                     )
                     
                     if memory_config:

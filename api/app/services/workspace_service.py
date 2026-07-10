@@ -1,27 +1,27 @@
-import datetime
 import hashlib
 import secrets
 import uuid
 from typing import List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import utcnow_naive
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
-from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
+from app.core.utils.datetime_utils import utcnow_naive
+from app.models.models_model import ModelCapability, ModelConfig, ModelProvider, ModelType
 from app.models.user_model import User
 from app.models.workspace_model import (
     InviteStatus,
     Workspace,
+    WorkspaceDefaultModelPreset,
     WorkspaceMember,
     WorkspaceRole,
 )
 from app.repositories import workspace_repository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
-from app.services.session_service import SessionService
 from app.schemas.workspace_schema import (
     InviteAcceptRequest,
     InviteValidateResponse,
@@ -32,9 +32,401 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsUpdate,
     WorkspaceUpdate,
 )
+from app.schemas.memory_config_schema import ConfigurationError
+from app.i18n import t
+from app.services.memory_config_service import MemoryConfigService
+from app.services.session_service import SessionService
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
+
+_DEFAULT_PRESET_KEY = "default"
+_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank", "vision", "audio", "video")
+_REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
+
+
+def _serialize_model_option(model: ModelConfig) -> dict:
+    return {
+        "id": model.id,
+        "name": model.name,
+        "provider": model.provider,
+        "type": model.type,
+        "capability": list(model.capability or []),
+        "logo": model.logo,
+        "is_public": bool(model.is_public),
+    }
+
+
+def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[ModelConfig]:
+    return (
+        db.query(ModelConfig)
+        .filter(ModelConfig.is_active.is_(True))
+        .filter(
+            or_(
+                ModelConfig.tenant_id == tenant_id,
+                (
+                    (ModelConfig.provider == ModelProvider.SPEEDBEAR)
+                    & ModelConfig.is_public.is_(True)
+                ),
+            )
+        )
+        .all()
+    )
+
+
+def _get_public_speedbear_models(db: Session) -> list[ModelConfig]:
+    return (
+        db.query(ModelConfig)
+        .filter(ModelConfig.is_active.is_(True))
+        .filter(ModelConfig.provider == ModelProvider.SPEEDBEAR)
+        .filter(ModelConfig.is_public.is_(True))
+        .all()
+    )
+
+
+def _slot_matches_model(slot: str, model: ModelConfig) -> bool:
+    model_type = str(model.type)
+    capability = set(model.capability or [])
+
+    if slot == "llm":
+        return model_type in {ModelType.LLM.value, ModelType.CHAT.value}
+    if slot == "embedding":
+        return model_type == ModelType.EMBEDDING.value
+    if slot == "rerank":
+        return model_type == ModelType.RERANK.value
+    if slot == "vision":
+        return ModelCapability.VISION.value in capability
+    if slot == "audio":
+        return ModelCapability.AUDIO.value in capability
+    if slot == "video":
+        return ModelCapability.VIDEO.value in capability
+    return False
+
+
+def _group_workspace_model_options(models: list[ModelConfig]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {slot: [] for slot in _WORKSPACE_MODEL_SLOTS}
+    seen_ids = set()
+
+    for model in models:
+        model_id = str(model.id)
+        if model_id in seen_ids:
+            continue
+        seen_ids.add(model_id)
+        data = _serialize_model_option(model)
+        for slot in _WORKSPACE_MODEL_SLOTS:
+            if _slot_matches_model(slot, model):
+                grouped[slot].append(data)
+
+    return grouped
+
+
+def _get_default_workspace_preset(db: Session) -> WorkspaceDefaultModelPreset:
+    preset = (
+        db.query(WorkspaceDefaultModelPreset)
+        .filter(WorkspaceDefaultModelPreset.singleton_key == _DEFAULT_PRESET_KEY)
+        .first()
+    )
+    if not preset:
+        raise BusinessException("默认模型配置未设置", BizCode.CONFIG_MISSING)
+    return preset
+
+
+def _build_workspace_preset_response(db: Session, preset: WorkspaceDefaultModelPreset) -> dict:
+    slot_to_model_id = {
+        "llm": preset.llm_model_config_id,
+        "embedding": preset.embedding_model_config_id,
+        "rerank": preset.rerank_model_config_id,
+        "vision": preset.vision_model_config_id,
+        "audio": preset.audio_model_config_id,
+        "video": preset.video_model_config_id,
+    }
+    model_ids = [model_id for model_id in slot_to_model_id.values() if model_id]
+    models = (
+        db.query(ModelConfig)
+        .filter(ModelConfig.id.in_(model_ids))
+        .all()
+    )
+    model_map = {model.id: model for model in models}
+    result: dict[str, dict] = {}
+
+    for slot, model_id in slot_to_model_id.items():
+        model = model_map.get(model_id)
+        if not model:
+            raise BusinessException(f"默认模型配置缺少 {slot} 模型", BizCode.MODEL_NOT_FOUND)
+        result[slot] = _serialize_model_option(model)
+
+    return result
+
+
+def _validate_workspace_model_selection(
+    available_models: list[ModelConfig],
+    selection: dict[str, uuid.UUID | str | None],
+    *,
+    require_all_slots: bool,
+) -> dict[str, str | None]:
+    model_map = {str(model.id): model for model in available_models}
+    normalized: dict[str, str | None] = {}
+
+    for slot in _WORKSPACE_MODEL_SLOTS:
+        raw_value = selection.get(slot)
+        if raw_value is None:
+            if require_all_slots or slot in _REQUIRED_WORKSPACE_MODEL_SLOTS:
+                raise BusinessException(f"{slot} 模型未配置", BizCode.INVALID_PARAMETER)
+            normalized[slot] = None
+            continue
+
+        model_id = str(raw_value)
+        model = model_map.get(model_id)
+        if not model:
+            raise BusinessException(f"{slot} 模型不存在或不可用", BizCode.MODEL_NOT_FOUND)
+        if not _slot_matches_model(slot, model):
+            raise BusinessException(f"{slot} 模型能力不匹配", BizCode.INVALID_PARAMETER)
+        normalized[slot] = model_id
+
+    return normalized
+
+
+def _extract_workspace_model_values(source) -> dict[str, str | None]:
+    getter = source.get if isinstance(source, dict) else lambda key: getattr(source, key, None)
+    return {slot: getter(slot) for slot in _WORKSPACE_MODEL_SLOTS}
+
+
+def _assign_workspace_models(workspace: Workspace, values: dict[str, str | None], *, is_default_config: bool) -> None:
+    for slot, value in values.items():
+        setattr(workspace, slot, value)
+    workspace.is_default_config = is_default_config
+    workspace.default_model_notice_pending = False
+
+
+def _get_default_workspace_model_values(db: Session) -> dict[str, str]:
+    preset = _get_default_workspace_preset(db)
+    return {
+        "llm": str(preset.llm_model_config_id),
+        "embedding": str(preset.embedding_model_config_id),
+        "rerank": str(preset.rerank_model_config_id),
+        "vision": str(preset.vision_model_config_id),
+        "audio": str(preset.audio_model_config_id),
+        "video": str(preset.video_model_config_id),
+    }
+
+
+def _build_workspace_models_response(source, *, locale: str = "zh") -> dict:
+    values = _extract_workspace_model_values(source)
+    is_default_config = source.get("is_default_config") if isinstance(source, dict) else bool(source.is_default_config)
+    notice_pending = (
+        bool(source.get("default_model_notice_pending"))
+        if isinstance(source, dict)
+        else bool(getattr(source, "default_model_notice_pending", False))
+    )
+    response = {
+        **values,
+        "is_default_config": bool(is_default_config),
+        "default_config_updated": notice_pending,
+        "default_config_notice": (
+            t("workspace.models.default_config_updated_notice", locale=locale)
+            if notice_pending else None
+        ),
+    }
+    return response
+
+
+def _resolve_workspace_model_update_target(
+    db: Session,
+    workspace: Workspace,
+    models_update: WorkspaceModelsUpdate | None,
+) -> tuple[bool, dict[str, str | None], tuple[str, ...]]:
+    selection = _extract_workspace_model_values(workspace)
+    target_is_default = bool(workspace.is_default_config)
+
+    if models_update:
+        mode_explicit = models_update.is_default_config is not None
+        target_is_default = (
+            models_update.is_default_config
+            if mode_explicit
+            else (
+                False if any(slot in models_update.model_fields_set for slot in _WORKSPACE_MODEL_SLOTS)
+                else bool(workspace.is_default_config)
+            )
+        )
+        if target_is_default:
+            selection = _get_default_workspace_model_values(db)
+        else:
+            merged_selection = {
+                slot: (
+                    str(getattr(models_update, slot))
+                    if getattr(models_update, slot) is not None
+                    else None
+                )
+                for slot in _WORKSPACE_MODEL_SLOTS
+            }
+            selection = _validate_workspace_model_selection(
+                _get_accessible_workspace_models(db, workspace.tenant_id),
+                merged_selection,
+                require_all_slots=False,
+            )
+
+    validation_slots = (
+        _WORKSPACE_MODEL_SLOTS if target_is_default else _REQUIRED_WORKSPACE_MODEL_SLOTS
+    )
+    return target_is_default, selection, validation_slots
+
+
+def _sync_workspace_default_memory_config(workspace: Workspace, memory_config) -> None:
+    if not memory_config:
+        return
+
+    memory_config.llm_id = workspace.llm
+    memory_config.reflection_model_id = workspace.llm
+    memory_config.emotion_model_id = workspace.llm
+    memory_config.embedding_id = workspace.embedding
+    memory_config.rerank_id = workspace.rerank
+    memory_config.vision_id = workspace.vision
+    memory_config.audio_id = workspace.audio
+    memory_config.video_id = workspace.video
+
+
+def _sync_default_config_workspaces(
+    db: Session,
+    resolved_models: dict[str, str | None],
+) -> None:
+    workspaces = (
+        db.query(Workspace)
+        .filter(Workspace.is_active.is_(True))
+        .filter(Workspace.is_default_config.is_(True))
+        .all()
+    )
+    if not workspaces:
+        return
+
+    memory_config_service = MemoryConfigService(db)
+    for workspace in workspaces:
+        for slot, value in resolved_models.items():
+            setattr(workspace, slot, value)
+        workspace.default_model_notice_pending = True
+        default_memory_config = memory_config_service.get_workspace_default_config(workspace.id)
+        _sync_workspace_default_memory_config(workspace, default_memory_config)
+
+
+async def _validate_workspace_model_runtime(
+    db: Session,
+    values: dict[str, str | None],
+    tenant_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    locale: str,
+    slots_to_validate: tuple[str, ...],
+) -> list[dict]:
+    service = MemoryConfigService(db)
+    warnings: list[dict] = []
+    validate_as_llm = {"vision", "video", "audio"}
+
+    async def _validate_one(model_type: str, model_id: str) -> dict | None:
+        validate_type = "llm" if model_type in validate_as_llm else model_type
+        try:
+            await service._validate_model_connectivity(
+                model_id,
+                validate_type,
+                tenant_id,
+                None,
+                workspace_id,
+                locale=locale,
+            )
+            return None
+        except ConfigurationError as exc:
+            return {
+                "model_type": model_type,
+                "model_id": str(model_id),
+                "message": exc.err_message,
+            }
+
+    for slot in slots_to_validate:
+        if not values.get(slot):
+            warnings.append({
+                "model_type": slot,
+                "model_id": None,
+                "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
+            })
+
+    for slot in slots_to_validate:
+        model_id = values.get(slot)
+        if not model_id:
+            continue
+        result = await _validate_one(slot, model_id)
+        if result is not None:
+            warnings.append(result)
+
+    return warnings
+
+
+def _resolve_workspace_create_payload(db: Session, workspace: WorkspaceCreate, tenant_id: uuid.UUID) -> WorkspaceCreate:
+    if workspace.is_default_config:
+        return workspace.model_copy(update=_get_default_workspace_model_values(db))
+
+    validated = _validate_workspace_model_selection(
+        _get_accessible_workspace_models(db, tenant_id),
+        {
+            "llm": workspace.llm,
+            "embedding": workspace.embedding,
+            "rerank": workspace.rerank,
+            "vision": workspace.vision,
+            "audio": workspace.audio,
+            "video": workspace.video,
+        },
+        require_all_slots=False,
+    )
+    return workspace.model_copy(update=validated)
+
+
+def get_default_workspace_models(db: Session, *, allow_empty: bool = False) -> dict:
+    try:
+        preset = _get_default_workspace_preset(db)
+    except BusinessException as exc:
+        if allow_empty and exc.code == BizCode.CONFIG_MISSING:
+            return {}
+        raise
+    return _build_workspace_preset_response(db, preset)
+
+
+def update_default_workspace_models(db: Session, data) -> dict:
+    validated = _validate_workspace_model_selection(
+        _get_public_speedbear_models(db),
+        {
+            "llm": data.llm,
+            "embedding": data.embedding,
+            "rerank": data.rerank,
+            "vision": data.vision,
+            "audio": data.audio,
+            "video": data.video,
+        },
+        require_all_slots=True,
+    )
+    preset = (
+        db.query(WorkspaceDefaultModelPreset)
+        .filter(WorkspaceDefaultModelPreset.singleton_key == _DEFAULT_PRESET_KEY)
+        .first()
+    )
+    if not preset:
+        preset = WorkspaceDefaultModelPreset(singleton_key=_DEFAULT_PRESET_KEY)
+
+    preset.llm_model_config_id = uuid.UUID(validated["llm"])
+    preset.embedding_model_config_id = uuid.UUID(validated["embedding"])
+    preset.rerank_model_config_id = uuid.UUID(validated["rerank"])
+    preset.vision_model_config_id = uuid.UUID(validated["vision"])
+    preset.audio_model_config_id = uuid.UUID(validated["audio"])
+    preset.video_model_config_id = uuid.UUID(validated["video"])
+    _sync_default_config_workspaces(db, validated)
+    db.add(preset)
+    db.commit()
+    db.refresh(preset)
+    return _build_workspace_preset_response(db, preset)
+
+
+def get_workspace_model_options(db: Session, tenant_id: uuid.UUID) -> dict:
+    return _group_workspace_model_options(_get_accessible_workspace_models(db, tenant_id))
+
+
+def get_system_workspace_model_options(db: Session) -> dict:
+    return _group_workspace_model_options(_get_public_speedbear_models(db))
 
 
 def switch_workspace(
@@ -123,12 +515,6 @@ def get_user_workspaces(db: Session, user: User) -> List[Workspace]:
     business_logger.debug(f"获取用户工作空间列表: {user.username} (ID: {user.id})")
     workspaces = workspace_repository.get_workspaces_by_user(db=db, user_id=user.id)
 
-    # Ensure each neo4j workspace has a default memory config
-    for workspace in workspaces:
-        if workspace.storage_type == 'neo4j':
-            _ensure_default_memory_config(db, workspace)
-            _ensure_default_ontology_scenes(db, workspace)
-
     business_logger.info(f"用户 {user.username} 的工作空间数量: {len(workspaces)}")
     return workspaces
 
@@ -151,7 +537,7 @@ def _create_workspace_only(
         raise
 
 
-def create_workspace(
+async def create_workspace(
         db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
     business_logger.info(
@@ -163,6 +549,21 @@ def create_workspace(
             message="同名工作空间已存在",
             code=BizCode.RESOURCE_ALREADY_EXISTS
         )
+    workspace = _resolve_workspace_create_payload(db, workspace, user.tenant_id)
+
+    validation_slots = _WORKSPACE_MODEL_SLOTS if workspace.is_default_config else _REQUIRED_WORKSPACE_MODEL_SLOTS
+    selection = _extract_workspace_model_values(workspace)
+    warnings = await _validate_workspace_model_runtime(
+        db,
+        selection,
+        user.tenant_id,
+        None,
+        locale=language,
+        slots_to_validate=validation_slots,
+    )
+    if warnings:
+        raise BusinessException(warnings[0]["message"], BizCode.INVALID_PARAMETER)
+
     llm = workspace.llm
     embedding = workspace.embedding
     rerank = workspace.rerank
@@ -236,30 +637,6 @@ def create_workspace(
             # Don't fail workspace creation if default ontology initialization fails
             # The workspace can still function without default ontology scenes
 
-        # Create default memory config for the workspace (only for neo4j storage types)
-        # 将默认场景ID（教育场景或情感陪伴场景）关联到记忆配置
-        if workspace.storage_type == 'neo4j':
-            try:
-                _create_default_memory_config(
-                    db=db,
-                    workspace_id=db_workspace.id,
-                    workspace_name=db_workspace.name,
-                    llm_id=llm,
-                    embedding_id=embedding,
-                    rerank_id=rerank,
-                    scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
-                    pruning_scene_name=default_scene_name,  # 传入场景名称作为语义剪枝场景值
-                )
-                business_logger.info(
-                    f"为工作空间 {db_workspace.id} 创建默认记忆配置成功 (scene_id={default_scene_id})"
-                )
-            except Exception as mc_error:
-                business_logger.error(
-                    f"为工作空间 {db_workspace.id} 创建默认记忆配置失败: {str(mc_error)}"
-                )
-                # Don't fail workspace creation if memory config creation fails
-                # The workspace can still function without a default memory config
-
         # 如果 storage_type 是 "rag"，自动创建知识库
         if workspace.storage_type == "rag":
             business_logger.info(
@@ -313,7 +690,15 @@ def create_workspace(
                     f"工作空间创建成功，但知识库创建失败: {str(kb_error)}",
                     BizCode.INTERNAL_ERROR
                 )
-
+        memory_config_service = MemoryConfigService(db)
+        config_id = memory_config_service.create_workspace_default_config(
+            db_workspace,
+            default_scene_id,
+            default_scene_name
+        )
+        db_workspace.memory_config = config_id
+        db.flush()
+        db.refresh(db_workspace)
         # 统一提交所有更改
         db.commit()
         business_logger.info(
@@ -913,6 +1298,7 @@ def get_workspace_models_configs(
         db: Session,
         workspace_id: uuid.UUID,
         user: User,
+        locale: str = "zh",
 ) -> Optional[dict]:
     """获取工作空间的模型配置（llm, embedding, rerank）
 
@@ -920,6 +1306,7 @@ def get_workspace_models_configs(
         db: 数据库会话
         workspace_id: 工作空间ID
         user: 当前用户
+        locale: 语言代码（zh / en），用于 i18n 告警消息
 
     Returns:
         dict: 包含 llm, embedding, rerank 的字典，如果工作空间不存在则返回 None
@@ -943,300 +1330,120 @@ def get_workspace_models_configs(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
         f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
     )
-    return configs
+    return _build_workspace_models_response(configs, locale=locale)
 
 
-def update_workspace_models_configs(
+async def validate_workspace_models_configs(
+        db: Session,
+        workspace_id: uuid.UUID,
+        user: User,
+        locale: str = "zh",
+        models_update: WorkspaceModelsUpdate | None = None,
+) -> dict:
+    db_workspace = _check_workspace_member_permission(db, workspace_id, user)
+    target_is_default, selection, validation_slots = _resolve_workspace_model_update_target(
+        db,
+        db_workspace,
+        models_update,
+    )
+    warnings = await _validate_workspace_model_runtime(
+        db,
+        selection,
+        db_workspace.tenant_id,
+        db_workspace.id,
+        locale=locale,
+        slots_to_validate=validation_slots,
+    )
+    workspace_payload = _build_workspace_models_response(
+        {
+            **selection,
+            "is_default_config": bool(target_is_default),
+            "default_model_notice_pending": (
+                db_workspace.default_model_notice_pending if target_is_default else False
+            ),
+        },
+        locale=locale,
+    )
+    return {
+        "workspace": workspace_payload,
+        "valid": not bool(warnings),
+        "warnings": warnings,
+    }
+
+
+async def update_workspace_models_configs(
         db: Session,
         workspace_id: uuid.UUID,
         models_update: WorkspaceModelsUpdate,
         user: User,
-) -> Workspace:
-    """更新工作空间的模型配置（llm, embedding, rerank）
+        locale: str = "zh",
+) -> dict:
+    """更新工作空间的模型配置，并按模式执行阻断校验。
 
     Args:
         db: 数据库会话
         workspace_id: 工作空间ID
         models_update: 模型配置更新对象
         user: 当前用户
+        locale: 语言代码（zh / en），用于 i18n 告警消息
 
     Returns:
-        Workspace: 更新后的工作空间对象
+        dict: 更新后的工作空间配置
     """
     business_logger.info(f"用户 {user.username} 请求更新工作空间 {workspace_id} 的模型配置")
 
     # 检查用户是否有管理员权限
     db_workspace = _check_workspace_admin_permission(db, workspace_id, user)
+    default_memory_config = MemoryConfigService(db).get_workspace_default_config(workspace_id=workspace_id)
 
     try:
-        if models_update.llm is not None:
-            db_workspace.llm = str(models_update.llm) if models_update.llm else None
-            business_logger.debug(f"更新LLM配置: {models_update.llm}")
+        use_default_config, resolved_models, validation_slots = _resolve_workspace_model_update_target(
+            db,
+            db_workspace,
+            models_update,
+        )
+        warnings = await _validate_workspace_model_runtime(
+            db,
+            resolved_models,
+            db_workspace.tenant_id,
+            db_workspace.id,
+            locale=locale,
+            slots_to_validate=validation_slots,
+        )
+        if warnings:
+            raise BusinessException(warnings[0]["message"], BizCode.INVALID_PARAMETER)
 
-        if models_update.embedding is not None:
-            db_workspace.embedding = str(models_update.embedding) if models_update.embedding else None
-            business_logger.debug(f"更新嵌入模型配置: {models_update.embedding}")
+        _assign_workspace_models(db_workspace, resolved_models, is_default_config=use_default_config)
 
-        if models_update.rerank is not None:
-            db_workspace.rerank = str(models_update.rerank) if models_update.rerank else None
-            business_logger.debug(f"更新重排序模型配置: {models_update.rerank}")
+        if default_memory_config:
+            default_memory_config.llm_id = resolved_models["llm"]
+            default_memory_config.reflection_model_id = resolved_models["llm"]
+            default_memory_config.emotion_model_id = resolved_models["llm"]
+            default_memory_config.embedding_id = resolved_models["embedding"]
+            default_memory_config.rerank_id = resolved_models["rerank"]
+            default_memory_config.vision_id = resolved_models["vision"]
+            default_memory_config.audio_id = resolved_models["audio"]
+            default_memory_config.video_id = resolved_models["video"]
 
         db.add(db_workspace)
+        if default_memory_config:
+            db.add(default_memory_config)
         db.commit()
         db.refresh(db_workspace)
+        if default_memory_config:
+            db.refresh(default_memory_config)
 
         business_logger.info(
             f"工作空间模型配置更新成功: workspace_id={workspace_id}, "
             f"llm={db_workspace.llm}, embedding={db_workspace.embedding}, rerank={db_workspace.rerank}"
         )
-        return db_workspace
 
+        return _build_workspace_models_response(db_workspace, locale=locale)
+
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"工作空间模型配置更新失败: workspace_id={workspace_id} - {str(e)}")
         db.rollback()
         raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)
-
-
-def _fill_workspace_configs_model_defaults(
-        db: Session,
-        workspace: Workspace
-) -> None:
-    """Fill empty model fields for all memory configs in a workspace.
-    
-    Updates llm_id, embedding_id, rerank_id, reflection_model_id, and emotion_model_id
-    if they are None, using the corresponding workspace default models.
-    
-    Args:
-        db: Database session
-        workspace: The workspace containing default model settings
-    """
-    from app.models.memory_config_model import MemoryConfig
-
-    # Get all configs for this workspace
-    configs = db.query(MemoryConfig).filter(
-        MemoryConfig.workspace_id == workspace.id
-    ).all()
-
-    if not configs:
-        return
-
-    # Map of memory_config field -> workspace field
-    model_field_mappings = [
-        ("llm_id", "llm"),
-        ("embedding_id", "embedding"),
-        ("rerank_id", "rerank"),
-        ("reflection_model_id", "llm"),  # reflection uses LLM
-        ("emotion_model_id", "llm"),  # emotion uses LLM
-    ]
-
-    configs_updated = 0
-
-    for memory_config in configs:
-        updated_fields = []
-
-        for config_field, workspace_field in model_field_mappings:
-            config_value = getattr(memory_config, config_field, None)
-            workspace_value = getattr(workspace, workspace_field, None)
-
-            if not config_value and workspace_value:
-                setattr(memory_config, config_field, workspace_value)
-                updated_fields.append(config_field)
-
-        if updated_fields:
-            configs_updated += 1
-            business_logger.debug(
-                f"Updated memory config {memory_config.config_id} fields: {updated_fields}"
-            )
-
-    if configs_updated > 0:
-        try:
-            db.commit()
-            business_logger.info(
-                f"Updated {configs_updated} memory configs in workspace {workspace.id} with default models"
-            )
-        except Exception as e:
-            db.rollback()
-            business_logger.error(
-                f"Failed to update memory configs in workspace {workspace.id}: {str(e)}"
-            )
-
-
-def _create_default_memory_config(
-        db: Session,
-        workspace_id: uuid.UUID,
-        workspace_name: str,
-        llm_id: Optional[uuid.UUID] = None,
-        embedding_id: Optional[uuid.UUID] = None,
-        rerank_id: Optional[uuid.UUID] = None,
-        scene_id: Optional[uuid.UUID] = None,
-        pruning_scene_name: Optional[str] = None,
-) -> None:
-    """Create a default memory config for a newly created workspace.
-    
-    Args:
-        db: Database session
-        workspace_id: The workspace ID
-        workspace_name: The workspace name (used for config naming)
-        llm_id: Optional LLM model ID
-        embedding_id: Optional embedding model ID
-        rerank_id: Optional rerank model ID
-        scene_id: Optional ontology scene ID (默认关联教育场景)
-        pruning_scene_name: Optional pruning scene name，取自 ontology_scene.scene_name
-    """
-    from app.models.memory_config_model import MemoryConfig
-
-    config_id = uuid.uuid4()
-
-    default_config = MemoryConfig(
-        config_id=config_id,
-        config_name=f"{workspace_name} 默认配置",
-        config_desc="工作空间创建时自动生成的默认记忆配置",
-        workspace_id=workspace_id,
-        llm_id=str(llm_id) if llm_id else None,
-        embedding_id=str(embedding_id) if embedding_id else None,
-        rerank_id=str(rerank_id) if rerank_id else None,
-        scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
-        pruning_scene=pruning_scene_name,  # 语义剪枝场景直接使用 scene_name
-        state=True,  # Active by default
-        is_default=True,  # Mark as workspace default
-    )
-
-    db.add(default_config)
-    db.flush()  # 使用 flush 而不是 commit，让调用者统一提交
-
-    business_logger.info(
-        "Created default memory config for workspace",
-        extra={
-            "workspace_id": str(workspace_id),
-            "config_id": str(config_id),
-            "config_name": default_config.config_name,
-            "scene_id": str(scene_id) if scene_id else None,
-        }
-    )
-
-
-# ==================== 检查配置相关服务 ====================
-
-def _ensure_default_memory_config(db: Session, workspace: Workspace) -> None:
-    """Ensure a workspace has a default memory config, creating one if missing.
-    
-    Also fills empty model fields for all configs in this workspace.
-    
-    Args:
-        db: Database session
-        workspace: The workspace to check
-    """
-    from app.models.memory_config_model import MemoryConfig
-
-    # Check if default config exists for this workspace
-    existing_default = db.query(MemoryConfig).filter(
-        MemoryConfig.workspace_id == workspace.id,
-        MemoryConfig.is_default == True
-    ).first()
-
-    if not existing_default:
-        # No default config exists, create one
-        business_logger.info(
-            f"Workspace {workspace.id} missing default memory config, creating one"
-        )
-
-        # 尝试获取默认场景ID，优先教育场景，其次情感陪伴场景
-        default_scene_id = None
-        try:
-            from app.repositories.ontology_scene_repository import OntologySceneRepository
-            from app.config.default_ontology_config import (
-                ONLINE_EDUCATION_SCENE,
-                EMOTIONAL_COMPANION_SCENE,
-                get_scene_name
-            )
-
-            scene_repo = OntologySceneRepository(db)
-            # 尝试中文和英文场景名称
-            for language in ["zh", "en"]:
-                # 优先尝试教育场景
-                education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
-                education_scene = scene_repo.get_by_name(education_scene_name, workspace.id)
-                if education_scene:
-                    default_scene_id = education_scene.scene_id
-                    business_logger.info(
-                        f"找到教育场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={education_scene_name}"
-                    )
-                    break
-
-                # 如果教育场景不存在，尝试情感陪伴场景
-                companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
-                companion_scene = scene_repo.get_by_name(companion_scene_name, workspace.id)
-                if companion_scene:
-                    default_scene_id = companion_scene.scene_id
-                    business_logger.info(
-                        f"教育场景不存在，找到情感陪伴场景用于默认记忆配置: scene_id={default_scene_id}, scene_name={companion_scene_name}"
-                    )
-                    break
-        except Exception as scene_error:
-            business_logger.warning(
-                f"获取默认场景失败，将创建不关联场景的记忆配置: {str(scene_error)}"
-            )
-
-        try:
-            _create_default_memory_config(
-                db=db,
-                workspace_id=workspace.id,
-                workspace_name=workspace.name,
-                llm_id=uuid.UUID(workspace.llm) if workspace.llm else None,
-                embedding_id=uuid.UUID(workspace.embedding) if workspace.embedding else None,
-                rerank_id=uuid.UUID(workspace.rerank) if workspace.rerank else None,
-                scene_id=default_scene_id,  # 传入默认场景ID（优先教育场景，其次情感陪伴场景）
-            )
-        except Exception as e:
-            business_logger.error(
-                f"Failed to create default memory config for workspace {workspace.id}: {str(e)}"
-            )
-
-    # Fill empty model fields for ALL configs in this workspace
-    _fill_workspace_configs_model_defaults(db, workspace)
-
-
-def _ensure_default_ontology_scenes(db: Session, workspace: Workspace) -> None:
-    """Ensure a workspace has default ontology scenes, creating them if missing.
-
-    Checks whether any is_system_default scene exists for the workspace.
-    If not, runs the DefaultOntologyInitializer to create them.
-
-    Args:
-        db: Database session
-        workspace: The workspace to check
-    """
-    from app.models.ontology_scene import OntologyScene
-
-    # 幂等检查：是否已存在系统默认场景
-    existing = db.query(OntologyScene).filter(
-        OntologyScene.workspace_id == workspace.id,
-        OntologyScene.is_system_default.is_(True)
-    ).first()
-
-    if existing:
-        return
-
-    business_logger.info(
-        f"Workspace {workspace.id} missing default ontology scenes, creating them"
-    )
-
-    try:
-        initializer = DefaultOntologyInitializer(db)
-        success, error_msg = initializer.initialize_default_scenes(
-            workspace.id, language="zh"
-        )
-        if success:
-            db.commit()
-            business_logger.info(
-                f"为工作空间 {workspace.id} 补建默认本体场景成功"
-            )
-        else:
-            business_logger.warning(
-                f"为工作空间 {workspace.id} 补建默认本体场景失败: {error_msg}"
-            )
-    except Exception as e:
-        db.rollback()
-        business_logger.error(
-            f"为工作空间 {workspace.id} 补建默认本体场景异常: {str(e)}"
-        )

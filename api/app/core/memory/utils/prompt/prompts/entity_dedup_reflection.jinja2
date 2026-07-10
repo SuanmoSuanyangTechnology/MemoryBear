@@ -211,8 +211,8 @@ Return JSON format with the following required fields:
 4. Return only valid JSON, with no Markdown code fence.
 
 {% if language == "zh" %}
-输出语言应始终与输入语言相同。
+flexible 的自然语言输出字段（`new_name`、`new_aliases`、`reason`）应跟随两个实体名称、描述和描述摘要的主要语言。固定 JSON 字段、布尔值、数字和 `null` 保持不变；不合并时 `new_name` 必须为 `null`。
 {% else %}
-The output language should always be the same as the input language.
+Flexible natural-language output fields (`new_name`, `new_aliases`, and `reason`) should follow the primary language of the two entity names, descriptions, and description summaries. Fixed JSON fields, booleans, numbers, and `null` stay unchanged; when not merging, `new_name` must be `null`.
 {% endif %}
 {{ json_schema }}

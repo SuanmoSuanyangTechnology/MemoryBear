@@ -7,17 +7,16 @@ Classes:
     EmotionAnalyticsService: 情绪分析服务，提供各种情绪分析功能
 """
 
-import json
 import statistics
 from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
 from app.repositories.neo4j.emotion_repository import EmotionRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-
-from app.utils.config_utils import resolve_config_id
+from app.services.memory_config_service import MemoryConfigService
 
 logger = get_business_logger()
 
@@ -551,27 +550,20 @@ class EmotionAnalyticsService:
             # 1. 从 end_user_id 获取关联的 memory_config_id
             llm_client = None
             try:
-                from app.services.memory_agent_service import (
-                    get_end_user_connected_config,
-                )
-
-                connected_config = get_end_user_connected_config(end_user_id, db)
-                config_id = connected_config.get("memory_config_id")
-                workspace_id = connected_config.get("workspace_id")
-                config_id = resolve_config_id(config_id, db) if config_id else None
-                if config_id is not None or workspace_id is not None:
-                    from app.services.memory_config_service import (
-                        MemoryConfigService,
-                    )
-                    config_service = MemoryConfigService(db)
+                config_service = MemoryConfigService(db)
+                config_id = config_service.get_config_id_by_end_user(end_user_id)
+                if config_id is not None:
                     memory_config = config_service.load_memory_config(
-                        config_id=config_id,
-                        workspace_id=workspace_id,
-                        service_name="EmotionAnalyticsService.generate_emotion_suggestions"
+                        config_id=config_id
                     )
-                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-                    factory = MemoryClientFactory(db)
-                    llm_client = factory.get_llm_client(str(memory_config.llm_model_id))
+                    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+                    # 统一经 ModelClientMixin 获取客户端，并携带 tenant_id，
+                    # 避免 SpeedBear 公共模型运行时缺失租户上下文。
+                    llm_client = ModelClientMixin.get_llm_client(
+                        db,
+                        memory_config.llm_model_id,
+                        tenant_id=memory_config.tenant_id,
+                    )
             except Exception as e:
                 logger.warning(f"无法获取 end_user {end_user_id} 的配置，将使用默认配置: {e}")
 
@@ -626,10 +618,14 @@ class EmotionAnalyticsService:
 
             # 8. 使用结构化输出直接获取 Pydantic 模型
             try:
-                suggestions_response = await llm_client.response_structured(
-                    messages=messages,
-                    response_model=EmotionSuggestionsResponse
-                )
+                from app.core.memory.utils.llm.llm_utils import StructResponse
+                # RedBearLLM（ModelClientMixin 产出）走 LangChain 接口：
+                # ainvoke 返回 AIMessage，再经 StructResponse 解析为 Pydantic 模型。
+                # prompt 模板已明确要求返回对应 JSON 结构。
+                suggestions_response = await llm_client.ainvoke(
+                    messages,
+                    config={"callbacks": []},
+                ) | StructResponse(mode="pydantic", model=EmotionSuggestionsResponse)
             except Exception as e:
                 logger.error(f"LLM 结构化输出失败: {str(e)}")
                 # 返回默认建议

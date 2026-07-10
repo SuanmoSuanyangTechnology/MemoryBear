@@ -71,6 +71,21 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    def get_end_users_count_by_workspace(self, workspace_id: uuid.UUID) -> int:
+        """获取指定 workspace 下的所有 end_user数量"""
+        try:
+            end_users_count = (
+                self.db.query(EndUser)
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
+                .count()
+            )
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {end_users_count} 个终端用户")
+            return end_users_count
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         """根据 end_user_id 查询宿主"""
         try:
@@ -534,6 +549,40 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
             raise
 
+    def get_cache_refresh_fields_by_workspace(
+        self, workspace_id: uuid.UUID
+    ) -> List[tuple]:
+        """获取工作空间下所有活跃终端用户的「缓存刷新判定」所需字段（列裁剪）。
+
+        仅取 id / write_time / memory_insight_updated_at / user_summary_updated_at 四列，
+        返回普通元组而非 ORM 对象：
+          - 不受 session 关闭后 detach/expire 影响（调用方可在会话外安全遍历）
+          - 不加载整行，万级用户时显著降低内存
+
+        Returns:
+            List[tuple]: 每个元素为
+                (id, write_time, memory_insight_updated_at, user_summary_updated_at)
+        """
+        try:
+            rows = (
+                self.db.query(
+                    EndUser.id,
+                    EndUser.write_time,
+                    EndUser.memory_insight_updated_at,
+                    EndUser.user_summary_updated_at,
+                )
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
+                .all()
+            )
+            db_logger.debug(
+                f"成功查询工作空间 {workspace_id} 下 {len(rows)} 个终端用户的缓存刷新字段"
+            )
+            return rows
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 缓存刷新字段时出错: {str(e)}")
+            raise
+
     def get_filtered_by_workspace(
         self,
         workspace_id: uuid.UUID,
@@ -860,6 +909,41 @@ class EndUserRepository:
             )
             raise
 
+    def soft_delete_by_end_user_id(self, end_user_id: uuid.UUID) -> bool:
+        """软删除指定 EndUser（按 end_user_id）。
+
+        设置 is_active=False，数据保留，查询时通过 is_active=True 过滤。
+        同时操作 EndUserInfo（通过 ORM cascade 或显式标记）。
+
+        Args:
+            end_user_id: 终端用户 ID
+
+        Returns:
+            bool: 是否成功删除（更新了至少一行）
+        """
+        try:
+            updated = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.id == end_user_id,
+                    EndUser.is_active == True,
+                )
+                .update(
+                    {"is_active": False},
+                    synchronize_session=False,
+                )
+            )
+            self.db.commit()
+            if updated:
+                db_logger.info(f"软删除终端用户: end_user_id={end_user_id}")
+            else:
+                db_logger.warning(f"未找到活跃终端用户，无法软删除: end_user_id={end_user_id}")
+            return updated > 0
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"软删除终端用户失败: end_user_id={end_user_id}, error={str(e)}")
+            raise
+
     def soft_delete_by_user_id(self, user_id: uuid.UUID) -> int:
         """软删除指定 User（通过 other_id 关联）的所有 EndUser。
 
@@ -1138,11 +1222,28 @@ def get_end_users_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[End
     end_users = repo.get_end_users_by_workspace(workspace_id)
     return end_users
 
+def get_end_users_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> int:
+    repo = EndUserRepository(db)
+    end_users_count = repo.get_end_users_count_by_workspace(workspace_id)
+    return end_users_count
+
 def get_end_user_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:
     """根据 end_user_id 查询对应宿主"""
     repo = EndUserRepository(db)
     end_user = repo.get_end_user_by_id(end_user_id)
     return end_user
+
+
+def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """根据 end_user_id 查询对应的 tenant_id，单次 JOIN 查询，不加载 ORM 对象"""
+    from app.models.workspace_model import Workspace
+
+    return (
+        db.query(Workspace.tenant_id)
+        .join(EndUser, EndUser.workspace_id == Workspace.id)
+        .filter(EndUser.id == end_user_id, EndUser.is_active == True)
+        .scalar()
+    )
 
 # 新增的缓存操作函数（保持与类方法一致的接口）
 def get_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:

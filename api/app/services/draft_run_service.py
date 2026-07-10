@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.schemas.chunk_schema import RetrieveType
+from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_db_context
@@ -143,6 +143,7 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
 
     request = KnowledgeRetrievalRequest(
         query=query,
+        caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         top_k=_as_int(first_kb.get("top_k"), 3),
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
@@ -359,6 +360,7 @@ class AgentRunService:
             suggested_questions: Optional[List[Any]] = None,
             status: str = "completed",
             error: Any = None,
+            message_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """统一构建 compare 场景下的 model_end 事件。"""
         data = {
@@ -373,6 +375,7 @@ class AgentRunService:
             "citations": citations or [],
             "suggested_questions": suggested_questions or [],
             "status": status,
+            "message_id": message_id,
             "timestamp": time.time()
         }
         if error is not None:
@@ -587,6 +590,7 @@ class AgentRunService:
             self,
             memory_config: dict | None,
             user_id,
+            workspace_id: uuid.UUID,
             storage_type,
             user_rag_memory_id
     ) -> tuple[list, bool]:
@@ -595,7 +599,7 @@ class AgentRunService:
 
         enabled = bool(memory_config and memory_config.get("enabled"))
         tool = create_long_term_memory_tool(
-            memory_config, user_id, storage_type, user_rag_memory_id,
+            memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
             db=self.db,
         )
         tools = [tool] if tool else []
@@ -743,6 +747,8 @@ class AgentRunService:
             Dict: 包含 AI 回复和元数据的字典
         """
         start_time = time.time()
+        user_message_id = uuid.uuid4()
+        assistant_message_id = uuid.uuid4()
         tools_config: dict | list | None = agent_config.tools
         skills_config: dict | None = agent_config.skills
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
@@ -805,7 +811,7 @@ class AgentRunService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.load_memory_config(
-                    memory_config, user_id, storage_type, user_rag_memory_id
+                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
@@ -829,25 +835,30 @@ class AgentRunService:
                                                                 source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
-                    conv_uuid = uuid.UUID(conversation_id)
-                    from app.services.conversation_service import ConversationService
-                    conv_service = ConversationService(self.db)
-                    conv_service.add_message(
-                        conversation_id=conv_uuid,
-                        role="user",
-                        content=message,
-                        meta_data={"files": []}
-                    )
-                    conv_service.add_message(
-                        conversation_id=conv_uuid,
-                        role="assistant",
-                        content=annotation_match["answer"],
-                        meta_data={"usage": {}}
-                    )
+                    # skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存
+                    if not skip_save:
+                        conv_uuid = uuid.UUID(conversation_id)
+                        from app.services.conversation_service import ConversationService
+                        conv_service = ConversationService(self.db)
+                        conv_service.add_message(
+                            message_id=user_message_id,
+                            conversation_id=conv_uuid,
+                            role="user",
+                            content=message,
+                            meta_data={"files": []},
+                            parent_message_id=self._get_last_current_assistant_id(conv_uuid),
+                        )
+                        conv_service.add_message(
+                            conversation_id=conv_uuid,
+                            role="assistant",
+                            content=annotation_match["answer"],
+                            meta_data={"usage": {}}
+                        )
                     return {
                         "message": annotation_match["answer"],
                         "reasoning_content": None,
                         "conversation_id": conversation_id,
+                        "user_message_id": str(user_message_id),
                         "usage": None,
                         "elapsed_time": elapsed_time,
                         "suggested_questions": [],
@@ -1026,13 +1037,15 @@ class AgentRunService:
                 features_config, result["content"], api_key_config, effective_params
             )) if not sub_agent else []
 
-            # 10. 保存会话消息
+            # 10. 保存会话消息（skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存）
             message_id = None
-            if not sub_agent:
+            if not sub_agent and not skip_save:
                 message_id = await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=result["content"],
+                    message_id=assistant_message_id,
+                    user_message_id=user_message_id,
                     app_id=agent_config.app_id,
                     user_id=user_id,
                     meta_data={
@@ -1067,7 +1080,7 @@ class AgentRunService:
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
-            if not sub_agent:
+            if not sub_agent and not skip_save:
                 agent_exec_repo.update_completed(
                     execution_id=agent_execution.id,
                     steps=orchestrator_node_executions + node_executions,
@@ -1079,6 +1092,7 @@ class AgentRunService:
             response = {
                 "message": result["content"],
                 "message_id": message_id,
+                "user_message_id": str(user_message_id),
                 "reasoning_content": result.get("reasoning_content"),
                 "conversation_id": conversation_id,
                 "usage": result.get("usage", {
@@ -1108,7 +1122,7 @@ class AgentRunService:
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
             # 更新 Agent 执行记录为 failed
-            if not sub_agent:
+            if not sub_agent and not skip_save:
                 try:
                     elapsed_time = time.time() - start_time
                     agent_exec_repo.update_completed(
@@ -1141,6 +1155,7 @@ class AgentRunService:
             source: str = "",
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
+            user_message_id: Optional[uuid.UUID] = None,
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -1175,6 +1190,9 @@ class AgentRunService:
         tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
         start_time = time.time()
+        # 支持外部传入 user_message_id（多模型对比时预生成并随 model_start 回传前端）
+        user_message_id = user_message_id or uuid.uuid4()
+        assistant_message_id = uuid.uuid4()
 
         try:
             # 1. 获取 API Key 配置
@@ -1217,7 +1235,7 @@ class AgentRunService:
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = self.load_memory_config(
-                    memory_config, user_id, storage_type, user_rag_memory_id
+                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
 
@@ -1242,23 +1260,29 @@ class AgentRunService:
                                                                 source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
-                    conv_uuid = uuid.UUID(conversation_id)
-                    from app.services.conversation_service import ConversationService
-                    conv_service = ConversationService(self.db)
-                    conv_service.add_message(
-                        conversation_id=conv_uuid,
-                        role="user",
-                        content=message,
-                        meta_data={"files": []}
-                    )
-                    conv_service.add_message(
-                        conversation_id=conv_uuid,
-                        role="assistant",
-                        content=annotation_match["answer"],
-                        meta_data={"usage": {}}
-                    )
+                    # skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存
+                    if not skip_save:
+                        conv_uuid = uuid.UUID(conversation_id)
+                        from app.services.conversation_service import ConversationService
+                        conv_service = ConversationService(self.db)
+                        conv_service.add_message(
+                            message_id=user_message_id,
+                            conversation_id=conv_uuid,
+                            role="user",
+                            content=message,
+                            meta_data={"files": []},
+                            parent_message_id=self._get_last_current_assistant_id(conv_uuid),
+                        )
+                        conv_service.add_message(
+                            conversation_id=conv_uuid,
+                            role="assistant",
+                            content=annotation_match["answer"],
+                            meta_data={"usage": {}}
+                        )
                     yield self._format_sse_event("start", {
                         "conversation_id": conversation_id,
+                        "message_id": str(assistant_message_id),
+                        "user_message_id": str(user_message_id),
                         "timestamp": time.time()
                     })
                     yield self._format_sse_event("message", {
@@ -1393,6 +1417,8 @@ class AgentRunService:
             # 8. 发送开始事件
             yield self._format_sse_event("start", {
                 "conversation_id": conversation_id,
+                "message_id": str(assistant_message_id),
+                "user_message_id": str(user_message_id),
                 "timestamp": time.time()
             })
 
@@ -1443,7 +1469,7 @@ class AgentRunService:
             # LLM 推理期间不需要 db，提前归还连接给连接池
             # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
             # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
-            self.db.close()
+            # self.db.close()
 
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
@@ -1506,13 +1532,15 @@ class AgentRunService:
                 features_config, full_content, api_key_config, effective_params
             )) if not sub_agent else []
 
-            # 11. 保存会话消息
+            # 11. 保存会话消息（skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存）
             message_id = None
-            if not sub_agent:
+            if not sub_agent and not skip_save:
                 message_id = await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=full_content,
+                    message_id=assistant_message_id,
+                    user_message_id=user_message_id,
                     app_id=_app_id,
                     user_id=user_id,
                     meta_data={
@@ -1542,7 +1570,7 @@ class AgentRunService:
                     asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
-            if not sub_agent:
+            if not sub_agent and not skip_save:
                 agent_exec_repo.update_completed(
                     execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
@@ -1597,7 +1625,8 @@ class AgentRunService:
             except Exception:
                 pass
             # 保存失败的消息，使前端可以展示失败状态
-            if not sub_agent:
+            # skip_save=True 时由调用方处理失败态，跳过 run_stream 内部重复保存
+            if not sub_agent and not skip_save:
                 try:
                     from app.services.conversation_service import ConversationService
 
@@ -1608,6 +1637,7 @@ class AgentRunService:
                         role="user",
                         content=message,
                         meta_data={"files": [], "history_files": {}},
+                        parent_message_id=self._get_last_current_assistant_id(conv_uuid),
                     )
                     conv_svc.add_message(
                         conversation_id=conv_uuid,
@@ -1619,7 +1649,7 @@ class AgentRunService:
                 except Exception:
                     pass
             # 更新 Agent 执行记录为 failed
-            if not sub_agent:
+            if not sub_agent and not skip_save:
                 try:
                     elapsed_time = time.time() - start_time
                     agent_exec_repo.update_completed(
@@ -1926,6 +1956,23 @@ class AgentRunService:
 
         return filtered_history
 
+    def _get_last_current_assistant_id(self, conv_uuid) -> Optional[uuid.UUID]:
+        """查会话最近 is_current=True 的 assistant，作为后续 user 消息的 parent。
+
+        用户切换版本时 switch_message_version 已把目标版本置 is_current=True，
+        故基于该版本继续提问的 user 消息 parent 自动指向用户选择的版本，
+        使 _build_branch_view 向下捞分支链不断（无需依赖时间兜底）。
+        """
+        if not conv_uuid:
+            return None
+        parent_assistant = self.db.query(Message).filter(
+            Message.conversation_id == conv_uuid,
+            Message.role == "assistant",
+            Message.is_current.is_(True),
+            Message.is_deleted.is_not(True),
+        ).order_by(Message.created_at.desc()).first()
+        return parent_assistant.id if parent_assistant else None
+
     async def _save_conversation_message(
             self,
             conversation_id: str,
@@ -1939,7 +1986,9 @@ class AgentRunService:
             audio_url: Optional[str] = None,
             citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
-            is_omni: Optional[bool] = None
+            is_omni: Optional[bool] = None,
+            message_id: Optional[uuid.UUID] = None,
+            user_message_id: Optional[uuid.UUID] = None
     ) -> Optional[str]:
         """保存会话消息（会话已通过 _ensure_conversation 确保存在）
 
@@ -2009,10 +2058,12 @@ class AgentRunService:
 
             # 保存用户消息
             user_msg = conversation_service.add_message(
+                message_id=user_message_id,
                 conversation_id=conv_uuid,
                 role="user",
                 content=user_message,
-                meta_data=human_meta
+                meta_data=human_meta,
+                parent_message_id=self._get_last_current_assistant_id(conv_uuid),
             )
             # 保存助手消息（含 audio_url 和 citations）
             if audio_url:
@@ -2020,6 +2071,7 @@ class AgentRunService:
             if citations:
                 meta_data["citations"] = citations
             assistant_msg = conversation_service.add_message(
+                message_id=message_id,
                 conversation_id=conv_uuid,
                 role="assistant",
                 content=assistant_message,
@@ -2823,11 +2875,16 @@ class AgentRunService:
         #     features_config = features_config.model_dump()
         # self._validate_file_upload(features_config, files)
 
+        # compare_start 的 user_message_id 仅作为本次对比的整体用户消息标识，
+        # 供前端为本地 user 消息气泡定位/删除；每个模型各自落库的 user_message_id
+        # 在 model_start 事件中返回，便于前端区分各对比模型
+        user_message_id = uuid.uuid4()
         # 发送开始事件
         yield self._format_sse_event("compare_start", {
             "conversation_id": conversation_id,
             "model_count": len(models),
             "parallel": parallel,
+            "user_message_id": str(user_message_id),
             "timestamp": time.time()
         })
 
@@ -2839,6 +2896,10 @@ class AgentRunService:
             model_config_id = str(model_info["model_config_id"])
             # 使用模型自己的 conversation_id，如果没有则使用全局的
             model_conversation_id = model_info.get("conversation_id") or conversation_id
+            # 每个模型预生成各自的 user_message_id，随 model_start 返回前端，
+            # 便于前端在多模型对比中区分各模型对应的用户消息；
+            # 同时下传 run_stream 作为该模型用户消息的落库 id，保证前后端一致
+            model_user_message_id = uuid.uuid4()
 
             try:
                 # 发送模型开始事件
@@ -2848,6 +2909,7 @@ class AgentRunService:
                     "model_name": model_info["model_config"].name,
                     "label": model_label,
                     "conversation_id": model_conversation_id,
+                    "user_message_id": str(model_user_message_id),
                     "timestamp": time.time()
                 }))
 
@@ -2860,6 +2922,7 @@ class AgentRunService:
                 citations = []
                 suggested_questions = []
                 stream_error = None
+                message_id = None
 
                 # 临时修改参数
                 original_params = agent_config.model_parameters
@@ -2880,7 +2943,8 @@ class AgentRunService:
                             web_search=web_search,
                             memory=memory,
                             files=files,
-                            source=source
+                            source=source,
+                            user_message_id=model_user_message_id
                     ):
                         # 解析原始事件
                         try:
@@ -2961,6 +3025,7 @@ class AgentRunService:
                                 audio_status = event_data.get("audio_status")
                                 citations = event_data.get("citations", [])
                                 suggested_questions = event_data.get("suggested_questions", [])
+                                message_id = event_data.get("message_id")
 
                             if event_type == "error" and event_data:
                                 stream_error = event_data.get("error") or {"message": "未知错误"}
@@ -2998,7 +3063,8 @@ class AgentRunService:
                             citations=citations,
                             suggested_questions=suggested_questions,
                             status="failed",
-                            error=stream_error
+                            error=stream_error,
+                            message_id=message_id
                         )
                     ))
                     return {
@@ -3047,7 +3113,8 @@ class AgentRunService:
                         audio_url=audio_url,
                         audio_status=audio_status,
                         citations=citations,
-                        suggested_questions=suggested_questions
+                        suggested_questions=suggested_questions,
+                        message_id=message_id
                     )
                 ))
 
@@ -3250,6 +3317,67 @@ class AgentRunService:
 
     # ==================== 重新生成功能 ====================
 
+    def _locate_or_restore_parent_user_message(self, original_msg: "Message") -> "Message":
+        """定位原 assistant 消息对应的父 user 消息。
+
+        查找顺序：
+        1. 优先用已回填的 parent_message_id（若其指向的消息非 user，视为脏数据忽略）；
+        2. 否则回溯同会话 created_at 早于或等于原消息的最近一条 user 消息
+           （不按 is_deleted 过滤，因为该消息即使已被删除仍是本轮实际提问；
+           用 <= 而非 < 是为了兼容 user/assistant 同毫秒入库的边界场景）；
+        3. 仍找不到时再放宽到本会话内最近一条 user 消息（兜底，覆盖
+           created_at 顺序异常的脏数据）。
+
+        若最终定位到的父消息已被逻辑删除（用户重新生成前误删了原提问），自动恢复
+        （is_deleted 置回 False）后继续，而非直接抛"无法找到原始用户消息"——
+        避免误删提问导致该轮回复彻底无法重新生成。
+        """
+        from app.models import Message
+        parent_msg = None
+        if original_msg.parent_message_id:
+            candidate = self.db.get(Message, original_msg.parent_message_id)
+            if candidate and candidate.role == "user":
+                parent_msg = candidate
+        if not parent_msg:
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at <= original_msg.created_at,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+        if not parent_msg:
+            # 兜底：同会话内最近一条 user 消息（不论时间顺序），覆盖 created_at 异常的脏数据
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+        if not parent_msg:
+            raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+        if original_msg.parent_message_id != parent_msg.id:
+            original_msg.parent_message_id = parent_msg.id
+            self.db.commit()
+        if parent_msg.is_deleted:
+            parent_msg.is_deleted = False
+            self.db.commit()
+            logger.info(
+                "重新生成时自动恢复被删除的父 user 消息",
+                extra={
+                    "parent_message_id": str(parent_msg.id),
+                    "assistant_message_id": str(original_msg.id),
+                    "conversation_id": str(original_msg.conversation_id),
+                },
+            )
+        return parent_msg
+
     async def regenerate(
             self,
             *,
@@ -3295,26 +3423,10 @@ class AgentRunService:
         original_msg.is_current = False
         self.db.commit()
 
-        # 3. 获取父用户消息（用于提取原始问题）
-        parent_msg_id = original_msg.parent_message_id
-        if not parent_msg_id:
-            # 如果没有 parent_message_id，则查找上一条 user 消息
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at < original_msg.created_at,
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
-            if not parent_msg:
-                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-            parent_msg_id = parent_msg.id
-        else:
-            parent_msg = self.db.get(Message, parent_msg_id)
+        # 3. 获取父用户消息（用于提取原始问题；若已被逻辑删除则自动恢复，
+        # 见 _locate_or_restore_parent_user_message）
+        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
 
@@ -3342,13 +3454,12 @@ class AgentRunService:
 
         # 4. 加载上下文（到父消息为止，不包含当前要重新生成的消息）
         conversation_id = str(original_msg.conversation_id)
-        max_history = agent_config.memory.get("max_history", 10) if agent_config.memory else 10
 
         # 使用封装的方法加载父消息之前的历史
         filtered_history = await self._load_history_before_message(
             conversation_id=original_msg.conversation_id,
             before_time=parent_msg.created_at,
-            max_history=max_history
+            max_history=settings.AGENT_MAX_HISTORY
         )
 
         # 5. 调用 LLM（复用现有 run 方法，传入过滤后的历史和文件）
@@ -3455,25 +3566,10 @@ class AgentRunService:
         original_msg.is_current = False
         self.db.commit()
 
-        # 3. 获取父用户消息（用于提取原始问题）
-        parent_msg_id = original_msg.parent_message_id
-        if not parent_msg_id:
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at < original_msg.created_at,
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
-            if not parent_msg:
-                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-            parent_msg_id = parent_msg.id
-        else:
-            parent_msg = self.db.get(Message, parent_msg_id)
+        # 3. 获取父用户消息（用于提取原始问题；若已被逻辑删除则自动恢复，
+        # 见 _locate_or_restore_parent_user_message）
+        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
 
@@ -3501,12 +3597,11 @@ class AgentRunService:
 
         # 4. 加载上下文
         conversation_id = str(original_msg.conversation_id)
-        max_history = agent_config.memory.get("max_history", 10) if agent_config.memory else 10
 
         filtered_history = await self._load_history_before_message(
             conversation_id=original_msg.conversation_id,
             before_time=parent_msg.created_at,
-            max_history=max_history
+            max_history=settings.AGENT_MAX_HISTORY
         )
 
         # 5. 流式调用 LLM
@@ -3558,6 +3653,9 @@ class AgentRunService:
                 yield event_str
             elif event_type == "tool_start" or event_type == "tool_end" or event_type == "tool_error":
                 yield event_str
+            elif event_type in ("agent_log", "agent_log_final"):
+                # regenerate 接口不向前端返回 agent 执行轨迹事件，直接丢弃
+                continue
             elif event_type == "end" and event_data:
                 # 从 end 事件中提取 features 输出
                 suggested_questions = event_data.get("suggested_questions", [])
@@ -3607,6 +3705,7 @@ class AgentRunService:
             "message_id": str(new_msg.id),
             "conversation_id": conversation_id,
             "version": new_version,
+            "message_length": len(full_content),
             "suggested_questions": suggested_questions,
             "audio_url": audio_url,
             "audio_status": audio_status,

@@ -2,9 +2,9 @@ import logging
 import os
 import tempfile
 
-from app.core.rag.deepdoc.parser.figure_parser import VisionFigureParser
 from app.core.rag.chunk.context import ChunkContext, ParsedBlock, ParsedBlockType, ParseResult
 from app.core.rag.chunk.parser.html import HtmlParser
+from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.json import JsonParser
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
 from app.core.rag.chunk.parser.txt import TxtParser
@@ -47,15 +47,15 @@ class MarkdownChunkPipeline(ChunkPipeline):
                 image = markdown_parser.load_image(str(block.metadata.get("src", "")))
                 if image:
                     block.image = image
-                    markdown_vision_parser = VisionFigureParser(
-                        vision_model=ctx.vision_model,
-                        figures_data=[((image, ["markdown image"]), [(0, 0, 0, 0, 0)])],
-                        **ctx.kwargs,
-                    )
-                    boosted_figures = markdown_vision_parser(callback=ctx.callback)
-                    vision_text = "\n\n".join([fig[0][1][0] for fig in boosted_figures])
-                    if vision_text:
-                        block.metadata["vision_text"] = vision_text
+            enhance_image_blocks_with_vision(
+                blocks,
+                vision_model=ctx.vision_model,
+                callback=ctx.callback,
+                log_prefix="Markdown",
+                lang=ctx.lang,
+                progress_start=0.2,
+                progress_span=0.55,
+            )
         else:
             logging.warning("No visual model detected. Skipping figure parsing enhancement.")
 

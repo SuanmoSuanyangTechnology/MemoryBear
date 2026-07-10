@@ -28,7 +28,8 @@ dayjs.extend(timezone);
  */
 export const formatDateTime = (
   value: string | number | null | undefined,
-  format: string = 'YYYY-MM-DD HH:mm:ss'
+  format: string = 'YYYY-MM-DD HH:mm:ss',
+  locale?: 'en' | 'zh'
 ): string => {
   if (!value) return '';
 
@@ -39,6 +40,10 @@ export const formatDateTime = (
 
   /** Get current timezone setting from localStorage */
   const currentTimeZone = localStorage.getItem('timeZone') || 'Asia/Shanghai';
+
+  if (locale) {
+    return dayjs(value).tz(currentTimeZone).locale(locale).format(format);
+  }
   
   return dayjs(value).tz(currentTimeZone).format(format);
 };

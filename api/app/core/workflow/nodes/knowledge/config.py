@@ -17,7 +17,7 @@ from app.core.workflow.nodes.llm.config import (
     LLMTopPConfig,
 )
 
-from app.schemas.chunk_schema import RetrieveType
+from app.schemas.chunk_schema import KnowledgeBaseConfig
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 
 
@@ -97,33 +97,6 @@ class KnowledgeModelConfig(BaseModel):
         normalized = {k: v for k, v in value.items() if k not in flat_param_keys}
         normalized["completion_params"] = collected
         return normalized
-
-
-class KnowledgeBaseConfig(BaseModel):
-    kb_id: UUID = Field(
-        ...,
-        description="Knowledge base IDs"
-    )
-
-    similarity_threshold: float = Field(
-        default=0.2,
-        description="Knowledge base similarity threshold"
-    )
-
-    vector_similarity_weight: float = Field(
-        default=0.3,
-        description="Knowledge base vector similarity weight"
-    )
-
-    top_k: int = Field(
-        default=4,
-        description="Knowledge base top k"
-    )
-
-    retrieve_type: RetrieveType = Field(
-        default=RetrieveType.PARTICIPLE,
-        description="Retrieve type"
-    )
 
 
 class KnowledgeRetrievalNodeConfig(BaseNodeConfig):

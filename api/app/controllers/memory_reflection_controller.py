@@ -31,7 +31,6 @@ from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.services.memory_reflection_service import (
     MemoryReflectionService,
     WorkspaceAppService,
@@ -196,97 +195,7 @@ def get_reflection_logs(
         api_logger.error(f"查询反思日志列表失败: end_user_id={end_user_id}, error={e}")
         return fail(BizCode.INTERNAL_ERROR, "查询日志列表失败", str(e))
 
-@router.post("/reflection/save")
-async def save_reflection_config(
-    request: Memory_Reflection,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    """
-    Save reflection configuration to memory config table
-
-    Persists reflection engine configuration settings to the data_config table,
-    including reflection parameters, model settings, and evaluation criteria.
-    Validates configuration parameters and ensures data consistency.
-
-    Args:
-        request: Memory reflection configuration data including:
-            - config_id: Configuration identifier to update
-            - reflection_enabled: Whether reflection is enabled
-            - reflection_period_in_hours: Reflection execution interval
-            - reflexion_range: Scope of reflection (partial/all)
-            - baseline: Reflection strategy (time/fact/hybrid)
-            - reflection_model_id: LLM model for reflection operations
-            - memory_verify: Enable memory verification checks
-            - quality_assessment: Enable quality assessment evaluation
-        current_user: Authenticated user saving the configuration
-        db: Database session for data operations
-
-    Returns:
-        dict: Success response with saved reflection configuration data
-
-    Raises:
-        HTTPException 400: If config_id is missing or parameters are invalid
-        HTTPException 500: If configuration save operation fails
-
-    Database Operations:
-        - Updates memory_config table with reflection settings
-        - Commits transaction and refreshes entity
-        - Maintains configuration consistency
-    """
-    try:
-        config_id = request.config_id
-        config_id = resolve_config_id(config_id, db)
-        if not config_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="缺少必需参数: config_id"
-            )
-        api_logger.info(f"用户 {current_user.username} 保存反思配置，config_id: {config_id}")
-
-        # Update reflection configuration in database
-        memory_config = MemoryConfigRepository.update_reflection_config(
-            db,
-            config_id=config_id,
-            enable_self_reflexion=request.reflection_enabled,
-            iteration_period=request.reflection_period_in_hours,
-            reflexion_range=request.reflexion_range,
-            baseline=request.baseline,
-            reflection_model_id=request.reflection_model_id,
-            memory_verify=request.memory_verify,
-            quality_assessment=request.quality_assessment
-        )
-
-        # Commit transaction and refresh entity
-        db.commit()
-        db.refresh(memory_config)
-
-        reflection_result={
-                "config_id": memory_config.config_id,
-                "enable_self_reflexion": memory_config.enable_self_reflexion,
-                "iteration_period": memory_config.iteration_period,
-                "reflexion_range": memory_config.reflexion_range,
-                "baseline": memory_config.baseline,
-                "reflection_model_id": memory_config.reflection_model_id,
-                "memory_verify": memory_config.memory_verify,
-                "quality_assessment": memory_config.quality_assessment}
-
-        return success(data=reflection_result, msg="反思配置成功")
-
-
-
-    except ValueError as ve:
-        api_logger.error(f"参数错误: {str(ve)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"参数错误: {str(ve)}"
-        )
-    except Exception as e:
-        api_logger.error(f"反思配置保存失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"反思配置保存失败: {str(e)}"
-        )
+# save_reflection_config 已迁移至 memory_config_controller（/memory_config/update_config_reflection）
 
 
 @router.get("/reflection")
@@ -413,82 +322,8 @@ async def start_workspace_reflection(
         )
 
 
-@router.get("/reflection/configs")
-async def start_reflection_configs(
-        config_id: uuid.UUID|int,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-) -> dict:
-    """
-    Query reflection configuration information by config_id
+# start_reflection_configs 已迁移至 memory_config_controller（/memory_config/read_config_reflection）
 
-    Retrieves detailed reflection configuration settings from the memory_config
-    table for a specific configuration ID. Provides comprehensive reflection
-    parameters including model settings, evaluation criteria, and operational flags.
-
-    Args:
-        config_id: Configuration identifier (UUID or integer) to query
-        current_user: Authenticated user making the request
-        db: Database session for data operations
-
-    Returns:
-        dict: Success response with detailed reflection configuration:
-            - config_id: Resolved configuration identifier
-            - reflection_enabled: Whether reflection is enabled for this config
-            - reflection_period_in_hours: Reflection execution interval
-            - reflexion_range: Scope of reflection operations (partial/all)
-            - baseline: Reflection strategy (time/fact/hybrid)
-            - reflection_model_id: LLM model identifier for reflection
-            - memory_verify: Memory verification flag
-            - quality_assessment: Quality assessment flag
-
-    Database Operations:
-        - Queries memory_config table by resolved config_id
-        - Retrieves all reflection-related configuration fields
-        - Resolves configuration ID for consistent formatting
-
-    Raises:
-        HTTPException 404: If configuration with specified ID is not found
-        HTTPException 500: If configuration query operation fails
-
-    ID Resolution:
-        - Supports both UUID and integer config_id formats
-        - Automatically resolves to appropriate internal format
-        - Maintains consistency across different ID representations
-    """
-    config_id = resolve_config_id(config_id, db)
-    try:
-        config_id=resolve_config_id(config_id,db)
-        api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
-        result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
-        memory_config_id = resolve_config_id(result.config_id, db)
-
-        # Build response data with comprehensive configuration details
-        reflection_config = {
-            "config_id": memory_config_id,
-            "reflection_enabled": result.enable_self_reflexion,
-            "reflection_period_in_hours": result.iteration_period,
-            "reflexion_range": result.reflexion_range,
-            "baseline": result.baseline,
-            "reflection_model_id": result.reflection_model_id,
-            "memory_verify": result.memory_verify,
-            "quality_assessment": result.quality_assessment
-        }
-        api_logger.info(f"成功查询反思配置，config_id: {config_id}")
-        return success(data=reflection_config, msg="反思配置查询成功")
-
-        api_logger.info(f"Successfully queried reflection config, config_id: {config_id}")
-        return success(data=reflection_config, msg="Reflection configuration query successful")
-
-    except HTTPException:
-        # Re-raise HTTP exceptions without modification
-        raise
-    except Exception as e:
-        api_logger.error(f"查询反思配置失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"查询反思配置失败: {str(e)}"
-        )
 
 @router.get("/reflection/run")
 async def reflection_run(

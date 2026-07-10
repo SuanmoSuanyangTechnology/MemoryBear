@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:54:47
+ * @Last Modified time: 2026-07-01 17:46:19
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
@@ -199,7 +199,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
           </Form.Item>
 
           {leftExtra}
-          <Form.Item name="variables" className="rb:mb-0!" hidden={queryValues?.variables?.length < 1}>
+          <Form.Item name="variables" className="rb:mb-0!" hidden={!queryValues?.variables || queryValues?.variables?.length < 1}>
             <Tooltip title={t('memoryConversation.variableConfig')}>
               <Flex justify="center" align="center"
                 className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {

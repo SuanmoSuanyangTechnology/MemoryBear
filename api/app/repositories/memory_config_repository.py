@@ -249,6 +249,9 @@ class MemoryConfigRepository:
                 rerank_id=params.rerank_id,
                 reflection_model_id=params.reflection_model_id,
                 emotion_model_id=params.emotion_model_id,
+                video_id=params.video_id,
+                audio_id=params.audio_id,
+                vision_id=params.vision_id,
             )
             db.add(db_config)
             db.flush()  # 获取自增ID但不提交事务
@@ -437,6 +440,7 @@ class MemoryConfigRepository:
                 "iteration_period": db_config.iteration_period,
                 "reflexion_range": db_config.reflexion_range,
                 "baseline": db_config.baseline,
+                "is_default": bool(db_config.is_default),
             }
 
             db_logger.debug(f"萃取配置查询成功: config_id={config_id}")

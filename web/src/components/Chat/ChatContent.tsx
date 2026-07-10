@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:12:26
+ * @Last Modified time: 2026-07-02 16:00:20
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -342,7 +342,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
                       {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools || isAlwaysShowAssistantTools) &&
-                        <Flex gap={12} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                        <Flex gap={12} wrap align="center" justify={item.role === 'user' ? 'end' : 'start'}>
                           {labelPosition === 'bottom' &&
                             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                               {labelFormat(item)}
@@ -362,7 +362,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {(isSupportTools || isAlwaysShowAssistantTools) && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
+                          {(isSupportTools || isAlwaysShowAssistantTools) && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && item.id && <>
                             {(index === data.length - 1 || typeof regenerateMaxCount === 'number') && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
@@ -435,7 +435,7 @@ const ChatContent: FC<ChatContentProps> = ({
                               ></div>
                             </Tooltip>
                           }
-                          {isSupportTools && item.role === 'user' && deleteMsg &&
+                          {isSupportTools && item.role === 'user' && item.id && deleteMsg &&
                             <Tooltip title={t('common.delete')}>
                               <div
                                 className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete_big.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red_big.svg')]"

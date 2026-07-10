@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import uuid
 from typing import Annotated
 
@@ -13,7 +14,7 @@ from app.core.logging_config import get_business_logger
 from app.core.quota_manager import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
-from app.db import get_db, get_db_read
+from app.db import get_db, get_db_context, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
@@ -24,7 +25,7 @@ from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import release_share_schema, conversation_schema, app_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
-from app.services.app_chat_service import AppChatService, get_app_chat_service
+from app.services.app_chat_service import AppChatService, get_app_chat_service, assert_not_opening_statement
 from app.services.app_service import AppService
 from app.services.auth_service import create_access_token
 from app.services.conversation_service import ConversationService
@@ -33,6 +34,7 @@ from app.services.message_report_service import ReportService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
 from app.services.workflow_service import WorkflowService
+from app.services.app_log_service import AppLogService
 from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
@@ -42,6 +44,21 @@ from app.models import Message, MessageFeedback
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
+
+# 体验分享 regenerate 接口只透传给 end-user 一组精简的 SSE 事件。
+# 前端只关心 `message` 文本流、`start` / `error` / `regenerate_end` / `end` 这几个
+# 端点事件、以及内容审核时的 `message_replace`。
+SHARE_FORWARD_EVENTS = frozenset({
+    "start",
+    "message",
+    "message_replace",
+    "end",
+    "error",
+    "regenerate_end",
+})
+
+# SSE 字符串中 `event: <type>` 行的正则——AGENT 路径吐出来的是已序列化的 SSE 字符串，
+SSE_EVENT_LINE = re.compile(r"^event:\s*(\S+)\s*$", re.MULTILINE)
 
 
 def _to_ms(iso_str: str | None) -> int | None:
@@ -367,6 +384,23 @@ def get_conversation(
         )
         favorited_ids = {row[0] for row in favorited_rows}
 
+    # 按当前用户预查反馈，避免 feedbacks[0] 串显（多用户下取任意行导致状态错位）
+    feedback_map: dict[uuid.UUID, tuple[str | None, str | None]] = {}
+    if message_ids:
+        feedback_rows = (
+            db.query(
+                MessageFeedback.message_id,
+                MessageFeedback.feedback_type,
+                MessageFeedback.feedback_content,
+            )
+            .filter(
+                MessageFeedback.message_id.in_(message_ids),
+                MessageFeedback.user_id == share_data.user_id,
+            )
+            .all()
+        )
+        feedback_map = {row[0]: (row[1], row[2]) for row in feedback_rows}
+
     # 构建消息响应列表
     message_responses = []
     for m in messages:
@@ -374,6 +408,7 @@ def get_conversation(
             # assistant 多版本列表
             version_responses = []
             for ver_msg in m:
+                fb_type, fb_content = feedback_map.get(ver_msg.id, (None, None))
                 version_responses.append(conversation_schema.Message(
                     id=ver_msg.id,
                     conversation_id=ver_msg.conversation_id,
@@ -382,8 +417,8 @@ def get_conversation(
                     status=ver_msg.status,
                     meta_data=ver_msg.meta_data,
                     created_at=ver_msg.created_at,
-                    feedback_type=ver_msg.feedbacks[0].feedback_type if ver_msg.feedbacks else None,
-                    feedback_content=ver_msg.feedbacks[0].feedback_content if ver_msg.feedbacks else None,
+                    feedback_type=fb_type,
+                    feedback_content=fb_content,
                     is_favorited=ver_msg.id in favorited_ids,
                     version=ver_msg.version,
                     is_current=ver_msg.is_current,
@@ -392,6 +427,7 @@ def get_conversation(
             message_responses.append(version_responses)
         else:
             # 单条消息（user 或单个 assistant）
+            fb_type, fb_content = feedback_map.get(m.id, (None, None))
             message_responses.append(conversation_schema.Message(
                 id=m.id,
                 conversation_id=m.conversation_id,
@@ -400,8 +436,8 @@ def get_conversation(
                 status=m.status,
                 meta_data=m.meta_data,
                 created_at=m.created_at,
-                feedback_type=m.feedbacks[0].feedback_type if m.feedbacks else None,
-                feedback_content=m.feedbacks[0].feedback_content if m.feedbacks else None,
+                feedback_type=fb_type,
+                feedback_content=fb_content,
                 is_favorited=m.id in favorited_ids,
                 version=m.version,
                 is_current=m.is_current,
@@ -564,15 +600,6 @@ async def chat(
             original_user_id=user_id
         )
 
-        # Only extract and set memory_config_id when the end user doesn't have one yet
-        if not new_end_user.memory_config_id:
-            from app.services.memory_config_service import MemoryConfigService
-            memory_config_service = MemoryConfigService(db)
-            memory_config_id, _ = memory_config_service.extract_memory_config_id(release.type, release.config or {})
-            if memory_config_id:
-                new_end_user.memory_config_id = memory_config_id
-                db.commit()
-                db.refresh(new_end_user)
         end_user_id = str(new_end_user.id)
 
         # appid = share.app_id
@@ -1261,6 +1288,10 @@ async def regenerate_message(
     if not message:
         raise BusinessException("消息不存在", BizCode.NOT_FOUND)
 
+    # 开场白（无父用户消息）不支持重新生成：必须在 StreamingResponse 之前拒绝，
+    # 否则 SSE 开流后无法回传干净的 HTTP 错误，前端会白屏。
+    assert_not_opening_statement(db, message_id)
+
     # 通过 share_token 获取 workspace_id
     service = SharedChatService(db)
     share, release = service.get_release_by_share_token(share_data.share_token, None)
@@ -1272,6 +1303,79 @@ async def regenerate_message(
         workspace_id=workspace_id,
         other_id=share_data.user_id
     )
+
+    # 按应用类型分支：工作流走 WorkflowService 多版本重新生成，其余走原 agent 路径
+    app_type = release.app.type if release.app else None
+
+    if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        if app_type == AppType.PURE_WORKFLOW:
+            raise BusinessException(
+                code=BizCode.APP_TYPE_NOT_SUPPORTED,
+                message="纯工作流为一次性执行，不支持重新生成",
+            )
+
+        workflow_service = WorkflowService(db)
+        # 与控制台试运行一致：从发布快照重建配置（带出真实 config id 与 workflow_type）。
+        # 不能用 workflow_config_4_app_release——它不恢复 workflow_type，内存对象该字段为 None，
+        # 会被 _supports_conversation 误判为非对话流而拒绝重新生成。
+        config = AppService(db)._workflow_config_from_release(release)
+
+        # 非对话流无"某一轮"语义，显式拒绝（与控制台试运行一致）
+        if not workflow_service._supports_conversation(config):
+            raise BusinessException(
+                code=BizCode.BAD_REQUEST,
+                message="该工作流非对话流，不支持重新生成",
+            )
+
+        # 版本数上限校验：必须在 StreamingResponse 之前——SSE 开流后无法回传干净 HTTP 错误
+        workflow_service._assert_regenerate_quota(message_id)
+
+        if payload.stream:
+            async def event_generator():
+                with get_db_context() as stream_db:
+                    svc = WorkflowService(stream_db)
+                    async for event in svc.regenerate_stream(
+                            message_id=message_id,
+                            app_id=release.app_id,
+                            config=config,
+                            workspace_id=workspace_id,
+                            user_id=str(end_user.id),
+                            override_variables=payload.variables,
+                            pre_create_execution=True,  # 让 start 事件携带真实 execution_id
+                    ):
+                        event_type = event.get("event", "message")
+                        # 体验分享端：只透出内容类事件与端点事件，过滤掉
+                        # node_*/workflow_*/cycle_item/intervention_* 等节点类事件
+                        if event_type not in SHARE_FORWARD_EVENTS:
+                            continue
+                        event_data = event.get("data", {})
+                        yield f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+
+        result = await workflow_service.regenerate(
+            message_id=message_id,
+            app_id=release.app_id,
+            config=config,
+            workspace_id=workspace_id,
+            user_id=str(end_user.id),
+            override_variables=payload.variables,
+        )
+        return success(data=app_schema.WorkflowRegenerateResponse(**result))
+
+    if app_type != AppType.AGENT:
+        raise BusinessException(
+            code=BizCode.APP_TYPE_NOT_SUPPORTED,
+            message=f"不支持的应用类型: {app_type}",
+        )
 
     # 获取配置
     agent_cfg = agent_config_4_app_release(release)
@@ -1306,6 +1410,11 @@ async def regenerate_message(
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
             ):
+                # AGENT 路径吐出来的是已序列化的 SSE 字符串（f"event: ...\ndata: ...\n\n"）。
+                # 解析 `event:` 行做白名单过滤，丢弃 reasoning/tool_*/agent_log/
+                m = SSE_EVENT_LINE.search(event)
+                if m and m.group(1) not in SHARE_FORWARD_EVENTS:
+                    continue
                 yield event
 
         return StreamingResponse(
@@ -1359,4 +1468,13 @@ async def switch_message_version(
         workspace_id=workspace_id,
     )
 
+    # 回填人工介入状态：切到的版本若处于 HITL 暂停，前端据此渲染介入 UI。
+    # 与会话详情接口一致，复用日志系统聚合逻辑；agent 应用无 workflow execution，map 为空。
+    result["pending_intervention"] = AppLogService(db).build_pending_intervention_map(
+        message.conversation_id
+    )
+
     return success(data=result)
+
+
+

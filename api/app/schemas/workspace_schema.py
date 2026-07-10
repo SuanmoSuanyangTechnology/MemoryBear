@@ -1,18 +1,17 @@
 import datetime
-import email
 import uuid
-from typing import Literal, Optional
+from typing import Optional
 
-from app.core.utils.datetime_utils import to_timestamp_ms
-from app.models.workspace_model import InviteStatus, WorkspaceRole
 from pydantic import (
     BaseModel,
     ConfigDict,
     EmailStr,
     Field,
-    computed_field,
     field_serializer,
 )
+
+from app.core.utils.datetime_utils import to_timestamp_ms
+from app.models.workspace_model import InviteStatus, WorkspaceRole
 
 
 class WorkspaceBase(BaseModel):
@@ -21,14 +20,17 @@ class WorkspaceBase(BaseModel):
     icon: str | None = None
     iconType: str | None = None
     storage_type: str | None = None
+    is_default_config: bool = False
     llm: str | None = None
     embedding: str | None = None
     rerank: str | None = None
+    vision: str | None = None
+    audio: str | None = None
+    video: str | None = None
 
 
 class WorkspaceCreate(WorkspaceBase):
     pass
-
 
 
 class WorkspaceUpdate(BaseModel):
@@ -75,9 +77,11 @@ class WorkspaceMemberBase(BaseModel):
 class WorkspaceMemberCreate(WorkspaceMemberBase):
     pass
 
+
 class WorkspaceMemberUpdate(BaseModel):
     id: uuid.UUID
     role: WorkspaceRole
+
 
 class WorkspaceMember(WorkspaceMemberBase):
     model_config = ConfigDict(from_attributes=True)
@@ -166,7 +170,7 @@ class WorkspaceInviteResponse(BaseModel):
     @field_serializer("accepted_at", when_used="json")
     def _serialize_accepted_at(self, dt: datetime.datetime):
         return to_timestamp_ms(dt)
-    
+
 
 class InviteValidateResponse(BaseModel):
     workspace_name: str
@@ -183,15 +187,70 @@ class InviteAcceptRequest(BaseModel):
 
 class WorkspaceModelsUpdate(BaseModel):
     """工作空间模型配置更新请求"""
+    is_default_config: Optional[bool] = Field(default=None, description="是否使用默认配置")
     llm: Optional[uuid.UUID] = Field(default=None, description="LLM模型ID")
-    embedding: Optional[uuid.UUID] = Field(default=None, description="嵌入模型ID") 
+    embedding: Optional[uuid.UUID] = Field(default=None, description="嵌入模型ID")
     rerank: Optional[uuid.UUID] = Field(default=None, description="重排序模型ID")
+    vision: Optional[uuid.UUID] = Field(default=None, description="视觉模型")
+    audio: Optional[uuid.UUID] = Field(default=None, description="音频模型")
+    video: Optional[uuid.UUID] = Field(default=None, description="视频模型")
 
 
 class WorkspaceModelsConfig(BaseModel):
     """工作空间模型配置响应"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     llm: Optional[str] = Field(default=None, description="LLM模型ID")
     embedding: Optional[str] = Field(default=None, description="嵌入模型ID")
     rerank: Optional[str] = Field(default=None, description="重排序模型ID")
+    vision: Optional[str] = Field(default=None, description="视觉模型")
+    audio: Optional[str] = Field(default=None, description="音频模型")
+    video: Optional[str] = Field(default=None, description="视频模型")
+    is_default_config: bool = Field(default=False, description="是否使用默认配置")
+    default_config_updated: bool = Field(default=False, description="默认配置是否已更新")
+    default_config_notice: str | None = Field(default=None, description="默认配置更新提示")
+
+
+class WorkspaceModelOptionItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    provider: str
+    type: str
+    capability: list[str] = Field(default_factory=list)
+    logo: str | None = None
+    is_public: bool = False
+
+
+class WorkspaceDefaultModelPresetUpdate(BaseModel):
+    llm: uuid.UUID = Field(..., description="默认LLM模型ID")
+    embedding: uuid.UUID = Field(..., description="默认Embedding模型ID")
+    rerank: uuid.UUID = Field(..., description="默认Rerank模型ID")
+    vision: uuid.UUID = Field(..., description="默认视觉模型ID")
+    audio: uuid.UUID = Field(..., description="默认音频模型ID")
+    video: uuid.UUID = Field(..., description="默认视频模型ID")
+
+
+class WorkspaceDefaultModelPresetResponse(BaseModel):
+    llm: WorkspaceModelOptionItem
+    embedding: WorkspaceModelOptionItem
+    rerank: WorkspaceModelOptionItem
+    vision: WorkspaceModelOptionItem
+    audio: WorkspaceModelOptionItem
+    video: WorkspaceModelOptionItem
+
+
+class WorkspaceModelOptionsResponse(BaseModel):
+    llm: list[WorkspaceModelOptionItem]
+    embedding: list[WorkspaceModelOptionItem]
+    rerank: list[WorkspaceModelOptionItem]
+    vision: list[WorkspaceModelOptionItem]
+    audio: list[WorkspaceModelOptionItem]
+    video: list[WorkspaceModelOptionItem]
+
+
+class WorkspaceModelsValidationResponse(BaseModel):
+    workspace: WorkspaceModelsConfig
+    valid: bool = Field(default=True, description="当前模型配置是否可用")
+    warnings: list[dict] = Field(default_factory=list, description="模型校验告警")

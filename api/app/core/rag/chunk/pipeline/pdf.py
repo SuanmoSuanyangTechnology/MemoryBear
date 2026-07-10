@@ -1,12 +1,17 @@
+import logging
 import os
 import tempfile
 
 from app.core.rag.chunk.context import ChunkContext, ParseResult
+from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
 from app.core.rag.chunk.parser.pdf import DeepDocPdfParser, MinerUPdfParser, PlainPdfParser, TextLnPdfParser
 from app.core.rag.utils.file_utils import extract_links_from_pdf
 from app.core.rag.utils.libre_office import async_convert_to_pdf
 
 from .base import ChunkPipeline
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PdfChunkPipeline(ChunkPipeline):
@@ -20,10 +25,33 @@ class PdfChunkPipeline(ChunkPipeline):
             layout_recognizer = "DeepDOC" if layout_recognizer else "Plain Text"
 
         name = layout_recognizer.strip().lower()
-        parser = self.select_parser(name)
         ctx.callback(0.1, "Start to parse.")
 
-        sections, tables, pdf_parser = parser.parse(ctx)
+        if name == "mineru":
+            try:
+                parse_result = MinerUV3Parser().parse(ctx)
+                parse_result.urls = urls
+                ctx.callback(0.8, "Finish parsing.")
+                return parse_result
+            except Exception as exc:
+                LOGGER.warning(
+                    "[MinerUV3] parse failed, fallback started: file_name=%s, fallback=old_mineru, error=%s",
+                    ctx.filename,
+                    exc,
+                )
+                ctx.callback(0.78, "MinerU V3 failed, fallback to old flow.")
+
+        parser = self.select_parser(name)
+        try:
+            sections, tables, pdf_parser = parser.parse(ctx)
+        except Exception as exc:
+            if name == "mineru":
+                LOGGER.error(
+                    "[MinerUV3] fallback failed: file_name=%s, fallback=old_mineru, error=%s",
+                    ctx.filename,
+                    exc,
+                )
+            raise
 
         if not sections and not tables:
             return ParseResult(direct_result=[], append_embed=False)

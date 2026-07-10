@@ -64,6 +64,7 @@ export interface ConfigForm {
   reflection_model_id: string;
   memory_verify: boolean;
   quality_assessment: boolean;
+  is_default: boolean;
 }
 
 /**

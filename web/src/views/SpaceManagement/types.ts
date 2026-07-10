@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:51 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:48:51 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-07-03 21:17:27
  */
 /**
  * Application data type
@@ -33,10 +33,16 @@ export interface SpaceModalData {
   type: string;
   icon?: any;
   iconType?: 'remote';
-  llm: string;
-  embedding: string;
-  rerank: string;
+  /** Config package mode: default recommended package or custom per-model selection */
+  is_default_config?: boolean | string;
+  llm?: string;
+  embedding?: string;
+  rerank?: string;
+  vision?: string;
+  audio?: string;
+  video?: string;
   storage_type: StorageType;
+  [key: string]: any;
 }
 
 /**

@@ -1,4 +1,5 @@
 import re
+import uuid
 from typing import Any
 
 from app.core.memory.enums import SearchStrategy
@@ -11,6 +12,7 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
 from app.db import get_db_context
 from app.schemas import FileInput
+from app.services.memory_config_service import MemoryConfigService
 
 
 class MemoryReadNode(BaseNode):
@@ -28,44 +30,44 @@ class MemoryReadNode(BaseNode):
             "intermediate_outputs": VariableType.ARRAY_OBJECT
         }
 
+    @staticmethod
+    def _get_workspace_memory_config_id(state: WorkflowState) -> uuid.UUID:
+        workspace_id = state.get("workspace_id")
+        if not workspace_id:
+            raise RuntimeError("Workspace id is required")
+
+        workspace_uuid = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(str(workspace_id))
+        with get_db_context() as db:
+            return MemoryConfigService(db).get_workspace_active_config_id(workspace_uuid)
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryReadNodeConfig(**self.config)
-        with get_db_context() as db:
-            end_user_id = self.get_variable("sys.user_id", variable_pool)
+        end_user_id = self.get_variable("sys.user_id", variable_pool)
 
-            if not end_user_id:
-                raise RuntimeError("End user id is required")
+        if not end_user_id:
+            raise RuntimeError("End user id is required")
 
-            memory_service = MemoryService(
-                storage_type=state["memory_storage_type"],
-                config_id=str(self.typed_config.config_id),
-                end_user_id=end_user_id,
-                user_rag_memory_id=state["user_rag_memory_id"],
-                conversation_id=variable_pool.get_value("sys.conversation_id"),
-            )
-            query = self._render_template(self.typed_config.message, variable_pool)
-            self._process = {"query": query, "config_id": str(self.typed_config.config_id)}
-            # TODO: Historical Messages -> Used to refer to coreference resolution
-            search_result = await memory_service.read(
-                query,
-                search_switch=SearchStrategy(self.typed_config.search_switch)
-            )
-            self._process["memories_count"] = len(search_result.memories)
-            return {
-                "answer": search_result.content,
-                "intermediate_outputs": [_.model_dump() for _ in search_result.memories]
-            }
+        config_id = self._get_workspace_memory_config_id(state)
 
-            # return await MemoryAgentService().read_memory(
-            #     end_user_id=end_user_id,
-            #     message=self._render_template(self.typed_config.message, variable_pool),
-            #     config_id=self.typed_config.config_id,
-            #     search_switch=self.typed_config.search_switch,
-            #     history=[],
-            #     db=db,
-            #     storage_type=state["memory_storage_type"],
-            #     user_rag_memory_id=state["user_rag_memory_id"]
-            # )
+        memory_service = MemoryService(
+            storage_type=state["memory_storage_type"],
+            config_id=config_id,
+            end_user_id=end_user_id,
+            user_rag_memory_id=state["user_rag_memory_id"],
+            conversation_id=variable_pool.get_value("sys.conversation_id"),
+        )
+        query = self._render_template(self.typed_config.message, variable_pool)
+        self._process = {"query": query, "config_id": str(config_id)}
+        # TODO: Historical Messages -> Used to refer to coreference resolution
+        search_result = await memory_service.read(
+            query,
+            search_switch=SearchStrategy(self.typed_config.search_switch)
+        )
+        self._process["memories_count"] = len(search_result.memories)
+        return {
+            "answer": search_result.content,
+            "intermediate_outputs": [_.model_dump() for _ in search_result.memories]
+        }
 
 
 class MemoryWriteNode(BaseNode):
@@ -99,6 +101,7 @@ class MemoryWriteNode(BaseNode):
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
+        config_id = MemoryReadNode._get_workspace_memory_config_id(state)
         messages = []
         if self.typed_config.message:
             messages.append({
@@ -137,16 +140,14 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        from app.core.memory.memory_service import MemoryService
-
-        conversation_id = variable_pool.get_value("sys.conversation_id") or ""
+        conversation_id = variable_pool.get_value("sys.conversation_id")
         workspace_id = str(state.get("workspace_id", "") or "")
 
         await MemoryService.ingest_workflow_messages(
             messages=messages,
             conversation_id=conversation_id,
             end_user_id=end_user_id,
-            config_id=str(self.typed_config.config_id),
+            config_id=str(config_id),
             workspace_id=workspace_id,
             language="zh",
         )

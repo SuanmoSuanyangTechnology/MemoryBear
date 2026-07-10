@@ -103,6 +103,7 @@ class ChatResponse(BaseModel):
     conversation_id: uuid.UUID
     message: str
     message_id: str
+    user_message_id: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
     elapsed_time: Optional[float] = None
     reasoning_content: Optional[str] = None
@@ -162,6 +163,26 @@ class V1ConversationMessageListResponse(BaseModel):
     """v1 应用对外服务的历史消息列表响应"""
     conversation_id: uuid.UUID
     items: List[V1ConversationMessageItem]
+    limit: int
+
+
+class V1ConversationFeedbackItem(BaseModel):
+    """v1 应用对外服务的会话消息反馈项（仅当前用户反馈类型，不含收藏）"""
+    message_id: uuid.UUID
+    role: str
+    feedback_type: Optional[str] = None  # 当前用户 like/dislike/None（不含 is_favorite）
+    feedback_content: Optional[str] = None  # 当前用户反馈内容（点踩原因等）
+    created_at: datetime.datetime
+
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at_ms(self, dt: datetime.datetime):
+        return to_timestamp_ms(dt)
+
+
+class V1ConversationFeedbackListResponse(BaseModel):
+    """v1 应用对外服务的会话消息反馈列表响应"""
+    conversation_id: uuid.UUID
+    items: List[V1ConversationFeedbackItem]
     limit: int
 
 

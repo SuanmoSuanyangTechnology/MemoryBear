@@ -14,6 +14,7 @@ from app.controllers import manager_router
 from app.core.runners import init_sandbox_user
 from app.dependencies import setup_dependencies, update_dependencies_periodically
 from app.logger import setup_logger, get_logger
+from app.middleware.concurrency import queue_controller
 
 setup_logger()
 config = get_config()
@@ -40,10 +41,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting server on port {config.app.port}")
     logger.info(f"Debug mode: {config.app.debug}")
     logger.info(f"Max workers: {config.max_workers}")
-    logger.info(f"Max requests: {config.max_requests}")
     logger.info(f"Network enabled: {config.enable_network}")
+
     init_sandbox_user()
     await setup_dependencies()
+
+    # Start queue-based worker pool
+    queue_controller.start()
 
     if config.python_deps_update_interval:
         asyncio.create_task(update_dependencies_periodically())
@@ -51,7 +55,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Shutting down Redbear Sandbox...")
+    logger.info("Shutting down RedBear Sandbox...")
+    await queue_controller.stop()
+
 
 app = FastAPI(
     title="Sandbox",

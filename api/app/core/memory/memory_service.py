@@ -10,6 +10,7 @@ MemoryService — 记忆模块统一入口（Facade）
 """
 
 import logging
+import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -26,7 +27,6 @@ from app.services.memory_config_service import MemoryConfigService
 logger = logging.getLogger(__name__)
 
 
-
 class MemoryService:
     """记忆模块统一入口
 
@@ -41,7 +41,7 @@ class MemoryService:
 
     def __init__(
             self,
-            config_id: str | None,
+            config_id: uuid.UUID | None,
             end_user_id: str,
             workspace_id: str | None = None,
             storage_type: str = "neo4j",
@@ -53,11 +53,9 @@ class MemoryService:
         with get_db_read() as db:
             config_service = MemoryConfigService(db)
             memory_config = None
-            if config_id is not None and config_id != "":
+            if config_id is not None:
                 memory_config = config_service.load_memory_config(
-                    config_id=config_id,
-                    workspace_id=workspace_id,
-                    service_name="MemoryService",
+                    config_id=config_id
                 )
         if memory_config is None and storage_type.lower() == "neo4j":
             logger.warning(
@@ -66,6 +64,7 @@ class MemoryService:
             )
         self.ctx = MemoryContext(
             end_user_id=end_user_id,
+            config_id=config_id,
             memory_config=memory_config,
             storage_type=StorageType(storage_type),
             user_rag_memory_id=user_rag_memory_id,
@@ -144,7 +143,7 @@ class MemoryService:
     async def dispatch_mcp_write(
         message: str,
         end_user_id: str,
-        config_id: str,
+        config_id: uuid.UUID,
         workspace_id: str,
         storage_type: str = "neo4j",
         dialog_at: str = "",
@@ -205,6 +204,31 @@ class MemoryService:
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
         return dispatch_flush_conversation(conversation_id)
 
+    @staticmethod
+    async def delete_node_by_element_id(element_id: str, end_user_id: str) -> bool:
+        """通过 elementId 删除 Neo4j 图节点（同时 DETACH DELETE 关联边）。"""
+        from app.core.memory.models.service_models import MemoryContext
+        from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
+
+        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+        return await pipeline.delete_node_by_element_id(
+            element_id=element_id,
+            end_user_id=end_user_id,
+        )
+
+    @staticmethod
+    async def delete_all_nodes_by_end_user_id(end_user_id: str) -> int:
+        """删除指定用户的所有 Neo4j 记忆节点和边。
+
+        Returns:
+            删除的节点总数
+        """
+        from app.core.memory.models.service_models import MemoryContext
+        from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
+
+        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+        return await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
+
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）
     # ──────────────────────────────────────────────
@@ -221,6 +245,7 @@ class MemoryService:
             is_pilot_run: bool = False,
             skip_cursor_advance: bool = False,
             dispatch_at: str = "",
+            source: str = "",
             progress_callback: Optional[
                 Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]
             ] = None,
@@ -238,6 +263,7 @@ class MemoryService:
             is_pilot_run: 试运行模式（只萃取不写入）
             skip_cursor_advance: 跳过 write_cursor 推进（直接写入路径）
             dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+            source: 写入来源（agent/service_api/mcp/workflow），用于快照路径和节点 ID 生成
             progress_callback: 可选的进度回调
 
         Returns:
@@ -263,6 +289,7 @@ class MemoryService:
             is_pilot_run=is_pilot_run,
             skip_cursor_advance=skip_cursor_advance,
             dispatch_at=dispatch_at,
+            source=source,
         )
 
     async def pilot_write(
@@ -314,7 +341,7 @@ class MemoryService:
         """遗忘：识别低激活节点并融合"""
         raise NotImplementedError("ForgettingPipeline 尚未实现")
 
-    async def run_reflection_layer2(self, baseline: str = "HYBRID", language: str = "zh") -> dict:
+    async def run_reflection_layer2(self, language: str = "zh") -> dict:
         """反思引擎 Layer 2 离线巡检
 
         由 Celery 定时任务调用（每 10 分钟），执行描述合并等子问题。
@@ -326,9 +353,9 @@ class MemoryService:
             end_user_id=self.ctx.end_user_id,
             language=language,
         )
-        return await pipeline.run_layer2(baseline=baseline)
+        return await pipeline.run_layer2(baseline=self.ctx.memory_config.reflexion_baseline or "HYBRID")
 
-    async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
+    async def run_dedup_full_scan(self) -> Dict[str, Any]:
         """反思引擎 Layer 2 — 去重方案B低频全量扫描去重（单用户入口）
 
         由 Celery 定时任务调用（每天）。
@@ -340,7 +367,7 @@ class MemoryService:
             end_user_id=self.ctx.end_user_id,
             language="zh",
         )
-        return await pipeline.run_dedup_full_scan(baseline=baseline)
+        return await pipeline.run_dedup_full_scan(baseline=self.ctx.memory_config.reflexion_baseline or "HYBRID")
 
     async def run_reflection_layer3(self) -> dict:
         """反思引擎 Layer 3 知识综合
@@ -358,6 +385,7 @@ class MemoryService:
 def create_long_term_memory_tool(
         memory_config: Dict[str, Any],
         end_user_id: str,
+        workspace_id: uuid.UUID | None,
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None,
         memory_name: Optional[str] = None,
@@ -370,6 +398,7 @@ def create_long_term_memory_tool(
     Args:
         memory_config: 记忆配置字典（来自 app_releases.config.memory）
         end_user_id: 用户 ID
+        workspace_id: 工作空间 ID
         storage_type: 存储类型（可选）
         user_rag_memory_id: 用户 RAG 记忆 ID（可选）
         memory_name: 记忆配置名称（可选，若提供 db 则自动查询）
@@ -383,7 +412,13 @@ def create_long_term_memory_tool(
 
     from langchain.tools import tool
 
-    config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
+    config_id = None
+    if workspace_id:
+        try:
+            with get_db_read() as read_db:
+                config_id = MemoryConfigService(read_db).get_workspace_active_config_id(workspace_id)
+        except Exception:
+            logger.warning("按工作空间解析长期记忆配置失败", exc_info=True)
 
     # 若未显式传入 memory_name 但提供了 db，则自动查询
     if not memory_name and config_id and db is not None:
@@ -396,7 +431,10 @@ def create_long_term_memory_tool(
         except Exception:
             pass
 
-    logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
+    logger.info(
+        f"创建长期记忆工具，配置: end_user_id={end_user_id}, "
+        f"workspace_id={workspace_id}, active_config_id={config_id}, storage_type={storage_type}"
+    )
 
     @tool(args_schema=LongTermMemoryInput)
     async def long_term_memory(question: str, search_mode: str) -> str:
@@ -407,7 +445,7 @@ def create_long_term_memory_tool(
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            memory_service = MemoryService(config_id, end_user_id)
+            memory_service = MemoryService(config_id, end_user_id, workspace_id=workspace_id)
             search_result = await memory_service.read(question, SearchStrategy(search_mode))
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
@@ -416,6 +454,6 @@ def create_long_term_memory_tool(
 
     long_term_memory._tool_meta = {
         "tool_type": "long_term_memory",
-        "sources": [{"id": config_id, "name": memory_name or config_id}],
+        "sources": [{"id": str(config_id), "name": memory_name or str(config_id)}],
     }
     return long_term_memory

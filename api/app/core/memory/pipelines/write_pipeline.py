@@ -51,7 +51,7 @@ bear = BearLogger("memory.pipeline")
 # ──────────────────────────────────────────────
 
 
-def _convert_pruning_records(raw_records: list) -> List[dict]:
+def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: str = "") -> List[dict]:
     """将 PruningPipeline 收集的剪枝记录转换为 graph_build_step 期望的格式。
 
     PruningPipeline.prune() 产生的记录格式（用于快照/日志）：
@@ -75,6 +75,11 @@ def _convert_pruning_records(raw_records: list) -> List[dict]:
         "memory_type": str,
         "created_at": str,
       }
+
+    Args:
+        raw_records: 原始剪枝记录列表
+        end_user_id: 终端用户 ID，用于 API/MCP 路径生成确定性 pair_id
+        source: 写入来源（service_api/mcp），用于 API/MCP 路径生成确定性 pair_id
     """
     from datetime import timezone as _tz
 
@@ -85,7 +90,13 @@ def _convert_pruning_records(raw_records: list) -> List[dict]:
         seq = r.get("message_seq", 0)
         # pair_id 基于 conversation_id + message_seq 确定性生成，
         # graph_build_step 用它构造 Neo4j 节点 ID（orig_{pair_id} / pruned_{pair_id}），确保 MERGE 幂等。
-        pair_id = f"{conv_id}_{seq}" if (conv_id and seq) else f"orphan_{uuid.uuid4().hex[:8]}_{idx}"
+        # API/MCP 路径 conversation_id 为空，使用 (end_user_id, source, seq) 保证确定性。
+        if conv_id and seq:
+            pair_id = f"{conv_id}_{seq}"
+        elif end_user_id and source and seq:
+            pair_id = f"{end_user_id}_{source}_{seq}"
+        else:
+            pair_id = f"orphan_{uuid.uuid4().hex[:8]}_{idx}"
 
         # Assistant 消息是 input.msgs 中最后一条
         msgs = r.get("input", {}).get("msgs", [])
@@ -227,6 +238,7 @@ class WritePipeline:
         is_pilot_run: bool = False,
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",
+        source: str = "",
     ) -> WriteResult:
         """
         执行写入流水线（滑动窗口模式）。
@@ -243,6 +255,7 @@ class WritePipeline:
             is_pilot_run: 试运行模式（只萃取不写入）
             skip_cursor_advance: 直接写入路径设为 True，跳过 write_cursor 推进
             dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+            source: 写入来源（agent/service_api/mcp/workflow），用于快照路径和节点 ID 生成
 
         Returns:
             WriteResult 包含状态和统计信息
@@ -306,9 +319,11 @@ class WritePipeline:
                     end_user_id=self.end_user_id,
                     conversation_id=conversation_id,
                     message_seq=message_seq,
+                    source=source or None,
                     extra_metadata={
                         "mode": "sliding_window",
                         "ref_id": ref_id,
+                        "source": source,
                         "dispatch_at": dispatch_at,
                         "dialog_at": _dialog_at,
                         "language": self.language,
@@ -353,6 +368,15 @@ class WritePipeline:
 
                 messages = [target_message]
 
+                # MCP 路径：追加空 assistant 占位消息，使 get_chunked_dialogs 内的
+                # prune_dataset 能配对出 (user, assistant) 并对 user 执行规整
+                if target_message.get("_mcp_pair_assistant"):
+                    messages.append({
+                        "role": "assistant",
+                        "content": "",
+                        "dialog_at": target_message.get("dialog_at", ""),
+                    })
+
                 # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
                 await self._preprocess_files(messages)
                 await self._preprocess_files(context_before_pruned)
@@ -384,13 +408,24 @@ class WritePipeline:
                     )
                     # 注入剪枝记录到 dialog_data.metadata
                     if pruning_records:
-                        converted = _convert_pruning_records(pruning_records)
+                        converted = _convert_pruning_records(
+                            pruning_records,
+                            end_user_id=self.end_user_id,
+                            source=source,
+                        )
                         for dd in chunked_dialogs:
                             existing = dd.metadata.get("assistant_pruning_records", [])
                             dd.metadata["assistant_pruning_records"] = existing + converted
 
                     # 注入 conversation_id 到 metadata
-                    _conv_id = conversation_id or f"batch_{self.end_user_id}_{ref_id}"
+                    # API/MCP 路径无 conversation_id，用 (end_user_id, source) 作为确定性 hub ID，
+                    # 确保同一用户同一来源的所有 assistant 节点聚合到同一个 Conversation hub。
+                    if conversation_id:
+                        _conv_id = conversation_id
+                    elif source:
+                        _conv_id = f"{self.end_user_id}_{source}"
+                    else:
+                        _conv_id = f"batch_{self.end_user_id}_{ref_id}"
                     for dd in chunked_dialogs:
                         dd.metadata["conversation_id"] = _conv_id
 
@@ -667,16 +702,7 @@ class WritePipeline:
                 kwargs={
                     "end_user_id": self.end_user_id,
                     "new_entity_ids": new_entity_ids,
-                    "llm_model_id": (
-                        str(self.memory_config.llm_model_id)
-                        if self.memory_config.llm_model_id
-                        else None
-                    ),
-                    "embedding_model_id": (
-                        str(self.memory_config.embedding_model_id)
-                        if self.memory_config.embedding_model_id
-                        else None
-                    ),
+                    "config_id": str(self.memory_config.config_id), # 跨进程只传入config_id
                     "language": self.language,
                 },
                 priority=3,

@@ -2,7 +2,6 @@ import json
 import os
 import csv
 import io
-import time
 from typing import Any, Optional
 import uuid
 
@@ -27,11 +26,33 @@ from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service, file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied, KnowledgeRetrievalService
+from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
+
+
+def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant_id: uuid.UUID):
+    if not image2text_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="image2text model config is unavailable",
+        )
+    api_key = ModelApiKeyService.get_available_api_key(db, image2text_id, tenant_id=tenant_id)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No available image2text api key found",
+        )
+    return QWenCV(
+        key=api_key.api_key,
+        model_name=api_key.model_name,
+        lang="Chinese",
+        base_url=api_key.api_base,
+    )
+
 
 router = APIRouter(
     prefix="/chunks",
@@ -109,12 +130,7 @@ async def get_preview_chunks(
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
     # Prepare to configure vision_model information
-    vision_model = QWenCV(
-            key=db_knowledge.image2text.api_keys[0].api_key,
-            model_name=db_knowledge.image2text.api_keys[0].model_name,
-            lang="Chinese",
-            base_url=db_knowledge.image2text.api_keys[0].api_base
-        )
+    vision_model = _build_image2text_vision_model(db, db_knowledge.image2text_id, current_user.tenant_id)
     from app.core.rag.chunk import chunk_pipeline as chunk
     from app.core.rag.chunk.context import ChunkOutputMode
     parent_child_mode = db_document.is_parent_child_mode
@@ -130,6 +146,12 @@ async def get_preview_chunks(
             parser_config=db_document.parser_config,
             is_root=False,
             chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
+            tenant_id=str(current_user.tenant_id),
+            workspace_id=str(db_knowledge.workspace_id),
+            knowledge_id=str(db_document.kb_id),
+            document_id=str(db_document.id),
+            source_file_id=str(db_document.file_id),
+            source_file_name=db_file.file_name,
         )
         # Combine parent and child chunks for preview
         parent_id_to_doc_id = {}
@@ -183,7 +205,13 @@ async def get_preview_chunks(
                     callback=progress_callback,
                     vision_model=vision_model,
                     parser_config=db_document.parser_config,
-                    is_root=False)
+                    is_root=False,
+                    tenant_id=str(current_user.tenant_id),
+                    workspace_id=str(db_knowledge.workspace_id),
+                    knowledge_id=str(db_document.kb_id),
+                    document_id=str(db_document.id),
+                    source_file_id=str(db_document.file_id),
+                    source_file_name=db_file.file_name)
 
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize
@@ -293,12 +321,7 @@ async def get_preview_chunks_hierarchy(
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
 
-    vision_model = QWenCV(
-        key=db_knowledge.image2text.api_keys[0].api_key,
-        model_name=db_knowledge.image2text.api_keys[0].model_name,
-        lang="Chinese",
-        base_url=db_knowledge.image2text.api_keys[0].api_base
-    )
+    vision_model = _build_image2text_vision_model(db, db_knowledge.image2text_id, current_user.tenant_id)
     from app.core.rag.chunk import chunk_pipeline as chunk
     from app.core.rag.chunk.context import ChunkOutputMode
 
@@ -328,6 +351,12 @@ async def get_preview_chunks_hierarchy(
                 parser_config=parser_config,
                 is_root=False,
                 chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
+                tenant_id=str(current_user.tenant_id),
+                workspace_id=str(db_knowledge.workspace_id),
+                knowledge_id=str(db_document.kb_id),
+                document_id=str(db_document.id),
+                source_file_id=str(db_document.file_id),
+                source_file_name=db_file.file_name,
             )
             hierarchy = _build_preview_hierarchy(
                 child_res,
@@ -345,6 +374,12 @@ async def get_preview_chunks_hierarchy(
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                tenant_id=str(current_user.tenant_id),
+                workspace_id=str(db_knowledge.workspace_id),
+                knowledge_id=str(db_document.kb_id),
+                document_id=str(db_document.id),
+                source_file_id=str(db_document.file_id),
+                source_file_name=db_file.file_name,
             )
             hierarchy = _build_preview_hierarchy(res, chunk_mode="qa")
         else:
@@ -357,6 +392,12 @@ async def get_preview_chunks_hierarchy(
                 vision_model=vision_model,
                 parser_config=parser_config,
                 is_root=False,
+                tenant_id=str(current_user.tenant_id),
+                workspace_id=str(db_knowledge.workspace_id),
+                knowledge_id=str(db_document.kb_id),
+                document_id=str(db_document.id),
+                source_file_id=str(db_document.file_id),
+                source_file_name=db_file.file_name,
             )
             hierarchy = _build_preview_hierarchy(res, chunk_mode="normal")
     except Exception as e:
@@ -950,20 +991,34 @@ def get_retrieve_types():
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-@router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
-async def retrieve_chunks(
+async def retrieve_chunks_with_caller(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: Session,
+        current_user: User,
+        caller: chunk_schema.KnowledgeRetrievalCaller,
 ):
     """
     retrieve chunk
     """
-    api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
+    api_logger.info(
+        "retrieve chunk request received: username=%s, caller=%s, query_len=%s, kb_count=%s, "
+        "ex_id_count=%s, retrieve_type=%s, top_k=%s, "
+        "metadata_mode=%s, metadata_filter_groups=%s",
+        current_user.username,
+        caller,
+        len(retrieve_data.query or ""),
+        len(retrieve_data.kb_ids or []),
+        len(retrieve_data.ex_ids or []),
+        retrieve_data.retrieve_type,
+        retrieve_data.top_k,
+        retrieve_data.metadata_filter_mode,
+        len(retrieve_data.metadata_filters or []),
+    )
 
     try:
-        request = KnowledgeRetrievalRequest(**retrieve_data.model_dump(exclude_none=True))
-        api_logger.info(f"retrieve chunk: request={request}")
+        retrieval_payload = retrieve_data.model_dump(exclude_none=True)
+        retrieval_payload["caller"] = caller
+        request = KnowledgeRetrievalRequest(**retrieval_payload)
         result = KnowledgeRetrievalService.retrieve(
             db=db,
             request=request,
@@ -976,3 +1031,17 @@ async def retrieve_chunks(
         ) from exc
 
     return success(data=jsonable_encoder(result.chunks), msg="retrieval successful")
+
+
+@router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
+async def retrieve_chunks(
+        retrieve_data: chunk_schema.ChunkRetrieve,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    return await retrieve_chunks_with_caller(
+        retrieve_data=retrieve_data,
+        db=db,
+        current_user=current_user,
+        caller=chunk_schema.KnowledgeRetrievalCaller.IN_API,
+    )

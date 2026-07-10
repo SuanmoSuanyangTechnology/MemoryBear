@@ -35,12 +35,14 @@ class WriteSnapshotRecorder:
         end_user_id: str,
         conversation_id: Optional[str] = None,
         message_seq: Optional[int] = None,
+        source: Optional[str] = None,
         extra_metadata: Optional[Dict[str, Any]] = None,
     ):
         self._snapshot = PipelineSnapshot(
             end_user_id=end_user_id,
             conversation_id=conversation_id,
             message_seq=message_seq,
+            source=source,
             extra_metadata=extra_metadata,
         )
 

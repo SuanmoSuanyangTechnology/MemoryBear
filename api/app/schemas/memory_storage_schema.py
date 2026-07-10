@@ -245,6 +245,9 @@ class ConfigParamsCreate(BaseModel):  # 创建配置参数模型（仅 body，�
     llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
     embedding_id: Optional[str] = Field(None, description="嵌入模型配置ID")
     rerank_id: Optional[str] = Field(None, description="重排序模型配置ID")
+    vision_id: Optional[str] = Field(None, description="视觉模型配置ID")
+    audio_id: Optional[str] = Field(None, description="语音模型ID")
+    video_id: Optional[str] = Field(None, description="视频模型ID")
     reflection_model_id: Optional[str] = Field(None, description="反思模型ID，默认与llm_id一致")
     emotion_model_id: Optional[str] = Field(None, description="情绪分析模型ID，默认与llm_id一致")
 
@@ -438,6 +441,7 @@ class ForgettingConfigResponse(BaseModel):
     enable_llm_summary: bool = Field(..., description="是否使用 LLM 生成摘要")
     max_merge_batch_size: int = Field(..., description="单次最大融合节点对数")
     forgetting_interval_hours: int = Field(..., description="遗忘周期间隔（小时）")
+    is_default: bool = Field(..., description="是否为默认配置")
 
 
 class ForgettingConfigUpdateRequest(BaseModel):
@@ -544,3 +548,18 @@ class ForgettingCurveResponse(BaseModel):
 
     curve_data: List[ForgettingCurvePoint] = Field(..., description="遗忘曲线数据点列表")
     config: Dict[str, Any] = Field(..., description="使用的配置参数")
+
+
+class DeleteNodeRequest(BaseModel):
+    """删除单个图节点请求"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    element_id: str = Field(..., description="Neo4j elementId")
+    end_user_id: str = Field(..., description="端用户 ID")
+
+
+class DeleteAllNodesRequest(BaseModel):
+    """删除用户所有记忆节点请求"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    end_user_id: str = Field(..., description="端用户 ID")

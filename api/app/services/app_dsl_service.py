@@ -214,6 +214,8 @@ class AppDslService:
                 if model_id:
                     config["model_ref"] = self._model_ref(model_id)
                     del config["model_id"]
+            elif node_type in (NodeType.MEMORY_READ.value, NodeType.MEMORY_WRITE.value):
+                config.pop("config_id", None)
             
             enriched_nodes.append({**node, "config": config})
         return enriched_nodes
@@ -495,14 +497,16 @@ class AppDslService:
     def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
         if not ref:
             return None
+        from sqlalchemy import or_
+        tenant_filter = or_(ModelConfig.tenant_id == tenant_id, ModelConfig.is_public.is_(True))
         model_id = ref.get("id")
         if model_id:
             try:
                 model_uuid = uuid.UUID(str(model_id))
                 m = self.db.query(ModelConfig).filter(
                     ModelConfig.id == model_uuid,
-                    ModelConfig.tenant_id == tenant_id,
-                    ModelConfig.is_active.is_(True)
+                    ModelConfig.is_active.is_(True),
+                    tenant_filter,
                 ).first()
                 if m:
                     return str(m.id)
@@ -511,7 +515,7 @@ class AppDslService:
         model_name = ref.get("name")
         if model_name:
             q = self.db.query(ModelConfig).filter(
-                ModelConfig.tenant_id == tenant_id,
+                tenant_filter,
                 ModelConfig.name == model_name,
                 ModelConfig.is_active.is_(True)
             )
@@ -714,14 +718,7 @@ class AppDslService:
                         if "model_ref" in config:
                             del config["model_ref"]
             elif node_type in (NodeType.MEMORY_READ.value, NodeType.MEMORY_WRITE.value):
-                memory_config_id = config.get("config_id")
-                if memory_config_id:
-                    resolved_memory = self._resolve_workflow_memory(memory_config_id, workspace_id)
-                    if resolved_memory:
-                        config["config_id"] = resolved_memory
-                    else:
-                        warnings.append(f"[{node_label}] 记忆配置 '{memory_config_id}' 未匹配，已置空，请导入后手动配置")
-                        config["config_id"] = None
+                config.pop("config_id", None)
             resolved_nodes.append({**node, "config": config})
         return resolved_nodes
 
@@ -764,30 +761,6 @@ class AppDslService:
             warnings.append(f"记忆配置 '{config_id}' 未匹配，已置空，请导入后手动配置")
             return {**memory, "memory_config_id": None, "enabled": memory.get("enabled", True)}
         return memory
-
-    def _resolve_workflow_memory(self, memory_config_id: str, workspace_id: uuid.UUID) -> Optional[str]:
-        """解析工作流节点中的记忆配置ID"""
-        if not memory_config_id:
-            return None
-        try:
-            config_uuid = uuid.UUID(str(memory_config_id))
-            exists = self.db.query(MemoryConfigModel).filter(
-                MemoryConfigModel.config_id == config_uuid,
-                MemoryConfigModel.workspace_id == workspace_id
-            ).first()
-            if exists:
-                return str(config_uuid)
-        except (ValueError, AttributeError):
-            try:
-                exists = self.db.query(MemoryConfigModel).filter(
-                    MemoryConfigModel.config_id_old == int(memory_config_id),
-                    MemoryConfigModel.workspace_id == workspace_id
-                ).first()
-                if exists:
-                    return str(exists.config_id)
-            except (ValueError, TypeError):
-                pass
-        return None
 
     def _resolve_skills(self, skills: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> dict:
         if not skills:

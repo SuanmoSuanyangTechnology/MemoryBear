@@ -78,7 +78,8 @@ class EmotionConfigService:
                 "emotion_model_id": config.emotion_model_id,
                 "emotion_extract_keywords": config.emotion_extract_keywords,
                 "emotion_min_intensity": config.emotion_min_intensity,
-                "emotion_enable_subject": config.emotion_enable_subject
+                "emotion_enable_subject": config.emotion_enable_subject,
+                "is_default": bool(config.is_default)
             }
             
             logger.info(f"情绪配置获取成功: config_id={config_id}")

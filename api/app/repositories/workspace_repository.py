@@ -30,9 +30,14 @@ class WorkspaceRepository:
                 icon=workspace_data.icon,
                 iconType=workspace_data.iconType,
                 storage_type=workspace_data.storage_type,
+                is_default_config=workspace_data.is_default_config,
+                default_model_notice_pending=False,
                 llm=workspace_data.llm,
                 embedding=workspace_data.embedding,
                 rerank=workspace_data.rerank,
+                vision=workspace_data.vision,
+                audio=workspace_data.audio,
+                video=workspace_data.video,
                 tenant_id=tenant_id
             )
             self.db.add(db_workspace)
@@ -76,7 +81,12 @@ class WorkspaceRepository:
                 configs = {
                     "llm": workspace.llm,
                     "embedding": workspace.embedding,
-                    "rerank": workspace.rerank
+                    "rerank": workspace.rerank,
+                    "vision": workspace.vision,
+                    "audio": workspace.audio,
+                    "video": workspace.video,
+                    "is_default_config": workspace.is_default_config,
+                    "default_model_notice_pending": workspace.default_model_notice_pending,
                 }
                 db_logger.debug(
                     f"工作空间模型配置查询成功: workspace_id={workspace_id}, "
@@ -313,6 +323,17 @@ class WorkspaceRepository:
             db_logger.error(f"更新成员角色失败: id={id} - {str(e)}")
             raise
 
+    def get_workspace_memory_config_id(self, workspace_id: uuid.UUID) -> Optional[uuid.UUID]:
+        try:
+            stmt = select(Workspace.memory_config).where(
+                Workspace.id == workspace_id,
+                Workspace.is_active.is_(True),
+            )
+            return self.db.scalar(stmt)
+        except Exception as e:
+            db_logger.error(f"查询空间记忆配置失败 - {str(e)}")
+            raise
+
 
 # 保持向后兼容的函数
 def get_workspace_by_id(db: Session, workspace_id: uuid.UUID) -> Workspace | None:
@@ -417,3 +438,8 @@ def get_workspace_models_configs(db: Session, workspace_id: uuid.UUID) -> Option
     """
     repo = WorkspaceRepository(db)
     return repo.get_workspace_models_configs(workspace_id)
+
+
+def get_workspace_memory_config_id(db: Session, workspace_id: uuid.UUID) -> uuid.UUID | None:
+    repo = WorkspaceRepository(db)
+    return repo.get_workspace_memory_config_id(workspace_id)

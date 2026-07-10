@@ -1,3 +1,4 @@
+import uuid
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -13,10 +14,11 @@ from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import ModelApiKey
 from app.models.user_model import User
+from app.repositories.end_user_repository import get_end_user_by_id
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_agent_service import MemoryAgentService
-from app.services.memory_agent_service import get_end_user_connected_config as get_config
+from app.services.memory_config_service import MemoryConfigService
 from app.services.model_service import ModelConfigService
 
 load_dotenv()
@@ -268,6 +270,7 @@ async def get_user_profile_api(
         result = await memory_agent_service.get_user_profile(
             end_user_id=end_user_id,
             current_user_id=str(current_user.id),
+            tenant_id=current_user.tenant_id,
             db=db
         )
         return success(data=result, msg="获取用户详情成功")
@@ -330,7 +333,13 @@ async def get_end_user_connected_config(
     api_logger.info(f"Getting connected config for end_user_id: {end_user_id}")
 
     try:
-        result = get_config(end_user_id, db)
+        end_user = get_end_user_by_id(db, uuid.UUID(end_user_id))
+        config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
+        result = {
+            "end_user_id": end_user_id,
+            "memory_config_id": config_id,
+            "workspace_id": end_user.workspace_id,
+        }
         return success(data=result, msg="获取终端用户关联配置成功")
     except ValueError as e:
         api_logger.warning(f"End user config not found: {str(e)}")

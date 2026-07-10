@@ -59,6 +59,7 @@ Description Content:
 5. 不限制长度，有多少独特事实就保留多少
 6. 不编造，只能用输入中的信息
 7. 使用逗号和句号作为分隔符，禁止使用中文分号（；），因为系统用分号作为碎片分隔符
+8. `merged_description` 使用新增碎片 `fragments` 的主要语言；如果新增碎片为空，则跟随上次合并摘要 `summary` 的语言；不要为了规范化翻译专有名词、别名或用户原文给出的名字
 {% else %}
 1. Synthesize all information into a complete new summary
 2. If the same attribute has multiple values, use the most recent one
@@ -67,6 +68,7 @@ Description Content:
 5. No length limit, preserve as many unique facts as available
 6. Do not fabricate; only use information from the input
 7. Use commas and periods as separators, NEVER use Chinese semicolons (；) as the system uses them as fragment delimiters
+8. `merged_description` should use the primary language of the new `fragments`; if there are no new fragments, follow the language of the previous `summary`. Do not translate proper nouns, aliases, or user-provided names just for normalization
 {% endif %}
 
 ===Output Format===
@@ -108,7 +110,7 @@ Output:
 4. Output ONLY the JSON object, no other text
 
 {% if language == "zh" %}
-输出语言应始终与输入语言相同。
+`merged_description` 的语言应跟随新增碎片 `fragments` 的主要语言；固定 JSON 字段名保持不变。
 {% else %}
-The output language should always be the same as the input language.
+The language of `merged_description` should follow the primary language of the new `fragments`; fixed JSON field names stay unchanged.
 {% endif %}

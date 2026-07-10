@@ -167,7 +167,9 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
       initialValue.tool_parameters[vo.name] = vo.default
     })
 
-    form.setFieldsValue(initialValue)
+    setTimeout(() => {
+      form.setFieldsValue(initialValue)
+    }, 0)
   }
 
   // string -> string
@@ -228,6 +230,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
       <Form.Item name="tool_id" hidden />
       <Form.Item name={['tool_parameters', 'operation']} hidden />
       {parameters.map((parameter) => {
+        const isIntegerNumberType = ['integer', 'number'].includes(parameter.type)
         return (
           <div key={parameter.name}>
             <Form.Item
@@ -239,7 +242,14 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                 </Tooltip>
               </>}
               rules={[
-                { required: parameter.required, message: t('common.pleaseEnter') }
+                { required: parameter.required, message: t('common.pleaseEnter') },
+                ...(isIntegerNumberType ? [{
+                  validator(_: any, value: any) {
+                    if (value === undefined || value === null || value === '') return Promise.resolve()
+                    if (/^-?\d+(\.\d+)?$/.test(String(value)) || /^\{\{(([^.]+\.[^}]+))\}\}$/.test(String(value))) return Promise.resolve()
+                    return Promise.reject(new Error(t('common.pleaseEnter') + ' ' + t('common.number') + ' ' + t('common.or') + ' ' + t('common.variable')))
+                  }
+                }] : [])
               ]}
               layout={parameter.type === 'boolean' ? 'horizontal' : 'vertical'}
               className={parameter.type === 'boolean' ? 'rb:mb-0!' : ''}
@@ -247,16 +257,33 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
               {parameter.type === 'string' && parameter.enum && parameter.enum.length > 0
                 ? <Select key={values.tool_id} size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
                 : parameter.type === 'boolean'
-                  ? <Switch key={values.tool_id} size="small" />
-                  : <Editor
-                    key={values.tool_id}
-                    variant="outlined"
-                    type="input"
-                    size="small"
-                    height={28}
-                    options={getFilterOptions(parameter.type)}
-                    placeholder={t('common.pleaseEnter')}
-                  />
+                ? <Switch key={values.tool_id} size="small" />
+                : <Editor
+                  key={values.tool_id}
+                  variant="outlined"
+                  type="input"
+                  size="small"
+                  height={28}
+                  options={getFilterOptions(parameter.type)}
+                  placeholder={t('common.pleaseEnter')}
+                  onBlur={isIntegerNumberType ? () => {
+                    const fieldKey = ['tool_parameters', parameter.name]
+                    form.validateFields([fieldKey])
+                      .then((values) => {
+                        const value = values.tool_parameters?.[parameter.name]
+                        let normalizedValue = value
+                        if (value === undefined || value === null || value === '') {
+                          normalizedValue = null
+                        } else if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(String(value))) {
+                          normalizedValue = Number(value)
+                        }
+                        form.setFieldValue(fieldKey, normalizedValue)
+                      })
+                      .catch(() => {
+                        form.setFieldValue(fieldKey, null)
+                      })
+                  } : undefined}
+                />
               }
             </Form.Item>
             {parameter.type === 'boolean' && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mb-6">{parameter.description}</div>}

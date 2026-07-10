@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:16:32
+ * @Last Modified time: 2026-07-06 11:04:44
  */
 import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -17,6 +17,7 @@ import InitialValuePlugin from './plugin/InitialValuePlugin';
 import CommandPlugin from './plugin/CommandPlugin';
 import BlurPlugin from './plugin/BlurPlugin';
 import InsertFormFieldPlugin from './plugin/InsertFormFieldPlugin';
+import OnBlurPlugin from './plugin/OnBlurPlugin';
 import { VariableNode } from './nodes/VariableNode'
 import { FormFieldNode } from './nodes/FormFieldNode';
 import { FormFieldProvider } from './nodes/FormFieldContext';
@@ -45,6 +46,7 @@ export interface LexicalEditorProps {
   waitForInit?: boolean;
   updateFormFields?: (form_fields: FormField[]) => void;
   formFields?: FormField[];
+  onBlur?: () => void;
 }
 
 // Default theme for editor
@@ -70,6 +72,7 @@ const Editor: FC<LexicalEditorProps> =({
   className,
   updateFormFields,
   formFields = [],
+  onBlur,
 }) => {
   // console.log('Editor value', value)
   const [_count, setCount] = useState(0);
@@ -86,6 +89,7 @@ const Editor: FC<LexicalEditorProps> =({
         size={size}
         height={height}
         className={className}
+        onBlur={onBlur}
       />
     );
   }
@@ -176,6 +180,7 @@ const Editor: FC<LexicalEditorProps> =({
           <CharacterCountPlugin setCount={setCount} />
           <InitialValuePlugin value={value} options={options} formFields={formFields} onChange={onChange} />
           <BlurPlugin />
+          <OnBlurPlugin onBlur={onBlur} />
           {updateFormFields &&
             <InsertFormFieldPlugin
               formFields={formFields}

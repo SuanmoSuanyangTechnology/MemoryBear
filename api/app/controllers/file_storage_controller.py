@@ -40,6 +40,7 @@ from app.services.file_storage_service import (
     FileStorageService,
     generate_file_key,
     get_file_storage_service,
+    upload_workspace_file,
 )
 
 api_logger = get_api_logger()
@@ -123,81 +124,21 @@ async def upload_file(
         f"filename={file.filename}, username={current_user.username}"
     )
 
-    # Read file contents
-    contents = await file.read()
-    file_size = len(contents)
-
-    # Validate file size
-    if file_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The file is empty."
-        )
-
-    if file_size > settings.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit"
-        )
-
-    # Extract file extension
-    _, file_extension = os.path.splitext(file.filename)
-    file_ext = file_extension.lower()
-
-    # Generate file_id and file_key
-    file_id = uuid.uuid4()
-    file_key = generate_file_key(
+    upload_result = await upload_workspace_file(
+        db=db,
         tenant_id=tenant_id,
         workspace_id=workspace_id,
-        file_id=file_id,
-        file_ext=file_ext,
+        file=file,
+        storage_service=storage_service,
     )
 
-    # Create file metadata record with pending status
-    file_metadata = FileMetadata(
-        id=file_id,
-        tenant_id=tenant_id,
-        workspace_id=workspace_id,
-        file_key=file_key,
-        file_name=file.filename,
-        file_ext=file_ext,
-        file_size=file_size,
-        content_type=file.content_type,
-        status="pending",
+    api_logger.info(
+        f"File upload successful: {file.filename} (file_id: {upload_result['file_id']})"
     )
-    db.add(file_metadata)
-    db.commit()
-    db.refresh(file_metadata)
-
-    # Upload file to storage backend
-    try:
-        await storage_service.upload_file(
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_id=file_id,
-            file_ext=file_ext,
-            content=contents,
-            content_type=file.content_type,
-        )
-        # Update status to completed
-        file_metadata.status = "completed"
-        db.commit()
-        api_logger.info(f"File uploaded to storage: file_key={file_key}")
-    except StorageUploadError as e:
-        # Update status to failed
-        file_metadata.status = "failed"
-        db.commit()
-        api_logger.error(f"Storage upload failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"File storage failed: {str(e)}"
-        )
-
-    api_logger.info(f"File upload successful: {file.filename} (file_id: {file_id})")
 
     return success(
-        data={"file_id": str(file_id), "file_key": file_key},
-        msg="File upload successful"
+        data=upload_result,
+        msg="File upload successful",
     )
 
 

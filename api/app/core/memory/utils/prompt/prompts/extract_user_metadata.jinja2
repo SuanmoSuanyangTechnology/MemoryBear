@@ -841,18 +841,20 @@ Output:
 ===Output Format===
 ===Output Language Rule===
 {% if language == "zh" %}
-metadata 字符串值的语言必须与输入 `description` 的主要语言一致。
+metadata 字符串值和 `reason` 的语言必须与输入 `description` 的主要语言一致。
 
-- 如果输入 `description` 主要是中文，则 metadata 字符串值用中文输出。
-- 如果输入 `description` 主要是英文，则 metadata 字符串值用英文输出。
+- 如果输入 `description` 主要是中文，则 `value`、`new_value`、`reason` 用中文输出。
+- 如果输入 `description` 主要是英文，则 `value`、`new_value`、`reason` 用英文输出。
+- `old_value` 必须从 `existing_metadata[field]` 原样复制，不得为了语言一致而翻译。
 - 不要为了规范化而将提取的条目翻译成另一种语言。
-- JSON 键名、数组结构、分隔符（如 `|`）保持不变；只有 metadata 字符串值需要跟随输入语言。
+- JSON 键名、数组结构、分隔符（如 `|`）保持不变；只有 flexible 的自然语言字符串值需要跟随输入语言。
   {% else %}
-  The language of metadata string values MUST follow the primary language of the input `description`.
-- If the input `description` is primarily Chinese, output metadata string values in Chinese.
-- If the input `description` is primarily English, output metadata string values in English.
+  The language of metadata string values and `reason` MUST follow the primary language of the input `description`.
+- If the input `description` is primarily Chinese, output `value`, `new_value`, and `reason` in Chinese.
+- If the input `description` is primarily English, output `value`, `new_value`, and `reason` in English.
+- `old_value` must be copied exactly from `existing_metadata[field]`; do not translate it for language consistency.
 - Do not translate extracted items into a different language just for normalization.
-- JSON keys, array structure, and separators such as `|` stay unchanged; only metadata string values need to follow the input language.
+- JSON keys, array structure, and separators such as `|` stay unchanged; only flexible natural-language string values need to follow the input language.
   {% endif %}
 
 {% if language == "zh" %}
@@ -896,7 +898,7 @@ JSON 要求：
 - 字符串内如果包含双引号，必须转义为 `\"`
 - 顶层只允许输出 `operations`
 - 不要输出尾逗号
-- metadata 字符串语言必须与输入 `description` 的主要语言一致
+- metadata 字符串和 `reason` 语言必须与输入 `description` 的主要语言一致；`old_value` 原样复制
   {% else %}
   JSON requirements:
 - Use standard ASCII double quotes `"`
@@ -905,5 +907,5 @@ JSON 要求：
 - Escape internal quotes as `\"`
 - Output only the top-level `operations` key
 - Do not emit trailing commas
-- Metadata string language must match the primary language of the input `description`
+- Metadata string and `reason` language must match the primary language of the input `description`; copy `old_value` verbatim
   {% endif %}

@@ -3,8 +3,11 @@
 管理 Neo4j 中 Community 节点及 BELONGS_TO_COMMUNITY 边的 CRUD 操作。
 """
 
+import asyncio
 import logging
 from typing import Dict, List, Optional
+
+from neo4j.exceptions import Neo4jError
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.cypher_queries import (
@@ -29,9 +32,19 @@ from app.repositories.neo4j.cypher_queries import (
     CHECK_COMMUNITY_IS_COMPLETE,
     CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING,
     BATCH_UPDATE_COMMUNITY_METADATA,
+    RECONCILE_DELETE_EMPTY_COMMUNITIES,
+    RECONCILE_REFRESH_ALL_MEMBER_COUNTS,
+    RECONCILE_REFRESH_MEMBER_COUNTS_SCOPED,
 )
 
 logger = logging.getLogger(__name__)
+
+# 批量分配实体到社区时的单事务分片大小。
+# 控制单个 UNWIND 事务最多锁住的实体节点数，避免与同用户写入流水线
+# 形成大事务锁竞争 / 死锁。500 兼顾往返削减与锁粒度，锁竞争严重时不应调大。
+COMMUNITY_ASSIGN_CHUNK_SIZE = 500
+# 单个分片命中 Neo4j 死锁时的最大重试次数。
+_DEADLOCK_MAX_RETRY = 3
 
 
 class CommunityRepository:
@@ -188,29 +201,60 @@ class CommunityRepository:
             return []
 
     async def batch_assign_entities_to_communities(
-        self, assignments: List[Dict], end_user_id: str
+        self, assignments: List[Dict], end_user_id: str,
+        chunk_size: int = COMMUNITY_ASSIGN_CHUNK_SIZE,
     ) -> bool:
-        """批量将实体分配到社区（UNWIND，一次 Cypher 替代 N×2 次串行查询）。
+        """批量将实体分配到社区（UNWIND + chunk 分片提交）。
+
+        分片提交：单事务最多锁 chunk_size 个实体节点，提交后立即释放，
+        避免与同用户写入流水线形成大事务锁竞争 / 死锁。单个分片命中死锁时
+        退避重试，失败只影响该分片，不会让整批回滚重来。
 
         Args:
             assignments: [{"entity_id": str, "community_id": str}, ...]
             end_user_id: 用户 ID
+            chunk_size: 单批写入实体数（默认 COMMUNITY_ASSIGN_CHUNK_SIZE）
 
         Returns:
-            True 表示执行成功（即使部分实体未匹配到也不抛出异常）。
+            True 表示全部分片成功；任一分片最终失败返回 False（不抛出异常）。
         """
         if not assignments:
             return True
-        try:
-            await self.connector.execute_query(
-                BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
-                assignments=assignments,
-                end_user_id=end_user_id,
-            )
-            return True
-        except Exception as e:
-            logger.error(f"batch_assign_entities_to_communities failed: {e}")
-            return False
+
+        ok = True
+        for start in range(0, len(assignments), chunk_size):
+            chunk = assignments[start:start + chunk_size]
+            label = f"chunk=[{start}:{start + len(chunk)}]"
+
+            # 分片级重试：默认只跑一次（末尾的 break），
+            # 仅在"死锁 + 还有重试次数"时通过 continue 再来一轮。
+            for attempt in range(1, _DEADLOCK_MAX_RETRY + 1):
+                try:
+                    await self.connector.execute_query(
+                        BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES,
+                        assignments=chunk,
+                        end_user_id=end_user_id,
+                    )
+                except Exception as e:
+                    # 唯一可重试路径：死锁 & 未耗尽次数 → 退避后进入下一轮
+                    if (
+                        isinstance(e, Neo4jError)
+                        and e.code == "Neo.TransientError.Transaction.DeadlockDetected"
+                        and attempt < _DEADLOCK_MAX_RETRY
+                    ):
+                        logger.warning(
+                            f"batch_assign {label} 死锁重试 "
+                            f"({attempt + 1}/{_DEADLOCK_MAX_RETRY})"
+                        )
+                    # 退避等待对方事务释放锁，避免立刻重试再次撞进同一个死锁    
+                        await asyncio.sleep(0.2 * attempt) # 
+                        continue
+                    # 终态失败（非死锁 或 重试耗尽）：只影响本分片，继续下一片
+                    logger.error(f"batch_assign {label} 失败: {e}")
+                    ok = False
+                # 成功 或 终态失败 都到这里跳出重试循环
+                break
+        return ok
 
     async def get_community_avg_embeddings_batch(
         self, community_ids: List[str], end_user_id: str
@@ -338,3 +382,56 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"batch_update_community_metadata failed: {e}")
             return False
+
+    async def reconcile_after_clustering(
+        self, end_user_id: str, refresh_community_ids: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        """聚类收尾对账：删空社区 + 重算成员数。幂等、低成本。
+
+        兜底去重/反思在聚类期间并发 DETACH DELETE 实体留下的脏数据。
+
+        两步策略（针对性能：增量聚类高频触发，避免对全用户社区写放大）：
+        - 删空社区：**始终全量**。读多写少（仅真正空社区才 DETACH DELETE），
+          覆盖合并解散的社区 + 并发去重清空的任意社区（这些都不在本轮 touched 集合里）。
+        - 重算 member_count：按 ``refresh_community_ids`` 限定范围——
+            * None  → 全量重算（全量聚类后使用）
+            * [...] → 仅重算这些社区（增量聚类后，消除每轮对全用户社区的写放大）
+            * []    → 跳过重算（本轮未触达任何社区）
+
+        Args:
+            end_user_id: 用户 ID
+            refresh_community_ids: member_count 重算范围；None 表示全量。
+
+        Returns:
+            {"deleted": 删除的空社区数, "refreshed": 重算 member_count 的社区数}
+        """
+        try:
+            # Step 1: 删除该用户下所有无成员边的空社区（始终全量）
+            # 覆盖：合并解散的社区、去重/反思并发删实体后清空的社区
+            d = await self.connector.execute_query(
+                RECONCILE_DELETE_EMPTY_COMMUNITIES, end_user_id=end_user_id
+            )
+            deleted = d[0]["deleted"] if d else 0
+
+            refreshed = 0
+            if refresh_community_ids is None:
+                # Step 2a: 全量重算该用户所有存活社区的 member_count（全量聚类后使用）
+                r = await self.connector.execute_query(
+                    RECONCILE_REFRESH_ALL_MEMBER_COUNTS, end_user_id=end_user_id
+                )
+                refreshed = r[0]["refreshed"] if r else 0
+            elif len(refresh_community_ids) > 0:
+                # Step 2b: 仅重算本轮触达的社区的 member_count（增量聚类后使用，避免全用户写放大）
+                r = await self.connector.execute_query(
+                    RECONCILE_REFRESH_MEMBER_COUNTS_SCOPED,
+                    end_user_id=end_user_id,
+                    community_ids=refresh_community_ids,
+                )
+                refreshed = r[0]["refreshed"] if r else 0
+            # else: refresh_community_ids == [] → 本轮未触达任何社区，跳过重算
+
+            logger.info(f"[Reconcile] 删除空社区={deleted}，刷新成员数社区={refreshed}")
+            return {"deleted": deleted, "refreshed": refreshed}
+        except Exception as e:
+            logger.error(f"reconcile_after_clustering failed: {e}")
+            return {"deleted": 0, "refreshed": 0}

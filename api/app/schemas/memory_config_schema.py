@@ -50,7 +50,8 @@ class ConfigurationError(Exception):
         self.config_id = config_id
         self.workspace_id = workspace_id
         self.context = context or {}
-        
+        self.err_message = message
+
         # Build detailed error message with context
         detailed_message = message
         if config_id is not None:

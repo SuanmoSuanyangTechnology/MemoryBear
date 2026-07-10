@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { Button, App, Space, Row, Col, Flex, Tooltip } from 'antd';
+import { Button, App, Space, Row, Col, Flex, Tooltip, Form } from 'antd';
 import { useTranslation } from 'react-i18next';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import clsx from 'clsx'
@@ -74,13 +74,14 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   const [categories, setCategories] = useState<MarketCategory[]>([]);
   const [mcpCache, setMcpCache] = useState<Record<string, MarketMcp[]>>({});
   const [mcpTotal, setMcpTotal] = useState(0);
-  const [searchKeyword, setSearchKeyword] = useState('');
   const [configIdMap, setConfigIdMap] = useState<Record<string, string>>({});
   const [hasMore, setHasMore] = useState(false);
   const [activatedMcps, setActivatedMcps] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
   const searchTimerRef = useRef<number | null>(null);
+  const [form] = Form.useForm();
+  const searchKeyword = Form.useWatch('keywords', form);
 
   // 获取市场数据
   useEffect(() => {
@@ -191,18 +192,20 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   const loadMore = useCallback(() => {
     if (!selectedSource || loading) return;
     fetchMcpList(selectedSource, currentPage + 1, true, searchKeyword);
-  }, [selectedSource, currentPage, loading, searchKeyword]);
+  }, [selectedSource, currentPage, loading]);
+
+  useEffect(() => {
+    handleSearchChange(searchKeyword);
+  }, [searchKeyword])
 
   const handleSearchChange = (value: string) => {
-    setSearchKeyword(value);
-    
     // 清除之前的定时器
     if (searchTimerRef.current) {
       clearTimeout(searchTimerRef.current);
     }
     
     // 如果清空搜索框，恢复原始列表
-    if (!value.trim()) {
+    if (!value || !value.trim()) {
       if (selectedSource) {
         // 清除缓存，重新加载原始列表
         setMcpCache(prev => {
@@ -234,7 +237,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   const handleSelectSource = async (sourceId: string) => {
     if (sourceId === selectedSource) return
     setSelectedSource(sourceId);
-    setSearchKeyword('');
+    form.resetFields();
     setCurrentPage(1);
     setHasMore(false);
     setMcpTotal(0);
@@ -367,13 +370,15 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
           </Flex>
 
           <Space size={12}>
-            <SearchInput
-              placeholder={t('tool.marketSearchPlaceholder')}
-              value={searchKeyword}
-              onSearch={(value: string) => handleSearchChange(value)}
-              allowClear
-              style={{ width: 200 }}
-            />
+            <Form form={form}>
+              <Form.Item name="keywords" noStyle>
+                <SearchInput
+                  placeholder={t('knowledgeBase.searchPlaceholder')}
+                  className="rb:w-full!"
+                  variant="outlined"
+                />
+              </Form.Item>
+            </Form>
             <Button type="primary" ghost onClick={() => handleOpenConfig(selectedSource)}>
               {t('tool.marketConfigBtn')}
             </Button>

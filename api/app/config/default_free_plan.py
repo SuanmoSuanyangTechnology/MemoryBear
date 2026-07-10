@@ -64,6 +64,7 @@ def _build_default_free_plan():
             "ontology_project_quota": 3,
             "model_quota": 1,
             "api_ops_rate_limit": 50,
+            "end_user_memory_limit": 300
         },
     }
 

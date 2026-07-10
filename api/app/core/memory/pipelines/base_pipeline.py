@@ -11,12 +11,13 @@ from app.services.model_service import ModelApiKeyService
 
 class ModelClientMixin(ABC):
     @staticmethod
-    def get_llm_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> RedBearLLM:
+    def get_llm_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearLLM:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
         return RedBearLLM(
             RedBearModelConfig(
                 model_name=api_config.model_name,
                 provider=api_config.provider,
+                capability=api_config.capability,
                 api_key=api_config.api_key,
                 base_url=api_config.api_base,
                 is_omni=api_config.is_omni
@@ -27,7 +28,7 @@ class ModelClientMixin(ABC):
     def get_embedding_client(
         db: Session,
         model_id: uuid.UUID,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
     ) -> RedBearEmbeddings:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
         return RedBearEmbeddings(
@@ -40,7 +41,7 @@ class ModelClientMixin(ABC):
         )
 
     @staticmethod
-    def get_rerank_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> RedBearRerank:
+    def get_rerank_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearRerank:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
         return RedBearRerank(
             RedBearModelConfig(

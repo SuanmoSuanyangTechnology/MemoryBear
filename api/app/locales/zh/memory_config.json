@@ -1,0 +1,15 @@
+{
+  "model": {
+    "not_configured": "{model_type} 模型未配置",
+    "not_found": "{model_type} 模型 {model_id} 不存在",
+    "not_found_with_error": "{model_type} 模型 {model_id} 不存在: {error}",
+    "no_api_key": "{model_type} 模型 {model_name} 没有可用的 API 密钥",
+    "api_verify_failed": "{model_type} 模型 {model_name} API 验证失败: {error}"
+  },
+  "config": {
+    "not_found": "配置不存在: {config_id}"
+  },
+  "workspace": {
+    "no_active_config": "当前工作空间无启用的记忆配置"
+  }
+}

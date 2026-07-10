@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-04 12:27:19
+ * @Last Modified time: 2026-07-02 16:30:15
  */
 /**
  * RadioGroupCard Component
@@ -102,7 +102,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
           'rb:border-[#EBEBEB] rb:bg-white': option.value !== value,
           'rb:opacity-[0.75] rb:cursor-not-allowed!': option.disabled || disabled,
           'rb:py-5 rb:px-3 rb:leading-5.5': !block,
-          'rb:flex rb:items-center rb:text-left rb:gap-4 rb:py-3 rb:px-4 rb:leading-4': block,
+          'rb:flex rb:items-center rb:text-left! rb:gap-4 rb:py-3 rb:px-4 rb:leading-4': block,
         })} onClick={() => handleChange(option)}>
           {option.recommend && <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-1 rb:px-2">{t('common.recommend')}</div>}
           {/* Use custom render or default card layout */}

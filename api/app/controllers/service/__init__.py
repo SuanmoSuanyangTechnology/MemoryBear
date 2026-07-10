@@ -6,7 +6,9 @@
 from fastapi import APIRouter
 
 from . import (
+    annotation_api_controller,
     app_api_controller,
+    message_feedback_api_controller,
     end_user_api_controller,
     memory_api_controller,
     memory_config_api_controller,
@@ -23,7 +25,9 @@ from . import (
 service_router = APIRouter()
 
 # 注册子路由
+service_router.include_router(annotation_api_controller.router)
 service_router.include_router(app_api_controller.router)
+service_router.include_router(message_feedback_api_controller.router)
 service_router.include_router(rag_api_knowledge_controller.router)
 service_router.include_router(rag_api_document_controller.router)
 service_router.include_router(rag_api_file_controller.router)

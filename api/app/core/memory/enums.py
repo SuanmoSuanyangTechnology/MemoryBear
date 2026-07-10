@@ -184,3 +184,18 @@ class TripletPredicate(Enum):
             f"- {item.predicate_id} ({item.value}): {item.description}"
             for item in cls
         )
+
+
+class MemoryMessageSource(StrEnum):
+    """memory_messages.source 枚举 — 标识记忆消息的写入来源。
+
+    - AGENT: agent 对话（走 conversation_id）
+    - SERVICE_API: /writer_service_async 写入（conversation_id 为 NULL）
+    - MCP: MCP 客户端写入（conversation_id 为 NULL）
+    - WORKFLOW: 对话流 workflow 的 MemoryWriteNode 写入（走 conversation_id）
+    """
+
+    AGENT = "agent"
+    SERVICE_API = "service_api"
+    MCP = "mcp"
+    WORKFLOW = "workflow"

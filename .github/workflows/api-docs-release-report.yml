@@ -1,0 +1,409 @@
+name: API Docs & Release Change Report
+
+on:
+  # 自动触发：release 分支有新 push 时（合并 PR 等）
+  push:
+    branches:
+      - 'release/**'
+
+  # 手动触发：可指定 base/current 版本
+  workflow_dispatch:
+    inputs:
+      current_ref:
+        description: "当前版本分支（如 release/v0.3.11）"
+        required: true
+        default: "release/v0.3.11"
+      base_ref:
+        description: "基线版本分支（如 release/v0.3.10）"
+        required: true
+        default: "release/v0.3.10"
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ─── Checkout（完整历史） ───
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ─── 解析 current 和 base 版本 ───
+      - name: Resolve version refs
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CURRENT_REF="${{ inputs.current_ref }}"
+            BASE_REF="${{ inputs.base_ref }}"
+          else
+            # push 事件：current = 当前推送的分支, base = 上一个 patch 版本
+            CURRENT_REF="${{ github.ref_name }}"
+            # 统一去除 release/ 前缀和 v 前缀，解析纯数字版本号
+            # release/v0.3.11 → 0.3.11
+            VERSION=$(echo "$CURRENT_REF" | sed 's|^release/||; s|^v||')
+            MAJOR=$(echo "$VERSION" | cut -d. -f1)
+            MINOR=$(echo "$VERSION" | cut -d. -f2)
+            PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+            if [ -z "$PATCH" ] || [ "$PATCH" -eq 0 ]; then
+              echo "::error::当前版本 $CURRENT_REF 是 minor/major 的首个 patch (patch=0 或为空)，无法自动推断基线版本。请使用 workflow_dispatch 手动指定 base_ref。"
+              exit 1
+            fi
+
+            PREV_PATCH=$((PATCH - 1))
+            BASE_REF="release/v${MAJOR}.${MINOR}.${PREV_PATCH}"
+          fi
+
+          echo "current_ref=$CURRENT_REF" >> $GITHUB_OUTPUT
+          echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
+
+          # 解析 SHA
+          CURRENT_SHA=$(git rev-parse "origin/$CURRENT_REF" 2>/dev/null || git rev-parse "$CURRENT_REF" 2>/dev/null || true)
+          if [ -z "$CURRENT_SHA" ]; then
+            echo "::error::无法解析 current ref: $CURRENT_REF"
+            exit 1
+          fi
+          CURRENT_SHORT=$(git rev-parse --short "$CURRENT_SHA")
+
+          BASE_SHA=$(git rev-parse "origin/$BASE_REF" 2>/dev/null || git rev-parse "$BASE_REF" 2>/dev/null || true)
+          if [ -z "$BASE_SHA" ]; then
+            echo "::error::无法解析 base ref: $BASE_REF — 该分支是否存在？如果是跨 minor 版本升级，请使用 workflow_dispatch 手动指定。"
+            exit 1
+          fi
+          BASE_SHORT=$(git rev-parse --short "$BASE_SHA")
+
+          echo "current_sha=$CURRENT_SHA" >> $GITHUB_OUTPUT
+          echo "current_short=$CURRENT_SHORT" >> $GITHUB_OUTPUT
+          echo "base_sha=$BASE_SHA" >> $GITHUB_OUTPUT
+          echo "base_short=$BASE_SHORT" >> $GITHUB_OUTPUT
+
+          CURRENT_VERSION=$(echo "$CURRENT_REF" | sed 's|^release/||')
+          BASE_VERSION=$(echo "$BASE_REF" | sed 's|^release/||')
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
+
+          echo "当前版本: $CURRENT_REF ($CURRENT_SHORT)"
+          echo "基线版本: $BASE_REF ($BASE_SHORT)"
+
+      # ─── 安装 Python + uv ───
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv==0.7.12
+
+      # ─── 导出当前版本 OpenAPI schema ───
+      - name: Checkout current ref
+        run: git checkout ${{ steps.refs.outputs.current_sha }}
+
+      - name: Install dependencies (current)
+        working-directory: api
+        run: uv sync
+
+      - name: Export current OpenAPI schema
+        id: export_current
+        working-directory: api
+        run: |
+          mkdir -p ../artifacts/raw
+          uv run python scripts/export_openapi.py --v1-only -o ../artifacts/openapi-current.json
+
+      # ─── 导出基线版本 OpenAPI schema ───
+      - name: Checkout base ref
+        run: |
+          # 清理 current 阶段可能产生的未跟踪文件，但保留 artifacts/
+          git clean -fd --exclude=artifacts
+          git checkout ${{ steps.refs.outputs.base_sha }}
+
+      - name: Install dependencies (base)
+        working-directory: api
+        run: |
+          # base 版本的 lock 文件可能与当前 uv 版本不完全兼容，允许重新解析
+          uv sync || uv sync --no-frozen || pip install -e . 2>/dev/null || true
+
+      - name: Export base OpenAPI schema
+        id: export_base
+        working-directory: api
+        run: |
+          # 确保 artifacts 目录存在（git clean 可能已删除）
+          mkdir -p ../artifacts/raw
+          # 如果 base 版本没有 export 脚本，从 current 版本拷贝
+          if [ ! -f scripts/export_openapi.py ]; then
+            echo "::notice::Base ref 缺少 export_openapi.py，从 current ref 复制"
+            mkdir -p scripts
+            git show ${{ steps.refs.outputs.current_sha }}:api/scripts/export_openapi.py > scripts/export_openapi.py
+          fi
+          uv run python scripts/export_openapi.py --v1-only -o ../artifacts/openapi-base.json
+
+      # ─── 恢复当前版本 ───
+      - name: Restore current ref
+        run: |
+          git clean -fd --exclude=artifacts
+          git checkout -f ${{ steps.refs.outputs.current_sha }}
+
+      # ─── 生成 Markdown API 文档 ───
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate Markdown API documentation
+        run: |
+          npx --yes widdershins@4.0.1 \
+            artifacts/openapi-current.json \
+            -o artifacts/openapi-doc.md \
+            --language_tabs 'python:Python' 'shell:cURL' \
+            --summary \
+            --omitHeader
+
+      # ─── 生成变更报告（oasdiff） ───
+      - name: Install oasdiff
+        run: |
+          # 使用固定版本 release binary，避免依赖 raw GitHub URL 的 install.sh
+          OASDIFF_VERSION="1.10.25"
+          curl -sSfL "https://github.com/Tufin/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/oasdiff.tar.gz
+          tar -xzf /tmp/oasdiff.tar.gz -C /usr/local/bin oasdiff
+          chmod +x /usr/local/bin/oasdiff
+          oasdiff --version
+
+      - name: Patch OpenAPI schemas for oasdiff compatibility
+        run: |
+          # oasdiff 的底层解析器不支持 OpenAPI 3.1 的 exclusiveMinimum/Maximum (数字格式)
+          # 需要转换为 3.0 兼容格式 (布尔 + minimum/maximum)
+          python3 << 'PYEOF'
+          import json, pathlib
+
+          def patch_schema_for_oasdiff(filepath):
+              """将 OpenAPI 3.1 的 exclusiveMinimum/Maximum 数字格式转为 3.0 兼容格式"""
+              path = pathlib.Path(filepath)
+              schema = json.loads(path.read_text(encoding="utf-8"))
+
+              def fix(obj):
+                  if isinstance(obj, dict):
+                      # exclusiveMinimum: number → minimum: number + exclusiveMinimum: true
+                      if "exclusiveMinimum" in obj and isinstance(obj["exclusiveMinimum"], (int, float)):
+                          val = obj.pop("exclusiveMinimum")
+                          obj["minimum"] = val
+                          obj["exclusiveMinimum"] = True
+                      # exclusiveMaximum: number → maximum: number + exclusiveMaximum: true
+                      if "exclusiveMaximum" in obj and isinstance(obj["exclusiveMaximum"], (int, float)):
+                          val = obj.pop("exclusiveMaximum")
+                          obj["maximum"] = val
+                          obj["exclusiveMaximum"] = True
+                      for v in obj.values():
+                          fix(v)
+                  elif isinstance(obj, list):
+                      for item in obj:
+                          fix(item)
+
+              fix(schema)
+              path.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+              print(f"Patched: {filepath}")
+
+          patch_schema_for_oasdiff("artifacts/openapi-base.json")
+          patch_schema_for_oasdiff("artifacts/openapi-current.json")
+          PYEOF
+
+      - name: Generate API change report
+        id: report
+        env:
+          BASE_REF: ${{ steps.refs.outputs.base_ref }}
+          BASE_VERSION: ${{ steps.refs.outputs.base_version }}
+          BASE_SHA: ${{ steps.refs.outputs.base_sha }}
+          BASE_SHORT: ${{ steps.refs.outputs.base_short }}
+          CURRENT_REF: ${{ steps.refs.outputs.current_ref }}
+          CURRENT_VERSION: ${{ steps.refs.outputs.current_version }}
+          CURRENT_SHA: ${{ steps.refs.outputs.current_sha }}
+          CURRENT_SHORT: ${{ steps.refs.outputs.current_short }}
+        run: |
+          # oasdiff 完整变更日志
+          oasdiff changelog \
+            artifacts/openapi-base.json \
+            artifacts/openapi-current.json \
+            --format text > artifacts/raw/oasdiff-changelog.txt 2>&1 || true
+
+          # oasdiff 仅 breaking changes
+          oasdiff breaking \
+            artifacts/openapi-base.json \
+            artifacts/openapi-current.json \
+            --format text > artifacts/raw/oasdiff-breaking.txt 2>&1 || true
+
+          # openapi-diff（预拉镜像，失败不阻塞）
+          docker pull openapitools/openapi-diff:2.1.0-beta.11 || true
+          docker run --rm \
+            -v "${{ github.workspace }}/artifacts:/work" \
+            openapitools/openapi-diff:2.1.0-beta.11 \
+            /work/openapi-base.json \
+            /work/openapi-current.json \
+            --markdown /work/raw/openapi-diff-output.md 2>&1 || echo "::warning::openapi-diff 执行失败，跳过该部分报告"
+
+          # 生成中文 Markdown 报告
+          python3 << 'PYEOF'
+          import os
+
+          base_version = os.environ["BASE_VERSION"]
+          base_ref = os.environ["BASE_REF"]
+          base_sha = os.environ["BASE_SHA"]
+          base_short = os.environ["BASE_SHORT"]
+          current_version = os.environ["CURRENT_VERSION"]
+          current_ref = os.environ["CURRENT_REF"]
+          current_sha = os.environ["CURRENT_SHA"]
+          current_short = os.environ["CURRENT_SHORT"]
+
+          def read_file(path):
+              try:
+                  with open(path, "r") as f:
+                      return f.read().strip()
+              except FileNotFoundError:
+                  return ""
+
+          changelog = read_file("artifacts/raw/oasdiff-changelog.txt")
+          breaking = read_file("artifacts/raw/oasdiff-breaking.txt")
+          openapi_diff = read_file("artifacts/raw/openapi-diff-output.md")
+
+          has_breaking = bool(breaking and "No changes detected" not in breaking and "No breaking changes" not in breaking and len(breaking) > 5)
+          has_changelog = bool(changelog and "No changes detected" not in changelog and len(changelog) > 5)
+
+          lines = []
+          lines.append(f"# API 变更报告：{base_version} → {current_version}\n")
+          lines.append("## 对比范围\n")
+          lines.append("| 字段 | 值 |")
+          lines.append("|------|---|")
+          lines.append(f"| 基线版本 | `{base_ref}` (`{base_short}`) |")
+          lines.append(f"| 当前版本 | `{current_ref}` (`{current_short}`) |")
+          lines.append(f"| 基线 SHA | `{base_sha}` |")
+          lines.append(f"| 当前 SHA | `{current_sha}` |")
+          lines.append("")
+
+          lines.append("## 摘要\n")
+          lines.append("| 指标 | 状态 |")
+          lines.append("|------|------|")
+          lines.append(f"| 破坏性变更 | {'⚠️ 有' if has_breaking else '✅ 无'} |")
+          lines.append(f"| 非破坏性变更 | {'📝 有' if has_changelog else '✅ 无'} |")
+          lines.append("")
+
+          if has_breaking:
+              lines.append("## ⚠️ 破坏性变更（Breaking Changes）\n")
+              lines.append("```")
+              lines.append(breaking)
+              lines.append("```\n")
+
+          if has_changelog:
+              lines.append("## 变更端点详情\n")
+              lines.append("<details>")
+              lines.append("<summary>点击展开 oasdiff 完整变更日志</summary>\n")
+              lines.append("```")
+              lines.append(changelog)
+              lines.append("```\n")
+              lines.append("</details>\n")
+
+          if openapi_diff:
+              lines.append("## openapi-diff 报告\n")
+              lines.append("<details>")
+              lines.append("<summary>点击展开 openapi-diff 输出</summary>\n")
+              lines.append(openapi_diff)
+              lines.append("\n</details>\n")
+
+          if not has_breaking and not has_changelog:
+              lines.append("> 两个版本之间未检测到 API 变更。\n")
+
+          with open("artifacts/openapi-change-report.md", "w") as f:
+              f.write("\n".join(lines))
+
+          print(f"报告已生成：{base_version} → {current_version}")
+          PYEOF
+
+          echo "report_generated=true" >> $GITHUB_OUTPUT
+
+      # ─── 上传产物 ───
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-docs-${{ steps.refs.outputs.base_version }}-to-${{ steps.refs.outputs.current_version }}
+          path: artifacts/
+          retention-days: 90
+
+      # ─── 发送企业微信通知（仅在报告成功生成时） ───
+      - name: Notify WeChat
+        if: steps.report.outputs.report_generated == 'true'
+        env:
+          WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
+          BASE_VERSION: ${{ steps.refs.outputs.base_version }}
+          CURRENT_VERSION: ${{ steps.refs.outputs.current_version }}
+          BASE_SHORT: ${{ steps.refs.outputs.base_short }}
+          CURRENT_SHORT: ${{ steps.refs.outputs.current_short }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, urllib.request
+
+          base_ver = os.environ["BASE_VERSION"]
+          current_ver = os.environ["CURRENT_VERSION"]
+          base_short = os.environ["BASE_SHORT"]
+          current_short = os.environ["CURRENT_SHORT"]
+          run_url = os.environ["RUN_URL"]
+          webhook = os.environ.get("WECHAT_WEBHOOK", "")
+
+          if not webhook:
+              print("WECHAT_WEBHOOK 未配置，跳过通知")
+              exit(0)
+
+          # 读取摘要
+          def read_file(path):
+              try:
+                  with open(path, "r") as f:
+                      return f.read().strip()
+              except FileNotFoundError:
+                  return ""
+
+          breaking = read_file("artifacts/raw/oasdiff-breaking.txt")
+          changelog = read_file("artifacts/raw/oasdiff-changelog.txt")
+
+          has_breaking = bool(breaking and "No changes detected" not in breaking and "No breaking changes" not in breaking and len(breaking) > 5)
+          has_changelog = bool(changelog and "No changes detected" not in changelog and len(changelog) > 5)
+
+          # 统计变更数
+          change_count = 0
+          for line in changelog.split("\n"):
+              if line.strip().startswith(("info", "warning", "error")):
+                  change_count += 1
+
+          # 构建企业微信 Markdown 消息
+          status_icon = "⚠️" if has_breaking else "✅"
+          content = (
+              f"## 📋 Release 发布通知 — API 变更报告\n"
+              f"> **版本对比**: {base_ver} → {current_ver}\n"
+              f"> **Commit**: `{base_short}` → `{current_short}`\n\n"
+              f"### 摘要\n"
+              f"- 破坏性变更: {status_icon} {'有' if has_breaking else '无'}\n"
+              f"- 变更端点数: {change_count}\n"
+          )
+
+          if has_breaking:
+              # 截取前 500 字符避免消息过长
+              breaking_preview = breaking[:500]
+              if len(breaking) > 500:
+                  breaking_preview += "\n... (完整报告见 Artifacts)"
+              content += f"\n### ⚠️ 破坏性变更\n```\n{breaking_preview}\n```\n"
+
+          content += f"\n---\n🔗 [查看完整报告与下载 Artifacts]({run_url})"
+
+          payload = {
+              "msgtype": "markdown",
+              "markdown": {
+                  "title": f"📋 API 变更报告 {base_ver} → {current_ver}",
+                  "text": content,
+              }
+          }
+          data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+          req = urllib.request.Request(
+              webhook,
+              data=data,
+              headers={"Content-Type": "application/json"}
+          )
+          resp = urllib.request.urlopen(req)
+          print(resp.read().decode())
+          PYEOF

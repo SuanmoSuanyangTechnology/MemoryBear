@@ -182,6 +182,13 @@ class AppLogService:
 
             resolved_list = intr_ctx.get("resolved_interventions") or []
             pending_list = intr_ctx.get("interventions") or []
+            # ★ 修复并行人工介入节点丢失：写入端把所有并行 HITL 节点都放进
+            # intervention_backlog（字段最完整：含 node_name/form_fields/timeout_at），
+            # 而 interventions 只放"当前可见"子集，且 resume 会把它重写为仅含
+            # node_id/rendered_content/actions/interrupt_id 的精简字典（丢 node_name 等）。只读 interventions+resolved 会让
+            # 未展示的并行节点整条丢失、可见节点的 node_name/form_fields/timeout_at 为空。
+            # 故把 backlog 一并纳入合并，以其完整字段为底，interventions 精简字段仅在 backlog 缺省时补位。
+            backlog_list = intr_ctx.get("intervention_backlog") or []
 
             # Merge by node_id. Order: resolved first, then pending overlays
             # non-resolved fields. Crucially, pending data must NOT clobber
@@ -190,7 +197,8 @@ class AppLogService:
             merged_by_node: Dict[str, Dict[str, Any]] = {
                 i["node_id"]: dict(i) for i in resolved_list if i.get("node_id")
             }
-            for i in pending_list:
+            # 先以 backlog（全量并行 HITL，字段最完整）打底，确保每个节点都入场
+            for i in backlog_list:
                 nid = i.get("node_id")
                 if not nid:
                     continue
@@ -202,6 +210,22 @@ class AppLogService:
                             merged[k] = v
                     else:
                         merged[k] = v
+                merged_by_node[nid] = merged
+            # interventions（当前可见子集，字段可能被 resume 精简）叠加：仅在
+            # backlog 未提供该字段时补位，避免用精简字典的空值覆盖完整字段
+            for i in pending_list:
+                nid = i.get("node_id")
+                if not nid:
+                    continue
+                base = merged_by_node.get(nid, {})
+                merged = dict(base)
+                for k, v in i.items():
+                    if k in ("resolved_action_id", "resolved_form_data", "resolved_at", "resolved_kind"):
+                        if base.get(k) in (None, "", []):
+                            merged[k] = v
+                    else:
+                        if base.get(k) in (None, "", []):
+                            merged[k] = v
                 merged_by_node[nid] = merged
 
             def _sort_key(item: Dict[str, Any]):
@@ -553,22 +577,7 @@ class AppLogService:
                 continue
 
             # 将 steps 转换为 AppLogNodeExecution 列表
-            execution_nodes = []
-            for idx, step in enumerate(steps):
-                if not isinstance(step, dict):
-                    continue
-                execution_nodes.append(AppLogNodeExecution(
-                    node_id=step.get("step_id", f"agent_step_{idx}"),
-                    node_type=step.get("node_type", "tool"),
-                    node_name=step.get("node_name"),
-                    status=step.get("status", "completed"),
-                    error=step.get("error"),
-                    input=step.get("input"),
-                    output=step.get("output"),
-                    elapsed_time=step.get("elapsed_time"),
-                    token_usage=None,
-                    meta=step.get("meta"),
-                ))
+            execution_nodes = _steps_to_node_executions(steps)
 
             if not execution_nodes:
                 continue
@@ -597,6 +606,48 @@ class AppLogService:
                 node_executions_map[msg_id_str] = execution_nodes
 
         return node_executions_map
+
+    def get_message_node_executions(self, message_id: uuid.UUID) -> list[dict]:
+        """返回单条 assistant 消息的节点执行明细（agent 工具调用轨迹）。
+
+        供版本切换等接口回填 subContent：优先按 agent_executions.message_id 精确取；
+        缺失时按完成时间就近兜底（300s 内视为同一条，同 workflow _build_branch_view 策略）。
+        无关联执行记录返回空列表。
+
+        Note: 重新生成的版本以 skip_save=True 跑 LLM，未落库 agent_execution，无轨迹可返回。
+        """
+        message = self.db.get(Message, message_id)
+        if not message or message.role != "assistant":
+            return []
+        # 开场白等非执行产生的 assistant 消息无真实执行记录：其 meta_data 不含任何执行痕迹
+        # （execution_id / regenerated_from / usage），跳过兜底匹配避免被时间就近误吸附到邻近执行
+        meta = message.meta_data if isinstance(message.meta_data, dict) else None
+        if meta and not any(k in meta for k in ("execution_id", "regenerated_from", "usage")):
+            return []
+
+        agent_exec_repo = AgentExecutionRepository(self.db)
+        execution = agent_exec_repo.get_by_message_id(message.id)
+
+        # 兜底：原始首轮回复的 agent_execution.message_id 为空，按完成时间就近匹配
+        if not execution and message.created_at:
+            target = message.created_at
+            best = None
+            best_diff = None
+            for ex in agent_exec_repo.get_by_conversation(message.conversation_id):
+                ref = ex.completed_at or ex.started_at
+                if not ref:
+                    continue
+                diff = abs((ref - target).total_seconds())
+                if best_diff is None or diff < best_diff:
+                    best_diff = diff
+                    best = ex
+            if best is not None and best_diff is not None and best_diff <= 300:
+                execution = best
+
+        if not execution or not execution.steps:
+            return []
+
+        return [n.model_dump() for n in _steps_to_node_executions(execution.steps)]
 
 
 def _extract_text(data: Optional[dict]) -> str:
@@ -687,3 +738,28 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
             token_usage=token_usage,
         ))
     return result
+
+
+def _steps_to_node_executions(steps: Optional[list]) -> list[AppLogNodeExecution]:
+    """将 agent_executions.steps（JSONB 数组）转为 AppLogNodeExecution 列表。
+
+    step 结构：{step_id, node_type, node_name, status, input, output, elapsed_time, error, meta}。
+    输出与 _build_nodes_from_output_data（workflow 侧）同构，前端可走同一套 subContent 渲染。
+    """
+    nodes: list[AppLogNodeExecution] = []
+    for idx, step in enumerate(steps or []):
+        if not isinstance(step, dict):
+            continue
+        nodes.append(AppLogNodeExecution(
+            node_id=step.get("step_id", f"agent_step_{idx}"),
+            node_type=step.get("node_type", "tool"),
+            node_name=step.get("node_name"),
+            status=step.get("status", "completed"),
+            error=step.get("error"),
+            input=step.get("input"),
+            output=step.get("output"),
+            elapsed_time=step.get("elapsed_time"),
+            token_usage=None,
+            meta=step.get("meta"),
+        ))
+    return nodes

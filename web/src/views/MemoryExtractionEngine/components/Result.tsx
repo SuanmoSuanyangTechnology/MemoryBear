@@ -43,6 +43,8 @@ const resultObj = {
 interface ResultProps {
   loading: boolean;
   handleSave: () => void;
+  /** 系统默认配置时禁用保存操作 */
+  disabled?: boolean;
 }
 /**
  * Module processing item
@@ -82,7 +84,7 @@ const initialExpanded = {
   ontologyCoverage: false,
 }
 
-const Result: FC<ResultProps> = ({ loading, handleSave }) => {
+const Result: FC<ResultProps> = ({ loading, handleSave, disabled = false }) => {
   const { t } = useTranslation();
   const { id } = useParams()
   const [runLoading, setRunLoading] = useState(false)
@@ -281,6 +283,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
         <Button
           icon={<div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/save.svg')]"></div>}
           loading={loading}
+          disabled={disabled}
           onClick={handleSave}
         >{t('common.save')}</Button>
         <Button

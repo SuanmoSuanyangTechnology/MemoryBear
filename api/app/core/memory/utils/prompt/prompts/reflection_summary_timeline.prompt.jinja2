@@ -379,7 +379,9 @@ Prefer the highest available stable name. For non-user entities, when a concrete
 - If `should_rename_entity` is true, `suggested_entity_name` must be a non-empty string and must not be `"NULL"`.
 - Use standard ASCII double quotes.
 - Do not emit trailing commas.
-- Natural-language string values should follow the main language of the input descriptions.
+- Flexible natural-language string values (`description_summary`, new/updated `title`, new/updated `fact`, and `suggested_entity_name`) should follow the main language of the input `description`.
+- Fixed schema values stay unchanged: JSON keys, `op`, `category_id`, `category`, dates, and `"NULL"` must keep the required format. `category` must remain the exact Chinese display name mapped to `category_id`.
+- `old_value` must be copied exactly from `event_timeline`; do not translate it for language consistency.
 {% else %}
 - 只输出严格 JSON。
 - 不要输出 markdown 代码块。
@@ -403,7 +405,9 @@ Prefer the highest available stable name. For non-user entities, when a concrete
 - 如果 `should_rename_entity` 是 true，`suggested_entity_name` 必须是非空字符串，且不能是 `"NULL"`。
 - 使用标准 ASCII 双引号。
 - 不要输出尾逗号。
-- 自然语言字符串值应跟随输入 description 的主要语言。
+- flexible 的自然语言字符串值（`description_summary`、新增/更新的 `title`、新增/更新的 `fact`、`suggested_entity_name`）应跟随输入 `description` 的主要语言。
+- 固定 schema 值保持不变：JSON key、`op`、`category_id`、`category`、日期和 `"NULL"` 必须保持指定格式。`category` 必须保留为与 `category_id` 对应的中文展示名。
+- `old_value` 必须从 `event_timeline` 原样复制，不得为了语言一致而翻译。
 {% endif %}
 
 {% if language == "en" %}

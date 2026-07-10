@@ -14,6 +14,7 @@ class Field(StrEnum):
     DOCUMENT_ID = "metadata.document_id"
     KNOWLEDGE_ID = "metadata.knowledge_id"
     SORT_ID = "metadata.sort_id"
+    VISION_TEXT = "metadata.vision_text"
     # QA fields
     CHUNK_TYPE = "chunk_type"  # "chunk" | "source" | "qa"
     QUESTION = "question"

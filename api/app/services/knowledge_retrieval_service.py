@@ -1,10 +1,15 @@
 import logging
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Optional
 
 from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.models import RedBearLLM, RedBearRerank
@@ -16,16 +21,17 @@ from app.core.rag.metadata.filter_engine import (
     FilterGroup as EngineFilterGroup,
     MetadataFilterEngine,
 )
-from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVector,
     ElasticSearchVectorFactory,
+    ElasticSearchVectorIndexOps,
 )
 from app.models import ModelType, knowledge_model, knowledgeshare_model
 from app.models.models_model import ModelApiKey
 from app.repositories import knowledge_repository
 from app.repositories.tool_repository import ToolRepository
-from app.schemas.chunk_schema import RetrieveType
+from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest, KnowledgeRetrievalResult
 from app.services import knowledge_service, knowledgeshare_service
@@ -44,7 +50,183 @@ class KnowledgeRetrievalConfigError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class ModelApiKeySnapshot:
+    model_name: str
+    provider: str
+    api_key: str
+    api_base: str | None
+
+    @classmethod
+    def from_api_key(cls, api_key: ModelApiKey) -> "ModelApiKeySnapshot":
+        return cls(
+            model_name=api_key.model_name,
+            provider=api_key.provider,
+            api_key=api_key.api_key,
+            api_base=api_key.api_base,
+        )
+
+
+@dataclass(frozen=True)
+class RetrievalParams:
+    similarity_threshold: float
+    vector_similarity_weight: float
+    top_k: int
+    top_n: int
+    retrieve_type: RetrieveType
+    rerank_score_threshold: float = 0.1
+
+
+@dataclass(frozen=True)
+class KnowledgeRetrievalRef:
+    knowledge: Any
+    config: KnowledgeBaseConfig | None
+
+
+@dataclass(frozen=True)
+class RetrievalTarget:
+    knowledge_id: uuid.UUID
+    workspace_id: uuid.UUID
+    index_name: str
+    params: RetrievalParams
+    embedding_config: ModelApiKeySnapshot
+    reranker_config: ModelApiKeySnapshot
+
+
 class KnowledgeRetrievalService:
+    @staticmethod
+    def _new_retrieval_log_id() -> str:
+        return uuid.uuid4().hex[:8]
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> int:
+        return max(0, int((time.perf_counter() - started_at) * 1000))
+
+    @staticmethod
+    def _compact_id(value: Any) -> str:
+        text = str(value)
+        return text[:8] if len(text) > 8 else text
+
+    @classmethod
+    def _compact_ids(cls, values: list[Any], limit: int = 10) -> list[str]:
+        compacted = [cls._compact_id(value) for value in values[:limit]]
+        if len(values) > limit:
+            compacted.append(f"+{len(values) - limit}")
+        return compacted
+
+    @classmethod
+    def _format_log_fields(cls, fields: dict[str, Any]) -> str:
+        return " ".join(
+            f"{key}={cls._format_log_value(value)}"
+            for key, value in fields.items()
+        )
+
+    @classmethod
+    def _format_log_value(cls, value: Any) -> str:
+        if value is None:
+            return "none"
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, Enum):
+            return str(value.value)
+        if isinstance(value, (list, tuple, set)):
+            return "[" + ",".join(cls._format_log_value(item) for item in value) + "]"
+        return str(value)
+
+    @classmethod
+    def _build_retrieval_start_log_fields(
+            cls,
+            log_id: str,
+            request: KnowledgeRetrievalRequest,
+            current_user: Any = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": log_id,
+            "user": getattr(current_user, "username", None) or getattr(current_user, "id", None) or "anonymous",
+            "kb_count": len(request.kb_ids or []),
+            "ex_id_count": len(request.ex_ids or []),
+            "knowledge_base_count": len(request.knowledge_bases or []),
+            "query_len": len(request.query or ""),
+            "type": request.retrieve_type.value,
+            "top_k": request.top_k,
+            "top_n": request.top_n,
+            "similarity_threshold": request.similarity_threshold,
+            "vector_weight": request.vector_similarity_weight,
+            "rerank_threshold": request.rerank_score_threshold,
+            "metadata_mode": request.metadata_filter_mode.value,
+            "metadata_filter_groups": len(request.metadata_filters or []),
+            "file_filter_count": len(request.file_names_filter or []),
+        }
+
+    @classmethod
+    def _build_targets_log_fields(
+            cls,
+            log_id: str,
+            request: KnowledgeRetrievalRequest,
+            targets: list[RetrievalTarget],
+            max_workers: int,
+    ) -> dict[str, Any]:
+        return {
+            "id": log_id,
+            "requested_kb_count": len(request.kb_ids or []) + len(request.knowledge_bases or []),
+            "target_count": len(targets),
+            "max_workers": max_workers,
+            "target_kbs": cls._compact_ids([target.knowledge_id for target in targets]),
+        }
+
+    @staticmethod
+    def _build_metadata_filter_log_fields(
+            log_id: str,
+            request: KnowledgeRetrievalRequest,
+            effective: bool,
+            reason: str,
+            document_count: int | None,
+            common_fields: int | None = None,
+            effective_groups: int | None = None,
+    ) -> dict[str, Any]:
+        fields = {
+            "id": log_id,
+            "mode": request.metadata_filter_mode.value,
+            "provided_groups": len(request.metadata_filters or []),
+            "effective": effective,
+            "reason": reason,
+            "matched_documents": document_count if document_count is not None else "none",
+        }
+        if common_fields is not None:
+            fields["common_fields"] = common_fields
+        if effective_groups is not None:
+            fields["effective_groups"] = effective_groups
+        return fields
+
+    @classmethod
+    def _build_target_done_log_fields(
+            cls,
+            log_id: str,
+            target: RetrievalTarget,
+            target_position: int,
+            vector_count: int,
+            full_text_count: int,
+            merged_count: int,
+            result_count: int,
+            elapsed_ms: int,
+            local_rerank: bool,
+    ) -> dict[str, Any]:
+        return {
+            "id": log_id,
+            "target": target_position,
+            "kb_id": cls._compact_id(target.knowledge_id),
+            "index": target.index_name,
+            "type": target.params.retrieve_type.value,
+            "top_k": target.params.top_k,
+            "top_n": target.params.top_n,
+            "vector_kept": vector_count,
+            "fulltext_kept": full_text_count,
+            "merged": merged_count,
+            "local_rerank": local_rerank,
+            "result_count": result_count,
+            "elapsed_ms": elapsed_ms,
+        }
+
     @staticmethod
     def _resolve_tenant_id(
             db: Session,
@@ -68,49 +250,657 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             current_user: Any = None,
     ) -> KnowledgeRetrievalResult:
-        logger.info("Knowledge retrieval request params: %s", request.model_dump() if hasattr(request, "model_dump") else request.dict())
-        knowledge_ids, workspace_ids = cls._resolve_retrievable_knowledge_ids(
+        log_id = cls._new_retrieval_log_id()
+        started_at = time.perf_counter()
+        logger.info(
+            "[Retrieval] start %s",
+            cls._format_log_fields(cls._build_retrieval_start_log_fields(log_id, request, current_user)),
+        )
+        targets, tenant_id = cls._resolve_retrieval_targets(
             db=db,
             request=request,
             current_user=current_user,
         )
-        if not knowledge_ids:
+        if not targets:
+            logger.info(
+                "[Retrieval] finish %s",
+                cls._format_log_fields({
+                    "id": log_id,
+                    "reason": "no_targets",
+                    "target_count": 0,
+                    "final_count": 0,
+                    "elapsed_ms": cls._elapsed_ms(started_at),
+                }),
+            )
             return KnowledgeRetrievalResult(chunks=[])
 
+        knowledge_ids = [target.knowledge_id for target in targets]
+        workspace_ids = [target.workspace_id for target in targets]
         db_knowledge = cls._get_first_knowledge(
             db=db,
-            knowledge_id=knowledge_ids[0],
+            knowledge_id=targets[0].knowledge_id,
             current_user=current_user,
         )
         if not db_knowledge:
             raise KnowledgeRetrievalAccessDenied("The knowledge base does not exist or access is denied")
-
-        tenant_id = cls._resolve_tenant_id(
-            db=db,
-            current_user=current_user,
-            workspace_id=getattr(db_knowledge, "workspace_id", None),
-        )
 
         document_ids_include = cls._build_metadata_document_filter(
             db=db,
             request=request,
             knowledge_ids=knowledge_ids,
             tenant_id=tenant_id,
+            log_id=log_id,
         )
         if document_ids_include == []:
+            logger.info(
+                "[Retrieval] finish %s",
+                cls._format_log_fields({
+                    "id": log_id,
+                    "reason": "metadata_filter_empty",
+                    "target_count": len(targets),
+                    "final_count": 0,
+                    "elapsed_ms": cls._elapsed_ms(started_at),
+                }),
+            )
             return KnowledgeRetrievalResult(chunks=[])
 
-        chunks = cls._retrieve_by_type(
+        chunks = cls._retrieve_targets(
             db=db,
             request=request,
-            knowledge_ids=knowledge_ids,
-            workspace_ids=workspace_ids,
-            db_knowledge=db_knowledge,
+            targets=targets,
             document_ids_include=document_ids_include,
             tenant_id=tenant_id,
+            log_id=log_id,
         )
+        if any(target.params.retrieve_type == RetrieveType.Graph for target in targets):
+            graph_doc = cls._retrieve_graph(
+                db=db,
+                request=request,
+                knowledge_ids=knowledge_ids,
+                workspace_ids=workspace_ids,
+                db_knowledge=db_knowledge,
+                tenant_id=tenant_id,
+            )
+            if graph_doc:
+                chunks.insert(0, graph_doc)
         chunks = cls._include_document_ids(chunks, document_ids_include)
+        logger.info(
+            "[Retrieval] finish %s",
+            cls._format_log_fields({
+                "id": log_id,
+                "reason": "ok",
+                "target_count": len(targets),
+                "document_filter_count": len(document_ids_include or []),
+                "final_count": len(chunks),
+                "elapsed_ms": cls._elapsed_ms(started_at),
+            }),
+        )
         return KnowledgeRetrievalResult(chunks=chunks)
+
+    @classmethod
+    def _resolve_retrieval_targets(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            current_user: Any = None,
+    ) -> tuple[list[RetrievalTarget], uuid.UUID | None]:
+        refs = cls._resolve_retrievable_knowledge_refs(
+            db=db,
+            request=request,
+            current_user=current_user,
+        )
+        if not refs:
+            return [], None
+
+        tenant_id = cls._resolve_tenant_id(
+            db=db,
+            current_user=current_user,
+            workspace_id=getattr(refs[0].knowledge, "workspace_id", None),
+        )
+        targets = [
+            cls._build_retrieval_target(
+                db=db,
+                request=request,
+                ref=ref,
+                tenant_id=tenant_id,
+            )
+            for ref in refs
+        ]
+        return targets, tenant_id
+
+    @classmethod
+    def _build_retrieval_target(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            ref: KnowledgeRetrievalRef,
+            tenant_id: uuid.UUID | None,
+    ) -> RetrievalTarget:
+        knowledge = ref.knowledge
+        if not knowledge.embedding_id:
+            raise KnowledgeRetrievalConfigError(f"embedding_id config error: {knowledge.id}")
+        if not knowledge.reranker_id:
+            raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
+
+        embedding_config = ModelApiKeyService.get_available_api_key(db, knowledge.embedding_id, tenant_id=tenant_id)
+        reranker_config = ModelApiKeyService.get_available_api_key(db, knowledge.reranker_id, tenant_id=tenant_id)
+        if not embedding_config:
+            raise KnowledgeRetrievalConfigError(f"No embedding api key found for knowledge {knowledge.id}")
+        if not reranker_config:
+            raise KnowledgeRetrievalConfigError(f"No reranker api key found for knowledge {knowledge.id}")
+
+        return RetrievalTarget(
+            knowledge_id=knowledge.id,
+            workspace_id=knowledge.workspace_id,
+            index_name=ElasticSearchVectorIndexOps.collection_name_for_knowledge(knowledge.id),
+            params=cls._build_retrieval_params(request, ref.config),
+            embedding_config=ModelApiKeySnapshot.from_api_key(embedding_config),
+            reranker_config=ModelApiKeySnapshot.from_api_key(reranker_config),
+        )
+
+    @staticmethod
+    def _resolve_rerank_score_threshold(
+            request: KnowledgeRetrievalRequest,
+            config: KnowledgeBaseConfig | None = None,
+    ) -> float:
+        explicit_fields = config.model_fields_set if config else set()
+        if (
+                config
+                and "rerank_score_threshold" in explicit_fields
+                and config.rerank_score_threshold is not None
+        ):
+            return config.rerank_score_threshold
+        if config and "vector_similarity_weight" in explicit_fields:
+            return config.vector_similarity_weight
+        if request.rerank_score_threshold is not None:
+            return request.rerank_score_threshold
+        if request.vector_similarity_weight is not None:
+            return request.vector_similarity_weight
+        return 0.1
+
+    @staticmethod
+    def _build_retrieval_params(
+            request: KnowledgeRetrievalRequest,
+            config: KnowledgeBaseConfig | None = None,
+    ) -> RetrievalParams:
+        explicit_fields = config.model_fields_set if config else set()
+        top_k = config.top_k if config and "top_k" in explicit_fields else request.top_k
+        retrieve_type = config.retrieve_type if config and "retrieve_type" in explicit_fields else request.retrieve_type
+        similarity_threshold = (
+            config.similarity_threshold
+            if config and "similarity_threshold" in explicit_fields
+            else request.similarity_threshold
+        )
+        vector_similarity_weight = (
+            config.vector_similarity_weight
+            if config and "vector_similarity_weight" in explicit_fields
+            else request.vector_similarity_weight
+        )
+        rerank_score_threshold = KnowledgeRetrievalService._resolve_rerank_score_threshold(request, config)
+        top_n = max(top_k, request.top_n or top_k)
+        return RetrievalParams(
+            similarity_threshold=similarity_threshold,
+            vector_similarity_weight=vector_similarity_weight,
+            top_k=top_k,
+            top_n=top_n,
+            retrieve_type=retrieve_type,
+            rerank_score_threshold=rerank_score_threshold,
+        )
+
+    @classmethod
+    def _resolve_retrievable_knowledge_refs(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            current_user: Any = None,
+    ) -> list[KnowledgeRetrievalRef]:
+        requested_kb_ids, explicit_configs = cls._resolve_requested_kb_ids_and_configs(
+            db=db,
+            request=request,
+            current_user=current_user,
+        )
+        if not requested_kb_ids:
+            return []
+
+        refs: list[KnowledgeRetrievalRef] = []
+        ref_positions: dict[uuid.UUID, int] = {}
+
+        def append_refs(items: list[KnowledgeRetrievalRef]) -> None:
+            for item in items:
+                knowledge_id = item.knowledge.id
+                if knowledge_id in ref_positions:
+                    if item.config is not None:
+                        refs[ref_positions[knowledge_id]] = item
+                    continue
+                ref_positions[knowledge_id] = len(refs)
+                refs.append(item)
+
+        if current_user is None:
+            knowledges = (
+                db.query(knowledge_model.Knowledge)
+                .filter(
+                    knowledge_model.Knowledge.id.in_(requested_kb_ids),
+                    knowledge_model.Knowledge.status == 1,
+                )
+                .all()
+            )
+            knowledge_by_id = {knowledge.id: knowledge for knowledge in knowledges}
+            for kb_id in requested_kb_ids:
+                knowledge = knowledge_by_id.get(kb_id)
+                if not knowledge:
+                    continue
+                append_refs(cls._expand_knowledge_to_leaf_refs(
+                    db=db,
+                    knowledge=knowledge,
+                    inherited_config=explicit_configs.get(kb_id),
+                    explicit_configs=explicit_configs,
+                ))
+            return refs
+
+        for kb_id in requested_kb_ids:
+            private_target = (
+                db.query(knowledge_model.Knowledge)
+                .filter(
+                    knowledge_model.Knowledge.id == kb_id,
+                    knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
+                    knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
+                    knowledge_model.Knowledge.status == 1,
+                )
+                .first()
+            )
+            if private_target:
+                append_refs(cls._expand_knowledge_to_leaf_refs(
+                    db=db,
+                    knowledge=private_target,
+                    inherited_config=explicit_configs.get(kb_id),
+                    explicit_configs=explicit_configs,
+                ))
+                continue
+
+            share_target = (
+                db.query(knowledge_model.Knowledge)
+                .filter(
+                    knowledge_model.Knowledge.id == kb_id,
+                    knowledge_model.Knowledge.workspace_id == current_user.current_workspace_id,
+                    knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
+                    knowledge_model.Knowledge.status == 1,
+                )
+                .first()
+            )
+            if not share_target:
+                continue
+
+            filters = [
+                knowledgeshare_model.KnowledgeShare.target_kb_id == share_target.id,
+                knowledgeshare_model.KnowledgeShare.target_workspace_id == current_user.current_workspace_id,
+            ]
+            share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
+                db=db,
+                filters=filters,
+                current_user=current_user,
+            )
+            for source_kb_id, _source_workspace_id in share_items:
+                source_knowledge = knowledge_repository.get_knowledge_by_id(
+                    db=db,
+                    knowledge_id=source_kb_id,
+                )
+                append_refs(cls._expand_knowledge_to_leaf_refs(
+                    db=db,
+                    knowledge=source_knowledge,
+                    inherited_config=explicit_configs.get(kb_id),
+                    explicit_configs=explicit_configs,
+                ))
+
+        return refs
+
+    @classmethod
+    def _resolve_requested_kb_ids_and_configs(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            current_user: Any = None,
+    ) -> tuple[list[uuid.UUID], dict[uuid.UUID, KnowledgeBaseConfig]]:
+        explicit_configs: dict[uuid.UUID, KnowledgeBaseConfig] = {}
+        requested_kb_ids = list(request.kb_ids)
+
+        if request.ex_ids:
+            if current_user is None:
+                raise KnowledgeRetrievalConfigError("current_user is required to resolve ex_ids")
+            resolved_ids = knowledge_service.get_knowledge_ids_by_external_ids(
+                db=db,
+                external_ids=request.ex_ids,
+                workspace_id=current_user.current_workspace_id,
+                current_user=current_user,
+            )
+            requested_kb_ids.extend(resolved_ids)
+
+        for config in request.knowledge_bases:
+            if config.kb_id in explicit_configs:
+                logger.warning("Duplicate KnowledgeBaseConfig found, using the last one: kb_id=%s", config.kb_id)
+            explicit_configs[config.kb_id] = config
+            requested_kb_ids.append(config.kb_id)
+
+        return cls._unique_ids(requested_kb_ids), explicit_configs
+
+    @classmethod
+    def _expand_knowledge_to_leaf_refs(
+            cls,
+            db: Session,
+            knowledge: Any,
+            inherited_config: KnowledgeBaseConfig | None,
+            explicit_configs: dict[uuid.UUID, KnowledgeBaseConfig],
+            visited: set[uuid.UUID] | None = None,
+    ) -> list[KnowledgeRetrievalRef]:
+        if not knowledge or not knowledge.is_active:
+            return []
+        current_config = explicit_configs.get(knowledge.id) or inherited_config
+        if knowledge.is_retrievable_leaf:
+            return [KnowledgeRetrievalRef(knowledge=knowledge, config=current_config)]
+        if not knowledge.is_folder:
+            return []
+
+        if visited is None:
+            visited = set()
+        if knowledge.id in visited:
+            logger.warning(
+                "Detected cyclic knowledge folder while expanding retrieval targets: knowledge_id=%s",
+                knowledge.id,
+            )
+            return []
+        visited.add(knowledge.id)
+
+        refs = []
+        children = knowledge_repository.get_knowledges_by_parent_id(db=db, parent_id=knowledge.id)
+        for child in children:
+            if child.workspace_id != knowledge.workspace_id:
+                logger.warning(
+                    "Skipping child knowledge from another workspace while expanding folder: folder_id=%s, child_id=%s",
+                    knowledge.id,
+                    child.id,
+                )
+                continue
+            refs.extend(cls._expand_knowledge_to_leaf_refs(
+                db=db,
+                knowledge=child,
+                inherited_config=current_config,
+                explicit_configs=explicit_configs,
+                visited=visited,
+            ))
+        return refs
+
+    @classmethod
+    def _retrieve_targets(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            targets: list[RetrievalTarget],
+            document_ids_include: list[str] | None,
+            tenant_id: uuid.UUID | None,
+            log_id: str | None = None,
+    ) -> list[Any]:
+        if not targets:
+            return []
+
+        max_workers = max(1, min(len(targets), settings.KNOWLEDGE_RETRIEVAL_MAX_WORKERS or 3))
+        if log_id:
+            logger.info(
+                "[Retrieval] targets %s",
+                cls._format_log_fields(cls._build_targets_log_fields(log_id, request, targets, max_workers)),
+            )
+        results_by_index: list[list[DocumentChunk]] = [[] for _ in targets]
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="knowledge-retrieval") as executor:
+            futures = {
+                executor.submit(
+                    cls._retrieve_single_target,
+                    request,
+                    target,
+                    document_ids_include,
+                    log_id,
+                    index + 1,
+                ): index
+                for index, target in enumerate(targets)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                target = targets[index]
+                try:
+                    results_by_index[index] = future.result()
+                except Exception:
+                    logger.exception(
+                        "Knowledge retrieval target failed: knowledge_id=%s index=%s retrieve_type=%s",
+                        target.knowledge_id,
+                        target.index_name,
+                        target.params.retrieve_type,
+                    )
+                    raise
+
+        candidates = [chunk for target_chunks in results_by_index for chunk in target_chunks]
+        return cls._finalize_retrieval_chunks(
+            db=db,
+            request=request,
+            targets=targets,
+            chunks=candidates,
+            tenant_id=tenant_id,
+            log_id=log_id,
+        )
+
+    @classmethod
+    def _retrieve_single_target(
+            cls,
+            request: KnowledgeRetrievalRequest,
+            target: RetrievalTarget,
+            document_ids_include: list[str] | None,
+            log_id: str | None = None,
+            target_position: int = 0,
+    ) -> list[DocumentChunk]:
+        started_at = time.perf_counter()
+        vector_service = ElasticSearchVectorFactory.init_vector_from_configs(
+            index_name=target.index_name,
+            embedding_config=target.embedding_config,
+            reranker_config=target.reranker_config,
+        )
+        local_request = request.model_copy(update={
+            "similarity_threshold": target.params.similarity_threshold,
+            "vector_similarity_weight": target.params.vector_similarity_weight,
+            "top_k": target.params.top_k,
+            "top_n": target.params.top_n,
+            "retrieve_type": target.params.retrieve_type,
+        })
+
+        if target.params.retrieve_type == RetrieveType.PARTICIPLE:
+            chunks = cls._search_full_text(
+                vector_service,
+                local_request,
+                target.index_name,
+                document_ids_include,
+                topk=target.params.top_k,
+                apply_score_threshold=False,
+            )
+            if log_id:
+                logger.info(
+                    "[Retrieval] target_done %s",
+                    cls._format_log_fields(cls._build_target_done_log_fields(
+                        log_id=log_id,
+                        target=target,
+                        target_position=target_position,
+                        vector_count=0,
+                        full_text_count=len(chunks),
+                        merged_count=len(chunks),
+                        result_count=len(chunks),
+                        elapsed_ms=cls._elapsed_ms(started_at),
+                        local_rerank=False,
+                    )),
+                )
+            return chunks
+        if target.params.retrieve_type == RetrieveType.SEMANTIC:
+            chunks = cls._search_vector(
+                vector_service,
+                local_request,
+                target.index_name,
+                document_ids_include,
+                topk=target.params.top_k,
+            )
+            if log_id:
+                logger.info(
+                    "[Retrieval] target_done %s",
+                    cls._format_log_fields(cls._build_target_done_log_fields(
+                        log_id=log_id,
+                        target=target,
+                        target_position=target_position,
+                        vector_count=len(chunks),
+                        full_text_count=0,
+                        merged_count=len(chunks),
+                        result_count=len(chunks),
+                        elapsed_ms=cls._elapsed_ms(started_at),
+                        local_rerank=False,
+                    )),
+                )
+            return chunks
+
+        vector_chunks = cls._search_vector(
+            vector_service,
+            local_request,
+            target.index_name,
+            document_ids_include,
+            topk=target.params.top_n,
+        )
+        full_text_chunks = cls._search_full_text(
+            vector_service,
+            local_request,
+            target.index_name,
+            document_ids_include,
+            topk=target.params.top_n,
+        )
+        unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
+        # if len(unique_chunks) <= target.params.top_k:
+        #     return unique_chunks
+        chunks = vector_service.rerank(
+            query=request.query,
+            docs=unique_chunks,
+            top_k=target.params.top_k,
+        )
+        chunks = [
+            chunk
+            for chunk in chunks
+            if (chunk.metadata or {}).get("score", 0) > target.params.rerank_score_threshold
+        ]
+        if log_id:
+            logger.info(
+                "[Retrieval] target_done %s",
+                cls._format_log_fields(cls._build_target_done_log_fields(
+                    log_id=log_id,
+                    target=target,
+                    target_position=target_position,
+                    vector_count=len(vector_chunks),
+                    full_text_count=len(full_text_chunks),
+                    merged_count=len(unique_chunks),
+                    result_count=len(chunks),
+                    elapsed_ms=cls._elapsed_ms(started_at),
+                    local_rerank=True,
+                )),
+            )
+        return chunks
+
+    @classmethod
+    def _finalize_retrieval_chunks(
+            cls,
+            db: Session,
+            request: KnowledgeRetrievalRequest,
+            targets: list[RetrievalTarget],
+            chunks: list[DocumentChunk],
+            tenant_id: uuid.UUID | None,
+            log_id: str | None = None,
+    ) -> list[DocumentChunk]:
+        candidate_count = len(chunks)
+        unique_chunks = cls._deduplicate_chunks(chunks)
+        if not unique_chunks:
+            if log_id:
+                logger.info(
+                    "[Retrieval] finalize %s",
+                    cls._format_log_fields({
+                        "id": log_id,
+                        "candidates": candidate_count,
+                        "deduped": 0,
+                        "global_rerank": False,
+                        "threshold": "none",
+                        "filtered": 0,
+                        "result_count": 0,
+                    }),
+                )
+            return []
+
+        needs_global_rerank = request.rerank_id is not None or len(targets) > 1
+        if request.rerank_id:
+            ranked_chunks = cls.rerank_documents(
+                db=db,
+                rerank_id=request.rerank_id,
+                query=request.query,
+                docs=unique_chunks,
+                top_k=request.top_k,
+                tenant_id=tenant_id,
+            )
+        elif needs_global_rerank:
+            first_target = targets[0]
+            vector_service = ElasticSearchVectorFactory.init_vector_from_configs(
+                index_name=first_target.index_name,
+                embedding_config=first_target.embedding_config,
+                reranker_config=first_target.reranker_config,
+            )
+            ranked_chunks = vector_service.rerank(
+                query=request.query,
+                docs=unique_chunks,
+                top_k=request.top_k,
+            )
+        else:
+            ranked_chunks = sorted(
+                unique_chunks,
+                key=lambda chunk: (chunk.metadata or {}).get("score", 0),
+                reverse=True,
+            )
+
+        # Apply the final global score threshold after optional cross-KB rerank.
+        threshold = cls._resolve_global_score_threshold(
+            request=request,
+            targets=targets,
+            used_rerank=needs_global_rerank,
+        )
+        filtered_chunks = [
+            chunk
+            for chunk in ranked_chunks
+            if (chunk.metadata or {}).get("score", 0) > threshold
+        ]
+        result_chunks = filtered_chunks[:request.top_k]
+        if log_id:
+            logger.info(
+                "[Retrieval] finalize %s",
+                cls._format_log_fields({
+                    "id": log_id,
+                    "candidates": candidate_count,
+                    "deduped": len(unique_chunks),
+                    "global_rerank": needs_global_rerank,
+                    "ranked": len(ranked_chunks),
+                    "threshold": threshold,
+                    "filtered": len(filtered_chunks),
+                    "result_count": len(result_chunks),
+                }),
+            )
+        return result_chunks
+
+    @staticmethod
+    def _resolve_global_score_threshold(
+            request: KnowledgeRetrievalRequest,
+            targets: list[RetrievalTarget],
+            used_rerank: bool,
+    ) -> float:
+        if used_rerank:
+            return KnowledgeRetrievalService._resolve_rerank_score_threshold(request)
+
+        retrieve_types = {target.params.retrieve_type for target in targets}
+        if retrieve_types == {RetrieveType.PARTICIPLE}:
+            return request.similarity_threshold
+        if retrieve_types == {RetrieveType.SEMANTIC}:
+            return request.vector_similarity_weight
+        return min(request.similarity_threshold, request.vector_similarity_weight)
 
     @classmethod
     def _retrieve_by_type(
@@ -165,12 +955,13 @@ class KnowledgeRetrievalService:
             indices: str,
             document_ids_include: list[str] | None,
             topk: Optional[int] = -1,
+            apply_score_threshold: bool = True,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_vector(
             query=request.query,
             top_k=topk,
             indices=indices,
-            score_threshold=request.vector_similarity_weight,
+            score_threshold=request.vector_similarity_weight if apply_score_threshold else None,
             document_ids_include=document_ids_include,
             file_names_filter=request.file_names_filter,
             resolve_parents=True,
@@ -183,12 +974,13 @@ class KnowledgeRetrievalService:
             indices: str,
             document_ids_include: list[str] | None,
             topk: Optional[int] = -1,
+            apply_score_threshold: bool = True,
     ) -> list[DocumentChunk]:
         return vector_service.search_by_full_text(
             query=request.query,
             top_k=topk,
             indices=indices,
-            score_threshold=request.similarity_threshold,
+            score_threshold=request.similarity_threshold if apply_score_threshold else None,
             document_ids_include=document_ids_include,
             file_names_filter=request.file_names_filter,
             resolve_parents=True,
@@ -221,7 +1013,7 @@ class KnowledgeRetrievalService:
 
         logger.debug(f"[rerank]rerank_id:{request.rerank_id}, returned {len(reranked_chunks)} docs")
 
-        rerank_score_threshold = request.rerank_score_threshold or request.vector_similarity_weight or 0.1
+        rerank_score_threshold = cls._resolve_rerank_score_threshold(request)
 
         filtered_chunks = [
             chunk
@@ -453,11 +1245,34 @@ class KnowledgeRetrievalService:
             request: KnowledgeRetrievalRequest,
             knowledge_ids: list[uuid.UUID],
             tenant_id: uuid.UUID | None,
+            log_id: str | None = None,
     ) -> list[str] | None:
         if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
+            if log_id:
+                logger.info(
+                    "[Retrieval] metadata_filter %s",
+                    cls._format_log_fields(cls._build_metadata_filter_log_fields(
+                        log_id=log_id,
+                        request=request,
+                        effective=False,
+                        reason="mode_disabled",
+                        document_count=None,
+                    )),
+                )
             return None
 
         if request.metadata_filter_mode == MetadataFilterMode.MANUAL and not request.metadata_filters:
+            if log_id:
+                logger.info(
+                    "[Retrieval] metadata_filter %s",
+                    cls._format_log_fields(cls._build_metadata_filter_log_fields(
+                        log_id=log_id,
+                        request=request,
+                        effective=False,
+                        reason="no_filters",
+                        document_count=None,
+                    )),
+                )
             return None
 
         metadata_defs_by_kb = {
@@ -474,6 +1289,19 @@ class KnowledgeRetrievalService:
         )
         if not filter_groups:
             logger.warning("[MetadataFilter] No common metadata fields matched; skipping metadata filter")
+            if log_id:
+                logger.info(
+                    "[Retrieval] metadata_filter %s",
+                    cls._format_log_fields(cls._build_metadata_filter_log_fields(
+                        log_id=log_id,
+                        request=request,
+                        effective=False,
+                        reason="no_effective_groups",
+                        document_count=None,
+                        common_fields=len(common_metadata_defs),
+                        effective_groups=0,
+                    )),
+                )
             return None
 
         document_ids = set()
@@ -485,6 +1313,19 @@ class KnowledgeRetrievalService:
                 metadata_defs=metadata_defs_by_kb[knowledge_id],
             )
             document_ids.update(matched_ids)
+        if log_id:
+            logger.info(
+                "[Retrieval] metadata_filter %s",
+                cls._format_log_fields(cls._build_metadata_filter_log_fields(
+                    log_id=log_id,
+                    request=request,
+                    effective=True,
+                    reason="matched",
+                    document_count=len(document_ids),
+                    common_fields=len(common_metadata_defs),
+                    effective_groups=len(filter_groups),
+                )),
+            )
         return [str(document_id) for document_id in document_ids]
 
     @classmethod
@@ -614,13 +1455,22 @@ class KnowledgeRetrievalService:
 
     @staticmethod
     def _deduplicate_chunks(chunks: list[DocumentChunk]) -> list[DocumentChunk]:
-        seen_doc_ids = set()
+        seen_keys = set()
         result = []
         for chunk in chunks:
-            doc_id = chunk.metadata["doc_id"]
-            if doc_id in seen_doc_ids:
+            metadata = chunk.metadata or {}
+            doc_id = metadata.get("doc_id")
+            document_id = metadata.get("document_id")
+            sort_id = metadata.get("sort_id")
+            if doc_id:
+                dedupe_key = ("doc_id", doc_id)
+            elif document_id is not None and sort_id is not None:
+                dedupe_key = ("document_sort", document_id, sort_id)
+            else:
+                dedupe_key = ("content", hash(chunk.page_content))
+            if dedupe_key in seen_keys:
                 continue
-            seen_doc_ids.add(doc_id)
+            seen_keys.add(dedupe_key)
             result.append(chunk)
         return result
 
@@ -688,7 +1538,7 @@ class KnowledgeRetrievalService:
             )
             documents = [
                 Document(
-                    page_content=doc.page_content,
+                    page_content=chunk_retrieval_content(doc),
                     metadata=doc.metadata or {},
                 )
                 for doc in docs

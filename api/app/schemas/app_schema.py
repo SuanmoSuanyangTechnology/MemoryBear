@@ -235,6 +235,16 @@ class WebSearchConfig(BaseModel):
 class ContextEngineFeatureConfig(BaseModel):
     """上下文引擎功能配置。"""
     enabled: bool = Field(default=False, description="是否启用上下文引擎")
+    cross_session_recent_enabled: bool = Field(
+        default=False,
+        description="是否注入同应用同用户其他会话的最近消息",
+    )
+    cross_session_recent_limit: int = Field(
+        default=6,
+        ge=1,
+        le=50,
+        description="跨会话注入的最近消息条数",
+    )
 
 
 class AppFeatures(BaseModel):
@@ -257,8 +267,6 @@ class ToolOldConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """记忆配置"""
     enabled: bool = Field(default=True, description="是否启用对话历史记忆")
-    memory_config_id: Optional[str] = Field(default=None, description="选择记忆的内容类型")
-    max_history: int = Field(default=10, ge=0, le=100, description="最大保留的历史对话轮数")
 
 
 class ModelParameters(BaseModel):
