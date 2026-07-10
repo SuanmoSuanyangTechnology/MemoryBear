@@ -2,7 +2,6 @@ import copy
 import uuid
 import io
 import json
-import time
 from dataclasses import dataclass
 from typing import Optional, Annotated
 
@@ -17,7 +16,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success, fail
-from app.db import get_db, get_db_context, get_async_db_context
+from app.db import get_db, get_async_db_context
 from app.dependencies import get_current_user, get_current_user_async, cur_workspace_access_guard
 from app.models import User
 from app.models.annotation_model import HitLogSource
@@ -961,46 +960,18 @@ async def draft_run(
     - 使用当前的 AgentConfig 配置
     - 支持流式和非流式返回
     """
-    draft_run_started_at = time.perf_counter()
-    draft_run_last_checkpoint_at = draft_run_started_at
-
-    def _log_draft_run_timing(stage: str, **extra) -> None:
-        nonlocal draft_run_last_checkpoint_at
-        now = time.perf_counter()
-        payload_items = {
-            "stage": stage,
-            "app_id": str(app_id),
-            "elapsed_ms": round((now - draft_run_started_at) * 1000, 2),
-            "step_ms": round((now - draft_run_last_checkpoint_at) * 1000, 2),
-        }
-        payload_items.update(extra)
-        logger.info(
-            "[TIMING] app_controller.draft_run %s",
-            " ".join(f"{k}={v}" for k, v in payload_items.items()),
-        )
-        draft_run_last_checkpoint_at = now
-
     workspace_id = current_user.current_workspace_id
     current_user_id = str(current_user.id)
-    _log_draft_run_timing(
-        "entered",
-        workspace_id=str(workspace_id) if workspace_id else None,
-        has_payload_user_id=payload.user_id is not None,
-        stream=payload.stream,
-    )
     storage_type: str | None = None
     user_rag_memory_id = ""
 
     app = await _load_draft_run_app_snapshot(app_id, workspace_id)
     app_type = AppType(app.type)
-    _log_draft_run_timing("app_loaded", app_type=str(app_type), app_workspace_id=str(app.workspace_id))
     if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         raise BusinessException("只有 Agent , Workflow 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
 
     if app_type != AppType.PURE_WORKFLOW and not payload.message:
         raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
-
-    _log_draft_run_timing("app_access_validated")
 
     if payload.user_id is None:
         payload.user_id = await _get_or_create_draft_end_user_id(
@@ -1008,7 +979,6 @@ async def draft_run(
             workspace_id=app.workspace_id,
             other_id=current_user_id,
         )
-    _log_draft_run_timing("end_user_ready", has_payload_user_id=payload.user_id is not None)
 
     is_agent_new_conversation = app_type == AppType.AGENT and not payload.conversation_id
     should_prepare_conversation = (
@@ -1023,22 +993,12 @@ async def draft_run(
                 app_id=app_id,
                 workspace_id=workspace_id,
             )
-        _log_draft_run_timing(
-            "conversation_ready",
-            has_conversation_id=bool(payload.conversation_id),
-            is_agent_new_conversation=is_agent_new_conversation,
-        )
 
         config, is_shared = await _load_workflow_runtime_config(
             app_id=app_id,
             app_workspace_id=app.workspace_id,
             current_release_id=app.current_release_id,
             workspace_id=workspace_id,
-        )
-        _log_draft_run_timing(
-            "workflow_config_ready",
-            is_shared=is_shared,
-            config_id=str(config.id) if getattr(config, "id", None) else None,
         )
         if payload.stream:
             logger.debug(
@@ -1051,7 +1011,6 @@ async def draft_run(
             )
 
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
-            _log_draft_run_timing("workflow_stream_start")
 
             async def event_generator():
                 import json
@@ -1119,11 +1078,6 @@ async def draft_run(
             workspace_id=workspace_id,
             current_user=current_user,
         )
-        _log_draft_run_timing("storage_type_ready", storage_type=storage_type)
-        _log_draft_run_timing(
-            "user_rag_memory_ready",
-            has_user_rag_memory_id=bool(user_rag_memory_id),
-        )
 
         async with get_async_db_context() as db:
             draft_service = AgentRunService(db)
@@ -1135,11 +1089,6 @@ async def draft_run(
                     user_id=payload.user_id
                 )
                 payload.conversation_id = conversation_id
-        _log_draft_run_timing(
-            "conversation_ready",
-            has_conversation_id=bool(payload.conversation_id),
-            is_agent_new_conversation=is_agent_new_conversation,
-        )
 
         agent_cfg, model_config, is_shared = await _load_agent_runtime_config(
             app_id=app_id,
@@ -1238,11 +1187,6 @@ async def draft_run(
         workspace_id=workspace_id,
         current_user=current_user,
     )
-    _log_draft_run_timing("storage_type_ready", storage_type=storage_type)
-    _log_draft_run_timing(
-        "user_rag_memory_ready",
-        has_user_rag_memory_id=bool(user_rag_memory_id),
-    )
 
     async with get_async_db_context() as db:
         draft_service = AgentRunService(db)
@@ -1254,11 +1198,6 @@ async def draft_run(
                 user_id=payload.user_id
             )
             payload.conversation_id = conversation_id
-    _log_draft_run_timing(
-        "conversation_ready",
-        has_conversation_id=bool(payload.conversation_id),
-        is_agent_new_conversation=is_agent_new_conversation,
-    )
 
     if app_type == AppType.MULTI_AGENT:
         from app.schemas.multi_agent_schema import MultiAgentRunRequest

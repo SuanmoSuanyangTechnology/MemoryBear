@@ -807,31 +807,10 @@ class AgentRunService:
         if not knowledge_retrieval_config:
             return [], []
 
-        started_at = time.perf_counter()
-        last_checkpoint = started_at
-
-        def _log(stage: str, **extra) -> None:
-            nonlocal last_checkpoint
-            now = time.perf_counter()
-            stage_ms = round((now - last_checkpoint) * 1000, 2)
-            total_ms = round((now - started_at) * 1000, 2)
-            detail_pairs = [f"{key}={value}" for key, value in extra.items() if value is not None]
-            details = f" {' '.join(detail_pairs)}" if detail_pairs else ""
-            logger.info(
-                f"[KnowledgeConfigTiming] {stage} stage_ms={stage_ms} total_ms={total_ms}{details}",
-                extra={
-                    "stage_ms": stage_ms,
-                    "total_ms": total_ms,
-                    **extra,
-                },
-            )
-            last_checkpoint = now
-
         citations_collector = []
         tools = []
         knowledge_bases = knowledge_retrieval_config.get("knowledge_bases", [])
         kb_ids = [kb["kb_id"] for kb in knowledge_bases if kb.get("kb_id")]
-        _log("kb_ids_ready", kb_count=len(kb_ids))
         if kb_ids:
             # 查询知识库名称
             kb_names = []
@@ -842,7 +821,6 @@ class AgentRunService:
                     )
                     rows = result.all()
                 kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
-                _log("knowledge_names_ready", name_count=len(kb_names))
 
                 # 对于共享知识库，chunk元数据中的knowledge_id是source_kb_id，
                 # 需要将source_kb_id也映射到名称，否则会显示为ID
@@ -854,7 +832,6 @@ class AgentRunService:
                         )
                     )
                     share_rows = result.all()
-                _log("knowledge_shares_ready", share_count=len(share_rows))
                 if share_rows:
                     id_to_name = {str(r.id): r.name for r in rows}
                     for sr in share_rows:
@@ -863,7 +840,6 @@ class AgentRunService:
                             kb_names.append({"id": str(sr.source_kb_id), "name": source_name})
             except Exception:
                 kb_names = [{"id": kid, "name": kid} for kid in kb_ids]
-                _log("knowledge_names_fallback", name_count=len(kb_names))
 
             kb_tool = create_knowledge_retrieval_tool(
                 knowledge_retrieval_config, kb_ids, user_id,
@@ -871,7 +847,6 @@ class AgentRunService:
                 kb_names=kb_names
             )
             tools.append(kb_tool)
-            _log("knowledge_tool_created", tool_count=len(tools), kb_name_count=len(kb_names))
             logger.debug(
                 "已添加知识库检索工具",
                 extra={"kb_ids": kb_ids, "tool_count": len(tools)}

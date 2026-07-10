@@ -97,43 +97,6 @@ class AppChatService:
     def _uses_async_session(self) -> bool:
         return isinstance(self.db, AsyncSession)
 
-    @staticmethod
-    def _make_agent_timing_logger(
-            scope: str,
-            *,
-            conversation_id: uuid.UUID | None,
-            app_id: uuid.UUID | None,
-            user_id: str | None,
-    ):
-        started_at = time.perf_counter()
-        last_checkpoint = started_at
-
-        def _log(stage: str, **extra) -> None:
-            nonlocal last_checkpoint
-            now = time.perf_counter()
-            stage_ms = round((now - last_checkpoint) * 1000, 2)
-            total_ms = round((now - started_at) * 1000, 2)
-            detail_pairs = [
-                f"{key}={value}"
-                for key, value in extra.items()
-                if value is not None
-            ]
-            details = f" {' '.join(detail_pairs)}" if detail_pairs else ""
-            logger.info(
-                f"[{scope}] {stage} stage_ms={stage_ms} total_ms={total_ms}{details}",
-                extra={
-                    "conversation_id": str(conversation_id) if conversation_id else None,
-                    "app_id": str(app_id) if app_id else None,
-                    "user_id": user_id,
-                    "stage_ms": stage_ms,
-                    "total_ms": total_ms,
-                    **extra,
-                },
-            )
-            last_checkpoint = now
-
-        return _log
-
     def _resolve_tenant_id(self, workspace_id: Optional[str]) -> Optional[uuid.UUID]:
         if not workspace_id:
             return None
@@ -565,12 +528,6 @@ class AppChatService:
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
-        timing_log = self._make_agent_timing_logger(
-            "AppChatService.agent_chat",
-            conversation_id=conversation_id,
-            app_id=config.app_id,
-            user_id=user_id,
-        )
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
 
@@ -613,8 +570,6 @@ class AppChatService:
                 "audio_status": None
             }
 
-        timing_log("annotation_checked", matched=bool(annotation_match))
-
         # 应用 features 配置
         features_config: dict = config.features or {}
         if hasattr(features_config, 'model_dump'):
@@ -636,7 +591,6 @@ class AppChatService:
             model_config_id,
             tenant_id=tenant_id,
         )
-        timing_log("model_ready", model_name=api_key_obj.model_name, provider=api_key_obj.provider)
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -653,32 +607,21 @@ class AppChatService:
         # 获取工具服务
         base_tools = await self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id)
         tools.extend(base_tools)
-        timing_log("tools_config_ready", tool_count=len(base_tools))
         skill_tools, skill_prompts = await self.agent_service.load_skill_config(
             config.skills, message, tenant_id, user_id, workspace_id
         )
         tools.extend(skill_tools)
         if skill_prompts:
             system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-        timing_log("skill_config_ready", tool_count=len(skill_tools), has_prompts=bool(skill_prompts))
         kb_tools, citations_collector = await self.agent_service.load_knowledge_retrieval_config(
             config.knowledge_retrieval, user_id
         )
         tools.extend(kb_tools)
-        timing_log("knowledge_config_ready", tool_count=len(kb_tools))
         if memory:
             memory_tools, _ = await self.agent_service.load_memory_config(
                 config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
             )
             tools.extend(memory_tools)
-            timing_log("memory_config_ready", tool_count=len(memory_tools))
-        timing_log(
-            "tools_loaded",
-            tool_count=len(tools),
-            skill_tool_count=len(skill_tools),
-            knowledge_tool_count=len(kb_tools),
-            memory_enabled=memory,
-        )
 
         # 获取模型参数
         model_parameters = config.model_parameters
@@ -710,7 +653,6 @@ class AppChatService:
             if prepared_input:
                 system_prompt, history = prepared_input
                 used_context_engine = True
-                timing_log("context_prepare_ready", used_context_engine=True, history_count=len(history or []))
             else:
                 history = await self.conversation_service.get_conversation_history(
                     conversation_id=conversation_id,
@@ -718,11 +660,9 @@ class AppChatService:
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
-                timing_log("history_fetch_ready", history_count=len(history or []))
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
         is_new_conversation = not await self._conversation_has_messages(conversation_id)
-        timing_log("conversation_state_ready", is_new_conversation=is_new_conversation)
         if is_new_conversation:
             opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
             if opening:
@@ -739,7 +679,6 @@ class AppChatService:
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
-                timing_log("opening_history_reloaded", history_count=len(history or []))
 
         # 处理多模态文件
         processed_files = None
@@ -804,7 +743,6 @@ class AppChatService:
             json_output=model_parameters.get("json_output", False),
             capability=capability,
         )
-        timing_log("agent_initialized", tool_count=len(tools), streaming=False)
 
         # 为需要运行时上下文的工具注入上下文
         for t in tools:
@@ -835,7 +773,6 @@ class AppChatService:
             },
         )
         await self._create_agent_execution(agent_exec_repo, agent_execution)
-        timing_log("agent_execution_created")
 
         try:
             # 调用 Agent（支持多模态）
@@ -844,11 +781,6 @@ class AppChatService:
                 history=history,
                 context=None,
                 files=processed_files
-            )
-            timing_log(
-                "llm_completed",
-                total_tokens=result.get("usage", {}).get("total_tokens", 0),
-                content_length=len(result.get("content", "")),
             )
         except Exception as e:
             # Agent 执行失败，更新记录为 failed
@@ -885,12 +817,6 @@ class AppChatService:
 
         # 过滤 citations（只调用一次）
         filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
-        timing_log(
-            "post_llm_ready",
-            suggested_questions_count=len(suggested_questions),
-            citations_count=len(filtered_citations),
-            has_audio=bool(audio_url),
-        )
 
         # 构建用户消息内容（含多模态文件）
         human_meta = {
@@ -992,8 +918,6 @@ class AppChatService:
                 await self.db.commit()
             else:
                 self.db.commit()
-        timing_log("messages_saved", skip_save=skip_save)
-
         # 更新 Agent 执行记录为 completed
         node_executions = orchestrator_node_executions + result.get("node_executions", [])
         await self._update_agent_execution(
@@ -1005,7 +929,6 @@ class AppChatService:
             token_usage=result.get("usage"),
             message_id=message_id,
         )
-        timing_log("completed", elapsed_time=elapsed_time)
 
         return {
             "conversation_id": conversation_id,
@@ -1048,12 +971,6 @@ class AppChatService:
 
         try:
             start_time = time.time()
-            timing_log = self._make_agent_timing_logger(
-                "AppChatService.agent_chat_stream",
-                conversation_id=conversation_id,
-                app_id=config.app_id,
-                user_id=user_id,
-            )
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
 
@@ -1084,8 +1001,6 @@ class AppChatService:
                 yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
                 return
 
-            timing_log("annotation_checked", matched=bool(annotation_match))
-
             # 应用 features 配置
             features_config: dict = config.features or {}
             if hasattr(features_config, 'model_dump'):
@@ -1108,7 +1023,6 @@ class AppChatService:
                 model_config_id,
                 tenant_id=tenant_id,
             )
-            timing_log("model_ready", model_name=api_key_obj.model_name, provider=api_key_obj.provider)
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -1125,31 +1039,20 @@ class AppChatService:
             # 获取工具服务
             base_tools = await self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id)
             tools.extend(base_tools)
-            timing_log("tools_config_ready", tool_count=len(base_tools))
 
             skill_tools, skill_prompts = await self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            timing_log("skill_config_ready", tool_count=len(skill_tools), has_prompts=bool(skill_prompts))
             kb_tools, citations_collector = await self.agent_service.load_knowledge_retrieval_config(
                 config.knowledge_retrieval, user_id)
             tools.extend(kb_tools)
-            timing_log("knowledge_config_ready", tool_count=len(kb_tools))
             # 添加长期记忆工具
             if memory:
                 memory_tools, _ = await self.agent_service.load_memory_config(
                     config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
-                timing_log("memory_config_ready", tool_count=len(memory_tools))
-            timing_log(
-                "tools_loaded",
-                tool_count=len(tools),
-                skill_tool_count=len(skill_tools),
-                knowledge_tool_count=len(kb_tools),
-                memory_enabled=memory,
-            )
 
             # 获取模型参数
             model_parameters = config.model_parameters
@@ -1181,7 +1084,6 @@ class AppChatService:
                 if prepared_input:
                     system_prompt, history = prepared_input
                     used_context_engine = True
-                    timing_log("context_prepare_ready", used_context_engine=True, history_count=len(history or []))
                 else:
                     history = await self.conversation_service.get_conversation_history(
                         conversation_id=conversation_id,
@@ -1189,16 +1091,9 @@ class AppChatService:
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni
                     )
-                    timing_log("history_fetch_ready", history_count=len(history or []))
-            timing_log(
-                "history_ready",
-                history_count=len(history or []),
-                used_context_engine=used_context_engine,
-            )
 
             # 新会话开场白先拼到内存 history，避免首包前写库+回查。
             is_new_conversation = not await self._conversation_has_messages(conversation_id)
-            timing_log("conversation_state_ready", is_new_conversation=is_new_conversation)
             opening_statement = None
             opening_suggested_questions: List[str] = []
             if is_new_conversation:
@@ -1211,8 +1106,6 @@ class AppChatService:
                         role="assistant",
                         content=opening_statement,
                     )
-                    timing_log("opening_history_appended", history_count=len(history or []))
-            timing_log("opening_ready", is_new_conversation=is_new_conversation)
 
             # 处理多模态文件
             processed_files = None
@@ -1226,7 +1119,6 @@ class AppChatService:
                     files, document_image_recognition=doc_img_recognition,
                     workspace_id=workspace_id
                 )
-                timing_log("files_ready", file_count=len(processed_files or []))
                 logger.info(f"处理了 {len(processed_files)} 个文件")
                 if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                     f.type == FileType.DOCUMENT for f in files
@@ -1266,7 +1158,6 @@ class AppChatService:
                     yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                     yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
-            timing_log("pre_llm_ready", capability_count=len(capability), final_tool_count=len(tools))
 
             # 创建 LangChain Agent
             agent = LangChainAgent(
@@ -1285,7 +1176,6 @@ class AppChatService:
                 json_output=model_parameters.get("json_output", False),
                 capability=capability,
             )
-            timing_log("agent_initialized", tool_count=len(tools), streaming=True)
 
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
@@ -1303,7 +1193,6 @@ class AppChatService:
             _api_key_is_omni = api_key_obj.is_omni
             # LLM 推理期间不再依赖共享 session，提前归还底层连接给连接池。
             await self._release_db_connection()
-            timing_log("db_released_before_llm")
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
@@ -1332,7 +1221,6 @@ class AppChatService:
                     files=processed_files
             ):
                 if not first_chunk_logged:
-                    timing_log("first_chunk")
                     first_chunk_logged = True
                 if isinstance(chunk, int):
                     total_tokens = chunk
@@ -1362,7 +1250,6 @@ class AppChatService:
                 await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-            timing_log("llm_completed", total_tokens=total_tokens, content_length=len(full_content))
             await self._record_api_key_usage(_api_key_id)
 
             # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
@@ -1390,12 +1277,6 @@ class AppChatService:
             # 过滤 citations（只调用一次）
             filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
             end_data["citations"] = filtered_citations
-            timing_log(
-                "post_llm_ready",
-                suggested_questions_count=len(suggested_questions),
-                citations_count=len(filtered_citations),
-                has_audio=bool(stream_audio_url),
-            )
 
             human_meta = {
                 "files": [],
@@ -1523,8 +1404,6 @@ class AppChatService:
                     if conv:
                         conv.message_count += 1
                     self.db.commit()
-            timing_log("messages_saved", skip_save=skip_save)
-
             # 首包后再一次性落 Agent execution，避免首包前 create + 尾部 update 双写。
             all_node_executions = orchestrator_node_executions + node_executions
             await self._persist_final_agent_execution(
@@ -1542,8 +1421,6 @@ class AppChatService:
                 token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 message_id=message_id,
             )
-            timing_log("agent_execution_saved", status="completed", step_count=len(all_node_executions))
-            timing_log("completed", elapsed_time=elapsed_time)
 
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 

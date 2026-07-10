@@ -27,10 +27,9 @@ from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas import AppChatRequest, app_schema, conversation_schema
+from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
-from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
 from app.services import workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_chat_service import AppChatService
@@ -250,30 +249,11 @@ async def chat(
     body = await request.json()
     payload = AppChatRequest(**body)
     request_started_at = time.perf_counter()
-    preprocess_last_checkpoint = request_started_at
-
-    def _log_preprocess(stage: str, **extra) -> None:
-        nonlocal preprocess_last_checkpoint
-        now = time.perf_counter()
-        stage_ms = round((now - preprocess_last_checkpoint) * 1000, 2)
-        total_ms = round((now - request_started_at) * 1000, 2)
-        detail_pairs = [f"{key}={value}" for key, value in extra.items() if value is not None]
-        details = f" {' '.join(detail_pairs)}" if detail_pairs else ""
-        logger.info(
-            f"[AppApiChatTiming] {stage} stage_ms={stage_ms} total_ms={total_ms}{details}",
-            extra={
-                "stage_ms": stage_ms,
-                "total_ms": total_ms,
-                **extra,
-            },
-        )
-        preprocess_last_checkpoint = now
 
     async with get_async_db_context() as db:
         app_service = AppService(db)
         conversation_service = ConversationService(db)
         app = await app_service.get_app_async(api_key_auth.resource_id, api_key_auth.workspace_id)
-        _log_preprocess("app_loaded", app_id=app.id)
 
         if payload.version is not None:
             active_release = await app_service.get_release_by_id_async(app.id, payload.version)
@@ -284,7 +264,6 @@ async def chat(
             )
             if not active_release:
                 raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
-        _log_preprocess("release_loaded", release_id=active_release.id if active_release else None)
 
         other_id = payload.user_id
         workspace_id = api_key_auth.workspace_id
@@ -295,14 +274,12 @@ async def chat(
             other_id=other_id,
         )
         end_user_id = str(new_end_user.id)
-        _log_preprocess("end_user_ready", end_user_id=end_user_id)
         web_search = True
         memory = True
         storage_type, user_rag_memory_id = await _prepare_v1_chat_memory_context_async(
             db,
             workspace_id,
         )
-        _log_preprocess("memory_context_ready", storage_type=storage_type, has_rag_memory=bool(user_rag_memory_id))
         app_type = app.type
         _checkAppConfig(active_release)
 
@@ -319,7 +296,6 @@ async def chat(
                 conversation_id=payload.conversation_id
             )
             conversation_id = conversation.id
-        _log_preprocess("conversation_ready", conversation_id=conversation_id)
 
         app_id = app.id
         release_id = active_release.id if active_release else None
@@ -331,7 +307,6 @@ async def chat(
             runtime_config = multi_agent_config_4_app_release(active_release)
         elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             runtime_config = workflow_config_4_app_release(active_release)
-        _log_preprocess("runtime_config_ready", app_type=app_type)
 
     logger.info(
         f"[AppApiChatTiming] preprocess_ready elapsed_ms={round((time.perf_counter() - request_started_at) * 1000, 2)} "
