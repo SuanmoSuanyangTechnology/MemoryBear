@@ -12,7 +12,7 @@ from app.core.logging_config import get_db_logger
 db_logger = get_db_logger()
 
 
-def _knowledge_relationship_load_options():
+def knowledge_schema_load_options():
     def model_config_options(relationship_attr):
         return (
             selectinload(relationship_attr).selectinload(ModelConfig.model_base),
@@ -89,7 +89,7 @@ async def get_knowledges_paginated_async(
     )
 
     try:
-        stmt = select(Knowledge).options(*_knowledge_relationship_load_options())
+        stmt = select(Knowledge).options(*knowledge_schema_load_options())
         for filter_cond in filters:
             stmt = stmt.where(filter_cond)
 
@@ -214,7 +214,7 @@ async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -
     db_logger.debug(f"Query knowledge base based on ID (async): knowledge_id={knowledge_id}")
 
     try:
-        stmt = select(Knowledge).options(*_knowledge_relationship_load_options()).where(Knowledge.id == knowledge_id)
+        stmt = select(Knowledge).options(*knowledge_schema_load_options()).where(Knowledge.id == knowledge_id)
         result = await db.execute(stmt)
         knowledge = result.scalars().first()
         if knowledge:
@@ -253,7 +253,7 @@ async def get_knowledge_by_external_id_async(
 ) -> Knowledge | None:
     """Async version of get_knowledge_by_external_id."""
     try:
-        stmt = select(Knowledge).options(*_knowledge_relationship_load_options()).where(
+        stmt = select(Knowledge).options(*knowledge_schema_load_options()).where(
             Knowledge.external_id == external_id,
             Knowledge.workspace_id == workspace_id,
             Knowledge.status == 1,
@@ -370,7 +370,7 @@ async def get_knowledges_by_parent_ids_async(
         return []
 
     try:
-        stmt = select(Knowledge).options(*_knowledge_relationship_load_options()).where(
+        stmt = select(Knowledge).options(*knowledge_schema_load_options()).where(
             Knowledge.parent_id.in_(parent_ids),
             Knowledge.workspace_id == workspace_id,
             Knowledge.status != 2,
@@ -465,7 +465,7 @@ async def get_knowledge_by_name_async(db: AsyncSession, name: str, workspace_id:
     try:
         stmt = (
             select(Knowledge)
-            .options(*_knowledge_relationship_load_options())
+            .options(*knowledge_schema_load_options())
             .where(Knowledge.name == name, Knowledge.workspace_id == workspace_id, Knowledge.status == 1)
         )
         result = await db.execute(stmt)

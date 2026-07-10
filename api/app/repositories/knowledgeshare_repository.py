@@ -1,15 +1,22 @@
 import uuid
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.knowledgeshare_model import KnowledgeShare
+from app.repositories.knowledge_repository import knowledge_schema_load_options
 from app.schemas import knowledgeshare_schema
 from app.core.logging_config import get_db_logger
-from sqlalchemy.orm import joinedload
-from sqlalchemy import or_
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
+
+
+def _knowledgeshare_schema_load_options():
+    return (
+        selectinload(KnowledgeShare.target_kb).options(*knowledge_schema_load_options()),
+        selectinload(KnowledgeShare.target_workspace),
+        selectinload(KnowledgeShare.shared_user),
+    )
 
 
 def get_knowledgeshares_paginated(
@@ -67,7 +74,7 @@ async def get_knowledgeshares_paginated_async(
 ) -> tuple[int, list]:
     """Async version of get_knowledgeshares_paginated."""
     try:
-        stmt = select(KnowledgeShare)
+        stmt = select(KnowledgeShare).options(*_knowledgeshare_schema_load_options())
         for filter_cond in filters:
             stmt = stmt.where(filter_cond)
 
@@ -158,7 +165,8 @@ async def create_knowledgeshare_async(
         db.add(db_knowledgeshare)
         await db.commit()
         await db.refresh(db_knowledgeshare)
-        return db_knowledgeshare
+        loaded_share = await get_knowledgeshare_by_id_async(db, db_knowledgeshare.id)
+        return loaded_share or db_knowledgeshare
     except Exception as e:
         db_logger.error(
             f"Failed to create a knowledge base sharing record (async): "
@@ -191,7 +199,7 @@ def get_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID) -> Knowl
 async def get_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID) -> KnowledgeShare | None:
     """Async version of get_knowledgeshare_by_id."""
     try:
-        stmt = select(KnowledgeShare).where(
+        stmt = select(KnowledgeShare).options(*_knowledgeshare_schema_load_options()).where(
             or_(
                 KnowledgeShare.id == knowledgeshare_id,
                 KnowledgeShare.target_kb_id == knowledgeshare_id,
