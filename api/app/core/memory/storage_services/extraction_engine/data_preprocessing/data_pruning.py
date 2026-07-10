@@ -163,6 +163,9 @@ class SemanticPruner:
         for attempt in range(max_retries):
             try:
                 result = await self.llm_client.call_structured(messages, AssistantPruningResponse)
+                if result is None:
+                    raise ValueError("call_structured 返回 None（LLM 输出解析失败）")
+                logger.info(f"[剪枝-LLM] raw result: {result}")
                 return result
             except Exception as e:
                 if attempt < max_retries - 1:

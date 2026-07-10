@@ -46,6 +46,7 @@ COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
     ("user_summary_id", "MemorySummary", "id"),
     ("user_perceptual_id", "Perceptual", "id"),
     ("user_community_id", "Community", "community_id"),
+    ("user_source_id", "UserSource", "id"),
 ]
 
 DELETE_AT_DEFS: List[Tuple[str, str, str]] = [

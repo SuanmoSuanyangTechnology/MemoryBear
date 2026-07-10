@@ -276,6 +276,29 @@
   "processed_user_topic_entity_hint": null
 }
 
+示例 6
+输入：
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "我叫小明。帮我记住这个番茄炒蛋菜谱：食材：3个鸡蛋、2个番茄、盐少许、糖一勺、油适量。步骤一：打散鸡蛋加盐搅匀。步骤二：热锅倒油，油温七成热。步骤三：倒入蛋液炒至凝固盛出。步骤四：锅中加油放入番茄块翻炒出汁。步骤五：加盐糖调味，倒回鸡蛋翻炒均匀出锅装盘。"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+输出：
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "我叫小明。我说了帮我记住一个番茄炒蛋菜谱，包含鸡蛋、番茄等食材和五个烹饪步骤的详细做法。",
+  "processed_user_topic_entity_hint": "番茄炒蛋菜谱"
+}
+
 {% else %}
 You are a dialogue pruning and normalization module designed for memory storage.
 
@@ -552,6 +575,29 @@ Output:
   "should_process_user_msg": false,
   "processed_user_msg": null,
   "processed_user_topic_entity_hint": null
+}
+
+Few-shot Example 6
+Input:
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "My name is Alex. Please remember this tomato egg stir-fry recipe: Ingredients: 3 eggs, 2 tomatoes, a pinch of salt, one spoon of sugar, oil as needed. Step 1: Beat eggs with salt. Step 2: Heat pan with oil until 70% hot. Step 3: Pour in egg mixture and scramble until set, remove. Step 4: Add oil, stir-fry tomato chunks until juicy. Step 5: Add salt and sugar, return eggs and stir evenly, serve."
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+Output:
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "My name is Alex. I asked to remember a tomato egg stir-fry recipe, which includes eggs, tomatoes, and other ingredients with five detailed cooking steps.",
+  "processed_user_topic_entity_hint": "tomato egg stir-fry recipe"
 }
 {% endif %}
 

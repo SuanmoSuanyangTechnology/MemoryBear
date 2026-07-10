@@ -381,11 +381,13 @@ class WritePipeline:
                 # 可以直接取 dialog 节点的内容作为 UserSource 节点的内容
                 self._user_pruning_info = None
                 if pruning_records:
+                    # 优先匹配 LLM 剪枝路径（source=llm, should_process_user_msg=True）
                     target_pruning = next(
                         (r for r in pruning_records
                          if r.get("message_seq") == message_seq
                          and r.get("type") == "user_pruning"
-                         and r.get("output", {}).get("should_process_user_msg")),
+                         and r.get("source") == "llm"
+                         and (r.get("output") or {}).get("should_process_user_msg")),
                         None,
                     )
                     if target_pruning:
@@ -398,6 +400,26 @@ class WritePipeline:
                             "conversation_id": conversation_id or f"{self.end_user_id}_{source}",
                             "topic_entity_hint": _output.get("processed_user_topic_entity_hint", ""),
                         }
+                    else:
+                        # 回退：DB 缓存路径（source=db）— 前一次任务已完成 LLM 剪枝并回写 PG
+                        target_pruning_db = next(
+                            (r for r in pruning_records
+                             if r.get("message_seq") == message_seq
+                             and r.get("type") == "user_pruning"
+                             and r.get("source") == "db"
+                             and (r.get("output") or {}).get("topic_entity_hint")),
+                            None,
+                        )
+                        if target_pruning_db:
+                            _orig_text = target_pruning_db["input"]["msgs"][0]["msg"]
+                            _output = target_pruning_db["output"]
+                            self._user_pruning_info = {
+                                "original_text": _orig_text,
+                                "pruned_text": _output.get("pruned_content", ""),
+                                "message_seq": message_seq,
+                                "conversation_id": conversation_id or f"{self.end_user_id}_{source}",
+                                "topic_entity_hint": _output.get("topic_entity_hint", ""),
+                            }
 
                 # Step 2: 预处理 - 消息分块
                 async with bear.step(2, 6, "预处理", "消息分块") as s:
@@ -728,7 +750,7 @@ class WritePipeline:
         text_embedding = None
         if self._embedder_client and info["original_text"]:
             try:
-                text_embedding = await self._embedder_client.embed_query(info["original_text"])
+                text_embedding = await self._embedder_client.aembed_query(info["original_text"])
             except Exception as e:
                 logger.warning(f"[UserSource] 生成 text_embedding 失败（不影响写入）: {e}")
 
@@ -793,7 +815,7 @@ class WritePipeline:
         hint_emb = None
         if self._embedder_client and hint_name:
             try:
-                hint_emb = await self._embedder_client.embed_query(hint_name)
+                hint_emb = await self._embedder_client.aembed_query(hint_name)
             except Exception as e:
                 logger.warning(f"[UserSource] hint embedding 失败，降级全连: {e}")
 
