@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+from dataclasses import replace
 
 from app.core.rag.chunk.context import ChunkContext, ParseResult
 from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
@@ -73,12 +74,18 @@ class PdfChunkPipeline(ChunkPipeline):
 
 
 class PresentationChunkPipeline(ChunkPipeline):
+    START_PROGRESS = 0.1
+    CONVERT_PROGRESS = 0.2
+    CHILD_PROGRESS_START = 0.3
+    CHILD_PROGRESS_END = 0.75
+    FINISH_PROGRESS = 0.8
+
     def parse(self, ctx: ChunkContext) -> ParseResult:
-        self._callback(ctx, 0.1, "Start to parse.")
+        self._callback(ctx, self.START_PROGRESS, "Start to parse.")
         if self._file_extension(ctx) == ".pptx":
             try:
                 parse_result = MinerUV3Parser().parse(ctx)
-                self._callback(ctx, 0.8, "Finish parsing.")
+                self._callback(ctx, self.FINISH_PROGRESS, "Finish parsing.")
                 return parse_result
             except Exception as exc:
                 LOGGER.warning(
@@ -86,9 +93,13 @@ class PresentationChunkPipeline(ChunkPipeline):
                     ctx.filename,
                     exc,
                 )
-                self._callback(ctx, 0.78, "MinerU V3 failed, fallback to converted PDF flow.")
+                self._callback(ctx, self.CONVERT_PROGRESS, "MinerU V3 failed, convert presentation to PDF.")
+        else:
+            self._callback(ctx, self.CONVERT_PROGRESS, "Convert presentation to PDF.")
 
-        return self._parse_converted_pdf(ctx)
+        parse_result = self._parse_converted_pdf(ctx)
+        self._callback(ctx, self.FINISH_PROGRESS, "Finish parsing.")
+        return parse_result
 
     def _file_extension(self, ctx: ChunkContext) -> str:
         return os.path.splitext(ctx.filename)[1].lower()
@@ -96,6 +107,26 @@ class PresentationChunkPipeline(ChunkPipeline):
     def _callback(self, ctx: ChunkContext, progress, message: str) -> None:
         if ctx.callback:
             ctx.callback(progress, message)
+
+    def _converted_pdf_context(self, ctx: ChunkContext) -> ChunkContext:
+        if not ctx.callback:
+            return ctx
+
+        def converted_pdf_callback(progress=None, message=None):
+            mapped_progress = self._map_converted_pdf_progress(progress)
+            ctx.callback(mapped_progress, message)
+
+        return replace(ctx, callback=converted_pdf_callback)
+
+    def _map_converted_pdf_progress(self, progress):
+        if not isinstance(progress, (int, float)):
+            return progress
+
+        child_start = self.START_PROGRESS
+        child_end = self.FINISH_PROGRESS
+        ratio = (progress - child_start) / (child_end - child_start)
+        ratio = min(max(ratio, 0), 1)
+        return self.CHILD_PROGRESS_START + ratio * (self.CHILD_PROGRESS_END - self.CHILD_PROGRESS_START)
 
     def _parse_converted_pdf(self, ctx: ChunkContext) -> ParseResult:
         tmp_file = None
@@ -112,10 +143,11 @@ class PresentationChunkPipeline(ChunkPipeline):
 
             future = async_convert_to_pdf(tmp_file.name)
             dest_pdf_path = future.result()
+            child_ctx = self._converted_pdf_context(ctx)
             direct_result = self.run_child(
                 dest_pdf_path,
                 binary=None,
-                ctx=ctx,
+                ctx=child_ctx,
                 is_root=ctx.kwargs.get("is_root", True),
                 vision_model=ctx.vision_model,
             )
