@@ -157,6 +157,22 @@ class ApiKeyService:
         return api_key
 
     @staticmethod
+    async def get_api_key_async(
+            db: AsyncSession,
+            api_key_id: uuid.UUID,
+            workspace_id: uuid.UUID
+    ) -> ApiKey:
+        """Async version of get_api_key."""
+        api_key = await ApiKeyRepository.get_by_id_async(db, api_key_id)
+        if not api_key:
+            raise BusinessException(f"API Key {api_key_id} 不存在", BizCode.API_KEY_NOT_FOUND)
+
+        if api_key.workspace_id != workspace_id:
+            raise BusinessException("无权访问此 API Key", BizCode.FORBIDDEN)
+
+        return api_key
+
+    @staticmethod
     def list_api_keys(
             db: Session,
             workspace_id: uuid.UUID,

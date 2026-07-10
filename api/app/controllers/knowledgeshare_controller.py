@@ -1,10 +1,10 @@
 from typing import Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
-from app.dependencies import get_current_user
+from app.db import get_async_db
+from app.dependencies import get_current_user_async
 from app.models.user_model import User
 from app.models import knowledgeshare_model, knowledge_model
 from app.schemas import knowledgeshare_schema, knowledge_schema
@@ -19,7 +19,7 @@ api_logger = get_api_logger()
 router = APIRouter(
     prefix="/knowledgeshares",
     tags=["knowledgeshares"],
-    dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
+    dependencies=[Depends(get_current_user_async)]  # Apply auth to all routes in this controller
 )
 
 
@@ -30,8 +30,8 @@ async def get_knowledgeshares(
         pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
         orderby: Optional[str] = Query(None, description="Sort fields, such as: created_at,updated_at"),
         desc: Optional[bool] = Query(False, description="Is it descending order"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Paged query knowledge base sharing list
@@ -59,7 +59,7 @@ async def get_knowledgeshares(
     # 3. Execute paged query
     try:
         api_logger.debug("Start executing knowledge base sharing and paging query")
-        total, items = knowledgeshare_service.get_knowledgeshares_paginated(
+        total, items = await knowledgeshare_service.get_knowledgeshares_paginated_async(
             db=db,
             filters=filters,
             page=page,
@@ -92,8 +92,8 @@ async def get_knowledgeshares(
 @router.post("/knowledgeshare", response_model=ApiResponse)
 async def create_knowledgeshare(
         create_data: knowledgeshare_schema.KnowledgeShareCreate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     create knowledgeshare
@@ -103,7 +103,7 @@ async def create_knowledgeshare(
 
     try:
         # 1.Create a knowledge base with permission_id=knowledge_model.PermissionType.Share
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=create_data.source_kb_id, current_user=current_user)
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=create_data.source_kb_id, current_user=current_user)
         knowledge = knowledge_schema.KnowledgeCreate(
             workspace_id=create_data.target_workspace_id,
             created_by=current_user.id,
@@ -122,11 +122,11 @@ async def create_knowledgeshare(
             parser_id=db_knowledge.parser_id,
             parser_config=db_knowledge.parser_config
         )
-        db_knowledge = knowledge_service.create_knowledge(db=db, knowledge=knowledge, current_user=current_user)
+        db_knowledge = await knowledge_service.create_knowledge_async(db=db, knowledge=knowledge, current_user=current_user)
         # 2. Create a knowledge base for sharing
         api_logger.debug(f"Start creating the knowledge base sharing: {db_knowledge.name}")
         create_data.target_kb_id = db_knowledge.id
-        db_knowledgeshare = knowledgeshare_service.create_knowledgeshare(db=db, knowledgeshare=create_data, current_user=current_user)
+        db_knowledgeshare = await knowledgeshare_service.create_knowledgeshare_async(db=db, knowledgeshare=create_data, current_user=current_user)
         api_logger.info(f"The knowledge base sharing has been successfully created: (ID: {db_knowledgeshare.id})")
         return success(data=knowledgeshare_schema.KnowledgeShare.model_validate(db_knowledgeshare), msg="The knowledge base sharing has been successfully created")
     except Exception as e:
@@ -137,8 +137,8 @@ async def create_knowledgeshare(
 @router.get("/{knowledgeshare_id}", response_model=ApiResponse)
 async def get_knowledgeshare(
         knowledgeshare_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Retrieve knowledge base sharing information based on knowledgeshare_id
@@ -148,7 +148,7 @@ async def get_knowledgeshare(
     try:
         # 1. Query knowledge base sharing information from the database
         api_logger.debug(f"Query knowledge base sharing: {knowledgeshare_id}")
-        db_knowledgeshare = knowledgeshare_service.get_knowledgeshare_by_id(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
+        db_knowledgeshare = await knowledgeshare_service.get_knowledgeshare_by_id_async(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
         if not db_knowledgeshare:
             api_logger.warning(f"The knowledge base sharing does not exist or access is denied: knowledgeshare_id={knowledgeshare_id}")
             raise HTTPException(
@@ -168,8 +168,8 @@ async def get_knowledgeshare(
 @router.delete("/{knowledgeshare_id}", response_model=ApiResponse)
 async def delete_knowledgeshare(
         knowledgeshare_id: uuid.UUID,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Delete knowledge base sharing
@@ -179,7 +179,7 @@ async def delete_knowledgeshare(
     try:
         # 1. Query knowledge base sharing information from the database
         api_logger.debug(f"Query knowledge base sharing: {knowledgeshare_id}")
-        db_knowledgeshare = knowledgeshare_service.get_knowledgeshare_by_id(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
+        db_knowledgeshare = await knowledgeshare_service.get_knowledgeshare_by_id_async(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
         if not db_knowledgeshare:
             api_logger.warning(f"The knowledge base sharing does not exist or access is denied: knowledgeshare_id={knowledgeshare_id}")
             raise HTTPException(
@@ -187,11 +187,11 @@ async def delete_knowledgeshare(
                 detail="The knowledge base sharing does not exist or access is denied"
             )
         # 2. Deleting shared knowledge base
-        knowledge_service.delete_knowledge_by_id(db, knowledge_id=db_knowledgeshare.target_kb_id ,current_user=current_user)
+        await knowledge_service.delete_knowledge_by_id_async(db, knowledge_id=db_knowledgeshare.target_kb_id ,current_user=current_user)
         # 3. Delete knowledge base sharing
         api_logger.debug(f"perform knowledge base sharing delete: (ID: {knowledgeshare_id})")
 
-        knowledgeshare_service.delete_knowledgeshare_by_id(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
+        await knowledgeshare_service.delete_knowledgeshare_by_id_async(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
         api_logger.info(f"The knowledge base sharing has been successfully deleted: (ID: {knowledgeshare_id})")
         return success(msg="The knowledge base sharing has been successfully deleted")
     except Exception as e:

@@ -4,14 +4,14 @@ from typing import Any, Optional, Union
 import uuid
 
 from fastapi import APIRouter, Body, Depends, File, Request, status, Query, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import chunk_controller
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.core.rag.models.chunk import QAChunk
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_async_db
 from app.schemas import chunk_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
@@ -24,13 +24,13 @@ api_logger = get_business_logger()
 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_preview_chunks(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
     pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
     keywords: Optional[str] = Query(None, description="The keywords used to match chunk content")
@@ -42,7 +42,7 @@ async def get_preview_chunks(
     - Return paging metadata + file list
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -56,13 +56,13 @@ async def get_preview_chunks(
 
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_chunks(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
     pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
     keywords: Optional[str] = Query(None, description="The keywords used to match chunk content")
@@ -74,7 +74,7 @@ async def get_chunks(
     - Return paging metadata + file list
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -88,13 +88,13 @@ async def get_chunks(
 
 
 @router.post("/{kb_id}/{document_id}/chunk", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def create_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     content: Union[str, QAChunk] = Body(..., description="Content can be either a string or a QAChunk object"),
 ):
     """
@@ -103,7 +103,7 @@ async def create_chunk(
     body = await request.json()
     create_data = chunk_schema.ChunkCreate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -115,13 +115,13 @@ async def create_chunk(
 
 
 @router.post("/{kb_id}/{document_id}/chunk/batch", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def create_chunks_batch(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     items: list = Body(..., description="chunk items list"),
 ):
     """
@@ -130,7 +130,7 @@ async def create_chunks_batch(
     body = await request.json()
     batch_data = chunk_schema.ChunkBatchCreate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -142,20 +142,20 @@ async def create_chunks_batch(
 
 
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     doc_id: str,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Retrieve document chunk information based on doc_id
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -167,14 +167,14 @@ async def get_chunk(
 
 
 @router.put("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def update_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     doc_id: str,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     content: Union[str, QAChunk] = Body(..., description="Content can be either a string or a QAChunk object"),
 ):
     """
@@ -183,7 +183,7 @@ async def update_chunk(
     body = await request.json()
     update_data = chunk_schema.ChunkUpdate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -196,21 +196,21 @@ async def update_chunk(
 
 
 @router.delete("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def delete_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     doc_id: str,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     force_refresh: bool = Query(False, description="Force Elasticsearch refresh after deletion"),
 ):
     """
     delete document chunk
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -228,11 +228,11 @@ def get_retrieve_types():
 
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def retrieve_chunks(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     query: str = Body(..., description="question"),
 ):
     """
@@ -241,7 +241,7 @@ async def retrieve_chunks(
     body = await request.json()
     retrieve_data = chunk_schema.ChunkRetrieve(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -254,20 +254,20 @@ async def retrieve_chunks(
 
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def import_qa_new_doc(
     kb_id: uuid.UUID,
     request: Request,
     file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
     api_key_auth: ApiKeyAuth = None,
     parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
     导入 QA 问答对并新建文档（CSV/Excel），异步处理（API Key 认证）
     """
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 

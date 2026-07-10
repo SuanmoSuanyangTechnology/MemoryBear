@@ -41,6 +41,23 @@ class ModelConfigService:
         return model
 
     @staticmethod
+    async def get_model_by_id_async(
+            db: AsyncSession,
+            model_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
+    ) -> ModelConfig:
+        """Async version of get_model_by_id with the same availability checks."""
+        model = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id=tenant_id)
+        if not model:
+            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        if model.model_base and model.model_base.is_deprecated:
+            raise BusinessException(
+                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
+                BizCode.MODEL_DEPRECATED,
+            )
+        return model
+
+    @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
         """获取模型配置列表"""
         models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
