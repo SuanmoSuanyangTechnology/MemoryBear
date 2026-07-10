@@ -26,13 +26,14 @@ import magic
 import openpyxl
 import uuid
 from docx import Document
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.models import ModelApiKey
 from app.models.file_metadata_model import FileMetadata
 from app.models.models_model import ModelCapability
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
@@ -320,7 +321,7 @@ class MultimodalService:
 
     def __init__(
             self,
-            db: Session,
+            db: Session | AsyncSession,
             api_config: ModelInfo | None = None,
             audio_api_key: Optional[str] = None,
             enable_audio_transcription: bool = False,
@@ -343,6 +344,42 @@ class MultimodalService:
             self.capability = api_config.capability
         self.audio_api_key = audio_api_key
         self.enable_audio_transcription = enable_audio_transcription
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
+
+    async def _get_file_metadata(
+            self,
+            file_id: uuid.UUID | None,
+            *,
+            completed_only: bool = False,
+    ) -> FileMetadata | None:
+        if file_id is None:
+            return None
+
+        if self._uses_async_session():
+            stmt = select(FileMetadata).where(FileMetadata.id == file_id)
+            if completed_only:
+                stmt = stmt.where(FileMetadata.status == "completed")
+            return (await self.db.execute(stmt)).scalar_one_or_none()
+
+        query = self.db.query(FileMetadata).filter(FileMetadata.id == file_id)
+        if completed_only:
+            query = query.filter(FileMetadata.status == "completed")
+        return query.first()
+
+    async def _get_workspace_tenant_id(self, workspace_id: uuid.UUID | None) -> uuid.UUID | None:
+        if workspace_id is None:
+            return None
+
+        from app.models.workspace_model import Workspace as WorkspaceModel
+
+        if self._uses_async_session():
+            stmt = select(WorkspaceModel.tenant_id).where(WorkspaceModel.id == workspace_id)
+            return (await self.db.execute(stmt)).scalar_one_or_none()
+
+        ws = self.db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        return ws.tenant_id if ws else None
 
     async def process_files(
             self,
@@ -387,9 +424,7 @@ class MultimodalService:
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
                     if document_image_recognition and ModelCapability.VISION in self.capability:
                         img_infos = await self.extract_document_images(file)
-                        from app.models.workspace_model import Workspace as WorkspaceModel
-                        ws = self.db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
-                        tenant_id = ws.tenant_id if ws else None
+                        tenant_id = await self._get_workspace_tenant_id(workspace_id)
                         img_result = []
                         for img_info in img_infos:
                             page = img_info["page"]
@@ -478,9 +513,7 @@ class MultimodalService:
             server_url = settings.FILE_LOCAL_SERVER_URL
             file.url = f"{server_url}/storage/permanent/{file.upload_file_id}"
             text = await self.extract_document_text(file)
-            file_metadata = self.db.query(FileMetadata).filter(
-                FileMetadata.id == file.upload_file_id
-            ).first()
+            file_metadata = await self._get_file_metadata(file.upload_file_id)
             file_name = file_metadata.file_name if file_metadata else "unknown"
             return await strategy.format_document(file_name, text)
 
@@ -498,7 +531,7 @@ class MultimodalService:
             (file_id_str, permanent_url)
         """
         from app.services.file_storage_service import FileStorageService, generate_file_key
-        from app.db import get_db_context
+        from app.db import get_async_db_context
 
         file_id = uuid.uuid4()
         file_ext = f".{ext}" if not ext.startswith(".") else ext
@@ -508,7 +541,7 @@ class MultimodalService:
         storage_svc = FileStorageService()
         await storage_svc.storage.upload(file_key, img_bytes, content_type)
 
-        with get_db_context() as db:
+        async with get_async_db_context() as db:
             meta = FileMetadata(
                 id=file_id,
                 tenant_id=tenant_id,
@@ -521,7 +554,7 @@ class MultimodalService:
                 status="completed",
             )
             db.add(meta)
-            db.commit()
+            await db.commit()
 
         url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
         return str(file_id), url
@@ -599,10 +632,7 @@ class MultimodalService:
             file_id = file.upload_file_id
 
             # 查询 FileMetadata
-            file_metadata = self.db.query(FileMetadata).filter(
-                FileMetadata.id == file_id,
-                FileMetadata.status == "completed"
-            ).first()
+            file_metadata = await self._get_file_metadata(file_id, completed_only=True)
 
             if not file_metadata:
                 raise BusinessException(

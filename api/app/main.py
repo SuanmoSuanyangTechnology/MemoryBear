@@ -78,6 +78,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Sync Redis pool warmup skipped: {e}")
 
+    from app.core.workflow.nodes.http_client import init_http_client
+    await init_http_client()
+
     # Start background intervention timeout scanner
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
     start_timeout_scanner()
@@ -96,6 +99,8 @@ async def lifespan(app: FastAPI):
 
     from app.services.intervention_timeout_scheduler import stop as stop_timeout_scanner
     stop_timeout_scanner()
+    from app.core.workflow.nodes.http_client import close_http_client
+    await close_http_client()
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     await Neo4jConnector.shutdown()
     logger.info("应用程序正在关闭")

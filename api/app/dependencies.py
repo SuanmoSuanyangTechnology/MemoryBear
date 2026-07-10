@@ -1,6 +1,7 @@
 import uuid
-from contextlib import closing
+from dataclasses import dataclass
 from functools import wraps
+import time
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
@@ -10,7 +11,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
-from app.db import get_async_db, get_db, get_db_read, SessionLocal
+from app.db import get_async_db, get_async_db_context, get_db, get_db_read, get_db_context, SessionLocal
 from app.models import App
 from app.schemas import token_schema
 from app.core.config import settings
@@ -76,6 +77,17 @@ class APIKeyExtractor:
 api_key_extractor = APIKeyExtractor()
 
 
+@dataclass
+class CurrentUserSnapshot:
+    id: uuid.UUID
+    username: str
+    email: str
+    is_active: bool
+    is_superuser: bool
+    current_workspace_id: uuid.UUID | None
+    tenant_id: uuid.UUID
+    preferred_language: str | None = None
+    roles: tuple[str, ...] = ()
 
 async def get_current_user(
         token: str = Depends(oauth2_scheme),
@@ -84,6 +96,24 @@ async def get_current_user(
     """
     获取当前认证用户
     """
+    auth_started_at = time.perf_counter()
+    auth_last_checkpoint_at = auth_started_at
+
+    def _log_auth_timing(stage: str, **extra) -> None:
+        nonlocal auth_last_checkpoint_at
+        now = time.perf_counter()
+        payload_items = {
+            "stage": stage,
+            "elapsed_ms": round((now - auth_started_at) * 1000, 2),
+            "step_ms": round((now - auth_last_checkpoint_at) * 1000, 2),
+        }
+        payload_items.update(extra)
+        auth_logger.info(
+            "[TIMING] auth.get_current_user %s",
+            " ".join(f"{k}={v}" for k, v in payload_items.items()),
+        )
+        auth_last_checkpoint_at = now
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -101,6 +131,7 @@ async def get_current_user(
 
         token_data = token_schema.TokenData(userId=user_id)
         auth_logger.debug(f"JWT解析成功，用户ID: {user_id}")
+        _log_auth_timing("jwt_decoded", user_id=user_id)
 
     except JWTError as e:
         auth_logger.warning(f"JWT解析失败: {str(e)}")
@@ -129,6 +160,7 @@ async def get_current_user(
                 raise credentials_exception
 
         auth_logger.debug("单点登录检查通过")
+        _log_auth_timing("session_checked")
 
     except HTTPException:
         raise
@@ -148,6 +180,11 @@ async def get_current_user(
             raise credentials_exception
 
         auth_logger.info(f"用户认证成功: {user.username} (ID: {user.id})")
+        _log_auth_timing(
+            "user_loaded",
+            user_id=str(user.id),
+            workspace_id=str(user.current_workspace_id) if user.current_workspace_id else None,
+        )
         return user
 
     except Exception as e:
@@ -157,11 +194,29 @@ async def get_current_user(
 
 async def get_current_user_async(
         token: str = Depends(oauth2_scheme),
-        db: AsyncSession = Depends(get_async_db)
-) -> User:
+) -> CurrentUserSnapshot:
     """
-    Async version of get_current_user for async request chains.
+    获取当前认证用户的异步快照版本。
+    仅返回热点链路需要的字段，避免把同步 ORM Session 挂到整个流式请求生命周期。
     """
+    auth_started_at = time.perf_counter()
+    auth_last_checkpoint_at = auth_started_at
+
+    def _log_auth_timing(stage: str, **extra) -> None:
+        nonlocal auth_last_checkpoint_at
+        now = time.perf_counter()
+        payload_items = {
+            "stage": stage,
+            "elapsed_ms": round((now - auth_started_at) * 1000, 2),
+            "step_ms": round((now - auth_last_checkpoint_at) * 1000, 2),
+        }
+        payload_items.update(extra)
+        auth_logger.info(
+            "[TIMING] auth.get_current_user_async %s",
+            " ".join(f"{k}={v}" for k, v in payload_items.items()),
+        )
+        auth_last_checkpoint_at = now
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -169,28 +224,20 @@ async def get_current_user_async(
     )
 
     try:
-        auth_logger.debug("开始解析JWT token")
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
-
         if user_id is None:
-            auth_logger.warning("JWT token中缺少用户ID")
             raise credentials_exception
-
         token_data = token_schema.TokenData(userId=user_id)
-        auth_logger.debug(f"JWT解析成功，用户ID: {user_id}")
-
-    except JWTError as e:
-        auth_logger.warning(f"JWT解析失败: {str(e)}")
+        _log_auth_timing("jwt_decoded", user_id=user_id)
+    except JWTError:
         raise credentials_exception
 
     try:
-        auth_logger.debug("检查单点登录黑名单")
         token_id = get_token_id(token)
         session_service = SessionService()
 
         if await session_service.is_token_blacklisted(token_id):
-            auth_logger.warning(f"Token已被列入黑名单: {token_id}")
             raise credentials_exception
 
         invalidation_time_str = await session_service.get_user_token_invalidation_time(user_id)
@@ -199,45 +246,62 @@ async def get_current_user_async(
             invalidation_time = datetime.fromisoformat(invalidation_time_str)
             token_issued_at = datetime.fromtimestamp(payload.get("iat", 0), tz=timezone.utc) if payload.get(
                 "iat") else None
-
             if token_issued_at and token_issued_at < invalidation_time:
-                auth_logger.warning(f"Token在密码重置前签发，已失效: user_id={user_id}")
                 raise credentials_exception
 
-        auth_logger.debug("单点登录检查通过")
-
+        _log_auth_timing("session_checked")
     except HTTPException:
         raise
-    except Exception as e:
-        auth_logger.error(f"检查token有效性时发生错误: {str(e)}")
+    except Exception:
         raise credentials_exception
 
     try:
-        auth_logger.debug(f"查询用户信息: {token_data.userId}")
-        result = await db.execute(
-            select(User)
-            .options(joinedload(User.tenant))
-            .where(User.id == token_data.userId, User.is_active.is_(True))
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(
+                    User.id,
+                    User.username,
+                    User.email,
+                    User.is_active,
+                    User.is_superuser,
+                    User.current_workspace_id,
+                    User.tenant_id,
+                    User.preferred_language,
+                    Tenants.is_active.label("tenant_is_active"),
+                )
+                .join(Tenants, Tenants.id == User.tenant_id)
+                .where(
+                    User.id == token_data.userId,
+                    User.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            row = result.mappings().one_or_none()
+            if row is None:
+                raise credentials_exception
+            if not row["tenant_is_active"]:
+                raise credentials_exception
+            snapshot = CurrentUserSnapshot(
+                id=row["id"],
+                username=row["username"],
+                email=row["email"],
+                is_active=row["is_active"],
+                is_superuser=row["is_superuser"],
+                current_workspace_id=row["current_workspace_id"],
+                tenant_id=row["tenant_id"],
+                preferred_language=row["preferred_language"],
+                roles=(),
+            )
+        _log_auth_timing(
+            "user_loaded",
+            user_id=str(snapshot.id),
+            workspace_id=str(snapshot.current_workspace_id) if snapshot.current_workspace_id else None,
         )
-        user = result.scalars().first()
-
-        if user is None:
-            auth_logger.warning(f"用户不存在: {token_data.userId}")
-            raise credentials_exception
-        if user.tenant and not user.tenant.is_active:
-            auth_logger.warning(f"用户 {user.username} (ID: {user.id}) 所属租户 {user.tenant_id} 已被禁用")
-            raise credentials_exception
-        if not user.is_active:
-            auth_logger.warning(f"用户已被停用: {user.username} (ID: {user.id})")
-            raise credentials_exception
-
-        auth_logger.info(f"用户认证成功: {user.username} (ID: {user.id})")
-        return user
-
+        return snapshot
     except HTTPException:
         raise
     except Exception as e:
-        auth_logger.error(f"查询用户信息时发生错误: {str(e)}")
+        auth_logger.error(f"异步查询用户信息时发生错误: {str(e)}")
         raise credentials_exception
 
 
@@ -520,24 +584,46 @@ def cur_workspace_access_guard():
         if asyncio.iscoroutinefunction(func):
             @wraps(func)
             async def _async_wrapper(*args, **kwargs):
+                guard_started_at = time.perf_counter()
                 db: Session = kwargs.get("db")
                 user: User = kwargs.get("current_user")
                 workspace_id = user.current_workspace_id
                 if workspace_id is None:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
-                _check_workspace_access_sync(db, user, workspace_id)
+                if db is not None:
+                    _check_workspace_access_sync(db, user, workspace_id)
+                else:
+                    with get_db_context() as guard_db:
+                        _check_workspace_access_sync(guard_db, user, workspace_id)
+                auth_logger.info(
+                    "[TIMING] auth.cur_workspace_access_guard stage=checked elapsed_ms=%s workspace_id=%s user_id=%s",
+                    round((time.perf_counter() - guard_started_at) * 1000, 2),
+                    str(workspace_id),
+                    str(user.id),
+                )
                 return await func(*args, **kwargs)
 
             return _async_wrapper
         else:
             @wraps(func)
             def _sync_wrapper(*args, **kwargs):
+                guard_started_at = time.perf_counter()
                 db: Session = kwargs.get("db")
                 user: User = kwargs.get("current_user")
                 workspace_id = user.current_workspace_id
                 if workspace_id is None:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
-                _check_workspace_access_sync(db, user, workspace_id)
+                if db is not None:
+                    _check_workspace_access_sync(db, user, workspace_id)
+                else:
+                    with get_db_context() as guard_db:
+                        _check_workspace_access_sync(guard_db, user, workspace_id)
+                auth_logger.info(
+                    "[TIMING] auth.cur_workspace_access_guard stage=checked elapsed_ms=%s workspace_id=%s user_id=%s",
+                    round((time.perf_counter() - guard_started_at) * 1000, 2),
+                    str(workspace_id),
+                    str(user.id),
+                )
                 return func(*args, **kwargs)
 
             return _sync_wrapper

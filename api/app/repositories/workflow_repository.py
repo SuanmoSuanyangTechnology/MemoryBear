@@ -4,6 +4,7 @@
 
 import uuid
 from typing import Any, Annotated, Literal
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, select, delete
 from fastapi import Depends
@@ -20,7 +21,7 @@ from app.db import get_db
 class WorkflowConfigRepository:
     """工作流配置仓储"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
     
     def get_by_app_id(self, app_id: uuid.UUID) -> WorkflowConfig | None:
@@ -36,6 +37,16 @@ class WorkflowConfigRepository:
             WorkflowConfig.app_id == app_id,
             WorkflowConfig.is_active.is_(True)
         ).first()
+
+    async def get_by_app_id_async(self, app_id: uuid.UUID) -> WorkflowConfig | None:
+        """根据应用 ID 异步获取工作流配置"""
+        result = await self.db.execute(
+            select(WorkflowConfig).where(
+                WorkflowConfig.app_id == app_id,
+                WorkflowConfig.is_active.is_(True)
+            ).limit(1)
+        )
+        return result.scalar_one_or_none()
 
     def list_active(self) -> list[WorkflowConfig]:
         """获取所有启用中的工作流配置。"""
@@ -141,7 +152,7 @@ class WorkflowConfigRepository:
 class WorkflowExecutionRepository:
     """工作流执行记录仓储"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
     
     def get_by_execution_id(self, execution_id: str) -> WorkflowExecution | None:
@@ -235,7 +246,7 @@ class WorkflowExecutionRepository:
 class WorkflowNodeExecutionRepository:
     """工作流节点执行记录仓储"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def create(self, **kwargs) -> WorkflowNodeExecution:
@@ -332,7 +343,7 @@ class WorkflowNodeExecutionRepository:
 class WorkflowNodeCacheRepository:
     """工作流节点缓存仓储"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def create(self, **kwargs) -> WorkflowNodeCache:

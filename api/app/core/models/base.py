@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any, ClassVar, Dict, List, Optional, TypeVar
 
+import httpx
 from langchain_aws import ChatBedrock
 from langchain_community.chat_models import ChatTongyi
 from langchain_core.embeddings import Embeddings
@@ -17,6 +19,37 @@ from app.models.models_model import ModelProvider, ModelType, ModelCapability
 from app.core.models.compatible_chat import CompatibleChatOpenAI
 
 T = TypeVar("T")
+_OPENAI_HTTP_CLIENTS: dict[
+    tuple[float | None, float | None, float | None, float | None],
+    tuple[httpx.Client, httpx.AsyncClient],
+] = {}
+_OPENAI_HTTP_CLIENTS_LOCK = threading.Lock()
+
+
+def _get_shared_openai_clients(
+        timeout_config: httpx.Timeout,
+) -> tuple[httpx.Client, httpx.AsyncClient]:
+    key = (
+        getattr(timeout_config, "connect", None),
+        getattr(timeout_config, "read", None),
+        getattr(timeout_config, "write", None),
+        getattr(timeout_config, "pool", None),
+    )
+    with _OPENAI_HTTP_CLIENTS_LOCK:
+        clients = _OPENAI_HTTP_CLIENTS.get(key)
+        if clients is not None:
+            return clients
+
+        limits = httpx.Limits(
+            max_connections=int(os.getenv("LLM_HTTP_MAX_CONNECTIONS", "300")),
+            max_keepalive_connections=int(os.getenv("LLM_HTTP_MAX_KEEPALIVE", "50")),
+        )
+        clients = (
+            httpx.Client(timeout=timeout_config, limits=limits, follow_redirects=True),
+            httpx.AsyncClient(timeout=timeout_config, limits=limits, follow_redirects=True),
+        )
+        _OPENAI_HTTP_CLIENTS[key] = clients
+        return clients
 
 
 class RedBearModelConfig(BaseModel):
@@ -178,7 +211,6 @@ class RedBearModelFactory:
 
         # dashscope 的 omni 模型使用 OpenAI 兼容模式
         if provider == ModelProvider.DASHSCOPE and config.is_omni:
-            import httpx
             if not config.base_url:
                 config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
             timeout_config = httpx.Timeout(
@@ -188,12 +220,15 @@ class RedBearModelFactory:
                 write=60.0,
                 pool=10.0,
             )
+            http_client, http_async_client = _get_shared_openai_clients(timeout_config)
             params: Dict[str, Any] = {
                 "model": config.model_name,
                 "base_url": config.base_url,
                 "api_key": config.api_key,
                 "timeout": timeout_config,
                 "max_retries": config.max_retries,
+                "http_client": http_client,
+                "http_async_client": http_async_client,
                 **filtered_extra_params
             }
             if default_headers:
@@ -240,7 +275,6 @@ class RedBearModelFactory:
         ]:
             # 使用 httpx.Timeout 对象来设置详细的超时配置
             # 这样可以分别控制连接超时和读取超时
-            import httpx
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,  # 总超时时间
                 connect=60.0,  # 连接超时：60秒（足够建立 TCP 连接）
@@ -248,6 +282,7 @@ class RedBearModelFactory:
                 write=60.0,  # 写入超时：60秒
                 pool=10.0,  # 连接池超时：10秒
             )
+            http_client, http_async_client = _get_shared_openai_clients(timeout_config)
             # OllamaLLM 有 top_k 原生字段，可直接传入顶层；
             # ChatOpenAI/CompatibleChatOpenAI 不支持 top_k，OpenAI API 也无此参数，不能放入 model_kwargs
             # 否则会透传到 AsyncCompletions.create() 导致 unexpected keyword argument 错误
@@ -263,6 +298,8 @@ class RedBearModelFactory:
                 "api_key": config.api_key,
                 "timeout": timeout_config,
                 "max_retries": config.max_retries,
+                "http_client": http_client,
+                "http_async_client": http_async_client,
                 **filtered_extra_params
             }
 

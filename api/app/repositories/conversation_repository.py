@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select, desc, func
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ResourceNotFoundException
@@ -16,7 +17,7 @@ logger = get_db_logger()
 class ConversationRepository:
     """Repository for Conversation entity, encapsulating CRUD operations."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def create_conversation(
@@ -79,6 +80,28 @@ class ConversationRepository:
             stmt = stmt.where(Conversation.workspace_id == workspace_id)
 
         conversation = self.db.scalars(stmt).first()
+
+        if not conversation:
+            logger.warning(f"Conversation not found: {conversation_id}")
+            raise ResourceNotFoundException("Conversation", str(conversation_id))
+
+        logger.info(f"Conversation fetched successfully: {conversation_id}")
+        return conversation
+
+    async def get_conversation_by_conversation_id_async(
+            self,
+            conversation_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
+    ) -> Conversation:
+        logger.info(f"Fetching conversation: {conversation_id}")
+
+        stmt = select(Conversation).where(Conversation.id == conversation_id)
+
+        if workspace_id:
+            stmt = stmt.where(Conversation.workspace_id == workspace_id)
+
+        result = await self.db.execute(stmt)
+        conversation = result.scalar_one_or_none()
 
         if not conversation:
             logger.warning(f"Conversation not found: {conversation_id}")
@@ -419,7 +442,7 @@ class ConversationRepository:
 class MessageRepository:
     """Repository for Message entity, encapsulating CRUD operations."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def add_message(self, message: Message) -> Message:
@@ -500,16 +523,47 @@ class MessageRepository:
             Message.conversation_id == conversation_id,
             Message.is_deleted.is_not(True),
         )
-        
+
         if current_only:
             stmt = stmt.where(Message.is_current.is_not(False))
-        
+
         stmt = stmt.order_by(Message.created_at)
 
         if limit:
             stmt = stmt.limit(limit)
 
         messages = list(self.db.scalars(stmt).all())
+
+        logger.info(
+            "Fetched messages successfully",
+            extra={
+                "conversation_id": str(conversation_id),
+                "returned": len(messages),
+                "current_only": current_only
+            }
+        )
+        return messages
+
+    async def get_message_by_conversation_id_async(
+            self,
+            conversation_id: uuid.UUID,
+            limit: Optional[int] = None,
+            current_only: bool = True
+    ) -> list[Message]:
+        stmt = select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_not(True),
+        )
+
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+
+        stmt = stmt.order_by(Message.created_at)
+
+        if limit:
+            stmt = stmt.limit(limit)
+
+        messages = list((await self.db.scalars(stmt)).all())
 
         logger.info(
             "Fetched messages successfully",
@@ -552,6 +606,38 @@ class MessageRepository:
         )
         return messages
 
+    async def get_messages_since_async(
+            self,
+            conversation_id: uuid.UUID,
+            since_at: Optional[datetime] = None,
+            current_only: bool = True,
+    ) -> list[Message]:
+        """按时间边界异步读取会话消息，结果按时间正序返回。"""
+        stmt = select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_not(True),
+        )
+
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+
+        if since_at is not None:
+            stmt = stmt.where(Message.created_at >= since_at)
+
+        stmt = stmt.order_by(Message.created_at)
+        result = await self.db.execute(stmt)
+        messages = list(result.scalars().all())
+        logger.debug(
+            "Fetched messages since boundary",
+            extra={
+                "conversation_id": str(conversation_id),
+                "since_at": since_at.isoformat() if since_at else None,
+                "returned": len(messages),
+                "current_only": current_only,
+            }
+        )
+        return messages
+
     def get_recent_messages_from_other_conversations(
             self,
             *,
@@ -582,6 +668,50 @@ class MessageRepository:
             stmt = stmt.where(Message.is_current.is_not(False))
 
         messages = list(self.db.scalars(stmt).all())
+        messages.reverse()
+        logger.info(
+            "Fetched recent messages from other conversations",
+            extra={
+                "app_id": str(app_id),
+                "user_id": user_id,
+                "exclude_conversation_id": str(exclude_conversation_id),
+                "returned": len(messages),
+                "current_only": current_only,
+            }
+        )
+        return messages
+
+    async def get_recent_messages_from_other_conversations_async(
+            self,
+            *,
+            app_id: uuid.UUID,
+            user_id: str,
+            exclude_conversation_id: uuid.UUID,
+            limit: int,
+            current_only: bool = True,
+    ) -> list[Message]:
+        """异步读取同应用同用户其他会话的最近消息，结果按时间正序返回。"""
+        if not user_id or limit <= 0:
+            return []
+
+        stmt = (
+            select(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.app_id == app_id,
+                Conversation.user_id == user_id,
+                Conversation.id != exclude_conversation_id,
+                Message.is_deleted.is_not(True),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+
+        result = await self.db.execute(stmt)
+        messages = list(result.scalars().all())
         messages.reverse()
         logger.info(
             "Fetched recent messages from other conversations",

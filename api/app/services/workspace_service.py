@@ -1348,6 +1348,27 @@ def get_workspace_storage_type_without_auth(
     return workspace.storage_type
 
 
+async def get_workspace_storage_type_without_auth_async(
+        db: AsyncSession,
+        workspace_id: uuid.UUID,
+) -> str:
+    """异步获取工作空间存储类型（无需权限验证，用于公开分享等场景）。"""
+    from app.models.workspace_model import Workspace
+
+    business_logger.info(f"获取工作空间 {workspace_id} 的存储类型（无权限验证，async）")
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = result.scalars().first()
+    if not workspace:
+        business_logger.error(f"工作空间不存在: workspace_id={workspace_id}")
+        raise BusinessException(
+            code=BizCode.WORKSPACE_NOT_FOUND,
+            message="工作空间不存在"
+        )
+
+    business_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {workspace.storage_type}")
+    return workspace.storage_type
+
+
 def get_workspace_models_configs(
         db: Session,
         workspace_id: uuid.UUID,

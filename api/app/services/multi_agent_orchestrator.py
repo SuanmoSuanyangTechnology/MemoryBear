@@ -2,7 +2,9 @@
 import uuid
 import time
 import asyncio
+import inspect
 from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models import MultiAgentConfig, AgentConfig, ModelConfig
@@ -22,7 +24,7 @@ logger = get_business_logger()
 class MultiAgentOrchestrator:
     """多 Agent 编排器 - 协调多个 Agent 协作完成任务"""
 
-    def __init__(self, db: Session, config: MultiAgentConfig):
+    def __init__(self, db: Session | AsyncSession, config: MultiAgentConfig):
         """初始化编排器
 
         Args:
@@ -43,55 +45,75 @@ class MultiAgentOrchestrator:
         self.default_model_config_id = config.default_model_config_id
         self.model_parameters = config.model_parameters
         self.tenant_id = None
-        if getattr(config, "app", None) and getattr(config.app, "workspace_id", None):
-            self.tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, str(config.app.workspace_id))
-
-        # 加载子 Agent
         self.sub_agents = {}
+        self.state_manager = ConversationStateManager()
+        self.master_model_config = None
+        self.router = None
+
+    @staticmethod
+    async def _maybe_await(value):
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
+    async def _db_get(self, model, identity):
+        return await self._maybe_await(self.db.get(model, identity))
+
+    @classmethod
+    async def create(cls, db: Session | AsyncSession, config: MultiAgentConfig) -> "MultiAgentOrchestrator":
+        orchestrator = cls(db, config)
+
+        if getattr(config, "app", None) and getattr(config.app, "workspace_id", None):
+            if isinstance(db, AsyncSession):
+                orchestrator.tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(
+                    db,
+                    str(config.app.workspace_id),
+                )
+            else:
+                orchestrator.tenant_id = ToolRepository.get_tenant_id_by_workspace_id(
+                    db,
+                    str(config.app.workspace_id),
+                )
+
         for sub_agent_info in config.sub_agents:
             agent_id = uuid.UUID(sub_agent_info["agent_id"])
-            agent = self._load_agent(agent_id)
-            self.sub_agents[str(agent_id)] = {
+            agent = await orchestrator._load_agent_async(agent_id)
+            orchestrator.sub_agents[str(agent_id)] = {
                 "config": agent,
                 "info": sub_agent_info
             }
 
-        # 初始化会话状态管理器
-        self.state_manager = ConversationStateManager()
-
-        # 只有 supervisor 模式才需要 default_model_config_id 和 router
-        self.master_model_config = None
-        self.router = None
-
-        if self._normalized_mode == OrchestrationMode.SUPERVISOR:
-            # 获取 Master Agent 的模型配置
-            if not self.default_model_config_id:
+        if orchestrator._normalized_mode == OrchestrationMode.SUPERVISOR:
+            if not orchestrator.default_model_config_id:
                 raise BusinessException("Supervisor 模式需要配置默认模型", BizCode.AGENT_CONFIG_MISSING)
 
-            self.master_model_config = self.db.get(ModelConfig, self.default_model_config_id)
-            if not self.master_model_config:
+            orchestrator.master_model_config = await orchestrator._db_get(
+                ModelConfig,
+                orchestrator.default_model_config_id,
+            )
+            if not orchestrator.master_model_config:
                 raise BusinessException("Master Agent 模型配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
-            # 初始化 Master Agent 路由器
-            self.router = MasterAgentRouter(
+            orchestrator.router = MasterAgentRouter(
                 db=db,
-                master_model_config=self.master_model_config,
-                model_parameters=self.model_parameters,
-                sub_agents=self.sub_agents,
-                state_manager=self.state_manager,
-                tenant_id=self.tenant_id,
+                master_model_config=orchestrator.master_model_config,
+                model_parameters=orchestrator.model_parameters,
+                sub_agents=orchestrator.sub_agents,
+                state_manager=orchestrator.state_manager,
+                tenant_id=orchestrator.tenant_id,
                 enable_rule_fast_path=config.execution_config.get("enable_rule_fast_path", True)
             )
-
         logger.info(
             "多 Agent 编排器初始化完成",
             extra={
                 "config_id": str(config.id),
-                "model": self.master_model_config.name if self.master_model_config else None,
-                "sub_agent_count": len(self.sub_agents),
-                "orchestration_mode": self._normalized_mode
+                "model": orchestrator.master_model_config.name if orchestrator.master_model_config else None,
+                "sub_agent_count": len(orchestrator.sub_agents),
+                "orchestration_mode": orchestrator._normalized_mode
             }
         )
+
+        return orchestrator
 
     def _normalize_orchestration_mode(self, mode: str) -> str:
         """标准化 orchestration_mode，兼容旧值
@@ -1294,7 +1316,7 @@ class MultiAgentOrchestrator:
         from app.services.draft_run_service import AgentRunService
 
         # 获取模型配置
-        model_config = self.db.get(ModelConfig, agent_config.default_model_config_id)
+        model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
         if not model_config:
             raise BusinessException(
                 "Agent 模型配置不存在",
@@ -1347,7 +1369,7 @@ class MultiAgentOrchestrator:
         from app.services.draft_run_service import AgentRunService
 
         # 获取模型配置
-        model_config = self.db.get(ModelConfig, agent_config.default_model_config_id)
+        model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
         if not model_config:
             raise BusinessException(
                 "Agent 模型配置不存在",
@@ -1616,7 +1638,7 @@ class MultiAgentOrchestrator:
         import json
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    def _load_agent(self, release_id: uuid.UUID):
+    async def _load_agent_async(self, release_id: uuid.UUID):
         """从发布版本加载 Agent 配置
 
         Args:
@@ -1628,7 +1650,7 @@ class MultiAgentOrchestrator:
         from app.models import AppRelease, App
 
         # 获取发布版本
-        release = self.db.get(AppRelease, release_id)
+        release = await self._db_get(AppRelease, release_id)
         if not release:
             raise ResourceNotFoundException("发布版本", str(release_id))
 
@@ -1638,7 +1660,7 @@ class MultiAgentOrchestrator:
             raise BusinessException(f"发布版本 {release_id} 缺少配置数据", BizCode.AGENT_CONFIG_MISSING)
 
         # 获取应用信息（用于 workspace_id）
-        app = self.db.get(App, release.app_id)
+        app = await self._db_get(App, release.app_id)
         if not app:
             raise ResourceNotFoundException("应用", str(release.app_id))
 
@@ -2598,7 +2620,7 @@ class MultiAgentOrchestrator:
             # ).first()
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
             # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = ModelApiKeyService.get_available_api_key(
+            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
                 self.db,
                 default_model_config_id,
                 tenant_id=self.tenant_id,
@@ -2637,7 +2659,7 @@ class MultiAgentOrchestrator:
             # 调用模型进行整合
             response = await llm.ainvoke(merge_prompt)
 
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
+            await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_config.id)
 
             # 提取整合消耗的 token
             merge_tokens = 0
@@ -2782,7 +2804,7 @@ class MultiAgentOrchestrator:
             # ).first()
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
             # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = ModelApiKeyService.get_available_api_key(
+            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
                 self.db,
                 default_model_config_id,
                 tenant_id=self.tenant_id,

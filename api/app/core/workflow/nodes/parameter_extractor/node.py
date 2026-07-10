@@ -13,9 +13,10 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig, InferenceMode
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
-from app.db import get_db_read
+from app.db import get_async_db_context, get_db_read
 from app.models import ModelType
 from app.models.models_model import ModelCapability
+from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,46 @@ class ParameterExtractorNode(BaseNode):
             type=ModelType(model_type)
         )
         return llm
+
+    async def _load_model_info_async(self, variable_pool: VariablePool) -> ModelInfo:
+        tenant_id = await self.resolve_tenant_id_async(variable_pool)
+
+        async with get_async_db_context() as db:
+            return await ModelConfigService.get_runtime_model_info_async(
+                db,
+                self.typed_config.model_id,
+                tenant_id=tenant_id,
+            )
+
+    def _get_model_info_sync(self, variable_pool: VariablePool) -> ModelInfo:
+        with get_db_read() as db:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
+            if not config:
+                raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
+
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
+            return ModelInfo(
+                model_name=api_config.model_name,
+                model_type=ModelType(config.type),
+                api_key=api_config.api_key,
+                api_base=api_config.api_base,
+                provider=api_config.provider,
+                is_omni=api_config.is_omni,
+                capability=api_config.capability,
+            )
+
+    def _build_llm_from_model_info(self, model_info: ModelInfo) -> RedBearLLM:
+        self._model_capability = model_info.capability or []
+        return RedBearLLM(
+            RedBearModelConfig(
+                model_name=model_info.model_name,
+                provider=model_info.provider,
+                api_key=model_info.api_key,
+                base_url=model_info.api_base,
+                is_omni=model_info.is_omni
+            ),
+            type=model_info.model_type
+        )
 
     def _get_field_desc(self) -> dict[str, str]:
         """
@@ -281,7 +322,8 @@ class ParameterExtractorNode(BaseNode):
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = self._get_typed_config()
-        llm = self._get_llm_instance(variable_pool)
+        model_info = await self._load_model_info_async(variable_pool)
+        llm = self._build_llm_from_model_info(model_info)
 
         actual_mode = self._resolve_inference_mode()
         logger.info(f"node: {self.node_id} inference_mode={actual_mode}")

@@ -1,11 +1,11 @@
 """工具服务 - 统一的工具管理和执行服务"""
-import json
 import uuid
 import time
 import importlib
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from sqlalchemy import select
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
@@ -54,7 +54,7 @@ BUILTIN_TOOLS = {
 class ToolService:
     """统一工具服务 - 管理工具的完整生命周期"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self._tool_cache: Dict[str, BaseTool] = {}
 
@@ -68,6 +68,9 @@ class ToolService:
         self.mcp_repo = MCPToolRepository()
         self.workflow_repo = WorkflowToolRepository()
         self.execution_repo = ToolExecutionRepository()
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
 
     def list_tools(
             self,
@@ -310,7 +313,17 @@ class ToolService:
 
         try:
             # 获取工具实例
-            tool = self.get_tool_instance(tool_id, tenant_id)
+            if self._uses_async_session():
+                tool_config = await self.get_tool_config_async(tool_id, tenant_id)
+                if tool_config and tool_config.tool_type == ToolType.WORKFLOW.value:
+                    # ponytail: workflow tools still bind sync WorkflowService; keep them off the async node hot path for now.
+                    return ToolResult.error_result(
+                        error="工作流工具暂未接入异步执行路径",
+                        execution_time=time.time() - start_time,
+                    )
+                tool = await self.get_tool_instance_async(tool_id, tenant_id)
+            else:
+                tool = self.get_tool_instance(tool_id, tenant_id)
             if not tool:
                 return ToolResult.error_result(
                     error=f"工具不存在: {tool_id}",
@@ -318,16 +331,24 @@ class ToolService:
                 )
 
             # 记录执行开始
-            self._record_execution_start(
-                execution_id, tool_id, parameters, user_id, workspace_id
-            )
+            if self._uses_async_session():
+                await self._record_execution_start_async(
+                    execution_id, tool_id, parameters, user_id, workspace_id
+                )
+            else:
+                self._record_execution_start(
+                    execution_id, tool_id, parameters, user_id, workspace_id
+                )
 
             # 执行工具
             tool.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
             result = await tool.safe_execute(**parameters)
 
             # 记录执行完成
-            self._record_execution_complete(execution_id, result)
+            if self._uses_async_session():
+                await self._record_execution_complete_async(execution_id, result)
+            else:
+                self._record_execution_complete(execution_id, result)
 
             return result
 
@@ -337,7 +358,10 @@ class ToolService:
                 error=str(e),
                 execution_time=execution_time
             )
-            self._record_execution_complete(execution_id, error_result)
+            if self._uses_async_session():
+                await self._record_execution_complete_async(execution_id, error_result)
+            else:
+                self._record_execution_complete(execution_id, error_result)
             return error_result
 
     async def test_connection(self, tool_id: str, tenant_id: uuid.UUID) -> Dict[str, Any]:
@@ -979,9 +1003,28 @@ class ToolService:
         """获取工具配置(仅返回 is_active=True)"""
         return self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
 
+    async def get_tool_config_async(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
+        """异步获取工具配置(仅返回 is_active=True)"""
+        if not self._uses_async_session():
+            return self._get_tool_config(tool_id, tenant_id)
+
+        stmt = select(ToolConfig).where(
+            ToolConfig.id == uuid.UUID(tool_id),
+            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.is_active.is_(True),
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
     def _get_tool_config_all(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
         """获取工具配置（返回所有）"""
         return self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
+
+    async def _get_type_config_async(self, config_model: type, config_id: uuid.UUID):
+        if not self._uses_async_session():
+            return self.db.query(config_model).filter(config_model.id == config_id).first()
+
+        stmt = select(config_model).where(config_model.id == config_id)
+        return (await self.db.execute(stmt)).scalar_one_or_none()
 
     def get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
         """获取工具实例（仅返回 is_active=True 的工具）"""
@@ -1001,6 +1044,24 @@ class ToolService:
             logger.error(f"创建工具实例失败: {tool_id}, {e}")
             return None
 
+    async def get_tool_instance_async(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
+        """异步获取工具实例（仅返回 is_active=True 的工具）"""
+        if tool_id in self._tool_cache:
+            return self._tool_cache[tool_id]
+
+        config = await self.get_tool_config_async(tool_id, tenant_id)
+        if not config or not config.is_active:
+            return None
+
+        try:
+            tool = await self._create_tool_instance_async(config)
+            if tool:
+                self._tool_cache[tool_id] = tool
+            return tool
+        except Exception as e:
+            logger.error(f"异步创建工具实例失败: {tool_id}, {e}")
+            return None
+
     def _create_tool_instance(self, config: ToolConfig) -> Optional[BaseTool]:
         """创建工具实例"""
         if config.tool_type == ToolType.BUILTIN.value:
@@ -1011,6 +1072,19 @@ class ToolService:
             return self._create_mcp_instance(config)
         elif config.tool_type == ToolType.WORKFLOW.value:
             return self._create_workflow_instance(config)
+        return None
+
+    async def _create_tool_instance_async(self, config: ToolConfig) -> Optional[BaseTool]:
+        """异步创建工具实例"""
+        if config.tool_type == ToolType.BUILTIN.value:
+            return await self._create_builtin_instance_async(config)
+        if config.tool_type == ToolType.CUSTOM.value:
+            return await self._create_custom_instance_async(config)
+        if config.tool_type == ToolType.MCP.value:
+            return await self._create_mcp_instance_async(config)
+        if config.tool_type == ToolType.WORKFLOW.value:
+            # ponytail: workflow tools still rely on sync WorkflowService internals.
+            return None
         return None
 
     def _create_builtin_instance(self, config: ToolConfig) -> Optional[BaseTool]:
@@ -1035,6 +1109,24 @@ class ToolService:
             logger.error(f"创建内置工具实例失败: {builtin_config.tool_class}, {e}")
             return None
 
+    async def _create_builtin_instance_async(self, config: ToolConfig) -> Optional[BaseTool]:
+        builtin_config = await self._get_type_config_async(BuiltinToolConfig, config.id)
+        if not builtin_config or builtin_config.tool_class not in BUILTIN_TOOLS:
+            return None
+
+        try:
+            module_path = BUILTIN_TOOLS[builtin_config.tool_class]
+            module = importlib.import_module(module_path)
+            tool_class = getattr(module, builtin_config.tool_class)
+            tool_config = {
+                **config.config_data,
+                "parameters": builtin_config.parameters,
+            }
+            return tool_class(str(config.id), tool_config)
+        except Exception as e:
+            logger.error(f"异步创建内置工具实例失败: {builtin_config.tool_class}, {e}")
+            return None
+
     def _create_custom_instance(self, config: ToolConfig) -> Optional[CustomTool]:
         """创建自定义工具实例"""
         custom_config = self.custom_repo.find_by_tool_id(self.db, config.id)
@@ -1053,6 +1145,21 @@ class ToolService:
 
         return CustomTool(str(config.id), tool_config)
 
+    async def _create_custom_instance_async(self, config: ToolConfig) -> Optional[CustomTool]:
+        custom_config = await self._get_type_config_async(CustomToolConfig, config.id)
+        if not custom_config:
+            return None
+
+        tool_config = {
+            "base_url": custom_config.base_url,
+            "auth_type": custom_config.auth_type,
+            "auth_config": custom_config.auth_config or {},
+            "timeout": custom_config.timeout or 30,
+            "schema_content": custom_config.schema_content,
+            "schema_url": custom_config.schema_url,
+        }
+        return CustomTool(str(config.id), tool_config)
+
     def _create_mcp_instance(self, config: ToolConfig) -> Optional[MCPTool]:
         """创建MCP工具实例"""
         mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
@@ -1066,6 +1173,18 @@ class ToolService:
             "available_tools": mcp_config.available_tools or []
         }
 
+        return MCPTool(str(config.id), tool_config)
+
+    async def _create_mcp_instance_async(self, config: ToolConfig) -> Optional[MCPTool]:
+        mcp_config = await self._get_type_config_async(MCPToolConfig, config.id)
+        if not mcp_config:
+            return None
+
+        tool_config = {
+            "server_url": mcp_config.server_url,
+            "connection_config": mcp_config.connection_config or {},
+            "available_tools": mcp_config.available_tools or [],
+        }
         return MCPTool(str(config.id), tool_config)
 
     def _create_workflow_instance(self, config: ToolConfig) -> Optional[WorkflowAsTool]:
@@ -1442,6 +1561,30 @@ class ToolService:
         except Exception as e:
             logger.error(f"记录执行开始失败: {execution_id}, {e}")
 
+    async def _record_execution_start_async(
+            self,
+            execution_id: str,
+            tool_id: str,
+            parameters: Dict[str, Any],
+            user_id: Optional[uuid.UUID],
+            workspace_id: Optional[uuid.UUID]
+    ):
+        """异步记录执行开始"""
+        try:
+            execution = ToolExecution(
+                execution_id=execution_id,
+                tool_config_id=uuid.UUID(tool_id),
+                status=ExecutionStatus.RUNNING.value,
+                input_data=parameters,
+                started_at=utcnow_naive(),
+                user_id=user_id,
+                workspace_id=workspace_id
+            )
+            self.db.add(execution)
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"异步记录执行开始失败: {execution_id}, {e}")
+
     def _record_execution_complete(self, execution_id: str, result: ToolResult):
         """记录执行完成"""
         try:
@@ -1459,6 +1602,26 @@ class ToolService:
                 self.db.commit()
         except Exception as e:
             logger.error(f"记录执行完成失败: {execution_id}, {e}")
+
+    async def _record_execution_complete_async(self, execution_id: str, result: ToolResult):
+        """异步记录执行完成"""
+        try:
+            execution = (
+                await self.db.execute(
+                    select(ToolExecution).where(ToolExecution.execution_id == execution_id)
+                )
+            ).scalar_one_or_none()
+
+            if execution:
+                execution.status = ExecutionStatus.COMPLETED.value if result.success else ExecutionStatus.FAILED.value
+                execution.output_data = result.data if result.success else None
+                execution.error_message = result.error if not result.success else None
+                execution.completed_at = utcnow_naive()
+                execution.execution_time = result.execution_time
+                execution.token_usage = result.token_usage
+                await self.db.commit()
+        except Exception as e:
+            logger.error(f"异步记录执行完成失败: {execution_id}, {e}")
 
     @staticmethod
     def _load_builtin_config() -> Dict[str, Any]:

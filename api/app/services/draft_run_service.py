@@ -14,6 +14,7 @@ from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.agent.agent_middleware import AgentMiddleware
@@ -25,19 +26,22 @@ from app.core.logging_config import get_business_logger
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
-from app.db import get_db_context
-from app.models import App, AgentConfig, ModelConfig, Message
+from app.db import get_db_context, get_async_db_context
+from app.models import App, AgentConfig, ModelConfig, Message, Conversation, Knowledge
 from app.models.agent_execution_model import AgentExecution
-from app.models.models_model import ModelCapability, ModelType
-from app.repositories.agent_execution_repository import AgentExecutionRepository
+from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
+from app.models.appshare_model import AppShare
+from app.models.file_metadata_model import FileMetadata
+from app.models.knowledgeshare_model import KnowledgeShare
+from app.models.models_model import ModelCapability, ModelType, ModelApiKey
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
-from app.services.conversation_service import ConversationService
 from app.services.langchain_tool_server import Search
+from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
@@ -258,7 +262,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 class AgentRunService:
     """Agent运行服务类"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         """Agent运行服务
 
         Args:
@@ -266,11 +270,229 @@ class AgentRunService:
         """
         self.db = db
 
-    def _resolve_app_tenant_id(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
-        app = self.db.get(App, app_id)
-        if not app:
+    async def _resolve_app_tenant_id_async(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(App.workspace_id).where(App.id == app_id).limit(1)
+            )
+            workspace_id = result.scalar_one_or_none()
+            if not workspace_id:
+                return None
+            return await ToolRepository.get_tenant_id_by_workspace_id_async(db, str(workspace_id))
+
+    async def _get_tenant_id_by_workspace_id_async(self, workspace_id: uuid.UUID) -> Optional[uuid.UUID]:
+        async with get_async_db_context() as db:
+            return await ToolRepository.get_tenant_id_by_workspace_id_async(db, str(workspace_id))
+
+    async def _get_last_current_assistant_id_async(self, conv_uuid: uuid.UUID | None) -> Optional[uuid.UUID]:
+        if not conv_uuid:
             return None
-        return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(Message.id).where(
+                    Message.conversation_id == conv_uuid,
+                    Message.role == "assistant",
+                    Message.is_current.is_(True),
+                    Message.is_deleted.is_not(True),
+                ).order_by(Message.created_at.desc()).limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def _get_message_async(self, message_id: uuid.UUID) -> Optional[Message]:
+        async with get_async_db_context() as db:
+            return await db.get(Message, message_id)
+
+    async def _mark_message_not_current_async(self, message_id: uuid.UUID) -> None:
+        async with get_async_db_context() as db:
+            record = await db.get(Message, message_id)
+            if not record:
+                return
+            record.is_current = False
+            await db.commit()
+
+    async def _save_regenerated_message_async(
+            self,
+            *,
+            conversation_id: uuid.UUID,
+            content: str,
+            version: int,
+            parent_message_id: uuid.UUID,
+            meta_data: dict,
+    ) -> Message:
+        async with get_async_db_context() as db:
+            new_msg = Message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=content,
+                version=version,
+                is_current=True,
+                parent_message_id=parent_message_id,
+                meta_data=meta_data,
+            )
+            db.add(new_msg)
+
+            conversation = await db.get(Conversation, conversation_id)
+            if conversation:
+                conversation.message_count = int(conversation.message_count or 0) + 1
+
+            await db.commit()
+            await db.refresh(new_msg)
+            return new_msg
+
+    async def _create_tts_file_metadata_async(
+            self,
+            *,
+            file_id: uuid.UUID,
+            tenant_id: Optional[uuid.UUID],
+            workspace_id: Optional[uuid.UUID],
+            file_key: str,
+            file_name: str,
+            file_ext: str,
+            content_type: str,
+    ) -> None:
+        async with get_async_db_context() as db:
+            db.add(
+                FileMetadata(
+                    id=file_id,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    file_key=file_key,
+                    file_name=file_name,
+                    file_ext=file_ext,
+                    file_size=0,
+                    content_type=content_type,
+                    status="pending",
+                )
+            )
+            await db.commit()
+
+    async def _update_tts_file_metadata_async(
+            self,
+            *,
+            file_id: uuid.UUID,
+            status: str,
+            file_size: Optional[int] = None,
+    ) -> None:
+        async with get_async_db_context() as db:
+            record = await db.get(FileMetadata, file_id)
+            if not record:
+                return
+            record.status = status
+            if file_size is not None:
+                record.file_size = file_size
+            await db.commit()
+
+    async def _add_message_async(
+            self,
+            *,
+            conversation_id: uuid.UUID,
+            role: str,
+            content: str,
+            meta_data: Optional[dict] = None,
+            message_id: Optional[uuid.UUID] = None,
+            status: str = "completed",
+            parent_message_id: Optional[uuid.UUID] = None,
+    ) -> Message:
+        async with get_async_db_context() as db:
+            conversation = await db.get(Conversation, conversation_id)
+            if not conversation:
+                raise BusinessException(f"会话不存在: {conversation_id}", BizCode.NOT_FOUND)
+
+            message = Message(
+                id=message_id if message_id else uuid.uuid4(),
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                meta_data=meta_data,
+                status=status,
+                parent_message_id=parent_message_id,
+            )
+            db.add(message)
+
+            conversation.message_count = int(conversation.message_count or 0) + 1
+            if conversation.message_count <= 2 and role == "user":
+                conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+
+            await db.commit()
+            await db.refresh(message)
+            return message
+
+    async def _create_agent_execution_async(
+            self,
+            *,
+            app_id: uuid.UUID,
+            conversation_id: uuid.UUID,
+            agent_config_id: uuid.UUID,
+            started_at: datetime.datetime,
+            model_name: str,
+            provider: Optional[str],
+    ) -> uuid.UUID:
+        async with get_async_db_context() as db:
+            execution = AgentExecution(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                message_id=None,
+                agent_config_id=agent_config_id,
+                release_id=None,
+                triggered_by=None,
+                steps=[],
+                status="running",
+                started_at=started_at,
+                meta_data={
+                    "model": model_name,
+                    "provider": provider,
+                },
+            )
+            db.add(execution)
+            await db.commit()
+            await db.refresh(execution)
+            return execution.id
+
+    async def _update_agent_execution_completed_async(
+            self,
+            execution_id: uuid.UUID,
+            *,
+            steps: list,
+            status: str = "completed",
+            elapsed_time: Optional[float] = None,
+            token_usage: Optional[dict] = None,
+            error_message: Optional[str] = None,
+            message_id: Optional[uuid.UUID] = None,
+    ) -> None:
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(AgentExecution).where(AgentExecution.id == execution_id)
+            )
+            record = result.scalar_one_or_none()
+            if not record:
+                return
+
+            record.steps = steps
+            record.status = status
+            record.completed_at = utcnow_naive()
+            if elapsed_time is not None:
+                record.elapsed_time = elapsed_time
+            if token_usage is not None:
+                record.token_usage = token_usage
+            if error_message is not None:
+                record.error_message = error_message
+            if message_id is not None:
+                record.message_id = message_id
+
+            await db.commit()
+
+    async def _record_api_key_usage_async(self, api_key_id: uuid.UUID | None) -> bool:
+        if not api_key_id:
+            return False
+        async with get_async_db_context() as db:
+            api_key = await db.get(ModelApiKey, api_key_id)
+            if not api_key:
+                return False
+            current_count = int(api_key.usage_count or "0")
+            api_key.usage_count = str(current_count + 1)
+            api_key.last_used_at = utcnow_naive()
+            await db.commit()
+            return True
 
     def _build_debug_id(self) -> str:
         """生成可用于日志和 SSE 对齐的错误追踪 ID。"""
@@ -389,8 +611,8 @@ class AgentRunService:
             data["error"] = error
         return data
 
-    def _check_annotation_match(self, app_id: uuid.UUID, message: str,
-                              source: str = "") -> Optional[dict]:
+    async def _check_annotation_match(self, app_id: uuid.UUID, message: str,
+                                    source: str = "") -> Optional[dict]:
         """检查是否命中标注
 
         Args:
@@ -402,33 +624,36 @@ class AgentRunService:
             命中返回标注结果字典，未命中返回None
         """
         try:
-            service = AnnotationService(self.db)
-            setting = service.get_setting(app_id)
-            if not setting or not setting.enabled:
-                return None
-            if not setting.model_config_id:
-                return None
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(AppAnnotationSetting).where(AppAnnotationSetting.app_id == app_id).limit(1)
+                )
+                setting = result.scalar_one_or_none()
+                if not setting or not setting.enabled:
+                    return None
+                if not setting.model_config_id:
+                    return None
 
-            annotations = service.repo.get_all_active_by_app(app_id)
-            if not annotations:
-                return None
+                result = await db.execute(
+                    select(AppAnnotation).where(
+                        AppAnnotation.app_id == app_id,
+                        AppAnnotation.is_active == 1,
+                    )
+                )
+                annotations = list(result.scalars().all())
+                if not annotations:
+                    return None
 
-            from app.models.models_model import ModelConfig
-            from app.services.model_service import ModelApiKeyService
-            model_cfg = self.db.query(ModelConfig).filter(
-                ModelConfig.id == setting.model_config_id
-            ).first()
-            if not model_cfg:
-                return None
+                tenant_id = await self._resolve_app_tenant_id_async(app_id)
+                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                    db,
+                    setting.model_config_id,
+                    tenant_id=tenant_id,
+                )
+                if not api_key_obj:
+                    return None
 
-            tenant_id = self._resolve_app_tenant_id(app_id)
-            api_key_obj = ModelApiKeyService.get_available_api_key(
-                self.db,
-                setting.model_config_id,
-                tenant_id=tenant_id,
-            )
-            if not api_key_obj:
-                return None
+                threshold = setting.similarity_threshold
 
             from app.core.models.base import RedBearModelConfig
             config = RedBearModelConfig(
@@ -440,16 +665,44 @@ class AgentRunService:
                 max_retries=3,
             )
 
-            result = service.find_best_match(
-                query=message,
-                annotations=annotations,
-                threshold=setting.similarity_threshold,
-                model_config=config,
-                app_id=app_id,
-                source=source,
-            )
+            query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
+            best_match = None
+            best_similarity = 0.0
+            for annotation in annotations:
+                if not annotation.embedding:
+                    continue
+                similarity = AnnotationService.cosine_similarity(query_embedding, annotation.embedding)
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match = annotation
 
-            return result
+            if not best_match or best_similarity < threshold:
+                return None
+
+            async with get_async_db_context() as db:
+                annotation = await db.get(AppAnnotation, best_match.id)
+                if not annotation:
+                    return None
+                annotation.hit_count = int(annotation.hit_count or 0) + 1
+                db.add(
+                    AppAnnotationHitLog(
+                        annotation_id=annotation.id,
+                        app_id=app_id or annotation.app_id,
+                        source=source,
+                        query=message,
+                        matched_question=annotation.question,
+                        answer=annotation.answer,
+                        similarity=best_similarity,
+                    )
+                )
+                await db.commit()
+
+            return {
+                "annotation_id": str(best_match.id),
+                "question": best_match.question,
+                "answer": best_match.answer,
+                "similarity": best_similarity,
+            }
         except Exception as e:
             logger.warning(f"标注匹配检查失败: {e}")
             return None
@@ -465,7 +718,7 @@ class AgentRunService:
                 raise ValueError(f"The required parameter '{variable.get('name')}' was not provided")
         return input_vars
 
-    def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
+    async def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """加载工具配置"""
         tools = []
         if web_search:
@@ -473,18 +726,22 @@ class AgentRunService:
             tools.append(search_tool)
         if not tools_config:
             return tools
-        tool_service = ToolService(self.db)
+        async with get_async_db_context() as db:
+            tool_service = ToolService(db)
 
-        if tools_config and isinstance(tools_config, list):
-            for tool_config in tools_config:
-                if tool_config.get("enabled", False):
-                    # 根据工具名称查找工具实例
-                    tool_instance = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
-                    if tool_instance:
-                        tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
-                        # 转换为LangChain工具
-                        langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
-                        tools.append(langchain_tool)
+            if tools_config and isinstance(tools_config, list):
+                for tool_config in tools_config:
+                    if tool_config.get("enabled", False):
+                        # 根据工具名称查找工具实例
+                        tool_instance = await tool_service.get_tool_instance_async(
+                            tool_config.get("tool_id", ""),
+                            tenant_id,
+                        )
+                        if tool_instance:
+                            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+                            # 转换为LangChain工具
+                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
+                            tools.append(langchain_tool)
         logger.debug(
             "已添加网络搜索工具",
             extra={
@@ -493,7 +750,7 @@ class AgentRunService:
         )
         return tools
 
-    def load_skill_config(
+    async def load_skill_config(
             self,
             skills_config: dict | None,
             message: str,
@@ -509,11 +766,12 @@ class AgentRunService:
         skill_enable = skills_config.get("enabled", False)
         if skill_enable:
             middleware = AgentMiddleware(skills=skills_config)
-            skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(
-                self.db,
-                tenant_id,
-                runtime_context={"user_id": user_id, "workspace_id": workspace_id},
-            )
+            async with get_async_db_context() as db:
+                skill_tools, skill_configs, tool_to_skill_map = await middleware.load_skill_tools_async(
+                    db,
+                    tenant_id,
+                    runtime_context={"user_id": user_id, "workspace_id": workspace_id},
+                )
 
             # 给技能工具挂载元数据（技能名称）
             for t in skill_tools:
@@ -540,7 +798,7 @@ class AgentRunService:
 
         return tools, skill_prompts
 
-    def load_knowledge_retrieval_config(
+    async def load_knowledge_retrieval_config(
             self,
             knowledge_retrieval_config: dict | None,
             user_id
@@ -557,21 +815,23 @@ class AgentRunService:
             # 查询知识库名称
             kb_names = []
             try:
-                from app.models import Knowledge
-                rows = self.db.query(Knowledge.id, Knowledge.name).filter(
-                    Knowledge.id.in_(kb_ids)
-                ).all()
+                async with get_async_db_context() as db:
+                    result = await db.execute(
+                        select(Knowledge.id, Knowledge.name).where(Knowledge.id.in_(kb_ids))
+                    )
+                    rows = result.all()
                 kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
 
                 # 对于共享知识库，chunk元数据中的knowledge_id是source_kb_id，
                 # 需要将source_kb_id也映射到名称，否则会显示为ID
-                from app.models.knowledgeshare_model import KnowledgeShare
                 target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
-                share_rows = self.db.query(
-                    KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id
-                ).filter(
-                    KnowledgeShare.target_kb_id.in_(target_kb_ids)
-                ).all()
+                async with get_async_db_context() as db:
+                    result = await db.execute(
+                        select(KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id).where(
+                            KnowledgeShare.target_kb_id.in_(target_kb_ids)
+                        )
+                    )
+                    share_rows = result.all()
                 if share_rows:
                     id_to_name = {str(r.id): r.name for r in rows}
                     for sr in share_rows:
@@ -593,7 +853,7 @@ class AgentRunService:
             )
         return tools, citations_collector
 
-    def load_memory_config(
+    async def load_memory_config(
             self,
             memory_config: dict | None,
             user_id,
@@ -605,9 +865,16 @@ class AgentRunService:
         from app.core.memory.memory_service import create_long_term_memory_tool
 
         enabled = bool(memory_config and memory_config.get("enabled"))
+        config_id = None
+        if enabled and workspace_id:
+            if isinstance(self.db, AsyncSession):
+                config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
+            else:
+                config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
+
         tool = create_long_term_memory_tool(
             memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
-            db=self.db,
+            config_id=config_id,
         )
         tools = [tool] if tool else []
         if tools:
@@ -769,7 +1036,7 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
-        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
+        tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         try:
             # 1. 获取 API Key 配置
@@ -808,16 +1075,16 @@ class AgentRunService:
             tools = []
 
             # 从配置中获取启用的工具
-            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
-            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
+            tools.extend(await self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
+            skill_tools, skill_prompts = await self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
+            kb_tools, citations_collector = await self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
             tools.extend(kb_tools)
             # 添加长期记忆工具
             if memory:
-                memory_tools, _ = self.load_memory_config(
+                memory_tools, _ = await self.load_memory_config(
                     memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
@@ -838,28 +1105,30 @@ class AgentRunService:
 
             # 检查标注命中
             if not sub_agent:
-                annotation_match = self._check_annotation_match(agent_config.app_id, message,
-                                                                source=source)
+                annotation_match = await self._check_annotation_match(agent_config.app_id, message,
+                                                                      source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
                     # skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
-                        from app.services.conversation_service import ConversationService
-                        conv_service = ConversationService(self.db)
-                        conv_service.add_message(
+                        conv_uuid = uuid.UUID(conversation_id)
+                        parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
+                        user_msg = await self._add_message_async(
                             message_id=user_message_id,
                             conversation_id=conv_uuid,
                             role="user",
                             content=message,
                             meta_data={"files": []},
-                            parent_message_id=self._get_last_current_assistant_id(conv_uuid),
+                            parent_message_id=parent_message_id,
                         )
-                        conv_service.add_message(
+                        await self._add_message_async(
+                            message_id=assistant_message_id,
                             conversation_id=conv_uuid,
                             role="assistant",
                             content=annotation_match["answer"],
-                            meta_data={"usage": {}}
+                            meta_data={"usage": {}},
+                            parent_message_id=user_msg.id,
                         )
                     return {
                         "message": annotation_match["answer"],
@@ -998,25 +1267,16 @@ class AgentRunService:
             )
 
             # 创建 Agent 执行记录（running 状态）
+            agent_execution_id = None
             if not sub_agent and not skip_save:
-                agent_exec_repo = AgentExecutionRepository(self.db)
-                agent_execution = AgentExecution(
+                agent_execution_id = await self._create_agent_execution_async(
                     app_id=agent_config.app_id,
                     conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
-                    message_id=None,
                     agent_config_id=agent_config.id,
-                    release_id=None,
-                    triggered_by=None,
-                    steps=[],
-                    status="running",
                     started_at=datetime.datetime.fromtimestamp(start_time),
-                    meta_data={
-                        "model": api_key_config["model_name"],
-                        "provider": api_key_config.get("provider"),
-                    },
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config.get("provider"),
                 )
-                agent_exec_repo.create(agent_execution)
-                self.db.commit()
 
             # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
@@ -1028,7 +1288,7 @@ class AgentRunService:
 
             elapsed_time = time.time() - start_time
 
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
+            await self._record_api_key_usage_async(api_key_config.get("api_key_id"))
 
             # 9. 生成 TTS audio_url（在保存消息前生成，以便一并存入 meta_data）
             audio_url = await self._generate_tts(
@@ -1081,15 +1341,15 @@ class AgentRunService:
                         model_config_id=model_config.id,
                     )
                     async def _run_after_turn(kwargs=_ctx_kwargs):
-                        with get_db_context() as db2:
+                        async with get_async_db_context() as db2:
                             await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
             if not sub_agent and not skip_save:
-                agent_exec_repo.update_completed(
-                    execution_id=agent_execution.id,
+                await self._update_agent_execution_completed_async(
+                    execution_id=agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
@@ -1132,8 +1392,8 @@ class AgentRunService:
             if not sub_agent and not skip_save:
                 try:
                     elapsed_time = time.time() - start_time
-                    agent_exec_repo.update_completed(
-                        execution_id=agent_execution.id,
+                    await self._update_agent_execution_completed_async(
+                        execution_id=agent_execution_id,
                         steps=[],
                         status="failed",
                         elapsed_time=elapsed_time,
@@ -1194,7 +1454,7 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
-        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
+        tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         start_time = time.time()
         # 支持外部传入 user_message_id（多模型对比时预生成并随 model_start 回传前端）
@@ -1231,17 +1491,17 @@ class AgentRunService:
             tools = []
 
             # 从配置中获取启用的工具
-            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
-            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
+            tools.extend(await self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
+            skill_tools, skill_prompts = await self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
+            kb_tools, citations_collector = await self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
             tools.extend(kb_tools)
 
             # 添加长期记忆工具
             if memory:
-                memory_tools, _ = self.load_memory_config(
+                memory_tools, _ = await self.load_memory_config(
                     memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
@@ -1263,28 +1523,29 @@ class AgentRunService:
 
             # 检查标注命中
             if not sub_agent:
-                annotation_match = self._check_annotation_match(agent_config.app_id, message,
-                                                                source=source)
+                annotation_match = await self._check_annotation_match(agent_config.app_id, message,
+                                                                      source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
                     # skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
-                        from app.services.conversation_service import ConversationService
-                        conv_service = ConversationService(self.db)
-                        conv_service.add_message(
+                        parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
+                        user_msg = await self._add_message_async(
                             message_id=user_message_id,
                             conversation_id=conv_uuid,
                             role="user",
                             content=message,
                             meta_data={"files": []},
-                            parent_message_id=self._get_last_current_assistant_id(conv_uuid),
+                            parent_message_id=parent_message_id,
                         )
-                        conv_service.add_message(
+                        await self._add_message_async(
+                            message_id=assistant_message_id,
                             conversation_id=conv_uuid,
                             role="assistant",
                             content=annotation_match["answer"],
-                            meta_data={"usage": {}}
+                            meta_data={"usage": {}},
+                            parent_message_id=user_msg.id,
                         )
                     yield self._format_sse_event("start", {
                         "conversation_id": conversation_id,
@@ -1447,31 +1708,21 @@ class AgentRunService:
                 })
 
             # 创建 Agent 执行记录（running 状态）
+            _agent_execution_id = None
             if not sub_agent and not skip_save:
-                agent_exec_repo = AgentExecutionRepository(self.db)
-                agent_execution = AgentExecution(
+                _agent_execution_id = await self._create_agent_execution_async(
                     app_id=agent_config.app_id,
                     conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
-                    message_id=None,
                     agent_config_id=agent_config.id,
-                    release_id=None,
-                    triggered_by=None,
-                    steps=[],
-                    status="running",
                     started_at=datetime.datetime.fromtimestamp(start_time),
-                    meta_data={
-                        "model": api_key_config["model_name"],
-                        "provider": api_key_config.get("provider"),
-                    },
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config.get("provider"),
                 )
-                agent_exec_repo.create(agent_execution)
-                self.db.commit()
 
             # close() 前把后续还会用到的 ORM 属性读成普通值，防止 close 后触发 DetachedInstanceError
             _app_id = agent_config.app_id
             _model_config_id = model_config.id
             _model_config_name = model_config.name
-            _agent_execution_id = agent_execution.id if (not sub_agent and not skip_save) else None
 
             # LLM 推理期间不需要 db，提前归还连接给连接池
             # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
@@ -1527,7 +1778,7 @@ class AgentRunService:
                 await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
+            await self._record_api_key_usage_async(api_key_config.get("api_key_id"))
 
             if sub_agent:
                 yield self._format_sse_event("sub_usage", {"total_tokens": total_tokens})
@@ -1572,13 +1823,13 @@ class AgentRunService:
                         model_config_id=_model_config_id,
                     )
                     async def _run_after_turn(kwargs=_ctx_kwargs):
-                        with get_db_context() as db2:
+                        async with get_async_db_context() as db2:
                             await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
             if not sub_agent and not skip_save:
-                agent_exec_repo.update_completed(
+                await self._update_agent_execution_completed_async(
                     execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
@@ -1628,30 +1879,29 @@ class AgentRunService:
                 exc_info=True
             )
             try:
-                self.db.rollback()
+                await self.db.rollback()
             except Exception:
                 pass
             # 保存失败的消息，使前端可以展示失败状态
             # skip_save=True 时由调用方处理失败态，跳过 run_stream 内部重复保存
             if not sub_agent and not skip_save:
                 try:
-                    from app.services.conversation_service import ConversationService
-
-                    conv_svc = ConversationService(self.db)
                     conv_uuid = uuid.UUID(conversation_id)
-                    conv_svc.add_message(
+                    parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
+                    user_msg = await self._add_message_async(
                         conversation_id=conv_uuid,
                         role="user",
                         content=message,
                         meta_data={"files": [], "history_files": {}},
-                        parent_message_id=self._get_last_current_assistant_id(conv_uuid),
+                        parent_message_id=parent_message_id,
                     )
-                    conv_svc.add_message(
+                    await self._add_message_async(
                         conversation_id=conv_uuid,
                         role="assistant",
                         content="",
                         meta_data={"error": json.dumps(compact_error, ensure_ascii=False)[:2000]},
                         status="failed",
+                        parent_message_id=user_msg.id,
                     )
                 except Exception:
                     pass
@@ -1659,7 +1909,7 @@ class AgentRunService:
             if not sub_agent and not skip_save:
                 try:
                     elapsed_time = time.time() - start_time
-                    agent_exec_repo.update_completed(
+                    await self._update_agent_execution_completed_async(
                         execution_id=_agent_execution_id,
                         steps=node_executions if 'node_executions' in dir() else [],
                         status="failed",
@@ -1713,24 +1963,25 @@ class AgentRunService:
         #
         # api_key = self.db.scalars(stmt).first()
         # api_key = api_keys[0] if api_keys else None
-        api_key = ModelApiKeyService.get_available_api_key(
-            self.db,
-            model_config_id,
-            tenant_id=tenant_id,
-        )
+        async with get_async_db_context() as db:
+            api_key = await ModelApiKeyService.get_available_api_key_async(
+                db,
+                model_config_id,
+                tenant_id=tenant_id,
+            )
 
-        if not api_key:
-            raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
+            if not api_key:
+                raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
 
-        return {
-            "model_name": api_key.model_name,
-            "provider": api_key.provider,
-            "api_key": api_key.api_key,
-            "api_base": api_key.api_base,
-            "api_key_id": api_key.id,
-            "is_omni": api_key.is_omni,
-            "capability": api_key.capability
-        }
+            return {
+                "model_name": api_key.model_name,
+                "provider": api_key.provider,
+                "api_key": api_key.api_key,
+                "api_base": api_key.api_base,
+                "api_key_id": api_key.id,
+                "is_omni": api_key.is_omni,
+                "capability": api_key.capability
+            }
 
     async def _ensure_conversation(
             self,
@@ -1759,11 +2010,6 @@ class AgentRunService:
         Raises:
             BusinessException: 当指定的会话不存在时
         """
-        from app.models import Conversation as ConversationModel
-        from app.services.conversation_service import ConversationService
-
-        conversation_service = ConversationService(self.db)
-
         # 如果没有提供会话ID，创建新会话
         if not conversation_id:
             logger.info(
@@ -1776,22 +2022,22 @@ class AgentRunService:
 
             # 创建新会话
             new_conv_id = str(uuid.uuid4())
-            new_conversation = ConversationModel(
-                id=uuid.UUID(new_conv_id),
-                app_id=app_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                is_draft=True,
-                title="草稿会话",
-                config_snapshot=config_snapshot
-            )
-            self.db.add(new_conversation)
-            self.db.commit()
-            self.db.refresh(new_conversation)
+            async with get_async_db_context() as db:
+                new_conversation = Conversation(
+                    id=uuid.UUID(new_conv_id),
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    is_draft=True,
+                    title="草稿会话",
+                    config_snapshot=config_snapshot
+                )
+                db.add(new_conversation)
+                await db.commit()
 
             # 如果有开场白，作为第一条 assistant 消息写入数据库
             if opening_statement:
-                conversation_service.add_message(
+                await self._add_message_async(
                     conversation_id=uuid.UUID(new_conv_id),
                     role="assistant",
                     content=opening_statement,
@@ -1812,37 +2058,44 @@ class AgentRunService:
         # 如果提供了会话ID，验证其存在性和工作空间归属
         try:
             conv_uuid = uuid.UUID(conversation_id)
-            conversation = conversation_service.get_conversation(conv_uuid)
-
-            # 验证会话属于当前工作空间（或属于共享应用的源工作空间）
-            # sub_agent 内部调用时跳过校验，已在上层验证过
-            if not sub_agent and conversation.workspace_id != workspace_id:
-                # 检查是否是共享应用的会话（被共享者 workspace 访问源应用）
-                from app.models import AppShare
-                share = self.db.scalars(
-                    select(AppShare).where(
-                        AppShare.source_app_id == app_id,
-                        AppShare.target_workspace_id == workspace_id
-                    )
-                ).first()
-
-                # 情况2：sub_agent 内部调用时，workspace_id 是源应用的 workspace，
-                # 而会话是被共享者创建的，只要会话属于同一个 app 即可放行
-                same_app = (conversation.app_id == app_id)
-
-                if not share and not same_app:
-                    logger.warning(
-                        "会话不属于当前工作空间",
-                        extra={
-                            "conversation_id": conversation_id,
-                            "conversation_workspace_id": str(conversation.workspace_id),
-                            "current_workspace_id": str(workspace_id)
-                        }
-                    )
+            async with get_async_db_context() as db:
+                conversation = await db.get(Conversation, conv_uuid)
+                if not conversation:
                     raise BusinessException(
-                        "会话不属于当前工作空间",
-                        BizCode.PERMISSION_DENIED
+                        f"会话不存在: {conversation_id}",
+                        BizCode.NOT_FOUND,
                     )
+
+                # 验证会话属于当前工作空间（或属于共享应用的源工作空间）
+                # sub_agent 内部调用时跳过校验，已在上层验证过
+                if not sub_agent and conversation.workspace_id != workspace_id:
+                    share = (
+                        await db.execute(
+                            select(AppShare.id).where(
+                                AppShare.source_app_id == app_id,
+                                AppShare.target_workspace_id == workspace_id,
+                                AppShare.is_active.is_(True),
+                            ).limit(1)
+                        )
+                    ).scalar_one_or_none()
+
+                    # 情况2：sub_agent 内部调用时，workspace_id 是源应用的 workspace，
+                    # 而会话是被共享者创建的，只要会话属于同一个 app 即可放行
+                    same_app = (conversation.app_id == app_id)
+
+                    if not share and not same_app:
+                        logger.warning(
+                            "会话不属于当前工作空间",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "conversation_workspace_id": str(conversation.workspace_id),
+                                "current_workspace_id": str(workspace_id)
+                            }
+                        )
+                        raise BusinessException(
+                            "会话不属于当前工作空间",
+                            BizCode.PERMISSION_DENIED
+                        )
 
             logger.debug(
                 "使用现有会话",
@@ -1885,14 +2138,38 @@ class AgentRunService:
         """
         try:
 
-            conversation_service = ConversationService(self.db)
-            # 获取 API 配置用于多模态处理
-            history = await conversation_service.get_conversation_history(
-                conversation_id=uuid.UUID(conversation_id),
-                max_history=max_history,
-                current_provider=current_provider,
-                current_is_omni=current_is_omni
-            )
+            async with get_async_db_context() as db:
+                stmt = select(Message).where(
+                    Message.conversation_id == uuid.UUID(conversation_id),
+                    Message.is_deleted.is_not(True),
+                    Message.is_current.is_not(False),
+                ).order_by(Message.created_at)
+                if max_history:
+                    stmt = stmt.limit(max_history)
+                result = await db.execute(stmt)
+                messages = list(result.scalars().all())
+
+            history = []
+            for msg in messages:
+                history_files = msg.meta_data.get("history_files", {}) if msg.meta_data else {}
+
+                has_files = bool(history_files and current_provider and current_is_omni is not None)
+                if has_files:
+                    stored_provider = history_files.get("provider")
+                    stored_is_omni = history_files.get("is_omni")
+
+                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                        continue
+
+                    content = [{"type": "text", "text": msg.content}]
+                    content.extend(history_files.get("content", []))
+                else:
+                    content = msg.content
+
+                history.append({
+                    "role": msg.role,
+                    "content": content
+                })
 
             logger.debug(
                 "加载会话历史",
@@ -1926,16 +2203,18 @@ class AgentRunService:
             List[Dict]: 历史消息列表，格式为 [{"role": "user/assistant", "content": [...]}]
         """
         # 查询指定时间之前的消息
-        history_msgs = self.db.scalars(
-            select(Message)
-            .where(
-                Message.conversation_id == conversation_id,
-                Message.created_at < before_time,  # 只取截止时间之前的消息
-                Message.is_deleted.is_not(True),
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.created_at < before_time,  # 只取截止时间之前的消息
+                    Message.is_deleted.is_not(True),
+                )
+                .order_by(Message.created_at.asc())  # 正序排列
+                .limit(max_history)
             )
-            .order_by(Message.created_at.asc())  # 正序排列
-            .limit(max_history)
-        ).all()
+            history_msgs = result.scalars().all()
 
         # 转换为 history 格式
         filtered_history = []
@@ -1962,23 +2241,6 @@ class AgentRunService:
         )
 
         return filtered_history
-
-    def _get_last_current_assistant_id(self, conv_uuid) -> Optional[uuid.UUID]:
-        """查会话最近 is_current=True 的 assistant，作为后续 user 消息的 parent。
-
-        用户切换版本时 switch_message_version 已把目标版本置 is_current=True，
-        故基于该版本继续提问的 user 消息 parent 自动指向用户选择的版本，
-        使 _build_branch_view 向下捞分支链不断（无需依赖时间兜底）。
-        """
-        if not conv_uuid:
-            return None
-        parent_assistant = self.db.query(Message).filter(
-            Message.conversation_id == conv_uuid,
-            Message.role == "assistant",
-            Message.is_current.is_(True),
-            Message.is_deleted.is_not(True),
-        ).order_by(Message.created_at.desc()).first()
-        return parent_assistant.id if parent_assistant else None
 
     async def _save_conversation_message(
             self,
@@ -2018,9 +2280,6 @@ class AgentRunService:
         """
         _ = (app_id, user_id)
         try:
-            from app.services.conversation_service import ConversationService
-
-            conversation_service = ConversationService(self.db)
             conv_uuid = uuid.UUID(conversation_id)
 
             # 保存消息（会话已经存在）
@@ -2029,17 +2288,20 @@ class AgentRunService:
                 "history_files": {}
             }
             if files:
-                from app.models.file_metadata_model import FileMetadata
                 local_ids = [f.upload_file_id for f in files
                              if f.transfer_method.value == "local_file" and f.upload_file_id
                              and (not f.name or not f.size)]
                 meta_map = {}
-                if local_ids:
-                    rows = self.db.query(FileMetadata).filter(
-                        FileMetadata.id.in_(local_ids),
-                        FileMetadata.status == "completed"
-                    ).all()
-                    meta_map = {str(r.id): r for r in rows}
+                async with get_async_db_context() as db:
+                    if local_ids:
+                        result = await db.execute(
+                            select(FileMetadata).where(
+                                FileMetadata.id.in_(local_ids),
+                                FileMetadata.status == "completed"
+                            )
+                        )
+                        rows = result.scalars().all()
+                        meta_map = {str(r.id): r for r in rows}
                 for f in files:
                     name, size = f.name, f.size
                     if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
@@ -2063,31 +2325,44 @@ class AgentRunService:
                     "is_omni": is_omni
                 }
 
-            # 保存用户消息
-            user_msg = conversation_service.add_message(
-                message_id=user_message_id,
-                conversation_id=conv_uuid,
-                role="user",
-                content=user_message,
-                meta_data=human_meta,
-                parent_message_id=self._get_last_current_assistant_id(conv_uuid),
-            )
+            parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
             # 保存助手消息（含 audio_url 和 citations）
             if audio_url:
                 meta_data["audio_url"] = audio_url
             if citations:
                 meta_data["citations"] = citations
-            assistant_msg = conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conv_uuid,
-                role="assistant",
-                content=assistant_message,
-                meta_data=meta_data
-            )
+            async with get_async_db_context() as db:
+                conversation = await db.get(Conversation, conv_uuid)
+                if not conversation:
+                    return None
 
-            # 设置 parent_message_id（助手消息关联到用户消息）
-            assistant_msg.parent_message_id = user_msg.id
-            self.db.commit()
+                user_msg = Message(
+                    id=user_message_id if user_message_id else uuid.uuid4(),
+                    conversation_id=conv_uuid,
+                    role="user",
+                    content=user_message,
+                    meta_data=human_meta,
+                    parent_message_id=parent_message_id,
+                    status="completed",
+                )
+                assistant_msg = Message(
+                    id=message_id if message_id else uuid.uuid4(),
+                    conversation_id=conv_uuid,
+                    role="assistant",
+                    content=assistant_message,
+                    meta_data=meta_data,
+                    parent_message_id=user_msg.id,
+                    status="completed",
+                )
+                db.add(user_msg)
+                db.add(assistant_msg)
+
+                message_count = int(conversation.message_count or 0)
+                if message_count + 1 <= 2:
+                    conversation.title = user_message[:50] + ("..." if len(user_message) > 50 else "")
+                conversation.message_count = message_count + 2
+
+                await db.commit()
 
             logger.debug(
                 "保存会话消息",
@@ -2116,52 +2391,49 @@ class AgentRunService:
             Dict: 配置快照
         """
         try:
-            from app.models import AgentConfig, ModelConfig
+            async with get_async_db_context() as db:
+                stmt = select(AgentConfig).where(AgentConfig.app_id == app_id).limit(1)
+                result = await db.execute(stmt)
+                agent_cfg = result.scalar_one_or_none()
 
-            # 获取 Agent 配置
-            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-            agent_cfg = self.db.scalars(stmt).first()
+                if not agent_cfg:
+                    return {}
 
-            if not agent_cfg:
-                return {}
+                # 获取模型配置
+                model_config = None
+                if agent_cfg.default_model_config_id:
+                    model_config = await db.get(ModelConfig, agent_cfg.default_model_config_id)
 
-            # 获取模型配置
-            model_config = None
-            if agent_cfg.default_model_config_id:
-                model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
+                # 构建快照（确保所有值都可序列化，在 session 关闭前读取所有属性）
+                def safe_serialize(value):
+                    if value is None:
+                        return None
+                    if isinstance(value, (str, int, float, bool)):
+                        return value
+                    if isinstance(value, (dict, list)):
+                        return value
+                    if hasattr(value, 'dict'):
+                        return value.dict()
+                    if hasattr(value, '__dict__'):
+                        return value.__dict__
+                    return str(value)
 
-            # 构建快照（确保所有值都可序列化）
-            def safe_serialize(value):
-                """安全序列化值"""
-                if value is None:
-                    return None
-                if isinstance(value, (str, int, float, bool)):
-                    return value
-                if isinstance(value, (dict, list)):
-                    return value
-                # 对于 Pydantic 模型或其他对象，尝试转换为字典
-                if hasattr(value, 'dict'):
-                    return value.dict()
-                if hasattr(value, '__dict__'):
-                    return value.__dict__
-                return str(value)
-
-            snapshot = {
-                "agent_config": {
-                    "system_prompt": agent_cfg.system_prompt,
-                    "model_parameters": safe_serialize(agent_cfg.model_parameters),
-                    "knowledge_retrieval": safe_serialize(agent_cfg.knowledge_retrieval),
-                    "memory": safe_serialize(agent_cfg.memory),
-                    "variables": safe_serialize(agent_cfg.variables),
-                    "tools": safe_serialize(agent_cfg.tools)
-                },
-                "model_config": {
-                    "model_name": model_config.name if model_config else None,
-                    "provider": model_config.provider if model_config else None,
-                    "type": model_config.type if model_config else None
-                } if model_config else None,
-                "snapshot_time": to_iso_z(utcnow_naive())
-            }
+                snapshot = {
+                    "agent_config": {
+                        "system_prompt": agent_cfg.system_prompt,
+                        "model_parameters": safe_serialize(agent_cfg.model_parameters),
+                        "knowledge_retrieval": safe_serialize(agent_cfg.knowledge_retrieval),
+                        "memory": safe_serialize(agent_cfg.memory),
+                        "variables": safe_serialize(agent_cfg.variables),
+                        "tools": safe_serialize(agent_cfg.tools)
+                    },
+                    "model_config": {
+                        "model_name": model_config.name if model_config else None,
+                        "provider": model_config.provider if model_config else None,
+                        "type": model_config.type if model_config else None
+                    } if model_config else None,
+                    "snapshot_time": to_iso_z(utcnow_naive())
+                }
 
             return snapshot
 
@@ -2226,7 +2498,6 @@ class AgentRunService:
         if not text or not text.strip():
             return None
 
-        from app.models.file_metadata_model import FileMetadata
         from app.services.file_storage_service import FileStorageService, generate_file_key
 
         provider = api_key_config.get("provider", "openai")
@@ -2235,23 +2506,23 @@ class AgentRunService:
         voice = tts_config.get("voice")
         file_ext, content_type = ".mp3", "audio/mpeg"
 
+        is_dashscope = provider == "dashscope" or (
+            isinstance(api_base, str) and "dashscope.aliyuncs.com" in api_base
+        )
+
         file_id = uuid.uuid4()
         file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
 
         # 先写入 pending 状态的元数据，立即返回 URL
-        db_file = FileMetadata(
-            id=file_id,
+        await self._create_tts_file_metadata_async(
+            file_id=file_id,
             tenant_id=tenant_id,
             workspace_id=workspace_id,
             file_key=file_key,
             file_name=f"tts_{file_id}{file_ext}",
             file_ext=file_ext,
-            file_size=0,
             content_type=content_type,
-            status="pending",
         )
-        self.db.add(db_file)
-        self.db.commit()
 
         server_url = settings.FILE_LOCAL_SERVER_URL
         audio_url = f"{server_url}/storage/permanent/{file_id}"
@@ -2260,7 +2531,7 @@ class AgentRunService:
         async def _stream_to_storage():
             try:
                 storage_service = FileStorageService()
-                if provider == "dashscope":
+                if is_dashscope:
                     stream = self._tts_dashscope_stream(
                         api_key=api_key,
                         text=text,
@@ -2284,21 +2555,18 @@ class AgentRunService:
                     content_type=content_type,
                 )
 
-                # 更新元数据状态
-                with get_db_context() as bg_db:
-                    record = bg_db.get(FileMetadata, file_id)
-                    if record:
-                        record.status = "completed"
-                        record.file_size = total_size
-                        bg_db.commit()
+                await self._update_tts_file_metadata_async(
+                    file_id=file_id,
+                    status="completed",
+                    file_size=total_size,
+                )
                 logger.debug(f"TTS 流式写入完成，provider={provider}, file_key={file_key}")
             except Exception as e:
                 logger.warning(f"TTS 流式写入失败: {e}")
-                with get_db_context() as bg_db:
-                    record = bg_db.get(FileMetadata, file_id)
-                    if record:
-                        record.status = "failed"
-                        bg_db.commit()
+                await self._update_tts_file_metadata_async(
+                    file_id=file_id,
+                    status="failed",
+                )
 
         asyncio.create_task(_stream_to_storage())
         return audio_url
@@ -2320,7 +2588,6 @@ class AgentRunService:
         if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
             return None, None
 
-        from app.models.file_metadata_model import FileMetadata
         from app.services.file_storage_service import FileStorageService, generate_file_key
 
         provider = api_key_config.get("provider", "openai")
@@ -2329,22 +2596,22 @@ class AgentRunService:
         voice = tts_config.get("voice")
         file_ext, content_type = ".mp3", "audio/mpeg"
 
+        is_dashscope = provider == "dashscope" or (
+            isinstance(api_base, str) and "dashscope.aliyuncs.com" in api_base
+        )
+
         file_id = uuid.uuid4()
         file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
 
-        db_file = FileMetadata(
-            id=file_id,
+        await self._create_tts_file_metadata_async(
+            file_id=file_id,
             tenant_id=tenant_id,
             workspace_id=workspace_id,
             file_key=file_key,
             file_name=f"tts_{file_id}{file_ext}",
             file_ext=file_ext,
-            file_size=0,
             content_type=content_type,
-            status="pending",
         )
-        self.db.add(db_file)
-        self.db.commit()
 
         server_url = settings.FILE_LOCAL_SERVER_URL
         audio_url = f"{server_url}/storage/permanent/{file_id}"
@@ -2352,7 +2619,7 @@ class AgentRunService:
         async def _run():
             try:
                 storage_service = FileStorageService()
-                if provider == "dashscope":
+                if is_dashscope:
                     audio_stream = self._tts_dashscope_stream_from_queue(
                         api_key=api_key,
                         voice=voice or "longxiaochun",
@@ -2374,20 +2641,18 @@ class AgentRunService:
                     stream=audio_stream,
                     content_type=content_type,
                 )
-                with get_db_context() as bg_db:
-                    record = bg_db.get(FileMetadata, file_id)
-                    if record:
-                        record.status = "completed"
-                        record.file_size = total_size
-                        bg_db.commit()
+                await self._update_tts_file_metadata_async(
+                    file_id=file_id,
+                    status="completed",
+                    file_size=total_size,
+                )
                 logger.debug(f"TTS 流式合成完成，provider={provider}, file_key={file_key}")
             except Exception as e:
                 logger.warning(f"TTS 流式合成失败: {e}")
-                with get_db_context() as bg_db:
-                    record = bg_db.get(FileMetadata, file_id)
-                    if record:
-                        record.status = "failed"
-                        bg_db.commit()
+                await self._update_tts_file_metadata_async(
+                    file_id=file_id,
+                    status="failed",
+                )
 
         task = asyncio.create_task(_run())
         return audio_url, task
@@ -3324,7 +3589,7 @@ class AgentRunService:
 
     # ==================== 重新生成功能 ====================
 
-    def _locate_or_restore_parent_user_message(self, original_msg: "Message") -> "Message":
+    async def _locate_or_restore_parent_user_message(self, original_msg: "Message") -> "Message":
         """定位原 assistant 消息对应的父 user 消息。
 
         查找顺序：
@@ -3339,42 +3604,55 @@ class AgentRunService:
         （is_deleted 置回 False）后继续，而非直接抛"无法找到原始用户消息"——
         避免误删提问导致该轮回复彻底无法重新生成。
         """
-        from app.models import Message
         parent_msg = None
         if original_msg.parent_message_id:
-            candidate = self.db.get(Message, original_msg.parent_message_id)
+            candidate = await self._get_message_async(original_msg.parent_message_id)
             if candidate and candidate.role == "user":
                 parent_msg = candidate
         if not parent_msg:
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
-                    Message.created_at <= original_msg.created_at,
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == original_msg.conversation_id,
+                        Message.role == "user",
+                        Message.created_at <= original_msg.created_at,
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
                 )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
+                parent_msg = result.scalar_one_or_none()
         if not parent_msg:
             # 兜底：同会话内最近一条 user 消息（不论时间顺序），覆盖 created_at 异常的脏数据
-            parent_msg = self.db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == original_msg.conversation_id,
-                    Message.role == "user",
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == original_msg.conversation_id,
+                        Message.role == "user",
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
                 )
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).first()
+                parent_msg = result.scalar_one_or_none()
         if not parent_msg:
             raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
-        if original_msg.parent_message_id != parent_msg.id:
-            original_msg.parent_message_id = parent_msg.id
-            self.db.commit()
-        if parent_msg.is_deleted:
-            parent_msg.is_deleted = False
-            self.db.commit()
+        restored_deleted = False
+        async with get_async_db_context() as db:
+            original_record = await db.get(Message, original_msg.id)
+            parent_record = await db.get(Message, parent_msg.id)
+            if not original_record or not parent_record:
+                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+            if original_record.parent_message_id != parent_record.id:
+                original_record.parent_message_id = parent_record.id
+            if parent_record.is_deleted:
+                parent_record.is_deleted = False
+                restored_deleted = True
+            await db.commit()
+            await db.refresh(parent_record)
+            parent_msg = parent_record
+        original_msg.parent_message_id = parent_msg.id
+        if restored_deleted:
             logger.info(
                 "重新生成时自动恢复被删除的父 user 消息",
                 extra={
@@ -3416,10 +3694,8 @@ class AgentRunService:
         Returns:
             Dict: 包含新消息ID、内容、版本号等
         """
-        from app.models import Message
-
         # 1. 获取原消息
-        original_msg = self.db.get(Message, message_id)
+        original_msg = await self._get_message_async(message_id)
         if not original_msg or original_msg.role != "assistant":
             raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
 
@@ -3427,12 +3703,12 @@ class AgentRunService:
             raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
 
         # 2. 将原版本标记为非当前
+        await self._mark_message_not_current_async(message_id)
         original_msg.is_current = False
-        self.db.commit()
 
         # 3. 获取父用户消息（用于提取原始问题；若已被逻辑删除则自动恢复，
         # 见 _locate_or_restore_parent_user_message）
-        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg = await self._locate_or_restore_parent_user_message(original_msg)
         parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
@@ -3486,12 +3762,10 @@ class AgentRunService:
 
         # 6. 保存新版本消息
         new_version = original_msg.version + 1
-        new_msg = Message(
+        new_msg = await self._save_regenerated_message_async(
             conversation_id=original_msg.conversation_id,
-            role="assistant",
             content=result["message"],
             version=new_version,
-            is_current=True,
             parent_message_id=parent_msg_id,
             meta_data={
                 "usage": result.get("usage"),
@@ -3501,16 +3775,6 @@ class AgentRunService:
                 "citations": result.get("citations", []),
             },
         )
-        self.db.add(new_msg)
-
-        # 更新会话消息计数
-        from app.models import Conversation
-        conv = self.db.get(Conversation, original_msg.conversation_id)
-        if conv:
-            conv.message_count += 1
-
-        self.db.commit()
-        self.db.refresh(new_msg)
 
         logger.info(
             "重新生成回复成功",
@@ -3559,10 +3823,8 @@ class AgentRunService:
         Yields:
             str: SSE 格式的事件数据
         """
-        from app.models import Message, Conversation
-
         # 1. 获取原消息
-        original_msg = self.db.get(Message, message_id)
+        original_msg = await self._get_message_async(message_id)
         if not original_msg or original_msg.role != "assistant":
             raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
 
@@ -3570,12 +3832,12 @@ class AgentRunService:
             raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
 
         # 2. 将原版本标记为非当前
+        await self._mark_message_not_current_async(message_id)
         original_msg.is_current = False
-        self.db.commit()
 
         # 3. 获取父用户消息（用于提取原始问题；若已被逻辑删除则自动恢复，
         # 见 _locate_or_restore_parent_user_message）
-        parent_msg = self._locate_or_restore_parent_user_message(original_msg)
+        parent_msg = await self._locate_or_restore_parent_user_message(original_msg)
         parent_msg_id = parent_msg.id
 
         user_message_content = parent_msg.content if parent_msg else ""
@@ -3672,12 +3934,10 @@ class AgentRunService:
 
         # 6. 保存新版本消息
         new_version = original_msg.version + 1
-        new_msg = Message(
+        new_msg = await self._save_regenerated_message_async(
             conversation_id=original_msg.conversation_id,
-            role="assistant",
             content=full_content,
             version=new_version,
-            is_current=True,
             parent_message_id=parent_msg_id,
             meta_data={
                 "reasoning_content": full_reasoning or None,
@@ -3687,15 +3947,6 @@ class AgentRunService:
                 "audio_url": audio_url,
             },
         )
-        self.db.add(new_msg)
-
-        # 更新会话消息计数
-        conv = self.db.get(Conversation, original_msg.conversation_id)
-        if conv:
-            conv.message_count += 1
-
-        self.db.commit()
-        self.db.refresh(new_msg)
 
         logger.info(
             "重新生成回复成功（流式）",

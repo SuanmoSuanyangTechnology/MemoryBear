@@ -146,6 +146,65 @@ class AgentMiddleware:
         
         return list(tools_dict.values()), skill_configs, tool_to_skill_map
 
+    async def load_skill_tools_async(
+        self,
+        db,
+        tenant_id: uuid.UUID,
+        base_tools: List = None,
+        runtime_context: Optional[Dict[str, Any]] = None,
+    ) -> tuple[List, Dict[str, Any], Dict[str, str]]:
+        """异步加载技能关联的工具"""
+        tools_dict = {}
+        tool_to_skill_map = {}
+
+        if base_tools:
+            for tool in base_tools:
+                tool_name = getattr(tool, 'name', str(id(tool)))
+                tools_dict[tool_name] = tool
+
+        skill_configs = {}
+        skill_ids_to_load = []
+
+        if self.enabled and self.all_skills:
+            skills, _ = await SkillService.list_skills_async(
+                db,
+                tenant_id,
+                is_active=True,
+                page=1,
+                pagesize=1000,
+            )
+            skill_ids_to_load = [str(skill.id) for skill in skills]
+        elif self.enabled and self.skill_ids:
+            skill_ids_to_load = self.skill_ids
+
+        if skill_ids_to_load:
+            for skill_id in skill_ids_to_load:
+                try:
+                    skill = await SkillRepository.get_by_id_async(db, uuid.UUID(skill_id), tenant_id)
+                    if skill and skill.is_active:
+                        config = skill.config or {}
+                        config['prompt'] = skill.prompt
+                        config['name'] = skill.name
+                        skill_configs[skill_id] = config
+                except Exception:
+                    continue
+
+            skill_tools, skill_tool_map = await SkillService.load_skill_tools_async(
+                db,
+                skill_ids_to_load,
+                tenant_id,
+                runtime_context=runtime_context,
+            )
+
+            for tool in skill_tools:
+                tool_name = getattr(tool, 'name', str(id(tool)))
+                if tool_name not in tools_dict:
+                    tools_dict[tool_name] = tool
+                    if tool_name in skill_tool_map:
+                        tool_to_skill_map[tool_name] = skill_tool_map[tool_name]
+
+        return list(tools_dict.values()), skill_configs, tool_to_skill_map
+
     @staticmethod
     def get_active_prompts(activated_skill_ids: List[str], skill_configs: Dict[str, Any]) -> str:
         """
