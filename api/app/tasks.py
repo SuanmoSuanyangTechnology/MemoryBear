@@ -17,6 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
 
+from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -59,6 +60,7 @@ from app.repositories.end_user_repository import get_end_users_by_workspace
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
+from app.services.model_service import ModelApiKeyService
 from app.utils.redis_lock import RedisFairLock
 
 logger = get_logger(__name__)
@@ -81,6 +83,42 @@ EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+
+def _resolve_model_api_key(db, model_config_id, tenant_id, role: str):
+    if not model_config_id:
+        raise RuntimeError(f"{role} model config is unavailable")
+    api_key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
+    if not api_key:
+        raise RuntimeError(f"No available {role} api key found")
+    return api_key
+
+
+def _build_llm_config(db, llm_id, tenant_id):
+    llm_key = _resolve_model_api_key(db, llm_id, tenant_id, "llm")
+    return {
+        "key": llm_key.api_key,
+        "model_name": llm_key.model_name,
+        "base_url": llm_key.api_base,
+    }
+
+
+def _build_chat_model(db, llm_id, tenant_id):
+    llm_key = _resolve_model_api_key(db, llm_id, tenant_id, "llm")
+    return Base(
+        key=llm_key.api_key,
+        model_name=llm_key.model_name,
+        base_url=llm_key.api_base,
+    )
+
+
+def _build_embedding_model(db, embedding_id, tenant_id):
+    embedding_key = _resolve_model_api_key(db, embedding_id, tenant_id, "embedding")
+    return OpenAIEmbed(
+        key=embedding_key.api_key,
+        model_name=embedding_key.model_name,
+        base_url=embedding_key.api_base,
+    )
 
 
 def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
@@ -317,7 +355,7 @@ def process_item(item: dict):
     return result
 
 
-def _build_vision_model(file_path: str, db_knowledge):
+def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
     """根据文件类型选择合适的视觉/音频模型，避免冗余初始化。"""
     if AUDIO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
@@ -340,11 +378,12 @@ def _build_vision_model(file_path: str, db_knowledge):
             base_url=omni_base,
         )
     # 默认：使用知识库配置的 image2text 模型
+    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
     return QWenCV(
-        key=db_knowledge.image2text.api_keys[0].api_key,
-        model_name=db_knowledge.image2text.api_keys[0].model_name,
+        key=image2text_key.api_key,
+        model_name=image2text_key.model_name,
         lang=DEFAULT_PARSE_LANGUAGE,
-        base_url=db_knowledge.image2text.api_keys[0].api_base,
+        base_url=image2text_key.api_base,
     )
 
 
@@ -427,18 +466,15 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 "workspace_id": str(db_knowledge.workspace_id),
                 "parent_child_mode": bool(db_document.is_parent_child_mode),
             }
+            tenant_id = db_workspace.tenant_id
             llm_config = None
             if auto_questions_topn:
-                llm_config = {
-                    "key": db_knowledge.llm.api_keys[0].api_key,
-                    "model_name": db_knowledge.llm.api_keys[0].model_name,
-                    "base_url": db_knowledge.llm.api_keys[0].api_base,
-                }
+                llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
             use_graphrag = bool(
                 knowledge_parser_config.get("graphrag", {}).get("use_graphrag", False)
             )
-            vision_model = _build_vision_model(file_name, db_knowledge)
+            vision_model = _build_vision_model(file_name, db, db_knowledge.image2text_id, tenant_id)
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             progress_lines.append(f"{_progress_ts()} Start to parse.")
@@ -880,8 +916,13 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             if db_knowledge is None:
                 logger.error(f"[GraphRAG-KB] knowledge={kb_id} not found")
                 return "build knowledge graph failed: knowledge not found"
+            db_workspace = db.query(Workspace).filter(Workspace.id == db_knowledge.workspace_id).first()
+            if db_workspace is None:
+                logger.error(f"[GraphRAG-KB] workspace={db_knowledge.workspace_id} not found")
+                return "build knowledge graph failed: workspace not found"
 
             kb_name = db_knowledge.name
+            tenant_id = db_workspace.tenant_id
             parser_config = db_knowledge.parser_config or {}
             graphrag_conf = parser_config.get("graphrag", {})
             if not graphrag_conf.get("use_graphrag", False):
@@ -890,16 +931,8 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             db_documents = db.query(Document).filter(Document.kb_id == kb_id).all()
             document_ids = [str(doc.id) for doc in db_documents]
 
-            chat_model = Base(
-                key=db_knowledge.llm.api_keys[0].api_key,
-                model_name=db_knowledge.llm.api_keys[0].model_name,
-                base_url=db_knowledge.llm.api_keys[0].api_base,
-            )
-            embedding_model = OpenAIEmbed(
-                key=db_knowledge.embedding.api_keys[0].api_key,
-                model_name=db_knowledge.embedding.api_keys[0].model_name,
-                base_url=db_knowledge.embedding.api_keys[0].api_base,
-            )
+            chat_model = _build_chat_model(db, db_knowledge.llm_id, tenant_id)
+            embedding_model = _build_embedding_model(db, db_knowledge.embedding_id, tenant_id)
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             with_resolution = graphrag_conf.get("resolution", False)
@@ -964,22 +997,19 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
             if db_document is None or db_knowledge is None:
                 logger.error(f"[GraphRAG] document={document_id} or knowledge={knowledge_id} not found")
                 return "build_graphrag_for_document failed: record not found"
+            db_workspace = db.query(Workspace).filter(Workspace.id == db_knowledge.workspace_id).first()
+            if db_workspace is None:
+                logger.error(f"[GraphRAG] workspace={db_knowledge.workspace_id} not found")
+                return "build_graphrag_for_document failed: workspace not found"
 
+            tenant_id = db_workspace.tenant_id
             parser_config = db_knowledge.parser_config or {}
             graphrag_conf = parser_config.get("graphrag", {})
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
-            chat_model = Base(
-                key=db_knowledge.llm.api_keys[0].api_key,
-                model_name=db_knowledge.llm.api_keys[0].model_name,
-                base_url=db_knowledge.llm.api_keys[0].api_base,
-            )
-            embedding_model = OpenAIEmbed(
-                key=db_knowledge.embedding.api_keys[0].api_key,
-                model_name=db_knowledge.embedding.api_keys[0].model_name,
-                base_url=db_knowledge.embedding.api_keys[0].api_base,
-            )
+            chat_model = _build_chat_model(db, db_knowledge.llm_id, tenant_id)
+            embedding_model = _build_embedding_model(db, db_knowledge.embedding_id, tenant_id)
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             task = {
@@ -1696,8 +1726,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
         return f"sync knowledge '{kb_name}' failed: {e}"
 
 
-@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=True, max_retries=3,
-                 reject_on_worker_lost=True)
+@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False, max_retries=0)
 def write_message_task(
         self,
         end_user_id: str,
@@ -3049,6 +3078,137 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
             "message": f"任务失败: {str(e)}",
             "duration_seconds": time.time() - start_time
         }
+
+
+_FORGET_CANDIDATES_KEY = "forget:candidates"
+_FORGET_INFLIGHT_KEY = "forget:inflight"
+
+
+@celery_app.task(
+    name="app.tasks.scan_forget_candidates",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+)
+def scan_forget_candidates(self) -> Dict[str, Any]:
+    """扫描 Redis 中超过配额的用户，派发 do_forget_for_user。
+
+    通过 smove 原子地将 end_user_id 从 candidates → inflight，
+    避免重复派发同一个用户。
+    """
+
+    async def _run() -> Dict[str, Any]:
+        from app.aioRedis import get_thread_safe_redis
+
+        start_time = time.time()
+        redis_client = get_thread_safe_redis()
+        if redis_client is None:
+            return {"status": "FAILED", "message": "Redis 不可用"}
+
+        candidates = await redis_client.smembers(_FORGET_CANDIDATES_KEY)
+        if not candidates:
+            return {"status": "SUCCESS", "dispatched": 0}
+
+        dispatched = 0
+        skipped_inflight = 0
+        for uid in candidates:
+            if await redis_client.sismember(_FORGET_INFLIGHT_KEY, uid):
+                await redis_client.srem(_FORGET_CANDIDATES_KEY, uid)
+                skipped_inflight += 1
+                continue
+
+            moved = await redis_client.smove(_FORGET_CANDIDATES_KEY, _FORGET_INFLIGHT_KEY, uid)
+            if not moved:
+                skipped_inflight += 1
+                continue
+            try:
+                do_forget_for_user.apply_async(
+                    kwargs={"end_user_id": uid},
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception as e:
+                await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, uid)
+                logger.error(f"[ForgetScan] 派发失败 user={uid}: {e}")
+
+        logger.info(
+            f"[ForgetScan] 完成: dispatched={dispatched}/{len(candidates)}, "
+            f"skip_inflight={skipped_inflight}, "
+            f"耗时={time.time() - start_time:.1f}s"
+        )
+        return {
+            "status": "SUCCESS",
+            "dispatched": dispatched,
+            "candidates": len(candidates),
+            "skip_inflight": skipped_inflight,
+        }
+
+    return asyncio.run(_run())
+
+
+@celery_app.task(
+    name="app.tasks.do_forget_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=1200,
+    soft_time_limit=1080,
+)
+def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
+    """对单个用户执行遗忘。由 scan_forget_candidates 派发。
+
+    ForgettingPipeline.run() 内部已调用 sync，sync 会根据最新计数
+    自行决定 sadd / srem。这里只清理 inflight，保证不泄漏。
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.repositories.end_user_repository import get_by_id as _get_user
+        from app.services.memory_config_service import MemoryConfigService
+        from app.core.memory.memory_service import MemoryService
+        redis_client = get_thread_safe_redis()
+        with get_db_context() as db:
+            end_user = _get_user(db, uuid.UUID(end_user_id))
+            if end_user is None:
+                logger.warning(f"[ForgetDo] 用户不存在: {end_user_id}")
+                if redis_client:
+                    await redis_client.srem(_FORGET_INFLIGHT_KEY, end_user_id)
+                    await redis_client.srem(_FORGET_CANDIDATES_KEY, end_user_id)
+                return {"status": "skipped", "reason": "not_found"}
+
+            config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
+            workspace_id = str(end_user.workspace_id)
+
+        service = MemoryService(
+            config_id=config_id,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+        )
+        result = await service.forget()
+
+        if redis_client:
+            await redis_client.srem(_FORGET_INFLIGHT_KEY, end_user_id)
+
+        logger.info(
+            f"[ForgetDo] 完成: end_user_id={end_user_id}, "
+            f"elapsed={time.time() - start_time:.1f}s"
+        )
+        return {"status": "success", "result": result}
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"[ForgetDo] 失败 user={end_user_id}: {e}", exc_info=True)
+        result = {"status": "failed", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    result["end_user_id"] = end_user_id
+    result["elapsed_time"] = time.time() - start_time
+    return result
 
 
 # =============================================================================

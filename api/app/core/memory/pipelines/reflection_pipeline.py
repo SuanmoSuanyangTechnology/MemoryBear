@@ -84,7 +84,7 @@ class ReflectionPipeline:
                     self._llm_client = await ModelClientMixin.get_llm_client_async(
                         db,
                         llm_id,
-                        tenant_id=getattr(self.memory_config, "tenant_id", None),
+                        getattr(self.memory_config, "tenant_id", None),
                     )
 
         # 构建 embedding_client（用于更名后重新生成 name_embedding）

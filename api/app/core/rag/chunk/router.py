@@ -37,4 +37,6 @@ class FileTypeRouter:
             return JsonChunkPipeline()
         if re.search(r"\.doc$", filename, re.IGNORECASE):
             return LegacyDocChunkPipeline()
-        raise NotImplementedError("file type not supported yet(pdf, xlsx, doc, docx, txt supported)")
+        raise NotImplementedError(
+            "file type not supported yet(pdf, ppt, pptx, xlsx, csv, doc, docx, txt, md, html, json supported)"
+        )

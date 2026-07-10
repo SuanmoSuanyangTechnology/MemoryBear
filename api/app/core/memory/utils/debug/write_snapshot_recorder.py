@@ -64,22 +64,27 @@ class WriteSnapshotRecorder:
 
     # ── Stage 1: 剪枝结果 ──
 
-    def record_pruning_results(self, pruning_records: list) -> None:
-        """记录 PruningPipeline 对 assistant 消息的剪枝结果。
+    def record_pruning_results(
+        self,
+        pruning_records: list,
+    ) -> None:
+        """记录统一剪枝结果（context 剪枝 + target 规整），按 message_seq 排序。
 
-        每条记录包含：
-        - conversation_id: 对话 ID
-        - message_seq: 消息序号
-        - original_content: 原始 assistant 消息内容
-        - pruned_content: 剪枝后内容（A'）
-        - source: "llm"（本轮 LLM 剪枝）或 "cache"（Redis 缓存命中）
+        将一次滑动窗口写入中的所有剪枝操作（_build_pruned_context 对 context
+        中 assistant 的剪枝 + _prune_target_message 对 target user 的规整）
+        合并到同一个快照文件，按 message_seq 升序排列。
+
+        只要剪枝开关开启就输出快照（即使记录为空列表），便于确认剪枝链路已执行。
 
         Args:
-            pruning_records: 剪枝记录列表，每条为 dict
+            pruning_records: 剪枝记录列表（含 context 剪枝 + target 规整）
         """
-        if not pruning_records:
-            return
-        self._snapshot.save_stage("1_user_assistant_pruning", pruning_records)
+        all_records = list(pruning_records) if pruning_records else []
+
+        # 按 message_seq 升序排列，确保快照输出顺序与消息在对话中的位置一致
+        all_records.sort(key=lambda r: r.get("message_seq", 0))
+
+        self._snapshot.save_stage("1_user_assistant_pruning", all_records)
 
     # ── Stage 2-5: 萃取阶段各步骤输出 ──
 

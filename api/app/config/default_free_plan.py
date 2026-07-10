@@ -21,6 +21,7 @@ def _get_quota_from_env():
         "ontology_project_quota",
         "model_quota",
         "api_ops_rate_limit",
+        "end_user_memory_limit"
     ]
     quotas = {}
     for key in quota_keys:

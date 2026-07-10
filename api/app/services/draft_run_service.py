@@ -158,6 +158,7 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
         rerank_id=rerank_id,
     )
 
+    # ToolOrchestrator runs sync tools in a worker thread, so keep this DB session on that thread.
     with get_db_context() as db:
         result = KnowledgeRetrievalService.retrieve(db=db, request=request, current_user=None)
 

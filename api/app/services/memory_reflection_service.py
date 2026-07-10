@@ -17,6 +17,7 @@ from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.models.app_model import App
 from app.models.app_release_model import AppRelease
+from app.models.workspace_model import Workspace
 from app.repositories.end_user_repository import EndUserRepository
 from app.utils.config_utils import resolve_config_id
 
@@ -151,16 +152,23 @@ class WorkspaceAppService:
             memory_content: Memory config ID string
             
         Returns:
-            Dict containing memory config info including workspace_id for model fallback
+            Dict containing memory config info including workspace_id and tenant_id for model fallback
         """
         try:
             memory_content = resolve_config_id(memory_content, self.db)
             memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, memory_content)
 
             if memory_config_result:
+                # 查询 workspace 获取 tenant_id，用于 SpeedBear 模型 API key 解析
+                tenant_id = None
+                if memory_config_result.workspace_id:
+                    workspace = self.db.get(Workspace, memory_config_result.workspace_id)
+                    tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
+
                 return {
                     "config_id": memory_content,
                     "workspace_id": memory_config_result.workspace_id,
+                    "tenant_id": tenant_id,
                     "enable_self_reflexion": memory_config_result.enable_self_reflexion,
                     "iteration_period": memory_config_result.iteration_period,
                     "reflexion_range": memory_config_result.reflexion_range,
@@ -491,7 +499,8 @@ class MemoryReflectionService:
             baseline=baseline,
             memory_verify=config_data.get("memory_verify", False),
             quality_assessment=config_data.get("quality_assessment", False),
-            model_id=reflection_model_id
+            model_id=reflection_model_id,
+            tenant_id=config_data.get("tenant_id")
         )
     
     async def _execute_reflection_engine(
@@ -501,14 +510,21 @@ class MemoryReflectionService:
     ) -> Dict[str, Any]:
         """Execute Reflection Engine"""
         try:
+            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+
             # 创建Neo4j连接器
             connector = Neo4jConnector()
+            
+            # 提前构建 LLM 客户端（不再让 ReflectionEngine 内部 lazy init）
+            llm_client = ModelClientMixin.get_llm_client(
+                self.db, reflection_config.model_id, self._get_tenant_id(reflection_config)
+            )
             
             # 创建反思引擎
             engine = ReflectionEngine(
                 config=reflection_config,
                 neo4j_connector=connector,
-                llm_client=reflection_config.model_id
+                llm_client=llm_client
             )
             
             # 执行反思
@@ -534,6 +550,11 @@ class MemoryReflectionService:
                 "memories_updated": 0,
                 "execution_time": 0.0
             }
+
+    def _get_tenant_id(self, reflection_config: ReflectionConfig):
+        """从 ReflectionConfig 中获取 tenant_id，用于 SpeedBear 模型 API key 解析"""
+        tid = getattr(reflection_config, 'tenant_id', None)
+        return uuid.UUID(tid) if tid else None
 
 
 class Memory_Reflection_Service:
