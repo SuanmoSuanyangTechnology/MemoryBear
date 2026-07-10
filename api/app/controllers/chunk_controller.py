@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Uplo
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
@@ -18,8 +19,8 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
-from app.db import get_async_db
-from app.dependencies import get_current_user_async
+from app.db import get_async_db, get_db
+from app.dependencies import get_current_user_async, get_current_user
 from app.models.document_model import Document
 from app.models.file_model import File as FileModel
 from app.models.user_model import User
@@ -1005,7 +1006,7 @@ def get_retrieve_types():
 
 async def retrieve_chunks_with_caller(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: AsyncSession,
+        db: Session | AsyncSession,
         current_user: User,
         caller: chunk_schema.KnowledgeRetrievalCaller,
 ):
@@ -1048,8 +1049,8 @@ async def retrieve_chunks_with_caller(
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
 ):
     return await retrieve_chunks_with_caller(
         retrieve_data=retrieve_data,

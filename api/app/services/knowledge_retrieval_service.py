@@ -30,6 +30,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
     ElasticSearchVectorIndexOps,
 )
+from app.db import get_db_context
 from app.models import ModelType, knowledge_model, knowledgeshare_model
 from app.models.models_model import ModelApiKey, ModelConfig
 from app.repositories import knowledge_repository
@@ -67,6 +68,29 @@ class ModelApiKeySnapshot:
             provider=api_key.provider,
             api_key=api_key.api_key,
             api_base=api_key.api_base,
+        )
+
+
+@dataclass(frozen=True)
+class RetrievalPrincipal:
+    id: Any
+    username: str | None
+    tenant_id: Any
+    current_workspace_id: Any
+    is_superuser: bool
+
+    @classmethod
+    def from_user(cls, user: Any) -> "RetrievalPrincipal | None":
+        if user is None:
+            return None
+        if isinstance(user, cls):
+            return user
+        return cls(
+            id=getattr(user, "id", None),
+            username=getattr(user, "username", None),
+            tenant_id=getattr(user, "tenant_id", None),
+            current_workspace_id=getattr(user, "current_workspace_id", None),
+            is_superuser=bool(getattr(user, "is_superuser", False)),
         )
 
 
@@ -343,13 +367,38 @@ class KnowledgeRetrievalService:
     @classmethod
     async def retrieve_async(
             cls,
-            db: AsyncSession,
+            db: Session | AsyncSession,
             request: KnowledgeRetrievalRequest,
             current_user: Any = None,
     ) -> KnowledgeRetrievalResult:
         """Async retrieval entrypoint for async request chains."""
-        if not isinstance(db, AsyncSession):
-            return await asyncio.to_thread(cls.retrieve, db, request, current_user)
+        principal = RetrievalPrincipal.from_user(current_user)
+        if isinstance(db, AsyncSession):
+            return await cls._retrieve_with_async_session(db, request, principal)
+        if isinstance(db, Session):
+            return await asyncio.to_thread(
+                cls._retrieve_with_sync_session,
+                request,
+                principal,
+            )
+        raise TypeError("retrieve_async requires Session or AsyncSession")
+
+    @classmethod
+    def _retrieve_with_sync_session(
+            cls,
+            request: KnowledgeRetrievalRequest,
+            current_user: RetrievalPrincipal | None,
+    ) -> KnowledgeRetrievalResult:
+        with get_db_context() as thread_db:
+            return cls.retrieve(thread_db, request, current_user)
+
+    @classmethod
+    async def _retrieve_with_async_session(
+            cls,
+            db: AsyncSession,
+            request: KnowledgeRetrievalRequest,
+            current_user: RetrievalPrincipal | None = None,
+    ) -> KnowledgeRetrievalResult:
 
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()
