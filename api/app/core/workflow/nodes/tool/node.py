@@ -9,7 +9,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read
+from app.db import get_db_read, get_db_context
 from app.services.tool_service import ToolService
 from app.models.tool_model import ToolType
 
@@ -79,8 +79,8 @@ class ToolNode(BaseNode):
         logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
         self._process = {"tool_id": str(self.typed_config.tool_id), "parameters": rendered_parameters}
 
-        # 执行工具
-        with get_db_read() as db:
+        # 执行工具 — 工具执行需要写入 tool_executions 表,改用读写 session
+        with get_db_context() as db:
             tool_service = ToolService(db)
 
             # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
@@ -106,7 +106,7 @@ class ToolNode(BaseNode):
             logger.info(f"节点 {self.node_id} 工具执行成功")
             self._process["raw_output"] = result.data
             return {
-                "data": result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False),
+                "data": json.dumps(result.data, ensure_ascii=False),
                 "execution_time": result.execution_time
             }
         else:
