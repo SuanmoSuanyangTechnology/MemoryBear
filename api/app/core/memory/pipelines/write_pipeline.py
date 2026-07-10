@@ -86,6 +86,10 @@ def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: s
     result: List[dict] = []
     _now = datetime.now(_tz.utc).isoformat()
     for idx, r in enumerate(raw_records):
+        # 只处理 assistant_pruning 类型的记录，user_pruning 不产生 AssistantOriginal 节点
+        if r.get("type") != "assistant_pruning":
+            continue
+
         conv_id = r.get("conversation_id", "")
         seq = r.get("message_seq", 0)
         # pair_id 基于 conversation_id + message_seq 确定性生成，

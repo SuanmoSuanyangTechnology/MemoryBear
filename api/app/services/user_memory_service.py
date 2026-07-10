@@ -1351,7 +1351,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
             logger.warning(f"获取用户 other_name 失败，使用默认称呼: {str(e)}")
     
     # 创建 UserSummaryHelper 实例
-    user_summary_tool = UserSummaryHelper(end_user_id or os.getenv("SELECTED_end_user_id", "group_123"))
+    user_summary_tool = UserSummaryHelper(end_user_id)
     
     try:
         # 1) 收集上下文数据
