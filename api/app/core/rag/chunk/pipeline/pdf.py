@@ -112,14 +112,16 @@ class PresentationChunkPipeline(ChunkPipeline):
         if not ctx.callback:
             return ctx
 
-        def converted_pdf_callback(progress=None, message=None):
+        def converted_pdf_callback(*args, **kwargs):
+            progress = args[0] if args else kwargs.get("prog", kwargs.get("progress"))
+            message = args[1] if len(args) > 1 else kwargs.get("msg", kwargs.get("message"))
             mapped_progress = self._map_converted_pdf_progress(progress)
-            ctx.callback(mapped_progress, message)
+            ctx.callback(prog=mapped_progress, msg=message)
 
         return replace(ctx, callback=converted_pdf_callback)
 
     def _map_converted_pdf_progress(self, progress):
-        if not isinstance(progress, (int, float)):
+        if not isinstance(progress, (int, float)) or progress < 0:
             return progress
 
         child_start = self.START_PROGRESS
