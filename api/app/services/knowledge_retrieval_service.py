@@ -70,7 +70,7 @@ class ModelApiKeySnapshot:
 @dataclass(frozen=True)
 class RetrievalParams:
     similarity_threshold: float
-    vector_similarity_weight: float
+    vector_similarity_weight: float | None
     top_k: int
     top_n: int
     retrieve_type: RetrieveType
@@ -410,7 +410,7 @@ class KnowledgeRetrievalService:
                 and config.rerank_score_threshold is not None
         ):
             return config.rerank_score_threshold
-        if config and "vector_similarity_weight" in explicit_fields:
+        if config and "vector_similarity_weight" in explicit_fields and config.vector_similarity_weight is not None:
             return config.vector_similarity_weight
         if request.rerank_score_threshold is not None:
             return request.rerank_score_threshold

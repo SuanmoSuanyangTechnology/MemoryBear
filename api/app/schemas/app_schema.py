@@ -106,7 +106,7 @@ class KnowledgeBaseConfig(BaseModel):
     similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="相似度阈值")
     # strategy: str = Field(default="hybrid", description="检索策略: hybrid | bm25 | dense")
     # weight: float = Field(default=1.0, ge=0.0, le=1.0, description="知识库权重（用于多知识库融合）")
-    vector_similarity_weight: float = Field(default=0.5, ge=0.0, le=1.0, description="向量相似度权重")
+    vector_similarity_weight: float | None = Field(default=0.5, ge=0.0, le=1.0, description="向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）")
     retrieve_type: str = Field(default="hybrid", description="检索方式participle｜ semantic｜hybrid")
 
 

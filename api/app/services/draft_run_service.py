@@ -105,7 +105,7 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
     """标准化知识库检索：走 KnowledgeRetrievalService + KnowledgeRetrievalRequest。
 
     读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
-    vector_similarity_weight / retrieve_type / reranker_id）。由于
+    retrieve_type / reranker_id）。由于
     KnowledgeRetrievalRequest 只携带一组检索参数，这里沿用工作流知识库节点的约定，
     用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
     """
@@ -141,13 +141,19 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
         except (ValueError, AttributeError):
             rerank_id = None
 
+    # 分词检索不使用 vector_similarity_weight，其他检索类型从配置读取
+    if retrieve_type == RetrieveType.PARTICIPLE:
+        vector_similarity_weight = None
+    else:
+        vector_similarity_weight = _as_float(first_kb.get("vector_similarity_weight"), 0.5)
+    
     request = KnowledgeRetrievalRequest(
         query=query,
         caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         top_k=_as_int(first_kb.get("top_k"), 3),
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
-        vector_similarity_weight=_as_float(first_kb.get("vector_similarity_weight"), 0.5),
+        vector_similarity_weight=vector_similarity_weight,
         retrieve_type=retrieve_type,
         rerank_id=rerank_id,
     )
