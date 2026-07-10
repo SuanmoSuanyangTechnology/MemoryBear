@@ -104,7 +104,7 @@ async def prune_messages(
                     "message_seq": seq,
                     "source": "skipped",
                     "type": "user_pruning",
-                    "reason": f"无 <input-file-summary> 且长度 {len(content)} < 500",
+                    "reason": f"无 <input-file-summary> 且长度 {len(content)} < 200",
                     "input": {"msgs": [{"role": "User", "msg": content}]},
                     "output": None,
                 })
@@ -310,7 +310,7 @@ async def _call_llm_prune(
 
 def _should_skip_user(content: str) -> bool:
     """短消息且无 file-summary → 跳过 LLM 调用。"""
-    return "<input-file-summary>" not in content and len(content) < 500
+    return "<input-file-summary>" not in content and len(content) < 200
 
 
 def _next_assistant_content(messages: List[dict], i: int) -> str:
