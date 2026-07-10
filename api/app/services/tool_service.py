@@ -47,6 +47,7 @@ BUILTIN_TOOLS = {
     "MinerUTool": "app.core.tools.builtin.mineru_tool",
     "TextInTool": "app.core.tools.builtin.textin_tool",
     "OpenClawTool": "app.core.tools.builtin.openclaw_tool",
+    "DatabaseTool": "app.core.tools.builtin.database_tool",
 }
 
 
@@ -1362,7 +1363,7 @@ class ToolService:
                 if builtin_config.requires_config:
                     # 需要配置的工具
                     if self._is_tool_configured(builtin_config):
-                        if tool_config.config_data.get("is_enabled", None):
+                        if builtin_config.is_enabled:
                             tool_config.status = ToolStatus.AVAILABLE.value
                         else:
                             tool_config.status = ToolStatus.CONFIGURED_DISABLED.value

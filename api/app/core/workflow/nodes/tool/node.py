@@ -76,15 +76,41 @@ class ToolNode(BaseNode):
                 rendered_value = param_template
             rendered_parameters[param_name] = rendered_value
 
-        logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
-        self._process = {"tool_id": str(self.typed_config.tool_id), "parameters": rendered_parameters}
-
         # 执行工具
         with get_db_read() as db:
             tool_service = ToolService(db)
 
-            # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
             tool_instance = tool_service.get_tool_instance(self.typed_config.tool_id, tenant_id)
+
+            # 字面值（非变量引用）在前端表单里始终以字符串形式提交，例如 integer/
+            # number/boolean 类型的参数手动填 "5432"/"true" 会保持字符串类型，
+            # 直接传给工具会在 BaseTool.validate_parameters 里的严格 isinstance
+            # 类型检查中报错。这里按工具声明的参数类型做一次尽力而为的类型转换，
+            # 只处理字符串值，转换失败则保留原值，交给后续校验按预期报错。
+            if tool_instance:
+                param_types = {p.name: p.type for p in tool_instance.parameters}
+                for param_name, value in list(rendered_parameters.items()):
+                    if not isinstance(value, str):
+                        continue
+                    param_type = param_types.get(param_name)
+                    stripped = value.strip()
+                    if param_type == "integer":
+                        try:
+                            rendered_parameters[param_name] = int(stripped)
+                        except (TypeError, ValueError):
+                            pass
+                    elif param_type == "number":
+                        try:
+                            rendered_parameters[param_name] = float(stripped)
+                        except (TypeError, ValueError):
+                            pass
+                    elif param_type == "boolean" and stripped.lower() in ("true", "false"):
+                        rendered_parameters[param_name] = stripped.lower() == "true"
+
+            logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
+            self._process = {"tool_id": str(self.typed_config.tool_id), "parameters": rendered_parameters}
+
+            # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
             if tool_instance and tool_instance.tool_type == ToolType.MCP:
                 operation = rendered_parameters.pop("operation", None)
                 if operation:

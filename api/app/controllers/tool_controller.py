@@ -222,7 +222,8 @@ async def execute_tool(
             timeout=request.timeout
         )
         if not result.success:
-            raise HTTPException(status_code=400, detail=result["error"])
+            status_code = 400 if result.error_code == "VALIDATION_ERROR" else 500
+            raise HTTPException(status_code=status_code, detail=result.error)
         return success(
             data={
                 "success": result.success,

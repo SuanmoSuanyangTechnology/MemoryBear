@@ -87,17 +87,27 @@ class BaseTool(ABC):
         """
         errors = {}
         param_definitions = {p.name: p for p in self.parameters}
-        
+
         # 检查必需参数
+        # 工作流节点里，用户没填的字段前端会提交空字符串 "" 而不是缺省这个 key，
+        # 所以这里把空字符串也当作"未填写"，否则会漏判必填缺失，转而在下面的
+        # 类型检查里报出一个容易误导人的 "invalid type" 错误。
         for param_def in self.parameters:
-            if param_def.required and param_def.name not in parameters:
+            if param_def.required and (
+                param_def.name not in parameters or parameters.get(param_def.name) in (None, "")
+            ):
                 errors[param_def.name] = f"Required parameter '{param_def.name}' is missing"
-        
+
         # 检查参数类型和约束
         for param_name, param_value in parameters.items():
             if param_name not in param_definitions:
                 continue
-                
+
+            # 空字符串视为"未填写"：必填缺失已经在上面报过了，可选参数留空
+            # 也不应该再去校验类型/约束（例如可选 integer 参数为空字符串）。
+            if param_value == "":
+                continue
+
             param_def = param_definitions[param_name]
             
             # 类型检查
