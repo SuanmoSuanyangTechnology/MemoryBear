@@ -35,6 +35,7 @@ export interface KnowledgeConfigForm {
   top_k?: number;
   retrieve_type?: RetrieveType;
   weight?: number;
+  config?: KnowledgeConfigForm;
 }
 
 /**
