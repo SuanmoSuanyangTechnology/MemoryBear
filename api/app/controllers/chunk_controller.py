@@ -26,11 +26,32 @@ from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service, file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied, KnowledgeRetrievalService
+from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
+
+
+def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant_id: uuid.UUID):
+    if not image2text_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="image2text model config is unavailable",
+        )
+    api_key = ModelApiKeyService.get_available_api_key(db, image2text_id, tenant_id=tenant_id)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No available image2text api key found",
+        )
+    return QWenCV(
+        key=api_key.api_key,
+        model_name=api_key.model_name,
+        lang="Chinese",
+        base_url=api_key.api_base,
+    )
 
 
 router = APIRouter(
@@ -109,12 +130,7 @@ async def get_preview_chunks(
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
     # Prepare to configure vision_model information
-    vision_model = QWenCV(
-            key=db_knowledge.image2text.api_keys[0].api_key,
-            model_name=db_knowledge.image2text.api_keys[0].model_name,
-            lang="Chinese",
-            base_url=db_knowledge.image2text.api_keys[0].api_base
-        )
+    vision_model = _build_image2text_vision_model(db, db_knowledge.image2text_id, current_user.tenant_id)
     from app.core.rag.chunk import chunk_pipeline as chunk
     from app.core.rag.chunk.context import ChunkOutputMode
     parent_child_mode = db_document.is_parent_child_mode
@@ -305,12 +321,7 @@ async def get_preview_chunks_hierarchy(
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
 
-    vision_model = QWenCV(
-        key=db_knowledge.image2text.api_keys[0].api_key,
-        model_name=db_knowledge.image2text.api_keys[0].model_name,
-        lang="Chinese",
-        base_url=db_knowledge.image2text.api_keys[0].api_base
-    )
+    vision_model = _build_image2text_vision_model(db, db_knowledge.image2text_id, current_user.tenant_id)
     from app.core.rag.chunk import chunk_pipeline as chunk
     from app.core.rag.chunk.context import ChunkOutputMode
 

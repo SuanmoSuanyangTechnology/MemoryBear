@@ -502,6 +502,6 @@ def create_long_term_memory_tool(
 
     long_term_memory._tool_meta = {
         "tool_type": "long_term_memory",
-        "sources": [{"id": config_id, "name": memory_name or config_id}],
+        "sources": [{"id": str(config_id), "name": memory_name or str(config_id)}],
     }
     return long_term_memory

@@ -135,7 +135,9 @@ class ModelConfigService:
                 api_key=api_key,
                 base_url=api_base,
                 is_omni=is_omni,
-                capability=capability
+                capability=capability,
+                timeout=10.0,
+                max_retries=0,
             )
 
             # 根据模型类型选择不同的验证方式
