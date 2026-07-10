@@ -11680,18 +11680,6 @@
             "title": "Enabled",
             "description": "是否启用对话历史记忆",
             "default": true
-          },
-          "memory_config_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Config Id",
-            "description": "选择记忆的内容类型"
           }
         },
         "type": "object",
