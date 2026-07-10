@@ -96,27 +96,14 @@ async def prune_messages(
             continue
 
         if role == "user":
-            if _should_skip_user(content):
-                result[i] = msg
-                db_updates.append((seq, content, None))
-                pruning_records.append({
-                    "conversation_id": conversation_id,
-                    "message_seq": seq,
-                    "source": "skipped",
-                    "type": "user_pruning",
-                    "reason": f"无 <input-file-summary> 且长度 {len(content)} < 200",
-                    "input": {"msgs": [{"role": "User", "msg": content}]},
-                    "output": None,
-                })
-            else:
-                pair = _next_assistant_content(messages, i)
-                prune_tasks.append((i, "user", _call_llm_prune(
-                    llm_client=llm_client,
-                    memory_config=memory_config,
-                    content=pair,
-                    user_content=content,
-                    language=language,
-                )))
+            pair = _next_assistant_content(messages, i)
+            prune_tasks.append((i, "user", _call_llm_prune(
+                llm_client=llm_client,
+                memory_config=memory_config,
+                content=pair,
+                user_content=content,
+                language=language,
+            )))
         elif role == "assistant":
             prune_tasks.append((i, "assistant", _call_llm_prune(
                 llm_client=llm_client,
@@ -306,11 +293,6 @@ async def _call_llm_prune(
         processed_user_msg=result.processed_user_msg,
         processed_user_topic_entity_hint=result.processed_user_topic_entity_hint,
     )
-
-
-def _should_skip_user(content: str) -> bool:
-    """短消息且无 file-summary → 跳过 LLM 调用。"""
-    return "<input-file-summary>" not in content and len(content) < 200
 
 
 def _next_assistant_content(messages: List[dict], i: int) -> str:
