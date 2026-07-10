@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from app.core.memory.utils.log.bear_logger import BearLogger
@@ -40,9 +40,7 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
     StatementNode,
 )
-from app.core.memory.storage_services.clustering_engine.label_propagation import (
-    _cosine_similarity,
-)
+from app.core.memory.utils.name_similarity_utils import cosine_similarity
 
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
@@ -756,7 +754,8 @@ class WritePipeline:
 
         # 构建节点
         node_id = uuid.uuid4().hex
-        now_iso = datetime.now().isoformat()
+        from app.core.utils.datetime_utils import to_iso_z
+        now_iso = to_iso_z(datetime.now(timezone.utc))
         run_id = result.dialogue_nodes[0].run_id if result.dialogue_nodes else uuid.uuid4().hex
 
         # name 使用 LLM 产出的实体锚点（processed_user_topic_entity_hint）
@@ -834,7 +833,7 @@ class WritePipeline:
             # embedding 相似度匹配
             if hint_emb:
                 emb = entity.name_embedding
-                if emb and _cosine_similarity(hint_emb, emb) < threshold:
+                if emb and cosine_similarity(hint_emb, emb) < threshold:
                     skipped_sim += 1
                     continue
             matched.append(entity)
