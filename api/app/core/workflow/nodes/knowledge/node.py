@@ -14,7 +14,7 @@ from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller
+from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.models import ModelType
 from app.models.models_model import ModelCapability
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
@@ -387,13 +387,19 @@ class KnowledgeRetrievalNode(BaseNode):
         first_kb = self.typed_config.knowledge_bases[0]
         kb_ids = [kb.kb_id for kb in self.typed_config.knowledge_bases]
 
+        # 分词检索不使用 vector_similarity_weight，其他检索类型从配置读取
+        if first_kb.retrieve_type == RetrieveType.PARTICIPLE:
+            vector_similarity_weight = None
+        else:
+            vector_similarity_weight = first_kb.vector_similarity_weight
+        
         request = KnowledgeRetrievalRequest(
             query=query,
             caller=KnowledgeRetrievalCaller.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
             similarity_threshold=first_kb.similarity_threshold,
-            vector_similarity_weight=first_kb.vector_similarity_weight,
+            vector_similarity_weight=vector_similarity_weight,
             top_k=self.typed_config.reranker_top_k or first_kb.top_k,
             retrieve_type=first_kb.retrieve_type,
             rerank_id=self.typed_config.reranker_id,
