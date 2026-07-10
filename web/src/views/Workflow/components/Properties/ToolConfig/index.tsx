@@ -1,6 +1,7 @@
 import { type FC, useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Select, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
+
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
@@ -27,6 +28,18 @@ interface Parameter {
   pattern: null | string;
 }
 
+const fetchToolMethods = (toolId: string): Promise<Option[]> => {
+  return getToolMethods(toolId).then(res => {
+    const response = res as Array<{ method_id: string; name: string; parameters: Parameter[] }>
+    return response.map(method => ({
+      value: method.name,
+      label: method.name,
+      isLeaf: true,
+      method_id: method.method_id,
+      parameters: method.parameters
+    }))
+  })
+}
 
 const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   options,
@@ -52,10 +65,8 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
             .then(toolsRes => {
               const tools = toolsRes as ToolItem[]
 
-              getToolMethods(values.tool_id)
-                .then(methodsRes => {
-                  const response = methodsRes as Array<{ method_id: string; name: string; parameters: Parameter[] }>
-
+              fetchToolMethods(values.tool_id)
+                .then(methodOptions => {
                   setOptionList(prevList => {
                     return prevList.map(item => {
                       if (item.value === detail.tool_type) {
@@ -65,13 +76,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                             value: vo.id,
                             label: vo.name,
                             isLeaf: false,
-                            children: vo.id === values.tool_id ? response.map(method => ({
-                              value: method.name,
-                              label: method.name,
-                              isLeaf: true,
-                              method_id: method.method_id,
-                              parameters: method.parameters
-                            })) : undefined
+                            children: vo.id === values.tool_id ? methodOptions : undefined
                           }))
                         }
                       }
@@ -79,18 +84,18 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                     })
                   })
 
-                  if (response.length > 1) {
-                    const filterTarget = response.find(vo => vo.name === values.tool_parameters?.operation)
+                  if (methodOptions.length > 1) {
+                    const filterTarget = methodOptions.find(vo => vo.value === values.tool_parameters?.operation)
                     if (filterTarget) {
-                      setParameters([...filterTarget.parameters])
+                      setParameters([...(filterTarget.parameters ?? [])])
                     } else {
                       setParameters([])
                     }
                   } else {
-                    setParameters([...response[0].parameters])
+                    setParameters([...(methodOptions[0].parameters ?? [])])
                   }
 
-                  form.setFieldValue('tools', [detail.tool_type, values.tool_id, values.tool_parameters?.operation ?? response[0].name])
+                  form.setFieldValue('tools', [detail.tool_type, values.tool_id, values.tool_parameters?.operation ?? methodOptions[0].value])
                 })
             })
         })
@@ -131,18 +136,9 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
           setOptionList([...optionList])
         })
     } else {
-      getToolMethods(targetOption.value as string)
-        .then(res => {
-          const response = res as Array<{ method_id: string; name: string }>
-          targetOption.children = response.map((vo: any) => {
-            return {
-              value: vo.name,
-              label: vo.name,
-              isLeaf: true,
-              method_id: vo.method_id,
-              parameters: vo.parameters
-            }
-          })
+      fetchToolMethods(targetOption.value as string)
+        .then(methodOptions => {
+          targetOption.children = methodOptions
           setOptionList([...optionList])
         })
     }
