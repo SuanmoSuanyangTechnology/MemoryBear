@@ -4,7 +4,6 @@ User Memory Service
 处理用户记忆相关的业务逻辑，包括记忆洞察、用户摘要、节点统计和图数据等。
 """
 
-import os
 import uuid
 from collections import Counter
 from datetime import datetime
@@ -20,7 +19,7 @@ from app.core.memory.constants.graph_data_constants import (
     _DEFAULT_FIELDS,
 )
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow_naive
 from app.db import get_db_context
 from app.repositories.conversation_repository import ConversationRepository
@@ -48,9 +47,6 @@ logger = get_logger(__name__)
 # Neo4j connector instance for analytics functions
 _neo4j_connector = Neo4jConnector(shared_driver=True)
 
-# Default LLM ID for fallback
-DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
-
 
 # ============================================================================
 # Internal Helper Classes
@@ -73,26 +69,22 @@ def _get_llm_client_for_user(user_id: str):
         user_id: User ID to get config for
         
     Returns:
-        LLM client instance
+        RedBearLLM client instance
+        
+    Raises:
+        ValueError: If no memory configuration found for the user
     """
     with get_db_context() as db:
-        try:
-            config_id = MemoryConfigService(db).get_config_id_by_end_user(user_id)
-            
-            if config_id:
-                config_service = MemoryConfigService(db)
-                memory_config = config_service.load_memory_config(
-                    config_id=config_id,
-                )
-                factory = MemoryClientFactory(db)
-                return factory.get_llm_client_from_config(memory_config)
-            else:
-                factory = MemoryClientFactory(db)
-                return factory.get_llm_client(DEFAULT_LLM_ID)
-        except Exception as e:
-            logger.warning(f"Failed to get user connected config, using default LLM: {e}")
-            factory = MemoryClientFactory(db)
-            return factory.get_llm_client(DEFAULT_LLM_ID)
+        config_id = MemoryConfigService(db).get_config_id_by_end_user(user_id)
+        if not config_id:
+            raise ValueError(
+                f"No memory configuration found for user_id: {user_id}"
+            )
+        config_service = MemoryConfigService(db)
+        memory_config = config_service.load_memory_config(config_id=config_id)
+        return ModelClientMixin.get_llm_client(
+            db, memory_config.llm_model_id, memory_config.tenant_id
+        )
 
 
 class MemoryInsightHelper:
@@ -150,10 +142,7 @@ class MemoryInsightHelper:
                 {"role": "system", "content": "你是一个专业的标签分类助手。你必须仔细分析标签的实际含义和使用场景，优先选择9个具体领域之一。'其他'类别只用于完全无法归类的极少数情况。特别注意：历史、科学、文化等知识性对话应归类为'学习'领域；学校、课程、考试等正式教育场景应归类为'教育'领域。"},
                 {"role": "user", "content": prompt}
             ]
-            classification = await self.llm_client.response_structured(
-                messages=messages,
-                response_model=TagClassification,
-            )
+            classification = await self.llm_client.call_structured(messages, TagClassification)
             if classification and hasattr(classification, 'domain') and classification.domain:
                 domain_counts[classification.domain] += 1
         
@@ -1264,7 +1253,7 @@ async def analytics_memory_insight_report(end_user_id: Optional[str] = None, lan
         ]
         
         # 5. 调用 LLM 生成报告
-        response = await insight.llm_client.chat(messages=messages)
+        response = await insight.llm_client.ainvoke(messages)
         
         # 6. 处理 LLM 响应，确保返回字符串类型
         content = response.content
@@ -1386,7 +1375,7 @@ async def analytics_user_summary(end_user_id: Optional[str] = None, language: st
         ]
 
         # 3) 调用 LLM 生成摘要
-        response = await user_summary_tool.llm.chat(messages=messages)
+        response = await user_summary_tool.llm.ainvoke(messages)
         
         # 4) 处理 LLM 响应，确保返回字符串类型
         content = response.content

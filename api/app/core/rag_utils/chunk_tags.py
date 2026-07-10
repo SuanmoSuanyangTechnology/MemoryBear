@@ -5,39 +5,34 @@ This module provides functionality to extract meaningful tags from chunk content
 """
 
 import asyncio
-import os
 from collections import Counter
 from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
 from app.core.logging_config import get_business_logger
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.db import get_db_context
 from app.services.memory_config_service import MemoryConfigService
 
 business_logger = get_business_logger()
 
-DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
-
 
 def _get_llm_client(end_user_id: Optional[str] = None):
-    """Get LLM client, preferring user-connected config with fallback to default."""
+    """Get LLM client from user-connected config. Raises if no config found."""
     with get_db_context() as db:
-        try:
-            if end_user_id:
-                config_service = MemoryConfigService(db)
-                config_id = config_service.get_config_id_by_end_user(end_user_id)
-                if config_id:
-                    memory_config = config_service.load_memory_config(
-                        config_id=config_id
-                    )
-                    factory = MemoryClientFactory(db)
-                    return factory.get_llm_client_from_config(memory_config)
-        except Exception as e:
-            business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
-        factory = MemoryClientFactory(db)
-        return factory.get_llm_client(DEFAULT_LLM_ID)
+        if not end_user_id:
+            raise ValueError("end_user_id is required to resolve LLM client")
+        config_service = MemoryConfigService(db)
+        config_id = config_service.get_config_id_by_end_user(end_user_id)
+        if not config_id:
+            raise ValueError(
+                f"No memory configuration found for end_user_id: {end_user_id}"
+            )
+        memory_config = config_service.load_memory_config(config_id=config_id)
+        return ModelClientMixin.get_llm_client(
+            db, memory_config.llm_model_id, memory_config.tenant_id
+        )
 
 
 class ExtractedTags(BaseModel):
@@ -93,10 +88,7 @@ async def extract_chunk_tags(chunks: List[str], max_tags: int = 10, max_chunks: 
             ]
             
             try:
-                single_response = await llm_client.response_structured(
-                    messages=single_messages,
-                    response_model=ExtractedTags
-                )
+                single_response = await llm_client.call_structured(single_messages, ExtractedTags)
                 all_tags.extend(single_response.tags)
             except Exception as e:
                 business_logger.warning(f"处理单个chunk时出错: {str(e)}")
@@ -177,10 +169,7 @@ async def extract_chunk_persona(chunks: List[str], max_personas: int = 5, max_ch
         
         # 调用LLM提取人物形象
         llm_client = _get_llm_client(end_user_id)
-        structured_response = await llm_client.response_structured(
-            messages=messages,
-            response_model=ExtractedPersona
-        )
+        structured_response = await llm_client.call_structured(messages, ExtractedPersona)
         
         # 去重并限制数量
         personas = list(dict.fromkeys(structured_response.personas))[:max_personas]

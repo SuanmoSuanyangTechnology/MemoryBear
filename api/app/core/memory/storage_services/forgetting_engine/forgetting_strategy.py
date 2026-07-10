@@ -595,8 +595,9 @@ class ForgettingStrategy:
 
 摘要："""
         
-        # 调用 LLM（直接传递 prompt 字符串）
-        response = await llm_client.chat(prompt)
+        # 调用 LLM
+        messages = [{"role": "user", "content": prompt}]
+        response = await llm_client.ainvoke(messages)
         
         # 提取摘要文本
         if isinstance(response, str):

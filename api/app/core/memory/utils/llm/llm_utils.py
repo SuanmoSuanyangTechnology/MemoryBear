@@ -3,10 +3,6 @@ from typing import TYPE_CHECKING
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.models.base import RedBearModelConfig
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-if TYPE_CHECKING:
-    from app.schemas.memory_config_schema import MemoryConfig
 
 
 async def handle_response(response: type[BaseModel]) -> dict:

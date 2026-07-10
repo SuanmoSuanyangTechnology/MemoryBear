@@ -2,19 +2,16 @@
 Generate summary for RAG chunks using memory_summary.jinja2 prompt template.
 """
 
-import os
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 from app.core.logging_config import get_business_logger
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.db import get_db_context
 from app.services.memory_config_service import MemoryConfigService
 
 business_logger = get_business_logger()
-
-DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────
@@ -41,22 +38,20 @@ class MemorySummaryResponse(BaseModel):
 # ── LLM client helper ────────────────────────────────────────────────────────
 
 def _get_llm_client(end_user_id: Optional[str] = None):
-    """Get LLM client, preferring user-connected config with fallback to default."""
+    """Get LLM client from user-connected config. Raises if no config found."""
     with get_db_context() as db:
-        try:
-            if end_user_id:
-                config_service = MemoryConfigService(db)
-                config_id = config_service.get_config_id_by_end_user(end_user_id)
-                if config_id:
-                    memory_config = config_service.load_memory_config(
-                        config_id=config_id,
-                    )
-                    factory = MemoryClientFactory(db)
-                    return factory.get_llm_client_from_config(memory_config)
-        except Exception as e:
-            business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
-        factory = MemoryClientFactory(db)
-        return factory.get_llm_client(DEFAULT_LLM_ID)
+        if not end_user_id:
+            raise ValueError("end_user_id is required to resolve LLM client")
+        config_service = MemoryConfigService(db)
+        config_id = config_service.get_config_id_by_end_user(end_user_id) # 这个获取记忆配置是没有问题
+        if not config_id:
+            raise ValueError(
+                f"No memory configuration found for end_user_id: {end_user_id}"
+            )
+        memory_config = config_service.load_memory_config(config_id=config_id)
+        return ModelClientMixin.get_llm_client(
+            db, memory_config.llm_model_id, memory_config.tenant_id
+        )
 
 
 # ── Core function ─────────────────────────────────────────────────────────────
@@ -107,14 +102,9 @@ async def generate_chunk_summary(
 
         llm_client = _get_llm_client(end_user_id)
 
-        # Try structured output; fall back to plain chat only for LLMClientException
-        # (indicates the model/provider doesn't support structured output).
-        # All other exceptions are re-raised so config/schema errors stay visible.
+        # Try structured output; fall back to plain ainvoke for parse failures.
         try:
-            response: MemorySummaryResponse = await llm_client.response_structured(
-                messages=messages,
-                response_model=MemorySummaryResponse,
-            )
+            response: MemorySummaryResponse = await llm_client.call_structured(messages, MemorySummaryResponse)
             if response.summary:
                 summary = response.summary.strip()
             elif response.statements:
@@ -122,16 +112,11 @@ async def generate_chunk_summary(
             else:
                 summary = "暂无内容"
         except Exception as e:
-            from app.core.memory.llm_tools.llm_client import LLMClientException
-            if isinstance(e, LLMClientException):
-                business_logger.warning(
-                    f"结构化输出不可用，降级为普通对话: end_user_id={end_user_id}, reason={e}"
-                )
-                raw = await llm_client.chat(messages=messages)
-                summary = raw.content.strip() if raw and raw.content else "暂无内容"
-            else:
-                business_logger.error(f"生成摘要时发生非预期异常: {e}")
-                raise
+            business_logger.warning(
+                f"结构化解析失败，降级为普通对话: end_user_id={end_user_id}, reason={e}"
+            )
+            raw = await llm_client.ainvoke(messages)
+            summary = raw.content.strip() if raw and hasattr(raw, 'content') else "暂无内容"
 
         business_logger.info(
             f"成功生成chunk摘要，处理了 {len(chunks_to_process)} 个片段"

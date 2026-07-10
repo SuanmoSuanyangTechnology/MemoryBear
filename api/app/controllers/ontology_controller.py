@@ -56,7 +56,6 @@ from app.schemas.ontology_schemas import (
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
-from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.validation.owl_validator import OWLValidator
 from app.services.model_service import ModelConfigService
 from app.repositories.ontology_scene_repository import OntologySceneRepository
@@ -155,27 +154,9 @@ def _get_ontology_service(
             f"is_composite: {is_composite}, api_key_id: {api_key_config.id}"
         )
         
-        # 创建模型配置对象
-        from app.core.models.base import RedBearModelConfig
-        
-        # 对于组合模型，使用 API Key 的 provider；否则使用 model_config 的 provider
-        actual_provider = api_key_config.provider if is_composite else (
-            getattr(model_config, 'provider', None) or "openai"
-        )
-        
-        llm_model_config = RedBearModelConfig(
-            model_name=api_key_config.model_name,
-            provider=actual_provider,
-            api_key=api_key_config.api_key,
-            base_url=api_key_config.api_base,
-            is_omni=api_key_config.is_omni,
-            capability=api_key_config.capability,
-            max_retries=3,
-            timeout=60.0
-        )
-        
-        # 创建OpenAI客户端
-        llm_client = OpenAIClient(model_config=llm_model_config)
+        # 创建LLM客户端（统一通过 ModelClientMixin）
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        llm_client = ModelClientMixin.get_llm_client(db, llm_id, current_user.tenant_id)
         
         # 创建OntologyService
         service = OntologyService(llm_client=llm_client, db=db)
@@ -324,19 +305,8 @@ async def create_scene(
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 创建OntologyService实例（不需要LLM）
-        from app.core.memory.llm_tools.openai_client import OpenAIClient
-        from app.core.models.base import RedBearModelConfig
-        
-        # 创建一个空的LLM配置（场景管理不需要LLM）
-        dummy_config = RedBearModelConfig(
-            model_name="dummy",
-            provider="openai",
-            api_key="dummy",
-            base_url="https://api.openai.com/v1"
-        )
-        llm_client = OpenAIClient(model_config=dummy_config)
-        service = OntologyService(llm_client=llm_client, db=db)
+        # 场景管理不需要LLM
+        service = OntologyService(db=db)
         
         # 调用服务层创建场景
         scene = service.create_scene(
@@ -441,19 +411,8 @@ async def update_scene(
                 "系统默认场景不可修改",
                 "该场景为系统预设场景，不允许修改"
             )
-        
-        # 创建OntologyService实例
-        from app.core.memory.llm_tools.openai_client import OpenAIClient
-        from app.core.models.base import RedBearModelConfig
-        
-        dummy_config = RedBearModelConfig(
-            model_name="dummy",
-            provider="openai",
-            api_key="dummy",
-            base_url="https://api.openai.com/v1"
-        )
-        llm_client = OpenAIClient(model_config=dummy_config)
-        service = OntologyService(llm_client=llm_client, db=db)
+        # 场景管理不需要LLM
+        service = OntologyService(db=db)
         
         # 调用服务层更新场景
         scene = service.update_scene(
@@ -547,18 +506,8 @@ async def delete_scene(
                 detail="SYSTEM_DEFAULT_SCENE_CANNOT_DELETE"
             )
         
-        # 创建OntologyService实例
-        from app.core.memory.llm_tools.openai_client import OpenAIClient
-        from app.core.models.base import RedBearModelConfig
-        
-        dummy_config = RedBearModelConfig(
-            model_name="dummy",
-            provider="openai",
-            api_key="dummy",
-            base_url="https://api.openai.com/v1"
-        )
-        llm_client = OpenAIClient(model_config=dummy_config)
-        service = OntologyService(llm_client=llm_client, db=db)
+        # 场景管理不需要LLM
+        service = OntologyService(db=db)
         
         # 调用服务层删除场景
         success_flag = service.delete_scene(
