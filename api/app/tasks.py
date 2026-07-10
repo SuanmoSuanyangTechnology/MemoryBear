@@ -17,6 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
 
+from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -1696,8 +1697,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
         return f"sync knowledge '{kb_name}' failed: {e}"
 
 
-@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=True, max_retries=3,
-                 reject_on_worker_lost=True)
+@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False, max_retries=0)
 def write_message_task(
         self,
         end_user_id: str,
@@ -3049,6 +3049,137 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
             "message": f"任务失败: {str(e)}",
             "duration_seconds": time.time() - start_time
         }
+
+
+_FORGET_CANDIDATES_KEY = "forget:candidates"
+_FORGET_INFLIGHT_KEY = "forget:inflight"
+
+
+@celery_app.task(
+    name="app.tasks.scan_forget_candidates",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+)
+def scan_forget_candidates(self) -> Dict[str, Any]:
+    """扫描 Redis 中超过配额的用户，派发 do_forget_for_user。
+
+    通过 smove 原子地将 end_user_id 从 candidates → inflight，
+    避免重复派发同一个用户。
+    """
+
+    async def _run() -> Dict[str, Any]:
+        from app.aioRedis import get_thread_safe_redis
+
+        start_time = time.time()
+        redis_client = get_thread_safe_redis()
+        if redis_client is None:
+            return {"status": "FAILED", "message": "Redis 不可用"}
+
+        candidates = await redis_client.smembers(_FORGET_CANDIDATES_KEY)
+        if not candidates:
+            return {"status": "SUCCESS", "dispatched": 0}
+
+        dispatched = 0
+        skipped_inflight = 0
+        for uid in candidates:
+            if await redis_client.sismember(_FORGET_INFLIGHT_KEY, uid):
+                await redis_client.srem(_FORGET_CANDIDATES_KEY, uid)
+                skipped_inflight += 1
+                continue
+
+            moved = await redis_client.smove(_FORGET_CANDIDATES_KEY, _FORGET_INFLIGHT_KEY, uid)
+            if not moved:
+                skipped_inflight += 1
+                continue
+            try:
+                do_forget_for_user.apply_async(
+                    kwargs={"end_user_id": uid},
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception as e:
+                await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, uid)
+                logger.error(f"[ForgetScan] 派发失败 user={uid}: {e}")
+
+        logger.info(
+            f"[ForgetScan] 完成: dispatched={dispatched}/{len(candidates)}, "
+            f"skip_inflight={skipped_inflight}, "
+            f"耗时={time.time() - start_time:.1f}s"
+        )
+        return {
+            "status": "SUCCESS",
+            "dispatched": dispatched,
+            "candidates": len(candidates),
+            "skip_inflight": skipped_inflight,
+        }
+
+    return asyncio.run(_run())
+
+
+@celery_app.task(
+    name="app.tasks.do_forget_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=1200,
+    soft_time_limit=1080,
+)
+def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
+    """对单个用户执行遗忘。由 scan_forget_candidates 派发。
+
+    ForgettingPipeline.run() 内部已调用 sync，sync 会根据最新计数
+    自行决定 sadd / srem。这里只清理 inflight，保证不泄漏。
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.repositories.end_user_repository import get_by_id as _get_user
+        from app.services.memory_config_service import MemoryConfigService
+        from app.core.memory.memory_service import MemoryService
+        redis_client = get_thread_safe_redis()
+        with get_db_context() as db:
+            end_user = _get_user(db, uuid.UUID(end_user_id))
+            if end_user is None:
+                logger.warning(f"[ForgetDo] 用户不存在: {end_user_id}")
+                if redis_client:
+                    await redis_client.srem(_FORGET_INFLIGHT_KEY, end_user_id)
+                    await redis_client.srem(_FORGET_CANDIDATES_KEY, end_user_id)
+                return {"status": "skipped", "reason": "not_found"}
+
+            config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
+            workspace_id = str(end_user.workspace_id)
+
+        service = MemoryService(
+            config_id=config_id,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+        )
+        result = await service.forget()
+
+        if redis_client:
+            await redis_client.srem(_FORGET_INFLIGHT_KEY, end_user_id)
+
+        logger.info(
+            f"[ForgetDo] 完成: end_user_id={end_user_id}, "
+            f"elapsed={time.time() - start_time:.1f}s"
+        )
+        return {"status": "success", "result": result}
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"[ForgetDo] 失败 user={end_user_id}: {e}", exc_info=True)
+        result = {"status": "failed", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    result["end_user_id"] = end_user_id
+    result["elapsed_time"] = time.time() - start_time
+    return result
 
 
 # =============================================================================

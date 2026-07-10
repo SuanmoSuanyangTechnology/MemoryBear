@@ -11,6 +11,7 @@ from typing import Optional, Callable, Dict, Any
 from uuid import UUID
 
 from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_auth_logger
@@ -129,7 +130,7 @@ def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def _get_quota_config_async(db, tenant_id: UUID) -> Optional[Dict[str, Any]]:
+async def _get_quota_config_async(db: AsyncSession, tenant_id: UUID) -> Optional[Dict[str, Any]]:
     """Async version of _get_quota_config.
 
     Community edition: db is unused (falls through to DEFAULT_FREE_PLAN).
@@ -185,7 +186,7 @@ async def get_api_ops_rate_limit_async(db, tenant_id: UUID) -> Optional[int]:
 def get_end_user_memory_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     quota_config = _get_quota_config(db, tenant_id)
     if quota_config:
-        return quota_config.get("end_user_memory_limit")
+        return quota_config.get("end_user_memory_limit", 300)
     return None
 
 

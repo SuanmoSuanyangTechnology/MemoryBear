@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.memory.enums import SearchStrategy, StorageType
 from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.service_models import LongTermMemoryInput, MemoryContext, MemorySearchResult
+from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
 from app.core.memory.pipelines.memory_read import ReadPipeLine
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
@@ -385,11 +386,8 @@ class MemoryService:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
         return await ReadPipeLine(self.ctx).run(query, search_switch, history, limit)
 
-    async def forget(
-            self, max_batch: int = 100, min_days: int = 30
-    ) -> dict:
-        """遗忘：识别低激活节点并融合"""
-        raise NotImplementedError("ForgettingPipeline 尚未实现")
+    async def forget(self) -> dict:
+        return await ForgettingPipeline(self.ctx).run()
 
     async def run_reflection_layer2(self, language: str = "zh") -> dict:
         """反思引擎 Layer 2 离线巡检

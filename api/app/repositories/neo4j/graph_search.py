@@ -1,7 +1,6 @@
 import asyncio
 import heapq
 import logging
-import time
 from typing import Any, Dict, List, Optional, Coroutine
 
 import numpy as np
@@ -1092,7 +1091,7 @@ async def search_graph_l_valid_at(
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Temporal search across Statements.
-    
+
     INTEGRATED: Updates activation values for Statement nodes before returning results
 
     - Matches statements valid at valid_at
@@ -1116,3 +1115,55 @@ async def search_graph_l_valid_at(
     )
 
     return results
+
+
+async def forget_count_active_nodes(
+    connector: Neo4jConnector,
+    end_user_id: str,
+) -> int:
+    """Count active nodes (``delete_at IS NULL``) across Chunk, Statement, Entity."""
+    from app.repositories.neo4j.cypher_queries import FORGET_COUNT_ACTIVE_NODES
+    result = await connector.execute_query(
+        FORGET_COUNT_ACTIVE_NODES, end_user_id=end_user_id,
+    )
+    return result[0]["cnt"] if result else 0
+
+
+async def forget_get_mixed_candidates(
+    connector: Neo4jConnector,
+    end_user_id: str,
+    batch_size: int,
+    protection_threshold: int,
+) -> list[dict[str, Any]]:
+    """Return up to *batch_size* oldest candidates across all three types.
+
+    Entity nodes with ``extraction_count >= protection_threshold`` are skipped.
+    Results are sorted by ``sort_time ASC NULLS FIRST, extraction_count ASC``.
+    """
+    from app.repositories.neo4j.cypher_queries import FORGET_MIXED_CANDIDATES
+    return await connector.execute_query(
+        FORGET_MIXED_CANDIDATES,
+        end_user_id=end_user_id,
+        batch_size=batch_size,
+        protection_threshold=protection_threshold,
+    )
+
+
+async def forget_soft_delete_by_element_ids(
+    connector: Neo4jConnector,
+    end_user_id: str,
+    element_ids: list[str],
+    now: str,
+) -> int:
+    """Mark nodes as soft-deleted (``SET delete_at = datetime($now)``).
+
+    Returns the number of nodes actually deleted.
+    """
+    from app.repositories.neo4j.cypher_queries import FORGET_SOFT_DELETE_BY_ELEMENT_IDS
+    result = await connector.execute_query(
+        FORGET_SOFT_DELETE_BY_ELEMENT_IDS,
+        end_user_id=end_user_id,
+        element_ids=element_ids,
+        now=now,
+    )
+    return result[0]["deleted"] if result else 0

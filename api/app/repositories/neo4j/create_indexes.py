@@ -39,7 +39,6 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_conversation", "Conversation"),
 ]
 
-# 复合索引 (end_user_id, id)
 COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
     ("user_statement_id", "Statement", "id"),
     ("user_entity_id", "ExtractedEntity", "id"),
@@ -47,6 +46,12 @@ COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
     ("user_summary_id", "MemorySummary", "id"),
     ("user_perceptual_id", "Perceptual", "id"),
     ("user_community_id", "Community", "community_id"),
+]
+
+DELETE_AT_DEFS: List[Tuple[str, str, str]] = [
+    ("user_statement_delete_at", "Statement", "delete_at"),
+    ("user_entity_delete_at", "ExtractedEntity", "delete_at"),
+    ("user_chunk_delete_at", "Chunk", "delete_at"),
 ]
 
 # 旧的单列 end_user_id 索引名称（已被复合索引替代，创建复合索引前需先删除）
@@ -377,9 +382,8 @@ async def create_composite_indexes():
                 except Exception as e:
                     logger.warning(f"[Index] 删除旧单列索引失败 {name}: {e}")
 
-        # 2. Smart upsert 复合索引
         desired: List[Dict[str, Any]] = []
-        for name, label, id_prop in COMPOSITE_DEFS:
+        for name, label, id_prop in COMPOSITE_DEFS + DELETE_AT_DEFS:
             desired.append({
                 "name": name,
                 "label": label,
