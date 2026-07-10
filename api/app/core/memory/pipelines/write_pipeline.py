@@ -838,22 +838,20 @@ class WritePipeline:
         """
         从 MemoryConfig 构建 LLM 和 Embedding 客户端。
 
-        使用 MemoryClientFactory 工厂模式，需要短暂的 DB session 来
+        使用 ModelClientMixin 静态方法，需要短暂的 DB session 来
         查询模型配置（API key、base_url 等），查询完毕立即释放。
 
         幂等：若已初始化则跳过，避免重复 DB 查询。
         """
-        if self._llm_client is not None and self._embedder_client is not None:
-            return
-
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
         from app.db import get_db_context
 
-        with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            self._llm_client = factory.get_llm_client_from_config(self.memory_config)
-            self._embedder_client = factory.get_embedder_client_from_config(
-                self.memory_config
+        with get_db_context() as db: # 考虑写入是否需要增加异步方法，get_async_db_context
+            self._llm_client = ModelClientMixin.get_llm_client(
+                db, self.memory_config.llm_model_id, self.memory_config.tenant_id
+            )
+            self._embedder_client = ModelClientMixin.get_embedding_client(
+                db, self.memory_config.embedding_model_id, self.memory_config.tenant_id
             )
         logger.info("LLM and embedding clients constructed")
 

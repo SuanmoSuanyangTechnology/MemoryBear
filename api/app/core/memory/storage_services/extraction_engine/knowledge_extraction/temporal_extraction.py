@@ -2,13 +2,16 @@ import os
 import asyncio
 from typing import Any, Optional
 from pydantic import BaseModel, Field
-from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.models.message_models import DialogData, Statement, TemporalValidityRange
 from app.core.memory.utils.prompt.prompt_utils import render_temporal_extraction_prompt
 from app.core.memory.utils.data.ontology import LABEL_DEFINITIONS, TemporalInfo
 from app.core.memory.utils.log.logging_utils import prompt_logger
 from app.core.utils.datetime_utils import utcnow_naive
 
+# NOTE: 此文件已无外部引用，整个 TemporalExtractor 类已被 StatementTemporalStep
+#（统一 ExtractionStep 范式）替代。RawTemporalRange 仅在文件内部自用。
+# 待确认后可安全删除整个文件。
+# 这个文件都可以被删除
 
 class RawTemporalRange(BaseModel):
     """Schema for the raw temporal range extracted by the LLM."""
@@ -26,12 +29,12 @@ class TemporalExtractor:
     Extracts temporal validity ranges from statements using an LLM.
     """
 
-    def __init__(self, llm_client: OpenAIClient):
+    def __init__(self, llm_client):
         """
         Initializes the TemporalExtractor.
 
         Args:
-            llm_client (OpenAIClient): The OpenAI client to use for LLM calls.
+            llm_client: LLM client instance (RedBearLLM) for LLM calls.
         """
         self.llm_client = llm_client
 
@@ -83,9 +86,7 @@ class TemporalExtractor:
         ]
 
         try:
-            response = await self.llm_client.response_structured(
-                messages, RawTemporalRange
-            )
+            response = await self.llm_client.call_structured(messages, RawTemporalRange)
             if response:
                 # Log raw structured response
                 try:
@@ -109,7 +110,7 @@ class TemporalExtractor:
 
     from typing import Dict, Tuple
 
-    async def extract_temporal_ranges(
+    async def extract_temporal_ranges( # 没有地方使用这个function # 有一个_extract_temporal_ranges和extract_temporal_ranges需要解决
         self, dialog_data: DialogData, ref_dates: Optional[dict[str, Any]] = None
     ) -> Dict[str, TemporalValidityRange]:
         """

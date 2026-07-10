@@ -157,9 +157,7 @@ class SemanticPruner:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                result = await self.llm_client.response_structured(
-                    messages, AssistantPruningResponse
-                )
+                result = await self.llm_client.call_structured(messages, AssistantPruningResponse)
                 return result
             except Exception as e:
                 if attempt < max_retries - 1:

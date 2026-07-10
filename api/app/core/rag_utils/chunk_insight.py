@@ -11,40 +11,35 @@ generate_chunk_insight() returns the full raw text (stored in end_user.memory_in
 generate_chunk_insight_sections() returns a dict with all four fields for richer storage.
 """
 
-import os
 import re
 from collections import Counter
 from typing import Dict, List, Optional
 
 from app.core.logging_config import get_business_logger
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.db import get_db_context
 from app.services.memory_config_service import MemoryConfigService
 
 business_logger = get_business_logger()
 
-DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
-
 
 # ── LLM client helper ────────────────────────────────────────────────────────
 
 def _get_llm_client(end_user_id: Optional[str] = None):
-    """Get LLM client, preferring user-connected config with fallback to default."""
+    """Get LLM client from user-connected config. Raises if no config found."""
     with get_db_context() as db:
-        try:
-            if end_user_id:
-                config_service = MemoryConfigService(db)
-                config_id = config_service.get_config_id_by_end_user(end_user_id)
-                if config_id:
-                    memory_config = config_service.load_memory_config(
-                        config_id=config_id,
-                    )
-                    factory = MemoryClientFactory(db)
-                    return factory.get_llm_client_from_config(memory_config)
-        except Exception as e:
-            business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
-        factory = MemoryClientFactory(db)
-        return factory.get_llm_client(DEFAULT_LLM_ID)
+        if not end_user_id:
+            raise ValueError("end_user_id is required to resolve LLM client")
+        config_service = MemoryConfigService(db)
+        config_id = config_service.get_config_id_by_end_user(end_user_id)
+        if not config_id:
+            raise ValueError(
+                f"No active memory config for end_user_id: {end_user_id}"
+            )
+        memory_config = config_service.load_memory_config(config_id=config_id)
+        return ModelClientMixin.get_llm_client(
+            db, memory_config.llm_model_id, memory_config.tenant_id
+        )
 
 
 # ── Domain analysis helpers (kept for building prompt inputs) ─────────────────
@@ -61,9 +56,8 @@ async def _classify_domain(chunk: str, llm_client) -> str:
             "请将以下文本归类到最合适的领域（技术/商业/教育/生活/娱乐/健康/其他）。\n\n"
             f"文本: {chunk[:500]}\n\n直接返回领域名称。"
         )
-        result = await llm_client.response_structured(
-            messages=[{"role": "user", "content": prompt}],
-            response_model=_Domain,
+        result = await llm_client.call_structured(
+            [{"role": "user", "content": prompt}], _Domain
         )
         return result.domain if result else "其他"
     except Exception:
@@ -184,8 +178,8 @@ async def generate_chunk_insight_sections(
 
         messages = [{"role": "user", "content": rendered_prompt}]
         llm_client = _get_llm_client(end_user_id)
-        response = await llm_client.chat(messages=messages)
-        raw_text = response.content.strip() if response and response.content else ""
+        response = await llm_client.ainvoke(messages)
+        raw_text = response.content.strip() if response else ""
 
         sections = _parse_sections(raw_text, language=language)
         sections["_raw"] = raw_text

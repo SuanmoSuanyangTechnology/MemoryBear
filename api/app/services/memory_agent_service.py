@@ -27,7 +27,6 @@ from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.type_classifier import status_typle
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context, get_db_read
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -598,10 +597,7 @@ class MemoryAgentService:
                     }
                 ]
 
-                user_tags = await llm_client.response_structured(
-                    messages=messages,
-                    response_model=UserTags
-                )
+                user_tags = await llm_client.call_structured(messages, UserTags)
 
                 result["tags"] = user_tags.tags
                 logger.debug(f"Extracted tags: {user_tags.tags}")
