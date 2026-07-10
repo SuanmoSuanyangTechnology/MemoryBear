@@ -19,8 +19,8 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
-from app.db import get_async_db, get_db
-from app.dependencies import get_current_user_async, get_current_user
+from app.db import get_async_db
+from app.dependencies import get_current_user_async
 from app.models.document_model import Document
 from app.models.file_model import File as FileModel
 from app.models.user_model import User
@@ -1049,8 +1049,8 @@ async def retrieve_chunks_with_caller(
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     return await retrieve_chunks_with_caller(
         retrieve_data=retrieve_data,
