@@ -7,14 +7,16 @@ from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
 from datetime import datetime
 
 from fastapi import Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.agent.langchain_agent import LangChainAgent
-from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_naive
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.db import get_db
+from app.db import get_db, get_db_context, get_async_db_context
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
@@ -25,6 +27,7 @@ from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
+from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
@@ -85,22 +88,398 @@ def assert_not_opening_statement(db, message_id: uuid.UUID) -> None:
 class AppChatService:
     """基于分享链接的聊天服务"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self.conversation_service = ConversationService(db)
         self.agent_service = AgentRunService(db)
         self.workflow_service = WorkflowService(db)
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
+
+    @staticmethod
+    def _make_agent_timing_logger(
+            scope: str,
+            *,
+            conversation_id: uuid.UUID | None,
+            app_id: uuid.UUID | None,
+            user_id: str | None,
+    ):
+        started_at = time.perf_counter()
+        last_checkpoint = started_at
+
+        def _log(stage: str, **extra) -> None:
+            nonlocal last_checkpoint
+            now = time.perf_counter()
+            stage_ms = round((now - last_checkpoint) * 1000, 2)
+            total_ms = round((now - started_at) * 1000, 2)
+            detail_pairs = [
+                f"{key}={value}"
+                for key, value in extra.items()
+                if value is not None
+            ]
+            details = f" {' '.join(detail_pairs)}" if detail_pairs else ""
+            logger.info(
+                f"[{scope}] {stage} stage_ms={stage_ms} total_ms={total_ms}{details}",
+                extra={
+                    "conversation_id": str(conversation_id) if conversation_id else None,
+                    "app_id": str(app_id) if app_id else None,
+                    "user_id": user_id,
+                    "stage_ms": stage_ms,
+                    "total_ms": total_ms,
+                    **extra,
+                },
+            )
+            last_checkpoint = now
+
+        return _log
 
     def _resolve_tenant_id(self, workspace_id: Optional[str]) -> Optional[uuid.UUID]:
         if not workspace_id:
             return None
         return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
+    async def _resolve_tenant_id_async(self, workspace_id: Optional[str]) -> Optional[uuid.UUID]:
+        if not workspace_id:
+            return None
+        if self._uses_async_session():
+            return await ToolRepository.get_tenant_id_by_workspace_id_async(self.db, str(workspace_id))
+        return self._resolve_tenant_id(workspace_id)
+
+    async def _resolve_app_tenant_id_async(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        if not self._uses_async_session():
+            return self._resolve_app_tenant_id(app_id)
+
+        async with get_async_db_context() as db:
+            app = await db.get(App, app_id)
+            if not app:
+                return None
+            return await ToolRepository.get_tenant_id_by_workspace_id_async(db, str(app.workspace_id))
+
     def _resolve_app_tenant_id(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
         app = self.db.get(App, app_id)
         if not app:
             return None
         return self._resolve_tenant_id(str(app.workspace_id))
+
+    async def _db_get(self, model, identity):
+        if self._uses_async_session():
+            return await self.db.get(model, identity)
+        return self.db.get(model, identity)
+
+    async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, FileMetadata]:
+        if not local_ids:
+            return {}
+        if self._uses_async_session():
+            result = await self.db.execute(
+                select(FileMetadata).where(
+                    FileMetadata.id.in_(local_ids),
+                    FileMetadata.status == "completed",
+                )
+            )
+            rows = result.scalars().all()
+        else:
+            rows = self.db.query(FileMetadata).filter(
+                FileMetadata.id.in_(local_ids),
+                FileMetadata.status == "completed",
+            ).all()
+        return {str(row.id): row for row in rows}
+
+    async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
+        if self._uses_async_session():
+            result = await self.db.execute(
+                select(Message.id)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.is_deleted.is_not(True),
+                )
+                .order_by(Message.created_at)
+                .limit(1)
+            )
+            return result.first() is not None
+        existing_messages = self.conversation_service.message_repo.get_message_by_conversation_id(
+            conversation_id=conversation_id,
+            limit=1,
+        )
+        return len(existing_messages) > 0
+
+    async def _record_api_key_usage(self, api_key_id: uuid.UUID | None) -> bool:
+        if not api_key_id:
+            return False
+        if self._uses_async_session():
+            async with get_async_db_context() as db:
+                return await ModelApiKeyService.record_api_key_usage_bridge_async(db, api_key_id)
+        return await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_id)
+
+    async def _release_db_connection(self) -> None:
+        if self._uses_async_session():
+            await self.db.close()
+        else:
+            self.db.close()
+
+    @staticmethod
+    def _append_history_message(
+            history: Optional[List[dict]],
+            *,
+            role: str,
+            content: Any,
+    ) -> List[dict]:
+        next_history = list(history or [])
+        next_history.append({"role": role, "content": content})
+        return next_history
+
+    async def _create_agent_execution(self, repo: AgentExecutionRepository, execution: AgentExecution) -> uuid.UUID:
+        if self._uses_async_session():
+            async with get_async_db_context() as db:
+                db.add(execution)
+                await db.commit()
+                await db.refresh(execution)
+                return execution.id
+        created = repo.create(execution)
+        self.db.commit()
+        return created.id
+
+    async def _update_agent_execution(
+            self,
+            repo: AgentExecutionRepository,
+            execution_id: uuid.UUID,
+            **kwargs,
+    ) -> None:
+        if self._uses_async_session():
+            async with get_async_db_context() as db:
+                await AgentExecutionRepository(db).update_completed_async(execution_id, **kwargs)
+            return
+        repo.update_completed(execution_id, **kwargs)
+
+    async def _save_opening_statement_async(
+            self,
+            *,
+            conversation_id: uuid.UUID,
+            opening_statement: str,
+            suggested_questions: Optional[List[str]] = None,
+    ) -> None:
+        if self._uses_async_session():
+            async with get_async_db_context() as db:
+                await ConversationService(db).add_message_async(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=opening_statement,
+                    meta_data={"suggested_questions": suggested_questions or []},
+                )
+            return
+        await self.conversation_service.add_message_async(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=opening_statement,
+            meta_data={"suggested_questions": suggested_questions or []},
+        )
+
+    async def _persist_final_agent_execution(
+            self,
+            *,
+            app_id: uuid.UUID,
+            conversation_id: uuid.UUID,
+            agent_config_id: uuid.UUID | None,
+            started_at_ts: float,
+            status: str,
+            steps: list,
+            meta_data: dict,
+            elapsed_time: Optional[float] = None,
+            token_usage: Optional[dict] = None,
+            error_message: Optional[str] = None,
+            message_id: Optional[uuid.UUID] = None,
+    ) -> uuid.UUID:
+        if self._uses_async_session():
+            async with get_async_db_context() as db:
+                app_obj = await db.get(App, app_id)
+                execution = AgentExecution(
+                    app_id=app_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    agent_config_id=agent_config_id,
+                    release_id=app_obj.current_release_id if app_obj else None,
+                    triggered_by=None,
+                    steps=steps,
+                    status=status,
+                    started_at=parse_timestamp_to_utc_naive(started_at_ts),
+                    completed_at=utcnow_naive(),
+                    elapsed_time=elapsed_time,
+                    token_usage=token_usage,
+                    error_message=error_message,
+                    meta_data=meta_data,
+                )
+                db.add(execution)
+                await db.commit()
+                await db.refresh(execution)
+                return execution.id
+
+        app_obj = await self._db_get(App, app_id)
+        execution = AgentExecution(
+            app_id=app_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            agent_config_id=agent_config_id,
+            release_id=app_obj.current_release_id if app_obj else None,
+            triggered_by=None,
+            steps=steps,
+            status=status,
+            started_at=parse_timestamp_to_utc_naive(started_at_ts),
+            completed_at=utcnow_naive(),
+            elapsed_time=elapsed_time,
+            token_usage=token_usage,
+            error_message=error_message,
+            meta_data=meta_data,
+        )
+        self.db.add(execution)
+        self.db.commit()
+        return execution.id
+
+    async def _save_versioned_assistant_message_async(
+            self,
+            *,
+            message_id: uuid.UUID,
+            conversation_id: uuid.UUID,
+            content: str,
+            version: int,
+            parent_message_id: Optional[uuid.UUID],
+            meta_data: dict,
+    ) -> None:
+        async with get_async_db_context() as db:
+            new_msg = Message(
+                id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=content,
+                version=version,
+                is_current=True,
+                parent_message_id=parent_message_id,
+                meta_data=meta_data,
+            )
+            db.add(new_msg)
+            conv = await db.get(Conversation, conversation_id)
+            if conv:
+                conv.message_count += 1
+            await db.commit()
+
+    async def _save_failed_stream_messages_async(
+            self,
+            *,
+            message_id: uuid.UUID,
+            user_message_id: uuid.UUID,
+            conversation_id: uuid.UUID,
+            message: str,
+            human_meta: dict,
+            error_message: str,
+    ) -> None:
+        async with get_async_db_context() as db:
+            service = ConversationService(db)
+            await service.add_message_async(
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+                meta_data=human_meta,
+            )
+            await service.add_message_async(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content="",
+                meta_data={"error": error_message[:2000]},
+                status="failed",
+            )
+
+    async def _check_annotation_match_async(
+            self,
+            app_id: uuid.UUID,
+            message: str,
+            source: str = "",
+    ) -> Optional[dict]:
+        if not self._uses_async_session():
+            return self._check_annotation_match(app_id, message, source)
+
+        try:
+            from app.core.models.base import RedBearModelConfig
+            from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
+
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(AppAnnotationSetting).where(AppAnnotationSetting.app_id == app_id).limit(1)
+                )
+                setting = result.scalar_one_or_none()
+                if not setting or not setting.enabled or not setting.model_config_id:
+                    return None
+
+                result = await db.execute(
+                    select(AppAnnotation).where(
+                        AppAnnotation.app_id == app_id,
+                        AppAnnotation.is_active == 1,
+                    )
+                )
+                annotations = list(result.scalars().all())
+                if not annotations:
+                    return None
+
+                tenant_id = await self._resolve_app_tenant_id_async(app_id)
+                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                    db,
+                    setting.model_config_id,
+                    tenant_id=tenant_id,
+                )
+                if not api_key_obj:
+                    return None
+                threshold = setting.similarity_threshold
+
+            config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
+            best_match = None
+            best_similarity = 0.0
+            for annotation in annotations:
+                if not annotation.embedding:
+                    continue
+                similarity = AnnotationService.cosine_similarity(query_embedding, annotation.embedding)
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match = annotation
+
+            if not best_match or best_similarity < threshold:
+                return None
+
+            async with get_async_db_context() as db:
+                annotation = await db.get(AppAnnotation, best_match.id)
+                if not annotation:
+                    return None
+                annotation.hit_count = int(annotation.hit_count or 0) + 1
+                db.add(
+                    AppAnnotationHitLog(
+                        annotation_id=annotation.id,
+                        app_id=app_id or annotation.app_id,
+                        source=source,
+                        query=message,
+                        matched_question=annotation.question,
+                        answer=annotation.answer,
+                        similarity=best_similarity,
+                    )
+                )
+                await db.commit()
+
+            return {
+                "annotation_id": str(best_match.id),
+                "question": best_match.question,
+                "answer": best_match.answer,
+                "similarity": best_similarity,
+            }
+        except Exception as e:
+            logger.error(f"标注匹配失败: {e}")
+            return None
 
     def _check_annotation_match(self, app_id: uuid.UUID, message: str, source: str = "") -> Optional[dict]:
         """检查是否命中标注
@@ -186,12 +565,18 @@ class AppChatService:
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
+        timing_log = self._make_agent_timing_logger(
+            "AppChatService.agent_chat",
+            conversation_id=conversation_id,
+            app_id=config.app_id,
+            user_id=user_id,
+        )
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
 
         # 检查标注命中
         from app.models.annotation_model import HitLogSource
-        annotation_match = self._check_annotation_match(
+        annotation_match = await self._check_annotation_match_async(
             config.app_id,
             message,
             source=source or HitLogSource.EXTERNAL
@@ -199,14 +584,14 @@ class AppChatService:
         if annotation_match:
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
-            self.conversation_service.add_message(
+            await self.conversation_service.add_message_async(
                 message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
                 meta_data={"files": []}
             )
-            ai_message = self.conversation_service.add_message(
+            await self.conversation_service.add_message_async(
                 message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
@@ -228,6 +613,8 @@ class AppChatService:
                 "audio_status": None
             }
 
+        timing_log("annotation_checked", matched=bool(annotation_match))
+
         # 应用 features 配置
         features_config: dict = config.features or {}
         if hasattr(features_config, 'model_dump'):
@@ -243,12 +630,13 @@ class AppChatService:
 
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
-        tenant_id = self._resolve_tenant_id(workspace_id)
-        api_key_obj = ModelApiKeyService.get_available_api_key(
+        tenant_id = await self._resolve_tenant_id_async(workspace_id)
+        api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
             self.db,
             model_config_id,
             tenant_id=tenant_id,
         )
+        timing_log("model_ready", model_name=api_key_obj.model_name, provider=api_key_obj.provider)
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -263,19 +651,34 @@ class AppChatService:
         tools = []
 
         # 获取工具服务
-        tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id))
-        skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
+        base_tools = await self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id)
+        tools.extend(base_tools)
+        timing_log("tools_config_ready", tool_count=len(base_tools))
+        skill_tools, skill_prompts = await self.agent_service.load_skill_config(
+            config.skills, message, tenant_id, user_id, workspace_id
+        )
         tools.extend(skill_tools)
         if skill_prompts:
             system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-        kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval,
-                                                                                           user_id)
+        timing_log("skill_config_ready", tool_count=len(skill_tools), has_prompts=bool(skill_prompts))
+        kb_tools, citations_collector = await self.agent_service.load_knowledge_retrieval_config(
+            config.knowledge_retrieval, user_id
+        )
         tools.extend(kb_tools)
+        timing_log("knowledge_config_ready", tool_count=len(kb_tools))
         if memory:
-            memory_tools, _ = self.agent_service.load_memory_config(
+            memory_tools, _ = await self.agent_service.load_memory_config(
                 config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
             )
             tools.extend(memory_tools)
+            timing_log("memory_config_ready", tool_count=len(memory_tools))
+        timing_log(
+            "tools_loaded",
+            tool_count=len(tools),
+            skill_tool_count=len(skill_tools),
+            knowledge_tool_count=len(kb_tools),
+            memory_enabled=memory,
+        )
 
         # 获取模型参数
         model_parameters = config.model_parameters
@@ -307,6 +710,7 @@ class AppChatService:
             if prepared_input:
                 system_prompt, history = prepared_input
                 used_context_engine = True
+                timing_log("context_prepare_ready", used_context_engine=True, history_count=len(history or []))
             else:
                 history = await self.conversation_service.get_conversation_history(
                     conversation_id=conversation_id,
@@ -314,17 +718,15 @@ class AppChatService:
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
+                timing_log("history_fetch_ready", history_count=len(history or []))
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
-        existing_messages = self.conversation_service.message_repo.get_message_by_conversation_id(
-            conversation_id=conversation_id,
-            limit=1,
-        )
-        is_new_conversation = len(existing_messages) == 0
+        is_new_conversation = not await self._conversation_has_messages(conversation_id)
+        timing_log("conversation_state_ready", is_new_conversation=is_new_conversation)
         if is_new_conversation:
             opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
             if opening:
-                self.conversation_service.add_message(
+                await self.conversation_service.add_message_async(
                     conversation_id=conversation_id,
                     role="assistant",
                     content=opening,
@@ -337,6 +739,7 @@ class AppChatService:
                     current_provider=api_key_obj.provider,
                     current_is_omni=api_key_obj.is_omni
                 )
+                timing_log("opening_history_reloaded", history_count=len(history or []))
 
         # 处理多模态文件
         processed_files = None
@@ -401,6 +804,7 @@ class AppChatService:
             json_output=model_parameters.get("json_output", False),
             capability=capability,
         )
+        timing_log("agent_initialized", tool_count=len(tools), streaming=False)
 
         # 为需要运行时上下文的工具注入上下文
         for t in tools:
@@ -414,7 +818,7 @@ class AppChatService:
         # 创建 Agent 执行记录（pending 状态，对齐工作流行为）
         from app.models.app_model import App
         agent_exec_repo = AgentExecutionRepository(self.db)
-        app_obj = self.db.get(App, config.app_id)
+        app_obj = await self._db_get(App, config.app_id)
         agent_execution = AgentExecution(
             app_id=config.app_id,
             conversation_id=conversation_id,
@@ -430,8 +834,8 @@ class AppChatService:
                 "provider": api_key_obj.provider,
             },
         )
-        agent_exec_repo.create(agent_execution)
-        self.db.commit()
+        await self._create_agent_execution(agent_exec_repo, agent_execution)
+        timing_log("agent_execution_created")
 
         try:
             # 调用 Agent（支持多模态）
@@ -441,10 +845,16 @@ class AppChatService:
                 context=None,
                 files=processed_files
             )
+            timing_log(
+                "llm_completed",
+                total_tokens=result.get("usage", {}).get("total_tokens", 0),
+                content_length=len(result.get("content", "")),
+            )
         except Exception as e:
             # Agent 执行失败，更新记录为 failed
             elapsed_time = time.time() - start_time
-            agent_exec_repo.update_completed(
+            await self._update_agent_execution(
+                agent_exec_repo,
                 execution_id=agent_execution.id,
                 steps=[],
                 status="failed",
@@ -453,7 +863,7 @@ class AppChatService:
             )
             raise
 
-        ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+        await self._record_api_key_usage(api_key_obj.id)
 
         elapsed_time = time.time() - start_time
 
@@ -475,6 +885,12 @@ class AppChatService:
 
         # 过滤 citations（只调用一次）
         filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+        timing_log(
+            "post_llm_ready",
+            suggested_questions_count=len(suggested_questions),
+            citations_count=len(filtered_citations),
+            has_audio=bool(audio_url),
+        )
 
         # 构建用户消息内容（含多模态文件）
         human_meta = {
@@ -495,11 +911,7 @@ class AppChatService:
                          and (not f.name or not f.size)]
             meta_map = {}
             if local_ids:
-                rows = self.db.query(FileMetadata).filter(
-                    FileMetadata.id.in_(local_ids),
-                    FileMetadata.status == "completed"
-                ).all()
-                meta_map = {str(r.id): r for r in rows}
+                meta_map = await self._fetch_completed_file_metadata(local_ids)
             for f in files:
                 name, size = f.name, f.size
                 if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
@@ -527,7 +939,7 @@ class AppChatService:
         # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
         # 这里不再触发老的 write_long_term 路径。
         if not skip_save:
-            self.conversation_service.add_message(
+            await self.conversation_service.add_message_async(
                 message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
@@ -535,7 +947,7 @@ class AppChatService:
                 meta_data=human_meta,
                 should_memorize=memory,
             )
-            self.conversation_service.add_message(
+            await self.conversation_service.add_message_async(
                 message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
@@ -553,9 +965,12 @@ class AppChatService:
                     model_config_id=config.default_model_config_id,
                 )
                 async def _run_after_turn(kwargs=_ctx_kwargs):
-                    from app.db import get_db_context
-                    with get_db_context() as db2:
-                        await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    if self._uses_async_session():
+                        async with get_async_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    else:
+                        with get_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
                 asyncio.create_task(_run_after_turn())
         else:
             new_msg = Message(
@@ -569,15 +984,20 @@ class AppChatService:
                 meta_data=assistant_meta,
             )
             self.db.add(new_msg)
-            conv = self.db.get(Conversation, conversation_id)
+            conv = await self._db_get(Conversation, conversation_id)
             if conv:
                 conv.message_count += 1
 
-            self.db.commit()
+            if self._uses_async_session():
+                await self.db.commit()
+            else:
+                self.db.commit()
+        timing_log("messages_saved", skip_save=skip_save)
 
         # 更新 Agent 执行记录为 completed
         node_executions = orchestrator_node_executions + result.get("node_executions", [])
-        agent_exec_repo.update_completed(
+        await self._update_agent_execution(
+            agent_exec_repo,
             execution_id=agent_execution.id,
             steps=node_executions,
             status="completed",
@@ -585,6 +1005,7 @@ class AppChatService:
             token_usage=result.get("usage"),
             message_id=message_id,
         )
+        timing_log("completed", elapsed_time=elapsed_time)
 
         return {
             "conversation_id": conversation_id,
@@ -627,25 +1048,31 @@ class AppChatService:
 
         try:
             start_time = time.time()
+            timing_log = self._make_agent_timing_logger(
+                "AppChatService.agent_chat_stream",
+                conversation_id=conversation_id,
+                app_id=config.app_id,
+                user_id=user_id,
+            )
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
 
             # 检查标注命中
             from app.models.annotation_model import HitLogSource
-            annotation_match = self._check_annotation_match(
+            annotation_match = await self._check_annotation_match_async(
                 config.app_id,
                 message,
                 source=source or HitLogSource.EXTERNAL
             )
             if annotation_match:
-                self.conversation_service.add_message(
+                await self.conversation_service.add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id,
                     role="user",
                     content=message,
                     meta_data={"files": []}
                 )
-                ai_message = self.conversation_service.add_message(
+                await self.conversation_service.add_message_async(
                     message_id=message_id,
                     conversation_id=conversation_id,
                     role="assistant",
@@ -656,6 +1083,8 @@ class AppChatService:
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
                 return
+
+            timing_log("annotation_checked", matched=bool(annotation_match))
 
             # 应用 features 配置
             features_config: dict = config.features or {}
@@ -673,12 +1102,13 @@ class AppChatService:
             variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
-            tenant_id = self._resolve_tenant_id(workspace_id)
-            api_key_obj = ModelApiKeyService.get_available_api_key(
+            tenant_id = await self._resolve_tenant_id_async(workspace_id)
+            api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
                 self.db,
                 model_config_id,
                 tenant_id=tenant_id,
             )
+            timing_log("model_ready", model_name=api_key_obj.model_name, provider=api_key_obj.provider)
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -693,21 +1123,33 @@ class AppChatService:
             tools = []
 
             # 获取工具服务
-            tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id))
+            base_tools = await self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id)
+            tools.extend(base_tools)
+            timing_log("tools_config_ready", tool_count=len(base_tools))
 
-            skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
+            skill_tools, skill_prompts = await self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(
+            timing_log("skill_config_ready", tool_count=len(skill_tools), has_prompts=bool(skill_prompts))
+            kb_tools, citations_collector = await self.agent_service.load_knowledge_retrieval_config(
                 config.knowledge_retrieval, user_id)
             tools.extend(kb_tools)
+            timing_log("knowledge_config_ready", tool_count=len(kb_tools))
             # 添加长期记忆工具
             if memory:
-                memory_tools, _ = self.agent_service.load_memory_config(
+                memory_tools, _ = await self.agent_service.load_memory_config(
                     config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
+                timing_log("memory_config_ready", tool_count=len(memory_tools))
+            timing_log(
+                "tools_loaded",
+                tool_count=len(tools),
+                skill_tool_count=len(skill_tools),
+                knowledge_tool_count=len(kb_tools),
+                memory_enabled=memory,
+            )
 
             # 获取模型参数
             model_parameters = config.model_parameters
@@ -739,6 +1181,7 @@ class AppChatService:
                 if prepared_input:
                     system_prompt, history = prepared_input
                     used_context_engine = True
+                    timing_log("context_prepare_ready", used_context_engine=True, history_count=len(history or []))
                 else:
                     history = await self.conversation_service.get_conversation_history(
                         conversation_id=conversation_id,
@@ -746,29 +1189,30 @@ class AppChatService:
                         current_provider=api_key_obj.provider,
                         current_is_omni=api_key_obj.is_omni
                     )
-
-            # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
-            existing_messages = self.conversation_service.message_repo.get_message_by_conversation_id(
-                conversation_id=conversation_id,
-                limit=1,
+                    timing_log("history_fetch_ready", history_count=len(history or []))
+            timing_log(
+                "history_ready",
+                history_count=len(history or []),
+                used_context_engine=used_context_engine,
             )
-            is_new_conversation = len(existing_messages) == 0
+
+            # 新会话开场白先拼到内存 history，避免首包前写库+回查。
+            is_new_conversation = not await self._conversation_has_messages(conversation_id)
+            timing_log("conversation_state_ready", is_new_conversation=is_new_conversation)
+            opening_statement = None
+            opening_suggested_questions: List[str] = []
             if is_new_conversation:
-                opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
-                if opening:
-                    self.conversation_service.add_message(
-                        conversation_id=conversation_id,
+                opening_statement, opening_suggested_questions = self.agent_service._get_opening_statement(
+                    features_config, True, variables
+                )
+                if opening_statement:
+                    history = self._append_history_message(
+                        history,
                         role="assistant",
-                        content=opening,
-                        meta_data={"suggested_questions": suggested_questions}
+                        content=opening_statement,
                     )
-                    # 重新加载历史（包含刚写入的开场白）
-                    history = await self.conversation_service.get_conversation_history(
-                        conversation_id=conversation_id,
-                        max_history=settings.AGENT_MAX_HISTORY,
-                        current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni
-                    )
+                    timing_log("opening_history_appended", history_count=len(history or []))
+            timing_log("opening_ready", is_new_conversation=is_new_conversation)
 
             # 处理多模态文件
             processed_files = None
@@ -782,11 +1226,11 @@ class AppChatService:
                     files, document_image_recognition=doc_img_recognition,
                     workspace_id=workspace_id
                 )
+                timing_log("files_ready", file_count=len(processed_files or []))
                 logger.info(f"处理了 {len(processed_files)} 个文件")
                 if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
-                    from langchain.agents import create_agent
                     system_prompt += (
                         "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
                         "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
@@ -822,6 +1266,7 @@ class AppChatService:
                     yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                     yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
+            timing_log("pre_llm_ready", capability_count=len(capability), final_tool_count=len(tools))
 
             # 创建 LangChain Agent
             agent = LangChainAgent(
@@ -840,6 +1285,7 @@ class AppChatService:
                 json_output=model_parameters.get("json_output", False),
                 capability=capability,
             )
+            timing_log("agent_initialized", tool_count=len(tools), streaming=True)
 
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
@@ -850,37 +1296,14 @@ class AppChatService:
                         uploaded_files=processed_files or []
                     )
 
-            # 创建 Agent 执行记录（running 状态）
-            from app.models.app_model import App
-            agent_exec_repo = AgentExecutionRepository(self.db)
-            app_obj = self.db.get(App, config.app_id)
-            agent_execution = AgentExecution(
-                app_id=config.app_id,
-                conversation_id=conversation_id,
-                message_id=None,
-                agent_config_id=config.id,
-                release_id=app_obj.current_release_id if app_obj else None,
-                triggered_by=None,
-                steps=[],
-                status="running",
-                started_at=parse_timestamp_to_utc_naive(start_time),
-                meta_data={
-                    "model": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                },
-            )
-            agent_exec_repo.create(agent_execution)
-            self.db.commit()
-
-
             # close() 前预读 ORM 属性，防止 close 后触发 DetachedInstanceError
             _api_key_id = api_key_obj.id
             _api_key_model_name = api_key_obj.model_name
-            _agent_execution_id = agent_execution.id
-            # LLM 推理期间不需要 db，提前归还连接给连接池
-            # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
-            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
-            self.db.close()
+            _api_key_provider = api_key_obj.provider
+            _api_key_is_omni = api_key_obj.is_omni
+            # LLM 推理期间不再依赖共享 session，提前归还底层连接给连接池。
+            await self._release_db_connection()
+            timing_log("db_released_before_llm")
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
@@ -901,12 +1324,16 @@ class AppChatService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
 
+            first_chunk_logged = False
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
                     context=None,
                     files=processed_files
             ):
+                if not first_chunk_logged:
+                    timing_log("first_chunk")
+                    first_chunk_logged = True
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
@@ -935,7 +1362,8 @@ class AppChatService:
                 await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-            ModelApiKeyService.record_api_key_usage(self.db, _api_key_id)
+            timing_log("llm_completed", total_tokens=total_tokens, content_length=len(full_content))
+            await self._record_api_key_usage(_api_key_id)
 
             # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
             end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
@@ -962,8 +1390,13 @@ class AppChatService:
             # 过滤 citations（只调用一次）
             filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
             end_data["citations"] = filtered_citations
+            timing_log(
+                "post_llm_ready",
+                suggested_questions_count=len(suggested_questions),
+                citations_count=len(filtered_citations),
+                has_audio=bool(stream_audio_url),
+            )
 
-            # 保存消息
             human_meta = {
                 "files": [],
                 "history_files": {}
@@ -971,108 +1404,146 @@ class AppChatService:
             assistant_meta = {
                 "model": _api_key_model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                "audio_url": None,
+                "audio_url": stream_audio_url,
                 "citations": filtered_citations,
                 "suggested_questions": suggested_questions,
                 "reasoning_content": full_reasoning or None
             }
 
-            if files:
-                local_ids = [f.upload_file_id for f in files
-                             if f.transfer_method.value == "local_file" and f.upload_file_id
-                             and (not f.name or not f.size)]
-                meta_map = {}
-                if local_ids:
-                    rows = self.db.query(FileMetadata).filter(
-                        FileMetadata.id.in_(local_ids),
-                        FileMetadata.status == "completed"
-                    ).all()
-                    meta_map = {str(r.id): r for r in rows}
-                for f in files:
-                    name, size = f.name, f.size
-                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                        meta = meta_map.get(str(f.upload_file_id))
-                        if meta:
-                            name = name or meta.file_name
-                            size = size or meta.file_size
-                    human_meta["files"].append({
-                        "type": f.type,
-                        "url": f.url,
-                        "name": name,
-                        "size": size,
-                        "file_type": f.file_type,
-                    })
-            if processed_files:
-                human_meta["history_files"] = {
-                    "content": processed_files,
-                    "provider": api_key_obj.provider,
-                    "is_omni": api_key_obj.is_omni
-                }
-
-            if stream_audio_url:
-                assistant_meta["audio_url"] = stream_audio_url
-
             # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
             # 这里不再触发老的 write_long_term 路径。
             if not skip_save:
-                self.conversation_service.add_message(
-                    message_id=user_message_id,
-                    conversation_id=conversation_id,
-                    role="user",
-                    content=message,
-                    meta_data=human_meta,
-                    should_memorize=memory,
-                )
-                self.conversation_service.add_message(
-                    message_id=message_id,
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=full_content,
-                    meta_data=assistant_meta,
-                    should_memorize=memory,
-                )
+                if opening_statement:
+                    await self._save_opening_statement_async(
+                        conversation_id=conversation_id,
+                        opening_statement=opening_statement,
+                        suggested_questions=opening_suggested_questions,
+                    )
+                if self._uses_async_session():
+                    await self.agent_service._save_conversation_message(
+                        conversation_id=str(conversation_id),
+                        user_message=message,
+                        assistant_message=full_content,
+                        message_id=message_id,
+                        user_message_id=user_message_id,
+                        app_id=config.app_id,
+                        user_id=user_id,
+                        meta_data=assistant_meta,
+                        files=files,
+                        processed_files=processed_files,
+                        audio_url=stream_audio_url,
+                        citations=filtered_citations,
+                        provider=_api_key_provider,
+                        is_omni=_api_key_is_omni,
+                    )
+                else:
+                    if files:
+                        local_ids = [f.upload_file_id for f in files
+                                     if f.transfer_method.value == "local_file" and f.upload_file_id
+                                     and (not f.name or not f.size)]
+                        meta_map = {}
+                        if local_ids:
+                            meta_map = await self._fetch_completed_file_metadata(local_ids)
+                        for f in files:
+                            name, size = f.name, f.size
+                            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                                meta = meta_map.get(str(f.upload_file_id))
+                                if meta:
+                                    name = name or meta.file_name
+                                    size = size or meta.file_size
+                            human_meta["files"].append({
+                                "type": f.type,
+                                "url": f.url,
+                                "name": name,
+                                "size": size,
+                                "file_type": f.file_type,
+                            })
+                    if processed_files:
+                        human_meta["history_files"] = {
+                            "content": processed_files,
+                            "provider": _api_key_provider,
+                            "is_omni": _api_key_is_omni
+                        }
+                    await self.conversation_service.add_message_async(
+                        message_id=user_message_id,
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=message,
+                        meta_data=human_meta,
+                        should_memorize=memory,
+                    )
+                    await self.conversation_service.add_message_async(
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=full_content,
+                        meta_data=assistant_meta,
+                        should_memorize=memory,
+                    )
                 if used_context_engine:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=conversation_id,
-                        current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni,
+                        current_provider=_api_key_provider,
+                        current_is_omni=_api_key_is_omni,
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=config.default_model_config_id,
                     )
                     async def _run_after_turn(kwargs=_ctx_kwargs):
-                        from app.db import get_db_context
-                        with get_db_context() as db2:
-                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                        if self._uses_async_session():
+                            async with get_async_db_context() as db2:
+                                await ContextEngineManager(db2).after_app_turn(**kwargs)
+                        else:
+                            with get_db_context() as db2:
+                                await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
             else:
-                new_msg = Message(
-                    id=message_id,
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=full_content,
-                    version=version,
-                    is_current=True,
-                    parent_message_id=parent_message_id,
-                    meta_data=assistant_meta,
-                )
-                self.db.add(new_msg)
-                conv = self.db.get(Conversation, conversation_id)
-                if conv:
-                    conv.message_count += 1
+                if self._uses_async_session():
+                    await self._save_versioned_assistant_message_async(
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        content=full_content,
+                        version=version,
+                        parent_message_id=parent_message_id,
+                        meta_data=assistant_meta,
+                    )
+                else:
+                    new_msg = Message(
+                        id=message_id,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=full_content,
+                        version=version,
+                        is_current=True,
+                        parent_message_id=parent_message_id,
+                        meta_data=assistant_meta,
+                    )
+                    self.db.add(new_msg)
+                    conv = await self._db_get(Conversation, conversation_id)
+                    if conv:
+                        conv.message_count += 1
+                    self.db.commit()
+            timing_log("messages_saved", skip_save=skip_save)
 
-                self.db.commit()
-
-            # 更新 Agent 执行记录为 completed
+            # 首包后再一次性落 Agent execution，避免首包前 create + 尾部 update 双写。
             all_node_executions = orchestrator_node_executions + node_executions
-            agent_exec_repo.update_completed(
-                execution_id=_agent_execution_id,
-                steps=all_node_executions,
+            await self._persist_final_agent_execution(
+                app_id=config.app_id,
+                conversation_id=conversation_id,
+                agent_config_id=config.id,
+                started_at_ts=start_time,
                 status="completed",
+                steps=all_node_executions,
+                meta_data={
+                    "model": _api_key_model_name,
+                    "provider": _api_key_provider,
+                },
                 elapsed_time=elapsed_time,
                 token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 message_id=message_id,
             )
+            timing_log("agent_execution_saved", status="completed", step_count=len(all_node_executions))
+            timing_log("completed", elapsed_time=elapsed_time)
 
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
@@ -1093,31 +1564,47 @@ class AppChatService:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
             try:
-                _human_meta = human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}}
-                self.conversation_service.add_message(
-                    message_id=user_message_id,
-                    conversation_id=conversation_id,
-                    role="user",
-                    content=message,
-                    meta_data=_human_meta,
-                )
-                self.conversation_service.add_message(
-                    message_id=message_id,
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=full_content if 'full_content' in locals() else "",
-                    meta_data={"error": str(e)[:2000]},
-                    status="failed",
-                )
+                if self._uses_async_session():
+                    await self._save_failed_stream_messages_async(
+                        message_id=message_id,
+                        user_message_id=user_message_id,
+                        conversation_id=conversation_id,
+                        message=message,
+                        human_meta=human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}},
+                        error_message=str(e),
+                    )
+                else:
+                    await self.conversation_service.add_message_async(
+                        message_id=user_message_id,
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=message,
+                        meta_data=human_meta,
+                    )
+                    await self.conversation_service.add_message_async(
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content="",
+                        meta_data={"error": str(e)[:2000]},
+                        status="failed",
+                    )
             except Exception:
                 pass
-            # 更新 Agent 执行记录为 failed
+            # 失败场景也改成尾部一次写，避免依赖首包前 execution。
             try:
                 elapsed_time = time.time() - start_time
-                agent_exec_repo.update_completed(
-                    execution_id=_agent_execution_id,
-                    steps=node_executions if 'node_executions' in dir() else [],
+                await self._persist_final_agent_execution(
+                    app_id=config.app_id,
+                    conversation_id=conversation_id,
+                    agent_config_id=config.id,
+                    started_at_ts=start_time,
                     status="failed",
+                    steps=node_executions if 'node_executions' in dir() else [],
+                    meta_data={
+                        "model": _api_key_model_name if '_api_key_model_name' in locals() else None,
+                        "provider": _api_key_provider if '_api_key_provider' in locals() else None,
+                    },
                     elapsed_time=elapsed_time,
                     error_message=str(e)[:2000],
                 )
@@ -1149,7 +1636,7 @@ class AppChatService:
             variables = {}
 
         # 2. 创建编排器
-        orchestrator = MultiAgentOrchestrator(self.db, config)
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         # 3. 执行任务
         result = await orchestrator.execute(
@@ -1165,14 +1652,14 @@ class AppChatService:
         elapsed_time = time.time() - start_time
 
         # 保存消息
-        self.conversation_service.add_message(
+        await self.conversation_service.add_message_async(
             message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
             content=message
         )
 
-        ai_message = self.conversation_service.add_message(
+        ai_message = await self.conversation_service.add_message_async(
             conversation_id=conversation_id,
             role="assistant",
             content=result.get("message", ""),
@@ -1229,7 +1716,7 @@ class AppChatService:
             total_tokens = 0
 
             # 2. 创建编排器
-            orchestrator = MultiAgentOrchestrator(self.db, config)
+            orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
             # 3. 流式执行任务
             async for event in orchestrator.execute_stream(
@@ -1267,14 +1754,14 @@ class AppChatService:
             elapsed_time = time.time() - start_time
 
             # 保存消息
-            self.conversation_service.add_message(
+            await self.conversation_service.add_message_async(
                 message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message
             )
 
-            self.conversation_service.add_message(
+            await self.conversation_service.add_message_async(
                 message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",

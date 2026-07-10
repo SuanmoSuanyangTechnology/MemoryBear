@@ -40,6 +40,7 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.validator import validate_workflow_config
+from app.aioRedis import aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_redis
 from app.db import get_async_db_context, get_async_pool_status, get_db
 from app.models import App, AppRelease, Conversation, Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeCache, WorkflowNodeExecution
@@ -66,11 +67,22 @@ class WorkflowExecutionRef:
     execution_id: str
     status: str
     conversation_id: uuid.UUID | None
+    workflow_config_id: uuid.UUID | None
+    app_id: uuid.UUID | None
+    release_id: uuid.UUID | None
+    trigger_type: str | None
+    triggered_by: uuid.UUID | None
     input_data: dict[str, Any] | None
     output_data: dict[str, Any] | None
+    context: dict[str, Any] | None
+    token_usage: dict[str, Any] | None
+    meta_data: dict[str, Any] | None
+    error_message: str | None
+    error_node_id: str | None
     started_at: datetime.datetime | None
     completed_at: datetime.datetime | None
     elapsed_time: float | None
+    persisted: bool = False
 
 
 class WorkflowService:
@@ -85,7 +97,7 @@ class WorkflowService:
     # 重新生成版本上限：同一轮（同 parent_message_id）允许的最大 assistant 版本数（含原始回复）
     MAX_REGENERATE_VERSIONS = 5
 
-    def __init__(self, db: Session | None = None):
+    def __init__(self, db: Session | AsyncSession | None = None):
         self.db = db
         self.config_repo = WorkflowConfigRepository(db) if db is not None else None
         self.execution_repo = WorkflowExecutionRepository(db) if db is not None else None
@@ -122,12 +134,184 @@ class WorkflowService:
             execution_id=execution.execution_id,
             status=execution.status,
             conversation_id=execution.conversation_id,
+            workflow_config_id=execution.workflow_config_id,
+            app_id=execution.app_id,
+            release_id=execution.release_id,
+            trigger_type=execution.trigger_type,
+            triggered_by=execution.triggered_by,
             input_data=execution.input_data if isinstance(execution.input_data, dict) else None,
             output_data=execution.output_data if isinstance(execution.output_data, dict) else None,
+            context=execution.context if isinstance(execution.context, dict) else None,
+            token_usage=execution.token_usage if isinstance(execution.token_usage, dict) else None,
+            meta_data=execution.meta_data if isinstance(execution.meta_data, dict) else None,
+            error_message=execution.error_message,
+            error_node_id=execution.error_node_id,
             started_at=execution.started_at,
             completed_at=execution.completed_at,
             elapsed_time=execution.elapsed_time,
+            persisted=True,
         )
+
+    @staticmethod
+    def _runtime_execution_redis_key(execution_id: str) -> str:
+        return f"workflow:runtime_execution:{execution_id}"
+
+    @staticmethod
+    def _serialize_runtime_execution_ref(execution: WorkflowExecutionRef) -> dict[str, Any]:
+        return {
+            "id": str(execution.id) if execution.id else None,
+            "execution_id": execution.execution_id,
+            "status": execution.status,
+            "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
+            "workflow_config_id": str(execution.workflow_config_id) if execution.workflow_config_id else None,
+            "app_id": str(execution.app_id) if execution.app_id else None,
+            "release_id": str(execution.release_id) if execution.release_id else None,
+            "trigger_type": execution.trigger_type,
+            "triggered_by": str(execution.triggered_by) if execution.triggered_by else None,
+            "input_data": execution.input_data,
+            "output_data": execution.output_data,
+            "context": execution.context,
+            "token_usage": execution.token_usage,
+            "meta_data": execution.meta_data,
+            "error_message": execution.error_message,
+            "error_node_id": execution.error_node_id,
+            "started_at": to_iso_z(execution.started_at) if execution.started_at else None,
+            "completed_at": to_iso_z(execution.completed_at) if execution.completed_at else None,
+            "elapsed_time": execution.elapsed_time,
+            "persisted": execution.persisted,
+        }
+
+    @staticmethod
+    def _runtime_execution_ref_from_snapshot(snapshot: dict[str, Any]) -> WorkflowExecutionRef | None:
+        if not isinstance(snapshot, dict):
+            return None
+
+        def _uuid_or_none(value: Any) -> uuid.UUID | None:
+            return uuid.UUID(value) if value else None
+
+        def _dt_or_none(value: Any) -> datetime.datetime | None:
+            return parse_iso_to_utc_naive(value) if value else None
+
+        execution_id = snapshot.get("execution_id")
+        if not execution_id:
+            return None
+
+        return WorkflowExecutionRef(
+            id=_uuid_or_none(snapshot.get("id")),
+            execution_id=execution_id,
+            status=snapshot.get("status") or "running",
+            conversation_id=_uuid_or_none(snapshot.get("conversation_id")),
+            workflow_config_id=_uuid_or_none(snapshot.get("workflow_config_id")),
+            app_id=_uuid_or_none(snapshot.get("app_id")),
+            release_id=_uuid_or_none(snapshot.get("release_id")),
+            trigger_type=snapshot.get("trigger_type"),
+            triggered_by=_uuid_or_none(snapshot.get("triggered_by")),
+            input_data=snapshot.get("input_data") if isinstance(snapshot.get("input_data"), dict) else None,
+            output_data=snapshot.get("output_data") if isinstance(snapshot.get("output_data"), dict) else None,
+            context=snapshot.get("context") if isinstance(snapshot.get("context"), dict) else None,
+            token_usage=snapshot.get("token_usage") if isinstance(snapshot.get("token_usage"), dict) else None,
+            meta_data=snapshot.get("meta_data") if isinstance(snapshot.get("meta_data"), dict) else None,
+            error_message=snapshot.get("error_message"),
+            error_node_id=snapshot.get("error_node_id"),
+            started_at=_dt_or_none(snapshot.get("started_at")),
+            completed_at=_dt_or_none(snapshot.get("completed_at")),
+            elapsed_time=snapshot.get("elapsed_time"),
+            persisted=bool(snapshot.get("persisted")),
+        )
+
+    @classmethod
+    def _build_execution_record_from_ref(cls, execution: WorkflowExecutionRef) -> WorkflowExecution:
+        return WorkflowExecution(
+            id=execution.id or uuid.uuid4(),
+            workflow_config_id=execution.workflow_config_id,
+            release_id=execution.release_id,
+            app_id=execution.app_id,
+            conversation_id=execution.conversation_id,
+            execution_id=execution.execution_id,
+            trigger_type=execution.trigger_type or "manual",
+            triggered_by=execution.triggered_by,
+            input_data=execution.input_data,
+            output_data=execution.output_data,
+            context=execution.context or {},
+            status=execution.status,
+            error_message=execution.error_message,
+            error_node_id=execution.error_node_id,
+            started_at=execution.started_at or utcnow_naive(),
+            completed_at=execution.completed_at,
+            elapsed_time=execution.elapsed_time,
+            token_usage=execution.token_usage,
+            meta_data=execution.meta_data or {},
+        )
+
+    @classmethod
+    def _build_transient_execution_ref(
+            cls,
+            *,
+            workflow_config_id: uuid.UUID,
+            app_id: uuid.UUID,
+            trigger_type: str,
+            release_id: uuid.UUID | None,
+            triggered_by: uuid.UUID | None,
+            conversation_id: uuid.UUID | None,
+            input_data: dict[str, Any] | None,
+            meta_data: dict[str, Any] | None,
+            status: str,
+    ) -> WorkflowExecutionRef:
+        return WorkflowExecutionRef(
+            id=None,
+            execution_id=f"exec_{uuid.uuid4().hex[:16]}",
+            status=status,
+            conversation_id=conversation_id,
+            workflow_config_id=workflow_config_id,
+            app_id=app_id,
+            release_id=release_id,
+            trigger_type=trigger_type,
+            triggered_by=triggered_by,
+            input_data=input_data,
+            output_data=None,
+            context={},
+            token_usage=None,
+            meta_data=meta_data or {},
+            error_message=None,
+            error_node_id=None,
+            started_at=utcnow_naive(),
+            completed_at=None,
+            elapsed_time=None,
+            persisted=False,
+        )
+
+    async def _store_runtime_execution_snapshot_async(self, execution: WorkflowExecutionRef) -> None:
+        await aio_redis_set(
+            self._runtime_execution_redis_key(execution.execution_id),
+            self._serialize_runtime_execution_ref(execution),
+            expire=600,
+        )
+
+    async def _delete_runtime_execution_snapshot_async(self, execution_id: str) -> None:
+        await aio_redis_delete(self._runtime_execution_redis_key(execution_id))
+
+    async def _get_runtime_execution_snapshot_async(self, execution_id: str) -> WorkflowExecutionRef | None:
+        raw_value = await aio_redis_get(self._runtime_execution_redis_key(execution_id))
+        if not raw_value:
+            return None
+        try:
+            import json
+            return self._runtime_execution_ref_from_snapshot(json.loads(raw_value))
+        except Exception as exc:
+            logger.warning("Failed to decode runtime execution snapshot: execution_id=%s error=%s", execution_id, exc)
+            return None
+
+    def _get_runtime_execution_snapshot_sync(self, execution_id: str) -> WorkflowExecutionRef | None:
+        try:
+            client = get_thread_safe_redis()
+            raw_value = client.get(self._runtime_execution_redis_key(execution_id))
+            if not raw_value:
+                return None
+            import json
+            return self._runtime_execution_ref_from_snapshot(json.loads(raw_value))
+        except Exception as exc:
+            logger.warning("Failed to load runtime execution snapshot: execution_id=%s error=%s", execution_id, exc)
+            return None
 
     @staticmethod
     def _build_runtime_workflow_config_from_release(
@@ -837,14 +1021,14 @@ class WorkflowService:
             )
 
             # ponytail: this helper only needs pure math; don't keep a DB session around for it.
-            query_embedding = AnnotationService.generate_embedding(None, message, config)
+            query_embedding = AnnotationService.generate_embedding(message, config)
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
                 embedding = annotation["embedding"]
                 if not embedding:
                     continue
-                similarity = AnnotationService.cosine_similarity(None, query_embedding, embedding)
+                similarity = AnnotationService.cosine_similarity(query_embedding, embedding)
                 if similarity > best_similarity:
                     best_similarity = similarity
                     best_match = annotation
@@ -963,6 +1147,11 @@ class WorkflowService:
             工作流配置或 None
         """
         return self.config_repo.get_by_app_id(app_id)
+
+    async def get_workflow_config_async(self, app_id: uuid.UUID) -> WorkflowConfig | None:
+        """异步获取工作流配置"""
+        async with get_async_db_context() as db:
+            return await WorkflowConfigRepository(db).get_by_app_id_async(app_id)
 
     def update_workflow_config(
             self,
@@ -1222,7 +1411,13 @@ class WorkflowService:
         Returns:
             执行记录或 None
         """
-        return self.execution_repo.get_by_execution_id(execution_id)
+        execution = self.execution_repo.get_by_execution_id(execution_id)
+        if execution:
+            return execution
+        runtime_execution = self._get_runtime_execution_snapshot_sync(execution_id)
+        if runtime_execution:
+            return self._build_execution_record_from_ref(runtime_execution)
+        return None
 
     @staticmethod
     def _serialize_execution_value(value: Any) -> Any:
@@ -1646,7 +1841,7 @@ class WorkflowService:
         }
 
     def _build_execution_snapshot_from_record(self, execution: WorkflowExecution) -> dict[str, Any]:
-        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id) if execution.id else []
         output_data = self._serialize_execution_value(execution.output_data or {})
         return self._build_execution_snapshot(
             execution=execution,
@@ -3305,7 +3500,13 @@ class WorkflowService:
             result = await db.execute(
                 select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
             )
-            return result.scalar_one_or_none()
+            execution = result.scalar_one_or_none()
+            if execution:
+                return execution
+            runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+            if runtime_execution:
+                return self._build_execution_record_from_ref(runtime_execution)
+            return None
 
     async def _patch_execution_async(
             self,
@@ -3319,10 +3520,14 @@ class WorkflowService:
             )
             execution = result.scalar_one_or_none()
             if not execution:
-                raise BusinessException(
-                    code=BizCode.NOT_FOUND,
-                    message=f"执行记录不存在: execution_id={execution_id}",
-                )
+                runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+                if not runtime_execution:
+                    raise BusinessException(
+                        code=BizCode.NOT_FOUND,
+                        message=f"执行记录不存在: execution_id={execution_id}",
+                    )
+                execution = self._build_execution_record_from_ref(runtime_execution)
+                db.add(execution)
 
             for key, value in fields.items():
                 if value is None and key not in {"error_message", "error_node_id"}:
@@ -3355,6 +3560,7 @@ class WorkflowService:
                 pool_status["overflow"],
                 pool_status["usage_percent"],
             )
+            await self._delete_runtime_execution_snapshot_async(execution_id)
             return self._build_execution_ref(execution)
 
     async def _add_message_async(
@@ -3423,10 +3629,14 @@ class WorkflowService:
             )
             execution = result.scalar_one_or_none()
             if not execution:
-                raise BusinessException(
-                    code=BizCode.NOT_FOUND,
-                    message=f"执行记录不存在: execution_id={execution_id}",
-                )
+                runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+                if not runtime_execution:
+                    raise BusinessException(
+                        code=BizCode.NOT_FOUND,
+                        message=f"执行记录不存在: execution_id={execution_id}",
+                    )
+                execution = self._build_execution_record_from_ref(runtime_execution)
+                db.add(execution)
 
             user_msg = Message(
                 id=user_message_id if user_message_id else uuid.uuid4(),
@@ -3483,6 +3693,7 @@ class WorkflowService:
                 pool_status["overflow"],
                 pool_status["usage_percent"],
             )
+            await self._delete_runtime_execution_snapshot_async(execution_id)
             return execution
 
     async def _update_message_async(
@@ -5777,7 +5988,7 @@ class WorkflowService:
         """
         # 1. 获取工作流配置
         if not config:
-            config = self.get_workflow_config(app_id)
+            config = await self.get_workflow_config_async(app_id)
         if not config:
             raise BusinessException(
                 code=BizCode.CONFIG_MISSING,
@@ -5858,7 +6069,7 @@ class WorkflowService:
                 )
 
             # 创建 WorkflowExecution 记录，用于日志显示
-            execution = self.create_execution(
+            execution = await self._create_execution_async(
                 workflow_config_id=config.id,
                 app_id=app_id,
                 trigger_type=trigger_type,
@@ -5866,26 +6077,30 @@ class WorkflowService:
                 conversation_id=conversation_id_uuid,
                 input_data=input_data,
                 release_id=release_id,
+                meta_data={
+                    "trigger_id": trigger_id,
+                    "trigger_meta": trigger_meta or {},
+                    "external_event_id": None,
+                },
             )
-            self._store_trigger_meta(execution, trigger_id, trigger_meta)
-            execution.status = "completed"
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
                 {"role": "assistant", "content": annotation_match["answer"]}
             ]
-            execution.output_data = {
-                "answer": annotation_match["answer"],
-                "messages": output_messages,
-                "annotation_hit": {
-                    "annotation_id": str(annotation_match["annotation_id"]),
-                    "similarity": annotation_match["similarity"],
-                    "question": annotation_match["question"],
-                }
-            }
-            execution.token_usage = {}
-            execution.elapsed_time = 0
-            execution.completed_at = utcnow_naive()
-            self.db.commit()
+            await self._patch_execution_async(
+                execution.execution_id,
+                status="completed",
+                output_data={
+                    "answer": annotation_match["answer"],
+                    "messages": output_messages,
+                    "annotation_hit": {
+                        "annotation_id": str(annotation_match["annotation_id"]),
+                        "similarity": annotation_match["similarity"],
+                        "question": annotation_match["question"],
+                    }
+                },
+                token_usage={},
+            )
 
             return {
                 "status": "completed",
@@ -5920,21 +6135,21 @@ class WorkflowService:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
                 if conversation_id_uuid:
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
                         role="user",
                         content=payload.message,
                         meta_data={"files": []},
                     )
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=preset_response,
                         meta_data={"usage": {}, "moderation_flagged": True},
                     )
-                execution = self.create_execution(
+                execution = await self._create_execution_async(
                     workflow_config_id=config.id,
                     app_id=app_id,
                     trigger_type="manual",
@@ -5942,12 +6157,17 @@ class WorkflowService:
                     conversation_id=conversation_id_uuid,
                     input_data={"message": payload.message, "moderation_flagged": True},
                     release_id=release_id,
+                    meta_data={
+                        "trigger_id": trigger_id,
+                        "trigger_meta": trigger_meta or {},
+                        "external_event_id": None,
+                    },
                 )
-                execution.status = "completed"
-                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
-                execution.elapsed_time = 0
-                execution.completed_at = utcnow_naive()
-                self.db.commit()
+                await self._patch_execution_async(
+                    execution.execution_id,
+                    status="completed",
+                    output_data={"answer": preset_response, "moderation_flagged": True},
+                )
                 return {
                     "execution_id": execution.execution_id,
                     "status": "completed",
@@ -5964,7 +6184,7 @@ class WorkflowService:
                 }
 
         # 2. 创建执行记录
-        execution = self.create_execution(
+        execution = await self._create_execution_async(
             workflow_config_id=config.id,
             app_id=app_id,
             trigger_type=trigger_type,
@@ -5972,9 +6192,12 @@ class WorkflowService:
             conversation_id=conversation_id_uuid,
             input_data=input_data,
             release_id=release_id,
+            meta_data={
+                "trigger_id": trigger_id,
+                "trigger_meta": trigger_meta or {},
+                "external_event_id": None,
+            },
         )
-        self._store_trigger_meta(execution, trigger_id, trigger_meta)
-        self.db.commit()
 
         # 3. 构建工作流配置字典
         workflow_config_dict = self._build_runtime_workflow_config_dict(
@@ -5984,20 +6207,16 @@ class WorkflowService:
             runtime_options={"bypass_node_cache": True},
         )
 
+        files = []
         try:
             files = await self._handle_file_input(payload.files)
-            storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
+            storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
-            # 更新 execution.input_data，确保数据库中的 files 包含 URL
-            execution.input_data = input_data
-            self.db.commit()
             message_id = uuid.uuid4()
             # 预生成 user_message_id：重新生成模式不创建新 user 消息，置 None
             # （add_message 收到 None 时内部生成 id，行为同原先；仅非重新生成场景
             # 需要把 id 经由 response 返回给前端，供"未刷新即删除 user 消息"使用）
             user_message_id = None if regenerate_mode else uuid.uuid4()
-            # 更新状态为运行中
-            self.update_execution_status(execution.execution_id, "running")
 
             if regenerate_mode and regenerate_history:
                 history = regenerate_history
@@ -6032,16 +6251,21 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
                         meta_data={"suggested_questions": suggested_questions},
-                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
+
+            execution = await self._patch_execution_async(
+                execution.execution_id,
+                input_data=input_data,
+                status="running",
+            )
 
             result = await execute_workflow(
                 workflow_config=workflow_config_dict,
@@ -6096,18 +6320,6 @@ class WorkflowService:
                                 })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
-                _user_msg = None
-                if conversation_id_uuid:
-                    _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
-                    _user_msg = self.conversation_service.add_message(
-                        conversation_id=conversation_id_uuid,
-                        role="user",
-                        content=human_message,
-                        meta_data=human_meta,
-                        parent_message_id=_from_msg_id,
-                        sync_memory=False,
-                        message_id=user_message_id,
-                    )
                 # 过滤 citations
                 citations = result.get("citations", [])
                 citation_cfg = feature_configs.get("citation", {})
@@ -6125,47 +6337,58 @@ class WorkflowService:
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
                 if conversation_id_uuid:
-                    self.conversation_service.add_message(
-                        message_id=message_id,
-                        conversation_id=conversation_id_uuid,
-                        role="assistant",
-                        content=assistant_message,
-                        meta_data=assistant_meta,
-                        parent_message_id=_user_msg.id if _user_msg else None,
-                        sync_memory=False,
+                    _from_msg_id = await self._resolve_from_message_id_async(
+                        payload.from_message_id,
+                        conversation_id_uuid,
                     )
-                self.update_execution_status(
-                    execution.execution_id,
-                    "completed",
-                    output_data=result,
-                    token_usage=token_usage.get("total_tokens", None)
-                )
-                execution = self.get_execution(execution.execution_id)
-                self._persist_workflow_node_executions(execution, config, result)
-                self._refresh_workflow_debug_state_from_execution(execution)
+                    execution = await self._finalize_completed_execution_async(
+                        execution_id=execution.execution_id,
+                        conversation_id=conversation_id_uuid,
+                        human_message=human_message,
+                        human_meta=human_meta,
+                        user_message_id=user_message_id,
+                        from_message_id=_from_msg_id,
+                        assistant_message_id=message_id,
+                        assistant_message=assistant_message,
+                        assistant_meta=assistant_meta,
+                        workflow_output_data=result,
+                        token_usage=token_usage.get("total_tokens", None),
+                    )
+                else:
+                    execution = await self._patch_execution_async(
+                        execution.execution_id,
+                        status="completed",
+                        output_data=result,
+                        token_usage=token_usage.get("total_tokens", None),
+                    )
+                execution_record = await self._get_execution_async(execution.execution_id)
+                if execution_record:
+                    self._persist_workflow_node_executions(execution_record, config, result)
+                    self._refresh_workflow_debug_state_from_execution(execution_record)
 
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
-                self.update_execution_status(
+                await self._patch_execution_async(
                     execution.execution_id,
-                    "failed",
+                    status="failed",
                     # 失败时同样持久化完整结果（含 node_outputs），
                     # 否则应用日志无法展示失败调用的各节点执行明细。
                     output_data=result,
                     error_message=result.get("error"),
                     error_node_id=result.get("error_node"),
                 )
-                execution = self.get_execution(execution.execution_id)
-                self._persist_workflow_node_executions(execution, config, result)
-                self._refresh_workflow_debug_state_from_execution(execution)
+                execution_record = await self._get_execution_async(execution.execution_id)
+                if execution_record:
+                    self._persist_workflow_node_executions(execution_record, config, result)
+                    self._refresh_workflow_debug_state_from_execution(execution_record)
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
                 final_messages = result.get("messages", [])[init_message_length:]
                 human_message, human_meta = self._extract_human_message_and_meta(
                     final_messages, payload.message or "", files
                 )
-                self._save_failed_conversation(
+                await self._save_failed_conversation_async(
                     conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
                 )
                 filtered_citations = []
@@ -6193,18 +6416,18 @@ class WorkflowService:
                     remove_checkpointer(cp_thread_id)
                 from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
                 InterventionRegistry.cleanup(execution.execution_id)
-                self.update_execution_status(
+                await self._patch_execution_async(
                     execution.execution_id,
-                    "failed",
+                    status="failed",
                     output_data=result,
                     error_message="非流式执行不支持人工介入节点",
                     error_node_id=result.get("error_node"),
                 )
                 try:
-                    execution = self.get_execution(execution.execution_id)
-                    if execution and execution.output_data:
-                        self._persist_workflow_node_executions(execution, config, execution.output_data)
-                        self._refresh_workflow_debug_state_from_execution(execution)
+                    execution_record = await self._get_execution_async(execution.execution_id)
+                    if execution_record and execution_record.output_data:
+                        self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
+                        self._refresh_workflow_debug_state_from_execution(execution_record)
                 except Exception as persist_err:
                     logger.warning(f"Failed to persist node executions on waiting_human: {persist_err}")
                 raise BusinessException(
@@ -6218,16 +6441,20 @@ class WorkflowService:
             raise
         except Exception as e:
             logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
-            self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            await self._patch_execution_async(
+                execution.execution_id,
+                status="failed",
+                error_message=str(e),
+            )
             try:
-                execution = self.get_execution(execution.execution_id)
-                if execution and execution.output_data:
-                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution)
+                execution_record = await self._get_execution_async(execution.execution_id)
+                if execution_record and execution_record.output_data:
+                    self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
+                    self._refresh_workflow_debug_state_from_execution(execution_record)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
+            await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -6700,13 +6927,13 @@ class WorkflowService:
                     status="running",
                 )
             else:
-                execution = await self._create_execution_async(
+                execution = self._build_transient_execution_ref(
                     workflow_config_id=config.id,
                     app_id=app_id,
                     trigger_type=trigger_type,
                     triggered_by=None,
                     conversation_id=conversation_id_uuid,
-                    input_data=input_data,
+                    input_data=self._build_persisted_execution_input_data(input_data),
                     release_id=release_id,
                     meta_data={
                         "trigger_id": trigger_id,
@@ -6715,6 +6942,7 @@ class WorkflowService:
                     },
                     status="running",
                 )
+                await self._store_runtime_execution_snapshot_async(execution)
             timing_execution_id = execution.execution_id
             _log_before_execute_step(
                 "before_execute_execution_ready",
@@ -8267,7 +8495,7 @@ class WorkflowService:
                     "elapsed_time": elapsed,
                     "error": None,
                 }
-                node._save_cache(
+                await node._save_cache(
                     state=state,
                     variable_pool=variable_pool,
                     node_output=self._normalize_single_node_payload(

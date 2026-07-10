@@ -202,6 +202,61 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
             raise
 
+    async def get_end_user_by_other_id_async(self, workspace_id: uuid.UUID, other_id: str) -> Optional["EndUser"]:
+        result = await self.db.execute(
+            select(EndUser)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.other_id == other_id,
+                EndUser.is_active == True,
+            )
+            .order_by(EndUser.created_at.asc())
+        )
+        return result.scalars().first()
+
+    async def get_or_create_end_user_async(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            other_id: str,
+            original_user_id: Optional[str] = None,
+            other_name: Optional[str] = None
+    ) -> EndUser:
+        try:
+            end_user = await self.get_end_user_by_other_id_async(workspace_id, other_id)
+            if end_user:
+                db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
+                end_user.app_id = app_id
+                await self.db.commit()
+                await self.db.refresh(end_user)
+                return end_user
+
+            end_user = EndUser(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                other_id=other_id
+            )
+            self.db.add(end_user)
+            await self.db.flush()
+
+            end_user_info = EndUserInfo(
+                end_user_id=end_user.id,
+                other_name=other_name or "",
+                aliases=[],
+                meta_data={}
+            )
+            self.db.add(end_user_info)
+
+            await self.db.commit()
+            await self.db.refresh(end_user)
+
+            db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
+            return end_user
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
+            raise
+
     def get_or_create_end_user_mcp(
             self,
             workspace_id: uuid.UUID,

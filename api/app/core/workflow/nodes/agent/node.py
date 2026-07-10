@@ -11,6 +11,7 @@ Agent 节点实现
 import asyncio
 import logging
 import json
+import uuid
 from copy import deepcopy
 from typing import Any
 
@@ -28,7 +29,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, validate_llm_param_constraints
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_async_db_context, get_db_read, get_db_context
+from app.db import get_async_db_context, get_db_read
 from app.models import ModelCapability, ModelType
 from app.models.tool_model import ToolType
 from app.models.workspace_model import Workspace
@@ -186,8 +187,15 @@ class AgentNode(BaseNode):
                 capability=api_config.capability,
             )
 
-    async def _load_model_info_async(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
-        return await asyncio.to_thread(self._load_model_info_sync, model_id, variable_pool)
+    async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
+        tenant_id = await self.resolve_tenant_id_async(variable_pool)
+
+        async with get_async_db_context() as db:
+            return await ModelConfigService.get_runtime_model_info_async(
+                db,
+                model_id,
+                tenant_id=tenant_id,
+            )
 
     async def _prepare_history_prefix_async(
             self,
@@ -199,28 +207,20 @@ class AgentNode(BaseNode):
             window_size: int,
             model_config_id: str,
     ) -> list[dict[str, Any]] | None:
-        def _run() -> list[dict[str, Any]] | None:
-            with get_db_context() as db:
-                return asyncio.run(
-                    ContextEngineManager(db).prepare_workflow_history_prefix(
-                        features=features,
-                        conversation_id=conversation_id,
-                        scope_key=f"node:{self.node_id}",
-                        current_input=message,
-                        workflow_messages=workflow_messages,
-                        window_size=window_size,
-                        model_config_id=model_config_id,
-                    )
-                )
-
-        return await asyncio.to_thread(_run)
+        async with get_async_db_context() as db:
+            return await ContextEngineManager(db).prepare_workflow_history_prefix(
+                features=features,
+                conversation_id=conversation_id,
+                scope_key=f"node:{self.node_id}",
+                current_input=message,
+                workflow_messages=workflow_messages,
+                window_size=window_size,
+                model_config_id=model_config_id,
+            )
 
     async def _run_after_workflow_turn_async(self, **kwargs: Any) -> None:
-        def _run() -> None:
-            with get_db_context() as db:
-                asyncio.run(ContextEngineManager(db).after_workflow_turn(**kwargs))
-
-        await asyncio.to_thread(_run)
+        async with get_async_db_context() as db:
+            await ContextEngineManager(db).after_workflow_turn(**kwargs)
 
     def _build_history(self, state: WorkflowState) -> list[dict[str, str]]:
         """构建历史消息（启用 memory 时）"""

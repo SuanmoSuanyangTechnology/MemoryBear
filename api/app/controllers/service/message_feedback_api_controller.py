@@ -107,7 +107,7 @@ async def get_conversation_feedback(
     不含 is_favorite（收藏功能不在本接口范围）。
     user_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。
     """
-    result = conversation_service.list_v1_conversation_feedback(
+    result = await conversation_service.list_v1_conversation_feedback(
         app_id=api_key_auth.resource_id,
         workspace_id=api_key_auth.workspace_id,
         external_user_id=user_id,

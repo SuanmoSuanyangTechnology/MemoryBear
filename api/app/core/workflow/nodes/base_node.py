@@ -958,6 +958,23 @@ class BaseNode(ABC):
             return uuid.UUID(str(tenant_id))
         return None
 
+    async def resolve_tenant_id_async(self, variable_pool: VariablePool) -> uuid.UUID | None:
+        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        if tenant_id:
+            return uuid.UUID(str(tenant_id))
+
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        if not workspace_id:
+            return None
+
+        async with get_async_db_context() as db:
+            tenant_id = await db.run_sync(
+                lambda sync_db: ToolRepository.get_tenant_id_by_workspace_id(sync_db, str(workspace_id))
+            )
+        if tenant_id:
+            return uuid.UUID(str(tenant_id))
+        return None
+
     def get_runtime_api_config(self, db, model_config: ModelConfig, variable_pool: VariablePool) -> ModelApiKey:
         tenant_id = self.resolve_tenant_id(variable_pool)
         api_config = ModelApiKeyService.get_available_api_key(

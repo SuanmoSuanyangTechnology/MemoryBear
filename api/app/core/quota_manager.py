@@ -10,7 +10,8 @@ from functools import wraps
 from typing import Optional, Callable, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -277,6 +278,35 @@ class QuotaUsageRepository:
             query = query.filter(~EndUser.other_id.in_(trial_user_ids))
         return query.count()
 
+    async def count_end_users_async(self, tenant_id: UUID, workspace_id: Optional[UUID] = None) -> int:
+        from app.models.end_user_model import EndUser
+        from app.models.workspace_model import Workspace
+        from app.models.user_model import User
+
+        trial_user_ids = [
+            str(user_id)
+            for user_id in (
+                await self.db.scalars(
+                    select(User.id).where(User.tenant_id == tenant_id)
+                )
+            ).all()
+        ]
+
+        stmt = (
+            select(func.count())
+            .select_from(EndUser)
+            .join(Workspace, EndUser.workspace_id == Workspace.id)
+            .where(EndUser.is_active == True)
+        )
+        if workspace_id:
+            stmt = stmt.where(EndUser.workspace_id == workspace_id)
+        else:
+            stmt = stmt.where(Workspace.tenant_id == tenant_id)
+        if trial_user_ids:
+            stmt = stmt.where(~EndUser.other_id.in_(trial_user_ids))
+
+        return int((await self.db.scalar(stmt)) or 0)
+
     def count_models(self, tenant_id: UUID) -> int:
         from app.models.models_model import ModelConfig
         return self.db.query(ModelConfig).filter(
@@ -387,6 +417,38 @@ async def _check_quota_async(
             workspace_id,
         )
     )
+
+
+async def check_end_user_quota_async(
+        db: AsyncSession,
+        tenant_id: UUID,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """Async 版终端用户配额检查，供 chat 入口等 AsyncSession 主链复用。"""
+    quota_config = await _get_quota_config_async(db, tenant_id)
+    if not quota_config:
+        logger.warning(f"租户 {tenant_id} 无有效配额配置，跳过配额检查")
+        return
+
+    quota_limit = quota_config.get("end_user_quota")
+    if quota_limit is None:
+        logger.warning("配额配置未包含 end_user_quota，跳过配额检查")
+        return
+
+    current_usage = await QuotaUsageRepository(db).count_end_users_async(
+        tenant_id,
+        workspace_id,
+    )
+    if current_usage >= quota_limit:
+        logger.warning(
+            f"配额不足: tenant={tenant_id}, workspace={workspace_id}, type=end_user_quota, "
+            f"usage={current_usage}, limit={quota_limit}"
+        )
+        raise QuotaExceededError(
+            resource="end_user",
+            current_usage=current_usage,
+            quota_limit=quota_limit,
+        )
 
 
 # ─── 具名装饰器 ────────────────────────────────────────────────────────────

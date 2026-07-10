@@ -3,6 +3,7 @@ import uuid
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -12,13 +13,19 @@ from app.models.agent_execution_model import AgentExecution
 class AgentExecutionRepository:
     """Agent 执行记录数据访问层"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def create(self, execution: AgentExecution) -> AgentExecution:
         """创建执行记录"""
         self.db.add(execution)
         self.db.flush()
+        return execution
+
+    async def create_async(self, execution: AgentExecution) -> AgentExecution:
+        """异步创建执行记录"""
+        self.db.add(execution)
+        await self.db.flush()
         return execution
 
     def update_completed(
@@ -57,6 +64,42 @@ class AgentExecutionRepository:
             for k, v in updates.items():
                 setattr(record, k, v)
             self.db.commit()
+
+    async def update_completed_async(
+        self,
+        execution_id: uuid.UUID,
+        *,
+        steps: list,
+        status: str = "completed",
+        elapsed_time: Optional[float] = None,
+        token_usage: Optional[dict] = None,
+        error_message: Optional[str] = None,
+        completed_at=None,
+        message_id: Optional[uuid.UUID] = None,
+    ) -> None:
+        """异步更新执行记录为完成状态"""
+        updates = {
+            "steps": steps,
+            "status": status,
+            "completed_at": completed_at or utcnow_naive(),
+        }
+        if elapsed_time is not None:
+            updates["elapsed_time"] = elapsed_time
+        if token_usage is not None:
+            updates["token_usage"] = token_usage
+        if error_message is not None:
+            updates["error_message"] = error_message
+        if message_id is not None:
+            updates["message_id"] = message_id
+
+        result = await self.db.execute(
+            select(AgentExecution).where(AgentExecution.id == execution_id)
+        )
+        record = result.scalar_one_or_none()
+        if record:
+            for k, v in updates.items():
+                setattr(record, k, v)
+            await self.db.commit()
 
     def get_by_conversation(
         self,

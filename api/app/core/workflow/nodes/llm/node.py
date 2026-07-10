@@ -7,12 +7,11 @@ LLM 节点实现
 import asyncio
 import logging
 import json
+import uuid
 from copy import deepcopy
 from typing import Any
 
 from langchain_core.messages import AIMessage
-from sqlalchemy import or_, select
-from sqlalchemy.orm import joinedload
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -31,13 +30,11 @@ from app.core.workflow.nodes.llm.config import (
 )
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context, get_db_context
-from app.models import ModelApiKey, ModelConfig, ModelType
+from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
-from app.services.model_service import ModelApiKeyService
 from app.services.model_service import ModelConfigService
 from app.models.models_model import ModelCapability, ModelProvider
-from app.models.workspace_model import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -501,22 +498,6 @@ class LLMNode(BaseNode):
                 idx = pos + len(seq)
         return text, False
 
-    async def _resolve_tenant_id_async(self, variable_pool: VariablePool) -> str | None:
-        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
-        if tenant_id:
-            return str(tenant_id)
-
-        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
-        if not workspace_id:
-            return None
-
-        async with get_async_db_context() as db:
-            return (
-                await db.execute(
-                    select(Workspace.tenant_id).where(Workspace.id == workspace_id)
-                )
-            ).scalar_one_or_none()
-
     def _load_model_info_sync(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
         with get_db_context() as db:
             config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
@@ -533,57 +514,14 @@ class LLMNode(BaseNode):
                 capability=api_config.capability,
             )
 
-    async def _load_model_info_async(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
-        tenant_id = await self._resolve_tenant_id_async(variable_pool)
+    async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
+        tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            stmt = (
-                select(ModelConfig)
-                .options(
-                    joinedload(ModelConfig.api_keys),
-                    joinedload(ModelConfig.model_base),
-                )
-                .where(ModelConfig.id == model_id)
-            )
-            if tenant_id:
-                stmt = stmt.where(
-                    or_(
-                        ModelConfig.tenant_id == tenant_id,
-                        ModelConfig.is_public,
-                    )
-                )
-
-            config = (await db.execute(stmt)).unique().scalar_one_or_none()
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-            if config.model_base and config.model_base.is_deprecated:
-                raise BusinessException(
-                    f"模型 '{config.name}' 已弃用，请在模型配置中更换为其他模型",
-                    BizCode.MODEL_DEPRECATED,
-                )
-
-            if ModelApiKeyService._is_public_speedbear_model(config):
-                api_config = await asyncio.to_thread(
-                    self._load_model_info_sync,
-                    model_id,
-                    variable_pool,
-                )
-                return api_config
-
-            active_api_keys = [key for key in config.api_keys if key.is_active]
-            if not active_api_keys:
-                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-            config.api_keys = active_api_keys
-            api_key: ModelApiKey = self.model_balance(config)
-
-            return ModelInfo(
-                model_name=api_key.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_key.api_key,
-                api_base=api_key.api_base,
-                provider=api_key.provider,
-                is_omni=api_key.is_omni,
-                capability=api_key.capability,
+            return await ModelConfigService.get_runtime_model_info_async(
+                db,
+                model_id,
+                tenant_id=tenant_id,
             )
 
     async def _prepare_history_prefix_async(
@@ -596,28 +534,20 @@ class LLMNode(BaseNode):
             window_size: int,
             model_config_id: str,
     ) -> list[dict[str, Any]] | None:
-        def _run() -> list[dict[str, Any]] | None:
-            with get_db_context() as db:
-                return asyncio.run(
-                    ContextEngineManager(db).prepare_workflow_history_prefix(
-                        features=features,
-                        conversation_id=conversation_id,
-                        scope_key=f"node:{self.node_id}",
-                        current_input=current_input,
-                        workflow_messages=workflow_messages,
-                        window_size=window_size,
-                        model_config_id=model_config_id,
-                    )
-                )
-
-        return await asyncio.to_thread(_run)
+        async with get_async_db_context() as db:
+            return await ContextEngineManager(db).prepare_workflow_history_prefix(
+                features=features,
+                conversation_id=conversation_id,
+                scope_key=f"node:{self.node_id}",
+                current_input=current_input,
+                workflow_messages=workflow_messages,
+                window_size=window_size,
+                model_config_id=model_config_id,
+            )
 
     async def _run_after_workflow_turn_async(self, **kwargs: Any) -> None:
-        def _run() -> None:
-            with get_db_context() as db:
-                asyncio.run(ContextEngineManager(db).after_workflow_turn(**kwargs))
-
-        await asyncio.to_thread(_run)
+        async with get_async_db_context() as db:
+            await ContextEngineManager(db).after_workflow_turn(**kwargs)
 
     async def _prepare_llm(
             self,

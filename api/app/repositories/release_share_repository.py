@@ -1,6 +1,7 @@
 import uuid
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.utils.datetime_utils import utcnow_naive
 from app.models import ReleaseShare
@@ -9,7 +10,7 @@ from app.models import ReleaseShare
 class ReleaseShareRepository:
     """发布版本分享仓储"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
     
     def create(self, release_share: ReleaseShare) -> ReleaseShare:
@@ -32,6 +33,13 @@ class ReleaseShareRepository:
         """根据分享 token 获取分享配置"""
         stmt = select(ReleaseShare).where(ReleaseShare.share_token == share_token)
         return self.db.scalars(stmt).first()
+
+    async def get_by_share_token_async(self, share_token: str) -> Optional[ReleaseShare]:
+        """根据分享 token 异步获取分享配置"""
+        result = await self.db.execute(
+            select(ReleaseShare).where(ReleaseShare.share_token == share_token)
+        )
+        return result.scalars().first()
     
     def update(self, release_share: ReleaseShare) -> ReleaseShare:
         """更新分享配置"""
@@ -57,3 +65,14 @@ class ReleaseShareRepository:
             share.view_count += 1
             share.last_accessed_at = utcnow_naive()
             self.db.commit()
+
+    async def increment_view_count_async(self, share_id: uuid.UUID) -> None:
+        """异步增加访问次数"""
+        result = await self.db.execute(
+            select(ReleaseShare).where(ReleaseShare.id == share_id)
+        )
+        share = result.scalars().first()
+        if share:
+            share.view_count += 1
+            share.last_accessed_at = utcnow_naive()
+            await self.db.commit()

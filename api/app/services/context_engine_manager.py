@@ -1,6 +1,9 @@
 import json
 import uuid
 from typing import Any, Optional
+import inspect
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.aioRedis import get_redis_connection
 from app.core.logging_config import get_business_logger
@@ -103,7 +106,7 @@ class ContextEngineManager:
 
     DEFAULT_PROVIDER = "context_manager.incremental_summary"
 
-    def __init__(self, db):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self.state_repo = ContextStateRepository(db)
         self.cache_repo = ContextCacheRepository()
@@ -180,7 +183,7 @@ class ContextEngineManager:
         cached = await self.cache_repo.get(conversation_id, scope_key)
         if cached:
             return cached
-        state = self.state_repo.get(conversation_id=conversation_id, scope_key=scope_key)
+        state = await self.state_repo.get_async(conversation_id=conversation_id, scope_key=scope_key)
         if state is None:
             return None
         payload = self._state_to_dict(state)
@@ -198,7 +201,7 @@ class ContextEngineManager:
             summarized_until_at=None,
             summarized_until_seq: Optional[int] = None,
     ) -> None:
-        state = self.state_repo.upsert(
+        state = await self.state_repo.upsert_async(
             conversation_id=conversation_id,
             scope_key=scope_key,
             source_type=source_type,
@@ -207,8 +210,13 @@ class ContextEngineManager:
             summarized_until_at=summarized_until_at,
             summarized_until_seq=summarized_until_seq,
         )
-        self.db.commit()
+        await self.db.commit()
         await self.cache_repo.set(self._state_to_dict(state))
+
+    async def _close_db_if_possible(self) -> None:
+        close_result = self.db.close()
+        if inspect.isawaitable(close_result):
+            await close_result
 
     @staticmethod
     def _normalize_prepared_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -272,7 +280,7 @@ class ContextEngineManager:
         except (TypeError, ValueError):
             return 0
 
-    def _get_cross_session_recent_records(
+    async def _get_cross_session_recent_records(
             self,
             *,
             conversation_id: uuid.UUID,
@@ -282,13 +290,13 @@ class ContextEngineManager:
         if limit <= 0:
             return []
 
-        conversation = self.conversation_service.conversation_repo.get_conversation_by_conversation_id(
+        conversation = await self.conversation_service.conversation_repo.get_conversation_by_conversation_id_async(
             conversation_id
         )
         if not conversation or not getattr(conversation, "user_id", None):
             return []
 
-        return self.conversation_service.message_repo.get_recent_messages_from_other_conversations(
+        return await self.conversation_service.message_repo.get_recent_messages_from_other_conversations_async(
             app_id=conversation.app_id,
             user_id=conversation.user_id,
             exclude_conversation_id=conversation_id,
@@ -370,11 +378,11 @@ class ContextEngineManager:
 
         try:
             state = await self._get_state(conversation_id, scope_key)
-            messages = self.conversation_service.message_repo.get_messages_since(
+            messages = await self.conversation_service.message_repo.get_messages_since_async(
                 conversation_id=conversation_id,
                 since_at=state.get("summarized_until_at") if state else None,
             )
-            cross_session_records = self._get_cross_session_recent_records(
+            cross_session_records = await self._get_cross_session_recent_records(
                 conversation_id=conversation_id,
                 context_config=context_config,
             )
@@ -440,7 +448,7 @@ class ContextEngineManager:
 
         try:
             state = await self._get_state(conversation_id, scope_key)
-            messages = self.conversation_service.message_repo.get_messages_since(
+            messages = await self.conversation_service.message_repo.get_messages_since_async(
                 conversation_id=conversation_id,
                 since_at=state.get("summarized_until_at") if state else None,
             )
@@ -469,7 +477,7 @@ class ContextEngineManager:
             _boundary_id = boundary_message.id
             _boundary_at = boundary_message.created_at
             # LLM 调用期间不需要 db，提前归还连接给连接池
-            self.db.close()
+            await self._close_db_if_possible()
             summary_text = await provider.warm_up_summary(
                 session_id=self._build_session_id(conversation_id, scope_key),
                 full_history=recent_messages,
@@ -536,7 +544,7 @@ class ContextEngineManager:
         try:
             state = await self._get_state(conversation_uuid, scope_key)
             normalized_messages = self._normalize_workflow_messages(workflow_messages)
-            cross_session_records = self._get_cross_session_recent_records(
+            cross_session_records = await self._get_cross_session_recent_records(
                 conversation_id=conversation_uuid,
                 context_config=context_config,
             )

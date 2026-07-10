@@ -1,3 +1,4 @@
+import copy
 import uuid
 import io
 import json
@@ -22,7 +23,6 @@ from app.models import User
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
-from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import app_schema, tool_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
@@ -47,6 +47,82 @@ class _DraftRunAppSnapshot:
     workspace_id: uuid.UUID
     type: str
     current_release_id: uuid.UUID | None
+
+
+def _build_agent_config_snapshot(source):
+    from app.models import AgentConfig
+    return _build_agent_config(
+        AgentConfig,
+        id=source.id,
+        app_id=source.app_id,
+        system_prompt=source.system_prompt,
+        default_model_config_id=source.default_model_config_id,
+        model_parameters=copy.deepcopy(source.model_parameters),
+        knowledge_retrieval=copy.deepcopy(source.knowledge_retrieval),
+        memory=copy.deepcopy(source.memory),
+        variables=copy.deepcopy(source.variables),
+        tools=copy.deepcopy(source.tools),
+        skills=copy.deepcopy(source.skills),
+        features=copy.deepcopy(source.features),
+        agent_role=source.agent_role,
+        agent_domain=source.agent_domain,
+        parent_agent_id=source.parent_agent_id,
+        capabilities=copy.deepcopy(source.capabilities),
+        is_active=source.is_active,
+        created_at=source.created_at,
+        updated_at=source.updated_at,
+    )
+
+
+def _build_agent_config(agent_config_cls, **kwargs):
+    return agent_config_cls(**kwargs)
+
+
+def _build_agent_config_from_release(*, release, real_config_id, created_at):
+    from app.models import AgentConfig
+
+    cfg = release.config or {}
+    return _build_agent_config(
+        AgentConfig,
+        id=real_config_id or uuid.uuid4(),
+        app_id=release.app_id,
+        system_prompt=cfg.get("system_prompt", ""),
+        default_model_config_id=release.default_model_config_id,
+        model_parameters=copy.deepcopy(cfg.get("model_parameters")),
+        knowledge_retrieval=copy.deepcopy(cfg.get("knowledge_retrieval")),
+        memory=copy.deepcopy(cfg.get("memory", {})),
+        variables=copy.deepcopy(cfg.get("variables", [])),
+        tools=copy.deepcopy(cfg.get("tools", [])),
+        skills=copy.deepcopy(cfg.get("skills", {})),
+        features=copy.deepcopy(cfg.get("features", {})),
+        is_active=True,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def _build_model_config_snapshot(source):
+    from app.models import ModelConfig
+
+    return ModelConfig(
+        id=source.id,
+        model_id=source.model_id,
+        tenant_id=source.tenant_id,
+        logo=source.logo,
+        name=source.name,
+        provider=source.provider,
+        type=source.type,
+        is_composite=source.is_composite,
+        description=source.description,
+        capability=copy.deepcopy(source.capability),
+        is_omni=source.is_omni,
+        config=copy.deepcopy(source.config),
+        is_public=source.is_public,
+        load_balance_strategy=source.load_balance_strategy,
+        created_at=source.created_at,
+        updated_at=source.updated_at,
+        is_active=source.is_active,
+    )
 
 
 async def _load_draft_run_app_snapshot(
@@ -270,6 +346,85 @@ async def _load_workflow_runtime_config(
         created_at=config_created_at,
         updated_at=config_updated_at,
     ), False
+
+
+async def _prepare_draft_memory_context_async(
+        *,
+        workspace_id: uuid.UUID,
+        current_user,
+) -> tuple[str, str]:
+    async with get_async_db_context() as db:
+        storage_type = await workspace_service.get_workspace_storage_type_async(
+            db=db,
+            workspace_id=workspace_id,
+            user=current_user,
+        )
+        if storage_type is None:
+            storage_type = "neo4j"
+
+        user_rag_memory_id = ""
+        knowledge = await knowledge_repository.get_knowledge_by_name_async(
+            db=db,
+            name="USER_RAG_MERORY",
+            workspace_id=workspace_id,
+        )
+        if knowledge:
+            user_rag_memory_id = str(knowledge.id)
+
+    return storage_type, user_rag_memory_id
+
+
+async def _load_agent_runtime_config(
+        *,
+        app_id: uuid.UUID,
+        app_workspace_id: uuid.UUID,
+        current_release_id: uuid.UUID | None,
+        workspace_id: uuid.UUID | None,
+):
+    from app.core.exceptions import ResourceNotFoundException
+    from app.core.utils.datetime_utils import utcnow_naive
+    from app.models import AgentConfig, AppRelease, ModelConfig
+
+    is_shared = app_workspace_id != workspace_id
+
+    async with get_async_db_context() as db:
+        if is_shared:
+            if not current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+
+            release = await db.get(AppRelease, current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+
+            real_config = await db.scalar(
+                select(AgentConfig).where(AgentConfig.app_id == release.app_id).limit(1)
+            )
+            now = release.created_at or utcnow_naive()
+            agent_cfg_snapshot = _build_agent_config_from_release(
+                release=release,
+                real_config_id=real_config.id if real_config else None,
+                created_at=now,
+            )
+        else:
+            agent_cfg = await db.scalar(
+                select(AgentConfig).where(AgentConfig.app_id == app_id).limit(1)
+            )
+            if not agent_cfg:
+                raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
+            agent_cfg_snapshot = _build_agent_config_snapshot(agent_cfg)
+
+        model_config = None
+        if agent_cfg_snapshot.default_model_config_id:
+            model_config = await db.get(ModelConfig, agent_cfg_snapshot.default_model_config_id)
+            if not model_config:
+                raise ResourceNotFoundException("模型配置", str(agent_cfg_snapshot.default_model_config_id))
+
+        if not model_config:
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
+
+        model_config_snapshot = _build_model_config_snapshot(model_config)
+
+    return agent_cfg_snapshot, model_config_snapshot, is_shared
 
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
@@ -925,10 +1080,8 @@ async def draft_run(
                 }
             )
 
-        db_ctx = get_db_context()
-        db = db_ctx.__enter__()
-        workflow_service = WorkflowService(db)
-        try:
+        async with get_async_db_context() as db:
+            workflow_service = WorkflowService(db)
             logger.debug(
                 "开始非流式试运行",
                 extra={
@@ -959,137 +1112,86 @@ async def draft_run(
                 data=result,
                 msg="工作流任务执行成功"
             )
-        finally:
-            db_ctx.__exit__(None, None, None)
-
-    db_ctx = get_db_context()
-    db = db_ctx.__enter__()
-    workflow_service = WorkflowService(db)
-
-    try:
-        def _prepare_memory_context() -> None:
-            nonlocal storage_type, user_rag_memory_id
-            if storage_type is not None:
-                return
-            storage_type = workspace_service.get_workspace_storage_type(
-                db=db,
-                workspace_id=workspace_id,
-                user=current_user
-            )
-            if storage_type is None:
-                storage_type = "neo4j"
-            _log_draft_run_timing("storage_type_ready", storage_type=storage_type)
-            if workspace_id:
-                knowledge = knowledge_repository.get_knowledge_by_name(
-                    db=db,
-                    name="USER_RAG_MERORY",
-                    workspace_id=workspace_id
-                )
-                if knowledge:
-                    user_rag_memory_id = str(knowledge.id)
-            _log_draft_run_timing(
-                "user_rag_memory_ready",
-                has_user_rag_memory_id=bool(user_rag_memory_id),
-            )
-
-        # 提前验证和准备（在流式响应开始前完成）
-        from app.services.app_service import AppService
-        from app.services.multi_agent_service import MultiAgentService
-        from app.models import AgentConfig, ModelConfig, AppRelease
+    if app_type == AppType.AGENT:
         from app.services.draft_run_service import AgentRunService
 
-        service = AppService(db)
-        draft_service = AgentRunService(db)
+        storage_type, user_rag_memory_id = await _prepare_draft_memory_context_async(
+            workspace_id=workspace_id,
+            current_user=current_user,
+        )
+        _log_draft_run_timing("storage_type_ready", storage_type=storage_type)
+        _log_draft_run_timing(
+            "user_rag_memory_ready",
+            has_user_rag_memory_id=bool(user_rag_memory_id),
+        )
 
-        if should_prepare_conversation:
-            conversation_id = await draft_service._ensure_conversation(
-                conversation_id=payload.conversation_id,
-                app_id=app_id,
-                workspace_id=workspace_id,
-                user_id=payload.user_id
-            )
-            payload.conversation_id = conversation_id
+        async with get_async_db_context() as db:
+            draft_service = AgentRunService(db)
+            if should_prepare_conversation:
+                conversation_id = await draft_service._ensure_conversation(
+                    conversation_id=payload.conversation_id,
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=payload.user_id
+                )
+                payload.conversation_id = conversation_id
         _log_draft_run_timing(
             "conversation_ready",
             has_conversation_id=bool(payload.conversation_id),
             is_agent_new_conversation=is_agent_new_conversation,
         )
 
-        if app_type == AppType.AGENT:
-            _prepare_memory_context()
-            service._check_agent_config(app_id)
+        agent_cfg, model_config, is_shared = await _load_agent_runtime_config(
+            app_id=app_id,
+            app_workspace_id=app.workspace_id,
+            current_release_id=app.current_release_id,
+            workspace_id=workspace_id,
+        )
 
-            # 2. 获取 Agent 配置
-            # 共享应用：从最新发布版本读配置快照，而非草稿
-            is_shared = app.workspace_id != workspace_id
-            if is_shared:
-                if not app.current_release_id:
-                    raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-                release = db.get(AppRelease, app.current_release_id)
-                if not release:
-                    raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
-                agent_cfg = service._agent_config_from_release(release)
-                model_config = db.get(ModelConfig, release.default_model_config_id) if release.default_model_config_id else None
-            else:
-                stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-                agent_cfg = db.scalars(stmt).first()
-                if not agent_cfg:
-                    raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
+        if payload.stream:
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
-                # 3. 获取模型配置
-                model_config = None
-                if agent_cfg.default_model_config_id:
-                    model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
-                    if not model_config:
-                        from app.core.exceptions import ResourceNotFoundException
-                        raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
+            async def event_generator():
+                async with get_async_db_context() as stream_db:
+                    from app.services.draft_run_service import AgentRunService as _AgentRunService
+                    _draft_service = _AgentRunService(stream_db)
+                    async for event in _draft_service.run_stream(
+                            agent_config=agent_cfg,
+                            model_config=model_config,
+                            message=payload.message,
+                            workspace_id=workspace_id,
+                            conversation_id=payload.conversation_id,
+                            user_id=payload.user_id or current_user_id,
+                            variables=payload.variables,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            files=payload.files,
+                            source=source
+                    ):
+                        yield event
 
-            # 流式返回
-            if payload.stream:
-                source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
-
-                async def event_generator():
-                    with get_db_context() as stream_db:
-                        from app.services.draft_run_service import AgentRunService as _AgentRunService
-                        _draft_service = _AgentRunService(stream_db)
-                        async for event in _draft_service.run_stream(
-                                agent_config=agent_cfg,
-                                model_config=model_config,
-                                message=payload.message,
-                                workspace_id=workspace_id,
-                                conversation_id=payload.conversation_id,
-                                user_id=payload.user_id or current_user_id,
-                                variables=payload.variables,
-                                storage_type=storage_type,
-                                user_rag_memory_id=user_rag_memory_id,
-                                files=payload.files,
-                                source=source
-                        ):
-                            yield event
-
-                return StreamingResponse(
-                    event_generator(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Accel-Buffering": "no"
-                    }
-                )
-
-            # 非流式返回
-            logger.debug(
-                "开始非流式试运行",
-                extra={
-                    "app_id": str(app_id),
-                    "message_length": len(payload.message or ""),
-                    "has_conversation_id": bool(payload.conversation_id),
-                    "has_variables": bool(payload.variables),
-                    "has_files": bool(payload.files)
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
                 }
             )
 
-            from app.services.draft_run_service import AgentRunService
+        logger.debug(
+            "开始非流式试运行",
+            extra={
+                "app_id": str(app_id),
+                "message_length": len(payload.message or ""),
+                "has_conversation_id": bool(payload.conversation_id),
+                "has_variables": bool(payload.variables),
+                "has_files": bool(payload.files)
+            }
+        )
+
+        async with get_async_db_context() as db:
             draft_service = AgentRunService(db)
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
             result = await draft_service.run(
@@ -1102,81 +1204,76 @@ async def draft_run(
                 variables=payload.variables,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                files=payload.files,  # 传递多模态文件
+                files=payload.files,
                 source=source
             )
 
-            logger.debug(
-                "试运行返回结果",
+        logger.debug(
+            "试运行返回结果",
+            extra={
+                "result_type": str(type(result)),
+                "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict"
+            }
+        )
+
+        try:
+            validated_result = app_schema.DraftRunResponse.model_validate(result)
+            logger.debug("结果验证成功")
+            return success(data=validated_result)
+        except Exception as e:
+            logger.error(
+                "结果验证失败",
                 extra={
-                    "result_type": str(type(result)),
-                    "result_keys": list(result.keys()) if isinstance(result, dict) else "not_dict"
+                    "error": str(e),
+                    "error_type": str(type(e)),
+                    "result": str(result)[:200]
                 }
             )
+            raise
 
-            try:
-                validated_result = app_schema.DraftRunResponse.model_validate(result)
-                logger.debug("结果验证成功")
-                return success(data=validated_result)
-            except Exception as e:
-                logger.error(
-                    "结果验证失败",
-                    extra={
-                        "error": str(e),
-                        "error_type": str(type(e)),
-                        "result": str(result)[:200]
-                    }
-                )
-                raise
+    from app.services.multi_agent_service import MultiAgentService
+    from app.services.draft_run_service import AgentRunService
 
-        elif app_type == AppType.MULTI_AGENT:
-            _prepare_memory_context()
-            service._check_multi_agent_config(app_id)
+    storage_type, user_rag_memory_id = await _prepare_draft_memory_context_async(
+        workspace_id=workspace_id,
+        current_user=current_user,
+    )
+    _log_draft_run_timing("storage_type_ready", storage_type=storage_type)
+    _log_draft_run_timing(
+        "user_rag_memory_ready",
+        has_user_rag_memory_id=bool(user_rag_memory_id),
+    )
 
-            from app.schemas.multi_agent_schema import MultiAgentRunRequest
-
-            multi_agent_request = MultiAgentRunRequest(
-                message=payload.message,
+    async with get_async_db_context() as db:
+        draft_service = AgentRunService(db)
+        if should_prepare_conversation:
+            conversation_id = await draft_service._ensure_conversation(
                 conversation_id=payload.conversation_id,
-                user_id=payload.user_id or current_user_id,
-                variables=payload.variables or {},
-                use_llm_routing=True
+                app_id=app_id,
+                workspace_id=workspace_id,
+                user_id=payload.user_id
             )
+            payload.conversation_id = conversation_id
+    _log_draft_run_timing(
+        "conversation_ready",
+        has_conversation_id=bool(payload.conversation_id),
+        is_agent_new_conversation=is_agent_new_conversation,
+    )
 
-            if payload.stream:
-                logger.debug(
-                    "开始多智能体流式试运行",
-                    extra={
-                        "app_id": str(app_id),
-                        "message_length": len(payload.message or ""),
-                        "has_conversation_id": bool(payload.conversation_id)
-                    }
-                )
+    if app_type == AppType.MULTI_AGENT:
+        from app.schemas.multi_agent_schema import MultiAgentRunRequest
 
-                async def event_generator():
-                    with get_db_context() as stream_db:
-                        from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
-                        multiservice = _MultiAgentService(stream_db)
-                        async for event in multiservice.run_stream(
-                                app_id=app_id,
-                                request=multi_agent_request,
-                                storage_type=storage_type,
-                                user_rag_memory_id=user_rag_memory_id
-                        ):
-                            yield event
+        multi_agent_request = MultiAgentRunRequest(
+            message=payload.message,
+            conversation_id=payload.conversation_id,
+            user_id=payload.user_id or current_user_id,
+            variables=payload.variables or {},
+            use_llm_routing=True
+        )
 
-                return StreamingResponse(
-                    event_generator(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Accel-Buffering": "no"
-                    }
-                )
-
+        if payload.stream:
             logger.debug(
-                "开始多智能体非流式试运行",
+                "开始多智能体流式试运行",
                 extra={
                     "app_id": str(app_id),
                     "message_length": len(payload.message or ""),
@@ -1184,29 +1281,58 @@ async def draft_run(
                 }
             )
 
-            multiservice = MultiAgentService(db)
-            result = await multiservice.run(app_id, multi_agent_request)
+            async def event_generator():
+                async with get_async_db_context() as stream_db:
+                    from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
+                    multiservice = _MultiAgentService(stream_db)
+                    async for event in multiservice.run_stream(
+                            app_id=app_id,
+                            request=multi_agent_request,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id
+                    ):
+                        yield event
 
-            logger.debug(
-                "多智能体试运行返回结果",
-                extra={
-                    "result_type": str(type(result)),
-                    "has_response": "response" in result if isinstance(result, dict) else False
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
                 }
             )
 
-            return success(
-                data=result,
-                msg="多 Agent 任务执行成功"
-            )
+        logger.debug(
+            "开始多智能体非流式试运行",
+            extra={
+                "app_id": str(app_id),
+                "message_length": len(payload.message or ""),
+                "has_conversation_id": bool(payload.conversation_id)
+            }
+        )
 
-        else:
-            return fail(
-                msg="未知应用类型",
-                code=422
-            )
-    finally:
-        db_ctx.__exit__(None, None, None)
+        async with get_async_db_context() as db:
+            multiservice = MultiAgentService(db)
+            result = await multiservice.run(app_id, multi_agent_request)
+
+        logger.debug(
+            "多智能体试运行返回结果",
+            extra={
+                "result_type": str(type(result)),
+                "has_response": "response" in result if isinstance(result, dict) else False
+            }
+        )
+
+        return success(
+            data=result,
+            msg="多 Agent 任务执行成功"
+        )
+
+    return fail(
+        msg="未知应用类型",
+        code=422
+    )
 
 
 @router.post("/{app_id}/draft/run/compare", summary="多模型对比试运行")
@@ -1214,8 +1340,7 @@ async def draft_run(
 async def draft_run_compare(
         app_id: uuid.UUID,
         payload: app_schema.DraftRunCompareRequest,
-        db: Session = Depends(get_db),
-        current_user=Depends(get_current_user),
+        current_user=Depends(get_current_user_async),
 ):
     """
     多模型对比试运行
@@ -1233,24 +1358,14 @@ async def draft_run_compare(
     3. 性能和成本分析
     """
     workspace_id = current_user.current_workspace_id
+    app = await _load_draft_run_app_snapshot(app_id, workspace_id)
+    if AppType(app.type) != AppType.AGENT:
+        raise BusinessException("只有 Agent 类型应用支持对比试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-    # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
+    storage_type, user_rag_memory_id = await _prepare_draft_memory_context_async(
         workspace_id=workspace_id,
-        user=current_user
+        current_user=current_user,
     )
-    if storage_type is None:
-        storage_type = 'neo4j'
-    user_rag_memory_id = ''
-    if workspace_id:
-        knowledge = knowledge_repository.get_knowledge_by_name(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
 
     logger.info(
         "多模型对比试运行",
@@ -1262,70 +1377,54 @@ async def draft_run_compare(
         }
     )
 
-    # 提前验证和准备（在流式响应开始前完成）
-    from app.services.app_service import AppService
     from app.models import ModelConfig
 
-    service = AppService(db)
-
-    # 1. 验证应用和权限
-    app = service._get_app_or_404(app_id)
-    if app.type != "agent":
-        raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
-    service._validate_app_accessible(app, workspace_id)
-
     if payload.user_id is None:
-        # 先获取 app 的 workspace_id
-        end_user_repo = EndUserRepository(db)
-        new_end_user = end_user_repo.get_or_create_end_user(
+        payload.user_id = await _get_or_create_draft_end_user_id(
             app_id=app_id,
             workspace_id=app.workspace_id,
             other_id=str(current_user.id),
         )
-        payload.user_id = str(new_end_user.id)
 
-    # 2. 获取 Agent 配置
-    from sqlalchemy import select
-    from app.models import AgentConfig
-    stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-    agent_cfg = db.scalars(stmt).first()
-    if not agent_cfg:
-        raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
+    agent_cfg, _, _ = await _load_agent_runtime_config(
+        app_id=app_id,
+        app_workspace_id=app.workspace_id,
+        current_release_id=app.current_release_id,
+        workspace_id=workspace_id,
+    )
 
-    # 3. 验证所有模型配置
-    model_configs = []
-    for model_item in payload.models:
-        model_config = db.get(ModelConfig, model_item.model_config_id)
-        if not model_config:
-            from app.core.exceptions import ResourceNotFoundException
-            raise ResourceNotFoundException("模型配置", str(model_item.model_config_id))
+    async with get_async_db_context() as db:
+        model_configs = []
+        for model_item in payload.models:
+            model_config = await db.get(ModelConfig, model_item.model_config_id)
+            if not model_config:
+                from app.core.exceptions import ResourceNotFoundException
+                raise ResourceNotFoundException("模型配置", str(model_item.model_config_id))
 
-        # 获取 agent_cfg.model_parameters，如果是 ModelParameters 对象则转为字典
-        agent_model_params = agent_cfg.model_parameters
-        if hasattr(agent_model_params, 'model_dump'):
-            agent_model_params = agent_model_params.model_dump()
-        elif not isinstance(agent_model_params, dict):
-            agent_model_params = {}
+            agent_model_params = agent_cfg.model_parameters
+            if hasattr(agent_model_params, 'model_dump'):
+                agent_model_params = agent_model_params.model_dump()
+            elif not isinstance(agent_model_params, dict):
+                agent_model_params = {}
 
-        # 获取 model_item.model_parameters，如果是 ModelParameters 对象则转为字典
-        item_model_params = model_item.model_parameters
-        if hasattr(item_model_params, 'model_dump'):
-            item_model_params = item_model_params.model_dump()
-        elif not isinstance(item_model_params, dict):
-            item_model_params = {}
+            item_model_params = model_item.model_parameters
+            if hasattr(item_model_params, 'model_dump'):
+                item_model_params = item_model_params.model_dump()
+            elif not isinstance(item_model_params, dict):
+                item_model_params = {}
 
-        merged_parameters = {
-            **(agent_model_params or {}),
-            **(item_model_params or {})
-        }
+            merged_parameters = {
+                **(agent_model_params or {}),
+                **(item_model_params or {})
+            }
 
-        model_configs.append({
-            "model_config": model_config,
-            "parameters": merged_parameters,
-            "label": model_item.label or model_config.name,
-            "model_config_id": model_item.model_config_id,
-            "conversation_id": model_item.conversation_id  # 传递每个模型的 conversation_id
-        })
+            model_configs.append({
+                "model_config": _build_model_config_snapshot(model_config),
+                "parameters": merged_parameters,
+                "label": model_item.label or model_config.name,
+                "model_config_id": model_item.model_config_id,
+                "conversation_id": model_item.conversation_id
+            })
 
     # 从 features 中读取功能开关（与 draft_run 保持一致）
     features_config: dict = agent_cfg.features or {}
@@ -1339,25 +1438,26 @@ async def draft_run_compare(
         source = HitLogSource.CONSOLE
         async def event_generator():
             from app.services.draft_run_service import AgentRunService
-            draft_service = AgentRunService(db)
-            async for event in draft_service.run_compare_stream(
-                    agent_config=agent_cfg,
-                    models=model_configs,
-                    message=payload.message,
-                    workspace_id=workspace_id,
-                    conversation_id=payload.conversation_id,
-                    user_id=payload.user_id,
-                    variables=payload.variables,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    web_search=web_search,
-                    memory=True,
-                    parallel=payload.parallel,
-                    timeout=payload.timeout or 60,
-                    files=payload.files,
-                    source=source
-            ):
-                yield event
+            async with get_async_db_context() as db:
+                draft_service = AgentRunService(db)
+                async for event in draft_service.run_compare_stream(
+                        agent_config=agent_cfg,
+                        models=model_configs,
+                        message=payload.message,
+                        workspace_id=workspace_id,
+                        conversation_id=payload.conversation_id,
+                        user_id=payload.user_id,
+                        variables=payload.variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        web_search=web_search,
+                        memory=True,
+                        parallel=payload.parallel,
+                        timeout=payload.timeout or 60,
+                        files=payload.files,
+                        source=source
+                ):
+                    yield event
 
         return StreamingResponse(
             event_generator(),
@@ -1371,25 +1471,26 @@ async def draft_run_compare(
 
     # 非流式返回
     from app.services.draft_run_service import AgentRunService
-    draft_service = AgentRunService(db)
     source = HitLogSource.CONSOLE
-    result = await draft_service.run_compare(
-        agent_config=agent_cfg,
-        models=model_configs,
-        message=payload.message,
-        workspace_id=workspace_id,
-        conversation_id=payload.conversation_id,
-        user_id=payload.user_id,
-        variables=payload.variables,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        web_search=web_search,
-        memory=True,
-        parallel=payload.parallel,
-        timeout=payload.timeout or 60,
-        files=payload.files,
-        source=source
-    )
+    async with get_async_db_context() as db:
+        draft_service = AgentRunService(db)
+        result = await draft_service.run_compare(
+            agent_config=agent_cfg,
+            models=model_configs,
+            message=payload.message,
+            workspace_id=workspace_id,
+            conversation_id=payload.conversation_id,
+            user_id=payload.user_id,
+            variables=payload.variables,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            web_search=web_search,
+            memory=True,
+            parallel=payload.parallel,
+            timeout=payload.timeout or 60,
+            files=payload.files,
+            source=source
+        )
 
     logger.info(
         "多模型对比完成",

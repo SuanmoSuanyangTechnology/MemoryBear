@@ -438,6 +438,7 @@ def create_long_term_memory_tool(
         storage_type: Optional[str] = None,
         user_rag_memory_id: Optional[str] = None,
         memory_name: Optional[str] = None,
+        config_id: uuid.UUID | None = None,
         db: Optional[Session] = None,
 ):
     """创建长期记忆检索工具。
@@ -461,8 +462,7 @@ def create_long_term_memory_tool(
 
     from langchain.tools import tool
 
-    config_id = None
-    if workspace_id:
+    if config_id is None and workspace_id:
         try:
             with get_db_read() as read_db:
                 config_id = MemoryConfigService(read_db).get_workspace_active_config_id(workspace_id)
