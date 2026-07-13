@@ -1,9 +1,67 @@
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from types import MappingProxyType
+from typing import Any, TypeAlias
 
 from app.schemas.chunk_schema import RetrieveType
+
+
+MetadataScalar: TypeAlias = str | bytes | int | float | bool | None | uuid.UUID
+FrozenMetadataValue: TypeAlias = (
+    MetadataScalar
+    | tuple["FrozenMetadataValue", ...]
+    | frozenset["FrozenMetadataValue"]
+    | Mapping[str, "FrozenMetadataValue"]
+)
+FrozenMetadataFieldDefinition: TypeAlias = Mapping[str, FrozenMetadataValue]
+FrozenMetadataDefinitions: TypeAlias = Mapping[str, FrozenMetadataFieldDefinition]
+FrozenMetadataDefinitionsByKnowledge: TypeAlias = Mapping[uuid.UUID, FrozenMetadataDefinitions]
+
+
+def _freeze_metadata_value(value: object) -> FrozenMetadataValue:
+    if isinstance(value, Mapping):
+        return _freeze_metadata_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_metadata_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze_metadata_value(item) for item in value)
+    if value is None or isinstance(value, (str, bytes, int, float, uuid.UUID)):
+        return value
+    raise TypeError(f"Unsupported metadata snapshot value: {type(value).__name__}")
+
+
+def _freeze_metadata_mapping(value: Mapping[object, object]) -> FrozenMetadataFieldDefinition:
+    frozen: dict[str, FrozenMetadataValue] = {}
+    for key, nested_value in value.items():
+        if not isinstance(key, str):
+            raise TypeError("Metadata mapping keys must be strings")
+        frozen[key] = _freeze_metadata_value(nested_value)
+    return MappingProxyType(frozen)
+
+
+def _freeze_metadata_definitions(value: Mapping[object, object]) -> FrozenMetadataDefinitions:
+    frozen: dict[str, FrozenMetadataFieldDefinition] = {}
+    for field_name, field_definition in value.items():
+        if not isinstance(field_name, str):
+            raise TypeError("Metadata field names must be strings")
+        if not isinstance(field_definition, Mapping):
+            raise TypeError("Metadata field definitions must be mappings")
+        frozen[field_name] = _freeze_metadata_mapping(field_definition)
+    return MappingProxyType(frozen)
+
+
+def _freeze_metadata_definitions_by_knowledge(
+    value: Mapping[object, object],
+) -> FrozenMetadataDefinitionsByKnowledge:
+    frozen: dict[uuid.UUID, FrozenMetadataDefinitions] = {}
+    for knowledge_id, field_definitions in value.items():
+        if not isinstance(knowledge_id, uuid.UUID):
+            raise TypeError("Metadata knowledge IDs must be UUIDs")
+        if not isinstance(field_definitions, Mapping):
+            raise TypeError("Knowledge metadata definitions must be mappings")
+        frozen[knowledge_id] = _freeze_metadata_definitions(field_definitions)
+    return MappingProxyType(frozen)
 
 
 @dataclass(frozen=True)
@@ -95,7 +153,19 @@ class GraphRetrievalSnapshot:
 class RetrievalPreparation:
     targets: tuple[RetrievalTarget, ...]
     tenant_id: uuid.UUID | None
-    metadata_defs_by_kb: Mapping[uuid.UUID, Mapping[str, dict[str, Any]]]
-    common_metadata_defs: Mapping[str, dict[str, Any]]
+    metadata_defs_by_kb: FrozenMetadataDefinitionsByKnowledge
+    common_metadata_defs: FrozenMetadataDefinitions
     metadata_llm: ModelRuntimeSnapshot | None
     graph: GraphRetrievalSnapshot | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "metadata_defs_by_kb",
+            _freeze_metadata_definitions_by_knowledge(self.metadata_defs_by_kb),
+        )
+        object.__setattr__(
+            self,
+            "common_metadata_defs",
+            _freeze_metadata_definitions(self.common_metadata_defs),
+        )
