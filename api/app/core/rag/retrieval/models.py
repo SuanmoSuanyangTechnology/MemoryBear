@@ -1,8 +1,7 @@
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import Any, TypeAlias
+from typing import Any, NoReturn, TypeAlias
 
 from app.schemas.chunk_schema import RetrieveType
 
@@ -17,6 +16,42 @@ FrozenMetadataValue: TypeAlias = (
 FrozenMetadataFieldDefinition: TypeAlias = Mapping[str, FrozenMetadataValue]
 FrozenMetadataDefinitions: TypeAlias = Mapping[str, FrozenMetadataFieldDefinition]
 FrozenMetadataDefinitionsByKnowledge: TypeAlias = Mapping[uuid.UUID, FrozenMetadataDefinitions]
+
+
+class FrozenMetadataMapping(dict[object, object]):
+    __slots__ = ()
+
+    def __new__(cls, *args: object, **kwargs: object) -> "FrozenMetadataMapping":
+        mapping = dict.__new__(cls)
+        dict.__init__(mapping, *args, **kwargs)
+        return mapping
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def __setattr__(self, name: str, value: object) -> NoReturn:
+        self._reject_mutation()
+
+    def __delattr__(self, name: str) -> NoReturn:
+        self._reject_mutation()
+
+    def _reject_mutation(self, *args: object, **kwargs: object) -> NoReturn:
+        raise TypeError("Frozen metadata mappings cannot be mutated")
+
+    __setitem__ = _reject_mutation
+    __delitem__ = _reject_mutation
+    clear = _reject_mutation
+    pop = _reject_mutation
+    popitem = _reject_mutation
+    setdefault = _reject_mutation
+    update = _reject_mutation
+    __ior__ = _reject_mutation
+
+    def __reduce__(self) -> tuple[type["FrozenMetadataMapping"], tuple[dict[object, object]]]:
+        return type(self), (dict(self),)
+
+    def __reduce_ex__(self, protocol: int) -> tuple[type["FrozenMetadataMapping"], tuple[dict[object, object]]]:
+        return self.__reduce__()
 
 
 def _freeze_metadata_value(value: object) -> FrozenMetadataValue:
@@ -37,7 +72,7 @@ def _freeze_metadata_mapping(value: Mapping[object, object]) -> FrozenMetadataFi
         if not isinstance(key, str):
             raise TypeError("Metadata mapping keys must be strings")
         frozen[key] = _freeze_metadata_value(nested_value)
-    return MappingProxyType(frozen)
+    return FrozenMetadataMapping(frozen)
 
 
 def _freeze_metadata_definitions(value: Mapping[object, object]) -> FrozenMetadataDefinitions:
@@ -48,7 +83,7 @@ def _freeze_metadata_definitions(value: Mapping[object, object]) -> FrozenMetada
         if not isinstance(field_definition, Mapping):
             raise TypeError("Metadata field definitions must be mappings")
         frozen[field_name] = _freeze_metadata_mapping(field_definition)
-    return MappingProxyType(frozen)
+    return FrozenMetadataMapping(frozen)
 
 
 def _freeze_metadata_definitions_by_knowledge(
@@ -61,7 +96,7 @@ def _freeze_metadata_definitions_by_knowledge(
         if not isinstance(field_definitions, Mapping):
             raise TypeError("Knowledge metadata definitions must be mappings")
         frozen[knowledge_id] = _freeze_metadata_definitions(field_definitions)
-    return MappingProxyType(frozen)
+    return FrozenMetadataMapping(frozen)
 
 
 @dataclass(frozen=True)
