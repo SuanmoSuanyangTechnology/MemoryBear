@@ -148,16 +148,25 @@ class AsyncRetrievalModelGateway:
             )
             return _rerank_fallback(docs, top_k)
 
-    def metadata_llm(self, model: ModelRuntimeSnapshot) -> AsyncMetadataLLM:
+    def metadata_llm(
+        self,
+        model: ModelRuntimeSnapshot,
+        generation_options: Mapping[str, Any] | None = None,
+    ) -> AsyncMetadataLLM:
         """Expose a model snapshot as the async LLM adapter metadata filtering needs."""
 
-        return _GatewayMetadataLLM(gateway=self, model=model)
+        return _GatewayMetadataLLM(
+            gateway=self,
+            model=model,
+            generation_options=generation_options,
+        )
 
     async def generate_metadata_filters(
         self,
         query: str,
         metadata_defs: Mapping[str, Mapping[str, Any]],
         model: ModelRuntimeSnapshot,
+        generation_options: Mapping[str, Any] | None = None,
     ) -> list[Any]:
         """Generate normalized metadata filters through the native async adapter."""
 
@@ -166,10 +175,15 @@ class AsyncRetrievalModelGateway:
         return await MetadataAutoFilterService.generate_filter_groups_async(
             query=query,
             metadata_defs=dict(metadata_defs),
-            llm=self.metadata_llm(model),
+            llm=self.metadata_llm(model, generation_options),
         )
 
-    async def invoke_metadata(self, model: ModelRuntimeSnapshot, messages: Sequence[BaseMessage]) -> str:
+    async def invoke_metadata(
+        self,
+        model: ModelRuntimeSnapshot,
+        messages: Sequence[BaseMessage],
+        generation_options: Mapping[str, Any] | None = None,
+    ) -> str:
         """Generate metadata-filter JSON through a provider-native async client."""
 
         provider = _provider_name(model)
@@ -181,7 +195,7 @@ class AsyncRetrievalModelGateway:
             response = await client.chat.completions.create(
                 model=model.model_name,
                 messages=provider_messages,
-                temperature=0,
+                **_openai_metadata_generation_options(model, generation_options),
             )
             return _metadata_content_from_openai_response(response)
         if provider == ModelProvider.OLLAMA.value:
@@ -189,7 +203,7 @@ class AsyncRetrievalModelGateway:
             response = await client.chat(
                 model=model.model_name,
                 messages=provider_messages,
-                options={"temperature": 0},
+                options=_ollama_metadata_generation_options(generation_options),
             )
             return _metadata_content_from_ollama_response(response)
         if provider == ModelProvider.VOLCANO.value:
@@ -197,11 +211,15 @@ class AsyncRetrievalModelGateway:
             response = await client.chat.completions.create(
                 model=model.model_name,
                 messages=provider_messages,
-                temperature=0,
+                **_openai_metadata_generation_options(model, generation_options),
             )
             return _metadata_content_from_openai_response(response)
         if provider == ModelProvider.DASHSCOPE.value:
-            return await self._metadata_with_dashscope(model, provider_messages)
+            return await self._metadata_with_dashscope(
+                model,
+                provider_messages,
+                generation_options,
+            )
         if provider == ModelProvider.BEDROCK.value:
             raise KnowledgeRetrievalConfigError(
                 "Bedrock metadata filtering requires a native async SDK, which is not installed"
@@ -294,15 +312,16 @@ class AsyncRetrievalModelGateway:
         self,
         model: ModelRuntimeSnapshot,
         messages: list[dict[str, str]],
+        generation_options: Mapping[str, Any] | None = None,
     ) -> str:
         client = await AsyncRetrievalHttpClientProvider.get_client()
         response = await client.post(
             _dashscope_endpoint(model, "services/aigc/text-generation/generation"),
-            headers=_bearer_headers(model.api_key),
+            headers=_metadata_headers(model.api_key, generation_options),
             json={
                 "model": model.model_name,
                 "input": {"messages": messages},
-                "parameters": {"result_format": "message", "temperature": 0},
+                "parameters": _dashscope_metadata_generation_options(generation_options),
             },
         )
         response.raise_for_status()
@@ -324,15 +343,154 @@ class AsyncRetrievalModelGateway:
 class _GatewayMetadataLLM:
     gateway: AsyncRetrievalModelGateway
     model: ModelRuntimeSnapshot
+    generation_options: Mapping[str, Any] | None = None
 
     async def invoke(self, messages: Sequence[BaseMessage]) -> str:
-        return await self.gateway.invoke_metadata(self.model, messages)
+        return await self.gateway.invoke_metadata(
+            self.model,
+            messages,
+            self.generation_options,
+        )
 
 
 @dataclass(frozen=True)
 class _RerankResult:
     index: int
     relevance_score: float
+
+
+def _metadata_generation_values(
+    generation_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if generation_options is None:
+        return {"temperature": 0}
+    return {
+        key: value
+        for key, value in generation_options.items()
+        if isinstance(key, str) and value is not None
+    }
+
+
+def _openai_metadata_generation_options(
+    model: ModelRuntimeSnapshot,
+    generation_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    values = _metadata_generation_values(generation_options)
+    allowed = {
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "seed",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "response_format",
+    }
+    request_options = {
+        key: value
+        for key, value in values.items()
+        if key in allowed
+    }
+    default_headers = values.get("default_headers")
+    if isinstance(default_headers, Mapping):
+        request_options["extra_headers"] = {
+            str(key): str(value)
+            for key, value in default_headers.items()
+        }
+    _apply_openai_thinking_options(model, values, request_options)
+    return request_options
+
+
+def _apply_openai_thinking_options(
+    model: ModelRuntimeSnapshot,
+    values: Mapping[str, Any],
+    request_options: dict[str, Any],
+) -> None:
+    if "deep_thinking" not in values or "thinking" not in model.capability:
+        return
+
+    enabled = bool(values["deep_thinking"])
+    budget = values.get("thinking_budget_tokens")
+    provider = _provider_name(model)
+    if provider == ModelProvider.VOLCANO.value:
+        request_options["extra_body"] = {"thinking": {"type": "enabled" if enabled else "disabled"}}
+        effort = _reasoning_effort(budget)
+        if enabled and effort is not None:
+            request_options["reasoning_effort"] = effort
+        return
+    if provider == ModelProvider.SPEEDBEAR.value:
+        if not enabled:
+            request_options["reasoning_effort"] = "none"
+            return
+        request_options["reasoning_effort"] = _reasoning_effort(budget) or "minimal"
+        return
+
+    extra_body: dict[str, Any] = {"enable_thinking": enabled}
+    if enabled and budget is not None:
+        extra_body["thinking_budget"] = budget
+    request_options["extra_body"] = extra_body
+
+
+def _ollama_metadata_generation_options(
+    generation_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    values = _metadata_generation_values(generation_options)
+    options = {
+        key: values[key]
+        for key in ("temperature", "top_p", "top_k", "seed", "stop")
+        if key in values
+    }
+    if "max_tokens" in values:
+        options["num_predict"] = values["max_tokens"]
+    if "repetition_penalty" in values:
+        options["repeat_penalty"] = values["repetition_penalty"]
+    return options
+
+
+def _dashscope_metadata_generation_options(
+    generation_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    values = _metadata_generation_values(generation_options)
+    options = {"result_format": "message"}
+    for key in (
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "top_k",
+        "seed",
+        "repetition_penalty",
+        "enable_search",
+        "stop",
+    ):
+        if key in values:
+            options[key] = values[key]
+    if "deep_thinking" in values:
+        options["enable_thinking"] = bool(values["deep_thinking"])
+    if values.get("deep_thinking") and "thinking_budget_tokens" in values:
+        options["thinking_budget"] = values["thinking_budget_tokens"]
+    return options
+
+
+def _metadata_headers(
+    api_key: str,
+    generation_options: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    headers = _bearer_headers(api_key)
+    values = _metadata_generation_values(generation_options)
+    default_headers = values.get("default_headers")
+    if isinstance(default_headers, Mapping):
+        headers.update({str(key): str(value) for key, value in default_headers.items()})
+    return headers
+
+
+def _reasoning_effort(budget: Any) -> str | None:
+    if not isinstance(budget, int):
+        return None
+    if budget <= 2048:
+        return "low"
+    if budget <= 4096:
+        return "medium"
+    return "high"
 
 
 def normalize_jina_rerank_url(base_url: str | None) -> str:

@@ -227,7 +227,7 @@ class KnowledgeRetrievalService:
                 set(preparation.common_metadata_defs.keys()),
             )
         if request.metadata_filter_mode == MetadataFilterMode.AUTO:
-            if request.metadata_filters:
+            if request.metadata_filters or request.metadata_filters_prepared:
                 return cls._build_common_filter_groups(
                     request.metadata_filters,
                     set(preparation.common_metadata_defs.keys()),
