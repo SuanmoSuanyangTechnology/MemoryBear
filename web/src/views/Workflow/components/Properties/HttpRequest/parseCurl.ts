@@ -63,7 +63,9 @@ const tokenize = (input: string): string[] => {
 
     if (char === '\\') {
       const next = normalized[i + 1]
-      if (next !== undefined) {
+      // 引号外：反斜杠+空白视为分隔符（等同于续行），不转义
+      // 反斜杠+非空白才作为转义字符处理
+      if (next !== undefined && !/\s/.test(next)) {
         current += next
         i++
         hasToken = true
@@ -125,12 +127,12 @@ export const parseCurl = (curl: string): ParsedCurl | null => {
   let hasBody = false
 
   for (let i = start; i < tokens.length; i++) {
-    const token = tokens[i]
+    const token = tokens[i].trim()
 
     switch (token) {
       case '-X':
       case '--request':
-        explicitMethod = tokens[++i]?.toUpperCase()
+        explicitMethod = tokens[++i]?.trim().toUpperCase()
         break
       case '-H':
       case '--header': {
@@ -196,7 +198,7 @@ export const parseCurl = (curl: string): ParsedCurl | null => {
           break
         }
         if (!result.url) {
-          result.url = token
+          result.url = token.replace(/^`+|`+$/g, '')
         }
         break
       }
