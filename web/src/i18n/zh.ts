@@ -2878,6 +2878,12 @@ export const zh = {
           curlParseError: 'cURL 解析失败，请检查格式',
           curlEmpty: '请粘贴 cURL 字符串',
           curlImportSuccess: '导入成功',
+          curlErrEmpty: 'cURL 命令不能为空',
+          curlErrNotCurl: '无效的 cURL 命令，必须以 "curl" 开头',
+          curlErrInvalid: '无效的 cURL 命令',
+          curlErrMissingArg: '{{flag}} 后缺少对应的值',
+          curlErrInvalidForm: '无效的表单数据格式',
+          curlErrNoUrl: '缺少 URL 或 URL 未以 http(s) 开头',
         },
         'jinja-render': {
           template: '代码',

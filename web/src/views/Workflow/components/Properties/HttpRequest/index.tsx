@@ -44,14 +44,16 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
     importCurlModalRef.current?.handleOpen()
   }
 
-  /** 将解析后的 cURL 信息回填到对应表单字段，未涉及的字段保持不变。 */
+  /** 将解析后的 cURL 信息回填到对应表单字段。headers/params/body 一律以解析结果为准，解析为空则清空。 */
   const handleImportCurl = (parsed: ParsedCurl) => {
-    const patch: Record<string, any> = {}
+    const patch: Record<string, any> = {
+      // 这三项始终以解析结果覆盖：无值时清空，避免残留旧数据
+      headers: parsed.headers ?? [],
+      params: parsed.params ?? [],
+      body: parsed.body ?? { content_type: 'none', data: undefined },
+    }
     if (parsed.method) patch.method = parsed.method
     if (parsed.url !== undefined) patch.url = parsed.url
-    if (parsed.headers) patch.headers = parsed.headers
-    if (parsed.params) patch.params = parsed.params
-    if (parsed.body) patch.body = parsed.body
     if (parsed.auth) patch.auth = parsed.auth
     form.setFieldsValue(patch)
   }

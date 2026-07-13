@@ -37,9 +37,13 @@ const ImportCurlModal = forwardRef<ImportCurlModalRef, ImportCurlModalProps>(({
       message.warning(t('workflow.config.http-request.curlEmpty'));
       return;
     }
-    const parsed = parseCurl(curl);
-    if (!parsed) {
-      message.error(t('workflow.config.http-request.curlParseError'));
+    const { data: parsed, error } = parseCurl(curl);
+    if (error || !parsed) {
+      message.error(
+        error
+          ? t(error.key, error.values)
+          : t('workflow.config.http-request.curlParseError'),
+      );
       return;
     }
     onImport(parsed);

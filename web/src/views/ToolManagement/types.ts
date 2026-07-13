@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-26 11:57:50
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-08 15:31:23
+ * @Last Modified time: 2026-07-13 16:11:06
  */
 export type ToolType = 'mcp' | 'builtin' | 'custom' | 'workflow'
 export interface Query {
@@ -211,4 +211,48 @@ export interface WorkflowToolModalRef {
 }
 export interface DatabaseToolModalRef {
   handleOpen: (data: ToolItem) => void;
+}
+
+
+export interface MarketSource {
+  id: string;
+  name: string;
+  category: string;
+  logo_url: string;
+  url: string;
+  description: string;
+  api_key?: string;
+  connected: boolean;
+  mcp_count: number;
+  created_at?: number;
+  created_by?: string;
+}
+
+export interface MarketMcp {
+  id: string;
+  name: string;
+  chinese_name?: string;
+  description: string;
+  logo_url: string;
+  publisher: string;
+  categories?: string[];
+  tags?: string[];
+  view_count?: number;
+  activated?: boolean;
+  inDatabase?: boolean;
+  locales?: {
+    [lang: string]: {
+      name: string;
+      description: string;
+    };
+  };
+}
+
+export interface MarketCategory {
+  id: string;
+  name: string;
+}
+
+export interface MarketApiResponse {
+  items: MarketSource[];
 }
