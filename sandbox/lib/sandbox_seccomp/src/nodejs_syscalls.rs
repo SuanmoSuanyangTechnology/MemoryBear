@@ -6,6 +6,7 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_read as i32,
     libc::SYS_openat as i32,
     libc::SYS_newfstatat as i32,
+    libc::SYS_statx as i32,
     libc::SYS_ioctl as i32,
     libc::SYS_lseek as i32,
     libc::SYS_fstat as i32,
@@ -47,6 +48,7 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     // Epoll / Event (I/O multiplexing)
     libc::SYS_epoll_ctl as i32,
     libc::SYS_epoll_pwait as i32,
+    libc::SYS_eventfd2 as i32,
 ];
 
 pub static ALLOW_ERROR_SYSCALLS: &[i32] = &[libc::SYS_clone as i32, libc::SYS_clone3 as i32];

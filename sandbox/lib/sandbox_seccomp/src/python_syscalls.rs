@@ -5,10 +5,15 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_openat as i32,
     libc::SYS_close as i32,
     libc::SYS_newfstatat as i32,
+    libc::SYS_statx as i32,
+    libc::SYS_fstat as i32,
     libc::SYS_ioctl as i32,
     libc::SYS_lseek as i32,
     libc::SYS_getdents64 as i32,
-    libc::SYS_fstat as i32,
+    libc::SYS_fcntl as i32,
+    libc::SYS_pread64 as i32,
+    libc::SYS_readv as i32,
+    libc::SYS_writev as i32,
     // Signal
     libc::SYS_rt_sigreturn as i32,
     libc::SYS_rt_sigaction as i32,
@@ -17,12 +22,15 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_tgkill as i32,
     // Thread
     libc::SYS_futex as i32,
+    libc::SYS_set_tid_address as i32,
+    libc::SYS_sched_getaffinity as i32,
     // Memory
     libc::SYS_mmap as i32,
     libc::SYS_brk as i32,
     libc::SYS_mprotect as i32,
     libc::SYS_munmap as i32,
     libc::SYS_mremap as i32,
+    libc::SYS_madvise as i32,
     // User / Group
     libc::SYS_getuid as i32,
     // Process
@@ -35,22 +43,28 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_set_robust_list as i32,
     libc::SYS_get_robust_list as i32,
     libc::SYS_rseq as i32,
+    libc::SYS_prlimit64 as i32,
     // Time
     libc::SYS_clock_gettime as i32,
     libc::SYS_gettimeofday as i32,
     libc::SYS_time as i32,
     libc::SYS_nanosleep as i32,
     libc::SYS_clock_nanosleep as i32,
-    // Epoll / Event (I/O multiplexing)
+    // Epoll / Event
     libc::SYS_epoll_create1 as i32,
     libc::SYS_epoll_ctl as i32,
     libc::SYS_pselect6 as i32,
-    // Randomness
+    libc::SYS_eventfd2 as i32,
+    libc::SYS_pipe2 as i32,
+    // Misc
     libc::SYS_getrandom as i32,
+    libc::SYS_getcwd as i32,
+    libc::SYS_uname as i32,
 ];
 
 pub static ALLOW_ERROR_SYSCALLS: &[i32] = &[
     libc::SYS_clone as i32,
+    libc::SYS_clone3 as i32,
     libc::SYS_mkdirat as i32,
     libc::SYS_mkdir as i32,
 ];
@@ -68,11 +82,9 @@ pub static ALLOW_NETWORK_SYSCALLS: &[i32] = &[
     libc::SYS_getpeername as i32,
     libc::SYS_setsockopt as i32,
     libc::SYS_ppoll as i32,
-    libc::SYS_uname as i32,
     libc::SYS_sendmsg as i32,
     libc::SYS_sendmmsg as i32,
     libc::SYS_getsockopt as i32,
-    libc::SYS_fcntl as i32,
     libc::SYS_fstatfs as i32,
     libc::SYS_poll as i32,
     libc::SYS_epoll_pwait as i32,
