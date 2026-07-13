@@ -105,7 +105,7 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
-def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
+async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
     """标准化知识库检索：走 KnowledgeRetrievalService + KnowledgeRetrievalRequest。
 
     读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
@@ -162,9 +162,7 @@ def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list
         rerank_id=rerank_id,
     )
 
-    # ToolOrchestrator runs sync tools in a worker thread, so keep this DB session on that thread.
-    with get_db_context() as db:
-        result = KnowledgeRetrievalService.retrieve(db=db, request=request, current_user=None)
+    result = await KnowledgeRetrievalService.retrieve_async(request=request, principal=None)
 
     return result.chunks
 
@@ -185,7 +183,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
     logger.info(f"创建知识库检索工具，用户：{user_id}")
 
     @tool(args_schema=KnowledgeRetrievalInput)
-    def knowledge_retrieval_tool(query: str) -> str:
+    async def knowledge_retrieval_tool(query: str) -> str:
         """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
         Args:
@@ -197,7 +195,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 
         try:
 
-            retrieve_chunks_result = _retrieve_chunks_via_standard(query, kb_config)
+            retrieve_chunks_result = await _retrieve_chunks_via_standard(query, kb_config)
             if retrieve_chunks_result:
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)

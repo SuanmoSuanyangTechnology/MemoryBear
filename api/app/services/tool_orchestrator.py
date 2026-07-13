@@ -262,9 +262,11 @@ class ToolOrchestrator:
         if not tool:
             return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}
         try:
+            if getattr(tool, "coroutine", None):
+                result = await tool.ainvoke(input_dict)
             # LangchainToolWrapper 使用 _arun，@tool 装饰器生成的工具使用 func
-            if hasattr(tool, 'func') and callable(tool.func):
-                result = await asyncio.to_thread(tool.func, **input_dict)
+            elif hasattr(tool, 'func') and callable(tool.func):
+                result = tool.func(**input_dict)
             else:
                 # LangchainToolWrapper: 工具名可能含 operation 后缀（如 datetime_tool_now）
                 # 需要从工具名中提取 operation 并注入参数

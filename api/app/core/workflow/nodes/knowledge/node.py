@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -15,7 +14,6 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_async_db_context, get_db_read
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.models import ModelType
 from app.models.models_model import ModelCapability
@@ -351,26 +349,19 @@ class KnowledgeRetrievalNode(BaseNode):
         return filter_groups
 
     async def _extract_auto_filter_groups_async(self, query: str) -> list:
-        async with get_async_db_context() as db:
-            prepared = await db.run_sync(lambda sync_db: self._prepare_auto_filter_state_sync(sync_db))
-
-        if not prepared:
-            return []
-
-        common_metadata_defs, llm = prepared
-        return await asyncio.to_thread(
-            self._extract_auto_filter_groups,
-            query,
-            common_metadata_defs,
-            llm,
+        del query
+        logger.info(
+            "node: %s auto filter is delegated to native knowledge retrieval",
+            self.node_id,
         )
+        return []
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the knowledge retrieval workflow node.
 
         Delegates all retrieval and metadata filtering to the unified
-        KnowledgeRetrievalService.retrieve entry point, as specified in
+        KnowledgeRetrievalService.retrieve_async entry point, as specified in
         the knowledge retrieval API convention document.
 
         Args:
@@ -426,13 +417,10 @@ class KnowledgeRetrievalNode(BaseNode):
         )
 
         # 4. Call unified retrieval service
-        with get_db_read() as db:
-            result = await asyncio.to_thread(
-                KnowledgeRetrievalService.retrieve,
-                db=db,
-                request=request,
-                current_user=None,  # workflow nodes have no user context
-            )
+        result = await KnowledgeRetrievalService.retrieve_async(
+            request=request,
+            principal=None,
+        )
 
         # 5. Assemble return format
         chunks = result.chunks
