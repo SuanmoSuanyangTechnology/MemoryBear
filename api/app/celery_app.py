@@ -185,7 +185,7 @@ layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_H
 reflection_retry_schedule = timedelta(minutes=settings.REFLECTION_RETRY_SCAN_INTERVAL_MINUTES)
 hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
-forget_scan_schedule = crontab(minute=settings.FORGET_SCAN_INTERVAL_MINUTES)
+forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
 # 构建定时任务配置
 beat_schedule_config = {
     # "run-workspace-reflection": {
