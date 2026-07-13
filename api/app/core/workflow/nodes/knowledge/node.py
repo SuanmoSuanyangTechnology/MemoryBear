@@ -252,6 +252,10 @@ class KnowledgeRetrievalNode(BaseNode):
                 and params.response_format.value == "json_object"
             ))
             and ModelCapability.JSON_OUTPUT in set(model.capability)
+            and not (
+                params.thinking.enable
+                and ModelCapability.THINKING in set(model.capability)
+            )
         ):
             options["response_format"] = {"type": "json_object"}
         if params.extra_headers.enable and params.extra_headers.value:

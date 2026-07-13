@@ -37,6 +37,7 @@ _JINA_RERANK_PROVIDERS = frozenset(
     }
 )
 _DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
+_DEFAULT_DASHSCOPE_COMPATIBLE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _DEFAULT_JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
 
 
@@ -227,9 +228,16 @@ class AsyncRetrievalModelGateway:
         raise KnowledgeRetrievalConfigError(f"Unsupported metadata-filter provider: {provider}")
 
     async def _openai_client(self, model: ModelRuntimeSnapshot) -> AsyncOpenAI:
+        base_url = model.api_base
+        if (
+            _provider_name(model) == ModelProvider.DASHSCOPE.value
+            and model.is_omni
+            and not base_url
+        ):
+            base_url = _DEFAULT_DASHSCOPE_COMPATIBLE_BASE_URL
         return AsyncOpenAI(
             api_key=model.api_key or "not-needed",
-            base_url=model.api_base,
+            base_url=base_url,
             timeout=_build_timeout(),
             max_retries=settings.LLM_MAX_RETRIES,
             http_client=await AsyncRetrievalHttpClientProvider.get_client(),
@@ -391,6 +399,8 @@ def _openai_metadata_generation_options(
         for key, value in values.items()
         if key in allowed
     }
+    if _provider_name(model) == ModelProvider.VOLCANO.value:
+        request_options.pop("seed", None)
     default_headers = values.get("default_headers")
     if isinstance(default_headers, Mapping):
         request_options["extra_headers"] = {
@@ -468,6 +478,9 @@ def _dashscope_metadata_generation_options(
         options["enable_thinking"] = bool(values["deep_thinking"])
     if values.get("deep_thinking") and "thinking_budget_tokens" in values:
         options["thinking_budget"] = values["thinking_budget_tokens"]
+    response_format = values.get("response_format")
+    if isinstance(response_format, Mapping):
+        options["response_format"] = dict(response_format)
     return options
 
 
