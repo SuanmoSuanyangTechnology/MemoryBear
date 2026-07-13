@@ -110,7 +110,11 @@ class ModelRuntimeSnapshot:
     model_type: str | None = None
 
     @classmethod
-    def from_api_key(cls, api_key: Any) -> "ModelRuntimeSnapshot":
+    def from_api_key(
+        cls,
+        api_key: Any,
+        model_type: str | None = None,
+    ) -> "ModelRuntimeSnapshot":
         return cls(
             model_name=api_key.model_name,
             provider=api_key.provider,
@@ -118,7 +122,7 @@ class ModelRuntimeSnapshot:
             api_base=api_key.api_base,
             capability=tuple(api_key.capability or ()),
             is_omni=bool(api_key.is_omni),
-            model_type=getattr(api_key, "model_type", None),
+            model_type=model_type if model_type is not None else getattr(api_key, "model_type", None),
         )
 
 
@@ -192,6 +196,7 @@ class RetrievalPreparation:
     common_metadata_defs: FrozenMetadataDefinitions
     metadata_llm: ModelRuntimeSnapshot | None
     graph: GraphRetrievalSnapshot | None
+    request_reranker: ModelRuntimeSnapshot | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
