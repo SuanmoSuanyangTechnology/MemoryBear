@@ -50,6 +50,15 @@ struct Pending {
     tx: Option<oneshot::Sender<(String, String, i32)>>,
 }
 
+/// Sandbox limits passed through to the zygote child on each execution.
+pub struct SandboxLimits {
+    pub uid: u32,
+    pub gid: u32,
+    pub net: bool,
+    pub max_as: u64,
+    pub timeout: Duration,
+}
+
 pub struct ZygoteManager {
     /// Only the write half is shared/locked. The read half is owned
     /// exclusively by the background reader task, so reads never hold a
@@ -128,11 +137,7 @@ impl ZygoteManager {
         &self,
         code_b64: &str,
         key_b64: &str,
-        uid: u32,
-        gid: u32,
-        net: bool,
-        max_as: u64,
-        timeout: Duration,
+        limits: &SandboxLimits,
     ) -> (String, String, i32) {
         if !self.running.load(Ordering::SeqCst) {
             return ("".into(), "zygote worker not running".into(), -1);
@@ -152,7 +157,8 @@ impl ZygoteManager {
 
         let payload = serde_json::json!({
             "code": code_b64, "key": key_b64,
-            "uid": uid, "gid": gid, "net": net, "max_as": max_as,
+            "uid": limits.uid, "gid": limits.gid,
+            "net": limits.net, "max_as": limits.max_as,
         }).to_string();
         let frame = encode_frame(MSG_RUN, req_id, payload.as_bytes());
 
@@ -164,7 +170,7 @@ impl ZygoteManager {
             }
         }
 
-        match tokio::time::timeout(timeout, rx).await {
+        match tokio::time::timeout(limits.timeout, rx).await {
             Ok(Ok(result)) => {
                 self.pending.lock().await.remove(&req_id);
                 result

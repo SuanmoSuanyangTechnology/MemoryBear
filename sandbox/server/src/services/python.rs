@@ -66,17 +66,14 @@ pub async fn run(
                 let enc_key = base64::engine::general_purpose::STANDARD.encode(&key);
                 let net = options.enable_network && config.enable_network;
 
-                let (out, err, exit_code) = zygote
-                    .run(
-                        &enc_code,
-                        &enc_key,
-                        config.sandbox_uid,
-                        config.sandbox_gid,
-                        net,
-                        config.python_max_as_bytes,
-                        Duration::from_secs(timeout_secs),
-                    )
-                    .await;
+                let limits = crate::services::zygote::SandboxLimits {
+                    uid: config.sandbox_uid,
+                    gid: config.sandbox_gid,
+                    net,
+                    max_as: config.python_max_as_bytes,
+                    timeout: Duration::from_secs(timeout_secs),
+                };
+                let (out, err, exit_code) = zygote.run(&enc_code, &enc_key, &limits).await;
 
                 return Ok(ExecutionResult {
                     stdout: out,

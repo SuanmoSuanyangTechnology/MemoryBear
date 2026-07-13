@@ -24,7 +24,7 @@ pub fn exit_code_from_status(status: ExitStatus) -> i32 {
     {
         use std::os::unix::process::ExitStatusExt;
         if let Some(signal) = status.signal() {
-            return -(signal as i32);
+            return -signal;
         }
     }
     status.code().unwrap_or(-1)
