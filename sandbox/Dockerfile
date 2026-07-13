@@ -1,51 +1,66 @@
+# ── Stage 1: Build sandbox server ──
+FROM rust:1.97-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libseccomp-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy workspace manifest and all source (lock file enables reproducible builds)
+COPY Cargo.toml Cargo.lock ./
+COPY server/ server/
+COPY lib/sandbox_seccomp/ lib/sandbox_seccomp/
+COPY runtime/ runtime/
+
+# Build server (uses workspace resolver)
+RUN cargo build --release -p sandbox-server
+
+# ── Stage 2: Build seccomp shared libs ──
+FROM rust:1.97-slim-bookworm AS seccomp
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libseccomp-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY lib/sandbox_seccomp/ ./
+
+RUN cargo build --release --features python3 && \
+    mv target/release/libsandbox.so /libpython.so
+
+RUN cargo clean && \
+    cargo build --release --features nodejs && \
+    mv target/release/libsandbox.so /libnodejs.so
+
+# ── Stage 3: Runtime ──
 FROM python:3.12-slim
-USER root
-WORKDIR /code
 
-ARG NEED_MIRROR=1
-ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs npm libseccomp2 ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
 
+# Seccomp shared libs (loaded at runtime by prescript)
+COPY --from=seccomp /libpython.so /usr/local/share/sandbox/libpython.so
+COPY --from=seccomp /libnodejs.so /usr/local/share/sandbox/libnodejs.so
 
-RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
-    if [ "$NEED_MIRROR" == "1" ]; then \
-        sed -i 's|https://ports.ubuntu.com|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
-        sed -i 's|https://archive.ubuntu.com|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
-    fi; \
-    rm -f /etc/apt/apt.conf.d/docker-clean && \
-    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
-    chmod 1777 /tmp && \
-    apt update && \
-    apt --no-install-recommends install -y ca-certificates && \
-    apt update && \
-    apt install -y python3-pip pipx nginx unzip curl wget git vim less && \
-    apt install -y nodejs npm && \
-    apt-get install -y --no-install-recommends tzdata libseccomp2 libseccomp-dev && \
-    ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" > /etc/timezone && \
-    apt install -y cargo
+# Server binary
+COPY --from=builder /build/target/release/sandbox-server /usr/local/bin/sandbox-server
 
-ENV PYTHONDONTWRITEBYTECODE=1
+# Config and runtime assets
+COPY runtime/config.toml /etc/sandbox/config.toml
+COPY runtime/ /usr/local/share/sandbox/
 
-COPY ./app /code/app
-COPY ./dependencies /code/dependencies
-COPY ./lib /code/lib
-COPY ./script /code/script
-COPY ./config.yaml /code/config.yaml
-COPY ./main.py /code/main.py
-COPY ./requirements.txt /code/requirements.txt
+RUN mkdir -p /usr/local/share/sandbox/tmp && chmod 1777 /usr/local/share/sandbox/tmp
 
-RUN python -m venv .venv
-RUN .venv/bin/python3 -m pip install -r requirements.txt
+# Install Node.js koffi FFI library (required by prescript.js for seccomp)
+RUN cd /usr/local/share/sandbox && npm install koffi@3
 
-RUN npm install --prefix=/code/dependencies/nodejs koffi
+# Sandbox user + dedicated non-privileged group for privilege dropping
+RUN groupadd -g 65537 sandbox && useradd -u 65537 -g 65537 sandbox
 
-RUN cargo build --release --manifest-path lib/seccomp_redbear/Cargo.toml --features python3
-RUN mv lib/seccomp_redbear/target/release/libsandbox.so lib/seccomp_redbear/target/release/libpython.so
-RUN cargo build --release --manifest-path lib/seccomp_redbear/Cargo.toml --features nodejs
-RUN mv lib/seccomp_redbear/target/release/libsandbox.so lib/seccomp_redbear/target/release/libnodejs.so
+ENV CONFIG_PATH=/etc/sandbox/config.toml
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl 127.0.0.1:8194/health
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://127.0.0.1:8194/health || exit 1
 
-
-CMD [".venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8194", "--log-level", "debug"]
+EXPOSE 8194
+CMD ["sandbox-server"]

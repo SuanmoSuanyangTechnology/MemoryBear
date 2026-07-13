@@ -1,0 +1,9 @@
+target
+**/target
+.git
+**/.git
+node_modules
+**/node_modules
+.vscode
+*.swp
+.env
