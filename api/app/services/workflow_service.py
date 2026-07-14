@@ -4114,6 +4114,49 @@ class WorkflowService:
 
         return f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
 
+    async def _resolve_local_file_async(
+            self,
+            upload_file_id,
+            file_type: str,
+            origin_file_type: str,
+    ) -> dict | None:
+        """resolve_local_file_object_dict 的异步版本，兼容 self.db 为 None 的情况。"""
+        from app.core.workflow.utils.file_processor import resolve_local_file_object_dict, build_file_object_dict_from_meta
+        from app.models.file_metadata_model import FileMetadata
+        from app.core.config import settings
+        import uuid as _uuid
+
+        if self.db is not None:
+            return resolve_local_file_object_dict(self.db, upload_file_id, file_type, origin_file_type)
+
+        try:
+            fid = _uuid.UUID(str(upload_file_id))
+        except ValueError:
+            return None
+
+        async with get_async_db_context() as db:
+            meta = await db.scalar(
+                select(FileMetadata).where(
+                    FileMetadata.id == fid,
+                    FileMetadata.status == "completed",
+                )
+            )
+            if not meta:
+                return None
+
+            url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{fid}"
+            return build_file_object_dict_from_meta(
+                file_type=file_type,
+                transfer_method="local_file",
+                origin_file_type=origin_file_type,
+                file_id=str(fid),
+                url=url,
+                file_name=meta.file_name,
+                file_size=meta.file_size,
+                file_ext=meta.file_ext,
+                content_type=meta.content_type,
+            )
+
     async def _resolve_start_node_file_variables(
             self,
             start_node_vars: list[dict[str, Any]],
@@ -4159,7 +4202,7 @@ class WorkflowService:
                 origin_file_type = value.get("file_type") or file_type
 
                 if transfer_method == "local_file" and value.get("upload_file_id"):
-                    fo = resolve_local_file_object_dict(self.db, value["upload_file_id"], file_type, origin_file_type)
+                    fo = await self._resolve_local_file_async(value["upload_file_id"], file_type, origin_file_type)
                     resolved[var_name] = fo or build_file_object_dict_from_meta(
                         file_type=file_type, transfer_method="local_file",
                         origin_file_type=origin_file_type,
@@ -4180,7 +4223,7 @@ class WorkflowService:
                         origin_file_type = item.get("file_type") or file_type
 
                         if transfer_method == "local_file" and item.get("upload_file_id"):
-                            fo = resolve_local_file_object_dict(self.db, item["upload_file_id"], file_type, origin_file_type)
+                            fo = await self._resolve_local_file_async(item["upload_file_id"], file_type, origin_file_type)
                             resolved_list.append(fo or build_file_object_dict_from_meta(
                                 file_type=file_type, transfer_method="local_file",
                                 origin_file_type=origin_file_type,
