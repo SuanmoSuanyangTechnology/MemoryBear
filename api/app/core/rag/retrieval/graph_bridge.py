@@ -38,18 +38,25 @@ class GraphRetrievalBridge:
             raise TypeError("GraphRetrievalBridge requires a GraphRetrievalSnapshot")
 
         started_at = time.perf_counter()
-        async with cls._get_semaphore():
+        semaphore = cls._get_semaphore()
+        await semaphore.acquire()
+        try:
             loop = asyncio.get_running_loop()
             future = loop.run_in_executor(cls._get_executor(), cls._retrieve_sync, snapshot)
-            try:
-                document = await future
-            except asyncio.CancelledError:
-                logger.info(
-                    "[Retrieval] graph_cancelled graph_async_mode=thread_bridge "
-                    "wait_ms=%s running_worker_not_stopped=true",
-                    cls._elapsed_ms(started_at),
-                )
-                raise
+        except BaseException:
+            semaphore.release()
+            raise
+
+        future.add_done_callback(lambda _future: semaphore.release())
+        try:
+            document = await asyncio.shield(future)
+        except asyncio.CancelledError:
+            logger.info(
+                "[Retrieval] graph_cancelled graph_async_mode=thread_bridge "
+                "wait_ms=%s running_worker_not_stopped=true capacity_release=worker_done",
+                cls._elapsed_ms(started_at),
+            )
+            raise
 
         logger.info(
             "[Retrieval] graph_done graph_async_mode=thread_bridge graph_ms=%s",
