@@ -76,6 +76,7 @@ CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
     ("memory_summary_id_unique", "MemorySummary", "id"),
     ("perceptual_id_unique", "Perceptual", "id"),
     ("community_id_unique", "Community", "community_id"),
+    ("user_source_id_unique", "UserSource", "id"),
 ]
 
 
