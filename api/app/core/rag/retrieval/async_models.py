@@ -633,13 +633,22 @@ def _bedrock_provider(model_id: str) -> str:
 
 def _bedrock_credentials(api_key: str) -> Credentials:
     credentials = api_key.split(":", 2)
-    if len(credentials) < 2 or not credentials[0] or not credentials[1]:
-        raise KnowledgeRetrievalConfigError(
-            "Bedrock native async retrieval requires api_key formatted as "
-            "access_key_id:secret_access_key[:session_token]"
+    if len(credentials) >= 2 and credentials[0] and credentials[1]:
+        session_token = credentials[2] if len(credentials) == 3 and credentials[2] else None
+        return Credentials(credentials[0], credentials[1], session_token)
+
+    access_key_id = api_key or os.getenv("AWS_ACCESS_KEY_ID")
+    secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    if access_key_id and secret_access_key:
+        return Credentials(
+            access_key_id,
+            secret_access_key,
+            os.getenv("AWS_SESSION_TOKEN"),
         )
-    session_token = credentials[2] if len(credentials) == 3 and credentials[2] else None
-    return Credentials(credentials[0], credentials[1], session_token)
+    raise KnowledgeRetrievalConfigError(
+        "Bedrock native async retrieval requires api_key formatted as "
+        "access_key_id:secret_access_key[:session_token] or static AWS environment credentials"
+    )
 
 
 def _bedrock_region(api_base: str | None) -> str:
