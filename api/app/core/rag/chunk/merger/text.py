@@ -65,11 +65,40 @@ class TextMerger:
 
     def _hard_split(self, text: str, limit: int) -> list[str]:
         tokens = encoder.encode(text)
-        return [
-            encoder.decode(tokens[index:index + limit])
-            for index in range(0, len(tokens), limit)
-            if tokens[index:index + limit]
-        ]
+        token_bytes = [encoder.decode_single_token_bytes(token) for token in tokens]
+        chunks: list[str] = []
+        start = 0
+
+        def decode_range(begin: int, end: int) -> str:
+            return b"".join(token_bytes[begin:end]).decode("utf-8")
+
+        while start < len(tokens):
+            end = min(start + limit, len(tokens))
+
+            while end > start:
+                try:
+                    chunk = decode_range(start, end)
+                except UnicodeDecodeError:
+                    end -= 1
+                    continue
+                chunks.append(chunk)
+                start = end
+                break
+            else:
+                end = min(start + limit + 1, len(tokens))
+                while True:
+                    try:
+                        chunk = decode_range(start, end)
+                    except UnicodeDecodeError:
+                        if end >= len(tokens):
+                            raise
+                        end += 1
+                        continue
+                    chunks.append(chunk)
+                    start = end
+                    break
+
+        return chunks
 
     @staticmethod
     def _within_limit(text: str, limit: int) -> bool:
