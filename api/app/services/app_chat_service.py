@@ -16,7 +16,7 @@ from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_n
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.db import get_db, get_db_context, get_async_db_context
+from app.db import get_db, get_async_db_context
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
@@ -133,19 +133,14 @@ class AppChatService:
     async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, FileMetadata]:
         if not local_ids:
             return {}
-        if self._uses_async_session():
-            result = await self.db.execute(
+        async with get_async_db_context() as db:
+            result = await db.execute(
                 select(FileMetadata).where(
                     FileMetadata.id.in_(local_ids),
                     FileMetadata.status == "completed",
                 )
             )
             rows = result.scalars().all()
-        else:
-            rows = self.db.query(FileMetadata).filter(
-                FileMetadata.id.in_(local_ids),
-                FileMetadata.status == "completed",
-            ).all()
         return {str(row.id): row for row in rows}
 
     async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
@@ -214,28 +209,7 @@ class AppChatService:
             return
         repo.update_completed(execution_id, **kwargs)
 
-    async def _save_opening_statement_async(
-            self,
-            *,
-            conversation_id: uuid.UUID,
-            opening_statement: str,
-            suggested_questions: Optional[List[str]] = None,
-    ) -> None:
-        if self._uses_async_session():
-            async with get_async_db_context() as db:
-                await ConversationService(db).add_message_async(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=opening_statement,
-                    meta_data={"suggested_questions": suggested_questions or []},
-                )
-            return
-        await self.conversation_service.add_message_async(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=opening_statement,
-            meta_data={"suggested_questions": suggested_questions or []},
-        )
+
 
     async def _persist_final_agent_execution(
             self,
@@ -297,60 +271,9 @@ class AppChatService:
         self.db.commit()
         return execution.id
 
-    async def _save_versioned_assistant_message_async(
-            self,
-            *,
-            message_id: uuid.UUID,
-            conversation_id: uuid.UUID,
-            content: str,
-            version: int,
-            parent_message_id: Optional[uuid.UUID],
-            meta_data: dict,
-    ) -> None:
-        async with get_async_db_context() as db:
-            new_msg = Message(
-                id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=content,
-                version=version,
-                is_current=True,
-                parent_message_id=parent_message_id,
-                meta_data=meta_data,
-            )
-            db.add(new_msg)
-            conv = await db.get(Conversation, conversation_id)
-            if conv:
-                conv.message_count += 1
-            await db.commit()
 
-    async def _save_failed_stream_messages_async(
-            self,
-            *,
-            message_id: uuid.UUID,
-            user_message_id: uuid.UUID,
-            conversation_id: uuid.UUID,
-            message: str,
-            human_meta: dict,
-            error_message: str,
-    ) -> None:
-        async with get_async_db_context() as db:
-            service = ConversationService(db)
-            await service.add_message_async(
-                message_id=user_message_id,
-                conversation_id=conversation_id,
-                role="user",
-                content=message,
-                meta_data=human_meta,
-            )
-            await service.add_message_async(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content="",
-                meta_data={"error": error_message[:2000]},
-                status="failed",
-            )
+
+
 
     async def _check_annotation_match_async(
             self,
@@ -891,12 +814,8 @@ class AppChatService:
                     model_config_id=config.default_model_config_id,
                 )
                 async def _run_after_turn(kwargs=_ctx_kwargs):
-                    if self._uses_async_session():
-                        async with get_async_db_context() as db2:
-                            await ContextEngineManager(db2).after_app_turn(**kwargs)
-                    else:
-                        with get_db_context() as db2:
-                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    async with get_async_db_context() as db2:
+                        await ContextEngineManager(db2).after_app_turn(**kwargs)
                 asyncio.create_task(_run_after_turn())
         else:
             new_msg = Message(
@@ -1213,15 +1132,12 @@ class AppChatService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
 
-            first_chunk_logged = False
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
                     context=None,
                     files=processed_files
             ):
-                if not first_chunk_logged:
-                    first_chunk_logged = True
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
@@ -1293,59 +1209,43 @@ class AppChatService:
 
             # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
             # 这里不再触发老的 write_long_term 路径。
+            if files:
+                local_ids = [f.upload_file_id for f in files
+                             if f.transfer_method.value == "local_file" and f.upload_file_id
+                             and (not f.name or not f.size)]
+                meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
+                for f in files:
+                    name, size = f.name, f.size
+                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                        meta = meta_map.get(str(f.upload_file_id))
+                        if meta:
+                            name = name or meta.file_name
+                            size = size or meta.file_size
+                    human_meta["files"].append({
+                        "type": f.type,
+                        "url": f.url,
+                        "name": name,
+                        "size": size,
+                        "file_type": f.file_type,
+                    })
+            if processed_files:
+                human_meta["history_files"] = {
+                    "content": processed_files,
+                    "provider": _api_key_provider,
+                    "is_omni": _api_key_is_omni
+                }
+
             if not skip_save:
-                if opening_statement:
-                    await self._save_opening_statement_async(
-                        conversation_id=conversation_id,
-                        opening_statement=opening_statement,
-                        suggested_questions=opening_suggested_questions,
-                    )
-                if self._uses_async_session():
-                    await self.agent_service._save_conversation_message(
-                        conversation_id=str(conversation_id),
-                        user_message=message,
-                        assistant_message=full_content,
-                        message_id=message_id,
-                        user_message_id=user_message_id,
-                        app_id=config.app_id,
-                        user_id=user_id,
-                        meta_data=assistant_meta,
-                        files=files,
-                        processed_files=processed_files,
-                        audio_url=stream_audio_url,
-                        citations=filtered_citations,
-                        provider=_api_key_provider,
-                        is_omni=_api_key_is_omni,
-                    )
-                else:
-                    if files:
-                        local_ids = [f.upload_file_id for f in files
-                                     if f.transfer_method.value == "local_file" and f.upload_file_id
-                                     and (not f.name or not f.size)]
-                        meta_map = {}
-                        if local_ids:
-                            meta_map = await self._fetch_completed_file_metadata(local_ids)
-                        for f in files:
-                            name, size = f.name, f.size
-                            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                                meta = meta_map.get(str(f.upload_file_id))
-                                if meta:
-                                    name = name or meta.file_name
-                                    size = size or meta.file_size
-                            human_meta["files"].append({
-                                "type": f.type,
-                                "url": f.url,
-                                "name": name,
-                                "size": size,
-                                "file_type": f.file_type,
-                            })
-                    if processed_files:
-                        human_meta["history_files"] = {
-                            "content": processed_files,
-                            "provider": _api_key_provider,
-                            "is_omni": _api_key_is_omni
-                        }
-                    await self.conversation_service.add_message_async(
+                async with get_async_db_context() as db:
+                    svc = ConversationService(db)
+                    if opening_statement:
+                        await svc.add_message_async(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=opening_statement,
+                            meta_data={"suggested_questions": opening_suggested_questions},
+                        )
+                    await svc.add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id,
                         role="user",
@@ -1353,7 +1253,7 @@ class AppChatService:
                         meta_data=human_meta,
                         should_memorize=memory,
                     )
-                    await self.conversation_service.add_message_async(
+                    await svc.add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id,
                         role="assistant",
@@ -1371,24 +1271,11 @@ class AppChatService:
                         model_config_id=config.default_model_config_id,
                     )
                     async def _run_after_turn(kwargs=_ctx_kwargs):
-                        if self._uses_async_session():
-                            async with get_async_db_context() as db2:
-                                await ContextEngineManager(db2).after_app_turn(**kwargs)
-                        else:
-                            with get_db_context() as db2:
-                                await ContextEngineManager(db2).after_app_turn(**kwargs)
+                        async with get_async_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
             else:
-                if self._uses_async_session():
-                    await self._save_versioned_assistant_message_async(
-                        message_id=message_id,
-                        conversation_id=conversation_id,
-                        content=full_content,
-                        version=version,
-                        parent_message_id=parent_message_id,
-                        meta_data=assistant_meta,
-                    )
-                else:
+                async with get_async_db_context() as db:
                     new_msg = Message(
                         id=message_id,
                         conversation_id=conversation_id,
@@ -1399,11 +1286,11 @@ class AppChatService:
                         parent_message_id=parent_message_id,
                         meta_data=assistant_meta,
                     )
-                    self.db.add(new_msg)
-                    conv = await self._db_get(Conversation, conversation_id)
+                    db.add(new_msg)
+                    conv = await db.get(Conversation, conversation_id)
                     if conv:
                         conv.message_count += 1
-                    self.db.commit()
+                    await db.commit()
             # 首包后再一次性落 Agent execution，避免首包前 create + 尾部 update 双写。
             all_node_executions = orchestrator_node_executions + node_executions
             await self._persist_final_agent_execution(
@@ -1441,24 +1328,17 @@ class AppChatService:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
             try:
-                if self._uses_async_session():
-                    await self._save_failed_stream_messages_async(
-                        message_id=message_id,
-                        user_message_id=user_message_id,
-                        conversation_id=conversation_id,
-                        message=message,
-                        human_meta=human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}},
-                        error_message=str(e),
-                    )
-                else:
-                    await self.conversation_service.add_message_async(
+                _human_meta = human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}}
+                async with get_async_db_context() as db:
+                    svc = ConversationService(db)
+                    await svc.add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id,
                         role="user",
                         content=message,
-                        meta_data=human_meta,
+                        meta_data=_human_meta,
                     )
-                    await self.conversation_service.add_message_async(
+                    await svc.add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id,
                         role="assistant",
