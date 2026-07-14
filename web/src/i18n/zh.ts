@@ -2338,6 +2338,7 @@ export const zh = {
       error_desc: 'API 已配置但链接异常',
       MinerUTool_available_desc: 'API URL 已配置并启用',
       MinerUTool_unconfigured_desc: '需要配置 API URL',
+      MinerUTool_configured_disabled_desc: '已配置未启用',
       DatabaseTool_available_desc: '数据库查询已启用',
       DatabaseTool_configured_disabled_desc: '未启用',
       
