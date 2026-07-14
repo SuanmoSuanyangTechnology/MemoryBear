@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-07-14 16:12:48 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-07-14 16:12:48 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-07-14 16:20:33
  */
 /**
  * ErrorBoundary Component
@@ -17,10 +17,11 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png';
+import loadErrorIcon from '@/assets/images/empty/loadError.png';
 import Empty from '@/components/Empty';
 
 /** Detect dynamic import / chunk preload failures across browsers. */
@@ -38,7 +39,7 @@ const ErrorFallback = ({ onReload }: { onReload: () => void }) => {
   return (
     <Flex align="center" justify="center" vertical className="rb:h-full!">
       <Empty
-        url={pageEmptyIcon}
+        url={loadErrorIcon}
         title={t('empty.loadError')}
         subTitle={t('empty.loadErrorDesc')}
         size={[240, 210]}
@@ -52,6 +53,8 @@ const ErrorFallback = ({ onReload }: { onReload: () => void }) => {
 
 interface ErrorBoundaryProps {
   children: ReactNode;
+  /** When this value changes (e.g. route pathname), a caught error is cleared. */
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -69,6 +72,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     console.error('ErrorBoundary caught an error:', error, info);
   }
 
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    // On route change, drop the error state so a normally-loading page renders.
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false });
+    }
+  }
+
   handleReload = () => {
     window.location.reload();
   };
@@ -81,4 +91,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
-export default ErrorBoundary;
+/**
+ * Wrapper that injects the current route path as the reset key, so switching to
+ * a route whose resources load fine clears any previously caught error.
+ */
+const RouteErrorBoundary = ({ children }: { children: ReactNode }) => {
+  const { pathname } = useLocation();
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
+};
+
+export default RouteErrorBoundary;
