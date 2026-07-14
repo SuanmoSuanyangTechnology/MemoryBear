@@ -26,7 +26,7 @@ from app.core.logging_config import get_business_logger
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
-from app.db import get_db_context, get_async_db_context
+from app.db import get_async_db_context
 from app.models import App, AgentConfig, ModelConfig, Message, Conversation, Knowledge
 from app.models.agent_execution_model import AgentExecution
 from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
