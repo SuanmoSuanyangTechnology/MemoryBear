@@ -230,7 +230,7 @@ class ToolService:
                 raise ValueError("内置工具不允许修改名称、描述和图标")
         try:
             effective_is_enabled = is_enabled
-            if config_obj.tool_type == ToolType.BUILTIN.value and is_enabled is None:
+            if config_obj.tool_type == ToolType.BUILTIN.value:
                 builtin_config = self.builtin_repo.find_by_tool_id(self.db, config_obj.id)
                 if builtin_config and builtin_config.tool_class == "MinerUTool":
                     effective_is_enabled = True
