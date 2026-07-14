@@ -4029,10 +4029,7 @@ class WorkflowService:
             variables: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Convert FileInput-format defaults in workflow variables to full FileObject dicts."""
-        from app.core.workflow.utils.file_processor import (
-            resolve_local_file_object_dict,
-            fetch_remote_file_meta,
-        )
+        from app.core.workflow.utils.file_processor import fetch_remote_file_meta
 
         async def _resolve_one(item: dict) -> dict | None:
             if not isinstance(item, dict) or item.get("is_file"):
@@ -4044,7 +4041,7 @@ class WorkflowService:
                 url = item.get("url", "")
                 return await fetch_remote_file_meta(url, file_type, origin_file_type) if url else None
             else:
-                return resolve_local_file_object_dict(self.db, item.get("upload_file_id"), file_type, origin_file_type)
+                return await self._resolve_local_file_async(item.get("upload_file_id"), file_type, origin_file_type)
 
         result = []
         for var_def in variables:
@@ -4067,7 +4064,6 @@ class WorkflowService:
             return []
 
         from app.core.workflow.utils.file_processor import (
-            resolve_local_file_object_dict,
             build_file_object_dict_from_meta,
             fetch_remote_file_meta,
         )
@@ -4079,7 +4075,7 @@ class WorkflowService:
             origin_file_type = file.file_type or file_type
 
             if file.transfer_method.value == "local_file" and file.upload_file_id:
-                fo = resolve_local_file_object_dict(self.db, file.upload_file_id, file_type, origin_file_type)
+                fo = await self._resolve_local_file_async(file.upload_file_id, file_type, origin_file_type)
                 files_struct.append(fo or build_file_object_dict_from_meta(
                     file_type=file_type, transfer_method="local_file",
                     origin_file_type=origin_file_type,
@@ -4120,14 +4116,11 @@ class WorkflowService:
             file_type: str,
             origin_file_type: str,
     ) -> dict | None:
-        """resolve_local_file_object_dict 的异步版本，兼容 self.db 为 None 的情况。"""
-        from app.core.workflow.utils.file_processor import resolve_local_file_object_dict, build_file_object_dict_from_meta
+        """resolve_local_file_object_dict 的异步版本。"""
+        from app.core.workflow.utils.file_processor import build_file_object_dict_from_meta
         from app.models.file_metadata_model import FileMetadata
         from app.core.config import settings
         import uuid as _uuid
-
-        if self.db is not None:
-            return resolve_local_file_object_dict(self.db, upload_file_id, file_type, origin_file_type)
 
         try:
             fid = _uuid.UUID(str(upload_file_id))
@@ -4175,7 +4168,6 @@ class WorkflowService:
             解析后的变量值字典
         """
         from app.core.workflow.utils.file_processor import (
-            resolve_local_file_object_dict,
             build_file_object_dict_from_meta,
             fetch_remote_file_meta,
         )
