@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from botocore.auth import SigV4Auth
@@ -111,9 +112,7 @@ class AsyncRetrievalModelGateway:
             response = await client.embeddings.create(model=embedding.model_name, input=query)
             return _embedding_from_openai_response(response)
         if provider == ModelProvider.OLLAMA.value:
-            client = self._ollama_client(embedding)
-            response = await client.embed(model=embedding.model_name, input=[query])
-            return _embedding_from_ollama_response(response)
+            return await self._embed_with_ollama(embedding, query)
         if provider == ModelProvider.VOLCANO.value:
             client = await self._ark_client(embedding)
             response = await client.multimodal_embeddings.create(
@@ -214,13 +213,11 @@ class AsyncRetrievalModelGateway:
             )
             return _metadata_content_from_openai_response(response)
         if provider == ModelProvider.OLLAMA.value:
-            client = self._ollama_client(model)
-            response = await client.chat(
-                model=model.model_name,
-                messages=provider_messages,
-                options=_ollama_metadata_generation_options(generation_options),
+            return await self._metadata_with_ollama(
+                model,
+                provider_messages,
+                generation_options,
             )
-            return _metadata_content_from_ollama_response(response)
         if provider == ModelProvider.VOLCANO.value:
             client = await self._ark_client(model)
             response = await client.chat.completions.create(
@@ -259,13 +256,36 @@ class AsyncRetrievalModelGateway:
             http_client=await AsyncRetrievalHttpClientProvider.get_client(),
         )
 
-    def _ollama_client(self, model: ModelRuntimeSnapshot) -> Any:
-        from ollama import AsyncClient
-
-        return AsyncClient(
-            host=model.api_base or "http://localhost:11434",
-            timeout=_build_timeout(),
+    async def _embed_with_ollama(self, model: ModelRuntimeSnapshot, query: str) -> list[float]:
+        client = await AsyncRetrievalHttpClientProvider.get_client()
+        response = await client.post(
+            _ollama_endpoint(model, "api/embed"),
+            headers=_ollama_headers(),
+            json={"model": model.model_name, "input": [query]},
         )
+        response.raise_for_status()
+        return _embedding_from_ollama_response(response.json())
+
+    async def _metadata_with_ollama(
+        self,
+        model: ModelRuntimeSnapshot,
+        messages: Sequence[dict[str, str]],
+        generation_options: Mapping[str, Any] | None,
+    ) -> str:
+        client = await AsyncRetrievalHttpClientProvider.get_client()
+        response = await client.post(
+            _ollama_endpoint(model, "api/chat"),
+            headers=_ollama_headers(),
+            json={
+                "model": model.model_name,
+                "messages": messages,
+                "tools": [],
+                "stream": False,
+                "options": _ollama_metadata_generation_options(generation_options),
+            },
+        )
+        response.raise_for_status()
+        return _metadata_content_from_ollama_response(response.json())
 
     async def _ark_client(self, model: ModelRuntimeSnapshot) -> Any:
         from volcenginesdkarkruntime import AsyncArk
@@ -613,6 +633,43 @@ def normalize_jina_rerank_url(base_url: str | None) -> str:
     if normalized.endswith("/v1"):
         return f"{normalized}/rerank"
     return f"{normalized}/v1/rerank"
+
+
+def _ollama_endpoint(model: ModelRuntimeSnapshot, path: str) -> str:
+    base_url = _normalize_ollama_base_url(model.api_base or "http://localhost:11434")
+    return f"{base_url}/{path.lstrip('/')}"
+
+
+def _normalize_ollama_base_url(base_url: str) -> str:
+    default_port = 11434
+    scheme, _, hostport = base_url.partition("://")
+    if not hostport:
+        scheme, hostport = "http", base_url
+    elif scheme == "http":
+        default_port = 80
+    elif scheme == "https":
+        default_port = 443
+
+    parsed = urlsplit(f"{scheme}://{hostport}")
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or default_port
+    try:
+        if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
+            host = f"[{host}]"
+    except ValueError:
+        pass
+
+    path = parsed.path.strip("/")
+    if path:
+        return f"{scheme}://{host}:{port}/{path}"
+    return f"{scheme}://{host}:{port}"
+
+
+def _ollama_headers() -> dict[str, str]:
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if api_key := os.getenv("OLLAMA_API_KEY"):
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 def _build_timeout() -> httpx.Timeout:
