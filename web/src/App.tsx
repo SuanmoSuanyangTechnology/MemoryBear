@@ -31,7 +31,7 @@ import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
 import { Provider as PrivateProvider } from '@redbear/memory-brick'
 
-import menuJson from '@/store/menu.json';
+import menuJson from '@/store/menuData';
 
 console.log('PrivateProvider', PrivateProvider)
 const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
