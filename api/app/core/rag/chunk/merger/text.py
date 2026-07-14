@@ -65,38 +65,28 @@ class TextMerger:
 
     def _hard_split(self, text: str, limit: int) -> list[str]:
         tokens = encoder.encode(text)
-        token_bytes = [encoder.decode_single_token_bytes(token) for token in tokens]
         chunks: list[str] = []
         start = 0
 
-        def decode_range(begin: int, end: int) -> str:
-            return b"".join(token_bytes[begin:end]).decode("utf-8")
+        def find_decodable_boundary(begin: int, end: int, step: int) -> tuple[int, str] | None:
+            while begin < end <= len(tokens):
+                try:
+                    return end, encoder.decode(tokens[begin:end], errors="strict")
+                except UnicodeDecodeError:
+                    end += step
+            return None
 
         while start < len(tokens):
             end = min(start + limit, len(tokens))
+            boundary = find_decodable_boundary(start, end, -1)
+            if boundary is None:
+                boundary = find_decodable_boundary(start, min(start + limit + 1, len(tokens)), 1)
+            if boundary is None:
+                raise RuntimeError(f"Unable to find a valid UTF-8 boundary from token index {start}.")
 
-            while end > start:
-                try:
-                    chunk = decode_range(start, end)
-                except UnicodeDecodeError:
-                    end -= 1
-                    continue
-                chunks.append(chunk)
-                start = end
-                break
-            else:
-                end = min(start + limit + 1, len(tokens))
-                while True:
-                    try:
-                        chunk = decode_range(start, end)
-                    except UnicodeDecodeError:
-                        if end >= len(tokens):
-                            raise
-                        end += 1
-                        continue
-                    chunks.append(chunk)
-                    start = end
-                    break
+            end, chunk = boundary
+            chunks.append(chunk)
+            start = end
 
         return chunks
 
