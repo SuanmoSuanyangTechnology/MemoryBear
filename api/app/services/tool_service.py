@@ -229,6 +229,12 @@ class ToolService:
             if name or description or icon:
                 raise ValueError("内置工具不允许修改名称、描述和图标")
         try:
+            effective_is_enabled = is_enabled
+            if config_obj.tool_type == ToolType.BUILTIN.value and is_enabled is None:
+                builtin_config = self.builtin_repo.find_by_tool_id(self.db, config_obj.id)
+                if builtin_config and builtin_config.tool_class == "MinerUTool":
+                    effective_is_enabled = True
+
             if name:
                 self._check_name_duplicate(name, config_obj.tool_type, tenant_id, exclude_id=config_obj.id)
                 config_obj.name = name
@@ -241,8 +247,11 @@ class ToolService:
             if config:
                 config_obj.config_data = config.copy()
 
+                if config_obj.tool_type == ToolType.BUILTIN.value and effective_is_enabled is not None:
+                    config_obj.config_data["is_enabled"] = effective_is_enabled
+
                 # 同步到类型表
-                self._sync_type_config(config_obj, config, is_enabled)
+                self._sync_type_config(config_obj, config, effective_is_enabled)
 
                 # 更新状态逻辑
                 self._update_tool_status(config_obj)
@@ -407,7 +416,7 @@ class ToolService:
                     status=initial_status,
                     config_data={"tool_class": tool_info['tool_class'],
                                  "requires_config": tool_info.get('requires_config', False),
-                                 "is_enabled": False},
+                                 "is_enabled": tool_info.get('enabled', False)},
                     version=tool_info["version"]
                 )
                 self.db.add(tool_config)
@@ -417,6 +426,7 @@ class ToolService:
                     id=tool_config.id,
                     tool_class=tool_info['tool_class'],
                     parameters={},
+                    is_enabled=tool_info.get('enabled', False),
                     requires_config=tool_info.get('requires_config', False)
                 )
                 self.db.add(builtin_config_obj)

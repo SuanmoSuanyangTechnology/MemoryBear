@@ -145,7 +145,7 @@ async def update_tool(
             description=request.description,
             icon=request.icon,
             config=request.config,
-            is_enabled=request.config.get("is_enabled", None),
+            is_enabled=request.is_enabled,
             tags=request.tags
         )
         if not success_flag:
