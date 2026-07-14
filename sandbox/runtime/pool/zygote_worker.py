@@ -24,11 +24,21 @@ import signal
 import socket
 import sys
 import traceback
+from typing import TypedDict
 
 # Make the sibling protocol module importable without pulling in `app`.
 _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _SELF_DIR)
 import protocol as P  # noqa: E402
+
+
+class _ReqInfo(TypedDict):
+    """Bookkeeping for one in-flight sandbox request."""
+    pid: int
+    out: int
+    err: int
+    open: set[int]
+
 
 # Max bytes buffered for the control socket before we stop draining child
 # pipes (applying backpressure to the producing child instead of growing this
@@ -64,7 +74,7 @@ def _xor(data: bytes, key: bytes) -> bytes:
         seg_len = end - i
         keystream = key * (seg_len // kl) + key[: seg_len % kl]
         out[i:end] = (
-            int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
+                int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
         ).to_bytes(seg_len, "big")
         i = end
     return bytes(out)
@@ -99,14 +109,15 @@ class Zygote:
         self._out = bytearray()
 
         # req_id -> {"pid", "out", "err", "open": set(fds)}
-        self.reqs: dict[int, dict] = {}
+        self.reqs: dict[int, _ReqInfo] = {}
         # pipe read fd -> (req_id, msg_type)
         self.fd_map: dict[int, tuple[int, int]] = {}
 
         # Keep child zombies until we explicitly waitpid them.
         signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 
-    def _warm_codecs(self) -> None:
+    @staticmethod
+    def _warm_codecs() -> None:
         # Force the source-bytes tokenizer + codec registry to fully initialize
         # while still unrestricted, so the warmed caches are inherited by every
         # forked child. Without this, the first non-ASCII compile() inside a
@@ -114,13 +125,13 @@ class Zygote:
         # "SyntaxError: UTF-8 decode error".
         try:
             import codecs
-            import encodings          # noqa: F401
-            import encodings.utf_8    # noqa: F401
+            import encodings  # noqa: F401
+            import encodings.utf_8  # noqa: F401
             import encodings.aliases  # noqa: F401
             for enc in ("utf-8", "ascii", "latin-1", "utf-16", "idna"):
                 try:
                     codecs.lookup(enc)
-                except Exception:
+                except LookupError:
                     pass
             # Exercise the non-ASCII bytes tokenizer path and coding-cookie path.
             compile(b"# -*- coding: utf-8 -*-\n# \xe4\xbd\xa0\xe5\xa5\xbd\nx = '\xc3\xa9'\n",
@@ -131,7 +142,8 @@ class Zygote:
         except Exception as e:  # noqa: BLE001 - best effort
             _log(f"codec warmup issue: {e}")
 
-    def _warm_import(self, modules) -> None:
+    @staticmethod
+    def _warm_import(modules: list[str]) -> None:
         import importlib
         ok = []
         for name in modules:
@@ -216,6 +228,8 @@ class Zygote:
             devnull = os.open(os.devnull, os.O_RDONLY)
             os.dup2(devnull, 0)
             os.close(devnull)
+            os.close(out_r)
+            os.close(err_r)
             # Close EVERY inherited fd except stdio (0/1/2). Enumerating
             # /proc/self/fd catches descriptors an explicit close-set would
             # miss — the control socket, other requests' pipes, and especially
@@ -246,6 +260,12 @@ class Zygote:
             # worker internals.
             sys.path = [p for p in sys.path if p and p != _SELF_DIR]
             sys.modules.pop("protocol", None)
+
+            # Clear the control-socket receive buffer inherited from the parent
+            # (COW). It may contain partial wire frames from other in-flight
+            # requests. The child never reads from the control socket, but user
+            # code could access it via gc.get_objects() introspection.
+            self._recv_buf.clear()
 
             uid = int(req["uid"])
             gid = int(req["gid"])

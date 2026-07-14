@@ -12,7 +12,7 @@ python_zygote = true
 python_path = "/usr/local/bin/python3"
 nodejs_path = "/usr/bin/node"
 
-sandbox_user = "redbear-sandbox"
+sandbox_user = "sandbox"
 sandbox_uid = 65537
 # Dedicated non-privileged group. MUST NOT be 0 (the root group), otherwise the
 # sandboxed process runs with the root group and can access group-root files.
@@ -28,7 +28,7 @@ nodejs_max_as_bytes = 2147483648   # 2 GiB
 [app]
 port = 8194
 debug = false
-key = "sandbox"
+key = "redbear-sandbox"
 
 # ── Proxy ──
 [proxy]
