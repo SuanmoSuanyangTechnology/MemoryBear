@@ -362,10 +362,26 @@ class KnowledgeRetrievalService:
             cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at)
             return chunks
 
-        vector_chunks, full_text_chunks = await asyncio.gather(
-            store.search_by_vector(target.embedding, request.query, vector_options),
-            store.search_by_full_text(request.query, full_text_options),
+        vector_task = asyncio.create_task(
+            store.search_by_vector(target.embedding, request.query, vector_options)
         )
+        full_text_task = asyncio.create_task(
+            store.search_by_full_text(request.query, full_text_options)
+        )
+        try:
+            vector_chunks, full_text_chunks = await asyncio.gather(
+                vector_task,
+                full_text_task,
+            )
+        except BaseException:
+            vector_task.cancel()
+            full_text_task.cancel()
+            await asyncio.gather(
+                vector_task,
+                full_text_task,
+                return_exceptions=True,
+            )
+            raise
         candidates = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
         reranker = request_reranker if use_request_reranker else target.reranker
         if candidates and reranker:
