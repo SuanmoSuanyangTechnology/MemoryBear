@@ -375,6 +375,8 @@ class KnowledgeRetrievalService:
                 candidates,
                 target.params.top_k,
             )
+        elif candidates and use_request_reranker:
+            ranked = cls._apply_rerank_fallback(candidates, target.params.top_k)
         else:
             ranked = candidates[:target.params.top_k]
         chunks = [
