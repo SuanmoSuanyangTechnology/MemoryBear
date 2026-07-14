@@ -82,99 +82,6 @@ const transformTreeData = (nodes: TreeNodeData[]): DataNode[] =>
     };
   });
 
-const buildMockTreeData = (): TreeNodeData[] => ([
-  {
-    title: '数据集文件夹',
-    key: '0',
-    icon: folderIcon,
-    switcherIcon: switcherIcon,
-    type: 'folder',
-    children: [
-      {
-        title: '文本数据集',
-        key: '0-0',
-        icon: textIcon,
-        switcherIcon: switcherIcon,
-        type: 'text',
-        children: [
-          {
-            title: '子文件夹1',
-            key: '0-0-0',
-            icon: folderIcon,
-            switcherIcon: switcherIcon,
-            type: 'folder',
-            children: [
-              {
-                title: '文档1.txt',
-                key: '0-0-0-0',
-                icon: textIcon,
-                type: 'text',
-              },
-              {
-                title: '文档2.txt',
-                key: '0-0-0-1',
-                icon: textIcon,
-                type: 'text',
-              },
-            ],
-          },
-          {
-            title: '子文件夹2',
-            key: '0-0-1',
-            icon: folderIcon,
-            switcherIcon: switcherIcon,
-            type: 'folder',
-            children: [
-              {
-                title: '嵌套文件夹',
-                key: '0-0-1-0',
-                icon: folderIcon,
-                switcherIcon: switcherIcon,
-                type: 'folder',
-                children: [
-                  {
-                    title: '深度文档.txt',
-                    key: '0-0-1-0-0',
-                    icon: textIcon,
-                    type: 'text',
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: '图片数据集',
-        key: '0-1',
-        icon: imageIcon,
-        switcherIcon: switcherIcon,
-        type: 'image',
-        children: [
-          {
-            title: '图片1.jpg',
-            key: '0-1-0',
-            icon: imageIcon,
-            type: 'image',
-          },
-          {
-            title: '图片2.png',
-            key: '0-1-1',
-            icon: imageIcon,
-            type: 'image',
-          },
-        ],
-      },
-      {
-        title: '通用数据集',
-        key: '0-2',
-        icon: datasetsIcon,
-        type: 'dataset',
-      },
-    ],
-  },
-]);
-
 const normalizeExt = (ext?: string): string => {
   if (typeof ext !== 'string') return '';
   return ext.trim().replace(/^\./, '').toLowerCase();
@@ -326,10 +233,9 @@ const FolderTree: FC<FolderTreeProps> = ({
       } catch (e) {
         console.error('Failed to load folder tree:', e);
         if (!cancelled) {
-          const fallback = buildMockTreeData();
-          setTreeData(fallback);
+          setTreeData([]);
           if (onRootLoad) {
-            onRootLoad(fallback.length > 0 ? fallback : null);
+            onRootLoad(null);
           }
         }
       }
