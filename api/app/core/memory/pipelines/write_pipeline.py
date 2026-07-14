@@ -932,7 +932,6 @@ class WritePipeline:
     # ──────────────────────────────────────────────
     # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
     # ──────────────────────────────────────────────
-# 需要重构调整一下，先研究一下感知记忆的内容产生，应用如何产生感知内容，写入如何拿到感知内容。
     async def _preprocess_files(self, messages: List[dict]) -> None:
         """处理消息中附带的文件，生成 Perceptual 记录并注入 summary 到 content。
 
