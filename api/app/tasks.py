@@ -1201,7 +1201,7 @@ def import_qa_chunks(
             }
             chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
 
-        batch_size = 50
+        batch_size = min(EMBEDDING_BATCH_SIZE or 10, 20)
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
             vector_service.add_chunks(batch)
