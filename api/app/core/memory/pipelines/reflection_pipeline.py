@@ -149,6 +149,7 @@ class ReflectionPipeline:
             neo4j_connector=connector,
             llm_client=self._llm_client,
             log_repo_factory=_create_log_repo,
+            embedding_client=self._embedding_client,
         )
 
         try:
