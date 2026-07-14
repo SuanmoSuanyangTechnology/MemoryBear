@@ -27,6 +27,7 @@ from app.core.rag.retrieval.models import (
     RetrievalPrincipal,
     RetrievalSearchOptions,
     RetrievalTarget,
+    RetrievalTimings,
 )
 from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
@@ -93,8 +94,9 @@ class KnowledgeRetrievalService:
         log_id: str,
         request: KnowledgeRetrievalRequest,
         principal: RetrievalPrincipal | None,
+        timings: RetrievalTimings,
     ) -> dict[str, Any]:
-        return {
+        fields: dict[str, Any] = {
             "id": log_id,
             "user": (
                 principal.username
@@ -111,6 +113,8 @@ class KnowledgeRetrievalService:
             "metadata_mode": request.metadata_filter_mode,
             "async_mode": "native",
         }
+        fields.update(timings.as_log_fields())
+        return fields
 
     @classmethod
     async def retrieve_async(
@@ -123,18 +127,19 @@ class KnowledgeRetrievalService:
         principal = RetrievalPrincipal.from_user(principal)
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()
+        timings = RetrievalTimings()
         logger.info(
             "[Retrieval] start %s",
             cls._format_log_fields(
-                cls._build_retrieval_start_log_fields(log_id, request, principal)
+                cls._build_retrieval_start_log_fields(log_id, request, principal, timings)
             ),
         )
 
         snapshot_started_at = time.perf_counter()
         preparation = await KnowledgeRetrievalPreparation.prepare(request, principal)
-        snapshot_ms = cls._elapsed_ms(snapshot_started_at)
+        timings.db_snapshot_ms = cls._elapsed_ms(snapshot_started_at)
         if not preparation.targets:
-            return cls._finish_empty(log_id, started_at, "no_targets", snapshot_ms)
+            return cls._finish_empty(log_id, started_at, "no_targets", timings)
 
         models = AsyncRetrievalModelGateway()
         metadata_started_at = time.perf_counter()
@@ -143,14 +148,14 @@ class KnowledgeRetrievalService:
             preparation,
             models,
         )
-        metadata_llm_ms = cls._elapsed_ms(metadata_started_at)
+        timings.metadata_llm_ms = cls._elapsed_ms(metadata_started_at)
 
         metadata_query_started_at = time.perf_counter()
         document_ids_include = await KnowledgeRetrievalPreparation.resolve_metadata_document_ids(
             preparation,
             filter_groups,
         )
-        metadata_query_ms = cls._elapsed_ms(metadata_query_started_at)
+        timings.metadata_query_ms = cls._elapsed_ms(metadata_query_started_at)
         cls._log_metadata_filter(
             log_id,
             request,
@@ -163,13 +168,11 @@ class KnowledgeRetrievalService:
                 log_id,
                 started_at,
                 "metadata_filter_empty",
-                snapshot_ms,
-                metadata_llm_ms,
-                metadata_query_ms,
+                timings,
             )
 
         client = await AsyncElasticsearchClientProvider.get_shared_client()
-        store = AsyncElasticSearchRetrieval(client, models)
+        store = AsyncElasticSearchRetrieval(client, models, timings)
         chunks = await cls._retrieve_targets(
             request,
             preparation,
@@ -177,9 +180,10 @@ class KnowledgeRetrievalService:
             store,
             models,
             log_id,
+            timings,
         )
         if preparation.graph:
-            graph_document = await GraphRetrievalBridge.retrieve(preparation.graph)
+            graph_document = await GraphRetrievalBridge.retrieve(preparation.graph, timings)
             if graph_document:
                 chunks.insert(0, graph_document)
 
@@ -193,12 +197,10 @@ class KnowledgeRetrievalService:
                     "target_count": len(preparation.targets),
                     "document_filter_count": len(document_ids_include or []),
                     "final_count": len(chunks),
-                    "db_snapshot_ms": snapshot_ms,
-                    "metadata_llm_ms": metadata_llm_ms,
-                    "metadata_query_ms": metadata_query_ms,
                     "elapsed_ms": cls._elapsed_ms(started_at),
                     "async_mode": "native",
                 }
+                | timings.as_log_fields()
             ),
         )
         return KnowledgeRetrievalResult(chunks=chunks)
@@ -253,6 +255,7 @@ class KnowledgeRetrievalService:
         store: AsyncElasticSearchRetrieval,
         models: AsyncRetrievalModelGateway,
         log_id: str,
+        timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
         targets = preparation.targets
         if not targets:
@@ -272,6 +275,7 @@ class KnowledgeRetrievalService:
                     "target_kbs": cls._compact_ids([target.knowledge_id for target in targets]),
                     "async_mode": "native",
                 }
+                | cls._timing_log_fields(timings)
             ),
         )
         semaphore = asyncio.Semaphore(max_workers)
@@ -293,6 +297,7 @@ class KnowledgeRetrievalService:
                         and target.params.retrieve_type == RetrieveType.HYBRID
                     ),
                     request_reranker=preparation.request_reranker,
+                    timings=timings,
                 )
                 return index, chunks
 
@@ -318,6 +323,7 @@ class KnowledgeRetrievalService:
             candidates,
             models,
             log_id,
+            timings,
         )
 
     @classmethod
@@ -331,6 +337,7 @@ class KnowledgeRetrievalService:
         *,
         use_request_reranker: bool,
         request_reranker: Any,
+        timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
         started_at = time.perf_counter()
         target_type = target.params.retrieve_type
@@ -347,7 +354,7 @@ class KnowledgeRetrievalService:
         )
         if target_type == RetrieveType.PARTICIPLE:
             chunks = await store.search_by_full_text(request.query, full_text_options)
-            cls._log_target_done(target, 0, len(chunks), len(chunks), len(chunks), started_at)
+            cls._log_target_done(target, 0, len(chunks), len(chunks), len(chunks), started_at, timings=timings)
             return chunks
 
         vector_options = cls._search_options(
@@ -359,7 +366,7 @@ class KnowledgeRetrievalService:
         )
         if target_type == RetrieveType.SEMANTIC:
             chunks = await store.search_by_vector(target.embedding, request.query, vector_options)
-            cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at)
+            cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at, timings=timings)
             return chunks
 
         vector_task = asyncio.create_task(
@@ -384,22 +391,26 @@ class KnowledgeRetrievalService:
             raise
         candidates = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
         reranker = request_reranker if use_request_reranker else target.reranker
-        if candidates and reranker:
-            ranked = await models.rerank(
-                reranker,
-                request.query,
-                candidates,
-                target.params.top_k,
-            )
-        elif candidates and use_request_reranker:
-            ranked = cls._apply_rerank_fallback(candidates, target.params.top_k)
-        else:
-            ranked = candidates[:target.params.top_k]
-        chunks = [
-            chunk
-            for chunk in ranked
-            if (chunk.metadata or {}).get("score", 0) > target.params.rerank_score_threshold
-        ]
+        local_rerank_started_at = time.perf_counter()
+        try:
+            if candidates and reranker:
+                ranked = await models.rerank(
+                    reranker,
+                    request.query,
+                    candidates,
+                    target.params.top_k,
+                )
+            elif candidates and use_request_reranker:
+                ranked = cls._apply_rerank_fallback(candidates, target.params.top_k)
+            else:
+                ranked = candidates[:target.params.top_k]
+            chunks = [
+                chunk
+                for chunk in ranked
+                if (chunk.metadata or {}).get("score", 0) > target.params.rerank_score_threshold
+            ]
+        finally:
+            cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
         cls._log_target_done(
             target,
             len(vector_chunks),
@@ -408,6 +419,7 @@ class KnowledgeRetrievalService:
             len(chunks),
             started_at,
             local_rerank=True,
+            timings=timings,
         )
         return chunks
 
@@ -419,6 +431,7 @@ class KnowledgeRetrievalService:
         chunks: list[DocumentChunk],
         models: AsyncRetrievalModelGateway,
         log_id: str,
+        timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
         candidates_count = len(chunks)
         unique_chunks = cls._deduplicate_chunks(chunks)
@@ -435,26 +448,30 @@ class KnowledgeRetrievalService:
             request.rerank_id is not None and not single_hybrid_uses_request_rerank
         )
         if needs_global_rerank:
-            reranker = (
-                preparation.request_reranker
-                if request.rerank_id is not None
-                else targets[0].reranker
-            )
-            if reranker:
-                ranked_chunks = await models.rerank(
-                    reranker,
-                    request.query,
-                    unique_chunks,
-                    request.top_k,
+            global_rerank_started_at = time.perf_counter()
+            try:
+                reranker = (
+                    preparation.request_reranker
+                    if request.rerank_id is not None
+                    else targets[0].reranker
                 )
-            else:
-                ranked_chunks = cls._apply_rerank_fallback(unique_chunks, request.top_k)
-            threshold: float | None = cls._resolve_rerank_score_threshold(request)
-            filtered_chunks = [
-                chunk
-                for chunk in ranked_chunks
-                if (chunk.metadata or {}).get("score", 0) > threshold
-            ]
+                if reranker:
+                    ranked_chunks = await models.rerank(
+                        reranker,
+                        request.query,
+                        unique_chunks,
+                        request.top_k,
+                    )
+                else:
+                    ranked_chunks = cls._apply_rerank_fallback(unique_chunks, request.top_k)
+                threshold: float | None = cls._resolve_rerank_score_threshold(request)
+                filtered_chunks = [
+                    chunk
+                    for chunk in ranked_chunks
+                    if (chunk.metadata or {}).get("score", 0) > threshold
+                ]
+            finally:
+                cls._record_timing(timings, "global_rerank_ms", global_rerank_started_at)
         else:
             ranked_chunks = sorted(
                 unique_chunks,
@@ -476,6 +493,7 @@ class KnowledgeRetrievalService:
                     "result_count": len(result),
                     "async_mode": "native",
                 }
+                | cls._timing_log_fields(timings)
             ),
         )
         return result
@@ -506,9 +524,7 @@ class KnowledgeRetrievalService:
         log_id: str,
         started_at: float,
         reason: str,
-        snapshot_ms: int,
-        metadata_llm_ms: int = 0,
-        metadata_query_ms: int = 0,
+        timings: RetrievalTimings,
     ) -> KnowledgeRetrievalResult:
         logger.info(
             "[Retrieval] finish %s",
@@ -518,12 +534,10 @@ class KnowledgeRetrievalService:
                     "reason": reason,
                     "target_count": 0,
                     "final_count": 0,
-                    "db_snapshot_ms": snapshot_ms,
-                    "metadata_llm_ms": metadata_llm_ms,
-                    "metadata_query_ms": metadata_query_ms,
                     "elapsed_ms": cls._elapsed_ms(started_at),
                     "async_mode": "native",
                 }
+                | timings.as_log_fields()
             ),
         )
         return KnowledgeRetrievalResult(chunks=[])
@@ -539,6 +553,7 @@ class KnowledgeRetrievalService:
         started_at: float,
         *,
         local_rerank: bool = False,
+        timings: RetrievalTimings | None = None,
     ) -> None:
         logger.info(
             "[Retrieval] target_done %s",
@@ -555,7 +570,26 @@ class KnowledgeRetrievalService:
                     "elapsed_ms": cls._elapsed_ms(started_at),
                     "async_mode": "native",
                 }
+                | cls._timing_log_fields(timings)
             ),
+        )
+
+    @staticmethod
+    def _timing_log_fields(timings: RetrievalTimings | None) -> dict[str, int]:
+        return timings.as_log_fields() if timings is not None else RetrievalTimings().as_log_fields()
+
+    @staticmethod
+    def _record_timing(
+        timings: RetrievalTimings | None,
+        field_name: str,
+        started_at: float,
+    ) -> None:
+        if timings is None:
+            return
+        setattr(
+            timings,
+            field_name,
+            getattr(timings, field_name) + KnowledgeRetrievalService._elapsed_ms(started_at),
         )
 
     @classmethod

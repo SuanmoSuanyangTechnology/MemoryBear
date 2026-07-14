@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -22,7 +23,11 @@ from app.core.rag.retrieval.elasticsearch_queries import (
     resolve_vector_search_mode,
     vector_hits_to_chunks,
 )
-from app.core.rag.retrieval.models import ModelRuntimeSnapshot, RetrievalSearchOptions
+from app.core.rag.retrieval.models import (
+    ModelRuntimeSnapshot,
+    RetrievalSearchOptions,
+    RetrievalTimings,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -74,9 +79,15 @@ class AsyncElasticsearchClientProvider:
 
 
 class AsyncElasticSearchRetrieval:
-    def __init__(self, client: AsyncElasticsearch, models: AsyncEmbeddingClient) -> None:
+    def __init__(
+        self,
+        client: AsyncElasticsearch,
+        models: AsyncEmbeddingClient,
+        timings: RetrievalTimings | None = None,
+    ) -> None:
         self._client = client
         self._models = models
+        self._timings = timings
 
     async def search_by_vector(
         self,
@@ -84,7 +95,11 @@ class AsyncElasticSearchRetrieval:
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
-        query_vector = normalize_vector(await self._models.embed_query(embedding, query))
+        embedding_started_at = time.perf_counter()
+        try:
+            query_vector = normalize_vector(await self._models.embed_query(embedding, query))
+        finally:
+            self._record_elapsed("embedding_ms", embedding_started_at)
         filters = build_vector_filter_clauses(
             options.file_names_filter,
             options.document_ids_include,
@@ -92,16 +107,20 @@ class AsyncElasticSearchRetrieval:
 
         if resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
             try:
-                result = await self._client.search(
-                    index=options.indices,
-                    size=options.top_k,
-                    knn=build_knn_query(
-                        query_vector,
-                        options.top_k,
-                        filters,
-                        options.knn_num_candidates,
-                    ),
-                )
+                vector_search_started_at = time.perf_counter()
+                try:
+                    result = await self._client.search(
+                        index=options.indices,
+                        size=options.top_k,
+                        knn=build_knn_query(
+                            query_vector,
+                            options.top_k,
+                            filters,
+                            options.knn_num_candidates,
+                        ),
+                    )
+                finally:
+                    self._record_elapsed("es_vector_ms", vector_search_started_at)
                 return await self._resolve_vector_result(
                     result,
                     options,
@@ -112,12 +131,16 @@ class AsyncElasticSearchRetrieval:
                     raise
                 logger.warning("[ES search_by_vector] KNN search failed; using script score: %s", exc)
 
-        result = await self._client.search(
-            index=options.indices,
-            from_=0,
-            size=options.top_k,
-            query=build_vector_script_query(query_vector, filters),
-        )
+        vector_search_started_at = time.perf_counter()
+        try:
+            result = await self._client.search(
+                index=options.indices,
+                from_=0,
+                size=options.top_k,
+                query=build_vector_script_query(query_vector, filters),
+            )
+        finally:
+            self._record_elapsed("es_vector_ms", vector_search_started_at)
         return await self._resolve_vector_result(
             result,
             options,
@@ -129,16 +152,20 @@ class AsyncElasticSearchRetrieval:
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
-        result = await self._client.search(
-            index=options.indices,
-            from_=0,
-            size=options.top_k,
-            query=build_full_text_query(
-                query,
-                options.file_names_filter,
-                options.document_ids_include,
-            ),
-        )
+        full_text_search_started_at = time.perf_counter()
+        try:
+            result = await self._client.search(
+                index=options.indices,
+                from_=0,
+                size=options.top_k,
+                query=build_full_text_query(
+                    query,
+                    options.file_names_filter,
+                    options.document_ids_include,
+                ),
+            )
+        finally:
+            self._record_elapsed("es_fulltext_ms", full_text_search_started_at)
         raise_on_shard_failures(result, "full text search")
         docs = full_text_hits_to_chunks(result, options.score_threshold)
         return await self.resolve_parent_chunks(docs, index=options.indices)
@@ -159,6 +186,7 @@ class AsyncElasticSearchRetrieval:
         if not parent_ids:
             return chunks
 
+        parent_resolution_started_at = time.perf_counter()
         try:
             result = await self._client.search(
                 index=index,
@@ -168,7 +196,18 @@ class AsyncElasticSearchRetrieval:
         except Exception as exc:
             logger.warning("Failed to resolve parent chunks: %s", exc)
             return chunks
+        finally:
+            self._record_elapsed("parent_resolution_ms", parent_resolution_started_at)
         return merge_parent_chunks(chunks, result.get("hits", {}).get("hits", []))
+
+    def _record_elapsed(self, field_name: str, started_at: float) -> None:
+        if self._timings is None:
+            return
+        setattr(
+            self._timings,
+            field_name,
+            getattr(self._timings, field_name) + max(0, int((time.perf_counter() - started_at) * 1000)),
+        )
 
     async def _resolve_vector_result(
         self,

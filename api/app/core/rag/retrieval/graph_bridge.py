@@ -8,7 +8,11 @@ from app.core.config import settings
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.retrieval.models import GraphRetrievalSnapshot, ModelRuntimeSnapshot
+from app.core.rag.retrieval.models import (
+    GraphRetrievalSnapshot,
+    ModelRuntimeSnapshot,
+    RetrievalTimings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +37,21 @@ class GraphRetrievalBridge:
         return cls._semaphore
 
     @classmethod
-    async def retrieve(cls, snapshot: GraphRetrievalSnapshot) -> DocumentChunk | None:
+    async def retrieve(
+        cls,
+        snapshot: GraphRetrievalSnapshot,
+        timings: RetrievalTimings | None = None,
+    ) -> DocumentChunk | None:
         if not isinstance(snapshot, GraphRetrievalSnapshot):
             raise TypeError("GraphRetrievalBridge requires a GraphRetrievalSnapshot")
 
-        started_at = time.perf_counter()
+        wait_started_at = time.perf_counter()
         semaphore = cls._get_semaphore()
         await semaphore.acquire()
+        wait_ms = cls._elapsed_ms(wait_started_at)
+        if timings is not None:
+            timings.graph_wait_ms += wait_ms
+        graph_started_at = time.perf_counter()
         try:
             loop = asyncio.get_running_loop()
             future = loop.run_in_executor(cls._get_executor(), cls._retrieve_sync, snapshot)
@@ -54,13 +66,17 @@ class GraphRetrievalBridge:
             logger.info(
                 "[Retrieval] graph_cancelled graph_async_mode=thread_bridge "
                 "wait_ms=%s running_worker_not_stopped=true capacity_release=worker_done",
-                cls._elapsed_ms(started_at),
+                wait_ms,
             )
             raise
 
+        graph_ms = cls._elapsed_ms(graph_started_at)
+        if timings is not None:
+            timings.graph_ms += graph_ms
         logger.info(
-            "[Retrieval] graph_done graph_async_mode=thread_bridge graph_ms=%s",
-            cls._elapsed_ms(started_at),
+            "[Retrieval] graph_done graph_async_mode=thread_bridge graph_wait_ms=%s graph_ms=%s",
+            wait_ms,
+            graph_ms,
         )
         return document
 
