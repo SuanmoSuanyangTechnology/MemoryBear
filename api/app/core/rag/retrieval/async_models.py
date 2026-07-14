@@ -5,15 +5,26 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any, Protocol
+from urllib.parse import quote
 
 import httpx
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.credentials import Credentials
+from botocore.loaders import create_loader
+from botocore.regions import EndpointResolver
+from langchain_aws.chat_models.bedrock import ChatPromptAdapter
+from langchain_aws.llms.bedrock import LLMInputOutputAdapter
 from langchain_core.messages import BaseMessage
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.core.models.bedrock_model_mapper import normalize_bedrock_model_id
 from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 from app.core.rag.retrieval.exceptions import KnowledgeRetrievalConfigError
 from app.core.rag.retrieval.models import ModelRuntimeSnapshot
@@ -39,6 +50,11 @@ _JINA_RERANK_PROVIDERS = frozenset(
 _DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
 _DEFAULT_DASHSCOPE_COMPATIBLE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _DEFAULT_JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
+_BEDROCK_ENDPOINT_RESOLVER = EndpointResolver(create_loader().load_data("endpoints"))
+_BEDROCK_RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_BEDROCK_CROSS_REGION_PREFIXES = frozenset(
+    {"eu", "us", "us-gov", "apac", "sa", "amer", "global", "jp", "au"}
+)
 
 
 class AsyncMetadataLLM(Protocol):
@@ -109,9 +125,7 @@ class AsyncRetrievalModelGateway:
         if provider == ModelProvider.DASHSCOPE.value:
             return await self._embed_with_dashscope(embedding, query)
         if provider == ModelProvider.BEDROCK.value:
-            raise KnowledgeRetrievalConfigError(
-                "Bedrock retrieval embedding requires a native async SDK, which is not installed"
-            )
+            return await self._embed_with_bedrock(embedding, query)
         raise KnowledgeRetrievalConfigError(f"Unsupported retrieval embedding provider: {provider}")
 
     async def rerank(
@@ -222,8 +236,10 @@ class AsyncRetrievalModelGateway:
                 generation_options,
             )
         if provider == ModelProvider.BEDROCK.value:
-            raise KnowledgeRetrievalConfigError(
-                "Bedrock metadata filtering requires a native async SDK, which is not installed"
+            return await self._metadata_with_bedrock(
+                model,
+                messages,
+                generation_options,
             )
         raise KnowledgeRetrievalConfigError(f"Unsupported metadata-filter provider: {provider}")
 
@@ -280,6 +296,24 @@ class AsyncRetrievalModelGateway:
         except (KeyError, IndexError, TypeError) as exc:
             raise KnowledgeRetrievalConfigError("DashScope returned an invalid embedding response") from exc
         return _float_vector(embedding)
+
+    async def _embed_with_bedrock(self, model: ModelRuntimeSnapshot, query: str) -> list[float]:
+        model_id = normalize_bedrock_model_id(model.model_name)
+        provider = _bedrock_provider(model_id)
+        if provider == "cohere":
+            payload = {"input_type": "search_query", "texts": [query]}
+        elif provider == "amazon" and "nova" in model_id and "embed" in model_id:
+            payload = {
+                "taskType": "SINGLE_EMBEDDING",
+                "singleEmbeddingParams": {
+                    "embeddingPurpose": "GENERIC_INDEX",
+                    "text": {"truncationMode": "END", "value": query},
+                },
+            }
+        else:
+            payload = {"inputText": query}
+        response = await self._bedrock_request(model, model_id, "invoke", payload)
+        return _embedding_from_bedrock_response(response)
 
     async def _request_rerank(
         self,
@@ -345,6 +379,68 @@ class AsyncRetrievalModelGateway:
         except (KeyError, IndexError, TypeError) as exc:
             raise KnowledgeRetrievalConfigError("DashScope returned an invalid metadata response") from exc
         return content if isinstance(content, str) else ""
+
+    async def _metadata_with_bedrock(
+        self,
+        model: ModelRuntimeSnapshot,
+        messages: Sequence[BaseMessage],
+        generation_options: Mapping[str, Any] | None = None,
+    ) -> str:
+        model_id = normalize_bedrock_model_id(model.model_name)
+        provider = _bedrock_provider(model_id)
+        response = await self._bedrock_request(
+            model,
+            model_id,
+            "invoke",
+            _bedrock_metadata_payload(provider, model_id, messages, generation_options),
+        )
+        return _metadata_content_from_bedrock_response(provider, response)
+
+    async def _bedrock_request(
+        self,
+        model: ModelRuntimeSnapshot,
+        model_id: str,
+        operation: str,
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        credentials = _bedrock_credentials(model.api_key)
+        region = _bedrock_region(model.api_base)
+        endpoint = _bedrock_runtime_endpoint(region)
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        client = await AsyncRetrievalHttpClientProvider.get_client()
+        max_retries = _bedrock_max_retries()
+        for attempt in range(max_retries + 1):
+            request = AWSRequest(
+                method="POST",
+                url=f"{endpoint}/model/{quote(model_id, safe=':.')}/{operation}",
+                data=body,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
+            SigV4Auth(credentials, "bedrock", region).add_auth(request)
+            try:
+                response = await client.post(
+                    request.url,
+                    headers=dict(request.headers.items()),
+                    content=body,
+                )
+            except httpx.TransportError:
+                if attempt >= max_retries:
+                    raise
+                await asyncio.sleep(_bedrock_retry_delay(attempt))
+                continue
+            if response.status_code in _BEDROCK_RETRYABLE_STATUS_CODES and attempt < max_retries:
+                await response.aclose()
+                await asyncio.sleep(_bedrock_retry_delay(attempt))
+                continue
+            response.raise_for_status()
+            try:
+                result = response.json()
+            except json.JSONDecodeError as exc:
+                raise KnowledgeRetrievalConfigError("Bedrock returned an invalid JSON response") from exc
+            if not isinstance(result, Mapping):
+                raise KnowledgeRetrievalConfigError("Bedrock returned an invalid response")
+            return result
+        raise RuntimeError("Bedrock native async request exhausted without a response")
 
 
 @dataclass(frozen=True)
@@ -526,6 +622,140 @@ def _build_timeout() -> httpx.Timeout:
 
 def _provider_name(model: ModelRuntimeSnapshot) -> str:
     return model.provider.lower().strip()
+
+
+def _bedrock_provider(model_id: str) -> str:
+    parts = model_id.split(".", 2)
+    if len(parts) > 1 and parts[0].lower() in _BEDROCK_CROSS_REGION_PREFIXES:
+        return parts[1].lower()
+    return parts[0].lower()
+
+
+def _bedrock_credentials(api_key: str) -> Credentials:
+    credentials = api_key.split(":", 2)
+    if len(credentials) < 2 or not credentials[0] or not credentials[1]:
+        raise KnowledgeRetrievalConfigError(
+            "Bedrock native async retrieval requires api_key formatted as "
+            "access_key_id:secret_access_key[:session_token]"
+        )
+    session_token = credentials[2] if len(credentials) == 3 and credentials[2] else None
+    return Credentials(credentials[0], credentials[1], session_token)
+
+
+def _bedrock_region(api_base: str | None) -> str:
+    region = (api_base or "us-east-1").strip()
+    if not region or "://" in region or "/" in region:
+        raise KnowledgeRetrievalConfigError("Bedrock api_base must be an AWS region")
+    return region
+
+
+def _bedrock_max_retries() -> int:
+    try:
+        return max(0, int(os.getenv("BEDROCK_MAX_RETRIES", "2")))
+    except ValueError:
+        return 2
+
+
+def _bedrock_retry_delay(attempt: int) -> float:
+    return min(0.25 * (2**attempt), 2.0)
+
+
+def _bedrock_runtime_endpoint(region: str) -> str:
+    endpoint = _BEDROCK_ENDPOINT_RESOLVER.construct_endpoint(
+        "bedrock-runtime",
+        region,
+    )
+    hostname = endpoint.get("hostname") if endpoint else None
+    if not isinstance(hostname, str) or not hostname:
+        raise KnowledgeRetrievalConfigError(f"Bedrock does not support region={region}")
+    return f"https://{hostname}"
+
+
+def _bedrock_metadata_payload(
+    provider: str,
+    model_id: str,
+    messages: Sequence[BaseMessage],
+    generation_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    values = _metadata_generation_values(generation_options)
+    model_kwargs = {
+        key: values[key]
+        for key in ("top_p", "top_k", "seed", "response_format")
+        if key in values
+    }
+    if "stop" in values:
+        model_kwargs["stop_sequences"] = values["stop"]
+    if values.get("deep_thinking"):
+        thinking: dict[str, Any] = {"type": "enabled"}
+        if "thinking_budget_tokens" in values:
+            thinking["budget_tokens"] = values["thinking_budget_tokens"]
+        model_kwargs["thinking"] = thinking
+
+    max_tokens = values.get("max_tokens")
+    temperature = values.get("temperature")
+    normalized_messages = list(messages)
+    prompt: str | None = None
+    system: str | list[dict[str, Any]] | None = None
+    formatted_messages: list[dict[str, Any]] | None = None
+    if provider == "anthropic":
+        formatted = ChatPromptAdapter.format_messages(provider, normalized_messages)
+        if not isinstance(formatted, tuple):
+            raise KnowledgeRetrievalConfigError("Bedrock returned an invalid Anthropic message adapter")
+        system, formatted_messages = formatted
+    elif provider in {"openai", "qwen"}:
+        formatted = ChatPromptAdapter.format_messages(provider, normalized_messages)
+        if not isinstance(formatted, list):
+            raise KnowledgeRetrievalConfigError("Bedrock returned an invalid message adapter")
+        formatted_messages = formatted
+    else:
+        prompt = ChatPromptAdapter.convert_messages_to_prompt(
+            provider,
+            normalized_messages,
+            model_id,
+        )
+
+    try:
+        payload = LLMInputOutputAdapter.prepare_input(
+            provider=provider,
+            model_kwargs=model_kwargs,
+            prompt=prompt,
+            system=system,
+            messages=formatted_messages,
+            max_tokens=max_tokens if isinstance(max_tokens, int) else None,
+            temperature=temperature if isinstance(temperature, (int, float)) else None,
+        )
+    except (NotImplementedError, TypeError, ValueError) as exc:
+        raise KnowledgeRetrievalConfigError(
+            f"Bedrock metadata filtering does not support model provider={provider}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise KnowledgeRetrievalConfigError("Bedrock returned an invalid metadata request adapter")
+    return payload
+
+
+def _embedding_from_bedrock_response(response: Mapping[str, Any]) -> list[float]:
+    try:
+        direct_embedding = response.get("embedding")
+        if direct_embedding is not None:
+            return _float_vector(direct_embedding)
+        embeddings = response.get("embeddings")
+        if isinstance(embeddings, Mapping):
+            return _float_vector(embeddings["float"][0])
+        return _float_vector(embeddings[0]["embedding"] if isinstance(embeddings[0], Mapping) else embeddings[0])
+    except (KeyError, IndexError, TypeError) as exc:
+        raise KnowledgeRetrievalConfigError("Bedrock returned an invalid embedding response") from exc
+
+
+def _metadata_content_from_bedrock_response(provider: str, response: Mapping[str, Any]) -> str:
+    try:
+        parsed = LLMInputOutputAdapter.prepare_output(
+            provider,
+            {"body": BytesIO(json.dumps(response).encode("utf-8"))},
+        )
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+        raise KnowledgeRetrievalConfigError("Bedrock returned an invalid metadata response") from exc
+    content = parsed.get("text")
+    return content if isinstance(content, str) else ""
 
 
 def _dashscope_endpoint(model: ModelRuntimeSnapshot, path: str) -> str:
