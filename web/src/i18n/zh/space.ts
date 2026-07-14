@@ -334,6 +334,9 @@ export const space = {
       loadingEmptyDesc: '您的内容正在火箭运输中！很快就会降落在您的屏幕上',
       pageEmpty: '哎呀！暂无搜索结果',
       pageEmptyDesc: '红熊歪着头等待您更换新的关键词，让我们一起探索吧。',
+      loadError: '页面加载失败',
+      loadErrorDesc: '检测到新版本或网络异常，请点击重新加载。',
+      reload: '重新加载',
     },
     apiKey: {
       name: '项目名称',
