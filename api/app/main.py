@@ -71,6 +71,21 @@ async def lifespan(app: FastAPI):
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")
 
+    # 预热 Neo4j 连接池：并行发起多个轻量查询，让 driver 预先建立多条连接。
+    # 避免首次并发请求时只有 1 条连接可用导致 asyncio.gather 退化为串行。
+    try:
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        _warmup_connector = Neo4jConnector(shared_driver=True)
+        _warmup_queries = [
+            _warmup_connector.execute_query("RETURN 1 AS ping")
+            for _ in range(5)
+        ]
+        import asyncio as _asyncio
+        await _asyncio.gather(*_warmup_queries)
+        logger.info("Neo4j connection pool warmup completed (5 connections)")
+    except Exception as e:
+        logger.warning(f"Neo4j pool warmup skipped: {e}")
+
     # 预热同步 Redis 连接池，避免首次请求承担建池 + PING 的冷启动开销
     try:
         from app.tasks import warmup_sync_redis_pool

@@ -52,7 +52,7 @@ class EmotionAnalyticsService:
 
     def __init__(self):
         """初始化情绪分析服务"""
-        connector = Neo4jConnector()
+        connector = Neo4jConnector(shared_driver=True)
         self.emotion_repo = EmotionRepository(connector)
         logger.info("情绪分析服务初始化完成")
 
