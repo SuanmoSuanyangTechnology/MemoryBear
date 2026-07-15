@@ -38,9 +38,24 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
   // 封装保存方法，添加提交逻辑
   const handleSave = () => {
     form.validateFields().then((values) => {
-      refresh([
-        ...(values?.variables ?? []),
-      ])
+      const variables = (values?.variables ?? []).map((variable) => {
+        // file 类型：value 可能是数组(交互过)/对象(默认值未改)/空，统一归一化后取首项转为单个对象
+        if (variable.type === 'file') {
+          const list = Array.isArray(variable.value)
+            ? variable.value
+            : variable.value ? [variable.value] : []
+          return { ...variable, value: list.length > 0 ? list[0] : null }
+        }
+        // array[file] 类型：保持数组格式（单对象默认值也归一化为数组）
+        if (variable.type === 'array[file]') {
+          const list = Array.isArray(variable.value)
+            ? variable.value
+            : variable.value ? [variable.value] : []
+          return { ...variable, value: list }
+        }
+        return variable
+      })
+      refresh(variables)
       handleClose()
     })
   }
