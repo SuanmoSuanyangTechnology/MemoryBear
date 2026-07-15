@@ -422,7 +422,6 @@ async def chat(
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-        # 多 Agent 流式返回
         config = runtime_config
         if payload.stream:
             async def event_generator():

@@ -758,8 +758,15 @@ class LLMNode(BaseNode):
 
             if self.typed_config.vision_input and effective_vision:
                 file_content = []
-                files = variable_pool.get_instance(self.typed_config.vision_input)
-                for file in files.value:
+                files_instance = variable_pool.get_instance(self.typed_config.vision_input)
+                from app.core.workflow.variable.variable_objects import ArrayVariable, FileVariable
+                if isinstance(files_instance, ArrayVariable):
+                    file_list = files_instance.value  # list[FileVariable]
+                elif isinstance(files_instance, FileVariable):
+                    file_list = [files_instance]  # wrap single file
+                else:
+                    file_list = []
+                for file in file_list:
                     content = await self.process_message(model_info, file.value, effective_vision)
                     if content:
                         file_content.extend(content)
