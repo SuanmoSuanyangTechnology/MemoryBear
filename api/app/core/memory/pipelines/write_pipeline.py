@@ -360,6 +360,7 @@ class WritePipeline:
                         conversation_id=conversation_id,
                         source=source,
                         language=self.language,
+                        persist=not is_pilot_run,
                     )
 
                     # 拆回三部分
@@ -931,7 +932,6 @@ class WritePipeline:
     # ──────────────────────────────────────────────
     # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
     # ──────────────────────────────────────────────
-
     async def _preprocess_files(self, messages: List[dict]) -> None:
         """处理消息中附带的文件，生成 Perceptual 记录并注入 summary 到 content。
 
