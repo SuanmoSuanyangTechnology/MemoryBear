@@ -77,6 +77,20 @@ class MemoryPerceptualRepository:
             db_logger.error(f"Failed to query perceptual memory count: end_user_id={end_user_id} - {str(e)}")
             raise
 
+    async def get_count_by_user_id_async(self, end_user_id: uuid.UUID) -> int:
+        """统计感知记忆总数（异步版本）"""
+        from sqlalchemy import select, func
+        try:
+            result = await self.db.execute(
+                select(func.count()).select_from(MemoryPerceptualModel).where(
+                    MemoryPerceptualModel.end_user_id == end_user_id
+                )
+            )
+            return int(result.scalar_one() or 0)
+        except Exception as e:
+            db_logger.error(f"Failed to query perceptual memory count async: end_user_id={end_user_id} - {str(e)}")
+            raise
+
     def get_count_by_type(
             self,
             end_user_id: uuid.UUID,

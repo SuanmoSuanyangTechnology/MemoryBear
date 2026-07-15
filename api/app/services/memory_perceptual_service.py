@@ -292,7 +292,7 @@ class MemoryPerceptualService:
             {"role": RoleType.SYSTEM.value, "content": [{"type": "text", "text": rendered_system_message}]},
             {"role": RoleType.USER.value, "content": [
                 file_message,
-                {"type": "text", "text": f"Generate a summary of the file's content"}
+                {"type": "text", "text": "Generate a summary of the file's content"}
             ]}
         ]
         try:

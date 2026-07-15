@@ -6,7 +6,7 @@ import clsx from 'clsx'
 
 import MarketConfigModal, { type MarketConfigModalRef } from './components/MarketConfigModal';
 import McpServiceModal from './components/McpServiceModal';
-import type { McpServiceModalRef } from './types';
+import type { McpServiceModalRef, MarketSource, MarketMcp, MarketCategory, MarketApiResponse } from './types';
 import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
 import Empty from '@/components/Empty/index'
 import { getMarketTools, getMarketConfig, getMarketMCPs, getMarketMCPDetail, getMarketMCPsActivated, getTools } from '@/api/tools';
@@ -15,48 +15,6 @@ import RbCard from '@/components/RbCard'
 import Tag from '@/components/Tag'
 import marketIcon from '@/assets/images/tool/market.png'
 
-interface MarketSource {
-  id: string;
-  name: string;
-  category: string;
-  logo_url: string;
-  url: string;
-  description: string;
-  api_key?: string;
-  connected: boolean;
-  mcp_count: number;
-  created_at?: number;
-  created_by?: string;
-}
-
-interface MarketMcp {
-  id: string;
-  name: string;
-  chinese_name?: string;
-  description: string;
-  logo_url: string;
-  publisher: string;
-  categories?: string[];
-  tags?: string[];
-  view_count?: number;
-  activated?: boolean;
-  inDatabase?: boolean;
-  locales?: {
-    [lang: string]: {
-      name: string;
-      description: string;
-    };
-  };
-}
-
-interface MarketCategory {
-  id: string;
-  name: string;
-}
-
-interface MarketApiResponse {
-  items: MarketSource[];
-}
 
 const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () => {
   const { t, i18n } = useTranslation();

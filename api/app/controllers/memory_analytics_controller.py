@@ -22,9 +22,7 @@ from app.core.memory.constants.graph_data_constants import (
 )
 from app.core.response_utils import fail, success
 from app.db import get_db
-from app.dependencies import get_current_user
-from app.models.user_model import User
-from app.repositories.workspace_repository import WorkspaceRepository
+from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.schemas.response_schema import ApiResponse
 from app.services._graph_data_helpers import parse_per_type_limits
@@ -33,7 +31,7 @@ from app.services.user_memory_service import (
     UserMemoryService,
     analytics_community_graph_data,
     analytics_graph_data,
-    analytics_memory_types,
+    analytics_memory_types_async,
 )
 
 api_logger = get_api_logger()
@@ -50,24 +48,16 @@ router = APIRouter(
 @router.get("/memory_insight", response_model=ApiResponse)
 async def get_memory_insight_report_api(
         end_user_id: str,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
-    """
-    获取缓存的记忆洞察报告
-
-    此接口仅查询数据库中已缓存的记忆洞察数据，不执行生成操作。
-    如需生成新的洞察报告，请使用专门的生成接口。
-    """
+    """获取缓存的记忆洞察报告"""
     api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
-        result = await user_memory_service.get_cached_memory_insight(db, end_user_id)
+        result = await user_memory_service.get_cached_memory_insight_async(end_user_id)
 
-        if result["is_cached"]:
-            api_logger.info(f"成功返回缓存的记忆洞察报告: end_user_id={end_user_id}")
+        if result.get("is_cached"):
             return success(data=result, msg="查询成功")
         else:
-            api_logger.info(f"记忆洞察报告缓存不存在: end_user_id={end_user_id}")
             return success(data=result, msg="数据尚未生成")
     except Exception as e:
         api_logger.error(f"记忆洞察报告查询失败: end_user_id={end_user_id}, error={str(e)}")
@@ -78,38 +68,16 @@ async def get_memory_insight_report_api(
 async def get_user_summary_api(
         end_user_id: str,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
-    """
-    获取缓存的用户摘要
-
-    此接口仅查询数据库中已缓存的用户摘要数据，不执行生成操作。
-    如需生成新的用户摘要，请使用专门的生成接口。
-
-    语言控制：
-    - 使用 X-Language-Type Header 指定语言
-    - 如果未传 Header，默认使用中文 (zh)
-    """
-    language = get_language_from_header(language_type)
-
-    workspace_id = current_user.current_workspace_id
-    workspace_repo = WorkspaceRepository(db)
-    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
-
-    if workspace_models:
-        model_id = workspace_models.get("llm", None)
-    else:
-        model_id = None
+    """获取缓存的用户摘要"""
     api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
-        result = await user_memory_service.get_cached_user_summary(db, end_user_id, model_id, language)
+        result = await user_memory_service.get_cached_user_summary_async(end_user_id)
 
-        if result["is_cached"]:
-            api_logger.info(f"成功返回缓存的用户摘要: end_user_id={end_user_id}")
+        if result.get("is_cached"):
             return success(data=result, msg="查询成功")
         else:
-            api_logger.info(f"用户摘要缓存不存在: end_user_id={end_user_id}")
             return success(data=result, msg="数据尚未生成")
     except Exception as e:
         api_logger.error(f"用户摘要查询失败: end_user_id={end_user_id}, error={str(e)}")
@@ -120,7 +88,7 @@ async def get_user_summary_api(
 async def generate_cache_api(
         request: GenerateCacheRequest,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         db: Session = Depends(get_db),
 ) -> dict:
     """
@@ -203,8 +171,7 @@ async def generate_cache_api(
 @router.get("/node_statistics", response_model=ApiResponse)
 async def get_node_statistics_api(
         end_user_id: str,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -213,10 +180,10 @@ async def get_node_statistics_api(
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(
-        f"记忆类型统计请求: end_user_id={end_user_id}, user={current_user.username}, workspace={workspace_id}")
+        f"记忆类型统计请求: end_user_id={end_user_id}, user={current_user.username}")
 
     try:
-        result = await analytics_memory_types(db, end_user_id)
+        result = await analytics_memory_types_async(end_user_id=end_user_id)
 
         total_count = sum(item["count"] for item in result)
         api_logger.info(
@@ -235,8 +202,7 @@ async def get_graph_data_api(
         depth: int = 1,
         center_node_id: Optional[str] = None,
         per_type_limits: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -276,7 +242,6 @@ async def get_graph_data_api(
 
     try:
         result = await analytics_graph_data(
-            db=db,
             end_user_id=end_user_id,
             node_types=node_types_list,
             limit=limit,
@@ -303,8 +268,7 @@ async def get_graph_data_api(
 @router.get("/community_graph", response_model=ApiResponse)
 async def get_community_graph_data_api(
         end_user_id: str,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -318,7 +282,7 @@ async def get_community_graph_data_api(
     )
 
     try:
-        result = await analytics_community_graph_data(db=db, end_user_id=end_user_id)
+        result = await analytics_community_graph_data(end_user_id=end_user_id)
 
         if "message" in result and result["statistics"]["total_nodes"] == 0:
             api_logger.warning(f"社区图谱查询返回空结果: {result.get('message')}")
@@ -344,8 +308,7 @@ async def get_interest_distribution_by_user_api(
         end_user_id: str = Query(..., description="用户ID（必填）"),
         limit: int = Query(5, le=5, description="返回兴趣标签数量限制，最多5个"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """
     获取指定用户的兴趣分布标签

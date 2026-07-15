@@ -7,7 +7,7 @@
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import { Flex, Button, Form, Switch, Space, Divider, App, Dropdown, type SegmentedProps } from 'antd';
+import { Flex, Button, Form, Switch, Space, Divider, App, Dropdown, DatePicker, type SegmentedProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
 import { getAppLogsUrl, getAnnotationsListUrl, getAnnotationsSettings, updateAnnotationsSettings, deleteAnnotations, deleteAllAnnotations, exportAnnotation, } from '@/api/application';
@@ -22,6 +22,8 @@ import SearchInput from '@/components/SearchInput'
 import type { Application } from '@/views/ApplicationManagement/types'
 import PageTabs from '@/components/PageTabs'
 import HitHistoryDetail from './components/HitHistoryDetail'
+
+const { RangePicker } = DatePicker;
 
 const tabKeys = ['logs', 'annotations']
 const Logs: FC<{ application: Application; }> = ({ application }) => {
@@ -205,6 +207,18 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
   const isHideAnnotations = useMemo(() => {
     return ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
   }, [source, application.type])
+
+  const logsQuery = useMemo(() => {
+    const { dateRange, ...reset } = values || {}
+    if (dateRange && dateRange.length > 0) {
+      reset.start_date = dateRange?.[0]?.startOf('d').toISOString()
+      reset.end_date = dateRange?.[1]?.endOf('d').toISOString()
+    }
+    return {
+      is_draft: false,
+      ...reset,
+    }
+  }, [values])
   return (
     <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
       <Flex justify={!isHideAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
@@ -218,12 +232,19 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
         <Form form={form}>
           <Space size={8}>
             {activeTab === 'logs' &&
-              <Form.Item name="keyword" noStyle>
-                <SearchInput
-                  placeholder={t(`application.${activeTab}SearchPlaceholder`)}
-                  variant="outlined"
-                />
-              </Form.Item>
+              <>
+                <Form.Item name="keyword" noStyle>
+                  <SearchInput
+                    placeholder={t(`application.${activeTab}SearchPlaceholder`)}
+                    variant="outlined"
+                  />
+                </Form.Item>
+                <Form.Item name="dateRange" noStyle>
+                  <RangePicker
+                    className="rb:w-70"
+                  />
+                </Form.Item>
+              </>
             }
             {activeTab === 'annotations' && <>
               <Form.Item name="search" noStyle>
@@ -304,10 +325,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       {activeTab === 'logs' && <>
         <Table<LogItem>
           apiUrl={getAppLogsUrl(id || '')}
-          apiParams={{
-            is_draft: false,
-            ...(values ?? {})
-          }}
+          apiParams={logsQuery}
           columns={columns}
           rowKey="id"
           isScroll={true}
