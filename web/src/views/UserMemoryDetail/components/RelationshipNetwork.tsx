@@ -34,8 +34,9 @@ interface RelationshipNetworkProps {
   setRegionId: Dispatch<SetStateAction<string | null>>;
   setSelectedKey: Dispatch<SetStateAction<string | null>>;
   setBrainMemories: Dispatch<SetStateAction<string[]>>;
+  refresh: () => void
 }
-const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey }) => {
+const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey, refresh }) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [nodes, setNodes] = useState<Node[]>([])
@@ -296,6 +297,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
         onSuccess={() => {
           setSelectedNode(null)
           getEdgeData()
+          refresh()
         }}
       />
     </div>
