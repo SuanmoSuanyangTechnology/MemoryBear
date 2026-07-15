@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     # 避免首次并发请求时只有 1 条连接可用导致 asyncio.gather 退化为串行。
     try:
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        _warmup_connector = Neo4jConnector()
+        _warmup_connector = Neo4jConnector(shared_driver=True)
         _warmup_queries = [
             _warmup_connector.execute_query("RETURN 1 AS ping")
             for _ in range(5)
