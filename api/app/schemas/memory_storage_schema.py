@@ -8,6 +8,7 @@ import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.schemas.memory_agent_schema import WriteMessageItem
 
 
 # ============================================================================
@@ -342,10 +343,17 @@ class ConfigUpdateForget(BaseModel):  # 更新遗忘引擎配置参数时使用�
     offset: Optional[float] = Field(0.0, ge=0.0, le=1.0, description="偏移度，0-1 小数；默认 0.0")
 
 
-class ConfigPilotRun(BaseModel):  # 试运行触发请求模型
-    config_id: Union[uuid.UUID, int, str] = Field(..., description="配置ID（唯一，支持UUID、整数或字符串）")
-    dialogue_text: str = Field(..., description="前端传入的对话文本，格式如 '用户: ...\nAI: ...' 可多行，试运行必填")
-    custom_text: Optional[str] = Field(None, description="自定义输入文本，当配置关联本体场景时使用此字段进行试运行")
+class PilotRunInput(BaseModel):  # v0.3.13 试运行触发请求模型（QA 消息格式）
+    """试运行请求 — QA 格式输入。
+
+    与 /api/memory-storage/write 使用同一 messages 结构，避免两套输入解析逻辑。
+    """
+    config_id: Union[uuid.UUID, int, str] = Field(..., description="萃取引擎配置 ID（唯一，支持 UUID、整数或字符串）")
+    messages: List[WriteMessageItem] = Field(
+        ...,
+        min_length=1,
+        description="QA 格式消息列表，role 为 user/assistant，files 可选",
+    )
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 

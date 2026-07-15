@@ -33,7 +33,7 @@ from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
     ConfigParamsDelete,
-    ConfigPilotRun,
+    PilotRunInput,
     ConfigUpdate,
     ConfigUpdateExtracted,
 )
@@ -283,7 +283,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
         return data_list
 
-    async def pilot_run_stream(self, payload: ConfigPilotRun, language: str = "zh") -> AsyncGenerator[str, None]:
+    async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh") -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
 
@@ -293,7 +293,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         - 本方法不依赖 FastAPI Depends(get_db)，自行管理 session 生命周期
 
         Args:
-            payload: 试运行配置和对话文本（config_id 已由 controller 解析为 UUID）
+            payload: 试运行配置和 QA 格式消息列表（v0.3.13：config_id + messages）
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
 
         Yields:
@@ -327,6 +327,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             if not cid:
                 raise ValueError("未提供 payload.config_id，禁止启动试运行")
 
+            # v0.3.13: 直接透传 messages，不再解析 dialogue_text / custom_text
+            messages = payload.messages
+            if not messages:
+                raise ValueError("试运行模式必须提供至少一条 message")
+
             with get_db_read() as db:
                 # 1a. 加载记忆配置
                 try:
@@ -338,26 +343,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 except ConfigurationError as e:
                     raise RuntimeError(f"Configuration loading failed: {e}")
 
-                # 1b. 确定使用的文本
-                if memory_config.scene_id:
-                    if hasattr(payload, 'custom_text') and payload.custom_text:
-                        dialogue_text = payload.custom_text.strip()
-                        logger.info(
-                            f"[PILOT_RUN_STREAM] Using custom_text for scene_id={memory_config.scene_id}, "
-                            f"length: {len(dialogue_text)}")
-                    else:
-                        dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
-                        logger.info(
-                            f"[PILOT_RUN_STREAM] No custom_text provided, using dialogue_text "
-                            f"for scene_id={memory_config.scene_id}")
-                else:
-                    dialogue_text = payload.dialogue_text.strip() if payload.dialogue_text else ""
-                    logger.info(f"[PILOT_RUN_STREAM] No scene_id, using dialogue_text, length: {len(dialogue_text)}")
-
-                if not dialogue_text:
-                    raise ValueError("试运行模式必须提供有效的文本内容（dialogue_text 或 custom_text）")
-
-                logger.info(f"[PILOT_RUN_STREAM] Final text preview: {dialogue_text[:100]}")
+                logger.info(
+                    f"[PILOT_RUN_STREAM] messages count={len(messages)}, "
+                    f"scene_id={memory_config.scene_id}"
+                )
 
                 # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
                 try:
@@ -390,10 +379,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     from app.services.pilot_run_service import run_pilot_extraction
 
                     logger.info(
-                        f"[PILOT_RUN_STREAM] Calling run_pilot_extraction with dialogue_text length: {len(dialogue_text)}")
+                        f"[PILOT_RUN_STREAM] Calling run_pilot_extraction with messages count: {len(messages)}"
+                    )
                     await run_pilot_extraction(
                         memory_config=memory_config,
-                        dialogue_text=dialogue_text,
+                        messages=messages,
                         llm_client=llm_client,
                         progress_callback=progress_callback,
                         language=language,

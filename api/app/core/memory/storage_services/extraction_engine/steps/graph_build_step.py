@@ -300,6 +300,22 @@ async def build_graph_nodes_and_edges(
                         entity_nodes.append(entity_node)
                         entity_id_set.add(entity.id)
 
+                        # v0.3.13: 新增 entity_creation 子事件（与 relationship_creation 共享同一事件名 creating_nodes_edges_result）
+                        if progress_callback and len(entity_nodes) <= 20:
+                            entity_result = {
+                                "result_type": "entity_creation",
+                                "entity_index": len(entity_nodes),
+                                "name": entity_node.name,
+                                "type": entity_node.entity_type,
+                                "description": entity_node.description,
+                                "dialog_progress": f"{processed_dialogs}/{total_dialogs}",
+                            }
+                            await progress_callback(
+                                "creating_nodes_edges_result",
+                                f"实体创建中 ({processed_dialogs}/{total_dialogs})",
+                                entity_result,
+                            )
+
                     entity_connect_strength = getattr(entity, "connect_strength", "Strong")
                     stmt_entity_edges.append(
                         StatementEntityEdge(

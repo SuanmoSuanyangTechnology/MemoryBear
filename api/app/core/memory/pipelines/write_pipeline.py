@@ -952,7 +952,7 @@ class WritePipeline:
         from app.db import get_db_context
         from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
         from app.schemas.app_schema import FileInput
-        from app.services.memory_perceptual_service import MemoryPerceptualService
+        from app.services.memory_perceptual_service import MemoryPerceptualService, _PerceptualSnapshot
 
         for msg in messages:
             files = msg.get("files") or []
@@ -979,19 +979,18 @@ class WritePipeline:
                                 key=lambda m: m.created_time if m.created_time else datetime.min,
                             )
                             # 在 Session 内提取所有需要的属性到一个简单对象中，
-                            # 彻底避免 DetachedInstanceError
-                            class _PerceptualSnapshot:
-                                pass
-                            snap = _PerceptualSnapshot()
-                            snap.id = memory.id
-                            snap.summary = memory.summary
-                            snap.meta_data = memory.meta_data
-                            snap.file_path = memory.file_path
-                            snap.file_name = memory.file_name
-                            snap.file_ext = memory.file_ext
-                            snap.perceptual_type = memory.perceptual_type
-                            snap.end_user_id = self.end_user_id  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
-                            snap.created_time = memory.created_time
+                            # 彻底避免 DetachedInstanceError（使用模块级 _PerceptualSnapshot）
+                            snap = _PerceptualSnapshot(
+                                id=memory.id,
+                                end_user_id=self.end_user_id,  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
+                                perceptual_type=memory.perceptual_type,
+                                file_path=memory.file_path,
+                                file_name=memory.file_name,
+                                file_ext=memory.file_ext,
+                                summary=memory.summary,
+                                meta_data=memory.meta_data,
+                                created_time=memory.created_time,
+                            )
                             file_object = snap
                         else:
                             # 不存在，创建 Perceptual 记录
