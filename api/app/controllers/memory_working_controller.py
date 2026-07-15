@@ -8,7 +8,7 @@ from app.core.logging_config import get_api_logger
 from app.core.memory.enums import MemoryMessageSource
 from app.core.response_utils import success
 from app.core.utils.datetime_utils import to_timestamp_ms
-from app.db import get_db
+from app.db import get_db, get_async_db_context
 from app.dependencies import get_current_user
 from app.models import User
 from app.repositories.memory_message_repository import MemoryMessageRepository
@@ -116,8 +116,8 @@ def get_messages(
 @router.get("/{end_user_id}/detail", response_model=ApiResponse)
 async def get_conversation_detail(
         conversation_id: uuid.UUID,
+        end_user_id: str,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
 ):
     """
     Retrieve detailed information about a specific conversation.
@@ -126,6 +126,7 @@ async def get_conversation_detail(
     does not exist or is outdated, it will trigger the LLM to generate a new summary.
 
     Args:
+        end_user_id:
         conversation_id (UUID): The ID of the conversation.
         current_user (User, optional): The authenticated user making the request.
         db (Session, optional): SQLAlchemy session.
@@ -138,12 +139,13 @@ async def get_conversation_detail(
         - Handles workspace and user-specific context automatically.
         - Logging and exception handling should be implemented for production monitoring.
     """
-    conversation_service = ConversationService(db)
-    detail = await conversation_service.get_conversation_detail(
-        user=current_user,
-        conversation_id=conversation_id,
-        workspace_id=current_user.current_workspace_id
-    )
+    async with get_async_db_context() as db:
+        conversation_service = ConversationService(db)
+        detail = await conversation_service.get_conversation_detail(
+            user=current_user,
+            conversation_id=conversation_id,
+            workspace_id=current_user.current_workspace_id
+        )
     return success(data=detail.model_dump(), msg="get conversation detail success")
 
 
