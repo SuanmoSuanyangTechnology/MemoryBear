@@ -165,6 +165,13 @@ class ForgetLogRepository:
                     ForgetAuditModel.recoverable == True,
                 )
             )
+        elif status == "recovered":
+            conditions.append(
+                and_(
+                    ForgetAuditModel.is_recovered == True,
+                    ForgetAuditModel.recoverable == True,
+                )
+            )
         elif status == "deleted":
             conditions.append(
                 or_(
