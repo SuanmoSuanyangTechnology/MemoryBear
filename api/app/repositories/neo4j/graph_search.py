@@ -1167,3 +1167,25 @@ async def forget_soft_delete_by_element_ids(
         now=now,
     )
     return result[0]["deleted"] if result else 0
+
+
+async def forget_recover_by_element_id(
+    connector: Neo4jConnector,
+    element_id: str,
+) -> dict | None:
+    """Remove the soft-delete marker from a node, restoring it.
+
+    ``elementId()`` is globally unique within a Neo4j database, so no
+    additional scoping is required.
+
+    Returns a dict with ``node_id`` and ``labels`` on success, or ``None``
+    if no matching soft-deleted node was found.
+    """
+    from app.repositories.neo4j.cypher_queries import FORGET_RECOVER_BY_ELEMENT_ID
+    result = await connector.execute_query(
+        FORGET_RECOVER_BY_ELEMENT_ID,
+        element_id=element_id,
+    )
+    return result[0] if result else None
+
+

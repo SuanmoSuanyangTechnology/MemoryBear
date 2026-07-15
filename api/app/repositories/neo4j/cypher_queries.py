@@ -2698,8 +2698,10 @@ RETURN elementId(r) AS uuid
 DELETE_NODE_BY_ELEMENT_ID = """
 MATCH (n)
 WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id
+WITH n, elementId(n) AS node_id, n.content AS content, n.statement AS statement,
+     n.name AS name, n.text AS text, labels(n) AS labels
 DETACH DELETE n
-RETURN count(n) AS deleted
+RETURN count(n) AS deleted, node_id, content, statement, name, text, labels
 """
 
 # ── Forgetting engine (soft-delete) ────────────────────────────────────
@@ -2719,11 +2721,18 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     RETURN count(n) AS deleted
 """
 
+FORGET_RECOVER_BY_ELEMENT_ID = """
+    MATCH (n)
+    WHERE elementId(n) = $element_id
+    SET n.delete_at = NULL
+    RETURN n.id AS node_id, labels(n) AS labels
+"""
+
 FORGET_MIXED_CANDIDATES = """
 CALL () {
     MATCH (c:Chunk {end_user_id: $end_user_id})
     WHERE c.delete_at IS NULL
-    RETURN 'chunk' AS node_type, elementId(c) AS element_id, c.id AS node_id,
+    RETURN 'Chunk' AS node_type, elementId(c) AS element_id, c.content AS content,
            coalesce(c.created_at) AS sort_time, 0 AS extraction_count,
            null AS name, null AS _type
     ORDER BY sort_time ASC
@@ -2731,7 +2740,7 @@ CALL () {
     UNION ALL
     MATCH (s:Statement {end_user_id: $end_user_id})
     WHERE s.delete_at IS NULL
-    RETURN 'statement' AS node_type, elementId(s) AS element_id, s.id AS node_id,
+    RETURN 'Statement' AS node_type, elementId(s) AS element_id, s.statement AS content,
            coalesce(s.created_at) AS sort_time, 0 AS extraction_count,
            null AS name, null AS _type
     ORDER BY sort_time ASC
@@ -2740,7 +2749,7 @@ CALL () {
     MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
     WHERE e.delete_at IS NULL
       AND coalesce(e.extraction_count, 0) < $protection_threshold
-    RETURN 'entity' AS node_type, elementId(e) AS element_id, e.id AS node_id,
+    RETURN 'ExtractedEntity' AS node_type, elementId(e) AS element_id, e.name AS content,
            coalesce(e.created_at) AS sort_time,
            coalesce(e.extraction_count, 0) AS extraction_count,
            e.name AS name, e.entity_type AS _type
