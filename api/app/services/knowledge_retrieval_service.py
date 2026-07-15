@@ -1243,6 +1243,23 @@ class KnowledgeRetrievalService:
             return vector_chunks, full_text_chunks, unique_chunks
 
         vector_chunks, full_text_chunks, unique_chunks = await asyncio.to_thread(retrieve_candidates)
+        if not unique_chunks:
+            if log_id:
+                logger.info(
+                    "[Retrieval] target_done %s",
+                    cls._format_log_fields(cls._build_target_done_log_fields(
+                        log_id=log_id,
+                        target=target,
+                        target_position=target_position,
+                        vector_count=len(vector_chunks),
+                        full_text_count=len(full_text_chunks),
+                        merged_count=0,
+                        result_count=0,
+                        elapsed_ms=cls._elapsed_ms(started_at),
+                        local_rerank=False,
+                    )),
+                )
+            return []
         chunks = await cls.rerank_documents_async(
             db=db,
             rerank_id=request.rerank_id,
@@ -1364,6 +1381,23 @@ class KnowledgeRetrievalService:
             topk=target.params.top_n,
         )
         unique_chunks = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
+        if not unique_chunks:
+            if log_id:
+                logger.info(
+                    "[Retrieval] target_done %s",
+                    cls._format_log_fields(cls._build_target_done_log_fields(
+                        log_id=log_id,
+                        target=target,
+                        target_position=target_position,
+                        vector_count=len(vector_chunks),
+                        full_text_count=len(full_text_chunks),
+                        merged_count=0,
+                        result_count=0,
+                        elapsed_ms=cls._elapsed_ms(started_at),
+                        local_rerank=False,
+                    )),
+                )
+            return []
         # if len(unique_chunks) <= target.params.top_k:
         #     return unique_chunks
         if use_request_rerank and request.rerank_id:
