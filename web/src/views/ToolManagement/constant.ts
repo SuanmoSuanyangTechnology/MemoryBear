@@ -73,11 +73,11 @@ export const InnerConfigData: Record<string, InnerConfigItem> = {
           { required: true, message: 'common.pleaseEnter' }
         ]
       },
-      // api_key: {
-      //   name: ['config', 'parameters', 'api_key'],
-      //   type: 'input',
-      //   desc: 'MinerUTool_api_key_desc',
-      // },
+      MinerUTool_enable: {
+        name: ['config', 'is_enabled'],
+        type: 'checkbox',
+        defaultValue: true,
+      },
     },
     features: [
       'pdfParser',
