@@ -1172,6 +1172,7 @@ async def forget_soft_delete_by_element_ids(
 async def forget_recover_by_element_id(
     connector: Neo4jConnector,
     element_id: str,
+    now: str,
 ) -> dict | None:
     """Remove the soft-delete marker from a node, restoring it.
 
@@ -1185,6 +1186,7 @@ async def forget_recover_by_element_id(
     result = await connector.execute_query(
         FORGET_RECOVER_BY_ELEMENT_ID,
         element_id=element_id,
+        now=now,
     )
     return result[0] if result else None
 

@@ -2724,7 +2724,7 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
 FORGET_RECOVER_BY_ELEMENT_ID = """
     MATCH (n)
     WHERE elementId(n) = $element_id
-    SET n.delete_at = NULL
+    SET n.delete_at = NULL, n.created_at = datetime($now)
     RETURN n.id AS node_id, labels(n) AS labels
 """
 
