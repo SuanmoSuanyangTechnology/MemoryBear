@@ -13,9 +13,7 @@ import {
   applyMessageId,
   applyUserMessageId,
   appendWorkflowContent,
-  appendWorkflowOutputByNodeId,
   replaceWorkflowContent,
-  finalizeWorkflowOutputs,
   appendWorkflowIntervention,
   markWorkflowInterventionTimeout,
   mergeWorkflowAgentLog,
@@ -24,6 +22,11 @@ import {
   updateWorkflowCycle,
   updateWorkflowEnd,
 } from './helpers'
+// Shared per-node meta_data.outputs helpers (single source of truth).
+import {
+  appendOutputByNodeId as appendWorkflowOutputByNodeId,
+  finalizeOutputs as finalizeWorkflowOutputs,
+} from '@/components/Chat/utils/messageOutputs'
 
 type SetChatList = Dispatch<SetStateAction<Array<ChatItem | ChatItem[]>>>
 

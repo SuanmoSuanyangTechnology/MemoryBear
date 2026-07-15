@@ -2,8 +2,12 @@ import type { TFunction } from 'i18next'
 
 import type { ChatItem } from '@/components/Chat/types'
 import type { SSEMessage } from '@/utils/stream'
-import { mapLastVersion, appendOutputByNodeId, finalizeOutputs } from './helpers'
+import { mapLastVersion } from './helpers'
 import type { NodeContext, StreamEventData } from './types'
+import {
+  appendOutputByNodeId,
+  finalizeOutputs,
+} from '@/components/Chat/utils/messageOutputs'
 
 export interface WorkflowStreamDeps {
   conversationId: string | null;

@@ -5,6 +5,7 @@
  */
 import { type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
+import { appendOutputByNodeId, finalizeOutputs } from '@/components/Chat/utils/messageOutputs'
 import type { StreamData } from '../types';
 
 /** start/node_start event: backfills the most recent user message's id with the real user_message_id */
@@ -145,93 +146,6 @@ const markInterventionTimeout = (
       }
     ]
   }
-}
-
-/**
- * On message event: accumulates streaming content into the last assistant
- * message's meta_data.outputs, keyed by node_id. Appends to the matching node_id
- * if present, otherwise creates a new entry, to support multi-answer replies
- * (several output nodes each forming their own segment within one reply). Only
- * applies when the last item is an assistant message; for the array form, targets
- * the last version.
- */
-const appendOutputByNodeId = (
-  prev: Array<ChatItem | ChatItem[]>,
-  nodeId?: string,
-  content: string = '',
-): Array<ChatItem | ChatItem[]> => {
-  if (!nodeId || !content) return prev
-
-  const mergeOutputs = (msg: ChatItem): ChatItem => {
-    const outputs = [...(msg.meta_data?.outputs || [])]
-    const idx = outputs.findIndex(o => o.node_id === nodeId)
-    if (idx === -1) {
-      outputs.push({ node_id: nodeId, content, status: 'running' })
-    } else {
-      outputs[idx] = { ...outputs[idx], content: (outputs[idx].content || '') + content }
-    }
-    return {
-      ...msg,
-      meta_data: { ...(msg.meta_data || {}), outputs },
-    }
-  }
-
-  const lastList = [...prev]
-  const lastIndex = lastList.length - 1
-  const lastEntry = lastList[lastIndex]
-
-  if (Array.isArray(lastEntry)) {
-    const lastChatIndex = lastEntry.length - 1
-    const lastMsg = lastEntry[lastChatIndex]
-    if (lastMsg?.role === 'assistant') {
-      return [
-        ...lastList.slice(0, lastIndex),
-        [...lastEntry.slice(0, lastChatIndex), mergeOutputs(lastMsg)],
-      ]
-    }
-  } else if (lastEntry?.role === 'assistant') {
-    return [
-      ...lastList.slice(0, lastIndex),
-      mergeOutputs(lastEntry),
-    ]
-  }
-  return prev
-}
-
-/** On stream end, marks any still-running outputs segments of the last assistant message as success */
-const finalizeOutputs = (
-  prev: Array<ChatItem | ChatItem[]>,
-): Array<ChatItem | ChatItem[]> => {
-  const settle = (msg: ChatItem): ChatItem => {
-    if (!msg.meta_data?.outputs?.length) return msg
-    return {
-      ...msg,
-      meta_data: {
-        ...msg.meta_data,
-        outputs: msg.meta_data.outputs.map(o =>
-          o.status === 'running' ? { ...o, status: 'success' } : o
-        ),
-      },
-    }
-  }
-
-  const lastList = [...prev]
-  const lastIndex = lastList.length - 1
-  const lastEntry = lastList[lastIndex]
-
-  if (Array.isArray(lastEntry)) {
-    const lastChatIndex = lastEntry.length - 1
-    const lastMsg = lastEntry[lastChatIndex]
-    if (lastMsg?.role === 'assistant') {
-      return [
-        ...lastList.slice(0, lastIndex),
-        [...lastEntry.slice(0, lastChatIndex), settle(lastMsg)],
-      ]
-    }
-  } else if (lastEntry?.role === 'assistant') {
-    return [...lastList.slice(0, lastIndex), settle(lastEntry)]
-  }
-  return prev
 }
 
 export interface StreamHandlerDeps {

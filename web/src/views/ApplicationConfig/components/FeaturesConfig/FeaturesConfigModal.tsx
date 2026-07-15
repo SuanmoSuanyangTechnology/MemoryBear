@@ -200,7 +200,9 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 >
                   {/* Label and description section */}
                   <LabelWrapper title={t('application.sensitive_word_avoidance')}>
-                    {values?.sensitive_word_avoidance?.enabled ? undefined : t('application.sensitive_word_avoidance_desc')}
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mt-1">
+                      {values?.sensitive_word_avoidance?.enabled ? undefined : t('application.sensitive_word_avoidance_desc')}
+                    </div>
                   </LabelWrapper>
 
                   <Switch value={values?.sensitive_word_avoidance?.enabled} onChange={handleSwitchContentModeration} />
