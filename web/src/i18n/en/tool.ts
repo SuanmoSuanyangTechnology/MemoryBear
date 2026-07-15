@@ -26,6 +26,7 @@ export const tool = {
       error_desc: 'API is configured but connection error',
       MinerUTool_available_desc: 'API URL is configured and enabled',
       MinerUTool_unconfigured_desc: 'Need to configure API URL',
+      MinerUTool_configured_disabled_desc: 'Configured but not enabled',
       DatabaseTool_available_desc: 'Database tool is enabled',
       DatabaseTool_configured_disabled_desc: 'Not enabled',
 
