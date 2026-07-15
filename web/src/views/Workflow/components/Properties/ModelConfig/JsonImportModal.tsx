@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal';
 import CodeMirrorEditor from '@/components/CodeMirrorEditor';
-import type { Field } from './StructuredOutputSchemaModal';
+import type { Field } from './types';
 
 export interface JsonImportModalRef {
   handleOpen: (text?: string) => void;
