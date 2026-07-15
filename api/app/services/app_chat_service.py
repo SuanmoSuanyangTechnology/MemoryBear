@@ -1584,6 +1584,8 @@ class AppChatService:
             workspace_id=workspace_id,
             release_id=release_id,
             source=source,
+            prepared_memory_storage_type=storage_type,
+            prepared_user_rag_memory_id=user_rag_memory_id,
         )
 
     async def workflow_chat_stream(
@@ -1621,7 +1623,9 @@ class AppChatService:
                 workspace_id=workspace_id,
                 release_id=release_id,
                 public=public,
-                source=source
+                source=source,
+                prepared_memory_storage_type=storage_type,
+                prepared_user_rag_memory_id=user_rag_memory_id,
         ):
             yield event
 
