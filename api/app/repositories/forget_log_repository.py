@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -135,7 +135,7 @@ class ForgetLogRepository:
         end_user_id: uuid.UUID,
         method: int | None = None,
         memory_type: str | None = None,
-        status: bool | None = None,
+        status: str | None = None,
         page: int = 1,
         pagesize: int = 10,
     ) -> tuple[list[ForgetAuditModel], dict[uuid.UUID, str], int]:
@@ -146,7 +146,7 @@ class ForgetLogRepository:
             end_user_id: 终端用户 ID（必填）。
             method: 遗忘触发方式（1=手动, 2=定时）。
             memory_type: 记忆节点类型过滤。
-            status: 恢复状态（True=已恢复, False=未恢复, None=全部）。
+            status: 恢复状态（"recoverable"=可恢复, "deleted"=已删除, None=全部）。
             page: 页码，从 1 开始。
             pagesize: 每页条数。
 
@@ -158,8 +158,20 @@ class ForgetLogRepository:
             conditions.append(ForgetAuditModel.trigger == method)
         if memory_type is not None:
             conditions.append(ForgetAuditModel.node_type == memory_type)
-        if status is not None:
-            conditions.append(ForgetAuditModel.is_recovered == status)
+        if status == "recoverable":
+            conditions.append(
+                and_(
+                    ForgetAuditModel.is_recovered == False,
+                    ForgetAuditModel.recoverable == True,
+                )
+            )
+        elif status == "deleted":
+            conditions.append(
+                or_(
+                    ForgetAuditModel.is_recovered == False,
+                    ForgetAuditModel.recoverable == False,
+                )
+            )
 
         base_query = select(ForgetAuditModel).where(*conditions)
 
