@@ -6,6 +6,7 @@
 - `rag_retrieval_load_test.py`：基于 Locust 的检索接口性能压测。
 
 两个脚本都只通过 HTTP 调用已经运行的 MemoryBear 服务，不导入 `app`、service、model 或数据库代码，也不读取项目 `.env`。可以将脚本复制到其他目录后单独运行。
+两个脚本都会生成中文 `report.html`；JSON/JSONL 保留英文键名，供 CI、`jq` 和其他程序稳定读取。
 
 ## 1. 评测范围
 
@@ -336,9 +337,16 @@ hybrid
 ```text
 case_results.jsonl
 summary.json
+report.html
 ```
 
-`case_results.jsonl` 保存逐 case 的请求状态、耗时、返回 ID、指标和错误；`summary.json` 保存运行配置、数据集 hash、成功/失败数量和平均指标。
+`report.html` 是中文人可读报告，包含总体指标、单文档/多文档/no-hit 分组结果、逐 case 概要和指标解释。可以直接打开：
+
+```bash
+open api/tmp/rag_evaluation/runs/quality-hybrid-top10/report.html
+```
+
+`case_results.jsonl` 保存逐 case 的请求状态、耗时、返回 ID、指标和错误；`summary.json` 保存运行配置、数据集 hash、成功/失败数量和平均指标。这两个机器可读文件的字段名仍为英文，不影响中文报告。
 
 如果 Ragas 导入或计算失败，逐 case 会出现 `ragas_error`，summary 的 `ragas_failure_count` 大于 0，进程以退出码 3 结束，避免只输出本地指标却被误认为 Ragas 已成功执行。
 
@@ -531,6 +539,17 @@ locust_stats_history.csv
 locust_failures.csv
 locust_exceptions.csv
 report.html
+locust-report.html
+```
+
+`report.html` 是脚本生成的中文主报告，包含请求数、失败率、RPS、延迟分位数、门禁结果、失败类型，以及 staircase 的逐档并发统计。
+
+`locust-report.html` 是 Locust 生成的原始英文页，仅在需要查看 Locust 原生图表或诊断信息时使用。
+
+正常压测结束后直接打开中文报告：
+
+```bash
+open api/tmp/rag_evaluation/runs/load-smoke-001/report.html
 ```
 
 `summary.json` 包含：
@@ -541,6 +560,23 @@ report.html
 - p50、p90、p95、p99 和最大延迟；
 - 门禁失败原因；
 - 最终 passed 状态。
+
+### 5.6 为已有压测结果生成中文报告
+
+如果旧的运行目录中只有 Locust 英文 `report.html`，不用重新压测，执行：
+
+```bash
+uv run api/scripts/rag_retrieval_load_test.py \
+  --render-report-dir api/tmp/rag_evaluation/runs/load-smoke-001
+```
+
+脚本会：
+
+1. 读取目录中的 `manifest.json`、`summary.json` 和 Locust CSV；
+2. 把原有 Locust 英文页保留为 `locust-report.html`；
+3. 生成新的中文 `report.html`。
+
+如果运行被中断、没有 `summary.json`，但 `locust_stats.csv` 仍可读，中文页会标记“运行未完整结束”，只展示诊断数据，不判定门禁通过。
 
 ## 6. 退出码
 

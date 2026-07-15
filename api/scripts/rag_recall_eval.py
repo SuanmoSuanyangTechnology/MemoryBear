@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import html
 import json
 import math
 import os
@@ -82,7 +83,9 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise EvaluationError(f"Invalid JSONL at {path}:{line_number}: {exc}") from exc
+                raise EvaluationError(
+                    f"Invalid JSONL at {path}:{line_number}: {exc}"
+                ) from exc
             if not isinstance(row, dict):
                 raise EvaluationError(f"Expected JSON object at {path}:{line_number}")
             rows.append(row)
@@ -113,7 +116,9 @@ class ApiClient:
     def post(self, path: str, payload: dict[str, Any]) -> Any:
         return self._request("POST", path, payload)
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> Any:
         url = f"{self.base_url}{path}"
         body = canonical_json(payload).encode("utf-8") if payload is not None else None
         request = urllib.request.Request(
@@ -132,9 +137,13 @@ class ApiClient:
                 status = response.status
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
-            raise EvaluationError(f"HTTP {exc.code} from {method} {path}: {raw[:500]}") from exc
+            raise EvaluationError(
+                f"HTTP {exc.code} from {method} {path}: {raw[:500]}"
+            ) from exc
         except urllib.error.URLError as exc:
-            raise EvaluationError(f"Request failed for {method} {path}: {exc.reason}") from exc
+            raise EvaluationError(
+                f"Request failed for {method} {path}: {exc.reason}"
+            ) from exc
 
         if not 200 <= status < 300:
             raise EvaluationError(f"HTTP {status} from {method} {path}")
@@ -155,7 +164,9 @@ class ApiClient:
 def require_token(env_name: str) -> str:
     token = os.getenv(env_name, "").strip()
     if not token:
-        raise EvaluationError(f"Missing authentication token in environment variable {env_name}")
+        raise EvaluationError(
+            f"Missing authentication token in environment variable {env_name}"
+        )
     return token
 
 
@@ -197,7 +208,9 @@ def flatten_chunk_items(
     return flattened
 
 
-def normalize_snapshot_chunk(item: dict[str, Any], kb_id: str, document_id: str) -> dict[str, Any]:
+def normalize_snapshot_chunk(
+    item: dict[str, Any], kb_id: str, document_id: str
+) -> dict[str, Any]:
     metadata = dict(item.get("metadata") or {})
     metadata.setdefault("knowledge_id", kb_id)
     metadata.setdefault("document_id", document_id)
@@ -273,7 +286,11 @@ def snapshot_command(args: argparse.Namespace) -> int:
             if not document_id:
                 raise EvaluationError(f"Document without id in knowledge base {kb_id}")
             if not args.include_unready:
-                if document.get("status") != 1 or document.get("progress") != 1 or document.get("run") != 0:
+                if (
+                    document.get("status") != 1
+                    or document.get("progress") != 1
+                    or document.get("run") != 0
+                ):
                     raise EvaluationError(
                         f"Document {document_id} is not ready: status={document.get('status')}, "
                         f"progress={document.get('progress')}, run={document.get('run')}"
@@ -343,14 +360,22 @@ class OpenAICompatibleGenerator:
             if not value
         ]
         if missing:
-            raise EvaluationError(f"Missing LLM environment variables: {', '.join(missing)}")
-        self.url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+            raise EvaluationError(
+                f"Missing LLM environment variables: {', '.join(missing)}"
+            )
+        self.url = (
+            base_url
+            if base_url.endswith("/chat/completions")
+            else f"{base_url}/chat/completions"
+        )
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
         self.temperature = temperature
 
-    def generate(self, evidence: list[dict[str, str]], no_hit: bool = False) -> dict[str, str]:
+    def generate(
+        self, evidence: list[dict[str, str]], no_hit: bool = False
+    ) -> dict[str, str]:
         if no_hit:
             task = (
                 "Generate one natural user question that is unrelated to and cannot be answered by the provided "
@@ -413,7 +438,11 @@ def context_id(chunk: dict[str, Any]) -> str:
         [
             str(chunk.get("knowledge_id") or ""),
             str(chunk.get("document_id") or ""),
-            str(chunk.get("canonical_evidence_id") or chunk.get("physical_chunk_id") or ""),
+            str(
+                chunk.get("canonical_evidence_id")
+                or chunk.get("physical_chunk_id")
+                or ""
+            ),
         ]
     )
 
@@ -465,7 +494,9 @@ def build_generated_case(
     file_name_counts: dict[tuple[str, str], int],
 ) -> dict[str, Any]:
     if no_hit:
-        kb_ids = sorted(str(item.get("id")) for item in snapshot.get("knowledges") or [])
+        kb_ids = sorted(
+            str(item.get("id")) for item in snapshot.get("knowledges") or []
+        )
         return {
             "schema_version": SCHEMA_VERSION,
             "case_id": f"no-hit-{index:05d}",
@@ -502,7 +533,9 @@ def build_generated_case(
             corpus_mode = "single_document_filter"
             target["file_names_filter"] = [file_name]
             if file_name_counts[(kb_id, file_name)] != 1:
-                raise EvaluationError(f"File name {file_name!r} is not unique in knowledge base {kb_id}")
+                raise EvaluationError(
+                    f"File name {file_name!r} is not unique in knowledge base {kb_id}"
+                )
     return {
         "schema_version": SCHEMA_VERSION,
         "case_id": f"{corpus_mode}-{index:05d}",
@@ -552,7 +585,9 @@ def generate_command(args: argparse.Namespace) -> int:
         if kb_document_counts[kb_id] == 1 or file_name_counts[(kb_id, file_name)] == 1:
             single_eligible.append(source)
     if not single_eligible:
-        raise EvaluationError("No source chunk can form an unambiguous single-document case")
+        raise EvaluationError(
+            "No source chunk can form an unambiguous single-document case"
+        )
 
     rng = random.Random(args.seed)
     generator = OpenAICompatibleGenerator(args.timeout, args.temperature)
@@ -561,7 +596,9 @@ def generate_command(args: argparse.Namespace) -> int:
     multi_count = min(remaining, round(remaining * args.multi_ratio))
     single_count = remaining - multi_count
     if multi_count and len(by_document) < 2:
-        raise EvaluationError("At least two documents are required for multi-document generation")
+        raise EvaluationError(
+            "At least two documents are required for multi-document generation"
+        )
 
     plans: list[tuple[list[dict[str, Any]], bool]] = []
     for _ in range(single_count):
@@ -621,11 +658,18 @@ def generate_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def validate_cases(cases: list[dict[str, Any]], snapshot: dict[str, Any] | None = None) -> list[str]:
+def validate_cases(
+    cases: list[dict[str, Any]], snapshot: dict[str, Any] | None = None
+) -> list[str]:
     errors: list[str] = []
+    if not cases:
+        errors.append("dataset is empty")
+        return errors
     seen_ids: set[str] = set()
     snapshot_hash = snapshot.get("physical_corpus_sha256") if snapshot else None
-    valid_context_ids = {context_id(chunk) for chunk in (snapshot or {}).get("chunks") or []}
+    valid_context_ids = {
+        context_id(chunk) for chunk in (snapshot or {}).get("chunks") or []
+    }
     for index, case in enumerate(cases, start=1):
         prefix = f"case[{index}]"
         case_id = str(case.get("case_id") or "")
@@ -646,7 +690,9 @@ def validate_cases(cases: list[dict[str, Any]], snapshot: dict[str, Any] | None 
         gold = case.get("gold_context_ids") or []
         if case.get("expected_no_hit"):
             if gold:
-                errors.append(f"{prefix}: no-hit case must not contain gold_context_ids")
+                errors.append(
+                    f"{prefix}: no-hit case must not contain gold_context_ids"
+                )
         elif not gold:
             errors.append(f"{prefix}: ordinary case needs gold_context_ids")
         if snapshot_hash and case.get("physical_corpus_sha256") != snapshot_hash:
@@ -654,7 +700,9 @@ def validate_cases(cases: list[dict[str, Any]], snapshot: dict[str, Any] | None 
         if snapshot and not case.get("expected_no_hit"):
             missing = sorted(set(gold) - valid_context_ids)
             if missing:
-                errors.append(f"{prefix}: gold context ids missing from snapshot: {missing}")
+                errors.append(
+                    f"{prefix}: gold context ids missing from snapshot: {missing}"
+                )
     return errors
 
 
@@ -684,7 +732,11 @@ def canonical_result_ids(item: dict[str, Any]) -> tuple[str, str]:
     else:
         evidence_id = physical_id
     document_result_id = f"{kb_id}:{document_id}" if kb_id and document_id else ""
-    context_result_id = f"{kb_id}:{document_id}:{evidence_id}" if document_result_id and evidence_id else ""
+    context_result_id = (
+        f"{kb_id}:{document_id}:{evidence_id}"
+        if document_result_id and evidence_id
+        else ""
+    )
     return document_result_id, context_result_id
 
 
@@ -706,7 +758,11 @@ def reciprocal_rank(retrieved: list[str], gold: set[str]) -> float:
 def ndcg(retrieved: list[str], gold: set[str]) -> float:
     if not gold:
         return 0.0
-    dcg = sum(1.0 / math.log2(rank + 1) for rank, item in enumerate(retrieved, start=1) if item in gold)
+    dcg = sum(
+        1.0 / math.log2(rank + 1)
+        for rank, item in enumerate(retrieved, start=1)
+        if item in gold
+    )
     ideal_count = min(len(gold), len(retrieved))
     ideal = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_count + 1))
     return dcg / ideal if ideal else 0.0
@@ -732,10 +788,280 @@ async def ragas_id_scores(retrieved: list[str], gold: list[str]) -> tuple[float,
         warnings.filterwarnings("ignore", message="Importing IDBasedContext")
         from ragas.metrics import IDBasedContextPrecision, IDBasedContextRecall
 
-    sample = SingleTurnSample(retrieved_context_ids=retrieved, reference_context_ids=gold)
+    sample = SingleTurnSample(
+        retrieved_context_ids=retrieved, reference_context_ids=gold
+    )
     ragas_precision = await IDBasedContextPrecision().single_turn_ascore(sample)
     ragas_recall = await IDBasedContextRecall().single_turn_ascore(sample)
     return float(ragas_precision), float(ragas_recall)
+
+
+METRIC_LABELS = {
+    "context_precision": "Chunk 精确率",
+    "context_recall": "Chunk 召回率",
+    "context_hit": "Chunk 命中率",
+    "context_mrr": "Chunk MRR",
+    "context_ndcg": "Chunk nDCG",
+    "document_recall": "文档召回率",
+    "document_hit": "文档命中率",
+    "group_recall": "证据组覆盖率",
+    "complete_evidence_group": "完整证据组命中率",
+    "ragas_id_context_precision": "Ragas ID 精确率",
+    "ragas_id_context_recall": "Ragas ID 召回率",
+}
+
+CORPUS_MODE_LABELS = {
+    "single_document_kb": "单文档知识库",
+    "single_document_filter": "单文档过滤",
+    "multi_document": "多文档",
+    "no_hit": "无答案",
+}
+
+
+def html_escape(value: Any) -> str:
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def format_percent(value: Any) -> str:
+    if value is None:
+        return "—"
+    return f"{float(value) * 100:.2f}%"
+
+
+def format_number(value: Any, digits: int = 2) -> str:
+    if value is None:
+        return "—"
+    return f"{float(value):.{digits}f}"
+
+
+def metric_keys_in_order(metrics: dict[str, Any]) -> list[str]:
+    return sorted(metrics, key=lambda value: int(value.lstrip("@")))
+
+
+def average_detail_metric(
+    rows: list[dict[str, Any]], key: str, metric: str
+) -> float | None:
+    values = [
+        item["metrics"][key][metric]
+        for item in rows
+        if isinstance(item.get("metrics", {}).get(key), dict)
+        and item["metrics"][key].get(metric) is not None
+    ]
+    if not values:
+        return None
+    return sum(float(value) for value in values) / len(values)
+
+
+def render_metric_table(
+    title: str,
+    metric_names: list[str],
+    summary_metrics: dict[str, Any],
+) -> str:
+    headers = "".join(
+        f"<th>{html_escape(METRIC_LABELS[name])}</th>" for name in metric_names
+    )
+    rows = []
+    for key in metric_keys_in_order(summary_metrics):
+        values = summary_metrics[key]
+        cells = "".join(
+            f"<td>{format_percent(values.get(name))}</td>" for name in metric_names
+        )
+        rows.append(f"<tr><th>K={html_escape(key.lstrip('@'))}</th>{cells}</tr>")
+    return (
+        f'<section><h2>{html_escape(title)}</h2><div class="table-wrap"><table>'
+        f"<thead><tr><th>截断位置</th>{headers}</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div></section>"
+    )
+
+
+def render_recall_report(
+    summary: dict[str, Any], details: list[dict[str, Any]], output: Path
+) -> None:
+    summary_metrics = summary.get("metrics") or {}
+    metric_keys = metric_keys_in_order(summary_metrics)
+    display_key = metric_keys[-1] if metric_keys else None
+    display_label = f"K={display_key.lstrip('@')}" if display_key else "无 K 值"
+    request_failures = int(summary.get("request_failure_count") or 0)
+    ragas_failures = int(summary.get("ragas_failure_count") or 0)
+    status_ok = request_failures == 0 and ragas_failures == 0
+    status_text = "评测运行完成" if status_ok else "评测存在异常"
+    status_class = "good" if status_ok else "bad"
+    no_hit_count = sum(1 for item in details if item.get("corpus_mode") == "no_hit")
+
+    metric_sections = []
+    if summary_metrics:
+        metric_sections.extend(
+            [
+                render_metric_table(
+                    "Chunk 召回质量",
+                    [
+                        "context_precision",
+                        "context_recall",
+                        "context_hit",
+                        "context_mrr",
+                        "context_ndcg",
+                    ],
+                    summary_metrics,
+                ),
+                render_metric_table(
+                    "文档与多证据召回质量",
+                    [
+                        "document_recall",
+                        "document_hit",
+                        "group_recall",
+                        "complete_evidence_group",
+                    ],
+                    summary_metrics,
+                ),
+                render_metric_table(
+                    "Ragas ID 指标",
+                    ["ragas_id_context_precision", "ragas_id_context_recall"],
+                    summary_metrics,
+                ),
+            ]
+        )
+
+    group_rows = []
+    ordered_modes = [
+        "single_document_kb",
+        "single_document_filter",
+        "multi_document",
+        "no_hit",
+    ]
+    for mode in ordered_modes:
+        rows = [item for item in details if item.get("corpus_mode") == mode]
+        if not rows:
+            continue
+        successful = sum(bool(item.get("request_success")) for item in rows)
+        if mode == "no_hit":
+            no_hit_values = [
+                item.get("metrics", {}).get("no_hit_correct") for item in rows
+            ]
+            accuracy = sum(bool(value) for value in no_hit_values) / len(no_hit_values)
+            group_rows.append(
+                "<tr>"
+                f"<td>{html_escape(CORPUS_MODE_LABELS[mode])}</td><td>{len(rows)}</td><td>{successful}</td>"
+                f'<td colspan="4">无答案准确率 {format_percent(accuracy)}</td>'
+                "</tr>"
+            )
+            continue
+        key = display_key or ""
+        group_rows.append(
+            "<tr>"
+            f"<td>{html_escape(CORPUS_MODE_LABELS.get(mode, mode))}</td><td>{len(rows)}</td><td>{successful}</td>"
+            f"<td>{format_percent(average_detail_metric(rows, key, 'context_hit'))}</td>"
+            f"<td>{format_percent(average_detail_metric(rows, key, 'context_recall'))}</td>"
+            f"<td>{format_percent(average_detail_metric(rows, key, 'document_hit'))}</td>"
+            f"<td>{format_percent(average_detail_metric(rows, key, 'complete_evidence_group'))}</td>"
+            "</tr>"
+        )
+
+    case_rows = []
+    for item in details:
+        mode = str(item.get("corpus_mode") or "unknown")
+        metrics = item.get("metrics") or {}
+        if mode == "no_hit":
+            quality = "正确无结果" if metrics.get("no_hit_correct") else "误召回"
+            hit = "—"
+            mrr = "—"
+            complete = "—"
+        else:
+            row = metrics.get(display_key, {}) if display_key else {}
+            quality = "命中" if row.get("context_hit") else "未命中"
+            hit = format_percent(row.get("context_hit"))
+            mrr = format_number(row.get("context_mrr"), 3)
+            complete = format_percent(row.get("complete_evidence_group"))
+        request_status = "成功" if item.get("request_success") else "失败"
+        request_class = "good-text" if item.get("request_success") else "bad-text"
+        case_rows.append(
+            "<tr>"
+            f"<td><code>{html_escape(item.get('case_id'))}</code></td>"
+            f"<td>{html_escape(CORPUS_MODE_LABELS.get(mode, mode))}</td>"
+            f'<td class="{request_class}">{request_status}</td>'
+            f"<td>{format_number(item.get('elapsed_ms'), 1)} ms</td>"
+            f"<td>{int(item.get('result_count') or 0)}</td>"
+            f"<td>{html_escape(quality)}</td><td>{hit}</td><td>{mrr}</td><td>{complete}</td>"
+            "</tr>"
+        )
+
+    retrieval = summary.get("retrieval") or {}
+    rerank_threshold = retrieval.get("rerank_score_threshold")
+    rerank_label = "未设置" if rerank_threshold is None else rerank_threshold
+    report = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识库召回效果评测报告</title>
+<style>
+:root {{ color-scheme: light; --ink:#172033; --muted:#637083; --line:#dce3ed; --panel:#f7f9fc; --good:#137a4b; --bad:#b42318; --accent:#3157d5; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:#eef2f7; color:var(--ink); font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }}
+main {{ width:min(1280px, calc(100% - 32px)); margin:32px auto; }}
+header, section {{ background:white; border:1px solid var(--line); border-radius:14px; padding:22px; margin-bottom:16px; box-shadow:0 6px 24px rgba(25,41,72,.05); }}
+h1 {{ margin:0 0 8px; font-size:28px; }} h2 {{ margin:0 0 14px; font-size:19px; }}
+p {{ margin:6px 0; }} .muted {{ color:var(--muted); }}
+.status {{ display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; }}
+.status.good {{ color:var(--good); background:#e8f7ef; }} .status.bad {{ color:var(--bad); background:#ffebe9; }}
+.cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-top:18px; }}
+.card {{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }}
+.card b {{ display:block; font-size:23px; margin-top:3px; }}
+.table-wrap {{ overflow:auto; }} table {{ width:100%; border-collapse:collapse; white-space:nowrap; }}
+th,td {{ border-bottom:1px solid var(--line); padding:10px 12px; text-align:right; }} th:first-child,td:first-child {{ text-align:left; }}
+thead th {{ background:var(--panel); color:#3c4960; position:sticky; top:0; }}
+code {{ font-family:"SFMono-Regular",Consolas,monospace; font-size:12px; }}
+.good-text {{ color:var(--good); font-weight:650; }} .bad-text {{ color:var(--bad); font-weight:650; }}
+.params {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px 18px; }}
+.params div {{ border-bottom:1px dashed var(--line); padding:6px 0; }}
+dl {{ display:grid; grid-template-columns:minmax(180px,260px) 1fr; gap:8px 18px; }} dt {{ font-weight:700; }} dd {{ margin:0; color:var(--muted); }}
+</style>
+</head>
+<body><main>
+<header>
+  <span class="status {status_class}">{status_text}</span>
+  <h1>知识库召回效果评测报告</h1>
+  <p class="muted">生成时间：{html_escape(summary.get("created_at"))}，本报告只评测检索与召回，不包含最终答案评测。</p>
+  <div class="cards">
+    <div class="card">评测 case<b>{int(summary.get("case_count") or 0)}</b></div>
+    <div class="card">请求成功<b>{int(summary.get("request_success_count") or 0)}</b></div>
+    <div class="card">请求失败<b>{request_failures}</b></div>
+    <div class="card">Ragas 计算失败<b>{ragas_failures}</b></div>
+    <div class="card">no-hit 样本<b>{no_hit_count}</b></div>
+    <div class="card">no-hit 准确率<b>{format_percent(summary.get("no_hit_accuracy"))}</b></div>
+  </div>
+</header>
+<section><h2>运行参数</h2><div class="params">
+  <div>数据集：<code>{html_escape(summary.get("dataset"))}</code></div>
+  <div>数据集 SHA256：<code>{html_escape(summary.get("dataset_sha256"))}</code></div>
+  <div>语料 SHA256：<code>{html_escape(summary.get("physical_corpus_sha256"))}</code></div>
+  <div>检索方式：{html_escape(retrieval.get("retrieve_type"))}</div>
+  <div>top_k / top_n：{html_escape(retrieval.get("top_k"))} / {html_escape(retrieval.get("top_n"))}</div>
+  <div>相似度阈值：{html_escape(retrieval.get("similarity_threshold"))}</div>
+  <div>向量权重：{html_escape(retrieval.get("vector_similarity_weight"))}</div>
+  <div>重排阈值：{html_escape(rerank_label)}</div>
+</div></section>
+{"".join(metric_sections)}
+<section><h2>分场景结果（{html_escape(display_label)}）</h2><div class="table-wrap"><table>
+<thead><tr><th>场景</th><th>case 数</th><th>请求成功</th><th>Chunk 命中率</th><th>Chunk 召回率</th><th>文档命中率</th><th>完整证据组</th></tr></thead>
+<tbody>{"".join(group_rows)}</tbody></table></div></section>
+<section><h2>逐 case 结果（{html_escape(display_label)}）</h2><div class="table-wrap"><table>
+<thead><tr><th>case ID</th><th>场景</th><th>请求</th><th>耗时</th><th>返回数</th><th>判定</th><th>Hit</th><th>MRR</th><th>完整证据组</th></tr></thead>
+<tbody>{"".join(case_rows)}</tbody></table></div></section>
+<section><h2>指标怎么看</h2><dl>
+  <dt>Chunk 精确率</dt><dd>前 K 个召回 chunk 中，黄金 chunk 所占比例。返回了很多无关 chunk 时会下降。</dd>
+  <dt>Chunk 召回率</dt><dd>黄金 chunk 中有多少被前 K 个结果覆盖。</dd>
+  <dt>Chunk 命中率</dt><dd>每个 case 前 K 个结果至少命中一个黄金 chunk 的比例。</dd>
+  <dt>MRR</dt><dd>第一个黄金 chunk 排名的倒数，越靠前越接近 100%。</dd>
+  <dt>nDCG</dt><dd>对多个黄金 chunk 的排名质量进行位置折损计算。</dd>
+  <dt>完整证据组</dt><dd>多文档问题所需的一整组证据是否都被召回。</dd>
+  <dt>Ragas ID 指标</dt><dd>Ragas 根据召回 context ID 与黄金 context ID 的集合关系计算的精确率和召回率。</dd>
+  <dt>no-hit 准确率</dt><dd>对预期知识库无法回答的问题，接口正确返回空列表的比例。</dd>
+</dl></section>
+<section><h2>数据局限</h2><p>黄金证据来自生成问题时选中的 source chunk，未自动穷举知识库中所有等价 chunk。`generated_unreviewed` 数据集适合建立基线和参数对比，不等同于经人工审核的绝对正确率。</p></section>
+</main></body></html>
+"""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(report, encoding="utf-8")
 
 
 def evaluate_command(args: argparse.Namespace) -> int:
@@ -766,7 +1092,9 @@ def evaluate_command(args: argparse.Namespace) -> int:
                 "vector_similarity_weight": args.vector_similarity_weight,
                 "rerank_score_threshold": args.rerank_score_threshold,
             }
-            payload = {key: value for key, value in payload.items() if value is not None}
+            payload = {
+                key: value for key, value in payload.items() if value is not None
+            }
             started = time.perf_counter()
             try:
                 response_items = client.post("/api/chunks/retrieval", payload)
@@ -806,7 +1134,9 @@ def evaluate_command(args: argparse.Namespace) -> int:
                 "metrics": {},
             }
             if case.get("expected_no_hit"):
-                result["metrics"]["no_hit_correct"] = not response_items
+                result["metrics"]["no_hit_correct"] = (
+                    request_error is None and not response_items
+                )
             else:
                 gold_contexts = list(case.get("gold_context_ids") or [])
                 gold_context_set = set(gold_contexts)
@@ -814,15 +1144,25 @@ def evaluate_command(args: argparse.Namespace) -> int:
                 for k in k_values:
                     retrieved_contexts = context_ids[:k]
                     retrieved_documents = document_ids[:k]
-                    group_recall, complete_group = group_scores(retrieved_contexts, case)
+                    group_recall, complete_group = group_scores(
+                        retrieved_contexts, case
+                    )
                     metric_row: dict[str, Any] = {
-                        "context_precision": precision(retrieved_contexts, gold_context_set),
+                        "context_precision": precision(
+                            retrieved_contexts, gold_context_set
+                        ),
                         "context_recall": recall(retrieved_contexts, gold_context_set),
                         "context_hit": bool(set(retrieved_contexts) & gold_context_set),
-                        "context_mrr": reciprocal_rank(retrieved_contexts, gold_context_set),
+                        "context_mrr": reciprocal_rank(
+                            retrieved_contexts, gold_context_set
+                        ),
                         "context_ndcg": ndcg(retrieved_contexts, gold_context_set),
-                        "document_recall": recall(retrieved_documents, gold_document_set),
-                        "document_hit": bool(set(retrieved_documents) & gold_document_set),
+                        "document_recall": recall(
+                            retrieved_documents, gold_document_set
+                        ),
+                        "document_hit": bool(
+                            set(retrieved_documents) & gold_document_set
+                        ),
                         "group_recall": group_recall,
                         "complete_evidence_group": complete_group,
                     }
@@ -842,10 +1182,19 @@ def evaluate_command(args: argparse.Namespace) -> int:
     summary_metrics: dict[str, Any] = {}
     for k in k_values:
         key = f"@{k}"
-        rows = [item["metrics"].get(key) for item in details if item["metrics"].get(key)]
+        rows = [
+            item["metrics"].get(key) for item in details if item["metrics"].get(key)
+        ]
         if not rows:
             continue
-        metric_names = sorted({name for row in rows for name, value in row.items() if isinstance(value, (int, float, bool))})
+        metric_names = sorted(
+            {
+                name
+                for row in rows
+                for name, value in row.items()
+                if isinstance(value, (int, float, bool))
+            }
+        )
         summary_metrics[key] = {
             name: sum(float(row[name]) for row in rows if row.get(name) is not None)
             / sum(1 for row in rows if row.get(name) is not None)
@@ -858,13 +1207,16 @@ def evaluate_command(args: argparse.Namespace) -> int:
         "created_at": utc_now(),
         "dataset": str(args.dataset),
         "dataset_sha256": hashlib.sha256(args.dataset.read_bytes()).hexdigest(),
-        "physical_corpus_sha256": cases[0].get("physical_corpus_sha256") if cases else None,
+        "physical_corpus_sha256": cases[0].get("physical_corpus_sha256")
+        if cases
+        else None,
         "case_count": len(cases),
         "request_success_count": len(cases) - failed_requests,
         "request_failure_count": failed_requests,
         "ragas_failure_count": ragas_failures,
         "no_hit_accuracy": (
-            sum(bool(item["metrics"]["no_hit_correct"]) for item in no_hit_rows) / len(no_hit_rows)
+            sum(bool(item["metrics"]["no_hit_correct"]) for item in no_hit_rows)
+            / len(no_hit_rows)
             if no_hit_rows
             else None
         ),
@@ -881,6 +1233,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(args.output_dir / "case_results.jsonl", details)
     write_json(args.output_dir / "summary.json", summary)
+    render_recall_report(summary, details, args.output_dir / "report.html")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if ragas_failures:
         return 3
@@ -891,8 +1244,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    snapshot = subparsers.add_parser("snapshot", help="Export a private corpus snapshot over HTTP")
-    snapshot.add_argument("--base-url", default=os.getenv("RAG_EVAL_BASE_URL"), required=not os.getenv("RAG_EVAL_BASE_URL"))
+    snapshot = subparsers.add_parser(
+        "snapshot", help="Export a private corpus snapshot over HTTP"
+    )
+    snapshot.add_argument(
+        "--base-url",
+        default=os.getenv("RAG_EVAL_BASE_URL"),
+        required=not os.getenv("RAG_EVAL_BASE_URL"),
+    )
     snapshot.add_argument("--token-env", default=DEFAULT_TOKEN_ENV)
     snapshot.add_argument("--kb-id", action="append", required=True)
     snapshot.add_argument("--output", type=Path, required=True)
@@ -900,7 +1259,9 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--include-unready", action="store_true")
     snapshot.set_defaults(handler=snapshot_command)
 
-    generate = subparsers.add_parser("generate", help="Generate a JSONL evaluation dataset from a snapshot")
+    generate = subparsers.add_parser(
+        "generate", help="Generate a JSONL evaluation dataset from a snapshot"
+    )
     generate.add_argument("--snapshot", type=Path, required=True)
     generate.add_argument("--output", type=Path, required=True)
     generate.add_argument("--count", type=int, default=50)
@@ -912,18 +1273,30 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--timeout", type=float, default=90.0)
     generate.set_defaults(handler=generate_command)
 
-    validate = subparsers.add_parser("validate", help="Validate a generated evaluation dataset")
+    validate = subparsers.add_parser(
+        "validate", help="Validate a generated evaluation dataset"
+    )
     validate.add_argument("--dataset", type=Path, required=True)
     validate.add_argument("--snapshot", type=Path)
     validate.set_defaults(handler=validate_command)
 
-    evaluate = subparsers.add_parser("evaluate", help="Run retrieval and calculate ID/ranking metrics")
-    evaluate.add_argument("--base-url", default=os.getenv("RAG_EVAL_BASE_URL"), required=not os.getenv("RAG_EVAL_BASE_URL"))
+    evaluate = subparsers.add_parser(
+        "evaluate", help="Run retrieval and calculate ID/ranking metrics"
+    )
+    evaluate.add_argument(
+        "--base-url",
+        default=os.getenv("RAG_EVAL_BASE_URL"),
+        required=not os.getenv("RAG_EVAL_BASE_URL"),
+    )
     evaluate.add_argument("--token-env", default=DEFAULT_TOKEN_ENV)
     evaluate.add_argument("--dataset", type=Path, required=True)
     evaluate.add_argument("--snapshot", type=Path)
     evaluate.add_argument("--output-dir", type=Path, required=True)
-    evaluate.add_argument("--retrieve-type", choices=["participle", "semantic", "hybrid"], default="hybrid")
+    evaluate.add_argument(
+        "--retrieve-type",
+        choices=["participle", "semantic", "hybrid"],
+        default="hybrid",
+    )
     evaluate.add_argument("--top-k", type=int, default=10)
     evaluate.add_argument("--top-n", type=int, default=20)
     evaluate.add_argument("--k", type=int, action="append")
