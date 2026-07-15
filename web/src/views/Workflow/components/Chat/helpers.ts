@@ -134,3 +134,49 @@ export const applyInterventionResolved = (
     }
   })
 
+/**
+ * message event: accumulates streaming content into the last assistant
+ * message's meta_data.outputs, keyed by node_id, to support multi-answer replies
+ * where several output nodes each form their own segment within one reply.
+ * Appends to the matching node_id if present, otherwise creates a new entry
+ * { node_id, content, status: 'running' }.
+ */
+export const appendOutputByNodeId = (
+  prev: Array<ChatItem | ChatItem[]>,
+  node_id?: string,
+  content: string = '',
+): Array<ChatItem | ChatItem[]> => {
+  if (!node_id || !content) return prev
+  return mapLastVersion(prev, (current) => {
+    if (current?.role && current.role !== 'assistant') return current
+    const outputs = [...(current.meta_data?.outputs || [])]
+    const filterIndex = outputs.findIndex(o => o.node_id === node_id)
+    if (filterIndex < 0) {
+      outputs.push({ node_id, content, status: 'running' })
+    } else {
+      outputs[filterIndex] = {
+        ...outputs[filterIndex],
+        content: (outputs[filterIndex].content || '') + content,
+      }
+    }
+    return { ...current, meta_data: { ...(current.meta_data || {}), outputs } }
+  })
+}
+
+/** On stream end, marks any still-running outputs segments of the last assistant message as success. */
+export const finalizeOutputs = (
+  prev: Array<ChatItem | ChatItem[]>,
+): Array<ChatItem | ChatItem[]> =>
+  mapLastVersion(prev, (current) => {
+    if (!current.meta_data?.outputs?.length) return current
+    return {
+      ...current,
+      meta_data: {
+        ...current.meta_data,
+        outputs: current.meta_data.outputs.map(o =>
+          o.status === 'running' ? { ...o, status: 'success' } : o
+        ),
+      },
+    }
+  })
+

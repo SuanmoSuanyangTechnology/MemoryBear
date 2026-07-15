@@ -168,13 +168,17 @@ const ChatContent: FC<ChatContentProps> = ({
   }
 
   const formatContent = (item: ChatItem) => {
-    return renderRuntime && item.content && item.content.length > 0
+    return renderRuntime && item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
+      ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
+      : renderRuntime && item.content && item.content.length > 0
       ? item.content
-        : renderRuntime
+      : renderRuntime
       ? ''
-        : item.meta_data?.error && item.meta_data?.error.length > 0
+      : item.meta_data?.error && item.meta_data?.error.length > 0
       ? item.meta_data?.error
-        : item.content && item.content.length > 0
+      : item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
+      ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
+      : item.content && item.content.length > 0
       ? item.content
         : errorDesc ?? ''
   }
@@ -312,10 +316,24 @@ const ChatContent: FC<ChatContentProps> = ({
                           />
                         )}
                         {/* Render message content using Markdown component */}
-                        <Markdown
-                          content={formatContent(item)}
-                          onFormSubmit={onFormSubmit}
-                        />
+                        {/* 一问多答区分展示 */}
+                        {item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
+                          ? <Flex vertical gap={8} align="start">
+                            {item.meta_data?.outputs?.map((output, idx: number) => (
+                              <div key={idx} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:pt-2.5 rb:pb-0.5">
+                                <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-3">{t('application.reply')} {idx + 1}</div>
+                                <Markdown
+                                  content={formatContent(output)}
+                                  onFormSubmit={onFormSubmit}
+                                />
+                              </div>
+                            ))}
+                          </Flex>
+                          : <Markdown
+                            content={formatContent(item)}
+                            onFormSubmit={onFormSubmit}
+                          />
+                        }
 
                         {item.meta_data?.citations && item.meta_data?.citations.length > 0 &&
                           <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">

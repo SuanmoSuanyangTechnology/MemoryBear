@@ -36,6 +36,11 @@ export interface ChatItem {
     error?: string;
     waiting_human?: boolean;
     execution_id?: string;
+    outputs?: {
+      status?: string;
+      content: string;
+      node_id: string;
+    }[]
   },
   version?: number;
   is_current?: boolean;

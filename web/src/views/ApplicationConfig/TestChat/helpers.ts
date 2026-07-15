@@ -283,6 +283,55 @@ export const addRunEndMessage = (prev: ChatList, data: any): ChatList => {
 export const appendWorkflowContent = (prev: ChatList, content: string): ChatList =>
   mapLastVersion(prev, (current) => ({ ...current, content: current.content + content }))
 
+/**
+ * Accumulates streaming content into the last assistant message's
+ * meta_data.outputs, keyed by node_id, to support multi-answer replies where
+ * several output nodes each form their own segment within one reply. Appends to
+ * the matching node_id if present, otherwise creates a new entry.
+ */
+export const appendWorkflowOutputByNodeId = (
+  prev: ChatList,
+  node_id?: string,
+  content: string = '',
+): ChatList => {
+  if (!node_id || !content) return prev
+  return mapLastVersion(prev, (current) => {
+    if (current?.role !== 'assistant') return current
+    const outputs = [...(current.meta_data?.outputs || [])]
+    const filterIndex = outputs.findIndex(o => o.node_id === node_id)
+    if (filterIndex < 0) {
+      outputs.push({ node_id, content, status: 'running' })
+    } else {
+      outputs[filterIndex] = {
+        ...outputs[filterIndex],
+        content: (outputs[filterIndex].content || '') + content,
+      }
+    }
+    return { ...current, meta_data: { ...(current.meta_data || {}), outputs } }
+  })
+}
+
+/**
+ * message_replace event: replaces the last assistant message content wholesale.
+ */
+export const replaceWorkflowContent = (prev: ChatList, content: string): ChatList =>
+  mapLastVersion(prev, (current) => ({ ...current, content, meta_data: { ...(current.meta_data || {}), outputs: undefined } }))
+
+/** On stream end, marks any still-running outputs segments of the last assistant message as success. */
+export const finalizeWorkflowOutputs = (prev: ChatList): ChatList =>
+  mapLastVersion(prev, (current) => {
+    if (!current.meta_data?.outputs?.length) return current
+    return {
+      ...current,
+      meta_data: {
+        ...current.meta_data,
+        outputs: current.meta_data.outputs.map(o =>
+          o.status === 'running' ? { ...o, status: 'success' } : o
+        ),
+      },
+    }
+  })
+
 export const appendWorkflowIntervention = (
   prev: ChatList,
   data: Pick<NodeData, 'execution_id' | 'node_id' | 'node_name' | 'rendered_content' | 'form_fields' | 'actions' | 'timeout_at'>,
@@ -457,7 +506,7 @@ export const applyInterventionResolved = (
   mapLastVersion(prev, (current) => {
     const interventions = current.interventions || []
     if (interventions.length === 0) return current
-    // 更新最后一条 intervention 的 resolved 信息
+    // Update the resolved info on the last intervention
     return {
       ...current,
       interventions: [

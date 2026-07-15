@@ -13,6 +13,9 @@ import {
   applyMessageId,
   applyUserMessageId,
   appendWorkflowContent,
+  appendWorkflowOutputByNodeId,
+  replaceWorkflowContent,
+  finalizeWorkflowOutputs,
   appendWorkflowIntervention,
   markWorkflowInterventionTimeout,
   mergeWorkflowAgentLog,
@@ -175,6 +178,11 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
         // Append streaming text chunks to assistant message
         case 'message':
           setChatList(prev => appendWorkflowContent(prev, content))
+          setChatList(prev => appendWorkflowOutputByNodeId(prev, node_id, content))
+          break
+        // Replace the assistant message content wholesale and drop the segmented outputs
+        case 'message_replace':
+          setChatList(prev => replaceWorkflowContent(prev, content))
           break
         case 'intervention_required':
           setChatList(prev => appendWorkflowIntervention(prev, {
@@ -206,6 +214,7 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
           if (citations && citations.length > 0) {
             setChatList(prev => updateWorkflowEnd(prev, item.data as NodeData, citations))
           }
+          setChatList(prev => finalizeWorkflowOutputs(prev))
           setStreamLoading(false)
           streamLoadingRef.current = false
           setLoading(false)
