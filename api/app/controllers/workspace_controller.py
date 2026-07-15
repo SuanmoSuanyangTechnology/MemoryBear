@@ -390,7 +390,7 @@ def switch_workspace(
 
 
 @router.get("/storage", response_model=ApiResponse)
-@cur_workspace_access_guard_async() # 需要思考一下
+@cur_workspace_access_guard_async()
 async def get_workspace_storage_type(
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         t: callable = Depends(get_translator)
