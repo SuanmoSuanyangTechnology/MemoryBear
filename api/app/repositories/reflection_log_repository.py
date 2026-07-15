@@ -149,3 +149,57 @@ class ReflectionLogRepository:
             "status": status,
             "resolve_rate": resolve_rate,
         }
+
+    async def get_stats_async(self, end_user_id: str) -> Dict[str, Any]:
+        """统计查询（异步版本）：按子问题和状态分组计数
+
+        Args:
+            end_user_id: 终端用户 ID
+
+        Returns:
+            同 get_stats
+        """
+        from sqlalchemy import select
+        from app.schemas.memory_reflection_schemas import SubProblemEnum
+
+        end_user_uuid = uuid.UUID(end_user_id)
+
+        # total count
+        total = int(await self.db.scalar(
+            select(func.count()).select_from(MemoryReflectionLog).where(
+                MemoryReflectionLog.end_user_id == end_user_uuid
+            )
+        ) or 0)
+
+        # 按 sub_problem 分组
+        sub_rows = (await self.db.execute(
+            select(MemoryReflectionLog.sub_problem, func.count()).where(
+                MemoryReflectionLog.end_user_id == end_user_uuid
+            ).group_by(MemoryReflectionLog.sub_problem)
+        )).all()
+        sub_counts = {row[0]: row[1] for row in sub_rows}
+
+        # 按 status 分组
+        status_rows = (await self.db.execute(
+            select(MemoryReflectionLog.status, func.count()).where(
+                MemoryReflectionLog.end_user_id == end_user_uuid
+            ).group_by(MemoryReflectionLog.status)
+        )).all()
+        status_counts = {row[0]: row[1] for row in status_rows}
+
+        # 补全所有枚举值
+        all_sub_problems = [e.value for e in SubProblemEnum]
+        sub_problem = {sp: sub_counts.get(sp, 0) for sp in all_sub_problems}
+        status = {
+            "resolved": status_counts.get("resolved", 0),
+            "recorded": status_counts.get("recorded", 0),
+        }
+
+        resolve_rate = round(status["resolved"] / total, 2) if total > 0 else 0.0
+
+        return {
+            "total": total,
+            "sub_problem": sub_problem,
+            "status": status,
+            "resolve_rate": resolve_rate,
+        }

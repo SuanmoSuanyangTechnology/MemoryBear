@@ -168,6 +168,33 @@ class ConversationRepository:
         )
         return conversations, total
 
+    async def get_active_conversation_count_async(self, user_id: uuid.UUID) -> int:
+        """统计用户的活跃会话数（异步版本，用于 analytics）"""
+        from sqlalchemy import func as sa_func
+        stmt = select(sa_func.count()).select_from(Conversation).where(
+            Conversation.user_id == str(user_id),
+            Conversation.is_active.is_(True),
+            Conversation.app_id != "00000000-0000-0000-0000-000000000001",
+        )
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def get_pending_write_conversation_count_async(self, user_id: str) -> int:
+        """统计有待写入长期记忆的会话数（message_seq > write_cursor）"""
+        from sqlalchemy import func as sa_func
+        from app.models.memory_message_model import MemoryMessage
+        stmt = (
+            select(sa_func.count(sa_func.distinct(Conversation.id)))
+            .select_from(Conversation)
+            .join(MemoryMessage, MemoryMessage.conversation_id == Conversation.id)
+            .where(
+                Conversation.user_id == user_id,
+                MemoryMessage.message_seq > sa_func.coalesce(Conversation.write_cursor, 0),
+            )
+        )
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one() or 0)
+
     def list_conversations(
             self,
             app_id: uuid.UUID,

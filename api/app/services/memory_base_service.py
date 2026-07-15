@@ -261,7 +261,7 @@ class MemoryBaseService:
     """记忆服务基类，提供共享的辅助方法"""
     
     def __init__(self):
-        self.neo4j_connector = Neo4jConnector()
+        self.neo4j_connector = Neo4jConnector(shared_driver=True)
     
     async def get_valid_memory_summary_count(
         self,
@@ -529,6 +529,11 @@ class MemoryBaseService:
         
         统计激活值低于遗忘阈值的节点数量（low_activation_nodes）。
         查询范围包括：Statement、ExtractedEntity、MemorySummary、Chunk 节点。
+
+        优化说明：
+            拆分为 4 条按 label 独立的 Cypher 查询并行执行，每条均走
+            label-property 索引（NodeIndexSeek），避免旧版 OR 多 label
+            导致的 AllNodesScan。
         
         Args:
             end_user_id: 可选的终端用户ID，用于过滤特定用户的节点
@@ -538,31 +543,21 @@ class MemoryBaseService:
             遗忘记忆的数量（激活值低于阈值的节点数）
         """
         try:
-            # 构建查询语句
-            query = """
-            MATCH (n)
-            WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
-            """
-            
+            from app.repositories.neo4j.cypher_queries import build_forget_memory_count_query
+
+            labels = ["Statement", "ExtractedEntity", "MemorySummary", "Chunk"]
+            params = {"threshold": forgetting_threshold}
             if end_user_id:
-                query += " AND n.end_user_id = $end_user_id"
-            
-            query += """
-            RETURN sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
-            """
-            
-            # 设置查询参数
-            params = {'threshold': forgetting_threshold}
-            if end_user_id:
-                params['end_user_id'] = end_user_id
-            
-            # 执行查询
-            result = await self.neo4j_connector.execute_query(query, **params)
-            
-            # 提取结果
-            forget_count = result[0]['low_activation_nodes'] if result and len(result) > 0 else 0
-            forget_count = forget_count or 0  # 处理 None 值
-            
+                params["end_user_id"] = end_user_id
+
+            async def _count_for_label(label: str) -> int:
+                query = build_forget_memory_count_query(label, with_end_user=bool(end_user_id))
+                result = await self.neo4j_connector.execute_query(query, **params)
+                return int(result[0]["cnt"]) if result else 0
+
+            counts = await asyncio.gather(*[_count_for_label(lb) for lb in labels])
+            forget_count = sum(counts)
+
             logger.debug(
                 f"遗忘记忆数量: {forget_count} "
                 f"(threshold={forgetting_threshold}, end_user_id={end_user_id})"
