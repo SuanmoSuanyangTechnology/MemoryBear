@@ -2305,8 +2305,7 @@ SET keeper.name = $merged_name,
     keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
 WITH keeper, loser
 OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
-WHERE s.delete_at IS NULL
-WHERE NOT (s)-[:REFERENCES_ENTITY]->(keeper)
+WHERE s.delete_at IS NULL AND NOT (s)-[:REFERENCES_ENTITY]->(keeper)
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
   CREATE (s)-[:REFERENCES_ENTITY]->(keeper)
 )
