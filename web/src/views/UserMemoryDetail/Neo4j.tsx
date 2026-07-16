@@ -19,7 +19,7 @@ import { useTranslation } from 'react-i18next';
 import EndUserProfile from './components/EndUserProfile'
 import AboutMe from './components/AboutMe'
 import InterestDistribution from './components/InterestDistribution'
-import NodeStatistics from './components/NodeStatistics'
+import NodeStatistics, { type NodeStatisticsRef } from './components/NodeStatistics'
 import RelationshipNetwork from './components/RelationshipNetwork'
 import MemoryInsight from './components/MemoryInsight'
 import type { EndUserProfileRef, MemoryInsightRef, AboutMeRef, EndUser } from './types'
@@ -29,7 +29,7 @@ import {
 import { useI18n } from '@/store/locale'
 
 import PrivateWrap from '@/components/PrivateWrap'
-import { BrainView, ReflectMemory } from '@redbear/memory-brick'
+import { BrainView, ReflectMemory, type ReflectMemoryRef } from '@redbear/memory-brick'
 import { request } from '@/utils/request'
 
 
@@ -49,6 +49,8 @@ const Neo4j: FC = () => {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [brainMemories, setBrainMemories] = useState<string[]>([])
   const [regionId, setRegionId] = useState<string | null>(null)
+  const nodeStatisticsRef = useRef<NodeStatisticsRef>(null)
+  const reflectMemoryRef = useRef<ReflectMemoryRef>(null)
 
   /** Handle brain region memory types change */
   const handleBrainMemoriesChange = (memories: string[], regionId: string | null) => {
@@ -195,6 +197,7 @@ const Neo4j: FC = () => {
 
               {isSaas && ReflectMemory &&
                 <ReflectMemory
+                  ref={reflectMemoryRef}
                   request={request}
                   onOpenChange={(e) => onOpenChange(e, 'reflect')}
                   selectedKey={selectedKey}
@@ -212,13 +215,17 @@ const Neo4j: FC = () => {
         </Flex>
 
         <Flex vertical className="rb:flex-1">
-          <NodeStatistics highlightKeys={brainMemories} />
+          <NodeStatistics ref={nodeStatisticsRef} highlightKeys={brainMemories} />
           <RelationshipNetwork
             regionId={regionId}
             setRegionId={setRegionId}
             selectedKey={selectedKey}
             setSelectedKey={setSelectedKey}
             setBrainMemories={setBrainMemories}
+            refresh={() => {
+              // nodeStatisticsRef.current?.getData()
+              reflectMemoryRef.current?.getData()
+            }}
           />
         </Flex>
       </Flex>

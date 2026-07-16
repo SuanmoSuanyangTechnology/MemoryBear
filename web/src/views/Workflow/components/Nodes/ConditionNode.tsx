@@ -8,7 +8,7 @@ import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-desi
 import NodeTools from './NodeTools'
 import { useVariableList } from '../Properties/hooks/useVariableList'
 import { isSubExprSet } from '../../utils'
-import { fileSubFieldOperators } from '../Properties/CaseList'
+import { fileSubFieldOperators } from '../Properties/CaseList/constant'
 
 const calculateIsSet = (item: any, type: string) => {
   switch (type) {

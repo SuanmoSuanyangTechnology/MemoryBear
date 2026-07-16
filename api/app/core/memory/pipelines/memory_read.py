@@ -46,14 +46,15 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             search_switch: SearchStrategy,
             history: list,
             limit: int = 10,
-            includes=None
+            includes=None,
+            skip_summary=False
     ) -> MemorySearchResult:
         query = QueryPreprocessor.process(query)
         match search_switch:
             case SearchStrategy.DEEP:
-                res = await self._deep_read(query, history, limit, includes=includes)
+                res = await self._deep_read(query, history, limit, includes=includes, skip_summary=skip_summary)
             case SearchStrategy.NORMAL:
-                res = await self._normal_read(query, history, limit, includes=includes)
+                res = await self._normal_read(query, history, limit, includes=includes, skip_summary=skip_summary)
             case SearchStrategy.QUICK:
                 return await self._quick_read(query, limit, includes)
             case SearchStrategy.EXPRESS:
@@ -117,6 +118,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             history: list,
             limit: int,
             includes=None,
+            skip_summary=False
     ) -> MemorySearchResult:
         search_service = await self._get_search_service(includes)
         memory_l0 = await self._user_meta()
@@ -147,12 +149,13 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         results = hybrid_search_res + relation_res
 
         results.memories.sort(key=lambda x: x.score, reverse=True)
-        results.content_str = await RetrievalSummaryProcessor.summary(
-            query,
-            results.content,
-            memory_l0.content if memory_l0 else '',
-            await self._get_llm_client()
-        )
+        if not skip_summary:
+            results.content_str = await RetrievalSummaryProcessor.summary(
+                query,
+                results.content,
+                memory_l0.content if memory_l0 else '',
+                await self._get_llm_client()
+            )
 
         return memory_l0 + results
 
@@ -161,6 +164,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             history: list,
             limit: int,
             includes=None,
+            skip_summary=False
     ) -> MemorySearchResult:
         search_service = await self._get_search_service(includes)
 
@@ -181,12 +185,13 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         ), return_exceptions=True))
         results = _safe_merge_results(all_results, "normal")
         results.memories.sort(key=lambda x: x.score, reverse=True)
-        results.content_str = await RetrievalSummaryProcessor.summary(
-            query,
-            results.content,
-            memory_l0.content if memory_l0 else '',
-            await self._get_llm_client()
-        )
+        if not skip_summary:
+            results.content_str = await RetrievalSummaryProcessor.summary(
+                query,
+                results.content,
+                memory_l0.content if memory_l0 else '',
+                await self._get_llm_client()
+            )
         return memory_l0 + results
 
     async def _express_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:

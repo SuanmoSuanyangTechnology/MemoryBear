@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 17:28:10
+ * @Last Modified time: 2026-07-13 17:39:06
  */
 /**
  * Model Configuration Modal
@@ -15,14 +15,16 @@ import { Form, Switch, Flex, Button, type SelectProps, InputNumber, type InputNu
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 
-import type { ModelConfigForm, ModelConfigModalRef } from './type'
+import type { ModelConfigForm, ModelConfigModalRef } from './types'
 import type { Model } from '@/views/ModelManagement/types'
 import RbModal from '@/components/RbModal'
 import ModelSelect from '@/components/ModelSelect'
 import RbSlider from '@/components/RbSlider'
 import Editor from "../../Editor";
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
-import StructuredOutputSchemaModal, { type StructuredOutputSchemaModalRef, type JsonSchema } from './StructuredOutputSchemaModal';
+import StructuredOutputSchemaModal from './StructuredOutputSchemaModal';
+import { fieldConfigs } from './constant'
+import type { StructuredOutputSchemaModalRef, JsonSchema } from './types'
 
 const FormItem = Form.Item;
 
@@ -36,174 +38,6 @@ interface ModelConfigModalProps {
   variableOptions: Suggestion[];
   /** Whether to show structured_output and json_output_fields configuration */
   hideStructuredOutputConfig?: boolean;
-}
-
-export const fieldConfigs: Record<string, any> = {
-  temperature: {
-    type: 'slider',
-    max: 1.99, 
-    min: 0, 
-    step: 0.1,
-    defaultValue: 0.7
-  },
-  max_tokens: {
-    type: 'slider',
-    max: 32000, 
-    min: 256, 
-    step: 1, 
-    defaultValue: 8000 
-  },
-  json_output: {
-    type: 'switch',
-    dependence: 'capability',
-    defaultValue: false,
-    hideTip: true
-  },
-  structured_output: {
-    type: 'switch',
-    dependence: 'capability',
-    defaultValue: false,
-    hideTip: true
-  },
-  json_output_fields: {
-    type: 'editor',
-    dependence: 'capability',
-  },
-  top_p: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'slider',
-      min: 0.1,
-      max: 1,
-      step: 0.1,
-      defaultValue: 0.8
-    }
-  },
-  top_k: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'slider',
-      min: 1,
-      max: 100,
-      step: 1,
-      defaultValue: 50
-    }
-  },
-  seed: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'inputNumber',
-      min: 0,
-      max: 18446744073709551615,
-      defaultValue: 1234
-    }
-  },
-  repetition_penalty: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'inputNumber',
-      min: 0.1,
-      max: 2,
-      step: 0.1,
-      defaultValue: 1.0
-    }
-  },
-  // enable_search: {
-  //   type: 'switch',
-  //   defaultValue: false
-  // },
-  thinking: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    budget: {
-      enable: {
-        type: 'switch',
-        defaultValue: false
-      },
-      value: {
-        type: 'inputNumber',
-        min: 128,
-        defaultValue: 256
-      }
-    }
-  },
-  response_format: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'select',
-      options: [
-        { label: 'text', value: 'text' },
-        { label: 'json_object', value: 'json_object' },
-      ],
-      defaultValue: 'text',
-    }
-  },
-  extra_headers: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'editor',
-    }
-  },
-  stop: {
-    enable: {
-      type: 'switch',
-      defaultValue: false
-    },
-    value: {
-      type: 'select',
-      mode: 'tags',
-      maxTagCount: 4,
-      defaultValue: []
-    }
-  },
-  presence_penalty: {
-    enable: {
-      type: 'switch',
-      defaultValue: false,
-      hideTip: true
-    },
-    value: {
-      type: 'inputNumber',
-      min: -2,
-      max: 2,
-      step: 0.1,
-      defaultValue: 0
-    }
-  },
-  frequency_penalty: {
-    enable: {
-      type: 'switch',
-      defaultValue: false,
-      hideTip: true
-    },
-    value: {
-      type: 'inputNumber',
-      min: -2,
-      max: 2,
-      step: 0.1,
-      defaultValue: 0
-    }
-  }
 }
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,

@@ -109,6 +109,7 @@ async def read_memory_internal(
         search_switch=SearchStrategy(payload.search_switch),
         limit=payload.limit,
         includes=includes,
+        skip_summary=payload.skip_summary
     )
     return success(data={
         "answer": memory.content,
