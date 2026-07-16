@@ -4102,6 +4102,9 @@ def flush_conversation_task(self) -> None:
     _dispatch_flush = _MS.dispatch_flush_conversation
     from app.models.conversation_model import Conversation
 
+    # Ensure an event loop is available for awaiting the async dispatch function.
+    _loop = set_asyncio_event_loop()
+
     redis_client = get_sync_redis_client()
     if redis_client is None:
         logger.error("[FlushScan] Redis 不可用，跳过本次扫描")
@@ -4215,7 +4218,7 @@ def flush_conversation_task(self) -> None:
 
             # 派发单个对话的兜底写入
             try:
-                _dispatch_flush(conv_id_str)
+                _loop.run_until_complete(_dispatch_flush(conv_id_str))
                 dispatched += 1
                 logger.info(f"[FlushScan] 已处理: conv={conv_id_str}")
             except Exception as e:

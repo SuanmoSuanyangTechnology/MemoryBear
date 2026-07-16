@@ -255,6 +255,10 @@ class Settings:
     LOG_STREAM_BUFFER_SIZE: int = int(os.getenv("LOG_STREAM_BUFFER_SIZE", "8192"))  # 8KB
     LOG_FILE_MAX_SIZE_MB: int = int(os.getenv("LOG_FILE_MAX_SIZE_MB", "10"))  # 10MB
 
+    # Celery Task Scheduler Configuration
+    # 每个 (task_name, user_id) 队列的最大待处理消息数，0 表示不限制
+    SCHEDULER_MAX_QUEUE_LEN: int = int(os.getenv("SCHEDULER_MAX_QUEUE_LEN", "1000"))
+
     # Celery configuration (internal)
     # NOTE: 变量名不以 CELERY_ 开头，避免被 Celery CLI 的前缀匹配机制劫持
     # 详见 docs/celery-env-bug-report.md
