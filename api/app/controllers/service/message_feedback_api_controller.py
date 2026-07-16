@@ -199,7 +199,7 @@ async def get_conversation_feedback(
         .where(
             Message.conversation_id == conversation_id,
             Message.is_deleted.is_not(True),
-            Message.is_current.is_not(False),
+            Message.is_current.is_(True),
         )
         .order_by(Message.created_at)
         .limit(limit)
