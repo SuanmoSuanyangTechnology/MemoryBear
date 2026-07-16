@@ -1542,7 +1542,7 @@ class WorkflowService:
         }
 
     @staticmethod
-    def _get_execution_source(execution: WorkflowExecution | None) -> str:
+    def _get_execution_source(execution: WorkflowExecution | WorkflowExecutionRef | None) -> str:
         if not execution:
             return "workflow_execution"
         meta_data = execution.meta_data or {}
@@ -1816,7 +1816,7 @@ class WorkflowService:
     def _build_public_execution_snapshot_record(
             self,
             *,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             node_executions: list[WorkflowNodeExecution],
             output_data: dict[str, Any],
             workflow_config: "WorkflowConfig | None" = None,
@@ -2171,7 +2171,7 @@ class WorkflowService:
             source=self._get_execution_source(execution),
         )
 
-    def _extract_execution_messages(self, execution: WorkflowExecution | None) -> list[dict[str, Any]]:
+    def _extract_execution_messages(self, execution: WorkflowExecution | WorkflowExecutionRef | None) -> list[dict[str, Any]]:
         if not execution or not isinstance(execution.output_data, dict):
             return []
         messages = self._serialize_execution_value(execution.output_data.get("messages") or [])
