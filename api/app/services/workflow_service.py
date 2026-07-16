@@ -1821,7 +1821,7 @@ class WorkflowService:
             output_data: dict[str, Any],
             workflow_config: "WorkflowConfig | None" = None,
     ) -> dict[str, Any]:
-        workflow_config = workflow_config or execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        workflow_config = workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         type_maps = self._build_snapshot_type_maps(workflow_config)
         raw_groups = self._extract_execution_snapshot_raw_groups(
             output_data=output_data,
@@ -2153,7 +2153,7 @@ class WorkflowService:
         )
 
     def _refresh_workflow_debug_state_from_execution(self, execution: WorkflowExecution, workflow_config: WorkflowConfig | None = None) -> None:
-        workflow_config = workflow_config or execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        workflow_config = workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
         output_data = self._serialize_execution_value(execution.output_data or {})
         snapshot = self._build_public_execution_snapshot_record(
@@ -3495,19 +3495,16 @@ class WorkflowService:
             logger.info(f"创建工作流执行记录: execution_id={execution_id}")
             return self._build_execution_ref(execution)
 
-    async def _get_execution_async(self, execution_id: str) -> WorkflowExecution | None:
+    async def _get_execution_async(self, execution_id: str) -> WorkflowExecutionRef | None:
         async with get_async_db_context() as db:
             result = await db.execute(
                 select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
             )
             execution = result.scalar_one_or_none()
             if execution:
-                db.expunge(execution)
-                return execution
+                return self._build_execution_ref(execution)
             runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
-            if runtime_execution:
-                return self._build_execution_record_from_ref(runtime_execution)
-            return None
+            return runtime_execution
 
     async def _patch_execution_async(
             self,
@@ -3615,7 +3612,7 @@ class WorkflowService:
             assistant_meta: Optional[dict],
             workflow_output_data: Any,
             token_usage: Any,
-    ) -> WorkflowExecution:
+    ) -> WorkflowExecutionRef:
         async with get_async_db_context() as db:
             started_at = time.perf_counter()
             conversation = await db.get(Conversation, conversation_id)
@@ -3695,8 +3692,7 @@ class WorkflowService:
                 pool_status["usage_percent"],
             )
             await self._delete_runtime_execution_snapshot_async(execution_id)
-            db.expunge(execution)
-            return execution
+            return self._build_execution_ref(execution)
 
     async def _update_message_async(
             self,
