@@ -10,8 +10,9 @@ import { Form, Flex } from 'antd'
 
 import ModelSelect from '@/components/ModelSelect'
 import type { Model } from '@/views/ModelManagement/types';
-import ModelConfigModal, { fieldConfigs } from './ModelConfigModal';
-import type { ModelConfigModalRef, ModelConfigForm } from './type'
+import ModelConfigModal from './ModelConfigModal';
+import { fieldConfigs } from './constant'
+import type { ModelConfigModalRef, ModelConfigForm } from './types'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 
 interface ModelConfigProps {

@@ -1,8 +1,9 @@
 """工具数据访问层"""
 import uuid
 from typing import List, Optional
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
@@ -58,6 +59,25 @@ class ToolRepository:
 
         if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
             # 兼容数据库中字段类型不匹配的情况（比如存储为字符串）
+            try:
+                tenant_id = uuid.UUID(tenant_id)
+            except (ValueError, TypeError):
+                return None
+
+        return tenant_id
+
+    @staticmethod
+    async def get_tenant_id_by_workspace_id_async(db: AsyncSession, workspace_id: str) -> Optional[uuid.UUID]:
+        """根据空间ID获取 tenant_id（异步版）"""
+        from app.models.workspace_model import Workspace
+
+        tenant_id = (
+            await db.execute(
+                select(Workspace.tenant_id).where(Workspace.id == workspace_id)
+            )
+        ).scalar_one_or_none()
+
+        if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
             try:
                 tenant_id = uuid.UUID(tenant_id)
             except (ValueError, TypeError):

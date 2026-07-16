@@ -27,7 +27,7 @@ from app.core.memory.storage_services.reflection_engine.self_reflexion import (
 )
 from app.core.response_utils import success
 from app.db import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
 from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -69,16 +69,14 @@ router = APIRouter(
 
 
 @router.get("/reflection/logs/stats")
-def get_reflection_log_stats(
+async def get_reflection_log_stats(
         end_user_id: str = Query(..., description="终端用户ID"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取反思日志统计概览
+    """获取反思日志统计概览（纯异步版本）"""
+    from app.db import get_async_db_context
+    from app.repositories.end_user_repository import EndUserRepository
 
-    返回该用户的日志总数、各子问题数量、各状态数量和处理率。
-    用于顶部子问题卡片和统计面板。
-    """
     try:
         end_user_uuid = uuid.UUID(end_user_id)
     except (ValueError, AttributeError):
@@ -87,15 +85,17 @@ def get_reflection_log_stats(
     api_logger.info(f"用户 {current_user.username} 查询反思日志统计: end_user_id={end_user_id}")
 
     try:
-        # 校验终端用户是否存在
-        from app.repositories.end_user_repository import EndUserRepository
-        end_user_repo = EndUserRepository(db)
-        end_user = end_user_repo.get_end_user_by_id(end_user_uuid)
-        if end_user is None:
-            return fail(BizCode.USER_NOT_FOUND, f"终端用户不存在: {end_user_id}", "end_user not found")
+        async with get_async_db_context() as db:
+            # 通过 repository 异步方法校验用户存在性
+            end_user_repo = EndUserRepository(db)
+            end_user = await end_user_repo.get_end_user_by_id_async(end_user_uuid)
+            if not end_user:
+                return fail(BizCode.USER_NOT_FOUND, f"终端用户不存在: {end_user_id}", "end_user not found")
 
-        repo = ReflectionLogRepository(db)
-        stats = repo.get_stats(end_user_id)
+            # 通过 repository 异步方法获取统计数据
+            repo = ReflectionLogRepository(db)
+            stats = await repo.get_stats_async(end_user_id)
+
         return success(data=stats, msg="反思日志统计获取成功")
     except Exception as e:
         api_logger.error(f"查询反思日志统计失败: end_user_id={end_user_id}, error={e}")

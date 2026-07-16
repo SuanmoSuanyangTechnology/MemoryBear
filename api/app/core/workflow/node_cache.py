@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import hashlib
 import json
@@ -134,6 +135,9 @@ class WorkflowNodeCacheManager:
             db.refresh(cache)
             return self.serialize(cache)
 
+    async def get_active_cache_async(self, cache_key: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self.get_active_cache, cache_key)
+
     def get_latest_cache(self, include_inactive: bool = False) -> dict[str, Any] | None:
         if not self.app_id:
             return None
@@ -208,6 +212,26 @@ class WorkflowNodeCacheManager:
             db.commit()
             db.refresh(cache)
             return self.serialize(cache)
+
+    async def save_cache_async(
+            self,
+            *,
+            cache_key: str,
+            input_data: Any,
+            result_data: dict[str, Any],
+            source: str,
+            ttl_seconds: int | None,
+            meta_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            self.save_cache,
+            cache_key=cache_key,
+            input_data=input_data,
+            result_data=result_data,
+            source=source,
+            ttl_seconds=ttl_seconds,
+            meta_data=meta_data,
+        )
 
     def update_latest_cache(
             self,

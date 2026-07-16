@@ -39,6 +39,14 @@ class EndUserInfoRepository:
     def get_by_end_user_id(self, end_user_id: uuid.UUID) -> Optional[EndUserInfo]:
         """获取用户的信息记录"""
         return self.db.query(EndUserInfo).filter(EndUserInfo.end_user_id == end_user_id).first()
+
+    async def get_end_user_info_async(self, end_user_id: uuid.UUID) -> Optional[EndUserInfo]:
+        """获取用户的信息记录（异步版本）"""
+        from sqlalchemy import select
+        result = await self.db.execute(
+            select(EndUserInfo).where(EndUserInfo.end_user_id == end_user_id).limit(1)
+        )
+        return result.scalars().first()
     
     def update(self, info_id: uuid.UUID, aliases: List[str] = None, meta_data: dict = None) -> Optional[EndUserInfo]:
         """更新用户信息"""

@@ -15,6 +15,7 @@ from typing import Annotated, Any, Dict, List, Optional, Tuple
 from fastapi import Depends
 from sqlalchemy import and_, column, exists, func, or_, select, update as sa_update
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -55,7 +56,7 @@ class AppService:
     负责应用相关的所有业务逻辑处理，遵循单一职责原则。
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         """初始化应用服务
 
         Args:
@@ -223,6 +224,18 @@ class AppService:
             ResourceNotFoundException: 当应用不存在时
         """
         app = get_apps_by_id(self.db, app_id)
+        if not app:
+            logger.warning("应用不存在", extra={"app_id": str(app_id)})
+            raise ResourceNotFoundException("应用", str(app_id))
+        return app
+
+    async def _get_app_or_404_async(self, app_id: uuid.UUID) -> App:
+        app = await self.db.scalar(
+            select(App).where(
+                App.id == app_id,
+                App.is_active.is_(True),
+            ).limit(1)
+        )
         if not app:
             logger.warning("应用不存在", extra={"app_id": str(app_id)})
             raise ResourceNotFoundException("应用", str(app_id))
@@ -660,6 +673,15 @@ class AppService:
         self._validate_app_accessible(app, workspace_id)
         return app
 
+    async def get_app_async(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
+    ) -> App:
+        app = await self._get_app_or_404_async(app_id)
+        self._validate_app_accessible(app, workspace_id)
+        return app
+
     def get_release_by_id(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
         """按发布版本ID获取发布快照
 
@@ -675,6 +697,22 @@ class AppService:
         """
         from app.repositories.app_repository import get_release_by_id
         release = get_release_by_id(self.db, app_id, release_id)
+        if not release:
+            raise BusinessException(
+                f"版本 {release_id} 不存在或已下线",
+                BizCode.RELEASE_NOT_FOUND,
+            )
+        return release
+
+    async def get_release_by_id_async(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
+        from app.models.app_release_model import AppRelease
+        release = await self.db.scalar(
+            select(AppRelease).where(
+                AppRelease.app_id == app_id,
+                AppRelease.id == release_id,
+                AppRelease.is_active.is_(True),
+            ).limit(1)
+        )
         if not release:
             raise BusinessException(
                 f"版本 {release_id} 不存在或已下线",
@@ -2091,6 +2129,17 @@ class AppService:
             return None
 
         return self.db.get(AppRelease, app.current_release_id)
+
+    async def get_current_release_async(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
+    ) -> Optional[AppRelease]:
+        app = await self.get_app_async(app_id, workspace_id)
+        if not app.current_release_id:
+            return None
+        return await self.db.get(AppRelease, app.current_release_id)
 
     def list_releases(
             self,

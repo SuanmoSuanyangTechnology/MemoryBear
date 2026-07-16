@@ -71,12 +71,30 @@ async def lifespan(app: FastAPI):
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")
 
+    # 预热 Neo4j 连接池：并行发起多个轻量查询，让 driver 预先建立多条连接。
+    # 避免首次并发请求时只有 1 条连接可用导致 asyncio.gather 退化为串行。
+    try:
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        _warmup_connector = Neo4jConnector(shared_driver=True)
+        _warmup_queries = [
+            _warmup_connector.execute_query("RETURN 1 AS ping")
+            for _ in range(5)
+        ]
+        import asyncio as _asyncio
+        await _asyncio.gather(*_warmup_queries)
+        logger.info("Neo4j connection pool warmup completed (5 connections)")
+    except Exception as e:
+        logger.warning(f"Neo4j pool warmup skipped: {e}")
+
     # 预热同步 Redis 连接池，避免首次请求承担建池 + PING 的冷启动开销
     try:
         from app.tasks import warmup_sync_redis_pool
         warmup_sync_redis_pool()
     except Exception as e:
         logger.warning(f"Sync Redis pool warmup skipped: {e}")
+
+    from app.core.workflow.nodes.http_client import init_http_client
+    await init_http_client()
 
     # Start background intervention timeout scanner
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
@@ -96,8 +114,16 @@ async def lifespan(app: FastAPI):
 
     from app.services.intervention_timeout_scheduler import stop as stop_timeout_scanner
     stop_timeout_scanner()
+    from app.core.workflow.nodes.http_client import close_http_client
+    await close_http_client()
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     await Neo4jConnector.shutdown()
+    from app.core.rag.retrieval.async_elasticsearch import AsyncElasticsearchClientProvider
+    from app.core.rag.retrieval.async_models import AsyncRetrievalHttpClientProvider
+    from app.core.rag.retrieval.graph_bridge import GraphRetrievalBridge
+    await AsyncElasticsearchClientProvider.aclose()
+    await AsyncRetrievalHttpClientProvider.aclose()
+    GraphRetrievalBridge.shutdown()
     logger.info("应用程序正在关闭")
 
 

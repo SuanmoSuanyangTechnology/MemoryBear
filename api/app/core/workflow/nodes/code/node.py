@@ -8,8 +8,6 @@ from string import Template
 from textwrap import dedent
 from typing import Any
 
-import httpx
-
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import BaseNode
@@ -17,6 +15,7 @@ from app.core.workflow.nodes.code.config import CodeNodeConfig
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.config import settings
+from app.core.workflow.nodes.http_client import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -151,20 +150,20 @@ class CodeNode(BaseNode):
         for attempt in range(max_attempts):
             try:
                 logger.info(f"节点 {self.node_id} 代码执行，尝试 {attempt + 1}/{max_attempts}")
-                async with httpx.AsyncClient(timeout=60) as client:
-                    response = await client.post(
-                        f"{settings.SANDBOX_URL}/v1/sandbox/run",
-                        headers={
-                            "x-api-key": 'redbear-sandbox'
-                        },
-                        json={
-                            "language": self.typed_config.language,
-                            "code": base64.b64encode(final_script.encode("utf-8")).decode("utf-8"),
-                            "options": {
-                                "enable_network": True
-                            }
+                client = get_http_client()
+                response = await client.post(
+                    f"{settings.SANDBOX_URL}/v1/sandbox/run",
+                    headers={
+                        "x-api-key": 'redbear-sandbox'
+                    },
+                    json={
+                        "language": self.typed_config.language,
+                        "code": base64.b64encode(final_script.encode("utf-8")).decode("utf-8"),
+                        "options": {
+                            "enable_network": True
                         }
-                    )
+                    }
+                )
                 if response.status_code != 200:
                     raise RuntimeError(f"Sandbox HTTP error: status={response.status_code}, body={response.text[:200]}")
 

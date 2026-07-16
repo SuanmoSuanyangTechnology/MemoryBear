@@ -8,7 +8,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.document_extractor.config import DocExtractorNodeConfig
 from app.core.workflow.variable.base_variable import VariableType, FileObject
-from app.db import get_db_read, get_db_context
+from app.db import get_async_db_context
 from app.models.file_metadata_model import FileMetadata
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 
@@ -78,7 +78,7 @@ async def _save_image_to_storage(
     storage_svc = FileStorageService()
     await storage_svc.storage.upload(file_key, img_bytes, content_type)
 
-    with get_db_context() as db:
+    async with get_async_db_context() as db:
         meta = FileMetadata(
             id=file_id,
             tenant_id=tenant_id,
@@ -91,7 +91,7 @@ async def _save_image_to_storage(
             status="completed",
         )
         db.add(meta)
-        db.commit()
+        await db.commit()
 
     url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
     return file_id, url
@@ -153,7 +153,7 @@ class DocExtractorNode(BaseNode):
         chunks: list[str] = []
         image_file_objects: list[dict] = []
 
-        with get_db_read() as db:
+        async with get_async_db_context() as db:
             from app.services.multimodal_service import MultimodalService
             svc = MultimodalService(db)
             for f in files:

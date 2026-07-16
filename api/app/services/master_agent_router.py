@@ -3,6 +3,7 @@ import json
 import re
 import uuid
 from typing import Dict, Any, List, Optional, Tuple
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.schemas.app_schema import ModelParameters
@@ -31,7 +32,7 @@ class MasterAgentRouter:
 
     def __init__(
         self,
-        db: Session,
+        db: Session | AsyncSession,
         master_model_config: ModelConfig,
         model_parameters: ModelParameters,
         sub_agents: Dict[str, Any],
@@ -351,7 +352,7 @@ class MasterAgentRouter:
             from app.models import ModelApiKey, ModelType
 
             # 获取 API Key 配置
-            api_key_config = ModelApiKeyService.get_available_api_key(
+            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
                 self.db,
                 self.master_model_config.id,
                 tenant_id=self.tenant_id,
@@ -408,7 +409,7 @@ class MasterAgentRouter:
 
             # 调用模型
             response = await llm.ainvoke(prompt)
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
+            await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_config.id)
 
             # 提取 token 消耗
             self._last_routing_tokens = 0

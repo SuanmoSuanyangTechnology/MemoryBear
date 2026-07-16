@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -6,23 +5,22 @@ from typing import Any
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.rag.retrieval.async_models import AsyncRetrievalModelGateway
+from app.core.rag.retrieval.models import ModelRuntimeSnapshot
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller
-from app.models import ModelType
+from app.db import get_async_db_context
+from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.models.models_model import ModelCapability
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
-from app.schemas.model_schema import ModelInfo
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
+from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
-from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -163,193 +161,162 @@ class KnowledgeRetrievalNode(BaseNode):
                 })
         return citations
 
-    def _build_auto_filter_llm(self, db) -> RedBearLLM:
-        """auto 模式：照搬 LLM 节点 _prepare_llm 的构造方式，用 RedBearLLM + extra_params。
-
-        参数折叠进 RedBearModelConfig.extra_params，经 strip_unsupported_llm_params 按 provider
-        剔除不支持的键并打 warning；stop 等经 RedBearModelFactory.get_model_params 路由到顶层，
-        provider 真正认（旧 chat_model.Base 路径下 stop 不生效的根因即在此）。与
-        MetadataAutoFilterService.generate_filter_groups 期望的 llm.invoke() 接口一致。
-
-        api-key 选取沿用旧 chat_model.Base 路径的 model_balance（取 config.api_keys[0]，直接用
-        其 api_base），不切到 get_runtime_api_config：后者对 SpeedBear 公共模型会走
-        _build_speedbear_runtime_api_key，base_url 指向 SPEEDBEAR_BASE_URL 网关，本地开发网络下
-        不可达会触发 Connection error。stop 修复只依赖 RedBearLLM 构造，与 api-key 来源无关。
-        """
-        model_cfg = self.typed_config.metadata_model
-        config = ModelConfigService.get_model_by_id(db=db, model_id=model_cfg.model_id)
-        if not config:
-            raise BusinessException(
-                "auto 模式配置的模型不存在", code=BizCode.NOT_FOUND
-            )
-        api_key = self.model_balance(config)
-        model_info = ModelInfo(
-            model_name=api_key.model_name,
-            model_type=ModelType(config.type),
-            api_key=api_key.api_key,
-            api_base=api_key.api_base,
-            provider=api_key.provider or config.provider,
-            is_omni=api_key.is_omni if api_key.is_omni is not None else config.is_omni,
-            capability=api_key.capability or config.capability or [],
-        )
-
-        p = model_cfg.completion_params
-        extra_params: dict[str, Any] = {}
-        # enable 门与 LLM 节点完全一致：temperature/max_tokens 无 enable 门，其余需 enable=true
-        if p.temperature is not None:
-            extra_params["temperature"] = p.temperature
-        if p.max_tokens is not None:
-            extra_params["max_tokens"] = p.max_tokens
-        if p.top_p.enable and p.top_p.value is not None:
-            extra_params["top_p"] = p.top_p.value
-        if p.top_k.enable and p.top_k.value is not None:
-            extra_params["top_k"] = p.top_k.value
-        if p.seed.enable and p.seed.value is not None:
-            extra_params["seed"] = p.seed.value
-        if p.repetition_penalty.enable and p.repetition_penalty.value is not None:
-            extra_params["repetition_penalty"] = p.repetition_penalty.value
-        if p.frequency_penalty.enable and p.frequency_penalty.value is not None:
-            extra_params["frequency_penalty"] = p.frequency_penalty.value
-        if p.presence_penalty.enable and p.presence_penalty.value is not None:
-            extra_params["presence_penalty"] = p.presence_penalty.value
-        if p.stop.enable and p.stop.value:
-            extra_params["stop"] = p.stop.value[:4]
-        if p.search:
-            extra_params["enable_search"] = True
-
-        deep_thinking = p.thinking.enable
-        thinking_budget_tokens = p.thinking.budget.value if (
-            p.thinking.budget.enable and p.thinking.budget.value is not None
-        ) else None
-
-        capability_set = set(model_info.capability or [])
-        json_output = bool(p.json_output)
-        if (
-            p.response_format.enable
-            and p.response_format.value == "json_object"
-            and ModelCapability.JSON_OUTPUT in capability_set
-        ):
-            extra_params["response_format"] = {"type": "json_object"}
-
-        if p.extra_headers.enable and p.extra_headers.value:
-            try:
-                extra_params["default_headers"] = json.loads(p.extra_headers.value)
-            except (ValueError, TypeError) as e:
-                logger.warning(
-                    f"node: {self.node_id} auto filter: extra_headers JSON parse failed: {e}"
-                )
-
-        # 按 provider 剔除不支持的参数并打 warning（与 LLM 节点 strip_unsupported_llm_params 一致）
-        extra_params, strip_warnings = strip_unsupported_llm_params(
-            extra_params, model_info.provider or "", model_info.is_omni
-        )
-        for w in strip_warnings:
-            logger.warning(
-                f"节点 {self.node_id} auto filter 参数安全剥离: {w} "
-                f"(模型={model_info.model_name}, 提供商={model_info.provider})"
-            )
-
-        logger.info(
-            f"节点 {self.node_id} auto filter: provider={model_info.provider}, "
-            f"model={model_info.model_name}, is_omni={model_info.is_omni}, "
-            f"is_public={getattr(config, 'is_public', None)}, "
-            f"base_url={model_info.api_base!r}, api_key_set={bool(model_info.api_key)}, "
-            f"extra_params={extra_params}"
-        )
-
-        return RedBearLLM(
-            RedBearModelConfig(
-                model_name=model_info.model_name,
-                provider=model_info.provider,
-                api_key=model_info.api_key,
-                base_url=model_info.api_base,
-                is_omni=model_info.is_omni,
-                capability=model_info.capability,
-                deep_thinking=deep_thinking,
-                thinking_budget_tokens=thinking_budget_tokens,
-                json_output=json_output,
-                extra_params=extra_params,
-            ),
-            type=model_info.model_type,
-        )
-
-    def _extract_auto_filter_groups(
+    async def _prepare_auto_filter_state_async(
         self,
-        query: str,
-    ) -> list:
-        """auto 模式：用配置好的模型 + 参数，调用 LLM 提取出源数据过滤条件。
-
-        产出 list[FilterGroup]（配置层类型），直接放进 metadata_filters 交给 service；
-        service 再经 _build_common_filter_groups 转成引擎层类型做真正的过滤。
-        """
+    ) -> tuple[dict[str, Any], ModelRuntimeSnapshot, dict[str, Any]] | None:
+        """Snapshot the Workflow AUTO filter inputs in a short async DB context."""
         cfg = self._get_typed_config()
-        model_cfg = cfg.metadata_model
-        if not model_cfg or not model_cfg.model_id:
-            raise BusinessException(
-                "auto 模式必须配置 metadata_model.model_id",
-                code=BizCode.INVALID_PARAMETER,
-            )
-
-        with get_db_read() as db:
-            # 1. 取各知识库的元数据定义，求公共字段（与 service._build_metadata_document_filter 一致）
+        async with get_async_db_context() as db:
             metadata_defs_by_kb = {
-                kb.kb_id: KnowledgeMetadataService.get_metadata_defs_for_filtering(db, kb.kb_id)
+                kb.kb_id: await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
+                    db,
+                    kb.kb_id,
+                )
                 for kb in cfg.knowledge_bases
             }
-            common_metadata_defs = KnowledgeRetrievalService._get_common_metadata_defs(metadata_defs_by_kb)
-
+            common_metadata_defs = KnowledgeRetrievalPreparation._get_common_metadata_defs(
+                metadata_defs_by_kb,
+            )
             if not common_metadata_defs:
                 logger.info(
-                    "node: %s auto filter: no common metadata fields, skip extraction",
+                    "node: %s auto filter skipped because no common metadata fields exist",
                     self.node_id,
                 )
-                return []
+                return None
 
-            # 2. 构造配置好的 LLM（含模型参数，照搬 LLM 节点 RedBearLLM 构造）
-            llm = self._build_auto_filter_llm(db)
+            model_cfg = cfg.metadata_model
+            if not model_cfg or not model_cfg.model_id:
+                raise BusinessException(
+                    "auto 模式必须配置 metadata_model.model_id",
+                    code=BizCode.INVALID_PARAMETER,
+                )
+            model_config = await ModelConfigService.get_model_by_id_async(
+                db,
+                model_cfg.model_id,
+            )
+            api_key = self.model_balance(model_config)
+            model = ModelRuntimeSnapshot(
+                model_name=api_key.model_name,
+                provider=api_key.provider or model_config.provider,
+                api_key=api_key.api_key,
+                api_base=api_key.api_base,
+                capability=tuple(api_key.capability or model_config.capability or ()),
+                is_omni=(
+                    api_key.is_omni
+                    if api_key.is_omni is not None
+                    else bool(model_config.is_omni)
+                ),
+                model_type=model_config.type,
+            )
 
-        # 3. 调用提取方法（参数已在 llm 实例上，不再单独传 gen_conf）
-        logger.info(
-            "node: %s auto filter: query=%r, fields=%s",
-            self.node_id, query, list(common_metadata_defs.keys()),
+        return (
+            common_metadata_defs,
+            model,
+            self._build_auto_filter_generation_options(model),
         )
-        filter_groups = MetadataAutoFilterService.generate_filter_groups(
+
+    def _build_auto_filter_generation_options(
+        self,
+        model: ModelRuntimeSnapshot,
+    ) -> dict[str, Any]:
+        """Normalize Workflow completion parameters for the native metadata adapter."""
+        params = self._get_typed_config().metadata_model.completion_params
+        options: dict[str, Any] = {}
+        if params.temperature is not None:
+            options["temperature"] = params.temperature
+        if params.max_tokens is not None:
+            options["max_tokens"] = params.max_tokens
+        if params.top_p.enable and params.top_p.value is not None:
+            options["top_p"] = params.top_p.value
+        if params.top_k.enable and params.top_k.value is not None:
+            options["top_k"] = params.top_k.value
+        if params.seed.enable and params.seed.value is not None:
+            options["seed"] = params.seed.value
+        if params.repetition_penalty.enable and params.repetition_penalty.value is not None:
+            options["repetition_penalty"] = params.repetition_penalty.value
+        if params.frequency_penalty.enable and params.frequency_penalty.value is not None:
+            options["frequency_penalty"] = params.frequency_penalty.value
+        if params.presence_penalty.enable and params.presence_penalty.value is not None:
+            options["presence_penalty"] = params.presence_penalty.value
+        if params.stop.enable and params.stop.value:
+            options["stop"] = params.stop.value[:4]
+        if params.search:
+            options["enable_search"] = True
+        if params.thinking.enable:
+            options["deep_thinking"] = True
+            if params.thinking.budget.enable and params.thinking.budget.value is not None:
+                options["thinking_budget_tokens"] = params.thinking.budget.value
+        if (
+            (params.json_output or (
+                params.response_format.enable
+                and params.response_format.value == "json_object"
+            ))
+            and ModelCapability.JSON_OUTPUT in set(model.capability)
+            and not (
+                params.thinking.enable
+                and ModelCapability.THINKING in set(model.capability)
+            )
+        ):
+            options["response_format"] = {"type": "json_object"}
+        if params.extra_headers.enable and params.extra_headers.value:
+            try:
+                decoded_headers = json.loads(params.extra_headers.value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "node: %s auto filter ignored invalid extra headers JSON",
+                    self.node_id,
+                )
+            else:
+                if isinstance(decoded_headers, dict):
+                    options["default_headers"] = decoded_headers
+                else:
+                    logger.warning(
+                        "node: %s auto filter ignored non-object extra headers",
+                        self.node_id,
+                    )
+
+        options, strip_warnings = strip_unsupported_llm_params(
+            options,
+            model.provider,
+            model.is_omni,
+        )
+        for warning in strip_warnings:
+            logger.warning(
+                "node: %s auto filter parameter stripped: %s",
+                self.node_id,
+                warning,
+            )
+        return options
+
+    async def _extract_auto_filter_groups_async(self, query: str) -> list[FilterGroup]:
+        prepared = await self._prepare_auto_filter_state_async()
+        if prepared is None:
+            return []
+
+        common_metadata_defs, model, generation_options = prepared
+        filter_groups = await AsyncRetrievalModelGateway().generate_metadata_filters(
             query=query,
             metadata_defs=common_metadata_defs,
-            llm=llm,
+            model=model,
+            generation_options=generation_options,
         )
-        # generate_filter_groups 返回引擎层 EngineFilterGroup；metadata_filters 字段装的是配置层 FilterGroup，
-        # 这里无损转成配置层类型（引擎层 logic 大写，由 config 校验器统一转小写）。
-        filter_groups = [
+        return [
             FilterGroup(
                 conditions=[
-                    FilterCondition(field=c.field, operator=c.operator, value=c.value)
-                    for c in (g.conditions or [])
+                    FilterCondition(field=condition.field, operator=condition.operator, value=condition.value)
+                    for condition in (group.conditions or [])
                 ],
-                logic=g.logic,
+                logic=group.logic,
             )
-            for g in (filter_groups or [])
+            for group in (filter_groups or [])
         ]
-        # 打印提取出的过滤条件（即交接给知识库工程师做真正过滤的内容）
-        logger.info(
-            "node: %s auto filter extracted: %s",
-            self.node_id,
-            [
-                {
-                    "logic": group.logic,
-                    "conditions": [cond.model_dump() for cond in (group.conditions or [])],
-                }
-                for group in (filter_groups or [])
-            ],
-        )
-        return filter_groups
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the knowledge retrieval workflow node.
 
         Delegates all retrieval and metadata filtering to the unified
-        KnowledgeRetrievalService.retrieve entry point, as specified in
+        KnowledgeRetrievalService.retrieve_async entry point, as specified in
         the knowledge retrieval API convention document.
 
         Args:
@@ -378,37 +345,43 @@ class KnowledgeRetrievalNode(BaseNode):
         # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
         auto_filter_groups: list | None = None
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            # generate_filter_groups 内部走同步 llm.invoke 网络调用，放到工作线程避免阻塞事件循环
-            auto_filter_groups = await asyncio.to_thread(
-                self._extract_auto_filter_groups, query
-            )
+            auto_filter_groups = await self._extract_auto_filter_groups_async(query)
 
         # 3. Construct KnowledgeRetrievalRequest
         first_kb = self.typed_config.knowledge_bases[0]
         kb_ids = [kb.kb_id for kb in self.typed_config.knowledge_bases]
 
+        # 分词检索不使用 vector_similarity_weight，其他检索类型从配置读取
+        if first_kb.retrieve_type == RetrieveType.PARTICIPLE:
+            vector_similarity_weight = None
+        else:
+            vector_similarity_weight = first_kb.vector_similarity_weight
+        
         request = KnowledgeRetrievalRequest(
             query=query,
             caller=KnowledgeRetrievalCaller.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
             similarity_threshold=first_kb.similarity_threshold,
-            vector_similarity_weight=first_kb.vector_similarity_weight,
+            vector_similarity_weight=vector_similarity_weight,
             top_k=self.typed_config.reranker_top_k or first_kb.top_k,
             retrieve_type=first_kb.retrieve_type,
             rerank_id=self.typed_config.reranker_id,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,
-            metadata_filters=auto_filter_groups or ([rendered_filters] if rendered_filters else []),
+            metadata_filters=(
+                auto_filter_groups
+                if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO
+                else ([rendered_filters] if rendered_filters else [])
+            ),
         )
+        if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
+            request.mark_metadata_filters_prepared()
 
         # 4. Call unified retrieval service
-        with get_db_read() as db:
-            result = await asyncio.to_thread(
-                KnowledgeRetrievalService.retrieve,
-                db=db,
-                request=request,
-                current_user=None,  # workflow nodes have no user context
-            )
+        result = await KnowledgeRetrievalService.retrieve_async(
+            request=request,
+            principal=None,
+        )
 
         # 5. Assemble return format
         chunks = result.chunks

@@ -7,6 +7,7 @@
 Validates: Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 6.1, 6.3, 6.4,
             7.3, 8.2
 """
+import asyncio
 import logging
 import math
 from logging import Logger
@@ -593,58 +594,42 @@ async def _query_nodes_by_type_limits(
 ) -> List[Dict[str, Any]]:
     """按 ``{Node_Type: Per_Type_Limit}`` 检索节点（封装 Q1）。
 
-    实现方式（单类型循环 + label 字面量内联）::
-
-        for node_type, limit in type_limits.items():
-            if limit <= 0:                  # 0 表示跳过该类型
-                continue
-            rows = await connector.execute_query(
-                build_graph_nodes_by_type_query(node_type),
-                end_user_id=end_user_id,
-                limit=int(limit),
-            )
-
-    两点背景：
-
-    1. Neo4j 不允许 ``LIMIT`` 引用运行期变量（``Neo.ClientError.Statement.SyntaxError
-       50N42``），因此不能用 ``UNWIND $type_limits AS spec ... LIMIT spec.limit`` 写法，
-       只能对每个类型单独下发静态 ``$limit``。
-    2. ``end_user_id`` 范围索引是 label-property 索引，规划器只有在 label 出现在
-       MATCH 模式里（``MATCH (n:Statement)``）时才会走 NodeIndexSeek；把 label 放进
-       WHERE 用 ``labels(n)[0] = $node_type``（或动态 label ``MATCH (n:$($node_type))``）
-       都无法稳定命中索引、退化为 AllNodesScan。因此这里改用
-       :func:`build_graph_nodes_by_type_query` 把白名单内的 label 字面量内联进模式。
-
-    对每个非零 limit 类型发起一次查询，调用次数 ``= 非零 limit 类型数``（最多
-    = ``len(SUPPORTED_NODE_TYPES)`` 个常量），与节点数 N 无关，符合 Requirement 6.4。
+    优化：对每个类型的查询通过 asyncio.gather 并行执行，所有查询共享同一
+    连接池，从串行 N×RTT 降为约 1×RTT。
 
     Args:
         connector: 由调用方注入的 :class:`Neo4jConnector` 实例，便于在测试中 mock。
         end_user_id: 终端用户 UUID 字符串。
         type_limits: ``{Node_Type: Per_Type_Limit}`` 映射。``Per_Type_Limit==0`` 的
-            条目会被本函数自动过滤（保留 0 会触发无意义的 ``LIMIT 0`` 查询）。
+            条目会被本函数自动过滤。
 
     Returns:
         合并后的 Cypher 行列表，每项包含 ``id`` / ``labels`` / ``properties`` 三个键。
-        当 ``type_limits`` 为空、或所有值 ≤ 0 时直接返回 ``[]``，不发起查询
-        （Requirement 6.3）。返回顺序为 ``type_limits`` 字典的迭代顺序（Python 3.7+
-        保留插入顺序）。
     """
     if not type_limits:
         return []
 
-    merged_rows: List[Dict[str, Any]] = []
-    for node_type, limit in type_limits.items():
-        limit_int = int(limit)
-        if limit_int <= 0:
-            continue
+    async def _fetch(node_type: str, limit_int: int) -> List[Dict[str, Any]]:
         rows = await connector.execute_query(
             build_graph_nodes_by_type_query(node_type),
             end_user_id=end_user_id,
             limit=limit_int,
         )
-        if rows:
-            merged_rows.extend(rows)
+        return rows or []
+
+    tasks = [
+        _fetch(node_type, int(limit))
+        for node_type, limit in type_limits.items()
+        if int(limit) > 0
+    ]
+
+    if not tasks:
+        return []
+
+    results = await asyncio.gather(*tasks)
+    merged_rows: List[Dict[str, Any]] = []
+    for rows in results:
+        merged_rows.extend(rows)
 
     return merged_rows
 
@@ -687,38 +672,30 @@ async def _query_total_count_by_type(
 ) -> Dict[str, int]:
     """按 label 聚合 end_user 下的全量节点总数（封装 Q4）。
 
-    与 Q1 同理：为命中 ``end_user_id`` 范围索引（label-property 索引），
-    必须把 label 字面量内联进 MATCH 模式。旧版「``MATCH (n) WHERE labels(n)[0]
-    IN $supported_types``」单查询缺少模式内 label，会对全库 AllNodesScan；
-    这里改为对每个类型调用 :func:`build_graph_total_count_by_type_query`
-    单独 NodeIndexSeek 计数，再合并为 ``{label: total}``。调用次数 = 类型数
-    （最多 = ``len(SUPPORTED_NODE_TYPES)``，常数级），与节点数 N 无关。
+    优化：通过 asyncio.gather 并行执行所有类型的计数查询，
+    从串行 N×RTT 降为约 1×RTT。
 
     Args:
         connector: :class:`Neo4jConnector` 实例。
         end_user_id: 终端用户 UUID 字符串。
-        supported_types: 需要计数的 Node_Type 列表（一般为
-            :data:`SUPPORTED_NODE_TYPES`，或 Filter_Mode 下的过滤后类型）。
+        supported_types: 需要计数的 Node_Type 列表。
 
     Returns:
-        ``{label: total}`` 字典。当 ``supported_types`` 为空时返回 ``{}`` 且
-        不发起查询。结果中缺失的类型由调用方在装配 ``statistics.per_type``
-        时按 0 处理。
+        ``{label: total}`` 字典。当 ``supported_types`` 为空时返回 ``{}``。
     """
     if not supported_types:
         return {}
 
-    result: Dict[str, int] = {}
-    for node_type in supported_types:
+    async def _count(node_type: str) -> Tuple[str, int]:
         rows = await connector.execute_query(
             build_graph_total_count_by_type_query(node_type),
             end_user_id=end_user_id,
         )
-        total = 0
-        if rows:
-            total = int(rows[0].get("total", 0) or 0)
-        result[node_type] = total
-    return result
+        total = int(rows[0].get("total", 0) or 0) if rows else 0
+        return node_type, total
+
+    results = await asyncio.gather(*[_count(t) for t in supported_types])
+    return {node_type: total for node_type, total in results}
 
 
 # ---------------------------------------------------------------------------

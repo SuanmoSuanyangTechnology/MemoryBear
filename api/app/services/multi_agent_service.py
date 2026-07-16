@@ -4,6 +4,7 @@ import json
 from typing import Optional, List, Tuple, Any, Annotated
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
@@ -46,7 +47,7 @@ def convert_uuids_to_str(obj: Any) -> Any:
 class MultiAgentService:
     """多 Agent 配置管理服务"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def create_config(
@@ -149,6 +150,19 @@ class MultiAgentService:
             )
             .order_by(MultiAgentConfig.updated_at.desc())
         ).first()
+
+    async def get_config_async(self, app_id: uuid.UUID) -> Optional[MultiAgentConfig]:
+        if isinstance(self.db, AsyncSession):
+            result = await self.db.execute(
+                select(MultiAgentConfig)
+                .where(
+                    MultiAgentConfig.app_id == app_id,
+                    MultiAgentConfig.is_active.is_(True)
+                )
+                .order_by(MultiAgentConfig.updated_at.desc())
+            )
+            return result.scalars().first()
+        return self.get_config(app_id)
 
     def get_multi_agent_configs(self, app_id: uuid.UUID) -> Optional[dict]:
         """通过 app_id 获取最新有效的多智能体配置，并将 agent_id 转换为 app_id
@@ -422,7 +436,7 @@ class MultiAgentService:
             raise BusinessException("多 Agent 配置已禁用", BizCode.RESOURCE_DISABLED)
 
         # 2. 创建编排器
-        orchestrator = MultiAgentOrchestrator(self.db, config)
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         # 3. 执行任务
         result = await orchestrator.execute(
@@ -471,7 +485,7 @@ class MultiAgentService:
             SSE 格式的事件流
         """
         # 1. 获取配置
-        config = self.get_config(app_id)
+        config = await self.get_config_async(app_id)
         if not config:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
 
@@ -479,7 +493,7 @@ class MultiAgentService:
             raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
         # 2. 创建编排器
-        orchestrator = MultiAgentOrchestrator(self.db, config)
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         full_content = ""
         total_tokens = 0
@@ -552,20 +566,44 @@ class MultiAgentService:
         """
         try:
             from app.services.conversation_service import ConversationService
+            from app.models import Conversation, Message
 
-            conversation_service = ConversationService(self.db)
+            if isinstance(self.db, AsyncSession):
+                conversation = await self.db.get(Conversation, conversation_id)
+                if not conversation:
+                    raise ResourceNotFoundException("会话", str(conversation_id))
 
-            conversation_service.add_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=user_message
-            )
-            conversation_service.add_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=assistant_message,
-                meta_data=meta_data
-            )
+                for role, content, message_meta in (
+                    ("user", user_message, None),
+                    ("assistant", assistant_message, meta_data),
+                ):
+                    message = Message(
+                        id=uuid.uuid4(),
+                        conversation_id=conversation_id,
+                        role=role,
+                        content=content,
+                        meta_data=message_meta,
+                        status="completed",
+                    )
+                    self.db.add(message)
+                    conversation.message_count = (conversation.message_count or 0) + 1
+                    if conversation.message_count <= 2 and role == "user":
+                        conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+
+                await self.db.commit()
+            else:
+                conversation_service = ConversationService(self.db)
+                conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=user_message
+                )
+                conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=assistant_message,
+                    meta_data=meta_data
+                )
 
             logger.debug(
                 "保存多 Agent 会话消息",

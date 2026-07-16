@@ -3,6 +3,7 @@ import uuid
 from typing import List
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.repositories.skill_repository import SkillRepository
@@ -78,6 +79,21 @@ class SkillService:
         )
 
     @staticmethod
+    async def list_skills_async(
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        search: str = None,
+        is_active: bool = None,
+        is_public: bool = None,
+        page: int = 1,
+        pagesize: int = 10
+    ) -> tuple[list[type[Skill]], int]:
+        """异步列出技能"""
+        return await SkillRepository.list_skills_async(
+            db, tenant_id, search, is_active, is_public, page, pagesize
+        )
+
+    @staticmethod
     def update_skill(db: Session, skill_id: uuid.UUID, data: SkillUpdate, tenant_id: uuid.UUID) -> Skill:
         """更新技能"""
         try:
@@ -133,6 +149,40 @@ class SkillService:
                             langchain_tool = tool.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
                             # 建立工具到技能的映射
+                            tool_name = getattr(langchain_tool, 'name', str(id(langchain_tool)))
+                            tool_to_skill_map[tool_name] = skill_id
+            except Exception as e:
+                print(f"加载技能 {skill_id} 的工具时出错: {e}")
+                continue
+
+        return tools, tool_to_skill_map
+
+    @staticmethod
+    async def load_skill_tools_async(
+        db: AsyncSession,
+        skill_ids: List[str],
+        tenant_id: uuid.UUID,
+        runtime_context: dict | None = None,
+    ) -> tuple[List, dict[str, str]]:
+        """异步加载技能关联的工具"""
+        tools = []
+        tool_to_skill_map = {}
+        tool_service = ToolService(db)
+
+        for skill_id in skill_ids:
+            try:
+                skill = await SkillRepository.get_by_id_async(db, uuid.UUID(skill_id), tenant_id)
+                if skill and skill.is_active:
+                    for tool_config in skill.tools:
+                        tool = await tool_service.get_tool_instance_async(
+                            tool_config.get("tool_id", ""),
+                            tenant_id,
+                        )
+                        if tool:
+                            if runtime_context:
+                                tool.set_runtime_context(**runtime_context)
+                            langchain_tool = tool.to_langchain_tool(tool_config.get("operation", None))
+                            tools.append(langchain_tool)
                             tool_name = getattr(langchain_tool, 'name', str(id(langchain_tool)))
                             tool_to_skill_map[tool_name] = skill_id
             except Exception as e:

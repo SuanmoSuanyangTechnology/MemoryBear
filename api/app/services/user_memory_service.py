@@ -4,6 +4,7 @@ User Memory Service
 处理用户记忆相关的业务逻辑，包括记忆洞察、用户摘要、节点统计和图数据等。
 """
 
+import asyncio
 import uuid
 from collections import Counter
 from datetime import datetime
@@ -14,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
 from app.core.memory.constants.graph_data_constants import (
-    DEPTH_HARD_MAX,
     NODE_PROPERTY_WHITELIST,
     _DEFAULT_FIELDS,
 )
@@ -22,7 +22,6 @@ from app.core.memory.storage_services.extraction_engine.deduplication.deduped_an
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow_naive
 from app.db import get_db_context
-from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.graph_data_schema import GraphDataResponse
@@ -39,8 +38,6 @@ from app.services._graph_data_helpers import (
 )
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
 from app.services.memory_config_service import MemoryConfigService
-from app.services.memory_perceptual_service import MemoryPerceptualService
-from app.services.memory_short_service import LongService, ShortService
 
 logger = get_logger(__name__)
 
@@ -359,8 +356,82 @@ class UserMemoryService:
                 if hasattr(original_value, 'timestamp'):
                     data[key] = UserMemoryService._datetime_to_timestamp(original_value)
         return data
- # ======================== 用户别名及信息 ========================    
-    def get_end_user_info(
+
+    # ======================== 异步缓存查询（纯异步，不阻塞事件循环）========================
+
+    async def get_cached_memory_insight_async(self, end_user_id: str) -> Dict[str, Any]:
+        """获取缓存的记忆洞察（纯异步版本，通过 Repository 层查询）。"""
+        import json
+        from app.db import get_async_db_context
+        from app.core.utils.datetime_utils import to_timestamp_ms
+
+        async with get_async_db_context() as db:
+            repo = EndUserRepository(db)
+            row = await repo.get_memory_insight_by_end_user_id_async(end_user_id)
+
+        if not row:
+            return {
+                "memory_insight": None, "behavior_pattern": None,
+                "key_findings": None, "growth_trajectory": None,
+                "updated_at": None, "is_cached": False, "message": "用户不存在"
+            }
+
+        has_cache = any([
+            row["memory_insight"], row["behavior_pattern"],
+            row["key_findings"], row["growth_trajectory"],
+        ])
+
+        # key_findings: JSON 字符串 → 数组
+        key_findings_raw = row["key_findings"]
+        if key_findings_raw:
+            try:
+                key_findings_array = json.loads(key_findings_raw)
+            except (json.JSONDecodeError, TypeError):
+                key_findings_array = [item.strip() for item in key_findings_raw.split('•') if item.strip()]
+        else:
+            key_findings_array = []
+
+        return {
+            "memory_insight": row["memory_insight"],
+            "behavior_pattern": row["behavior_pattern"],
+            "key_findings": key_findings_array,
+            "growth_trajectory": row["growth_trajectory"],
+            "updated_at": to_timestamp_ms(row["memory_insight_updated_at"]) if row["memory_insight_updated_at"] else None,
+            "is_cached": has_cache,
+        }
+
+    async def get_cached_user_summary_async(self, end_user_id: str) -> Dict[str, Any]:
+        """获取缓存的用户摘要（纯异步版本，通过 Repository 层查询）。"""
+        from app.db import get_async_db_context
+        from app.core.utils.datetime_utils import to_timestamp_ms
+
+        async with get_async_db_context() as db:
+            repo = EndUserRepository(db)
+            row = await repo.get_user_summary_by_end_user_id_async(end_user_id)
+
+        if not row:
+            return {
+                "user_summary": None, "personality": None,
+                "core_values": None, "one_sentence": None,
+                "updated_at": None, "is_cached": False, "message": "用户不存在"
+            }
+
+        has_cache = any([
+            row["user_summary"], row["personality_traits"],
+            row["core_values"], row["one_sentence_summary"],
+        ])
+
+        return {
+            "user_summary": row["user_summary"],
+            "personality": row["personality_traits"],
+            "core_values": row["core_values"],
+            "one_sentence": row["one_sentence_summary"],
+            "updated_at": to_timestamp_ms(row["user_summary_updated_at"]) if row["user_summary_updated_at"] else None,
+            "is_cached": has_cache,
+        }
+
+    # ======================== 用户别名及信息 ========================    
+    def get_end_user_info( #TODO(乐力齐):[910]清除旧有无用代码(v0.3.14)
         self,
         db: Session,
         end_user_id: str
@@ -1445,257 +1516,185 @@ async def analytics_node_statistics(
 ) -> Dict[str, Any]:
     """
     统计 Neo4j 中四种节点类型的数量和百分比
-    
-    Args:
-        db: 数据库会话
-        end_user_id: 可选的终端用户ID (UUID)，用于过滤特定用户的节点
-        
-    Returns:
-        {
-            "total": int,  # 总节点数
-            "nodes": [
-                {
-                    "type": str,  # 节点类型
-                    "count": int,  # 节点数量
-                    "percentage": float  # 百分比
-                }
-            ]
-        }
     """
-    # 定义四种节点类型的查询
+    from app.repositories.neo4j.cypher_queries import build_node_count_query
+
     node_types = ["Chunk", "MemorySummary", "Statement", "ExtractedEntity"]
-    
-    # 存储每种节点类型的计数
     node_counts = {}
-    
-    # 查询每种节点类型的数量
+
     for node_type in node_types:
-        # 构建查询语句
-        if end_user_id:
-            query = f"""
-            MATCH (n:{node_type})
-            WHERE n.end_user_id = $end_user_id
-            RETURN count(n) as count
-            """
-            result = await _neo4j_connector.execute_query(query, end_user_id=end_user_id)
-        else:
-            query = f"""
-            MATCH (n:{node_type})
-            RETURN count(n) as count
-            """
-            result = await _neo4j_connector.execute_query(query)
-        
-        # 提取计数结果
-        count = result[0]["count"] if result and len(result) > 0 else 0
-        node_counts[node_type] = count
-    
-    # 计算总数
+        query = build_node_count_query(node_type, with_end_user=bool(end_user_id))
+        params = {"end_user_id": end_user_id} if end_user_id else {}
+        result = await _neo4j_connector.execute_query(query, **params)
+        node_counts[node_type] = result[0]["count"] if result else 0
+
     total = sum(node_counts.values())
-    
-    # 构建返回数据，包含百分比
     nodes = []
     for node_type in node_types:
         count = node_counts[node_type]
         percentage = round((count / total * 100), 2) if total > 0 else 0.0
-        nodes.append({
-            "type": node_type,
-            "count": count,
-            "percentage": percentage
-        })
-    
-    data = {
-        "total": total,
-        "nodes": nodes
-    }
-    
-    return data
+        nodes.append({"type": node_type, "count": count, "percentage": percentage})
+
+    return {"total": total, "nodes": nodes}
 
 
-async def analytics_memory_types(
-    db: Session,
+async def _async_get_perceptual_count(end_user_uuid: uuid.UUID) -> int:
+    """统计感知记忆总数（通过 Repository 异步方法）。"""
+    from app.db import get_async_db_context
+    from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
+    async with get_async_db_context() as db:
+        repo = MemoryPerceptualRepository(db)
+        return await repo.get_count_by_user_id_async(end_user_uuid)
+
+
+async def _async_get_working_memory_stats(end_user_id: str) -> Tuple[int, int]:
+    """统计工作记忆（通过 Repository 异步方法）。"""
+    from app.db import get_async_db_context
+    from app.repositories.conversation_repository import ConversationRepository
+    from app.repositories.memory_message_repository import MemoryMessageRepository
+
+    async with get_async_db_context() as db:
+        conv_repo = ConversationRepository(db)
+        agent_workflow_count = await conv_repo.get_active_conversation_count_async(uuid.UUID(end_user_id))
+
+        msg_repo = MemoryMessageRepository(db)
+        api_mcp_count = await msg_repo.get_working_memory_source_count_async(end_user_id)
+
+    return agent_workflow_count, api_mcp_count
+
+
+async def _async_get_short_term_count(end_user_id: str) -> int:
+    """统计短期记忆条数（通过 Repository 异步方法）。"""
+    from app.db import get_async_db_context
+    from app.repositories.memory_short_repository import ShortTermMemoryRepository
+    async with get_async_db_context() as db:
+        repo = ShortTermMemoryRepository(db)
+        return await repo.count_by_user_id_async(end_user_id)
+
+
+async def _async_get_long_term_conversation_count(end_user_id: str) -> int:
+    """统计有待写入长期记忆的会话数（通过 Repository 异步方法）。"""
+    from app.db import get_async_db_context
+    from app.repositories.conversation_repository import ConversationRepository
+    async with get_async_db_context() as db:
+        repo = ConversationRepository(db)
+        return await repo.get_pending_write_conversation_count_async(end_user_id)
+
+
+async def _async_get_forgetting_threshold(end_user_id: str) -> float:
+    """获取用户的遗忘阈值配置（通过 Repository 异步方法）。"""
+    from app.db import get_async_db_context
+    async with get_async_db_context() as db:
+        repo = EndUserRepository(db)
+        value = await repo.get_forgetting_threshold_async(uuid.UUID(end_user_id))
+        if value is not None:
+            return float(value)
+    return 0.3
+
+
+async def analytics_memory_types_async(
     end_user_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    统计8种记忆类型的数量和百分比
-    
-    计算规则：
-    1. 感知记忆 (PERCEPTUAL_MEMORY) = 通过 MemoryPerceptualService.get_memory_count 获取的 total_count
-    2. 工作记忆 (WORKING_MEMORY) = 会话数量（通过 ConversationRepository.get_conversation_by_user_id 获取）
-    3. 短期记忆 (SHORT_TERM_MEMORY) = /short_term 接口返回的问答对数量
-    4. 显性记忆 (EXPLICIT_MEMORY) = 情景记忆 + 语义记忆（通过 MemoryBaseService.get_explicit_memory_count 获取）
-    5. 隐性记忆 (IMPLICIT_MEMORY) = MemorySummary 节点数量（需 >= MIN_MEMORY_SUMMARY_COUNT 才显示，否则为 0）
-    6. 情绪记忆 (EMOTIONAL_MEMORY) = 情绪标签统计总数（通过 MemoryBaseService.get_emotional_memory_count 获取）
-    7. 情景记忆 (EPISODIC_MEMORY) = memory_summary（通过 MemoryBaseService.get_episodic_memory_count 获取）
-    8. 遗忘记忆 (FORGET_MEMORY) = 激活值低于阈值的节点数（通过 MemoryBaseService.get_forget_memory_count 获取）
-    
-    Args:
-        db: 数据库会话
-        end_user_id: 可选的终端用户ID (UUID)，用于过滤特定用户的节点
-        
-    Returns:
-        [
-            {
-                "type": str,  # 记忆类型枚举值 (如 PERCEPTUAL_MEMORY, WORKING_MEMORY 等)
-                "count": int,  # 该类型的数量
-                "percentage": float  # 该类型在所有记忆中的占比
-            },
-            ...
-        ]
-        
-    记忆类型枚举值：
-        - PERCEPTUAL_MEMORY: 感知记忆
-        - WORKING_MEMORY: 工作记忆
-        - SHORT_TERM_MEMORY: 短期记忆
-        - EXPLICIT_MEMORY: 显性记忆
-        - IMPLICIT_MEMORY: 隐性记忆
-        - EMOTIONAL_MEMORY: 情绪记忆
-        - EPISODIC_MEMORY: 情景记忆
-        - FORGET_MEMORY: 遗忘记忆
+    统计8种记忆类型的数量和百分比（纯异步版本）。
+
+    每个 PG 查询通过 Repository 异步方法从连接池取独立 Session。
     """
-    # 初始化基础服务
     base_service = MemoryBaseService()
-    
-    # 初始化感知记忆服务
-    perceptual_service = MemoryPerceptualService(db)
-    
-    # 获取感知记忆数量
-    if end_user_id:
-        perceptual_stats = perceptual_service.get_memory_count(uuid.UUID(end_user_id))
-        perceptual_count = perceptual_stats.get("total", 0)
-    else:
-        perceptual_count = 0
-    
-    # 获取工作记忆数量（agent/workflow 会话数 + API/MCP 有记录则 +1）
-    work_count = 0
-    if end_user_id:
-        try:
-            from app.repositories.memory_message_repository import MemoryMessageRepository
 
-            conversation_repo = ConversationRepository(db)
-            conversations, total = conversation_repo.get_conversation_by_user_id(
-                user_id=uuid.UUID(end_user_id),
-                is_activate=True
-            )
-            agent_workflow_count = total
+    if not end_user_id:
+        # 无 end_user_id 时直接返回全零结果
+        return [
+            {"type": t, "count": 0, "percentage": 0.0}
+            for t in [
+                "PERCEPTUAL_MEMORY", "WORKING_MEMORY", "SHORT_TERM_MEMORY",
+                "EXPLICIT_MEMORY", "IMPLICIT_MEMORY", "EMOTIONAL_MEMORY",
+                "EPISODIC_MEMORY", "FORGET_MEMORY",
+            ]
+        ]
 
-            memory_message_repo = MemoryMessageRepository(db)
-            sources = memory_message_repo.get_working_memory_sources(end_user_id)
-            api_mcp_count = len(sources)  # 每个 source（service_api / mcp）有记录则各占 1
+    end_user_uuid = uuid.UUID(end_user_id)
 
-            work_count = agent_workflow_count + api_mcp_count
-            logger.debug(
-                f"工作记忆数量: total={work_count} "
-                f"(agent_workflow={agent_workflow_count}, api_mcp_sources={[s['source'] for s in sources]}) "
-                f"(end_user_id={end_user_id})"
-            )
-        except Exception as e:
-            logger.warning(f"获取工作记忆数量失败，设为0: {str(e)}")
-            work_count = 0
-    
-    # 获取隐性记忆数量（基于有关联关系的 MemorySummary 节点数量，需 >= MIN_MEMORY_SUMMARY_COUNT 才计入）
-    implicit_count = 0
-    if end_user_id:
-        try:
-            memory_summary_count = await base_service.get_valid_memory_summary_count(end_user_id)
-            implicit_count = memory_summary_count if memory_summary_count >= MIN_MEMORY_SUMMARY_COUNT else 0
-            logger.debug(f"隐性记忆数量（有效MemorySummary节点数）: {implicit_count} (有效MemorySummary总数={memory_summary_count}, end_user_id={end_user_id})")
-        except Exception as e:
-            logger.warning(f"获取MemorySummary数量失败，隐性记忆数量设为0: {str(e)}")
-            implicit_count = 0
-    
-    # 原有的基于行为习惯的统计方式（已注释）
-    # implicit_count = 0
-    # if end_user_id:
-    #     try:
-    #         implicit_service = ImplicitMemoryService(db, end_user_id)
-    #         behavior_habits = await implicit_service.get_behavior_habits(
-    #             user_id=end_user_id
-    #         )
-    #         implicit_count = len(behavior_habits)
-    #         logger.debug(f"隐性记忆数量（行为习惯数）: {implicit_count} (end_user_id={end_user_id})")
-    #     except Exception as e:
-    #         logger.warning(f"获取行为习惯数量失败，隐性记忆数量设为0: {str(e)}")
-    #         implicit_count = 0
-    
-    # 获取短期记忆数量（问答对数）和长期记忆数量
-    short_term_count = 0
-    long_term_number = 0
-    if end_user_id:
-        try:
-            short_term_service = ShortService(end_user_id, db)
-            short_term_count = short_term_service.get_short_count()
-            logger.debug(f"短期记忆数量（问答对数）: {short_term_count} (end_user_id={end_user_id})")
-        except Exception as e:
-            logger.warning(f"获取短期记忆数量失败，短期记忆数量设为0: {str(e)}")
-            short_term_count = 0
+    # ==== 第一阶段：拿到 forgetting_threshold + perceptual_count（后续 Neo4j 查询依赖）====
+    # 这两个 PG 查询独立，各自开独立 AsyncSession，真正并行
+    (
+        perceptual_count,
+        forgetting_threshold,
+    ) = await asyncio.gather(
+        _async_get_perceptual_count(end_user_uuid),
+        _async_get_forgetting_threshold(end_user_id),
+    )
 
+    # ==== 第二阶段：所有独立查询并行（3 个 PG + 5 个 Neo4j）====
+    async def _work_count_task() -> int:
         try:
-            long_term_service = LongService(end_user_id, db)
-            long_term_data = long_term_service.get_long_databasets()
-            if long_term_data:
-                long_term_number = len(long_term_data)
-            logger.debug(f"长期记忆数量: {long_term_number} (end_user_id={end_user_id})")
+            agent_wf, api_mcp = await _async_get_working_memory_stats(end_user_id)
+            return agent_wf + api_mcp
         except Exception as e:
-            logger.warning(f"获取长期记忆数量失败，长期记忆数量设为0: {str(e)}")
-            long_term_number = 0
-    
-    # 获取用户的遗忘阈值配置
-    forgetting_threshold = 0.3  # 默认值
-    if end_user_id:
+            logger.warning(f"获取工作记忆数量失败，设为0: {e}")
+            return 0
+
+    async def _short_term_task() -> int:
         try:
-            from app.core.memory.storage_services.forgetting_engine.config_utils import (
-                load_actr_config_from_db,
-            )
-            
-            # 获取用户关联的 config_id
-            config_id = MemoryConfigService(db).get_config_id_by_end_user(end_user_id)
-            
-            if config_id:
-                # 从数据库加载配置
-                config = load_actr_config_from_db(db, config_id)
-                forgetting_threshold = config.get('forgetting_threshold', 0.3)
-                logger.debug(f"使用用户配置的遗忘阈值: {forgetting_threshold} (end_user_id={end_user_id}, config_id={config_id})")
-            else:
-                logger.debug(f"用户未关联配置，使用默认遗忘阈值: {forgetting_threshold} (end_user_id={end_user_id})")
+            return await _async_get_short_term_count(end_user_id)
         except Exception as e:
-            logger.warning(f"获取用户遗忘阈值配置失败，使用默认值 {forgetting_threshold}: {str(e)}")
-    
-    # 使用 MemoryBaseService 的共享方法获取特殊记忆类型的数量
-    episodic_count = await base_service.get_episodic_memory_count(end_user_id)
-    explicit_count = await base_service.get_explicit_memory_count(end_user_id)
-    emotion_count = await base_service.get_emotional_memory_count(end_user_id, perceptual_count)
-    forget_count = await base_service.get_forget_memory_count(end_user_id, forgetting_threshold)
-    
-    # 按规则计算8种记忆类型的数量（使用英文枚举作为key）
+            logger.warning(f"获取短期记忆数量失败，设为0: {e}")
+            return 0
+
+    async def _long_term_task() -> int:
+        try:
+            return await _async_get_long_term_conversation_count(end_user_id)
+        except Exception as e:
+            logger.warning(f"获取长期记忆数量失败，设为0: {e}")
+            return 0
+
+    (
+        work_count,
+        short_term_count,
+        long_term_number,
+        memory_summary_count,
+        episodic_count,
+        explicit_count,
+        emotion_count,
+        forget_count,
+    ) = await asyncio.gather(
+        _work_count_task(),
+        _short_term_task(),
+        _long_term_task(),
+        base_service.get_valid_memory_summary_count(end_user_id),
+        base_service.get_episodic_memory_count(end_user_id),
+        base_service.get_explicit_memory_count(end_user_id),
+        base_service.get_emotional_memory_count(end_user_id, perceptual_count),
+        base_service.get_forget_memory_count(end_user_id, forgetting_threshold),
+    )
+
+    implicit_count = memory_summary_count if memory_summary_count >= MIN_MEMORY_SUMMARY_COUNT else 0
+
     memory_counts = {
-        "PERCEPTUAL_MEMORY": perceptual_count,                    # 感知记忆
-        "WORKING_MEMORY": work_count,                             # 工作记忆（基于会话数量）
-        "SHORT_TERM_MEMORY": short_term_count+long_term_number,   # 短期记忆（基于问答对数量）
-        "EXPLICIT_MEMORY": explicit_count,                        # 显性记忆（情景记忆 + 语义记忆）
-        "IMPLICIT_MEMORY": implicit_count,                        # 隐性记忆（MemorySummary节点数，需>=MIN_MEMORY_SUMMARY_COUNT）
-        "EMOTIONAL_MEMORY": emotion_count,                        # 情绪记忆（使用情绪标签统计）
-        "EPISODIC_MEMORY": episodic_count,                        # 情景记忆
-        "FORGET_MEMORY": forget_count                             # 遗忘记忆（激活值低于阈值）
+        "PERCEPTUAL_MEMORY": perceptual_count,
+        "WORKING_MEMORY": work_count,
+        "SHORT_TERM_MEMORY": short_term_count + long_term_number,
+        "EXPLICIT_MEMORY": explicit_count,
+        "IMPLICIT_MEMORY": implicit_count,
+        "EMOTIONAL_MEMORY": emotion_count,
+        "EPISODIC_MEMORY": episodic_count,
+        "FORGET_MEMORY": forget_count,
     }
-    
-    # 计算总数
+
     total = sum(memory_counts.values())
-    
-    # 构建返回数据，包含 type、count 和 percentage
     memory_types = []
     for memory_type, count in memory_counts.items():
         percentage = round((count / total * 100), 2) if total > 0 else 0.0
         memory_types.append({
             "type": memory_type,
             "count": count,
-            "percentage": percentage
+            "percentage": percentage,
         })
-    
+
     return memory_types
 
 async def analytics_graph_data(
-    db: Session,
-    end_user_id: str,
+    end_user_id: str = "",
     node_types: Optional[List[str]] = None,
     limit: int = 100,
     depth: int = 1,
@@ -1745,7 +1744,11 @@ async def analytics_graph_data(
             logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return _empty_graph_response("无效的用户ID格式")
 
-        end_user = EndUserRepository(db).get_by_id(user_uuid)
+        # 通过 Repository 异步方法校验用户存在性
+        from app.db import get_async_db_context
+        async with get_async_db_context() as _db:
+            end_user_repo = EndUserRepository(_db)
+            end_user = await end_user_repo.get_end_user_by_id_async(user_uuid)
         if not end_user:
             logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
             return _empty_graph_response("用户不存在")
@@ -1880,6 +1883,9 @@ async def _format_nodes(
         labels_value = record.get("labels") or []
         node_label = labels_value[0] if labels_value else "Unknown"
         node_props = record.get("properties") or {}
+        # 白名单查询返回的 map literal 包含 null 值（属性不存在时），
+        # 需要过滤以保持与 properties(n) 的行为一致（仅返回存在的属性）
+        node_props = {k: v for k, v in node_props.items() if v is not None}
         node_records.append((node_id, node_label, node_props))
         node_ids.append(node_id)
 
@@ -2028,24 +2034,10 @@ async def _query_center_node_neighbors(
     depth: int,
     limit: int,
 ) -> List[Dict[str, Any]]:
-    """以中心节点为起点的 1..depth 跳邻居查询（Center_Mode）。
+    """以中心节点为起点的 1..depth 跳邻居查询（Center_Mode）。"""
+    from app.repositories.neo4j.cypher_queries import build_center_node_neighbors_query
 
-    Cypher 不允许直接参数化变长路径长度（``[*1..n]``），因此需要将 ``depth``
-    安全拼入字符串；调用方需保证 ``depth`` 已被钳制为 ≤ 3。
-    """
-    safe_depth = max(1, min(int(depth), DEPTH_HARD_MAX))
-    cypher = f"""
-    MATCH path = (center)-[*1..{safe_depth}]-(connected)
-    WHERE center.end_user_id = $end_user_id
-      AND elementId(center) = $center_node_id
-    WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
-    UNWIND all_nodes as n
-    RETURN DISTINCT
-        elementId(n) as id,
-        labels(n) as labels,
-        properties(n) as properties
-    LIMIT $limit
-    """
+    cypher = build_center_node_neighbors_query(depth)
     rows = await _neo4j_connector.execute_query(
         cypher,
         end_user_id=end_user_id,
@@ -2056,38 +2048,28 @@ async def _query_center_node_neighbors(
 
 
 async def _query_edges_among_nodes(node_ids: List[str]) -> List[Dict[str, Any]]:
-    """查询若干节点之间的有向关系（Q3）。Cypher 已过滤悬空边。"""
-    cypher = """
-    MATCH (n)-[r]->(m)
-    WHERE elementId(n) IN $node_ids
-      AND elementId(m) IN $node_ids
-    RETURN
-        elementId(r) as id,
-        elementId(n) as source,
-        elementId(m) as target,
-        type(r) as rel_type,
-        properties(r) as properties
-    """
-    rows = await _neo4j_connector.execute_query(cypher, node_ids=list(node_ids))
+    """查询若干节点之间的有向关系（Q3）。"""
+    from app.repositories.neo4j.cypher_queries import GRAPH_EDGES_AMONG_NODES
+    rows = await _neo4j_connector.execute_query(GRAPH_EDGES_AMONG_NODES, node_ids=list(node_ids))
     return list(rows)
 
 
 # 辅助函数
 
 async def analytics_community_graph_data(
-    db: Session,
     end_user_id: str,
 ) -> Dict[str, Any]:
     """
     获取社区图谱数据，包含 Community 节点、ExtractedEntity 节点及其关系。
-
-    Returns:
-        包含 nodes、edges、statistics 的字典，格式与 analytics_graph_data 一致
     """
     try:
         user_uuid = uuid.UUID(end_user_id)
-        repo = EndUserRepository(db)
-        end_user = repo.get_by_id(user_uuid)
+
+        # 通过 Repository 异步方法校验用户存在性
+        from app.db import get_async_db_context
+        async with get_async_db_context() as _db:
+            end_user_repo = EndUserRepository(_db)
+            end_user = await end_user_repo.get_end_user_by_id_async(user_uuid)
         if not end_user:
             return {
                 "nodes": [], "edges": [],

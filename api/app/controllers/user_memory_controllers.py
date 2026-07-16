@@ -181,6 +181,7 @@ async def delete_node_api(
         deleted = await MemoryService.delete_node_by_element_id(
             element_id=element_id,
             end_user_id=end_user_id,
+            operator=current_user.id,
         )
 
         if deleted:

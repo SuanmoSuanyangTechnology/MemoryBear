@@ -261,6 +261,22 @@ class MemoryMessageRepository:
             for r in rows
         ]
 
+    async def get_working_memory_source_count_async(self, end_user_id: str) -> int:
+        """统计该用户 API/MCP 来源的 distinct source 数量（异步版本）。
+
+        返回值等价于 len(get_working_memory_sources(...))。
+        """
+        rows = await self.db.execute(
+            select(MemoryMessage.source)
+            .where(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.source.in_(self._API_MCP_SOURCES),
+            )
+            .group_by(MemoryMessage.source)
+        )
+        return len(rows.all())
+
     def has_api_mcp_messages(self, end_user_id: str) -> bool:
         """判断该用户是否有任何 API/MCP 来源的记忆消息（用于 work_count +1 判断）。"""
         exists = self.db.execute(

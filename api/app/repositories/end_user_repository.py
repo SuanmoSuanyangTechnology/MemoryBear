@@ -202,6 +202,61 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
             raise
 
+    async def get_end_user_by_other_id_async(self, workspace_id: uuid.UUID, other_id: str) -> Optional["EndUser"]:
+        result = await self.db.execute(
+            select(EndUser)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.other_id == other_id,
+                EndUser.is_active == True,
+            )
+            .order_by(EndUser.created_at.asc())
+        )
+        return result.scalars().first()
+
+    async def get_or_create_end_user_async(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            other_id: str,
+            original_user_id: Optional[str] = None,
+            other_name: Optional[str] = None
+    ) -> EndUser:
+        try:
+            end_user = await self.get_end_user_by_other_id_async(workspace_id, other_id)
+            if end_user:
+                db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
+                end_user.app_id = app_id
+                await self.db.commit()
+                await self.db.refresh(end_user)
+                return end_user
+
+            end_user = EndUser(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                other_id=other_id
+            )
+            self.db.add(end_user)
+            await self.db.flush()
+
+            end_user_info = EndUserInfo(
+                end_user_id=end_user.id,
+                other_name=other_name or "",
+                aliases=[],
+                meta_data={}
+            )
+            self.db.add(end_user_info)
+
+            await self.db.commit()
+            await self.db.refresh(end_user)
+
+            db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
+            return end_user
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
+            raise
+
     def get_or_create_end_user_mcp(
             self,
             workspace_id: uuid.UUID,
@@ -363,6 +418,57 @@ class EndUserRepository:
             db_logger.error(f"查询终端用户 {end_user_id} 时出错: {str(e)}")
             raise
 
+    async def get_memory_insight_by_end_user_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
+        "获取用户缓存的记忆洞察"
+        from sqlalchemy import select
+        result = await self.db.execute(
+            select(
+                EndUser.memory_insight,
+                EndUser.behavior_pattern,
+                EndUser.key_findings,
+                EndUser.growth_trajectory,
+                EndUser.memory_insight_updated_at,
+            ).where(EndUser.id == end_user_id).limit(1)
+        )
+        return result.mappings().one_or_none()
+
+    async def get_user_summary_by_end_user_id_async(self, end_user_id: uuid.UUID) -> Optional[dict]:
+        """获取用户缓存的用户摘要"""
+        from sqlalchemy import select
+        result = await self.db.execute(
+            select(
+                EndUser.user_summary,
+                EndUser.personality_traits,
+                EndUser.core_values,
+                EndUser.one_sentence_summary,
+                EndUser.user_summary_updated_at,
+            ).where(EndUser.id == end_user_id).limit(1)
+        )
+        return result.mappings().one_or_none()
+
+    async def get_forgetting_threshold_async(self, end_user_id: uuid.UUID) -> Optional[float]:
+        """获取用户的遗忘阈值配置。
+
+        路径: EndUser → workspace → workspace.memory_config → MemoryConfig.forgetting_threshold
+        """
+        from sqlalchemy import select
+        from app.models.memory_config_model import MemoryConfig
+        from app.models.workspace_model import Workspace
+
+        stmt = (
+            select(MemoryConfig.forgetting_threshold)
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .join(MemoryConfig, MemoryConfig.config_id == Workspace.memory_config)
+            .where(
+                EndUser.id == end_user_id,
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+        
     def update_memory_insight(
             self,
             end_user_id: uuid.UUID,

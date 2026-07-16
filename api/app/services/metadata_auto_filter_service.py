@@ -1,9 +1,11 @@
+import asyncio
 import json
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 import json_repair
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
@@ -12,6 +14,13 @@ from app.core.rag.metadata.filter_engine import (
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive
 
 logger = logging.getLogger(__name__)
+
+
+class AsyncMetadataLLM(Protocol):
+    """Minimal native asynchronous LLM contract for metadata filtering."""
+
+    async def invoke(self, messages: Sequence[BaseMessage]) -> str:
+        """Return generated content for the supplied messages."""
 
 
 class MetadataAutoFilterService:
@@ -112,6 +121,38 @@ class MetadataAutoFilterService:
         return [EngineFilterGroup(conditions=conditions, logic="AND")]
 
     @classmethod
+    async def generate_filter_groups_async(
+        cls,
+        query: str,
+        metadata_defs: dict[str, dict],
+        llm: AsyncMetadataLLM,
+    ) -> list[EngineFilterGroup]:
+        """Generate metadata filters without blocking the request event loop."""
+
+        if not metadata_defs:
+            return []
+
+        raw_conditions = await cls._extract_metadata_conditions_async(
+            query=query,
+            metadata_defs=metadata_defs,
+            llm=llm,
+        )
+        conditions = []
+        for raw_condition in raw_conditions:
+            condition = cls._normalize_condition(raw_condition, metadata_defs)
+            if condition:
+                conditions.append(condition)
+
+        logger.info(
+            "[MetadataAutoFilter] async extracted %s valid conditions from %s candidates",
+            len(conditions),
+            len(raw_conditions),
+        )
+        if not conditions:
+            return []
+        return [EngineFilterGroup(conditions=conditions, logic="AND")]
+
+    @classmethod
     def _extract_metadata_conditions(
         cls,
         query: str,
@@ -130,19 +171,49 @@ class MetadataAutoFilterService:
         ]
         try:
             response = llm.invoke(messages)
-        except Exception as e:
-            base_url = getattr(getattr(llm, "_config", None), "base_url", None)
+        except Exception as exc:
             logger.warning(
-                "[MetadataAutoFilter] LLM invoke failed (base_url=%r): %r",
-                base_url, e,
+                "[MetadataAutoFilter] LLM invoke failed error_type=%s",
+                type(exc).__name__,
             )
             return []
         content = response.content if hasattr(response, "content") else str(response)
-        logger.info("[MetadataAutoFilter] LLM raw output: %s", content)
+        logger.info("[MetadataAutoFilter] LLM response received length=%s", len(str(content)))
         if not content:
             logger.warning("[MetadataAutoFilter] LLM returned no usable content")
             return []
         return cls._parse_llm_response(str(content))
+
+    @classmethod
+    async def _extract_metadata_conditions_async(
+        cls,
+        query: str,
+        metadata_defs: dict[str, dict],
+        llm: AsyncMetadataLLM,
+    ) -> list[dict[str, Any]]:
+        system_prompt = (
+            "You are a text metadata extract engine. Extract only metadata filters that are clearly "
+            "present in the user's input and only use fields from the provided metadata list."
+        )
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=cls._build_prompt(query=query, metadata_defs=metadata_defs)),
+        ]
+        try:
+            content = await llm.invoke(messages)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[MetadataAutoFilter] async LLM invoke failed error_type=%s",
+                type(exc).__name__,
+            )
+            return []
+        if not content:
+            logger.warning("[MetadataAutoFilter] async LLM returned no usable content")
+            return []
+        logger.info("[MetadataAutoFilter] async LLM response received length=%s", len(content))
+        return cls._parse_llm_response(content)
 
     @staticmethod
     def _build_prompt(query: str, metadata_defs: dict[str, dict]) -> str:

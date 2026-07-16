@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from app.schemas.chunk_schema import KnowledgeBaseConfig, KnowledgeRetrievalCaller, RetrieveType
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
@@ -14,7 +14,7 @@ class KnowledgeRetrievalRequest(BaseModel):
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] = Field(default_factory=list)
     similarity_threshold: float = Field(default=0.3, ge=0, le=1)
-    vector_similarity_weight: float = Field(default=0.3, ge=0, le=1)
+    vector_similarity_weight: float | None = Field(default=0.3, ge=0, le=1)
     top_k: int = Field(default=100, ge=1, le=100)
     top_n: int | None = Field(default=None, ge=1, le=100)
     caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL
@@ -23,6 +23,16 @@ class KnowledgeRetrievalRequest(BaseModel):
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
+    _metadata_filters_prepared: bool = PrivateAttr(default=False)
+
+    def mark_metadata_filters_prepared(self) -> None:
+        """Record that an internal caller already evaluated AUTO filters."""
+        self._metadata_filters_prepared = True
+
+    @property
+    def metadata_filters_prepared(self) -> bool:
+        """Whether AUTO filtering was already evaluated by an internal adapter."""
+        return self._metadata_filters_prepared
 
     @field_validator("query")
     @classmethod

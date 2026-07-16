@@ -6,12 +6,14 @@ import asyncio
 import time
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any, Annotated, Optional
 
 import yaml
 from fastapi import Depends
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, desc, select, update
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import (
     as_utc_aware,
@@ -38,9 +40,10 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.validator import validate_workflow_config
-from app.db import get_db
-from app.models import App, AppRelease, Conversation
-from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from app.aioRedis import aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_redis
+from app.db import get_async_db_context, get_async_pool_status, get_db
+from app.models import App, AppRelease, Conversation, Message
+from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeCache, WorkflowNodeExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -57,25 +60,51 @@ from app.services.multimodal_service import MultimodalService
 from app.services.workspace_service import get_workspace_storage_type_without_auth
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class WorkflowExecutionRef:
+    id: uuid.UUID | None
+    execution_id: str
+    status: str
+    conversation_id: uuid.UUID | None
+    workflow_config_id: uuid.UUID | None
+    app_id: uuid.UUID | None
+    release_id: uuid.UUID | None
+    trigger_type: str | None
+    triggered_by: uuid.UUID | None
+    input_data: dict[str, Any] | None
+    output_data: dict[str, Any] | None
+    context: dict[str, Any] | None
+    token_usage: dict[str, Any] | None
+    meta_data: dict[str, Any] | None
+    error_message: str | None
+    error_node_id: str | None
+    started_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
+    elapsed_time: float | None
+    persisted: bool = False
+
+
 class WorkflowService:
-    """工作流服务"""
+
 
     DEBUG_STATE_NODE_ID = "__workflow_debug_state__"
     DEBUG_STATE_NODE_TYPE = "debug-state"
     DEBUG_STATE_NODE_NAME = "Workflow Debug State"
     DEBUG_STATE_SOURCE = "debug_state"
+    SKIP_EXECUTION_ARTIFACT_PERSIST_FOR_EXPERIMENT = True
 
     # 重新生成版本上限：同一轮（同 parent_message_id）允许的最大 assistant 版本数（含原始回复）
     MAX_REGENERATE_VERSIONS = 5
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession | None = None):
         self.db = db
-        self.config_repo = WorkflowConfigRepository(db)
-        self.execution_repo = WorkflowExecutionRepository(db)
-        self.node_execution_repo = WorkflowNodeExecutionRepository(db)
-        self.node_cache_repo = WorkflowNodeCacheRepository(db)
-        self.conversation_service = ConversationService(db)
-        self.multimodal_service = MultimodalService(db)
+        self.config_repo = WorkflowConfigRepository(db) if db is not None else None
+        self.execution_repo = WorkflowExecutionRepository(db) if db is not None else None
+        self.node_execution_repo = WorkflowNodeExecutionRepository(db) if db is not None else None
+        self.node_cache_repo = WorkflowNodeCacheRepository(db) if db is not None else None
+        self.conversation_service = ConversationService(db) if db is not None else None
+        self.multimodal_service = MultimodalService(db) if db is not None else None
 
         self.registry = PlatformAdapterRegistry
 
@@ -85,6 +114,204 @@ class WorkflowService:
             return None
         from app.repositories.tool_repository import ToolRepository
         return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+
+    async def _resolve_app_tenant_id_async(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
+        from app.models.workspace_model import Workspace
+
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(Workspace.tenant_id)
+                .join(App, App.workspace_id == Workspace.id)
+                .where(App.id == app_id)
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    @staticmethod
+    def _build_execution_ref(execution: WorkflowExecution) -> WorkflowExecutionRef:
+        return WorkflowExecutionRef(
+            id=execution.id,
+            execution_id=execution.execution_id,
+            status=execution.status,
+            conversation_id=execution.conversation_id,
+            workflow_config_id=execution.workflow_config_id,
+            app_id=execution.app_id,
+            release_id=execution.release_id,
+            trigger_type=execution.trigger_type,
+            triggered_by=execution.triggered_by,
+            input_data=execution.input_data if isinstance(execution.input_data, dict) else None,
+            output_data=execution.output_data if isinstance(execution.output_data, dict) else None,
+            context=execution.context if isinstance(execution.context, dict) else None,
+            token_usage=execution.token_usage if isinstance(execution.token_usage, dict) else None,
+            meta_data=execution.meta_data if isinstance(execution.meta_data, dict) else None,
+            error_message=execution.error_message,
+            error_node_id=execution.error_node_id,
+            started_at=execution.started_at,
+            completed_at=execution.completed_at,
+            elapsed_time=execution.elapsed_time,
+            persisted=True,
+        )
+
+    @staticmethod
+    def _runtime_execution_redis_key(execution_id: str) -> str:
+        return f"workflow:runtime_execution:{execution_id}"
+
+    @staticmethod
+    def _serialize_runtime_execution_ref(execution: WorkflowExecutionRef) -> dict[str, Any]:
+        return {
+            "id": str(execution.id) if execution.id else None,
+            "execution_id": execution.execution_id,
+            "status": execution.status,
+            "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
+            "workflow_config_id": str(execution.workflow_config_id) if execution.workflow_config_id else None,
+            "app_id": str(execution.app_id) if execution.app_id else None,
+            "release_id": str(execution.release_id) if execution.release_id else None,
+            "trigger_type": execution.trigger_type,
+            "triggered_by": str(execution.triggered_by) if execution.triggered_by else None,
+            "input_data": execution.input_data,
+            "output_data": execution.output_data,
+            "context": execution.context,
+            "token_usage": execution.token_usage,
+            "meta_data": execution.meta_data,
+            "error_message": execution.error_message,
+            "error_node_id": execution.error_node_id,
+            "started_at": to_iso_z(execution.started_at) if execution.started_at else None,
+            "completed_at": to_iso_z(execution.completed_at) if execution.completed_at else None,
+            "elapsed_time": execution.elapsed_time,
+            "persisted": execution.persisted,
+        }
+
+    @staticmethod
+    def _runtime_execution_ref_from_snapshot(snapshot: dict[str, Any]) -> WorkflowExecutionRef | None:
+        if not isinstance(snapshot, dict):
+            return None
+
+        def _uuid_or_none(value: Any) -> uuid.UUID | None:
+            return uuid.UUID(value) if value else None
+
+        def _dt_or_none(value: Any) -> datetime.datetime | None:
+            return parse_iso_to_utc_naive(value) if value else None
+
+        execution_id = snapshot.get("execution_id")
+        if not execution_id:
+            return None
+
+        return WorkflowExecutionRef(
+            id=_uuid_or_none(snapshot.get("id")),
+            execution_id=execution_id,
+            status=snapshot.get("status") or "running",
+            conversation_id=_uuid_or_none(snapshot.get("conversation_id")),
+            workflow_config_id=_uuid_or_none(snapshot.get("workflow_config_id")),
+            app_id=_uuid_or_none(snapshot.get("app_id")),
+            release_id=_uuid_or_none(snapshot.get("release_id")),
+            trigger_type=snapshot.get("trigger_type"),
+            triggered_by=_uuid_or_none(snapshot.get("triggered_by")),
+            input_data=snapshot.get("input_data") if isinstance(snapshot.get("input_data"), dict) else None,
+            output_data=snapshot.get("output_data") if isinstance(snapshot.get("output_data"), dict) else None,
+            context=snapshot.get("context") if isinstance(snapshot.get("context"), dict) else None,
+            token_usage=snapshot.get("token_usage") if isinstance(snapshot.get("token_usage"), dict) else None,
+            meta_data=snapshot.get("meta_data") if isinstance(snapshot.get("meta_data"), dict) else None,
+            error_message=snapshot.get("error_message"),
+            error_node_id=snapshot.get("error_node_id"),
+            started_at=_dt_or_none(snapshot.get("started_at")),
+            completed_at=_dt_or_none(snapshot.get("completed_at")),
+            elapsed_time=snapshot.get("elapsed_time"),
+            persisted=bool(snapshot.get("persisted")),
+        )
+
+    @classmethod
+    def _build_execution_record_from_ref(cls, execution: WorkflowExecutionRef) -> WorkflowExecution:
+        return WorkflowExecution(
+            id=execution.id or uuid.uuid4(),
+            workflow_config_id=execution.workflow_config_id,
+            release_id=execution.release_id,
+            app_id=execution.app_id,
+            conversation_id=execution.conversation_id,
+            execution_id=execution.execution_id,
+            trigger_type=execution.trigger_type or "manual",
+            triggered_by=execution.triggered_by,
+            input_data=execution.input_data,
+            output_data=execution.output_data,
+            context=execution.context or {},
+            status=execution.status,
+            error_message=execution.error_message,
+            error_node_id=execution.error_node_id,
+            started_at=execution.started_at or utcnow_naive(),
+            completed_at=execution.completed_at,
+            elapsed_time=execution.elapsed_time,
+            token_usage=execution.token_usage,
+            meta_data=execution.meta_data or {},
+        )
+
+    @classmethod
+    def _build_transient_execution_ref(
+            cls,
+            *,
+            workflow_config_id: uuid.UUID,
+            app_id: uuid.UUID,
+            trigger_type: str,
+            release_id: uuid.UUID | None,
+            triggered_by: uuid.UUID | None,
+            conversation_id: uuid.UUID | None,
+            input_data: dict[str, Any] | None,
+            meta_data: dict[str, Any] | None,
+            status: str,
+    ) -> WorkflowExecutionRef:
+        return WorkflowExecutionRef(
+            id=None,
+            execution_id=f"exec_{uuid.uuid4().hex[:16]}",
+            status=status,
+            conversation_id=conversation_id,
+            workflow_config_id=workflow_config_id,
+            app_id=app_id,
+            release_id=release_id,
+            trigger_type=trigger_type,
+            triggered_by=triggered_by,
+            input_data=input_data,
+            output_data=None,
+            context={},
+            token_usage=None,
+            meta_data=meta_data or {},
+            error_message=None,
+            error_node_id=None,
+            started_at=utcnow_naive(),
+            completed_at=None,
+            elapsed_time=None,
+            persisted=False,
+        )
+
+    async def _store_runtime_execution_snapshot_async(self, execution: WorkflowExecutionRef) -> None:
+        await aio_redis_set(
+            self._runtime_execution_redis_key(execution.execution_id),
+            self._serialize_runtime_execution_ref(execution),
+            expire=600,
+        )
+
+    async def _delete_runtime_execution_snapshot_async(self, execution_id: str) -> None:
+        await aio_redis_delete(self._runtime_execution_redis_key(execution_id))
+
+    async def _get_runtime_execution_snapshot_async(self, execution_id: str) -> WorkflowExecutionRef | None:
+        raw_value = await aio_redis_get(self._runtime_execution_redis_key(execution_id))
+        if not raw_value:
+            return None
+        try:
+            import json
+            return self._runtime_execution_ref_from_snapshot(json.loads(raw_value))
+        except Exception as exc:
+            logger.warning("Failed to decode runtime execution snapshot: execution_id=%s error=%s", execution_id, exc)
+            return None
+
+    def _get_runtime_execution_snapshot_sync(self, execution_id: str) -> WorkflowExecutionRef | None:
+        try:
+            client = get_thread_safe_redis()
+            raw_value = client.get(self._runtime_execution_redis_key(execution_id))
+            if not raw_value:
+                return None
+            import json
+            return self._runtime_execution_ref_from_snapshot(json.loads(raw_value))
+        except Exception as exc:
+            logger.warning("Failed to load runtime execution snapshot: execution_id=%s error=%s", execution_id, exc)
+            return None
 
     @staticmethod
     def _build_runtime_workflow_config_from_release(
@@ -200,6 +427,57 @@ class WorkflowService:
         if trigger_payload is not None:
             merged["trigger_payload"] = trigger_payload
         return merged
+
+    @staticmethod
+    def _build_persisted_execution_input_data(
+        input_data: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(input_data, dict):
+            return {}
+
+        persisted: dict[str, Any] = {}
+        for key in ("message", "conversation_id", "variables", "inputs", "conv"):
+            value = input_data.get(key)
+            if value is not None:
+                persisted[key] = value
+
+        trigger = input_data.get("trigger")
+        if isinstance(trigger, dict):
+            persisted["trigger"] = {
+                "type": trigger.get("type"),
+                "id": trigger.get("id"),
+                "meta": trigger.get("meta") or {},
+            }
+            persisted["trigger_type"] = trigger.get("type") or "manual"
+            persisted["trigger_id"] = trigger.get("id")
+            persisted["trigger_meta"] = trigger.get("meta") or {}
+        else:
+            if input_data.get("trigger_type") is not None:
+                persisted["trigger_type"] = input_data.get("trigger_type")
+            if input_data.get("trigger_id") is not None:
+                persisted["trigger_id"] = input_data.get("trigger_id")
+            if input_data.get("trigger_meta") is not None:
+                persisted["trigger_meta"] = input_data.get("trigger_meta")
+
+        if input_data.get("trigger_payload") is not None:
+            persisted["trigger_payload"] = input_data.get("trigger_payload")
+
+        raw_files = input_data.get("files") or []
+        if raw_files:
+            persisted["files"] = [
+                {
+                    "type": file_item.get("type"),
+                    "url": file_item.get("url"),
+                    "file_type": file_item.get("file_type"),
+                    "name": file_item.get("name"),
+                    "size": file_item.get("size"),
+                    "upload_file_id": file_item.get("upload_file_id") or file_item.get("file_id"),
+                }
+                for file_item in raw_files
+                if isinstance(file_item, dict)
+            ]
+
+        return persisted
 
     @staticmethod
     def _find_debug_trigger_node(
@@ -626,6 +904,166 @@ class WorkflowService:
             logger.warning(f"标注匹配检查失败: {e}")
             return None
 
+    async def _check_annotation_match_async(
+            self,
+            app_id: uuid.UUID,
+            message: str,
+            source: str = "",
+    ) -> Optional[dict]:
+        try:
+            from app.core.models.base import RedBearModelConfig
+            from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
+            from app.models.models_model import (
+                LoadBalanceStrategy,
+                ModelApiKey,
+                ModelConfig,
+                ModelProvider,
+            )
+            from app.services.model_service import ModelApiKeyService
+            from app.models.workspace_model import Workspace
+            from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
+
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(
+                        AppAnnotationSetting.similarity_threshold,
+                        AppAnnotationSetting.model_config_id,
+                        AppAnnotationSetting.enabled,
+                    )
+                    .where(AppAnnotationSetting.app_id == app_id)
+                    .limit(1)
+                )
+                setting_row = result.one_or_none()
+                if not setting_row:
+                    return None
+                similarity_threshold, model_config_id, enabled = setting_row
+                if not enabled or not model_config_id:
+                    return None
+
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(
+                        AppAnnotation.id,
+                        AppAnnotation.question,
+                        AppAnnotation.answer,
+                        AppAnnotation.embedding,
+                        AppAnnotation.hit_count,
+                    ).where(
+                        AppAnnotation.app_id == app_id,
+                        AppAnnotation.is_active == 1,
+                    )
+                )
+                annotations = list(result.mappings())
+                if not annotations:
+                    return None
+
+                result = await db.execute(
+                    select(ModelConfig)
+                    .options(selectinload(ModelConfig.api_keys))
+                    .where(ModelConfig.id == model_config_id)
+                    .limit(1)
+                )
+                model_cfg = result.scalar_one_or_none()
+                if not model_cfg or not model_cfg.is_active:
+                    return None
+
+                api_key_obj: ModelApiKey | None = None
+                if ModelApiKeyService._is_public_speedbear_model(model_cfg):
+                    result = await db.execute(
+                        select(Workspace.tenant_id)
+                        .join(App, App.workspace_id == Workspace.id)
+                        .where(App.id == app_id)
+                        .limit(1)
+                    )
+                    tenant_id = result.scalar_one_or_none()
+                    if not tenant_id:
+                        return None
+                    result = await db.execute(
+                        select(TenantSpeedBearBinding)
+                        .where(TenantSpeedBearBinding.tenant_id == tenant_id)
+                        .limit(1)
+                    )
+                    binding = result.scalar_one_or_none()
+                    if not binding:
+                        return None
+                    from app.core.config import settings
+
+                    api_key_obj = ModelApiKey(
+                        model_name=model_cfg.name,
+                        provider=ModelProvider.SPEEDBEAR,
+                        api_key=binding.gateway_api_key,
+                        api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
+                        capability=model_cfg.capability,
+                        is_omni=model_cfg.is_omni,
+                    )
+                else:
+                    api_keys = [key for key in model_cfg.api_keys if key.is_active]
+                    if not api_keys:
+                        return None
+                    if model_cfg.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+                        api_key_obj = min(
+                            api_keys,
+                            key=lambda key: (int(key.usage_count or "0"), key.last_used_at or datetime.datetime.min),
+                        )
+                    else:
+                        api_key_obj = api_keys[0]
+
+                if not api_key_obj:
+                    return None
+
+            config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            # ponytail: this helper only needs pure math; don't keep a DB session around for it.
+            query_embedding = AnnotationService.generate_embedding(message, config)
+            best_match = None
+            best_similarity = 0.0
+            for annotation in annotations:
+                embedding = annotation["embedding"]
+                if not embedding:
+                    continue
+                similarity = AnnotationService.cosine_similarity(query_embedding, embedding)
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match = annotation
+
+            if not best_match or best_similarity < float(similarity_threshold):
+                return None
+
+            async with get_async_db_context() as db:
+                await db.execute(
+                    update(AppAnnotation)
+                    .where(AppAnnotation.id == best_match["id"])
+                    .values(hit_count=int(best_match["hit_count"] or 0) + 1)
+                )
+                db.add(
+                    AppAnnotationHitLog(
+                        annotation_id=best_match["id"],
+                        app_id=app_id,
+                        source=source,
+                        query=message,
+                        matched_question=best_match["question"],
+                        answer=best_match["answer"],
+                        similarity=best_similarity,
+                    )
+                )
+                await db.commit()
+                return {
+                    "annotation_id": str(best_match["id"]),
+                    "question": best_match["question"],
+                    "answer": best_match["answer"],
+                    "similarity": best_similarity,
+                }
+        except Exception as e:
+            logger.warning(f"标注匹配检查失败: {e}")
+            return None
+
     # ==================== 配置管理 ====================
 
     def create_workflow_config(
@@ -709,6 +1147,11 @@ class WorkflowService:
             工作流配置或 None
         """
         return self.config_repo.get_by_app_id(app_id)
+
+    async def get_workflow_config_async(self, app_id: uuid.UUID) -> WorkflowConfig | None:
+        """异步获取工作流配置"""
+        async with get_async_db_context() as db:
+            return await WorkflowConfigRepository(db).get_by_app_id_async(app_id)
 
     def update_workflow_config(
             self,
@@ -968,7 +1411,13 @@ class WorkflowService:
         Returns:
             执行记录或 None
         """
-        return self.execution_repo.get_by_execution_id(execution_id)
+        execution = self.execution_repo.get_by_execution_id(execution_id)
+        if execution:
+            return execution
+        runtime_execution = self._get_runtime_execution_snapshot_sync(execution_id)
+        if runtime_execution:
+            return self._build_execution_record_from_ref(runtime_execution)
+        return None
 
     @staticmethod
     def _serialize_execution_value(value: Any) -> Any:
@@ -1392,7 +1841,7 @@ class WorkflowService:
         }
 
     def _build_execution_snapshot_from_record(self, execution: WorkflowExecution) -> dict[str, Any]:
-        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id) if execution.id else []
         output_data = self._serialize_execution_value(execution.output_data or {})
         return self._build_execution_snapshot(
             execution=execution,
@@ -2982,6 +3431,577 @@ class WorkflowService:
         logger.info(f"更新执行状态: execution_id={execution_id}, status={status}")
         return execution
 
+    async def _create_execution_async(
+            self,
+            workflow_config_id: uuid.UUID,
+            app_id: uuid.UUID,
+            trigger_type: str,
+            release_id: uuid.UUID | None = None,
+            triggered_by: uuid.UUID | None = None,
+            conversation_id: uuid.UUID | None = None,
+            input_data: dict[str, Any] | None = None,
+            meta_data: dict[str, Any] | None = None,
+            status: str = "pending",
+    ) -> WorkflowExecutionRef:
+        execution_id = f"exec_{uuid.uuid4().hex[:16]}"
+        started_at = time.perf_counter()
+        async with get_async_db_context() as db:
+            after_session_opened_at = time.perf_counter()
+            logger.info(
+                "[TIMING] workflow.create_execution stage=session_opened execution_id=%s "
+                "total_ms=%.2f status=%s",
+                execution_id,
+                (after_session_opened_at - started_at) * 1000,
+                status,
+            )
+            execution = WorkflowExecution(
+                workflow_config_id=workflow_config_id,
+                app_id=app_id,
+                release_id=release_id,
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                trigger_type=trigger_type,
+                triggered_by=triggered_by,
+                input_data=self._build_persisted_execution_input_data(input_data),
+                meta_data=meta_data or {},
+                status=status,
+            )
+            before_add_at = time.perf_counter()
+            db.add(execution)
+            before_commit_at = time.perf_counter()
+            logger.info(
+                "[TIMING] workflow.create_execution stage=before_commit execution_id=%s "
+                "total_ms=%.2f add_ms=%.2f status=%s",
+                execution_id,
+                (before_commit_at - started_at) * 1000,
+                (before_commit_at - before_add_at) * 1000,
+                status,
+            )
+            await db.commit()
+            after_commit_at = time.perf_counter()
+            pool_status = get_async_pool_status()
+            logger.info(
+                "[TIMING] workflow.create_execution stage=after_commit execution_id=%s "
+                "total_ms=%.2f commit_ms=%.2f status=%s pool_checked_out=%s "
+                "pool_overflow=%s pool_usage_percent=%s",
+                execution_id,
+                (after_commit_at - started_at) * 1000,
+                (after_commit_at - before_commit_at) * 1000,
+                status,
+                pool_status["checked_out"],
+                pool_status["overflow"],
+                pool_status["usage_percent"],
+            )
+            logger.info(f"创建工作流执行记录: execution_id={execution_id}")
+            return self._build_execution_ref(execution)
+
+    async def _get_execution_async(self, execution_id: str) -> WorkflowExecution | None:
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
+            )
+            execution = result.scalar_one_or_none()
+            if execution:
+                return execution
+            runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+            if runtime_execution:
+                return self._build_execution_record_from_ref(runtime_execution)
+            return None
+
+    async def _patch_execution_async(
+            self,
+            execution_id: str,
+            **fields: Any,
+    ) -> WorkflowExecutionRef:
+        async with get_async_db_context() as db:
+            started_at = time.perf_counter()
+            result = await db.execute(
+                select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
+            )
+            execution = result.scalar_one_or_none()
+            if not execution:
+                runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+                if not runtime_execution:
+                    raise BusinessException(
+                        code=BizCode.NOT_FOUND,
+                        message=f"执行记录不存在: execution_id={execution_id}",
+                    )
+                execution = self._build_execution_record_from_ref(runtime_execution)
+                db.add(execution)
+
+            for key, value in fields.items():
+                if value is None and key not in {"error_message", "error_node_id"}:
+                    continue
+                if key == "output_data" and value is not None:
+                    value = convert_uuids_to_str(value)
+                setattr(execution, key, value)
+
+            status = fields.get("status")
+            if status in {"completed", "failed", "cancelled", "timeout"} and not execution.completed_at:
+                execution.completed_at = utcnow_naive()
+                execution.elapsed_time = (
+                    (execution.completed_at - execution.started_at).total_seconds()
+                    if execution.started_at else 0.0
+                )
+
+            before_commit_at = time.perf_counter()
+            await db.commit()
+            after_commit_at = time.perf_counter()
+            pool_status = get_async_pool_status()
+            logger.info(
+                "[TIMING] workflow.patch_execution stage=after_commit execution_id=%s "
+                "status=%s total_ms=%.2f commit_ms=%.2f pool_checked_out=%s "
+                "pool_overflow=%s pool_usage_percent=%s",
+                execution_id,
+                getattr(execution, "status", None),
+                (after_commit_at - started_at) * 1000,
+                (after_commit_at - before_commit_at) * 1000,
+                pool_status["checked_out"],
+                pool_status["overflow"],
+                pool_status["usage_percent"],
+            )
+            await self._delete_runtime_execution_snapshot_async(execution_id)
+            return self._build_execution_ref(execution)
+
+    async def _add_message_async(
+            self,
+            conversation_id: uuid.UUID,
+            role: str,
+            content: str,
+            meta_data: Optional[dict] = None,
+            message_id: Optional[uuid.UUID] = None,
+            status: str = "completed",
+            parent_message_id: Optional[uuid.UUID] = None,
+    ) -> Message:
+        async with get_async_db_context() as db:
+            conversation = await db.get(Conversation, conversation_id)
+            if not conversation:
+                raise BusinessException(
+                    f"会话不存在: conversation_id={conversation_id}",
+                    code=BizCode.NOT_FOUND,
+                )
+
+            message = Message(
+                id=message_id if message_id else uuid.uuid4(),
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                meta_data=meta_data,
+                status=status,
+                parent_message_id=parent_message_id,
+            )
+            db.add(message)
+
+            conversation.message_count = (conversation.message_count or 0) + 1
+            if conversation.message_count <= 2 and role == "user":
+                conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+
+            await db.commit()
+            await db.refresh(message)
+            return message
+
+    async def _finalize_completed_execution_async(
+            self,
+            *,
+            execution_id: str,
+            conversation_id: uuid.UUID,
+            human_message: str,
+            human_meta: Optional[dict],
+            user_message_id: Optional[uuid.UUID],
+            from_message_id: Optional[uuid.UUID],
+            assistant_message_id: Optional[uuid.UUID],
+            assistant_message: str,
+            assistant_meta: Optional[dict],
+            workflow_output_data: Any,
+            token_usage: Any,
+    ) -> WorkflowExecution:
+        async with get_async_db_context() as db:
+            started_at = time.perf_counter()
+            conversation = await db.get(Conversation, conversation_id)
+            if not conversation:
+                raise BusinessException(
+                    f"会话不存在: conversation_id={conversation_id}",
+                    code=BizCode.NOT_FOUND,
+                )
+
+            result = await db.execute(
+                select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
+            )
+            execution = result.scalar_one_or_none()
+            if not execution:
+                runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+                if not runtime_execution:
+                    raise BusinessException(
+                        code=BizCode.NOT_FOUND,
+                        message=f"执行记录不存在: execution_id={execution_id}",
+                    )
+                execution = self._build_execution_record_from_ref(runtime_execution)
+                db.add(execution)
+
+            user_msg = Message(
+                id=user_message_id if user_message_id else uuid.uuid4(),
+                conversation_id=conversation_id,
+                role="user",
+                content=human_message,
+                meta_data=human_meta,
+                status="completed",
+                parent_message_id=from_message_id,
+            )
+            assistant_msg = Message(
+                id=assistant_message_id if assistant_message_id else uuid.uuid4(),
+                conversation_id=conversation_id,
+                role="assistant",
+                content=assistant_message,
+                meta_data=assistant_meta,
+                status="completed",
+                parent_message_id=user_msg.id,
+            )
+            db.add(user_msg)
+            db.add(assistant_msg)
+
+            message_count = int(conversation.message_count or 0)
+            if message_count + 1 <= 2:
+                conversation.title = human_message[:50] + ("..." if len(human_message) > 50 else "")
+            conversation.message_count = message_count + 2
+
+            execution.status = "completed"
+            execution.output_data = (
+                convert_uuids_to_str(workflow_output_data)
+                if workflow_output_data is not None
+                else workflow_output_data
+            )
+            execution.token_usage = token_usage
+            if not execution.completed_at:
+                execution.completed_at = utcnow_naive()
+                execution.elapsed_time = (
+                    (execution.completed_at - execution.started_at).total_seconds()
+                    if execution.started_at else 0.0
+                )
+
+            before_commit_at = time.perf_counter()
+            await db.commit()
+            after_commit_at = time.perf_counter()
+            pool_status = get_async_pool_status()
+            logger.info(
+                "[TIMING] workflow.finalize_execution stage=after_commit execution_id=%s "
+                "total_ms=%.2f commit_ms=%.2f pool_checked_out=%s pool_overflow=%s "
+                "pool_usage_percent=%s",
+                execution_id,
+                (after_commit_at - started_at) * 1000,
+                (after_commit_at - before_commit_at) * 1000,
+                pool_status["checked_out"],
+                pool_status["overflow"],
+                pool_status["usage_percent"],
+            )
+            await self._delete_runtime_execution_snapshot_async(execution_id)
+            return execution
+
+    async def _update_message_async(
+            self,
+            message_id: uuid.UUID,
+            content: str | None = None,
+            meta_data: dict | None = None,
+    ) -> Message | None:
+        async with get_async_db_context() as db:
+            message = await db.get(Message, message_id)
+            if not message:
+                logger.warning(f"update_message: message_id={message_id} not found")
+                return None
+            if content is not None:
+                message.content = content
+            if meta_data is not None:
+                message.meta_data = meta_data
+            await db.commit()
+            await db.refresh(message)
+            return message
+
+    async def _touch_conversation_async(self, conversation_id: uuid.UUID | str | None) -> None:
+        if not conversation_id:
+            return
+        try:
+            cid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
+        except (TypeError, ValueError):
+            return
+        async with get_async_db_context() as db:
+            conversation = await db.get(Conversation, cid)
+            if conversation:
+                conversation.updated_at = utcnow_naive()
+                await db.commit()
+
+    async def _save_failed_conversation_async(
+            self,
+            conversation_id: uuid.UUID | None,
+            message_id: uuid.UUID | None,
+            human_message: str,
+            human_meta: dict,
+            error: str,
+    ) -> None:
+        if not conversation_id:
+            return
+        await self._add_message_async(
+            conversation_id=conversation_id,
+            role="user",
+            content=human_message,
+            meta_data=human_meta,
+        )
+        await self._add_message_async(
+            conversation_id=conversation_id,
+            role="assistant",
+            content="",
+            meta_data={"error": error},
+            message_id=message_id,
+        )
+
+    async def _archive_resolved_intervention_async(
+            self,
+            execution_id: str,
+            node_id: str,
+            action_id: str,
+            form_data: dict | None,
+            kind: str | None,
+    ) -> WorkflowExecution | None:
+        execution = await self._get_execution_async(execution_id)
+        if not execution or not node_id:
+            return execution
+
+        current_context = execution.context or {}
+        intr_ctx = dict(current_context.get("human_intervention") or {})
+        interventions = [dict(i) for i in (intr_ctx.get("interventions") or [])]
+        intervention_backlog = [dict(i) for i in (intr_ctx.get("intervention_backlog") or [])]
+        resolved_interventions = [dict(i) for i in (intr_ctx.get("resolved_interventions") or [])]
+
+        matched = None
+        for idx, intr in enumerate(interventions):
+            if intr.get("node_id") == node_id:
+                updated = {**intr, "resolved_action_id": action_id, "resolved_form_data": form_data or {}}
+                interventions[idx] = updated
+                matched = updated
+                break
+
+        for idx, intr in enumerate(intervention_backlog):
+            if intr.get("node_id") == node_id:
+                updated = {**intr, "resolved_action_id": action_id, "resolved_form_data": form_data or {}}
+                intervention_backlog[idx] = updated
+                if matched is None:
+                    matched = updated
+                break
+
+        if matched is None:
+            return execution
+
+        if not any(i.get("node_id") == node_id for i in resolved_interventions):
+            resolved_interventions.append({
+                **matched,
+                "resolved_action_id": action_id,
+                "resolved_form_data": form_data or {},
+                "resolved_at": to_iso_z(utcnow_naive()),
+                "resolved_kind": kind or "interrupt",
+            })
+
+        new_context = {
+            **current_context,
+            "human_intervention": {
+                **intr_ctx,
+                "interventions": interventions,
+                "intervention_backlog": intervention_backlog,
+                "resolved_interventions": resolved_interventions,
+            },
+        }
+        await self._touch_conversation_async(intr_ctx.get("conversation_id"))
+        return await self._patch_execution_async(execution_id, context=new_context)
+
+    async def _persist_execution_artifacts_async(
+            self,
+            execution_id: str,
+            workflow_config: WorkflowConfig | None = None,
+    ) -> None:
+        if self.SKIP_EXECUTION_ARTIFACT_PERSIST_FOR_EXPERIMENT:
+            logger.info(
+                "[EXPERIMENT] skip execution artifact persist execution_id=%s",
+                execution_id,
+            )
+            return
+        execution = await self._get_execution_async(execution_id)
+        if not execution or not execution.output_data:
+            return
+        resolved_workflow_config = workflow_config
+        if resolved_workflow_config is None and execution.workflow_config_id:
+            async with get_async_db_context() as db:
+                resolved_workflow_config = await db.get(WorkflowConfig, execution.workflow_config_id)
+        if resolved_workflow_config is None:
+            return
+        await self._persist_workflow_node_executions_async(
+            execution=execution,
+            workflow_config=resolved_workflow_config,
+            result=execution.output_data,
+        )
+        await self._refresh_workflow_debug_state_from_execution_async(
+            execution,
+            workflow_config=resolved_workflow_config,
+        )
+
+    async def _persist_workflow_node_executions_async(
+            self,
+            execution: WorkflowExecution,
+            workflow_config: WorkflowConfig,
+            result: dict[str, Any],
+    ) -> None:
+        node_outputs = result.get("node_outputs") or {}
+        if not isinstance(node_outputs, dict) or not node_outputs:
+            return
+
+        items: list[dict[str, Any]] = []
+        ordered_node_outputs = sorted(node_outputs.items(), key=self._node_output_sort_key)
+        for index, (node_id, node_data) in enumerate(ordered_node_outputs, start=1):
+            if not isinstance(node_data, dict):
+                continue
+            items.append(
+                self._build_node_execution_record(
+                    execution=execution,
+                    node_id=node_id,
+                    node_data=node_data,
+                    source="workflow_execution",
+                    fallback_execution_order=index,
+                    fallback_node_name=self._get_node_name_from_config(workflow_config, node_id),
+                )
+            )
+        async with get_async_db_context() as db:
+            await db.execute(
+                delete(WorkflowNodeExecution).where(WorkflowNodeExecution.execution_id == execution.id)
+            )
+            if items:
+                db.add_all([WorkflowNodeExecution(**item) for item in items])
+            await db.commit()
+
+    async def _write_workflow_debug_state_async(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workflow_config: WorkflowConfig | None,
+            snapshot: dict[str, Any],
+            messages: Any = None,
+            execution_id: str | None = None,
+            source: str | None = None,
+    ) -> dict[str, Any]:
+        persist_payload = self._build_debug_state_persist_payload(
+            snapshot=snapshot,
+            messages=messages,
+            execution_id=execution_id,
+            source=source,
+        )
+        manager = self._build_debug_state_cache_manager(
+            app_id=app_id,
+            workflow_config=workflow_config,
+        )
+        if not manager.app_id:
+            return {
+                "cache": {},
+                "snapshot": persist_payload["snapshot"],
+                "messages": persist_payload["messages"],
+                "execution_id": persist_payload["execution_id"],
+                "source": persist_payload["source"],
+                "node_order": persist_payload["node_order"],
+            }
+
+        now = utcnow_naive()
+        cache_key = manager.build_cache_key({"kind": self.DEBUG_STATE_SOURCE})
+        normalized_meta = normalize_cache_value(persist_payload["meta_data"] or {})
+        normalized_result = normalize_cache_value(persist_payload["result_data"])
+        normalized_input = normalize_cache_value({"kind": self.DEBUG_STATE_SOURCE})
+
+        async with get_async_db_context() as db:
+            stmt = (
+                select(WorkflowNodeCache)
+                .where(
+                    WorkflowNodeCache.app_id == manager.app_id,
+                    WorkflowNodeCache.node_id == self.DEBUG_STATE_NODE_ID,
+                    WorkflowNodeCache.cache_key == cache_key,
+                    WorkflowNodeCache.status == "active",
+                )
+                .order_by(desc(WorkflowNodeCache.updated_at), desc(WorkflowNodeCache.created_at))
+                .limit(1)
+            )
+            cache = (await db.execute(stmt)).scalars().first()
+            if cache and cache.expires_at and cache.expires_at <= now:
+                cache.status = "expired"
+                cache.invalidated_at = now
+                cache = None
+
+            if cache is None:
+                cache = WorkflowNodeCache(
+                    app_id=manager.app_id,
+                    workflow_config_id=manager.workflow_config_id,
+                    node_id=self.DEBUG_STATE_NODE_ID,
+                    node_type=self.DEBUG_STATE_NODE_TYPE,
+                    node_name=self.DEBUG_STATE_NODE_NAME,
+                    cache_key=cache_key,
+                    source=self.DEBUG_STATE_SOURCE,
+                    status="active",
+                    input_data=normalized_input,
+                    result_data=normalized_result,
+                    hit_count=0,
+                    last_hit_at=None,
+                    expires_at=None,
+                    invalidated_at=None,
+                    meta_data=normalized_meta,
+                )
+                db.add(cache)
+            else:
+                cache.workflow_config_id = manager.workflow_config_id
+                cache.node_type = self.DEBUG_STATE_NODE_TYPE
+                cache.node_name = self.DEBUG_STATE_NODE_NAME
+                cache.source = self.DEBUG_STATE_SOURCE
+                cache.status = "active"
+                cache.input_data = normalized_input
+                cache.result_data = normalized_result
+                cache.expires_at = None
+                cache.invalidated_at = None
+                cache.meta_data = normalized_meta
+
+            await db.commit()
+        return {
+            "cache": {},
+            "snapshot": persist_payload["snapshot"],
+            "messages": persist_payload["messages"],
+            "execution_id": persist_payload["execution_id"],
+            "source": persist_payload["source"],
+            "node_order": persist_payload["node_order"],
+        }
+
+    async def _refresh_workflow_debug_state_from_execution_async(
+            self,
+            execution: WorkflowExecution,
+            workflow_config: WorkflowConfig | None = None,
+    ) -> None:
+        resolved_workflow_config = workflow_config
+        async with get_async_db_context() as db:
+            if resolved_workflow_config is None and execution.workflow_config_id:
+                resolved_workflow_config = await db.get(WorkflowConfig, execution.workflow_config_id)
+            stmt = (
+                select(WorkflowNodeExecution)
+                .where(WorkflowNodeExecution.execution_id == execution.id)
+                .order_by(WorkflowNodeExecution.execution_order)
+            )
+            node_executions = list((await db.execute(stmt)).scalars())
+
+        if resolved_workflow_config is None:
+            return
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        snapshot = self._build_public_execution_snapshot_record(
+            execution=execution,
+            node_executions=node_executions,
+            output_data=output_data if isinstance(output_data, dict) else {},
+            workflow_config=resolved_workflow_config,
+        )
+        await self._write_workflow_debug_state_async(
+            app_id=execution.app_id,
+            workflow_config=resolved_workflow_config,
+            snapshot=snapshot or self._build_default_debug_state_snapshot(resolved_workflow_config),
+            messages=self._extract_execution_messages(execution),
+            execution_id=execution.execution_id,
+            source=self._get_execution_source(execution),
+        )
+
     def get_execution_statistics(self, app_id: uuid.UUID) -> dict[str, Any]:
         """获取执行统计信息
 
@@ -3009,10 +4029,7 @@ class WorkflowService:
             variables: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Convert FileInput-format defaults in workflow variables to full FileObject dicts."""
-        from app.core.workflow.utils.file_processor import (
-            resolve_local_file_object_dict,
-            fetch_remote_file_meta,
-        )
+        from app.core.workflow.utils.file_processor import fetch_remote_file_meta
 
         async def _resolve_one(item: dict) -> dict | None:
             if not isinstance(item, dict) or item.get("is_file"):
@@ -3024,7 +4041,7 @@ class WorkflowService:
                 url = item.get("url", "")
                 return await fetch_remote_file_meta(url, file_type, origin_file_type) if url else None
             else:
-                return resolve_local_file_object_dict(self.db, item.get("upload_file_id"), file_type, origin_file_type)
+                return await self._resolve_local_file_async(item.get("upload_file_id"), file_type, origin_file_type)
 
         result = []
         for var_def in variables:
@@ -3047,19 +4064,18 @@ class WorkflowService:
             return []
 
         from app.core.workflow.utils.file_processor import (
-            resolve_local_file_object_dict,
             build_file_object_dict_from_meta,
             fetch_remote_file_meta,
         )
 
         files_struct = []
         for file in files:
-            url = await self.multimodal_service.get_file_url(file)
+            url = await self._get_file_url_async(file)
             file_type = str(file.type)
             origin_file_type = file.file_type or file_type
 
             if file.transfer_method.value == "local_file" and file.upload_file_id:
-                fo = resolve_local_file_object_dict(self.db, file.upload_file_id, file_type, origin_file_type)
+                fo = await self._resolve_local_file_async(file.upload_file_id, file_type, origin_file_type)
                 files_struct.append(fo or build_file_object_dict_from_meta(
                     file_type=file_type, transfer_method="local_file",
                     origin_file_type=origin_file_type,
@@ -3069,6 +4085,70 @@ class WorkflowService:
             else:
                 files_struct.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
         return files_struct
+
+    async def _get_file_url_async(self, file: FileInput) -> str:
+        from app.core.config import settings
+        from app.models.file_metadata_model import FileMetadata
+
+        if file.transfer_method == TransferMethod.REMOTE_URL:
+            return file.url
+
+        file_id = file.upload_file_id
+        async with get_async_db_context() as db:
+            file_metadata = await db.scalar(
+                select(FileMetadata).where(
+                    FileMetadata.id == file_id,
+                    FileMetadata.status == "completed",
+                )
+            )
+
+        if not file_metadata:
+            raise BusinessException(
+                f"文件不存在或已删除: {file_id}",
+                BizCode.NOT_FOUND
+            )
+
+        return f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
+
+    async def _resolve_local_file_async(
+            self,
+            upload_file_id,
+            file_type: str,
+            origin_file_type: str,
+    ) -> dict | None:
+        """resolve_local_file_object_dict 的异步版本。"""
+        from app.core.workflow.utils.file_processor import build_file_object_dict_from_meta
+        from app.models.file_metadata_model import FileMetadata
+        from app.core.config import settings
+        import uuid as _uuid
+
+        try:
+            fid = _uuid.UUID(str(upload_file_id))
+        except ValueError:
+            return None
+
+        async with get_async_db_context() as db:
+            meta = await db.scalar(
+                select(FileMetadata).where(
+                    FileMetadata.id == fid,
+                    FileMetadata.status == "completed",
+                )
+            )
+            if not meta:
+                return None
+
+            url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{fid}"
+            return build_file_object_dict_from_meta(
+                file_type=file_type,
+                transfer_method="local_file",
+                origin_file_type=origin_file_type,
+                file_id=str(fid),
+                url=url,
+                file_name=meta.file_name,
+                file_size=meta.file_size,
+                file_ext=meta.file_ext,
+                content_type=meta.content_type,
+            )
 
     async def _resolve_start_node_file_variables(
             self,
@@ -3088,7 +4168,6 @@ class WorkflowService:
             解析后的变量值字典
         """
         from app.core.workflow.utils.file_processor import (
-            resolve_local_file_object_dict,
             build_file_object_dict_from_meta,
             fetch_remote_file_meta,
         )
@@ -3115,7 +4194,7 @@ class WorkflowService:
                 origin_file_type = value.get("file_type") or file_type
 
                 if transfer_method == "local_file" and value.get("upload_file_id"):
-                    fo = resolve_local_file_object_dict(self.db, value["upload_file_id"], file_type, origin_file_type)
+                    fo = await self._resolve_local_file_async(value["upload_file_id"], file_type, origin_file_type)
                     resolved[var_name] = fo or build_file_object_dict_from_meta(
                         file_type=file_type, transfer_method="local_file",
                         origin_file_type=origin_file_type,
@@ -3136,7 +4215,7 @@ class WorkflowService:
                         origin_file_type = item.get("file_type") or file_type
 
                         if transfer_method == "local_file" and item.get("upload_file_id"):
-                            fo = resolve_local_file_object_dict(self.db, item["upload_file_id"], file_type, origin_file_type)
+                            fo = await self._resolve_local_file_async(item["upload_file_id"], file_type, origin_file_type)
                             resolved_list.append(fo or build_file_object_dict_from_meta(
                                 file_type=file_type, transfer_method="local_file",
                                 origin_file_type=origin_file_type,
@@ -3534,6 +4613,43 @@ class WorkflowService:
                 storage_type = 'neo4j'
         return storage_type, user_rag_memory_id
 
+    async def _get_memory_store_info_async(self, workspace_id: uuid.UUID) -> tuple[str, str]:
+        from app.models.workspace_model import Workspace
+        from app.models.knowledge_model import Knowledge
+
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(Workspace.storage_type).where(Workspace.id == workspace_id)
+            )
+            storage_type = result.scalar_one_or_none()
+            user_rag_memory_id = ""
+
+            if not storage_type:
+                storage_type = "neo4j"
+                logger.warning(
+                    f"Storage type not set for workspace {workspace_id}, using default: neo4j"
+                )
+
+            if storage_type == "rag":
+                result = await db.execute(
+                    select(Knowledge.id).where(
+                        Knowledge.name == "USER_RAG_MERORY",
+                        Knowledge.workspace_id == workspace_id,
+                        Knowledge.status == 1,
+                    ).limit(1)
+                )
+                knowledge_id = result.scalar_one_or_none()
+                if knowledge_id:
+                    user_rag_memory_id = str(knowledge_id)
+                else:
+                    logger.warning(
+                        f"No knowledge base named 'USER_RAG_MEMORY' found, "
+                        f"workspace_id: {workspace_id}, will use neo4j storage"
+                    )
+                    storage_type = "neo4j"
+
+            return storage_type, user_rag_memory_id
+
     @staticmethod
     def _extract_human_message_and_meta(
             final_messages: list[dict],
@@ -3799,6 +4915,34 @@ class WorkflowService:
             .limit(1)
         ).first()
         return last.id if last else None
+
+    async def _resolve_from_message_id_async(
+        self,
+        from_message_id: Optional[str],
+        conversation_id: Optional[uuid.UUID],
+    ) -> Optional[uuid.UUID]:
+        if from_message_id:
+            try:
+                return uuid.UUID(from_message_id)
+            except (ValueError, TypeError):
+                return None
+        if not conversation_id:
+            return None
+
+        from app.models import Message as MessageModel
+
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(MessageModel.id)
+                .where(
+                    MessageModel.conversation_id == conversation_id,
+                    MessageModel.role == "assistant",
+                    MessageModel.is_deleted.is_not(True),
+                )
+                .order_by(desc(MessageModel.is_current), MessageModel.created_at.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
 
     def _locate_execution_for_message(
             self, original_msg: "Message", conversation_id: uuid.UUID
@@ -4097,12 +5241,9 @@ class WorkflowService:
 
         conversation_id = original_msg.conversation_id
         parent_msg = self._locate_parent_user_message(original_msg)
-        # run_stream 执行期间会调用 self.db.close() 归还连接池（见 run_stream 内
-        # “工作流引擎执行期间不需要 db” 处）。SQLAlchemy 的 Session.close() 会 expunge
-        # 所有关联对象，使 parent_msg/original_msg 变为 detached；而 run_stream 在 close
-        # 之前的若干次 commit 又因 expire_on_commit=True 把它们的属性标记为过期。
-        # 此后再访问这些已过期属性（如 parent_msg.id）会抛 DetachedInstanceError。
-        # 故在 close 之前先把后续落库所需的主键与内容快照到局部变量，不再依赖 ORM 懒加载。
+        # run_stream 执行期间会多次 commit（expire_on_commit=True 会把对象属性标记为过期），
+        # 为避免后续访问触发额外 DB 查询或 DetachedInstanceError，这里把后续落库所需的主键与内容
+        # 快照到局部变量，不再依赖 ORM 懒加载。
         parent_msg_id = parent_msg.id
         parent_msg_content = parent_msg.content or ""
         original_execution = self._locate_execution_for_message(original_msg, conversation_id)
@@ -4229,8 +5370,7 @@ class WorkflowService:
 
         # 失败回滚：run_stream 抛异常 或 status 非 completed
         if stream_failed or stream_status != "completed":
-            # original_msg 已被 run_stream 内 self.db.close() expunge 而脱离会话，
-            # 直接改对象属性再 commit 不会落库（静默失效）→ 改用按主键的批量 UPDATE 还原 is_current，
+            # 回滚时不依赖 ORM 实例的状态，直接用按主键的批量 UPDATE 还原 is_current，
             # 避免回滚失败后原版本停留在 is_current=False、本轮无当前回复的脏状态。
             self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
             self.db.commit()
@@ -4321,6 +5461,35 @@ class WorkflowService:
         self.db.add(new_conversation)
         self.db.commit()
         self.db.refresh(new_conversation)
+        return conversation_id
+
+    async def _ensure_conversation_async(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            user_id: str | None,
+            conversation_id: uuid.UUID | None,
+            enable_conversation: bool,
+    ) -> uuid.UUID | None:
+        if not enable_conversation:
+            return conversation_id
+        if conversation_id:
+            return conversation_id
+
+        conversation_id = uuid.uuid4()
+        async with get_async_db_context() as db:
+            db.add(
+                Conversation(
+                    id=conversation_id,
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    is_draft=True,
+                    title="草稿会话",
+                )
+            )
+            await db.commit()
         return conversation_id
 
     def _trace_context_chain(self, end_msg) -> list[dict[str, Any]]:
@@ -4691,6 +5860,64 @@ class WorkflowService:
             conv_messages.append({"role": latest.role, "content": latest.content})
         return conv_vars, conv_messages
 
+    async def _trace_context_chain_async(self, db: AsyncSession, end_msg) -> list[dict[str, Any]]:
+        from app.models import Message as MessageModel
+
+        chain: list[MessageModel] = []
+        visited: set[uuid.UUID] = set()
+        cur = end_msg
+        while cur is not None and cur.parent_message_id:
+            if cur.id in visited:
+                break
+            visited.add(cur.id)
+            parent = await db.get(MessageModel, cur.parent_message_id)
+            if parent is None or parent.is_deleted:
+                break
+            chain.append(parent)
+            cur = parent
+        chain.reverse()
+        return [
+            {"role": m.role, "content": m.content}
+            for m in chain if m.role in ("user", "assistant")
+        ]
+
+    async def _get_history_info_async(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
+        conv_vars: dict[str, Any] = {}
+        from app.models import Message as MessageModel
+
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(WorkflowExecution)
+                .where(
+                    WorkflowExecution.conversation_id == conversation_id,
+                    WorkflowExecution.status == "completed",
+                )
+                .order_by(desc(WorkflowExecution.started_at))
+                .limit(1)
+            )
+            latest_execution = result.scalar_one_or_none()
+            if latest_execution and isinstance(latest_execution.output_data, dict):
+                variables = latest_execution.output_data.get("variables", {}) or {}
+                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+
+            result = await db.execute(
+                select(MessageModel)
+                .where(
+                    MessageModel.conversation_id == conversation_id,
+                    MessageModel.is_deleted.is_not(True),
+                )
+                .order_by(MessageModel.created_at.desc())
+                .limit(1)
+            )
+            latest = result.scalar_one_or_none()
+            if not latest:
+                return None
+
+            conv_messages = await self._trace_context_chain_async(db, latest)
+            if latest.role in ("user", "assistant"):
+                conv_messages.append({"role": latest.role, "content": latest.content})
+            return conv_vars, conv_messages
+
 
 
     def _get_history_from_message(self, message_id: str | None) -> tuple[dict, list] | None:
@@ -4723,6 +5950,38 @@ class WorkflowService:
         if branch_msg.role in ("user", "assistant"):
             conv_messages.append({"role": branch_msg.role, "content": branch_msg.content})
         return conv_vars, conv_messages
+
+    async def _get_history_from_message_async(self, message_id: str | None) -> tuple[dict, list] | None:
+        if not message_id:
+            return None
+
+        from app.models import Message as MessageModel
+
+        try:
+            branch_message_id = uuid.UUID(message_id)
+        except (ValueError, TypeError):
+            return None
+
+        async with get_async_db_context() as db:
+            branch_msg = await db.get(MessageModel, branch_message_id)
+            if not branch_msg:
+                return None
+
+            conv_vars: dict[str, Any] = {}
+            exec_id = (branch_msg.meta_data or {}).get("execution_id") if branch_msg.meta_data else None
+            if exec_id:
+                result = await db.execute(
+                    select(WorkflowExecution).where(WorkflowExecution.execution_id == str(exec_id)).limit(1)
+                )
+                execution = result.scalar_one_or_none()
+                if execution and isinstance(execution.output_data, dict):
+                    variables = execution.output_data.get("variables", {}) or {}
+                    conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+
+            conv_messages = await self._trace_context_chain_async(db, branch_msg)
+            if branch_msg.role in ("user", "assistant"):
+                conv_messages.append({"role": branch_msg.role, "content": branch_msg.content})
+            return conv_vars, conv_messages
 
 
 
@@ -4764,7 +6023,7 @@ class WorkflowService:
         """
         # 1. 获取工作流配置
         if not config:
-            config = self.get_workflow_config(app_id)
+            config = await self.get_workflow_config_async(app_id)
         if not config:
             raise BusinessException(
                 code=BizCode.CONFIG_MISSING,
@@ -4800,9 +6059,10 @@ class WorkflowService:
             input_data["conversation_id"] = payload.conversation_id
         input_data = self._merge_trigger_context(input_data, trigger_type, trigger_id, trigger_meta, trigger_payload)
 
+        has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
-        conversation_id_uuid = self._ensure_conversation(
+        conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
@@ -4817,34 +6077,34 @@ class WorkflowService:
         # 重新生成场景不短路：需走完整工作流以产出新版本回复
         annotation_match = None
         if supports_conversation and payload.message and not regenerate_mode:
-            annotation_match = self._check_annotation_match(
+            annotation_match = await self._check_annotation_match_async(
                 app_id, payload.message, source=source or HitLogSource.CONSOLE
             )
         if annotation_match:
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
             prev_messages = []
-            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
+            history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             if conversation_id_uuid:
-                self.conversation_service.add_message(
+                await self._add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=payload.message,
-                    meta_data={"files": []}
+                    meta_data={"files": []},
                 )
-                self.conversation_service.add_message(
+                await self._add_message_async(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=annotation_match["answer"],
-                    meta_data={"usage": {}}
+                    meta_data={"usage": {}},
                 )
 
             # 创建 WorkflowExecution 记录，用于日志显示
-            execution = self.create_execution(
+            execution = await self._create_execution_async(
                 workflow_config_id=config.id,
                 app_id=app_id,
                 trigger_type=trigger_type,
@@ -4852,26 +6112,30 @@ class WorkflowService:
                 conversation_id=conversation_id_uuid,
                 input_data=input_data,
                 release_id=release_id,
+                meta_data={
+                    "trigger_id": trigger_id,
+                    "trigger_meta": trigger_meta or {},
+                    "external_event_id": None,
+                },
             )
-            self._store_trigger_meta(execution, trigger_id, trigger_meta)
-            execution.status = "completed"
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
                 {"role": "assistant", "content": annotation_match["answer"]}
             ]
-            execution.output_data = {
-                "answer": annotation_match["answer"],
-                "messages": output_messages,
-                "annotation_hit": {
-                    "annotation_id": str(annotation_match["annotation_id"]),
-                    "similarity": annotation_match["similarity"],
-                    "question": annotation_match["question"],
-                }
-            }
-            execution.token_usage = {}
-            execution.elapsed_time = 0
-            execution.completed_at = utcnow_naive()
-            self.db.commit()
+            await self._patch_execution_async(
+                execution.execution_id,
+                status="completed",
+                output_data={
+                    "answer": annotation_match["answer"],
+                    "messages": output_messages,
+                    "annotation_hit": {
+                        "annotation_id": str(annotation_match["annotation_id"]),
+                        "similarity": annotation_match["similarity"],
+                        "question": annotation_match["question"],
+                    }
+                },
+                token_usage={},
+            )
 
             return {
                 "status": "completed",
@@ -4906,37 +6170,39 @@ class WorkflowService:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
                 if conversation_id_uuid:
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
                         role="user",
                         content=payload.message,
                         meta_data={"files": []},
                     )
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=preset_response,
                         meta_data={"usage": {}, "moderation_flagged": True},
                     )
-                if preserved_execution is not None:
-                    execution = preserved_execution
-                else:
-                    execution = self.create_execution(
-                        workflow_config_id=config.id,
-                        app_id=app_id,
-                        trigger_type="manual",
-                        triggered_by=None,
-                        conversation_id=conversation_id_uuid,
-                        input_data={"message": payload.message, "moderation_flagged": True},
-                        release_id=release_id,
-                    )
-                execution.status = "completed"
-                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
-                execution.elapsed_time = 0
-                execution.completed_at = utcnow_naive()
-                self.db.commit()
+                execution = await self._create_execution_async(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type="manual",
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data={"message": payload.message, "moderation_flagged": True},
+                    release_id=release_id,
+                    meta_data={
+                        "trigger_id": trigger_id,
+                        "trigger_meta": trigger_meta or {},
+                        "external_event_id": None,
+                    },
+                )
+                await self._patch_execution_async(
+                    execution.execution_id,
+                    status="completed",
+                    output_data={"answer": preset_response, "moderation_flagged": True},
+                )
                 return {
                     "execution_id": execution.execution_id,
                     "status": "completed",
@@ -4953,7 +6219,7 @@ class WorkflowService:
                 }
 
         # 2. 创建执行记录
-        execution = self.create_execution(
+        execution = await self._create_execution_async(
             workflow_config_id=config.id,
             app_id=app_id,
             trigger_type=trigger_type,
@@ -4961,9 +6227,12 @@ class WorkflowService:
             conversation_id=conversation_id_uuid,
             input_data=input_data,
             release_id=release_id,
+            meta_data={
+                "trigger_id": trigger_id,
+                "trigger_meta": trigger_meta or {},
+                "external_event_id": None,
+            },
         )
-        self._store_trigger_meta(execution, trigger_id, trigger_meta)
-        self.db.commit()
 
         # 3. 构建工作流配置字典
         workflow_config_dict = self._build_runtime_workflow_config_dict(
@@ -4973,30 +6242,28 @@ class WorkflowService:
             runtime_options={"bypass_node_cache": True},
         )
 
+        files = []
         try:
             files = await self._handle_file_input(payload.files)
-            storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
+            storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
-            # 更新 execution.input_data，确保数据库中的 files 包含 URL
-            execution.input_data = input_data
-            self.db.commit()
             message_id = uuid.uuid4()
             # 预生成 user_message_id：重新生成模式不创建新 user 消息，置 None
             # （add_message 收到 None 时内部生成 id，行为同原先；仅非重新生成场景
             # 需要把 id 经由 response 返回给前端，供"未刷新即删除 user 消息"使用）
             user_message_id = None if regenerate_mode else uuid.uuid4()
-            # 更新状态为运行中
-            self.update_execution_status(execution.execution_id, "running")
 
             if regenerate_mode and regenerate_history:
                 history = regenerate_history
             elif payload.from_message_id:
-                history = self._get_history_from_message(payload.from_message_id)
+                history = await self._get_history_from_message_async(payload.from_message_id)
                 # from_message_id 找不到对应 execution 时回退到最近 completed
                 if history is None and conversation_id_uuid:
-                    history = self._get_history_info(conversation_id_uuid)
+                    history = await self._get_history_info_async(conversation_id_uuid)
+            elif not has_existing_conversation:
+                history = None
             else:
-                history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
+                history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
@@ -5019,16 +6286,21 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
                         meta_data={"suggested_questions": suggested_questions},
-                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
+
+            execution = await self._patch_execution_async(
+                execution.execution_id,
+                input_data=input_data,
+                status="running",
+            )
 
             result = await execute_workflow(
                 workflow_config=workflow_config_dict,
@@ -5083,18 +6355,6 @@ class WorkflowService:
                                 })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
-                _user_msg = None
-                if conversation_id_uuid:
-                    _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
-                    _user_msg = self.conversation_service.add_message(
-                        conversation_id=conversation_id_uuid,
-                        role="user",
-                        content=human_message,
-                        meta_data=human_meta,
-                        parent_message_id=_from_msg_id,
-                        sync_memory=False,
-                        message_id=user_message_id,
-                    )
                 # 过滤 citations
                 citations = result.get("citations", [])
                 citation_cfg = feature_configs.get("citation", {})
@@ -5112,47 +6372,58 @@ class WorkflowService:
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
                 if conversation_id_uuid:
-                    self.conversation_service.add_message(
-                        message_id=message_id,
-                        conversation_id=conversation_id_uuid,
-                        role="assistant",
-                        content=assistant_message,
-                        meta_data=assistant_meta,
-                        parent_message_id=_user_msg.id if _user_msg else None,
-                        sync_memory=False,
+                    _from_msg_id = await self._resolve_from_message_id_async(
+                        payload.from_message_id,
+                        conversation_id_uuid,
                     )
-                self.update_execution_status(
-                    execution.execution_id,
-                    "completed",
-                    output_data=result,
-                    token_usage=token_usage.get("total_tokens", None)
-                )
-                execution = self.get_execution(execution.execution_id)
-                self._persist_workflow_node_executions(execution, config, result)
-                self._refresh_workflow_debug_state_from_execution(execution)
+                    execution = await self._finalize_completed_execution_async(
+                        execution_id=execution.execution_id,
+                        conversation_id=conversation_id_uuid,
+                        human_message=human_message,
+                        human_meta=human_meta,
+                        user_message_id=user_message_id,
+                        from_message_id=_from_msg_id,
+                        assistant_message_id=message_id,
+                        assistant_message=assistant_message,
+                        assistant_meta=assistant_meta,
+                        workflow_output_data=result,
+                        token_usage=token_usage.get("total_tokens", None),
+                    )
+                else:
+                    execution = await self._patch_execution_async(
+                        execution.execution_id,
+                        status="completed",
+                        output_data=result,
+                        token_usage=token_usage.get("total_tokens", None),
+                    )
+                execution_record = await self._get_execution_async(execution.execution_id)
+                if execution_record:
+                    self._persist_workflow_node_executions(execution_record, config, result)
+                    self._refresh_workflow_debug_state_from_execution(execution_record)
 
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
-                self.update_execution_status(
+                await self._patch_execution_async(
                     execution.execution_id,
-                    "failed",
+                    status="failed",
                     # 失败时同样持久化完整结果（含 node_outputs），
                     # 否则应用日志无法展示失败调用的各节点执行明细。
                     output_data=result,
                     error_message=result.get("error"),
                     error_node_id=result.get("error_node"),
                 )
-                execution = self.get_execution(execution.execution_id)
-                self._persist_workflow_node_executions(execution, config, result)
-                self._refresh_workflow_debug_state_from_execution(execution)
+                execution_record = await self._get_execution_async(execution.execution_id)
+                if execution_record:
+                    self._persist_workflow_node_executions(execution_record, config, result)
+                    self._refresh_workflow_debug_state_from_execution(execution_record)
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
                 final_messages = result.get("messages", [])[init_message_length:]
                 human_message, human_meta = self._extract_human_message_and_meta(
                     final_messages, payload.message or "", files
                 )
-                self._save_failed_conversation(
+                await self._save_failed_conversation_async(
                     conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
                 )
                 filtered_citations = []
@@ -5180,18 +6451,18 @@ class WorkflowService:
                     remove_checkpointer(cp_thread_id)
                 from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
                 InterventionRegistry.cleanup(execution.execution_id)
-                self.update_execution_status(
+                await self._patch_execution_async(
                     execution.execution_id,
-                    "failed",
+                    status="failed",
                     output_data=result,
                     error_message="非流式执行不支持人工介入节点",
                     error_node_id=result.get("error_node"),
                 )
                 try:
-                    execution = self.get_execution(execution.execution_id)
-                    if execution and execution.output_data:
-                        self._persist_workflow_node_executions(execution, config, execution.output_data)
-                        self._refresh_workflow_debug_state_from_execution(execution)
+                    execution_record = await self._get_execution_async(execution.execution_id)
+                    if execution_record and execution_record.output_data:
+                        self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
+                        self._refresh_workflow_debug_state_from_execution(execution_record)
                 except Exception as persist_err:
                     logger.warning(f"Failed to persist node executions on waiting_human: {persist_err}")
                 raise BusinessException(
@@ -5205,16 +6476,20 @@ class WorkflowService:
             raise
         except Exception as e:
             logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
-            self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            await self._patch_execution_async(
+                execution.execution_id,
+                status="failed",
+                error_message=str(e),
+            )
             try:
-                execution = self.get_execution(execution.execution_id)
-                if execution and execution.output_data:
-                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution)
+                execution_record = await self._get_execution_async(execution.execution_id)
+                if execution_record and execution_record.output_data:
+                    self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
+                    self._refresh_workflow_debug_state_from_execution(execution_record)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
+            await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -5261,6 +6536,49 @@ class WorkflowService:
         Raises:
             BusinessException: 配置不存在或执行失败时抛出
         """
+        request_started_at = time.perf_counter()
+        before_execute_started_at = request_started_at
+        before_execute_last_checkpoint_at = request_started_at
+        stream_started_at: float | None = None
+        first_message_at: float | None = None
+        workflow_end_seen_at: float | None = None
+        timing_execution_id = "pending"
+
+        def _log_run_stream_timing(stage: str, **extra: Any) -> None:
+            now = time.perf_counter()
+            payload_items = {
+                "stage": stage,
+                "execution_id": timing_execution_id,
+                "elapsed_ms": round((now - request_started_at) * 1000, 2),
+            }
+            if stream_started_at is not None:
+                payload_items["stream_ms"] = round((now - stream_started_at) * 1000, 2)
+            if first_message_at is not None:
+                payload_items["post_first_chunk_ms"] = round((now - first_message_at) * 1000, 2)
+            if workflow_end_seen_at is not None:
+                payload_items["finalize_ms"] = round((now - workflow_end_seen_at) * 1000, 2)
+            payload_items.update(extra)
+            logger.info(
+                "[TIMING] workflow.run_stream %s",
+                " ".join(f"{k}={v}" for k, v in payload_items.items()),
+            )
+
+        def _log_before_execute_step(stage: str, **extra: Any) -> None:
+            nonlocal before_execute_last_checkpoint_at
+            now = time.perf_counter()
+            payload_items = {
+                "stage": stage,
+                "execution_id": timing_execution_id,
+                "before_execute_ms": round((now - before_execute_started_at) * 1000, 2),
+                "step_ms": round((now - before_execute_last_checkpoint_at) * 1000, 2),
+            }
+            payload_items.update(extra)
+            logger.info(
+                "[TIMING] workflow.run_stream %s",
+                " ".join(f"{k}={v}" for k, v in payload_items.items()),
+            )
+            before_execute_last_checkpoint_at = now
+
         # 1. 获取工作流配置
         if not config:
             config = self.get_workflow_config(app_id)
@@ -5280,11 +6598,21 @@ class WorkflowService:
         supports_conversation = self._supports_conversation(config)
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
+        _log_before_execute_step(
+            "before_execute_config_ready",
+            supports_conversation=supports_conversation,
+            has_release_id=release_id is not None,
+        )
 
         # 解析开始节点文件类型的变量值
         start_node_vars = self.get_start_node_variables({"nodes": config.nodes})
         resolved_variables = await self._resolve_start_node_file_variables(
             start_node_vars, payload.variables or {}
+        )
+        _log_before_execute_step(
+            "before_execute_input_resolved",
+            start_node_var_count=len(start_node_vars or []),
+            file_count=len(payload.files or []),
         )
 
         input_data = {
@@ -5297,9 +6625,10 @@ class WorkflowService:
             input_data["conversation_id"] = payload.conversation_id
         input_data = self._merge_trigger_context(input_data, trigger_type, trigger_id, trigger_meta, trigger_payload)
 
+        has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
-        conversation_id_uuid = self._ensure_conversation(
+        conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
@@ -5309,42 +6638,46 @@ class WorkflowService:
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
             input_data["conversation_id"] = str(conversation_id_uuid)
+        _log_before_execute_step(
+            "before_execute_conversation_ready",
+            conversation_id=str(conversation_id_uuid) if conversation_id_uuid else None,
+        )
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
         # 重新生成场景不短路：需走完整工作流以产出新版本回复
         annotation_match = None
         if supports_conversation and payload.message and not regenerate_mode:
-            annotation_match = self._check_annotation_match(
+            annotation_match = await self._check_annotation_match_async(
                 app_id, payload.message, source=source or HitLogSource.CONSOLE
             )
         if annotation_match:
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
             prev_messages = []
-            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
+            history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             if conversation_id_uuid:
-                self.conversation_service.add_message(
+                await self._add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=payload.message,
-                    meta_data={"files": []}
+                    meta_data={"files": []},
                 )
-                self.conversation_service.add_message(
+                await self._add_message_async(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=annotation_match["answer"],
-                    meta_data={"usage": {}}
+                    meta_data={"usage": {}},
                 )
 
             # 创建 WorkflowExecution 记录，用于日志显示
             if preserved_execution is not None:
                 execution = preserved_execution
             else:
-                execution = self.create_execution(
+                execution = await self._create_execution_async(
                     workflow_config_id=config.id,
                     app_id=app_id,
                     trigger_type=trigger_type,
@@ -5352,14 +6685,21 @@ class WorkflowService:
                     conversation_id=conversation_id_uuid,
                     input_data=input_data,
                     release_id=release_id,
+                    meta_data={
+                        "trigger_id": trigger_id,
+                        "trigger_meta": trigger_meta or {},
+                        "external_event_id": None,
+                    },
                 )
-            self._store_trigger_meta(execution, trigger_id, trigger_meta)
-            execution.status = "completed"
+            timing_execution_id = execution.execution_id
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
                 {"role": "assistant", "content": annotation_match["answer"]}
             ]
-            execution.output_data = {
+            execution = await self._patch_execution_async(
+                execution.execution_id,
+                status="completed",
+                output_data={
                 "answer": annotation_match["answer"],
                 "messages": output_messages,
                 "annotation_hit": {
@@ -5367,11 +6707,9 @@ class WorkflowService:
                     "similarity": annotation_match["similarity"],
                     "question": annotation_match["question"],
                 }
-            }
-            execution.token_usage = {}
-            execution.elapsed_time = 0
-            execution.completed_at = utcnow_naive()
-            self.db.commit()
+                },
+                token_usage={},
+            )
 
             start_internal_event = {
                 "event": "workflow_start",
@@ -5434,14 +6772,14 @@ class WorkflowService:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
                 if conversation_id_uuid:
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
                         role="user",
                         content=payload.message,
                         meta_data={"files": []},
                     )
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id_uuid,
                         role="assistant",
@@ -5451,7 +6789,7 @@ class WorkflowService:
                 if preserved_execution is not None:
                     execution = preserved_execution
                 else:
-                    execution = self.create_execution(
+                    execution = await self._create_execution_async(
                         workflow_config_id=config.id,
                         app_id=app_id,
                         trigger_type="manual",
@@ -5459,12 +6797,18 @@ class WorkflowService:
                         conversation_id=conversation_id_uuid,
                         input_data={"message": payload.message, "moderation_flagged": True},
                         release_id=release_id,
+                        meta_data={
+                            "trigger_id": trigger_id,
+                            "trigger_meta": trigger_meta or {},
+                            "external_event_id": None,
+                        },
                     )
-                execution.status = "completed"
-                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
-                execution.elapsed_time = 0
-                execution.completed_at = utcnow_naive()
-                self.db.commit()
+                timing_execution_id = execution.execution_id
+                execution = await self._patch_execution_async(
+                    execution.execution_id,
+                    status="completed",
+                    output_data={"answer": preset_response, "moderation_flagged": True},
+                )
 
                 start_internal_event = {
                     "event": "workflow_start",
@@ -5504,21 +6848,7 @@ class WorkflowService:
                     yield end_event
                 return
 
-        # 2. 创建执行记录
-        if preserved_execution is not None:
-            execution = preserved_execution
-        else:
-            execution = self.create_execution(
-                workflow_config_id=config.id,
-                app_id=app_id,
-                trigger_type=trigger_type,
-                triggered_by=None,
-                conversation_id=conversation_id_uuid,
-                input_data=input_data,
-                release_id=release_id,
-            )
-        self._store_trigger_meta(execution, trigger_id, trigger_meta)
-        self.db.commit()
+        execution = preserved_execution
 
         # 3. 构建工作流配置字典
         workflow_config_dict = self._build_runtime_workflow_config_dict(
@@ -5527,29 +6857,45 @@ class WorkflowService:
             features=feature_configs,
             runtime_options={"bypass_node_cache": True},
         )
+        _log_before_execute_step("before_execute_runtime_config_ready")
 
         try:
             files = await self._handle_file_input(payload.files)
-            storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
+            storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
-            # 更新 execution.input_data，确保数据库中的 files 包含 URL
-            execution.input_data = input_data
-            self.db.commit()
-            self.update_execution_status(execution.execution_id, "running")
+            _log_before_execute_step(
+                "before_execute_files_ready",
+                file_count=len(files or []),
+                storage_type=storage_type,
+                has_user_rag_memory_id=bool(user_rag_memory_id),
+            )
+            history_source = "none"
             if regenerate_mode and regenerate_history:
                 history = regenerate_history
+                history_source = "regenerate"
             elif payload.from_message_id:
-                history = self._get_history_from_message(payload.from_message_id)
+                history = await self._get_history_from_message_async(payload.from_message_id)
+                history_source = "from_message"
                 # from_message_id 找不到对应 execution 时回退到最近 completed
                 if history is None and conversation_id_uuid:
-                    history = self._get_history_info(conversation_id_uuid)
+                    history = await self._get_history_info_async(conversation_id_uuid)
+                    history_source = "conversation_fallback"
+            elif not has_existing_conversation:
+                history = None
+                history_source = "new_conversation_skip"
             else:
-                history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
+                history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
+                history_source = "conversation" if conversation_id_uuid else "none"
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
+            _log_before_execute_step(
+                "before_execute_history_ready",
+                history_message_count=init_message_length,
+                history_source=history_source,
+            )
             message_id = regenerate_message_id or uuid.uuid4()
             # 预生成 user_message_id（重新生成模式不创建新 user 消息，置 None）。
             # 主流程 user 消息在 workflow_end 后才落库(:5550)，而 workflow_start 事件
@@ -5574,16 +6920,19 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    self.conversation_service.add_message(
+                    await self._add_message_async(
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
                         meta_data={"suggested_questions": suggested_questions},
-                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
+            _log_before_execute_step(
+                "before_execute_opening_ready",
+                is_new_conversation=is_new_conversation,
+            )
 
             output_moderation = None
             llm_node_ids: set[str] = set()
@@ -5600,18 +6949,52 @@ class WorkflowService:
                     for node in (config.nodes or []):
                         if node.get("type") == "llm":
                             llm_node_ids.add(node.get("id", ""))
+            _log_before_execute_step(
+                "before_execute_output_moderation_ready",
+                moderation_enabled=output_moderation is not None,
+                llm_node_count=len(llm_node_ids),
+            )
+
+            if execution is not None:
+                execution = await self._patch_execution_async(
+                    execution.execution_id,
+                    input_data=input_data,
+                    status="running",
+                )
+            else:
+                execution = self._build_transient_execution_ref(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type=trigger_type,
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data=self._build_persisted_execution_input_data(input_data),
+                    release_id=release_id,
+                    meta_data={
+                        "trigger_id": trigger_id,
+                        "trigger_meta": trigger_meta or {},
+                        "external_event_id": None,
+                    },
+                    status="running",
+                )
+                await self._store_runtime_execution_snapshot_async(execution)
+            timing_execution_id = execution.execution_id
+            _log_before_execute_step(
+                "before_execute_execution_ready",
+                preserved_execution=preserved_execution is not None,
+                status="running",
+            )
 
             accumulated_content = ""
             queued_intervention_events = []
 
             moderation_flagged = False
             active_llm_nodes: set[str] = set()  # 已 node_start 但尚未 node_end 的 LLM 节点
-
-            # 工作流引擎执行期间不需要 db，提前归还连接给连接池
-            # execution 对象保持内存状态，事件处理时通过 self.db 懒重连写入
-            # 写完后再调用 self.db.close() 归还连接
-            self.db.refresh(execution)
-            self.db.close()
+            stream_started_at = time.perf_counter()
+            _log_run_stream_timing(
+                "before_execute",
+                conversation_id=str(conversation_id_uuid) if conversation_id_uuid else None,
+            )
 
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
@@ -5631,6 +7014,9 @@ class WorkflowService:
 
                 # message 事件：先审查再 yield，检测到关键词立即触发 message_replace 并结束流式
                 if event_type == "message" and output_moderation and not moderation_flagged:
+                    if first_message_at is None:
+                        first_message_at = time.perf_counter()
+                        _log_run_stream_timing("first_message_chunk", content_len=len(event_data.get("content", "") or ""))
                     chunk = event_data.get("content", "")
                     if output_moderation.accumulate(chunk):
                         moderation_flagged = True
@@ -5642,23 +7028,6 @@ class WorkflowService:
                         human_message, human_meta = self._extract_human_message_and_meta(
                             [], payload.message or "", files
                         )
-                        if conversation_id_uuid:
-                            self.conversation_service.add_message(
-                                message_id=user_message_id,
-                                conversation_id=conversation_id_uuid,
-                                role="user",
-                                content=human_message,
-                                meta_data=human_meta,
-                                sync_memory=False,
-                            )
-                            self.conversation_service.add_message(
-                                message_id=message_id,
-                                conversation_id=conversation_id_uuid,
-                                role="assistant",
-                                content=preset_response,
-                                meta_data={"usage": {}, "audio_url": None, "moderation_flagged": True},
-                                sync_memory=False,
-                            )
                         # 更新执行状态为完成，标记审查触发
                         workflow_output_data = {
                             "moderation_flagged": True,
@@ -5674,9 +7043,24 @@ class WorkflowService:
                                 else:
                                     node_outputs[cycle_node_id] = {"cycle_items": items}
                             workflow_output_data.update(new_output_data)
-                        self.update_execution_status(
+                        if conversation_id_uuid:
+                            await self._add_message_async(
+                                message_id=user_message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                            )
+                            await self._add_message_async(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content=preset_response,
+                                meta_data={"usage": {}, "audio_url": None, "moderation_flagged": True},
+                            )
+                        execution = await self._patch_execution_async(
                             execution.execution_id,
-                            "completed",
+                            status="completed",
                             output_data=workflow_output_data,
                         )
                         # 合成 LLM node_end 事件：只为当前正在执行的 LLM 节点补发
@@ -5711,17 +7095,14 @@ class WorkflowService:
                         }
                         end_event = self._emit(public, end_internal_event)
                         if end_event:
+                            _log_run_stream_timing("moderation_finalize_done", status="completed")
                             yield end_event
-                        try:
-                            execution = self.get_execution(execution.execution_id)
-                            if execution and execution.output_data:
-                                self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
-                        except Exception as persist_err:
-                            logger.warning(f"Failed to persist node executions on moderation: {persist_err}")
                         break
 
                 if event_type == "message":
+                    if first_message_at is None:
+                        first_message_at = time.perf_counter()
+                        _log_run_stream_timing("first_message_chunk", content_len=len(event_data.get("content", "") or ""))
                     accumulated_content += event_data.get("content", "") or ""
 
                 if event_type == "cycle_item":
@@ -5731,9 +7112,15 @@ class WorkflowService:
                     _cycle_items[cycle_id].append(event_data)
 
                 if event.get("event") == "workflow_end":
+                    workflow_end_seen_at = time.perf_counter()
+                    _log_run_stream_timing(
+                        "workflow_end_received",
+                        status=event.get("data", {}).get("status"),
+                    )
                     status = event.get("data", {}).get("status")
                     token_usage = event.get("data", {}).get("token_usage", {}) or {}
                     if status == "completed":
+                        finalize_started_at = time.perf_counter()
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
                         human_message = ""
                         assistant_message = ""
@@ -5756,17 +7143,6 @@ class WorkflowService:
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
                         _user_msg = None
-                        if conversation_id_uuid:
-                            _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
-                            _user_msg = self.conversation_service.add_message(
-                                conversation_id=conversation_id_uuid,
-                                role="user",
-                                content=human_message,
-                                meta_data=human_meta,
-                                parent_message_id=_from_msg_id,
-                                sync_memory=False,
-                                message_id=user_message_id,
-                            )
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
                         citation_cfg = feature_configs.get("citation", {})
@@ -5783,26 +7159,67 @@ class WorkflowService:
                         assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
-                        if conversation_id_uuid:
-                            self.conversation_service.add_message(
-                                message_id=message_id,
-                                conversation_id=conversation_id_uuid,
-                                role="assistant",
-                                content=assistant_message,
-                                meta_data=assistant_meta,
-                                parent_message_id=_user_msg.id if _user_msg else None,
-                                sync_memory=False,
-                            )
                         # 输出审查触发时，将 moderation 信息写入 execution output_data
                         workflow_output_data = event.get("data") or {}
                         if output_moderation and output_moderation.is_flagged:
                             workflow_output_data["moderation_flagged"] = True
                             workflow_output_data["preset_response"] = output_moderation.preset_response
-                        self.update_execution_status(
+                        _token_usage_total = token_usage.get("total_tokens", None)
+                        finalize_payload_ready_at = time.perf_counter()
+                        logger.info(
+                            "[TIMING] workflow.finalize_outer stage=payload_ready execution_id=%s "
+                            "total_ms=%.2f step_ms=%.2f has_conversation=%s",
                             execution.execution_id,
-                            "completed",
-                            output_data=workflow_output_data,
-                            token_usage=token_usage.get("total_tokens", None)
+                            (finalize_payload_ready_at - finalize_started_at) * 1000,
+                            (finalize_payload_ready_at - finalize_started_at) * 1000,
+                            bool(conversation_id_uuid),
+                        )
+
+                        if conversation_id_uuid:
+                            _from_msg_id = await self._resolve_from_message_id_async(
+                                payload.from_message_id,
+                                conversation_id_uuid,
+                            )
+                            finalize_context_ready_at = time.perf_counter()
+                            logger.info(
+                                "[TIMING] workflow.finalize_outer stage=context_ready execution_id=%s "
+                                "total_ms=%.2f step_ms=%.2f",
+                                execution.execution_id,
+                                (finalize_context_ready_at - finalize_started_at) * 1000,
+                                (finalize_context_ready_at - finalize_payload_ready_at) * 1000,
+                            )
+                            execution = await self._finalize_completed_execution_async(
+                                execution_id=execution.execution_id,
+                                conversation_id=conversation_id_uuid,
+                                human_message=human_message,
+                                human_meta=human_meta,
+                                user_message_id=user_message_id,
+                                from_message_id=_from_msg_id,
+                                assistant_message_id=message_id,
+                                assistant_message=assistant_message,
+                                assistant_meta=assistant_meta,
+                                workflow_output_data=workflow_output_data,
+                                token_usage=_token_usage_total,
+                            )
+                        else:
+                            execution = await self._patch_execution_async(
+                                execution.execution_id,
+                                status="completed",
+                                output_data=workflow_output_data,
+                                token_usage=_token_usage_total,
+                            )
+                        finalize_db_done_at = time.perf_counter()
+                        logger.info(
+                            "[TIMING] workflow.finalize_outer stage=db_done execution_id=%s "
+                            "total_ms=%.2f step_ms=%.2f",
+                            execution.execution_id,
+                            (finalize_db_done_at - finalize_started_at) * 1000,
+                            (finalize_db_done_at - (finalize_context_ready_at if conversation_id_uuid else finalize_payload_ready_at)) * 1000,
+                        )
+                        _log_run_stream_timing(
+                            "workflow_end_finalize_done",
+                            status="completed",
+                            message_count=len(final_messages),
                         )
                         event.setdefault("data", {})["citations"] = filtered_citations
                         logger.info(f"Workflow Run Success, "
@@ -5813,22 +7230,19 @@ class WorkflowService:
                         human_message, human_meta = self._extract_human_message_and_meta(
                             final_messages, payload.message or "", files
                         )
-                        self._save_failed_conversation(
+                        _failed_output = event.get("data")
+                        _error_node_id = (_failed_output or {}).get("error_node")
+
+                        await self._save_failed_conversation_async(
                             conversation_id_uuid, message_id, human_message, human_meta, error_msg
                         )
-                        self.update_execution_status(
+                        execution = await self._patch_execution_async(
                             execution.execution_id,
-                            "failed",
-                            output_data=event.get("data"),
-                            error_node_id=(event.get("data") or {}).get("error_node"),
+                            status="failed",
+                            output_data=_failed_output,
+                            error_node_id=_error_node_id,
                         )
-                        try:
-                            execution = self.get_execution(execution.execution_id)
-                            if execution and execution.output_data:
-                                self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
-                        except Exception as persist_err:
-                            logger.warning(f"Failed to persist node executions on stream failed: {persist_err}")
+                        _log_run_stream_timing("workflow_end_finalize_done", status="failed")
                     elif status == "waiting_human":
                         from app.services.intervention_registry import register_intervention, register_pending
 
@@ -5928,20 +7342,7 @@ class WorkflowService:
                         # 原来只更 status+context，丢弃了 output_data 脏属性，导致 waiting_human
                         # 时节点明细不落库，switch-version/branch 读取时
                         # node_executions_map 为空。故把 output_data 纳入 update 列。
-                        self.db.query(WorkflowExecution).filter(
-                            WorkflowExecution.execution_id == execution.execution_id
-                        ).update(
-                            {"status": "waiting_human", "context": _hitl_context, "output_data": execution.output_data},
-                            synchronize_session=False,
-                        )
-                        self.db.commit()
-                        execution.status = "waiting_human"
-                        execution.context = _hitl_context
-                        self.db.close()
 
-                        # Save the user message so that the conversation title
-                        # gets updated from the first user message, rather than
-                        # staying as "New Conversation".
                         human_message = payload.message or ""
                         human_meta = {"files": []}
                         for f in files or []:
@@ -5953,43 +7354,40 @@ class WorkflowService:
                                     "name": f.get("name"),
                                     "size": f.get("size"),
                                 })
-                        # 与正常完成路径(见 run 内 _user_msg/_from_msg_id)一致地挂
-                        # parent_message_id,避免人工介入分支的首轮 user/assistant 消息
-                        # 成为孤儿(parent=null)。否则 switch-version/branch 重建分支链
-                        # 时会丢失 user 消息,且重新生成的兄弟版本因 parent 不一致无法
-                        # 聚合(详见 _build_branch_view siblings)。
-                        _from_msg_id = self._resolve_from_message_id(payload.from_message_id, conversation_id_uuid)
+
+                        execution = await self._patch_execution_async(
+                            execution.execution_id,
+                            status="waiting_human",
+                            context=_hitl_context,
+                            output_data=execution.output_data,
+                        )
+                        _log_run_stream_timing(
+                            "workflow_end_finalize_done",
+                            status="waiting_human",
+                            interventions=len(intervention_list),
+                        )
+
+                        _from_msg_id = await self._resolve_from_message_id_async(
+                            payload.from_message_id,
+                            conversation_id_uuid,
+                        )
                         _hitl_user_msg = None
                         if conversation_id_uuid:
-                            _hitl_user_msg = self.conversation_service.add_message(
+                            _hitl_user_msg = await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
                                 content=human_message,
                                 meta_data=human_meta,
                                 parent_message_id=_from_msg_id,
-                                sync_memory=False,
                                 message_id=user_message_id,
                             )
-
-                            # Save an assistant message marked as waiting_human.
-                            # Content is intentionally EMPTY — the intervention UI
-                            # (form, buttons, rendered_content) comes from
-                            # pending_intervention in the conversation API, not
-                            # from the message content itself. The message only
-                            # acts as an anchor so the frontend can locate the
-                            # intervention form in the message list.
-                            # Use the same message_id as workflow_start so the
-                            # frontend's local placeholder and the DB message
-                            # share the same ID. On resume, this message is
-                            # updated in-place with the final output content.
-                            self.conversation_service.add_message(
+                            await self._add_message_async(
                                 message_id=message_id,
                                 conversation_id=conversation_id_uuid,
                                 role="assistant",
                                 content="",
                                 meta_data={"waiting_human": True, "execution_id": execution.execution_id},
                                 parent_message_id=_hitl_user_msg.id if _hitl_user_msg else None,
-                                sync_memory=False,
                             )
 
                         # message_id is already saved in execution.context["human_intervention"]["message_id"]
@@ -6038,11 +7436,10 @@ class WorkflowService:
                             else:
                                 node_outputs[cycle_node_id] = {"cycle_items": items}
                         execution.output_data = new_output_data
-                        self.db.commit()
-                        self.db.close()
-                    if status in {"completed", "failed"} and execution.output_data:
-                        self._persist_workflow_node_executions(execution, config, execution.output_data)
-                        self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
+                        execution = await self._patch_execution_async(
+                            execution.execution_id,
+                            output_data=execution.output_data,
+                        )
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                     if user_message_id:
@@ -6109,13 +7506,10 @@ class WorkflowService:
                         }
                         # ★ 修复：execution 在 5787 close 后 detached，ORM 赋值 context 不落库，
                         # 改用 Core query.update 显式更新 context，确保 resolved_interventions 持久化
-                        self.db.query(WorkflowExecution).filter(
-                            WorkflowExecution.execution_id == execution.execution_id
-                        ).update({"context": _new_ctx}, synchronize_session=False)
-                        execution.context = _new_ctx
-                        self.db.commit()
-                        execution.context = _resolved_context
-                        self.db.close()
+                        execution = await self._patch_execution_async(
+                            execution.execution_id,
+                            context=_new_ctx,
+                        )
 
                     # Handle timeout signal from the background scheduler
                     # Resume the workflow via the timeout branch (TIMEOUT) instead of terminating
@@ -6207,8 +7601,10 @@ class WorkflowService:
                                     visible_interventions=[],
                                     backlog_interventions=clean_remaining,
                                 )
-                                self.db.commit()
-                                self.db.close()
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    context=execution.context,
+                                )
 
                                 register_intervention(execution.execution_id, new_map)
                                 if new_pending:
@@ -6237,13 +7633,9 @@ class WorkflowService:
                                 # yielded to the client. We must synthesize a
                                 # proper "completed" workflow_end here so the
                                 # frontend knows the workflow has finished.
-                                # ★ 修复：execution 在 5787 self.db.close() 后已 detached，
-                                # 后续 ORM 赋值在 6129 commit 时不会发 UPDATE，导致 resume 完成
-                                # 后 status 乌为 waiting_human、output_data 乌旧值。改用 Core query.update
-                                # 显式落库，绕开 session 跟踪问题。
-                                _completed_at = utcnow_naive()
-                                _elapsed_time = (_completed_at - execution.started_at).total_seconds() if execution.started_at else 0.0
-
+                                # ★ 修复：execution 在 run_stream 开始阶段已从 session 脱离，
+                                # 后续仅修改内存对象不会自动落库，导致 resume 完成后 status/output_data
+                                # 仍停留在 waiting_human/旧值。这里改用 query.update 显式落库。
                                 # Save the formatted output (built by
                                 # resume_workflow_stream via build_final_output)
                                 # as output_data so the log view displays the
@@ -6260,26 +7652,12 @@ class WorkflowService:
                                     if captured_formatted_output.get("token_usage"):
                                         _final_token_usage = captured_formatted_output["token_usage"]
 
-                                _update_fields = {
-                                    "status": "completed",
-                                    "completed_at": _completed_at,
-                                    "elapsed_time": _elapsed_time,
-                                }
-                                if _final_output_data is not None:
-                                    _update_fields["output_data"] = _final_output_data
-                                if _final_token_usage is not None:
-                                    _update_fields["token_usage"] = _final_token_usage
-                                self.db.query(WorkflowExecution).filter(
-                                    WorkflowExecution.execution_id == execution.execution_id
-                                ).update(_update_fields, synchronize_session=False)
-                                # 同步内存对象，供后续 _persist_workflow_node_executions 使用
-                                execution.status = "completed"
-                                execution.completed_at = _completed_at
-                                execution.elapsed_time = _elapsed_time
-                                if _final_output_data is not None:
-                                    execution.output_data = _final_output_data
-                                if _final_token_usage is not None:
-                                    execution.token_usage = _final_token_usage
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    status="completed",
+                                    output_data=_final_output_data,
+                                    token_usage=_final_token_usage,
+                                )
 
                                 # ★ Always clear waiting_human on the original
                                 # message, even when accumulated_content is empty
@@ -6296,26 +7674,19 @@ class WorkflowService:
                                     if captured_formatted_output and captured_formatted_output.get("citations"):
                                         _assistant_meta["citations"] = captured_formatted_output["citations"]
                                     _resolved_meta.update(_assistant_meta)
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         message_id=message_id,
                                         content=accumulated_content,
                                         meta_data=_resolved_meta,
                                     )
                                 else:
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         message_id=message_id,
                                         meta_data=_resolved_meta,
                                     )
 
-                                # Commit AFTER the message update so the change
-                                # is durable across requests. update_message()
-                                # only flushes; it relies on the caller to commit.
-                                self.db.commit()
-                                self.db.close()
-
                                 try:
-                                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
+                                    await self._persist_execution_artifacts_async(execution.execution_id, config)
                                 except Exception as persist_err:
                                     logger.warning(f"Failed to persist node executions on intervention resolved: {persist_err}")
 
@@ -6342,6 +7713,7 @@ class WorkflowService:
                                     f"[RUN] all remaining interventions filtered out, workflow complete, "
                                     f"resolved={resolved_node_ids}, execution_id={execution.execution_id}"
                                 )
+                                _log_run_stream_timing("resume_filtered_finalize_done", status="completed")
                         else:
                             # Accumulate message event content for the final output.
                             # Only message events carry the actual streaming text;
@@ -6364,25 +7736,12 @@ class WorkflowService:
 
                                 resume_data["output"] = accumulated_content
                                 # ★ 同 6080 段修复：execution detached 后 ORM 赋值不落库，改用 Core query.update
-                                _completed_at2 = utcnow_naive()
-                                _elapsed_time2 = (_completed_at2 - execution.started_at).total_seconds() if execution.started_at else 0.0
-                                _update_fields2 = {
-                                    "status": "completed",
-                                    "completed_at": _completed_at2,
-                                    "elapsed_time": _elapsed_time2,
-                                    "output_data": resume_data,
-                                }
-                                if resume_data.get("token_usage"):
-                                    _update_fields2["token_usage"] = resume_data["token_usage"]
-                                self.db.query(WorkflowExecution).filter(
-                                    WorkflowExecution.execution_id == execution.execution_id
-                                ).update(_update_fields2, synchronize_session=False)
-                                execution.output_data = resume_data
-                                execution.status = "completed"
-                                execution.completed_at = _completed_at2
-                                execution.elapsed_time = _elapsed_time2
-                                if resume_data.get("token_usage"):
-                                    execution.token_usage = resume_data["token_usage"]
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    status="completed",
+                                    output_data=resume_data,
+                                    token_usage=resume_data.get("token_usage"),
+                                )
 
                                 # ★ Always clear waiting_human on the original
                                 # message, even when accumulated_content is empty
@@ -6399,26 +7758,19 @@ class WorkflowService:
                                     if resume_data.get("citations"):
                                         _assistant_meta["citations"] = resume_data["citations"]
                                     _resolved_meta.update(_assistant_meta)
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         message_id=message_id,
                                         content=accumulated_content,
                                         meta_data=_resolved_meta,
                                     )
                                 else:
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         message_id=message_id,
                                         meta_data=_resolved_meta,
                                     )
 
-                                # Commit AFTER the message update so the change
-                                # is durable across requests. update_message()
-                                # only flushes; it relies on the caller to commit.
-                                self.db.commit()
-                                self.db.close()
-
                                 try:
-                                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
+                                    await self._persist_execution_artifacts_async(execution.execution_id, config)
                                 except Exception as persist_err:
                                     logger.warning(f"Failed to persist node executions on intervention complete: {persist_err}")
 
@@ -6440,24 +7792,23 @@ class WorkflowService:
                                     execution.output_data = resume_data
                                 elif not execution.output_data:
                                     execution.output_data = resume_data
-                                execution.status = "failed"
-                                execution.completed_at = utcnow_naive()
-                                execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
-                                execution.error_node_id = resume_data.get("error_node")
-                                execution.error_message = resume_data.get("error")
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    status="failed",
+                                    output_data=execution.output_data,
+                                    error_node_id=resume_data.get("error_node"),
+                                    error_message=resume_data.get("error"),
+                                )
 
                                 # 失败时清除 waiting_human 标记，更新消息
                                 _resolved_meta = {"waiting_human": False, "execution_id": execution.execution_id}
-                                self.conversation_service.update_message(
+                                await self._update_message_async(
                                     message_id=message_id,
                                     meta_data=_resolved_meta,
                                 )
-                                self.db.commit()
-                                self.db.close()
 
                                 try:
-                                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
+                                    await self._persist_execution_artifacts_async(execution.execution_id, config)
                                 except Exception as persist_err:
                                     logger.warning(f"Failed to persist node executions on intervention failed: {persist_err}")
                             emitted = self._emit(public, resume_event)
@@ -6514,8 +7865,10 @@ class WorkflowService:
                                 )
                                 commit_context = True
                             if commit_context:
-                                self.db.commit()
-                                self.db.close()
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    context=execution.context,
+                                )
                             yield next_evt
                             break
 
@@ -6524,7 +7877,11 @@ class WorkflowService:
                 f"Workflow streaming execution failed: execution_id={execution.execution_id}, error={e}",
                 exc_info=True
             )
-            self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            execution = await self._patch_execution_async(
+                execution.execution_id,
+                status="failed",
+                error_message=str(e),
+            )
             try:
                 execution = self.get_execution(execution.execution_id)
                 if execution and execution.output_data:
@@ -6536,11 +7893,13 @@ class WorkflowService:
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(execution.execution_id)
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
+            await self._save_failed_conversation_async(
+                conversation_id_uuid, None, human_message, human_meta, str(e)
+            )
             # On failure, update the waiting_human message in-place:
             # clear the flag and set content to the error message.
             if conversation_id_uuid and message_id:
-                self.conversation_service.update_message(
+                await self._update_message_async(
                     message_id=message_id,
                     content=str(e),
                     meta_data={
@@ -6664,18 +8023,8 @@ class WorkflowService:
         # Record resolved action/form_data in the execution context so the
         # conversation endpoint can show the completed intervention even after
         # the workflow finishes (preserves history, not just pending state).
-        execution = self.get_execution(execution_id)
+        execution = await self._get_execution_async(execution_id)
         if execution:
-            intr_ctx = (execution.context or {}).get("human_intervention", {})
-            interventions = intr_ctx.get("interventions") or []
-            _matched = None
-            for intr in interventions:
-                if intr.get("node_id") == node_id:
-                    intr["resolved_action_id"] = effective_action_id
-                    intr["resolved_form_data"] = effective_form_data or {}
-                    _matched = intr
-                    break
-
             # ★ Append the just-resolved intervention to resolved_interventions
             # (append-only). Without this, when the resume loop later replaces
             # `interventions` with the next pending node, the resolved node's
@@ -6691,25 +8040,13 @@ class WorkflowService:
                     _archived_kind = "pending"
                 elif node_id in _entry.get("node_map", {}):
                     _archived_kind = "interrupt"
-            if _matched is not None:
-                _archived = {
-                    **_matched,
-                    "resolved_action_id": effective_action_id,
-                    "resolved_form_data": effective_form_data or {},
-                    "resolved_at": to_iso_z(utcnow_naive()),
-                    "resolved_kind": _archived_kind,
-                }
-                intr_ctx["resolved_interventions"] = [
-                    *(intr_ctx.get("resolved_interventions") or []),
-                    _archived,
-                ]
-
-            intr_ctx["interventions"] = interventions
-            if execution.context is None:
-                execution.context = {}
-            execution.context["human_intervention"] = intr_ctx
-            self.db.commit()
-            self.db.refresh(execution)
+            execution = await self._archive_resolved_intervention_async(
+                execution_id,
+                node_id,
+                effective_action_id,
+                effective_form_data,
+                _archived_kind,
+            )
             intervention_ctx = (execution.context or {}).get("human_intervention", {})
             resolved_node_ids = self._resolved_intervention_node_ids(intervention_ctx)
             resolved_node_ids.add(node_id)
@@ -6746,12 +8083,11 @@ class WorkflowService:
                 if timeout_event:
                     yield timeout_event
 
-            execution = self.get_execution(execution_id)
+            execution = await self._get_execution_async(execution_id)
             if execution:
-                self._archive_resolved_intervention(
-                    execution, next_node_id, next_action_id, next_form_data, next_kind
+                execution = await self._archive_resolved_intervention_async(
+                    execution_id, next_node_id, next_action_id, next_form_data, next_kind
                 )
-                self.db.refresh(execution)
                 intervention_ctx = (execution.context or {}).get("human_intervention", {})
                 resolved_node_ids.update(self._resolved_intervention_node_ids(intervention_ctx))
                 all_intervention_node_ids.update(resolved_node_ids)
@@ -6838,20 +8174,17 @@ class WorkflowService:
                     else:
                         # All remaining resolved — synthesize completed end
                         more_pending = False
-                        execution.status = "completed"
-                        execution.completed_at = utcnow_naive()
-                        execution.elapsed_time = (
-                            execution.completed_at - execution.started_at
-                        ).total_seconds()
                         if captured_formatted_output:
                             if not accumulated_content and captured_formatted_output.get("output"):
                                 accumulated_content = captured_formatted_output["output"]
                             captured_formatted_output["output"] = accumulated_content
-                            execution.output_data = captured_formatted_output
-                            if captured_formatted_output.get("token_usage"):
-                                execution.token_usage = captured_formatted_output["token_usage"]
-                        self._touch_conversation(conversation_id_uuid)
-                        self.db.commit()
+                        execution = await self._patch_execution_async(
+                            execution_id,
+                            status="completed",
+                            output_data=captured_formatted_output,
+                            token_usage=(captured_formatted_output or {}).get("token_usage"),
+                        )
+                        await self._touch_conversation_async(conversation_id_uuid)
 
                         if conversation_id_uuid and accumulated_content:
                             assistant_meta = {"usage": execution.token_usage or {}}
@@ -6871,31 +8204,23 @@ class WorkflowService:
                                 resolved_meta.update(assistant_meta or {})
                             if hitl_message_id:
                                 if accumulated_content:
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         hitl_message_id,
                                         content=accumulated_content,
                                         meta_data=resolved_meta,
                                     )
                                 else:
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         hitl_message_id,
                                         meta_data=resolved_meta,
                                     )
                             elif accumulated_content:
-                                self.conversation_service.resolve_intervention_message(
-                                    conversation_id_uuid,
-                                    execution_id,
-                                    content=accumulated_content,
-                                    extra_meta=resolved_meta,
-                                )
+                                logger.warning("hitl_message_id missing; skip in-place update for resolved intervention")
 
-                        # Commit AFTER the message update so it's durable.
-                        self._touch_conversation(conversation_id_uuid)
-                        self.db.commit()
+                        await self._touch_conversation_async(conversation_id_uuid)
 
                         try:
-                            self._persist_workflow_node_executions(execution, config, execution.output_data)
-                            self._refresh_workflow_debug_state_from_execution(execution)
+                            await self._persist_execution_artifacts_async(execution.execution_id, config)
                         except Exception as persist_err:
                             logger.warning(f"Failed to persist node executions on resume resolved: {persist_err}")
 
@@ -6920,7 +8245,7 @@ class WorkflowService:
                     visible_interventions = self._first_visible_intervention(clean_remaining)
                     current_context = execution.context or {}
                     current_intervention_ctx = current_context.get("human_intervention", {})
-                    execution.context = {
+                    _new_context = {
                         **current_context,
                         "human_intervention": {
                             **current_intervention_ctx,
@@ -6928,11 +8253,13 @@ class WorkflowService:
                             "intervention_backlog": clean_remaining if clean_remaining else [],
                         },
                     }
-                    self._touch_conversation(
+                    execution = await self._patch_execution_async(
+                        execution_id,
+                        context=_new_context,
+                    )
+                    await self._touch_conversation_async(
                         current_intervention_ctx.get("conversation_id") or conversation_id_uuid
                     )
-                    self.db.commit()
-                    self.db.refresh(execution)
 
                     for evt in pending_intervention_events[:1]:
                         yield evt
@@ -6947,12 +8274,12 @@ class WorkflowService:
                         if not accumulated_content and resume_data.get("output"):
                             accumulated_content = resume_data["output"]
                         resume_data["output"] = accumulated_content
-                        execution.output_data = resume_data
-                        execution.status = "completed"
-                        execution.completed_at = utcnow_naive()
-                        execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
-                        if resume_data.get("token_usage"):
-                            execution.token_usage = resume_data["token_usage"]
+                        execution = await self._patch_execution_async(
+                            execution_id,
+                            status="completed",
+                            output_data=resume_data,
+                            token_usage=resume_data.get("token_usage"),
+                        )
                         if conversation_id_uuid:
                             resolved_meta = {"waiting_human": False, "execution_id": execution_id}
                             if accumulated_content:
@@ -6962,32 +8289,23 @@ class WorkflowService:
                                 resolved_meta.update(assistant_meta)
                             if hitl_message_id:
                                 if accumulated_content:
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         hitl_message_id,
                                         content=accumulated_content,
                                         meta_data=resolved_meta,
                                     )
                                 else:
-                                    self.conversation_service.update_message(
+                                    await self._update_message_async(
                                         hitl_message_id,
                                         meta_data=resolved_meta,
                                     )
                             elif accumulated_content:
-                                self.conversation_service.resolve_intervention_message(
-                                    conversation_id_uuid,
-                                    execution_id,
-                                    content=accumulated_content,
-                                    extra_meta=resolved_meta,
-                                )
+                                logger.warning("hitl_message_id missing; skip in-place update for completed resume")
 
-                        # Commit AFTER the message update so the change is
-                        # durable across requests.
-                        self._touch_conversation(conversation_id_uuid)
-                        self.db.commit()
+                        await self._touch_conversation_async(conversation_id_uuid)
 
                         try:
-                            self._persist_workflow_node_executions(execution, config, execution.output_data)
-                            self._refresh_workflow_debug_state_from_execution(execution)
+                            await self._persist_execution_artifacts_async(execution.execution_id, config)
                         except Exception as persist_err:
                             logger.warning(f"Failed to persist node executions on resume complete: {persist_err}")
 
@@ -7000,31 +8318,32 @@ class WorkflowService:
                         # 否则（异常场景：resume_workflow_stream 只 yield {status, error,
                         # execution_id}），保留 execution.output_data（异常处理已
                         # 正确构建了含 node_outputs 的数据），不覆盖。
+                        failed_output = execution.output_data
                         if isinstance(resume_data.get("node_outputs"), dict) and resume_data["node_outputs"]:
-                            execution.output_data = resume_data
-                        elif not execution.output_data:
-                            execution.output_data = resume_data
-                        execution.status = "failed"
-                        execution.completed_at = utcnow_naive()
-                        execution.elapsed_time = (execution.completed_at - execution.started_at).total_seconds()
-                        execution.error_node_id = resume_data.get("error_node")
-                        execution.error_message = resume_data.get("error")
+                            failed_output = resume_data
+                        elif not failed_output:
+                            failed_output = resume_data
+                        execution = await self._patch_execution_async(
+                            execution_id,
+                            status="failed",
+                            output_data=failed_output,
+                            error_node_id=resume_data.get("error_node"),
+                            error_message=resume_data.get("error"),
+                        )
 
                         # 失败时清除 waiting_human 标记，更新消息
                         if conversation_id_uuid:
                             resolved_meta = {"waiting_human": False, "execution_id": execution_id}
                             if hitl_message_id:
-                                self.conversation_service.update_message(
+                                await self._update_message_async(
                                     hitl_message_id,
                                     meta_data=resolved_meta,
                                 )
 
-                        self._touch_conversation(conversation_id_uuid)
-                        self.db.commit()
+                        await self._touch_conversation_async(conversation_id_uuid)
 
                         try:
-                            self._persist_workflow_node_executions(execution, config, execution.output_data)
-                            self._refresh_workflow_debug_state_from_execution(execution)
+                            await self._persist_execution_artifacts_async(execution.execution_id, config)
                         except Exception as persist_err:
                             logger.warning(f"Failed to persist node executions on resume failed: {persist_err}")
                     emitted = self._emit(public, resume_event)
@@ -7211,7 +8530,7 @@ class WorkflowService:
                     "elapsed_time": elapsed,
                     "error": None,
                 }
-                node._save_cache(
+                await node._save_cache(
                     state=state,
                     variable_pool=variable_pool,
                     node_output=self._normalize_single_node_payload(
@@ -8077,7 +9396,6 @@ class WorkflowService:
             )
 
             if has_remaining:
-                execution.status = "waiting_human"
                 all_interventions = []
                 for intr in remaining_interrupts:
                     all_interventions.append({
@@ -8089,14 +9407,18 @@ class WorkflowService:
                 all_interventions.extend(unique_pending_info)
                 current_context = execution.context or {}
                 current_intervention_ctx = current_context.get("human_intervention", {})
-                execution.context = {
+                new_context = {
                     **current_context,
                     "human_intervention": {
                         **current_intervention_ctx,
                         "interventions": all_interventions,
                     },
                 }
-                self.db.commit()
+                execution = await self._patch_execution_async(
+                    execution_id,
+                    status="waiting_human",
+                    context=new_context,
+                )
 
                 # Include formatted output so that run_stream Path 2 can use it
                 # when all remaining interventions are filtered as resolved.
@@ -8118,12 +9440,6 @@ class WorkflowService:
                 }
             else:
                 result = graph_state.values
-                execution.status = "completed"
-                execution.completed_at = utcnow_naive()
-                execution.elapsed_time = (
-                    execution.completed_at - execution.started_at
-                ).total_seconds()
-
                 # Fallback: if streaming did not produce message events (e.g. End
                 # node output was not streamed during resume), extract the End
                 # node output directly from graph state node_outputs.
@@ -8146,14 +9462,15 @@ class WorkflowService:
                     result, execution_context, executor.variable_pool,
                     elapsed_time, full_content, success=True
                 )
-                execution.output_data = formatted_output
-                if formatted_output.get("token_usage"):
-                    execution.token_usage = formatted_output["token_usage"]
-                self.db.commit()
+                execution = await self._patch_execution_async(
+                    execution_id,
+                    status="completed",
+                    output_data=formatted_output,
+                    token_usage=formatted_output.get("token_usage"),
+                )
 
                 try:
-                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution)
+                    await self._persist_execution_artifacts_async(execution.execution_id, config)
                 except Exception as persist_err:
                     logger.warning(f"Failed to persist node executions on resume completed: {persist_err}")
 
@@ -8192,23 +9509,24 @@ class WorkflowService:
             # If the error is a NodeExecutionError, inject the failed node's output
             # into node_outputs so it appears in the log (same pattern as executor.py).
             from app.core.workflow.nodes.base_node import NodeExecutionError
+            error_node_id = None
             if isinstance(e, NodeExecutionError):
                 if not execution.output_data:
                     execution.output_data = {}
                 node_outputs = execution.output_data.setdefault("node_outputs", {})
                 node_outputs.setdefault(e.node_id, e.node_output)
-                execution.error_node_id = e.node_id
+                error_node_id = e.node_id
 
-            execution.status = "failed"
-            execution.error_message = str(e)
-            execution.completed_at = utcnow_naive()
-            self.db.commit()
+            execution = await self._patch_execution_async(
+                execution_id,
+                status="failed",
+                output_data=execution.output_data,
+                error_message=str(e),
+                error_node_id=error_node_id,
+            )
 
             try:
-                execution = self.get_execution(execution_id)
-                if execution and execution.output_data:
-                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution)
+                await self._persist_execution_artifacts_async(execution.execution_id, config)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on resume error: {persist_err}")
 

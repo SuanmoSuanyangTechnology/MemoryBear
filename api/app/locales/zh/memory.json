@@ -1,0 +1,13 @@
+{
+  "forget_reason": {
+    "timeout": "超时过期",
+    "manual": "用户手动"
+  },
+  "default_operator": "遗忘引擎",
+  "recover_success": "记忆恢复成功",
+  "errors": {
+    "recover_not_allowed": "该记忆不可恢复，可能已恢复或为不可恢复类型",
+    "neo4j_node_not_found": "Neo4j 节点不存在或已被删除",
+    "internal_error": "恢复记忆失败"
+  }
+}
