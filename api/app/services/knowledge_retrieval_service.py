@@ -5,20 +5,26 @@ import uuid
 from enum import Enum
 from typing import Any, Sequence
 
+from langchain_core.documents import Document
+
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
+from app.core.models import (
+    RedBearEmbeddings,
+    RedBearLLM,
+    RedBearModelConfig,
+    RedBearRerank,
+)
 from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
     FilterGroup as EngineFilterGroup,
 )
-from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 from app.core.rag.retrieval.async_elasticsearch import (
     AsyncElasticSearchRetrieval,
     AsyncElasticsearchClientProvider,
 )
-from app.core.rag.retrieval.async_models import AsyncRetrievalModelGateway
-from app.core.rag.retrieval.exceptions import KnowledgeRetrievalConfigError
 from app.core.rag.retrieval.graph_bridge import GraphRetrievalBridge
 from app.core.rag.retrieval.models import (
     ModelRuntimeSnapshot,
@@ -29,6 +35,7 @@ from app.core.rag.retrieval.models import (
     RetrievalTarget,
     RetrievalTimings,
 )
+from app.models.models_model import ModelType
 from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import (
@@ -36,10 +43,12 @@ from app.schemas.knowledge_retrieval_schema import (
     KnowledgeRetrievalResult,
 )
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
+from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 
 logger = logging.getLogger(__name__)
 
 ModelApiKeySnapshot = ModelRuntimeSnapshot
+_RERANK_SOURCE_INDEX = "_retrieval_source_index"
 
 
 class KnowledgeRetrievalAccessDenied(Exception):
@@ -87,6 +96,97 @@ class KnowledgeRetrievalService:
         if isinstance(value, (list, tuple, set)):
             return "[" + ",".join(cls._format_log_value(item) for item in value) + "]"
         return str(value)
+
+    @staticmethod
+    def _model_config(
+        snapshot: ModelRuntimeSnapshot,
+        *,
+        extra_params: dict[str, Any] | None = None,
+    ) -> RedBearModelConfig:
+        """Map a request-local snapshot to the shared model configuration."""
+
+        return RedBearModelConfig(
+            model_name=snapshot.model_name,
+            provider=snapshot.provider,
+            api_key=snapshot.api_key,
+            base_url=snapshot.api_base,
+            capability=list(snapshot.capability),
+            is_omni=snapshot.is_omni,
+            extra_params=dict(extra_params or {}),
+        )
+
+    @classmethod
+    def _metadata_llm(
+        cls,
+        snapshot: ModelRuntimeSnapshot,
+        *,
+        extra_params: dict[str, Any] | None = None,
+    ) -> RedBearLLM:
+        model_type = ModelType.LLM
+        if snapshot.model_type in {ModelType.LLM.value, ModelType.CHAT.value}:
+            model_type = ModelType(snapshot.model_type)
+        return RedBearLLM(
+            cls._model_config(snapshot, extra_params=extra_params),
+            type=model_type,
+        )
+
+    @classmethod
+    async def _rerank_with_shared_model(
+        cls,
+        snapshot: ModelRuntimeSnapshot,
+        query: str,
+        chunks: Sequence[DocumentChunk],
+        top_k: int,
+    ) -> list[DocumentChunk]:
+        if top_k <= 0 or not chunks:
+            return []
+
+        try:
+            documents = [
+                Document(
+                    page_content=chunk_retrieval_content(chunk),
+                    metadata={
+                        **(chunk.metadata or {}),
+                        _RERANK_SOURCE_INDEX: index,
+                    },
+                )
+                for index, chunk in enumerate(chunks)
+            ]
+            reranker = RedBearRerank(
+                cls._model_config(snapshot, extra_params={"top_n": top_k})
+            )
+            reranked_documents = list(
+                await reranker.acompress_documents(documents, query)
+            )
+            reranked_documents.sort(
+                key=lambda item: item.metadata.get("relevance_score", 0),
+                reverse=True,
+            )
+
+            result: list[DocumentChunk] = []
+            for item in reranked_documents[:top_k]:
+                source_index = item.metadata.get(_RERANK_SOURCE_INDEX)
+                if (
+                    not isinstance(source_index, int)
+                    or isinstance(source_index, bool)
+                    or not 0 <= source_index < len(chunks)
+                ):
+                    continue
+                chunk = chunks[source_index]
+                if chunk.metadata is None:
+                    chunk.metadata = {}
+                chunk.metadata["score"] = item.metadata.get("relevance_score", 0)
+                result.append(chunk)
+            return result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[Retrieval] shared rerank failed; using retrieval order provider=%s error_type=%s",
+                snapshot.provider,
+                type(exc).__name__,
+            )
+            return cls._apply_rerank_fallback(chunks, top_k)
 
     @classmethod
     def _build_retrieval_start_log_fields(
@@ -141,12 +241,10 @@ class KnowledgeRetrievalService:
         if not preparation.targets:
             return cls._finish_empty(log_id, started_at, "no_targets", timings)
 
-        models = AsyncRetrievalModelGateway()
         metadata_started_at = time.perf_counter()
         filter_groups = await cls._build_metadata_filter_groups(
             request,
             preparation,
-            models,
         )
         timings.metadata_llm_ms = cls._elapsed_ms(metadata_started_at)
 
@@ -172,13 +270,12 @@ class KnowledgeRetrievalService:
             )
 
         client = await AsyncElasticsearchClientProvider.get_shared_client()
-        store = AsyncElasticSearchRetrieval(client, models, timings)
+        store = AsyncElasticSearchRetrieval(client, timings)
         chunks = await cls._retrieve_targets(
             request,
             preparation,
             document_ids_include,
             store,
-            models,
             log_id,
             timings,
         )
@@ -217,7 +314,6 @@ class KnowledgeRetrievalService:
         cls,
         request: KnowledgeRetrievalRequest,
         preparation: RetrievalPreparation,
-        models: AsyncRetrievalModelGateway,
     ) -> list[EngineFilterGroup]:
         if request.metadata_filter_mode == MetadataFilterMode.DISABLED:
             return []
@@ -236,10 +332,10 @@ class KnowledgeRetrievalService:
                 )
             if not preparation.common_metadata_defs or not preparation.metadata_llm:
                 return []
-            return await models.generate_metadata_filters(
-                request.query,
-                preparation.common_metadata_defs,
-                preparation.metadata_llm,
+            return await MetadataAutoFilterService.generate_filter_groups_async(
+                query=request.query,
+                metadata_defs=dict(preparation.common_metadata_defs),
+                llm=cls._metadata_llm(preparation.metadata_llm),
             )
         raise BusinessException(
             f"metadata_filter_mode 不支持: {request.metadata_filter_mode}",
@@ -253,7 +349,6 @@ class KnowledgeRetrievalService:
         preparation: RetrievalPreparation,
         document_ids_include: list[str] | None,
         store: AsyncElasticSearchRetrieval,
-        models: AsyncRetrievalModelGateway,
         log_id: str,
         timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
@@ -290,7 +385,6 @@ class KnowledgeRetrievalService:
                     target,
                     document_ids_include,
                     store,
-                    models,
                     use_request_reranker=(
                         request.rerank_id is not None
                         and len(targets) == 1
@@ -321,7 +415,6 @@ class KnowledgeRetrievalService:
             request,
             preparation,
             candidates,
-            models,
             log_id,
             timings,
         )
@@ -333,7 +426,6 @@ class KnowledgeRetrievalService:
         target: RetrievalTarget,
         document_ids_include: list[str] | None,
         store: AsyncElasticSearchRetrieval,
-        models: AsyncRetrievalModelGateway,
         *,
         use_request_reranker: bool,
         request_reranker: Any,
@@ -364,13 +456,14 @@ class KnowledgeRetrievalService:
             top_k=target.params.top_k if target_type == RetrieveType.SEMANTIC else target.params.top_n,
             score_threshold=target.params.vector_similarity_weight,
         )
+        embedding = RedBearEmbeddings(cls._model_config(target.embedding))
         if target_type == RetrieveType.SEMANTIC:
-            chunks = await store.search_by_vector(target.embedding, request.query, vector_options)
+            chunks = await store.search_by_vector(embedding, request.query, vector_options)
             cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at, timings=timings)
             return chunks
 
         vector_task = asyncio.create_task(
-            store.search_by_vector(target.embedding, request.query, vector_options)
+            store.search_by_vector(embedding, request.query, vector_options)
         )
         full_text_task = asyncio.create_task(
             store.search_by_full_text(request.query, full_text_options)
@@ -394,7 +487,7 @@ class KnowledgeRetrievalService:
         local_rerank_started_at = time.perf_counter()
         try:
             if candidates and reranker:
-                ranked = await models.rerank(
+                ranked = await cls._rerank_with_shared_model(
                     reranker,
                     request.query,
                     candidates,
@@ -429,7 +522,6 @@ class KnowledgeRetrievalService:
         request: KnowledgeRetrievalRequest,
         preparation: RetrievalPreparation,
         chunks: list[DocumentChunk],
-        models: AsyncRetrievalModelGateway,
         log_id: str,
         timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
@@ -456,7 +548,7 @@ class KnowledgeRetrievalService:
                     else targets[0].reranker
                 )
                 if reranker:
-                    ranked_chunks = await models.rerank(
+                    ranked_chunks = await cls._rerank_with_shared_model(
                         reranker,
                         request.query,
                         unique_chunks,
