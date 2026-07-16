@@ -3840,7 +3840,7 @@ class WorkflowService:
 
     async def _persist_workflow_node_executions_async(
             self,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             workflow_config: WorkflowConfig,
             result: dict[str, Any],
     ) -> None:
@@ -3968,29 +3968,28 @@ class WorkflowService:
 
     async def _refresh_workflow_debug_state_from_execution_async(
             self,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             workflow_config: WorkflowConfig | None = None,
     ) -> None:
         resolved_workflow_config = workflow_config
+        output_data = self._serialize_execution_value(execution.output_data or {})
         async with get_async_db_context() as db:
             if resolved_workflow_config is None and execution.workflow_config_id:
                 resolved_workflow_config = await db.get(WorkflowConfig, execution.workflow_config_id)
+            if resolved_workflow_config is None:
+                return
             stmt = (
                 select(WorkflowNodeExecution)
                 .where(WorkflowNodeExecution.execution_id == execution.id)
                 .order_by(WorkflowNodeExecution.execution_order)
             )
             node_executions = list((await db.execute(stmt)).scalars())
-
-        if resolved_workflow_config is None:
-            return
-        output_data = self._serialize_execution_value(execution.output_data or {})
-        snapshot = self._build_public_execution_snapshot_record(
-            execution=execution,
-            node_executions=node_executions,
-            output_data=output_data if isinstance(output_data, dict) else {},
-            workflow_config=resolved_workflow_config,
-        )
+            snapshot = self._build_public_execution_snapshot_record(
+                execution=execution,
+                node_executions=node_executions,
+                output_data=output_data if isinstance(output_data, dict) else {},
+                workflow_config=resolved_workflow_config,
+            )
         await self._write_workflow_debug_state_async(
             app_id=execution.app_id,
             workflow_config=resolved_workflow_config,
@@ -6410,8 +6409,8 @@ class WorkflowService:
                     )
                 execution_record = await self._get_execution_async(execution.execution_id)
                 if execution_record:
-                    self._persist_workflow_node_executions(execution_record, config, result)
-                    self._refresh_workflow_debug_state_from_execution(execution_record)
+                    await self._persist_workflow_node_executions_async(execution_record, config, result)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
 
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
@@ -6427,8 +6426,8 @@ class WorkflowService:
                 )
                 execution_record = await self._get_execution_async(execution.execution_id)
                 if execution_record:
-                    self._persist_workflow_node_executions(execution_record, config, result)
-                    self._refresh_workflow_debug_state_from_execution(execution_record)
+                    await self._persist_workflow_node_executions_async(execution_record, config, result)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
                 final_messages = result.get("messages", [])[init_message_length:]
@@ -6473,8 +6472,8 @@ class WorkflowService:
                 try:
                     execution_record = await self._get_execution_async(execution.execution_id)
                     if execution_record and execution_record.output_data:
-                        self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
-                        self._refresh_workflow_debug_state_from_execution(execution_record)
+                        await self._persist_workflow_node_executions_async(execution_record, config, execution_record.output_data)
+                        await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
                 except Exception as persist_err:
                     logger.warning(f"Failed to persist node executions on waiting_human: {persist_err}")
                 raise BusinessException(
@@ -6496,8 +6495,8 @@ class WorkflowService:
             try:
                 execution_record = await self._get_execution_async(execution.execution_id)
                 if execution_record and execution_record.output_data:
-                    self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution_record)
+                    await self._persist_workflow_node_executions_async(execution_record, config, execution_record.output_data)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
@@ -7901,10 +7900,10 @@ class WorkflowService:
                 error_message=str(e),
             )
             try:
-                execution = self.get_execution(execution.execution_id)
+                execution = await self._get_execution_async(execution.execution_id)
                 if execution and execution.output_data:
-                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
+                    await self._persist_workflow_node_executions_async(execution, config, execution.output_data)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution, workflow_config=config)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on stream error: {persist_err}")
             # Clean up registry on failure to avoid leaks.
