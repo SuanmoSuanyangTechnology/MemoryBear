@@ -3502,6 +3502,7 @@ class WorkflowService:
             )
             execution = result.scalar_one_or_none()
             if execution:
+                db.expunge(execution)
                 return execution
             runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
             if runtime_execution:
@@ -3694,6 +3695,7 @@ class WorkflowService:
                 pool_status["usage_percent"],
             )
             await self._delete_runtime_execution_snapshot_async(execution_id)
+            db.expunge(execution)
             return execution
 
     async def _update_message_async(

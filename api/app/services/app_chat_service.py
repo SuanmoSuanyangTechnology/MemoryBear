@@ -695,7 +695,7 @@ class AppChatService:
                 "provider": api_key_obj.provider,
             },
         )
-        await self._create_agent_execution(agent_exec_repo, agent_execution)
+        agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
 
         try:
             # 调用 Agent（支持多模态）
@@ -710,7 +710,7 @@ class AppChatService:
             elapsed_time = time.time() - start_time
             await self._update_agent_execution(
                 agent_exec_repo,
-                execution_id=agent_execution.id,
+                execution_id=agent_execution_id,
                 steps=[],
                 status="failed",
                 elapsed_time=elapsed_time,
@@ -841,7 +841,7 @@ class AppChatService:
         node_executions = orchestrator_node_executions + result.get("node_executions", [])
         await self._update_agent_execution(
             agent_exec_repo,
-            execution_id=agent_execution.id,
+            execution_id=agent_execution_id,
             steps=node_executions,
             status="completed",
             elapsed_time=elapsed_time,
