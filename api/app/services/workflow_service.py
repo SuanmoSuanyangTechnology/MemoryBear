@@ -3757,7 +3757,7 @@ class WorkflowService:
             action_id: str,
             form_data: dict | None,
             kind: str | None,
-    ) -> WorkflowExecution | None:
+    ) -> WorkflowExecutionRef | None:
         execution = await self._get_execution_async(execution_id)
         if not execution or not node_id:
             return execution
@@ -4425,7 +4425,7 @@ class WorkflowService:
 
     def _set_human_intervention_state(
             self,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             visible_interventions: list[dict] | None = None,
             backlog_interventions: list[dict] | None = None,
     ) -> None:
