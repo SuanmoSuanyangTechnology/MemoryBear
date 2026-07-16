@@ -56,6 +56,11 @@ class WorkflowExecutor:
         self.execution_context = execution_context
         self.execution_config = workflow_config.get("execution_config", {})
 
+        # 读取一问多答模式配置
+        features = workflow_config.get("features", {}) or {}
+        multi_answer_mode = features.get("multi_answer_mode", {}) or {}
+        self.multi_answer_mode_enabled = multi_answer_mode.get("enabled", False)
+
         self.start_node_id: str | None = None
         self.variable_pool: VariablePool | None = None
         self.graph: CompiledStateGraph | None = None
@@ -63,7 +68,9 @@ class WorkflowExecutor:
         self.variable_initializer = VariablePoolInitializer(workflow_config)
         self.state_manager = WorkflowStateManager()
         self.result_builder = WorkflowResultBuilder()
-        self.stream_coordinator = StreamOutputCoordinator()
+        self.stream_coordinator = StreamOutputCoordinator(
+            multi_answer_mode_enabled=self.multi_answer_mode_enabled
+        )
         self.event_handler: EventStreamHandler | None = None
 
     def build_graph(self, stream=False, checkpointer=None) -> CompiledStateGraph:
@@ -109,7 +116,8 @@ class WorkflowExecutor:
         self.event_handler = EventStreamHandler(
             output_coordinator=self.stream_coordinator,
             variable_pool=self.variable_pool,
-            execution_id=self.execution_context.execution_id
+            execution_id=self.execution_context.execution_id,
+            multi_answer_mode_enabled=self.multi_answer_mode_enabled
         )
         logger.info(f"Workflow graph build completed: execution_id={self.execution_context.execution_id}, "
                     f"cost: {time.time() - start_time:.4f}s")
@@ -236,7 +244,8 @@ class WorkflowExecutor:
                     try:
                         if event_type == "node_chunk":
                             async for msg_event in self.event_handler.handle_node_chunk_event(data):
-                                full_content += msg_event["data"]["content"]
+                                if msg_event.get("event") == "message":
+                                    full_content += msg_event["data"].get("content", "")
                                 yield msg_event
 
                         elif event_type == "node_error":
@@ -286,7 +295,8 @@ class WorkflowExecutor:
                                 self.graph,
                                 self.execution_context.checkpoint_config
                         ):
-                            full_content += msg_event["data"]['content']
+                            if msg_event.get("event") == "message":
+                                full_content += msg_event["data"].get("content", "")
                             yield msg_event
                     except Exception as updates_err:
                         logger.error(f"[STREAM] Error handling updates event: {updates_err} "
@@ -378,7 +388,8 @@ class WorkflowExecutor:
 
             # Flush any remaining chunks
             async for msg_event in self.stream_coordinator.flush_remaining_chunk(self.variable_pool):
-                full_content += msg_event["data"]['content']
+                if msg_event.get("event") == "message":
+                    full_content += msg_event["data"].get("content", "")
                 yield msg_event
 
             result = (await graph.aget_state(self.execution_context.checkpoint_config)).values
