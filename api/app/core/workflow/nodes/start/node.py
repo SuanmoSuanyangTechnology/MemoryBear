@@ -109,6 +109,21 @@ class StartNode(BaseNode):
             if var_name in input_variables:
                 value = input_variables[var_name]
 
+                # None 值按类型回退到默认值，避免写入 StringVariable(None) 等报错
+                if value is None:
+                    if var_def.required:
+                        raise ValueError(
+                            f"缺少必需的输入变量: {var_name}"
+                            + (f" ({var_def.description})" if var_def.description else "")
+                        )
+                    value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+                    if var_type == VariableType.FILE:
+                        self.output_var_types[var_name] = var_type
+                        continue
+                    processed[var_name] = value
+                    self.output_var_types[var_name] = var_type
+                    continue
+
                 # select: 值必须在 options 列表中
                 if ui_type == "select" and var_def.options:
                     if value not in var_def.options:
