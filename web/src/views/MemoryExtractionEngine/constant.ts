@@ -130,7 +130,7 @@ export const configList: ConfigVo[] = [
       {
         title: 'intelligentSemanticPruning',
         list: [
-          // Intelligent semantic pruning功能
+          // Intelligent semantic pruning toggle
           {
             label: 'intelligentSemanticPruningFunction',
             variableName: 'pruning_enabled',
@@ -138,7 +138,7 @@ export const configList: ConfigVo[] = [
             type: 'tinyint',
             meaning: 'intelligentSemanticPruningFunctionDesc',
           },
-          // Intelligent semantic pruning场景
+          // Intelligent semantic pruning scene
           {
             label: 'intelligentSemanticPruningScene',
             variableName: 'pruning_scene',
@@ -146,7 +146,7 @@ export const configList: ConfigVo[] = [
             type: 'enum',
             meaning: 'intelligentSemanticPruningSceneDesc',
           },
-          // Intelligent semantic pruning阈值
+          // Intelligent semantic pruning threshold
           {
             label: 'intelligentSemanticPruningThreshold',
             control: 'slider',

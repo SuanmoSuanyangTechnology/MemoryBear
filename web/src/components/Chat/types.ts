@@ -79,6 +79,8 @@ export interface Intervention {
 export interface ChatProps extends Omit<ChatContentProps, 'onSend'> {
   /** Input content change callback */
   onChange: (message: string) => void;
+  /** Current input message (controlled; clearing it empties the input box) */
+  message?: string;
   /** Send message callback */
   onSend: () => void;
   /** Loading state */
