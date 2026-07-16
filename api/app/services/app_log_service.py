@@ -50,6 +50,8 @@ class AppLogService:
         pagesize: int = 20,
         is_draft: Optional[bool] = None,
         keyword: Optional[str] = None,
+        start_date: Optional[dt.datetime] = None,
+        end_date: Optional[dt.datetime] = None,
     ) -> Tuple[list[Conversation], int]:
         """
         查询应用日志会话列表
@@ -61,6 +63,8 @@ class AppLogService:
             pagesize: 每页数量
             is_draft: 是否草稿会话（None表示返回全部）
             keyword: 搜索关键词（匹配 messages 表消息内容）
+            start_date: 开始时间（筛选 created_at >= start_date）
+            end_date: 结束时间（筛选 created_at <= end_date）
 
         Returns:
             Tuple[list[Conversation], int]: (会话列表，总数)
@@ -74,6 +78,8 @@ class AppLogService:
                 "pagesize": pagesize,
                 "is_draft": is_draft,
                 "keyword": keyword,
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
             }
         )
 
@@ -83,6 +89,8 @@ class AppLogService:
             workspace_id=workspace_id,
             is_draft=is_draft,
             keyword=keyword,
+            start_date=start_date,
+            end_date=end_date,
             page=page,
             pagesize=pagesize,
         )

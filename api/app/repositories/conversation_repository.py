@@ -208,6 +208,8 @@ class ConversationRepository:
             workspace_id: uuid.UUID,
             is_draft: Optional[bool] = None,
             keyword: Optional[str] = None,
+            start_date: Optional[datetime] = None,
+            end_date: Optional[datetime] = None,
             page: int = 1,
             pagesize: int = 20,
     ) -> tuple[list[Conversation], int]:
@@ -219,6 +221,8 @@ class ConversationRepository:
             workspace_id: 工作空间 ID
             is_draft: 是否草稿会话（None表示返回全部）
             keyword: 搜索关键词（匹配 messages 表的消息内容）
+            start_date: 开始时间（筛选 created_at >= start_date，走索引）
+            end_date: 结束时间（筛选 created_at <= end_date，走索引）
             page: 页码（从 1 开始）
             pagesize: 每页数量
 
@@ -233,20 +237,25 @@ class ConversationRepository:
         if is_draft is not None:
             base_conditions.append(Conversation.is_draft == is_draft)
 
+        # 时间范围筛选（走 ix_app_call_logs_app_id_created_at 索引）
+        if start_date:
+            base_conditions.append(Conversation.created_at >= start_date)
+        if end_date:
+            base_conditions.append(Conversation.created_at <= end_date)
+
         base_stmt = select(Conversation).where(*base_conditions)
 
         if keyword:
             kw_pattern = f"%{keyword}%"
-            app_conversation_ids = select(Conversation.id).where(*base_conditions)
-            keyword_stmt = (
+            # 用 EXISTS 替代 IN：找到第一条匹配就返回，避免全量子查询
+            base_stmt = base_stmt.where(
                 select(Message.conversation_id)
                 .where(
-                    Message.conversation_id.in_(app_conversation_ids),
+                    Message.conversation_id == Conversation.id,
                     Message.content.ilike(kw_pattern),
                 )
-                .distinct()
+                .exists()
             )
-            base_stmt = base_stmt.where(Conversation.id.in_(keyword_stmt))
 
         # Calculate total number of records
         total = int(self.db.execute(
