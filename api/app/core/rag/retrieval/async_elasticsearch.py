@@ -24,7 +24,6 @@ from app.core.rag.retrieval.elasticsearch_queries import (
     vector_hits_to_chunks,
 )
 from app.core.rag.retrieval.models import (
-    ModelRuntimeSnapshot,
     RetrievalSearchOptions,
     RetrievalTimings,
 )
@@ -34,11 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncEmbeddingClient(Protocol):
-    async def embed_query(
-        self,
-        embedding: ModelRuntimeSnapshot,
-        query: str,
-    ) -> list[float]: ...
+    async def aembed_query(self, text: str) -> list[float]: ...
 
 
 def build_async_elasticsearch_client_config() -> dict[str, Any]:
@@ -82,22 +77,20 @@ class AsyncElasticSearchRetrieval:
     def __init__(
         self,
         client: AsyncElasticsearch,
-        models: AsyncEmbeddingClient,
         timings: RetrievalTimings | None = None,
     ) -> None:
         self._client = client
-        self._models = models
         self._timings = timings
 
     async def search_by_vector(
         self,
-        embedding: ModelRuntimeSnapshot,
+        embedding: AsyncEmbeddingClient,
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
         embedding_started_at = time.perf_counter()
         try:
-            query_vector = normalize_vector(await self._models.embed_query(embedding, query))
+            query_vector = normalize_vector(await embedding.aembed_query(query))
         finally:
             self._record_elapsed("embedding_ms", embedding_started_at)
         filters = build_vector_filter_clauses(

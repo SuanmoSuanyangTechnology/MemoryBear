@@ -1,11 +1,10 @@
 import asyncio
 import json
 import logging
-from collections.abc import Sequence
 from typing import Any, Protocol
 
 import json_repair
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
@@ -17,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncMetadataLLM(Protocol):
-    """Minimal native asynchronous LLM contract for metadata filtering."""
+    """Shared asynchronous LLM contract used by metadata filtering."""
 
-    async def invoke(self, messages: Sequence[BaseMessage]) -> str:
-        """Return generated content for the supplied messages."""
+    async def ainvoke(self, input: Any, config: dict | None = None, **kwargs: Any) -> Any:
+        """Invoke the shared model asynchronously."""
 
 
 class MetadataAutoFilterService:
@@ -200,7 +199,7 @@ class MetadataAutoFilterService:
             HumanMessage(content=cls._build_prompt(query=query, metadata_defs=metadata_defs)),
         ]
         try:
-            content = await llm.invoke(messages)
+            response = await llm.ainvoke(messages)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -209,11 +208,12 @@ class MetadataAutoFilterService:
                 type(exc).__name__,
             )
             return []
+        content = response.content if hasattr(response, "content") else str(response)
         if not content:
             logger.warning("[MetadataAutoFilter] async LLM returned no usable content")
             return []
-        logger.info("[MetadataAutoFilter] async LLM response received length=%s", len(content))
-        return cls._parse_llm_response(content)
+        logger.info("[MetadataAutoFilter] async LLM response received length=%s", len(str(content)))
+        return cls._parse_llm_response(str(content))
 
     @staticmethod
     def _build_prompt(query: str, metadata_defs: dict[str, dict]) -> str:
