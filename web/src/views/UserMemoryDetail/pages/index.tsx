@@ -19,7 +19,7 @@ import EpisodicDetail from './EpisodicDetail'
 import ExplicitDetail from './ExplicitDetail'
 import WorkingDetail from './WorkingDetail'
 import GraphDetail from './GraphDetail'
-import { ReflectLogList } from '@redbear/memory-brick'
+import { MemoryEvolutionEvent } from '@redbear/memory-brick'
 import { request } from '@/utils/request';
 
 
@@ -76,8 +76,8 @@ const Detail: FC = () => {
     }
   }
 
-  if (type === 'REFLECT_LOGS' && isSaas && ReflectLogList) {
-    return <ReflectLogList request={request} />
+  if (type === 'REFLECT_LOGS' && isSaas && MemoryEvolutionEvent) {
+    return <MemoryEvolutionEvent request={request} />
   } else if (type === 'REFLECT_LOGS') {
     return null;
   }

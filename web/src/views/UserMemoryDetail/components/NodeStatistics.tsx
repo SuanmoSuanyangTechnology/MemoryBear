@@ -9,7 +9,7 @@
  * Displays memory node statistics by type with navigation to detail views
  */
 
-import { type FC, useEffect, useState } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -37,8 +37,11 @@ const typeList = [
     ]
   },
 ]
+export interface NodeStatisticsRef {
+  getData: () => void
+}
 
-const NodeStatistics: FC<{ highlightKeys?: string[] }> = ({ highlightKeys = [] }) => {
+const NodeStatistics = forwardRef<NodeStatisticsRef, { highlightKeys?: string[] }>(({ highlightKeys = [] }, ref) => {
   const navigate = useNavigate();
   const { t } = useTranslation()
   const { id } = useParams()
@@ -98,6 +101,9 @@ const NodeStatistics: FC<{ highlightKeys?: string[] }> = ({ highlightKeys = [] }
       </Flex>
     )
   }
+  useImperativeHandle(ref, () => ({
+    getData,
+  }))
 
   return (
     <div className="rb:h-22">
@@ -126,5 +132,5 @@ const NodeStatistics: FC<{ highlightKeys?: string[] }> = ({ highlightKeys = [] }
         }
     </div>
   )
-}
+})
 export default NodeStatistics
