@@ -171,7 +171,7 @@ const applyFormArg = (ctx: ParseContext, args: string[], index: number): ParseSt
     ctx.headers.push({ key: 'Content-Type', value: typeMatch[2] })
   }
 
-  ctx.formParts.push({ key, value })
+  ctx.formParts.push({ key, value, type: 'text' })
   ctx.hasBody = true
   return { error: null, nextIndex: index + 1 }
 }
