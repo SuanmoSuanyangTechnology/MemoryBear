@@ -1,6 +1,4 @@
-import os
 from typing import List, Optional
-
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.add_nodes import add_chunk_nodes
@@ -356,24 +354,55 @@ async def save_dialog_and_statements_to_neo4j(
             se_uuids = [record["uuid"] async for record in result]
             results['statement_entity_edges'] = se_uuids
             logger.debug(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
-
+        # 8. Save perceptual edges
+        # PerceptualEdge 同时承担两种语义，根据 source_type 分发到对应 Cypher：
+        #   - source_type="chunk"  → PERCEPTUAL_CHUNK_EDGE_SAVE   (Chunk-[:HAS_PERCEPTUAL]->Perceptual)
+        #   - source_type="entity" → PERCEPTUAL_ENTITY_EDGE_SAVE  (ExtractedEntity-[:HAS_PERCEPTUAL]->Perceptual)
         if perceptual_edges:
-            from app.repositories.neo4j.cypher_queries import PERCEPTUAL_CHUNK_EDGE_SAVE
-            perceptual_edge_data = []
-            for edge in perceptual_edges:
-                print(edge.source, edge.target)
-                perceptual_edge_data.append({
-                    "perceptual_id": edge.source,
-                    "chunk_id": edge.target,
-                    "end_user_id": edge.end_user_id,
-                    "created_at": to_iso_z(edge.created_at),
-                })
-            result = await tx.run(PERCEPTUAL_CHUNK_EDGE_SAVE, edges=perceptual_edge_data)
-            perceptual_edges_uuids = [record["uuid"] async for record in result]
-            results['perceptual_chunk_edges'] = perceptual_edges_uuids
-            logger.debug(f"Successfully saved {len(perceptual_edges_uuids)} perceptual-chunk edges to Neo4j")
+            from app.repositories.neo4j.cypher_queries import (
+                PERCEPTUAL_CHUNK_EDGE_SAVE,
+                PERCEPTUAL_ENTITY_EDGE_SAVE,
+            )
 
-        # 8. Save assistant original nodes
+            chunk_edge_payload = []
+            entity_edge_payload = []
+            for edge in perceptual_edges:
+                # 旧实例未设置 source_type 时，默认按 entity 处理（与 PerceptualEdge 字段默认值一致）
+                source_type = getattr(edge, "source_type", "entity") or "entity"
+                base = {
+                    "perceptual_id": edge.target,
+                    "end_user_id": edge.end_user_id,
+                    "run_id": edge.run_id,
+                    "created_at": to_iso_z(edge.created_at),
+                    "perceptual_type": edge.perceptual_type,
+                    "perceptual_type_id": edge.perceptual_type_id,
+                }
+                if source_type == "chunk":
+                    chunk_edge_payload.append({**base, "chunk_id": edge.source})
+                else:
+                    entity_edge_payload.append({**base, "entity_id": edge.source})
+
+            if entity_edge_payload:
+                result = await tx.run(
+                    PERCEPTUAL_ENTITY_EDGE_SAVE, edges=entity_edge_payload
+                )
+                perceptual_entity_uuids = [record["uuid"] async for record in result]
+                results['perceptual_entity_edges'] = perceptual_entity_uuids
+                logger.debug(
+                    f"Successfully saved {len(perceptual_entity_uuids)} perceptual-entity edges to Neo4j"
+                )
+
+            if chunk_edge_payload:
+                result = await tx.run(
+                    PERCEPTUAL_CHUNK_EDGE_SAVE, edges=chunk_edge_payload
+                )
+                perceptual_chunk_uuids = [record["uuid"] async for record in result]
+                results['perceptual_chunk_edges'] = perceptual_chunk_uuids
+                logger.debug(
+                    f"Successfully saved {len(perceptual_chunk_uuids)} perceptual-chunk edges to Neo4j"
+                )
+
+        # 9. Save assistant original nodes
         if assistant_original_nodes:
             from app.repositories.neo4j.cypher_queries import ASSISTANT_ORIGINAL_NODE_SAVE
             original_data = [node.model_dump() for node in assistant_original_nodes]

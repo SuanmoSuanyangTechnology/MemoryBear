@@ -177,9 +177,25 @@ class EntityEntityEdge(Edge):
 
 
 class PerceptualEdge(Edge):
-    """Edge connecting perceptual nodes to their source chunks
     """
-    pass
+    Edge connecting ExtractedEntity to PerceptualNode (HAS_PERCEPTUAL).
+    Edge connecting Chunk to PerceptualNode (HAS_PERCEPTUAL).
+    语义：一个 Entity 关联到一个语义相似度 ≥ 阈值（或作为兜底选中的最高相似度）的感知记忆。
+         一个 Chunk 关联到一个感知记忆（多模态文件）。
+
+    Attributes:
+        perceptual_type: 感知记忆模态类型 (image/video/audio/document)
+        perceptual_type_id: 模态类型数字枚举 (101=image, 102=video, 103=audio, 104=document)
+        source_type: 源节点类型判别符，用于写库时选择对应 Cypher
+                     - "chunk"  : source 为 Chunk.id
+                     - "entity" : source 为 ExtractedEntity.id（默认）
+    """
+    perceptual_type: str = Field(..., description="感知记忆模态类型: image/video/audio/document")
+    perceptual_type_id: int = Field(..., description="模态类型数字枚举: 101=image, 102=video, 103=audio, 104=document")
+    source_type: str = Field(
+        default="entity",
+        description="源节点类型判别符：'chunk' 表示 Chunk→Perceptual，'entity' 表示 ExtractedEntity→Perceptual",
+    )
 
 
 class Node(BaseModel):
