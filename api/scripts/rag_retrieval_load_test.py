@@ -47,6 +47,12 @@ RETRIEVAL_FIELDS = {
     "rerank_score_threshold",
 }
 TARGET_FIELDS = {"kb_ids", "file_names_filter"}
+GATE_FIELDS = {
+    "min_requests",
+    "max_failure_ratio",
+    "max_p95_ms",
+    "min_achieved_rps",
+}
 
 
 class LoadConfigError(RuntimeError):
@@ -120,6 +126,12 @@ def validate_runtime(config: dict[str, Any], samples: list[dict[str, Any]]) -> N
                 raise LoadConfigError(
                     f"stage[{index}] duration_seconds must be positive"
                 )
+    gates = config.get("gates") or {}
+    if not isinstance(gates, dict):
+        raise LoadConfigError("gates must be an object")
+    unknown_gates = set(gates) - GATE_FIELDS
+    if unknown_gates:
+        raise LoadConfigError(f"Unknown performance gates: {sorted(unknown_gates)}")
     for index, sample in enumerate(samples, start=1):
         if not str(sample.get("query") or "").strip():
             raise LoadConfigError(f"sample[{index}] has an empty query")
