@@ -1,6 +1,6 @@
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import sqlalchemy as sa
 from sqlalchemy import select, or_
@@ -418,7 +418,7 @@ class EndUserRepository:
             db_logger.error(f"查询终端用户 {end_user_id} 时出错: {str(e)}")
             raise
 
-    def filter_existing_ids(self, end_user_ids: List[uuid.UUID]) -> set:
+    def filter_existing_ids(self, end_user_ids: List[uuid.UUID]) -> Set[str]:
         """批量校验 end_user_id 是否存在，返回实际存在且活跃的 ID 集合。
 
         Args:

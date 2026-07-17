@@ -3610,12 +3610,21 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
         service = MemoryAgentService()
 
-        # 预校验：查询 DB 中实际存在的 end_user_id
+        # 预校验：逐个解析 UUID，无效格式直接记 failed 跳过
+        valid_uuids: list[uuid.UUID] = []
+        invalid_ids: list[str] = []
+        for eid in end_user_ids:
+            try:
+                valid_uuids.append(uuid.UUID(eid))
+            except (ValueError, AttributeError):
+                invalid_ids.append(eid)
+                failed += 1
+                logger.warning(f"用户 {eid} UUID 格式无效，跳过兴趣分布初始化")
+
+        # 查询 DB 中实际存在的 end_user_id
         with get_db_context() as db:
             from app.repositories.end_user_repository import EndUserRepository
-            existing_ids = EndUserRepository(db).filter_existing_ids(
-                [uuid.UUID(eid) for eid in end_user_ids]
-            )
+            existing_ids = EndUserRepository(db).filter_existing_ids(valid_uuids)
 
         for end_user_id in end_user_ids:
             # 存在性校验：不存在的用户直接记失败
