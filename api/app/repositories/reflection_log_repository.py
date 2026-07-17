@@ -203,3 +203,21 @@ class ReflectionLogRepository:
             "status": status,
             "resolve_rate": resolve_rate,
         }
+
+    async def get_total_async(self, end_user_id: str) -> int:
+        """获取反思日志总数（异步版本）。
+
+        Args:
+            end_user_id: 终端用户 ID。
+
+        Returns:
+            int: 总记录数。
+        """
+        from sqlalchemy import select
+        end_user_uuid = uuid.UUID(end_user_id)
+        total = await self.db.scalar(
+            select(func.count()).select_from(MemoryReflectionLog).where(
+                MemoryReflectionLog.end_user_id == end_user_uuid
+            )
+        )
+        return int(total or 0)
