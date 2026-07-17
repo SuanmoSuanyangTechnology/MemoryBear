@@ -2623,7 +2623,7 @@ RETURN s.id AS statement_id
 
 UNRESOLVED_UPDATE_STATEMENT_FLAG = """
 MATCH (s:Statement {id: $statement_id})
-WHERE s.delete_at IS NULL
+WHERE s.delete_at IS NOT NULL
 SET s.has_unsolved_reference = false
 RETURN s.id AS statement_id
 """
