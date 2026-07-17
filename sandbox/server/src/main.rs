@@ -100,6 +100,7 @@ pub(crate) async fn try_restart_zygote(config: &Config) -> bool {
         "./libpython.so",
         LIB_PATH,
         &config.python_zygote_preload_modules,
+        &config.proxy,
     ) {
         Ok(z) => z,
         Err(e) => {
@@ -160,17 +161,25 @@ async fn main() -> std::io::Result<()> {
         zygote = config.python_zygote,
         network = config.enable_network,
         preload = config.enable_preload,
+        privilege = config.privilege,
         python_max_as_mb = config.python_max_as_bytes / 1048576,
         nodejs_max_as_mb = config.nodejs_max_as_bytes / 1048576,
         "Sandbox flags"
     );
 
-    if let Err(e) = crate::setup::dependencies::install_python_dependencies(&config).await {
-        tracing::warn!("Failed to install initial Python dependencies: {e}");
-    }
+    if config.privilege {
+        if let Err(e) = crate::setup::dependencies::install_python_dependencies(&config).await {
+            tracing::warn!("Failed to install initial Python dependencies: {e}");
+        }
 
-    // Prepare sandbox environment (stdlib, system libs into chroot jail)
-    crate::setup::env::prepare_environment(&config).await;
+        // Prepare sandbox environment (stdlib, system libs into chroot jail)
+        crate::setup::env::prepare_environment(&config).await;
+    } else {
+        tracing::info!(
+            "Non-privileged mode: skipping runtime pip install and chroot jail setup \
+             (expected to be baked into the container image)"
+        );
+    }
 
     // Unix-only: requires fork() + seccomp.
     #[cfg(unix)]
@@ -189,6 +198,7 @@ async fn main() -> std::io::Result<()> {
             "./libpython.so",
             LIB_PATH,
             &config.python_zygote_preload_modules,
+            &config.proxy,
         ) {
             Ok(zygote) => {
                 tracing::info!("Python zygote pool started");

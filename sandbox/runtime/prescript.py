@@ -16,8 +16,11 @@ sys.excepthook = excepthook
 
 # Load security library if available
 lib = ctypes.CDLL("./libpython.so")
-lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64]
+lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64, ctypes.c_bool]
 lib.init_seccomp.restype = ctypes.c_int
+
+lib.apply_landlock.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
+lib.apply_landlock.restype = ctypes.c_int
 
 # Get running path
 running_path = sys.argv[1]
@@ -41,7 +44,19 @@ os.chdir(running_path)
 sys.path = [p for p in sys.path if p]
 
 # Apply security if library is available
-init_status = lib.init_seccomp({{uid}}, {{gid}}, {{enable_network}}, {{max_as}})
+privilege = {{privilege}}
+if not privilege:
+    # Non-privileged mode: apply Landlock for all allowed paths before seccomp
+    import json
+    allowed = json.loads("""{{allowed_paths}}""")
+    arr = (ctypes.c_char_p * (len(allowed) + 1))()
+    for i, p in enumerate(allowed):
+        arr[i] = p.encode()
+    arr[-1] = None
+    rc = lib.apply_landlock(arr)
+    if rc != 0:
+        raise Exception(f"Landlock failed - {str(rc)}")
+init_status = lib.init_seccomp({{uid}}, {{gid}}, {{enable_network}}, {{max_as}}, privilege)
 if init_status != 0:
     raise Exception(f"code executor err - {str(init_status)}")
 del lib

@@ -31,7 +31,6 @@ _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _SELF_DIR)
 import protocol as P  # noqa: E402
 
-
 class _ReqInfo(TypedDict):
     """Bookkeeping for one in-flight sandbox request."""
     pid: int
@@ -74,7 +73,7 @@ def _xor(data: bytes, key: bytes) -> bytes:
         seg_len = end - i
         keystream = key * (seg_len // kl) + key[: seg_len % kl]
         out[i:end] = (
-                int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
+            int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
         ).to_bytes(seg_len, "big")
         i = end
     return bytes(out)
@@ -88,8 +87,11 @@ class Zygote:
 
         # Warm load of the seccomp library. Inherited by every child via COW.
         self.lib = ctypes.CDLL(lib_so)
-        self.lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64]
+        self.lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64, ctypes.c_bool]
         self.lib.init_seccomp.restype = ctypes.c_int
+
+        self.lib.apply_landlock.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
+        self.lib.apply_landlock.restype = ctypes.c_int
 
         # Initialize the tokenizer/codec machinery now (unrestricted parent) so
         # children can compile non-ASCII source after seccomp without triggering
@@ -125,8 +127,8 @@ class Zygote:
         # "SyntaxError: UTF-8 decode error".
         try:
             import codecs
-            import encodings  # noqa: F401
-            import encodings.utf_8  # noqa: F401
+            import encodings          # noqa: F401
+            import encodings.utf_8    # noqa: F401
             import encodings.aliases  # noqa: F401
             for enc in ("utf-8", "ascii", "latin-1", "utf-16", "idna"):
                 try:
@@ -271,7 +273,17 @@ class Zygote:
             gid = int(req["gid"])
             net = bool(req["net"])
             max_as = int(req.get("max_as", 0))
-            rc = self.lib.init_seccomp(uid, gid, net, max_as)
+            privilege = bool(req.get("privilege", True))
+            if not privilege:
+                allowed = req.get("allowed_paths", [self.lib_dir])
+                arr = (ctypes.c_char_p * (len(allowed) + 1))()
+                for i, p in enumerate(allowed):
+                    arr[i] = p.encode()
+                arr[-1] = None
+                ll_rc = self.lib.apply_landlock(arr)
+                if ll_rc != 0:
+                    raise RuntimeError(f"Landlock failed - {ll_rc}")
+            rc = self.lib.init_seccomp(uid, gid, net, max_as, privilege)
             if rc != 0:
                 raise RuntimeError(f"code executor err - {rc}")
 

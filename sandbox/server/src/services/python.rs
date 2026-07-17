@@ -31,11 +31,24 @@ fn build_script(
 
     let checked_preload = if config.enable_preload { preload } else { "" };
 
+    let allowed_paths_json: String = if config.privilege {
+        // Privileged mode — Landlock not used, paths never read.
+        "[]".into()
+    } else {
+        let mut paths = vec![LIB_PATH.to_string()];
+        paths.extend(config.python_lib_paths.iter().cloned());
+        paths.extend(config.nodejs_lib_paths.iter().cloned());
+        paths.extend(["/etc/ssl/certs".into(), "/etc".into()]);
+        serde_json::to_string(&paths).unwrap_or_else(|_| "[]".into())
+    };
+
     let mut script = PYTHON_PRESCRIPT
         .replace("{{uid}}", &config.sandbox_uid.to_string())
         .replace("{{gid}}", &config.sandbox_gid.to_string())
         .replace("{{enable_network}}", &enable_net.to_string())
         .replace("{{max_as}}", &config.python_max_as_bytes.to_string())
+        .replace("{{privilege}}", &(config.privilege as i32).to_string())
+        .replace("{{allowed_paths}}", &allowed_paths_json)
         .replace("{{preload}}", &format!("{checked_preload}\n"));
     let encoded_code = crypto::encrypt_code(code, &key);
     script = script.replace("{{code}}", &encoded_code);
@@ -66,12 +79,23 @@ pub async fn run(
                 let enc_key = base64::engine::general_purpose::STANDARD.encode(&key);
                 let net = options.enable_network && config.enable_network;
 
+                let allowed_paths: Vec<String> = if config.privilege {
+                    vec![]
+                } else {
+                    let mut paths = vec![LIB_PATH.to_string()];
+                    paths.extend(config.python_lib_paths.iter().cloned());
+                    paths.extend(config.nodejs_lib_paths.iter().cloned());
+                    paths.extend(["/etc/ssl/certs".into(), "/etc".into()]);
+                    paths
+                };
                 let limits = crate::services::zygote::SandboxLimits {
                     uid: config.sandbox_uid,
                     gid: config.sandbox_gid,
                     net,
                     max_as: config.python_max_as_bytes,
                     timeout: Duration::from_secs(timeout_secs),
+                    privilege: config.privilege,
+                    allowed_paths,
                 };
                 let (out, err, exit_code) = zygote.run(&enc_code, &enc_key, &limits).await;
 
@@ -105,6 +129,11 @@ pub async fn run(
     // Minimal environment: PATH so the interpreter can find shared libraries.
     if let Ok(path) = std::env::var("PATH") {
         cmd.env("PATH", &path);
+    }
+    // Inject proxy env vars so Python HTTP libraries (requests, urllib, …)
+    // respect the configured proxy.
+    for (k, v) in config.proxy.proxy_env_vars() {
+        cmd.env(k, v);
     }
     cmd.arg("-B")
         .arg("-")

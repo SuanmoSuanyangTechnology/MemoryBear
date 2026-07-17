@@ -5,6 +5,10 @@ worker_timeout = 30
 enable_network = true
 enable_preload = false
 
+# When false, pip install and chroot jail setup are skipped at startup
+# (must be pre-baked into the container image during docker build).
+privilege = true
+
 # Pre-warmed Python zygote — fork() child per request, avoids interpreter
 # cold start. Linux-only; set to false on macOS/Windows dev machines.
 python_zygote = true
@@ -28,7 +32,7 @@ nodejs_max_as_bytes = 2147483648   # 2 GiB
 [app]
 port = 8194
 debug = false
-key = "redbear-sandbox"
+key = "sandbox"
 
 # ── Proxy ──
 [proxy]

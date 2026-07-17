@@ -15,7 +15,7 @@ async fn copy_into_jail(src: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let env_sh = format!("{LIB_PATH}/script/env.sh");
+    let env_sh = format!("{}/script/env.sh", LIB_PATH);
     let child = Command::new("bash")
         .arg(&env_sh)
         .arg(src)
@@ -33,7 +33,7 @@ async fn copy_into_jail(src: &str) -> Result<(), String> {
         return Err(format!("env.sh {src} failed: {stderr}"));
     }
 
-    tracing::debug!("Sandbox env: copied {src} -> {LIB_PATH}");
+    tracing::debug!("Sandbox env: copied {} -> {}", src, LIB_PATH);
     Ok(())
 }
 

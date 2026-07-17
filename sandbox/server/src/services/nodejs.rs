@@ -57,8 +57,8 @@ pub async fn run(
 
     // Build options JSON string for the prescript
     let opts_json = format!(
-        r#"{{"enable_network":{},"max_as":{}}}"#,
-        enable_network, config.nodejs_max_as_bytes
+        r#"{{"enable_network":{},"max_as":{},"privilege":{}}}"#,
+        enable_network, config.nodejs_max_as_bytes, config.privilege
     );
 
     // `node -` — feed the script via stdin (no temp file).
@@ -74,15 +74,8 @@ pub async fn run(
     // Point NODE_PATH at the bundled node_modules so require('koffi')
     // resolves before init_seccomp() applies chroot.
     cmd.env("NODE_PATH", format!("{LIB_PATH}/node_modules"));
-    if let Some(socks5) = config.proxy.socks5_option() {
-        cmd.env("HTTPS_PROXY", socks5).env("HTTP_PROXY", socks5);
-    } else {
-        if let Some(h) = config.proxy.https_option() {
-            cmd.env("HTTPS_PROXY", h);
-        }
-        if let Some(h) = config.proxy.http_option() {
-            cmd.env("HTTP_PROXY", h);
-        }
+    for (k, v) in config.proxy.proxy_env_vars() {
+        cmd.env(k, v);
     }
 
     // Cap V8's JS heap so JS-object bombs die with a clean heap-OOM below the

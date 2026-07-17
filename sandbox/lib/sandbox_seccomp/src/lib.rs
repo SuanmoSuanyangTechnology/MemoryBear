@@ -20,6 +20,48 @@ use std::env;
 use std::ffi::CString;
 use std::str::FromStr;
 
+// ── Landlock constants (Linux 5.13+) ──
+
+/// Landlock syscall numbers (x86_64).
+const SYS_LANDLOCK_CREATE_RULESET: libc::c_long = 444;
+const SYS_LANDLOCK_ADD_RULE: libc::c_long = 445;
+const SYS_LANDLOCK_RESTRICT_SELF: libc::c_long = 446;
+
+/// Landlock access rights — MUST match the kernel LANDLOCK_ACCESS_FS_* values.
+/// ABI v1 (Linux 5.13+): bits 0–12.
+/// ABI v2 (Linux 5.19+): bit 13 (REFER).
+/// ABI v3 (Linux 6.0+):  bit 14 (TRUNCATE).
+/// ABI v4 (Linux 6.2+):  bit 15 (IOCTL_DEV).
+const LANDLOCK_ACCESS_FS_EXECUTE: u64 = 1 << 0;
+const LANDLOCK_ACCESS_FS_WRITE_FILE: u64 = 1 << 1;
+const LANDLOCK_ACCESS_FS_READ_FILE: u64 = 1 << 2;
+const LANDLOCK_ACCESS_FS_READ_DIR: u64 = 1 << 3;
+const LANDLOCK_ACCESS_FS_REMOVE_DIR: u64 = 1 << 4;
+const LANDLOCK_ACCESS_FS_REMOVE_FILE: u64 = 1 << 5;
+const LANDLOCK_ACCESS_FS_MAKE_CHAR: u64 = 1 << 6;
+const LANDLOCK_ACCESS_FS_MAKE_DIR: u64 = 1 << 7;
+const LANDLOCK_ACCESS_FS_MAKE_REG: u64 = 1 << 8;
+const LANDLOCK_ACCESS_FS_MAKE_SOCK: u64 = 1 << 9;
+const LANDLOCK_ACCESS_FS_MAKE_FIFO: u64 = 1 << 10;
+const LANDLOCK_ACCESS_FS_MAKE_BLOCK: u64 = 1 << 11;
+const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 12;
+const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 13;
+const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
+const LANDLOCK_ACCESS_FS_IOCTL_DEV: u64 = 1 << 15;
+
+const LANDLOCK_RULE_PATH_BENEATH: u64 = 1;
+
+#[repr(C)]
+struct LandlockRulesetAttr {
+    handled_access_fs: u64,
+}
+
+#[repr(C)]
+struct LandlockPathBeneathAttr {
+    allowed_access: u64,
+    parent_fd: i32,
+}
+
 /// Allowed syscalls from env `ALLOWED_SYSCALLS` or built-in defaults.
 pub fn get_allowed_syscalls(enable_network: bool) -> (Vec<i32>, Vec<i32>) {
     let mut allowed_syscalls = Vec::new();
@@ -102,7 +144,138 @@ fn set_memory_limit(max_as_bytes: u64) -> Result<(), c_int> {
     Ok(())
 }
 
+/// Apply Landlock filesystem restrictions to emulate chroot-like isolation.
+///
+/// `paths` is a NULL-terminated array of C strings.  The calling process will
+/// be restricted to read + execute access within each listed directory tree.
+/// Requires Linux 5.13+. Returns 0 on success, negative on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn apply_landlock(paths: *const *const c_char) -> c_int {
+    if paths.is_null() {
+        return -20;
+    }
+
+    let handled_access = LANDLOCK_ACCESS_FS_EXECUTE
+        | LANDLOCK_ACCESS_FS_WRITE_FILE
+        | LANDLOCK_ACCESS_FS_READ_FILE
+        | LANDLOCK_ACCESS_FS_READ_DIR
+        | LANDLOCK_ACCESS_FS_REMOVE_DIR
+        | LANDLOCK_ACCESS_FS_REMOVE_FILE
+        | LANDLOCK_ACCESS_FS_MAKE_CHAR
+        | LANDLOCK_ACCESS_FS_MAKE_DIR
+        | LANDLOCK_ACCESS_FS_MAKE_REG
+        | LANDLOCK_ACCESS_FS_MAKE_SOCK
+        | LANDLOCK_ACCESS_FS_MAKE_FIFO
+        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
+        | LANDLOCK_ACCESS_FS_MAKE_SYM
+        | LANDLOCK_ACCESS_FS_REFER
+        | LANDLOCK_ACCESS_FS_TRUNCATE
+        | LANDLOCK_ACCESS_FS_IOCTL_DEV;
+
+    let ruleset_attr = LandlockRulesetAttr {
+        handled_access_fs: handled_access,
+    };
+
+    let ruleset_fd = libc::syscall(
+        SYS_LANDLOCK_CREATE_RULESET,
+        &ruleset_attr as *const _,
+        core::mem::size_of::<LandlockRulesetAttr>(),
+        0u32,
+    ) as i32;
+    if ruleset_fd < 0 {
+        // Kernel may reject unknown bits — retry with only ABI v1 bits.
+        let handled_v1 = LANDLOCK_ACCESS_FS_EXECUTE
+            | LANDLOCK_ACCESS_FS_WRITE_FILE
+            | LANDLOCK_ACCESS_FS_READ_FILE
+            | LANDLOCK_ACCESS_FS_READ_DIR
+            | LANDLOCK_ACCESS_FS_REMOVE_DIR
+            | LANDLOCK_ACCESS_FS_REMOVE_FILE
+            | LANDLOCK_ACCESS_FS_MAKE_CHAR
+            | LANDLOCK_ACCESS_FS_MAKE_DIR
+            | LANDLOCK_ACCESS_FS_MAKE_REG
+            | LANDLOCK_ACCESS_FS_MAKE_SOCK
+            | LANDLOCK_ACCESS_FS_MAKE_FIFO
+            | LANDLOCK_ACCESS_FS_MAKE_BLOCK
+            | LANDLOCK_ACCESS_FS_MAKE_SYM;
+        let ruleset_attr = LandlockRulesetAttr { handled_access_fs: handled_v1 };
+        let ruleset_fd = libc::syscall(
+            SYS_LANDLOCK_CREATE_RULESET,
+            &ruleset_attr as *const _,
+            core::mem::size_of::<LandlockRulesetAttr>(),
+            0u32,
+        ) as i32;
+        if ruleset_fd < 0 {
+            return -21;
+        }
+    }
+
+    let allowed_access = LANDLOCK_ACCESS_FS_EXECUTE
+        | LANDLOCK_ACCESS_FS_READ_FILE
+        | LANDLOCK_ACCESS_FS_READ_DIR;
+
+    // Add a path_beneath rule for each path in the NULL-terminated array.
+    let mut p = paths;
+    let mut added = 0u32;
+    while !(*p).is_null() {
+        let path = *p;
+        let dir_fd = libc::open(path, libc::O_PATH | libc::O_CLOEXEC);
+        if dir_fd >= 0 {
+            let path_beneath = LandlockPathBeneathAttr {
+                allowed_access,
+                parent_fd: dir_fd,
+            };
+            let ret = libc::syscall(
+                SYS_LANDLOCK_ADD_RULE,
+                ruleset_fd as i64,
+                LANDLOCK_RULE_PATH_BENEATH as i64,
+                &path_beneath as *const _,
+                0u32,
+            );
+            libc::close(dir_fd);
+            if ret == 0 {
+                added += 1;
+            }
+        }
+        p = p.add(1);
+    }
+    // If no rules were added (all paths failed), the sandbox would be empty.
+    if added == 0 {
+        libc::close(ruleset_fd);
+        return -22;
+    }
+
+    // landlock_restrict_self requires no_new_privs already set.
+    if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+        libc::close(ruleset_fd);
+        return -24;
+    }
+
+    let ret = libc::syscall(
+        SYS_LANDLOCK_RESTRICT_SELF,
+        ruleset_fd as i64,
+        0u32,
+    );
+    libc::close(ruleset_fd);
+
+    if ret != 0 {
+        return -23;
+    }
+    0
+}
+
+/// Convenience wrapper: apply Landlock for a single path.
+/// Equivalent to `apply_landlock(&[lib_path, NULL])`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn apply_landlock_one(lib_path: *const c_char) -> c_int {
+    let paths: [*const c_char; 2] = [lib_path, std::ptr::null()];
+    apply_landlock(paths.as_ptr())
+}
+
 /// Install seccomp filter. Default action: SCMP_ACT_KILL_PROCESS.
+///
+/// `openat` is only allowed when the `O_CREAT` flag is **not** set, preventing
+/// the sandboxed process from creating new files.  If `O_CREAT` is present the
+/// call falls through to the default `KILL_PROCESS`.
 fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
     unsafe {
         let ctx = seccomp_init(SCMP_ACT_KILL_PROCESS);
@@ -113,9 +286,23 @@ fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
         let (allowed_syscalls, allowed_not_kill_syscalls) = get_allowed_syscalls(enable_network);
 
         for &sc in &allowed_syscalls {
-            if seccomp_rule_add(ctx, SCMP_ACT_ALLOW, sc, 0) != 0 {
-                seccomp_release(ctx);
-                return Err(-7);
+            if sc == libc::SYS_openat as i32 {
+                // Allow openat only when O_CREAT is NOT set in flags (arg idx 2).
+                let cmp = scmp_arg_cmp {
+                    arg: 2,
+                    op: scmp_compare::SCMP_CMP_MASKED_EQ,
+                    datum_a: 0,                         // O_CREAT bit must be 0
+                    datum_b: libc::O_CREAT as u64,      // mask
+                };
+                if seccomp_rule_add_array(ctx, SCMP_ACT_ALLOW, sc, 1, &cmp) != 0 {
+                    seccomp_release(ctx);
+                    return Err(-7);
+                }
+            } else {
+                if seccomp_rule_add(ctx, SCMP_ACT_ALLOW, sc, 0) != 0 {
+                    seccomp_release(ctx);
+                    return Err(-7);
+                }
             }
         }
 
@@ -136,7 +323,16 @@ fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
     }
 }
 
-/// Initialize sandbox: RLIMIT_AS → chroot → no_new_privs → drop_privs → seccomp.
+/// Initialize sandbox.
+///
+/// Privileged mode (`privilege != 0`):
+///   RLIMIT_AS → chroot → no_new_privs → drop_privs → seccomp
+///
+/// Non-privileged mode (`privilege == 0`):
+///   RLIMIT_AS → (Landlock applied separately by caller) → no_new_privs
+///   → seccomp
+///
+/// In both modes, `openat` is only allowed when `O_CREAT` is not set.
 /// Must be called once per process before executing untrusted code.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn init_seccomp(
@@ -144,18 +340,23 @@ pub unsafe extern "C" fn init_seccomp(
     gid: gid_t,
     enable_network: i32,
     max_as_bytes: u64,
+    privilege: i32,
 ) -> c_int {
     if let Err(code) = set_memory_limit(max_as_bytes) {
         return code;
     }
-    if let Err(code) = setup_root() {
-        return code;
+    if privilege != 0 {
+        if let Err(code) = setup_root() {
+            return code;
+        }
     }
     if let Err(code) = set_no_new_privs() {
         return code;
     }
-    if let Err(code) = drop_privileges(uid, gid) {
-        return code;
+    if privilege != 0 {
+        if let Err(code) = drop_privileges(uid, gid) {
+            return code;
+        }
     }
     match install_seccomp(enable_network != 0) {
         Ok(_) => 0,

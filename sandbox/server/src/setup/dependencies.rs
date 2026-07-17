@@ -49,7 +49,7 @@ pub async fn list_python_packages(config: &Config) -> Vec<Package> {
 
 /// Install Python packages from requirements file.
 pub async fn install_python_dependencies(config: &Config) -> Result<(), String> {
-    let req_path = format!("{LIB_PATH}/requirements.txt");
+    let req_path = format!("{}/requirements.txt", LIB_PATH);
     let requirements = match std::fs::read_to_string(req_path) {
         Ok(r) => r,
         Err(_) => {

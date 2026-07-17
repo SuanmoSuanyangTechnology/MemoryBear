@@ -5,15 +5,24 @@ let koffi = require('koffi')
 process.chdir(argv[2])
 
 let lib = koffi.load("./libnodejs.so")
-/** @type {(uid: number, gid: number, enableNetwork: boolean, maxAs: number) => number} */
-let initSeccomp = lib.func('int init_seccomp(int, int, bool, uint64_t)')
+/** @type {(uid: number, gid: number, enableNetwork: boolean, maxAs: number, privilege: boolean) => number} */
+let initSeccomp = lib.func('int init_seccomp(int, int, bool, uint64_t, bool)')
+/** @type {(path: string) => number} */
+let applyLandlock = lib.func('int apply_landlock_one(char*)')
 
 let uid = parseInt(argv[3])
 let gid = parseInt(argv[4])
 
 let options = JSON.parse(argv[5])
 
-let seccomp_init = initSeccomp(uid, gid, options['enable_network'], options['max_as'])
+let privilege = options['privilege'] !== false
+if (!privilege) {
+    let ll_rc = applyLandlock(argv[2])
+    if (ll_rc !== 0) {
+        throw `Landlock failed - ${ll_rc}`
+    }
+}
+let seccomp_init = initSeccomp(uid, gid, options['enable_network'], options['max_as'], privilege)
 if (seccomp_init !== 0) {
     throw `code executor err - ${seccomp_init}`
 }
@@ -23,6 +32,7 @@ argv = undefined
 koffi = undefined
 lib = undefined
 initSeccomp = undefined
+applyLandlock = undefined
 uid = undefined
 gid = undefined
 options = undefined
