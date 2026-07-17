@@ -93,6 +93,9 @@ export interface TestResult {
   memory: {
     chunks: number;
   };
+  perceptual: {
+    count: number;
+  };
   triplets: {
     count: number;
   };
