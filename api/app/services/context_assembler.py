@@ -57,7 +57,10 @@ def create_evidence_compressor(
             "\n保留数字、日期、名称、条件、限制和否定信息。\n证据：\n"
             + content
         )
-        response = await llm.ainvoke(prompt)
+        # Compression is an internal preprocessing call. Isolate it from the
+        # parent Agent callback chain so its chunks never become user-facing
+        # message events in astream_events().
+        response = await llm.ainvoke(prompt, config={"callbacks": []})
         value = response.content if hasattr(response, "content") else response
         if content_to_text:
             return content_to_text(value)
