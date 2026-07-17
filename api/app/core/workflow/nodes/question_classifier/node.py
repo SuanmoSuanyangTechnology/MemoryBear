@@ -9,6 +9,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable.variable_objects import ArrayVariable, FileVariable
 from app.db import get_async_db_context, get_db_read
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
@@ -156,8 +157,14 @@ class QuestionClassifierNode(BaseNode):
             return user_prompt
         
         try:
-            files_variable = variable_pool.get_instance(self.typed_config.vision_input)
-            if not files_variable or not files_variable.value:
+            files_instance = variable_pool.get_instance(self.typed_config.vision_input, default=None, strict=False)
+            if isinstance(files_instance, ArrayVariable):
+                file_list = files_instance.value
+            elif isinstance(files_instance, FileVariable):
+                file_list = [files_instance]
+            else:
+                file_list = []
+            if not file_list:
                 return user_prompt
         except Exception:
             logger.warning(f"节点 {self.node_id} 获取视觉变量失败: {self.typed_config.vision_input}")
@@ -165,7 +172,7 @@ class QuestionClassifierNode(BaseNode):
         
         content = [{"type": "text", "text": user_prompt}]
         
-        for file in files_variable.value:
+        for file in file_list:
             file_content = await self.process_message(model_info, file.value, self.typed_config.vision)
             if file_content:
                 if isinstance(file_content, list):

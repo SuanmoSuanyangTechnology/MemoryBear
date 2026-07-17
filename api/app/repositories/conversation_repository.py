@@ -451,6 +451,31 @@ class ConversationRepository:
         detail = self.db.scalars(stmt).first()
         return detail
 
+    async def get_conversation_detail_async(
+            self,
+            conversation_id: uuid.UUID,
+    ) -> ConversationDetail | None:
+        """
+    Retrieve the detail of a conversation by its ID (async).
+
+    Args:
+        conversation_id (UUID): The unique identifier of the conversation.
+
+    Returns:
+        ConversationDetail or None: The conversation detail object if found,
+        otherwise None.
+
+    Notes:
+        - This method queries the database but does not modify it.
+        - The caller is responsible for handling the case where None is returned.
+        - Use this async variant when running under an AsyncSession.
+    """
+        stmt = select(ConversationDetail).where(
+            ConversationDetail.conversation_id == conversation_id
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().first()
+
     def add_conversation_detail(
             self,
             conversation_detail: ConversationDetail,

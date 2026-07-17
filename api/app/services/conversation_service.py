@@ -158,6 +158,29 @@ class ConversationService:
 
         return conversation
 
+    async def get_conversation_async(
+            self,
+            conversation_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None,
+    ) -> Conversation:
+        """
+        Async version of get_conversation.
+
+        Args:
+            conversation_id (uuid.UUID): The conversation UUID.
+            workspace_id (Optional[uuid.UUID]): Optional workspace UUID to restrict the query.
+
+        Raises:
+            ResourceNotFoundException: If the conversation does not exist.
+
+        Returns:
+            Conversation: The requested Conversation instance.
+        """
+        return await self.conversation_repo.get_conversation_by_conversation_id_async(
+            conversation_id=conversation_id,
+            workspace_id=workspace_id,
+        )
+
     def get_user_conversations(
             self,
             user_id: uuid.UUID,
@@ -1479,10 +1502,10 @@ class ConversationService:
         """
         logger.info(f"Fetching conversation detail for conversation_id={conversation_id}, workspace_id={workspace_id}")
 
-        conversation_detail = self.conversation_repo.get_conversation_detail(
+        conversation_detail = await self.conversation_repo.get_conversation_detail_async(
             conversation_id=conversation_id,
         )
-        conversation = self.get_conversation(
+        conversation = await self.get_conversation_async(
             conversation_id=conversation_id,
         )
         if not conversation:
@@ -1501,7 +1524,7 @@ class ConversationService:
                 info_score=conversation_detail.info_score,
             )
         logger.info("Conversation detail not found, generating new summary using LLM")
-        configs = workspace_service.get_workspace_models_configs(
+        configs = await workspace_service.get_workspace_models_configs_async(
             db=self.db,
             workspace_id=workspace_id,
             user=user
@@ -1510,14 +1533,14 @@ class ConversationService:
         if not model_id:
             logger.error(f"Workspace model configuration not found for workspace_id={workspace_id}")
             raise BusinessException("Workspace model configuration not found. Please configure a model first.", code=BizCode.MODEL_NOT_FOUND)
-        config = ModelConfigService.get_model_by_id(db=self.db, model_id=model_id)
+        config = await ModelConfigService.get_model_by_id_async(db=self.db, model_id=model_id)
 
         if not config:
             logger.error("Configured model not found for model_id={model_id}")
             raise BusinessException("Configured model does not exist.", BizCode.NOT_FOUND)
 
-        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
-        api_config = ModelApiKeyService.get_available_api_key(
+        tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(self.db, str(workspace_id))
+        api_config = await ModelApiKeyService.get_available_api_key_async(
             self.db,
             model_id,
             tenant_id=tenant_id,
@@ -1613,8 +1636,8 @@ class ConversationService:
                 conversation_detail.takeaways = takeaways
                 conversation_detail.info_score = info_score
 
-            self.db.commit()
-            self.db.refresh(conversation_detail)
+            await self.db.commit()
+            await self.db.refresh(conversation_detail)
 
         logger.info(f"Returning conversation summary for conversation_id={conversation_id}")
         conversation_out = ConversationOut(

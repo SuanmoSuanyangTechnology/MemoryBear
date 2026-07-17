@@ -163,25 +163,16 @@ class StartNode(BaseNode):
                                     f"变量 '{var_name}' 中包含不允许的文件类型 '{file_type}'"
                                 )
 
-                processed[var_name] = value
-
-            elif var_def.required:
-                # 必需变量缺失
+            elif var_def.required and var_def.default is None:
                 raise ValueError(
                     f"缺少必需的输入变量: {var_name}"
                     + (f" ({var_def.description})" if var_def.description else "")
                 )
 
-            elif var_def.default is not None:
-                # 使用默认值
-                processed[var_name] = var_def.default
-                logger.debug(f"变量 '{var_name}' 使用默认值: {var_def.default}")
             else:
-                # file 类型未传值时不生成空占位，避免后续被当成无效 FileObject 写入变量池
-                if var_type == VariableType.FILE:
-                    self.output_var_types[var_name] = var_type
-                    continue
-                processed[var_name] = DEFAULT_VALUE(var_type)
+                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+
+            processed[var_name] = value
             self.output_var_types[var_name] = var_type
 
         return processed
