@@ -3,6 +3,7 @@ import asyncio
 import json
 import time
 import uuid
+from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
 from datetime import datetime
 
@@ -38,8 +39,25 @@ from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.services.tool_orchestrator import ToolOrchestrator
+from app.services.context_assembler import (
+    ContextEvidence,
+    append_external_context_rule,
+    resolve_evidence_max_tokens,
+)
 
 logger = get_business_logger()
+
+
+def _snapshot_annotations(annotations: List[Any]) -> List[SimpleNamespace]:
+    """Copy ORM values while the async database session is still open."""
+    return [SimpleNamespace(
+        id=item.id,
+        question=item.question,
+        answer=item.answer,
+        embedding=list(item.embedding) if item.embedding else None,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    ) for item in annotations]
 
 
 class CustomJsonEncoder(json.JSONEncoder):
@@ -379,7 +397,7 @@ class AppChatService:
                         AppAnnotation.is_active == 1,
                     )
                 )
-                annotations = list(result.scalars().all())
+                annotations = _snapshot_annotations(list(result.scalars().all()))
                 if not annotations:
                     return None
 
@@ -507,6 +525,78 @@ class AppChatService:
             logger.error(f"标注匹配失败: {e}")
             return None
 
+    async def _load_annotation_context_evidence(self, app_id: uuid.UUID, message: str) -> List[ContextEvidence]:
+        """延迟查询候选标注；只由成功产生证据的知识库/记忆工具触发。"""
+        try:
+            from app.core.models.base import RedBearModelConfig
+            from app.models.annotation_model import AppAnnotation, AppAnnotationSetting
+            api_key_config: dict[str, Any] | None = None
+            if self._uses_async_session():
+                async with get_async_db_context() as db:
+                    setting = (await db.execute(select(AppAnnotationSetting).where(
+                        AppAnnotationSetting.app_id == app_id).limit(1))).scalar_one_or_none()
+                    if not setting or not setting.enabled or not setting.model_config_id:
+                        return []
+                    annotations = _snapshot_annotations(list((await db.execute(select(AppAnnotation).where(
+                        AppAnnotation.app_id == app_id, AppAnnotation.is_active == 1))).scalars().all()))
+                    tenant_id = await self._resolve_app_tenant_id_async(app_id)
+                    api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                        db, setting.model_config_id, tenant_id=tenant_id)
+                    if api_key_obj:
+                        api_key_config = {
+                            "model_name": api_key_obj.model_name,
+                            "provider": api_key_obj.provider,
+                            "api_key": api_key_obj.api_key,
+                            "api_base": api_key_obj.api_base,
+                        }
+            else:
+                service = AnnotationService(self.db)
+                setting = service.get_setting(app_id)
+                if not setting or not setting.enabled or not setting.model_config_id:
+                    return []
+                annotations = service.repo.get_all_active_by_app(app_id)
+                api_key_obj = ModelApiKeyService.get_available_api_key(
+                    self.db, setting.model_config_id, tenant_id=self._resolve_app_tenant_id(app_id))
+                if api_key_obj:
+                    api_key_config = {
+                        "model_name": api_key_obj.model_name,
+                        "provider": api_key_obj.provider,
+                        "api_key": api_key_obj.api_key,
+                        "api_base": api_key_obj.api_base,
+                    }
+            if not annotations or not api_key_config:
+                return []
+            model_config = RedBearModelConfig(
+                model_name=api_key_config["model_name"], provider=api_key_config["provider"],
+                api_key=api_key_config["api_key"], base_url=api_key_config["api_base"] or None,
+                timeout=60, max_retries=3,
+            )
+            candidates = await asyncio.to_thread(
+                AnnotationService.find_context_candidates,
+                message, annotations, model_config, 0.6, 3,
+            )
+            logger.info(
+                "[上下文组装] 标注候选 | "
+                f"应用={str(app_id)[:8]} | 标注总数={len(annotations)} | "
+                f"候选={len(candidates)} | 阈值=0.6 | top_k=3",
+                extra={
+                    "app_id": str(app_id),
+                    "annotation_total": len(annotations),
+                    "candidate_count": len(candidates),
+                    "threshold": 0.6,
+                    "top_k": 3,
+                },
+            )
+            return [ContextEvidence(
+                source_type="annotation", source_id=item["annotation_id"],
+                content=f"参考问题：{item['question']}\n参考答案：{item['answer']}",
+                score=item["similarity"], created_at=item.get("created_at"),
+                updated_at=item.get("updated_at"), metadata={"question": item["question"]},
+            ) for item in candidates]
+        except Exception:
+            logger.warning("标注上下文候选加载失败", exc_info=True)
+            return []
+
     async def agent_chat(
             self,
             message: str,
@@ -625,6 +715,10 @@ class AppChatService:
 
         # 获取模型参数
         model_parameters = config.model_parameters
+        async def load_annotation_context():
+            return await self._load_annotation_context_evidence(config.app_id, message)
+
+        system_prompt = append_external_context_rule(system_prompt)
 
         model_info = ModelInfo(
             model_name=api_key_obj.model_name,
@@ -714,7 +808,8 @@ class AppChatService:
             "is_omni": api_key_obj.is_omni,
             "capability": capability,
         }
-        if ModelCapability.FUNCTION_CALL not in capability and tools:
+        use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+        if not use_agent_mode and tools:
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
                 system_prompt=system_prompt,
@@ -724,6 +819,7 @@ class AppChatService:
                 model_config=model_info,
                 effective_params=model_parameters,
                 processed_files=processed_files,
+                context_evidence_loader=load_annotation_context,
             )
             tools = []
 
@@ -742,6 +838,12 @@ class AppChatService:
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
             capability=capability,
+            context_query=message,
+            context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+            context_evidence_loader=load_annotation_context,
+            evidence_max_tokens=resolve_evidence_max_tokens(
+                model_parameters.get("max_tokens") or 2000
+            ),
         )
 
         # 为需要运行时上下文的工具注入上下文
@@ -1056,6 +1158,10 @@ class AppChatService:
 
             # 获取模型参数
             model_parameters = config.model_parameters
+            async def load_annotation_context():
+                return await self._load_annotation_context_evidence(config.app_id, message)
+
+            system_prompt = append_external_context_rule(system_prompt)
 
             model_info = ModelInfo(
                 model_name=api_key_obj.model_name,
@@ -1141,7 +1247,8 @@ class AppChatService:
                 "is_omni": api_key_obj.is_omni,
                 "capability": capability,
             }
-            if ModelCapability.FUNCTION_CALL not in capability and tools:
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            if not use_agent_mode and tools:
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
@@ -1151,6 +1258,7 @@ class AppChatService:
                     model_config=model_info,
                     effective_params=model_parameters,
                     processed_files=processed_files,
+                    context_evidence_loader=load_annotation_context,
                 )
                 # 把已完成的工具调用步骤作为事件补发给前端
                 for step in orchestrator_node_executions:
@@ -1175,6 +1283,12 @@ class AppChatService:
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
                 capability=capability,
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
+                evidence_max_tokens=resolve_evidence_max_tokens(
+                    effective_params.get("max_tokens") or 2000
+                ),
             )
 
             # 为需要运行时上下文的工具注入上下文

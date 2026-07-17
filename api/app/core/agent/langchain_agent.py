@@ -8,14 +8,16 @@ LangChain Agent 封装
 - 使用 RedBearLLM 支持多提供商
 """
 
+import asyncio
 import functools
+import inspect
 import json
 import time
 import uuid as _uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
 
@@ -242,7 +244,12 @@ class LangChainAgent:
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
             capability: Optional[List[str]] = None,  # 模型能力列表，用于校验是否支持深度思考
-            tool_call_limit: int = 1  # 每个工具的最大调用次数（防止模型陷入工具循环）
+            tool_call_limit: int = 1,  # 每个工具的最大调用次数（防止模型陷入工具循环）
+            context_evidence: Optional[List[Any]] = None,
+            context_query: str = "",
+            context_base_text: str = "",
+            context_evidence_loader: Optional[Any] = None,
+            evidence_max_tokens: Optional[int] = None,
     ):
         """初始化 LangChain Agent
 
@@ -267,6 +274,15 @@ class LangChainAgent:
         self.is_omni = is_omni
         self.strategy = strategy
         self.tool_call_limit = tool_call_limit
+        self._initial_context_evidence = list(context_evidence or [])
+        self._context_query = context_query
+        self._context_base_text = context_base_text
+        self._context_evidence_loader = context_evidence_loader
+        from app.services.context_assembler import resolve_evidence_max_tokens
+        self._evidence_max_tokens = max(
+            1,
+            int(evidence_max_tokens or resolve_evidence_max_tokens(max_tokens)),
+        )
 
         # 构建工具名 → 元数据映射（用于执行记录中补充具体资源信息）
         self._tool_meta_map: Dict[str, Dict[str, Any]] = {}
@@ -346,6 +362,7 @@ class LangChainAgent:
         )
 
         self.llm = RedBearLLM(model_config, type=ModelType.CHAT)
+        self._wrap_tools_with_external_context()
         # 从经过校验的 config 读取实际生效的能力开关
         self.deep_thinking = model_config.deep_thinking
         self.json_output = model_config.json_output
@@ -380,6 +397,97 @@ class LangChainAgent:
                 "tool_call_limit": self.tool_call_limit,
             }
         )
+
+    def _wrap_tools_with_external_context(self) -> None:
+        """将工具产生的证据组装后追加到工具返回值，从而进入 ToolMessage。"""
+        if not self.tools:
+            return
+        from app.services.context_assembler import (
+            ContextAssembler,
+            context_evidence_from_tool_result,
+            create_evidence_compressor,
+        )
+
+        assembly_lock = asyncio.Lock()
+        pending_shared_evidence = list(self._initial_context_evidence)
+        loaded_annotations = False
+
+        assembler = ContextAssembler(
+            self._evidence_max_tokens,
+            compressor=create_evidence_compressor(self.llm, self._content_to_text),
+        )
+        for tool in self.tools:
+            # ToolNode drives native tools through BaseTool.ainvoke().  Do not
+            # only wrap _arun: synchronous StructuredTool instances are
+            # otherwise executed through _run and bypass the assembly hook.
+            original_ainvoke = getattr(tool, "ainvoke", None)
+            if not callable(original_ainvoke):
+                continue
+
+            def make_ainvoke(current_tool, original):
+                @functools.wraps(original)
+                async def wrapped(*args, **kwargs):
+                    nonlocal loaded_annotations
+                    result = await original(*args, **kwargs)
+                    evidence = getattr(current_tool, "_context_evidence", None)
+                    if not evidence:
+                        tool_input = args[0] if args and isinstance(args[0], dict) else None
+                        evidence = context_evidence_from_tool_result(current_tool, result, tool_input)
+                    if evidence:
+                        # Native ToolNode may execute several tool calls in
+                        # parallel. Keep each ToolMessage scoped to its own
+                        # evidence; otherwise the second result repeats all
+                        # evidence already returned by the first result.
+                        async with assembly_lock:
+                            evidence_for_message = list(evidence)
+                            current_tool._context_evidence = []
+                            if pending_shared_evidence:
+                                evidence_for_message.extend(pending_shared_evidence)
+                                pending_shared_evidence.clear()
+                            if not loaded_annotations and self._context_evidence_loader:
+                                extra = self._context_evidence_loader()
+                                if inspect.isawaitable(extra):
+                                    extra = await extra
+                                evidence_for_message.extend(extra or [])
+                                loaded_annotations = True
+                            assembled = await assembler.assemble(
+                                evidence_for_message,
+                                query=self._context_query,
+                                base_text=self._context_base_text,
+                                triggered_by=[current_tool.name],
+                            )
+                        current_tool._context_assembly_stats = {
+                            "triggered_by": assembled.triggered_by,
+                            "evidence_count": len(assembled.evidence),
+                            "compressed_count": len(assembled.compressed_evidence_keys),
+                            "dropped_count": len(assembled.dropped_evidence),
+                            "estimated_tokens": assembled.estimated_tokens,
+                        }
+                        if assembled.context_text:
+                            logger.info(
+                                "[上下文组装] 已注入 ToolMessage | "
+                                f"工具={current_tool.name} | 证据={len(assembled.evidence)} | "
+                                f"压缩={len(assembled.compressed_evidence_keys)} | "
+                                f"删除={len(assembled.dropped_evidence)} | "
+                                f"证据估算={assembled.estimated_tokens}/{self._evidence_max_tokens} token"
+                            )
+                            if isinstance(result, ToolMessage):
+                                return result.model_copy(
+                                    update={"content": assembled.context_text}
+                                )
+                            logger.warning(
+                                "[上下文组装] 原生工具返回值不是 ToolMessage，"
+                                "无法安全替换注入内容 | "
+                                f"工具={current_tool.name} | 类型={type(result).__name__}"
+                            )
+                            return result
+                    logger.info(
+                        "[上下文组装] 原生 Function Call 工具未产生可组装证据 | "
+                        f"工具={current_tool.name} | 保留原始工具结果"
+                    )
+                    return result
+                return wrapped
+            object.__setattr__(tool, "ainvoke", make_ainvoke(tool, original_ainvoke))
 
     def _wrap_tools_with_call_limit(self, max_calls: int) -> None:
         """为每个工具包裹调用次数限制
@@ -640,11 +748,17 @@ class LangChainAgent:
             t_name = getattr(t, "name", None)
             if t_name == tool_name:
                 sources = getattr(t, "_last_sources", None)
+                context_stats = getattr(t, "_context_assembly_stats", None)
                 if sources:
                     if not node.get("meta"):
                         node["meta"] = {}
                     node["meta"]["sources"] = sources
                     t._last_sources = []
+                if context_stats:
+                    if not node.get("meta"):
+                        node["meta"] = {}
+                    node["meta"]["context_assembly"] = context_stats
+                    t._context_assembly_stats = None
                 break
 
     async def chat(
