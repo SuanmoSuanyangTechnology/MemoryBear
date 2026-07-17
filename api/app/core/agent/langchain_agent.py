@@ -460,13 +460,6 @@ class LangChainAgent:
                             "estimated_tokens": assembled.estimated_tokens,
                         }
                         if assembled.context_text:
-                            logger.info(
-                                "[上下文组装] 已注入 ToolMessage | "
-                                f"工具={current_tool.name} | 证据={len(assembled.evidence)} | "
-                                f"压缩={len(assembled.compressed_evidence_keys)} | "
-                                f"删除={len(assembled.dropped_evidence)} | "
-                                f"证据估算={assembled.estimated_tokens}/{self._evidence_max_tokens} token"
-                            )
                             if isinstance(result, ToolMessage):
                                 return result.model_copy(
                                     update={"content": assembled.context_text}

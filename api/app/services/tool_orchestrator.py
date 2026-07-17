@@ -400,13 +400,6 @@ class ToolOrchestrator:
                 )
                 if assembled.context_text:
                     observation = assembled.context_text
-                    logger.info(
-                        "[上下文组装] 已注入 ReAct Observation | "
-                        f"工具={action} | 证据={len(assembled.evidence)} | "
-                        f"压缩={len(assembled.compressed_evidence_keys)} | "
-                        f"删除={len(assembled.dropped_evidence)} | "
-                        f"证据估算={assembled.estimated_tokens}/{self.context_assembler.evidence_max_tokens} token"
-                    )
                 else:
                     observation = "[外部上下文未注入：组装后为空，避免回退发送原始大段工具结果]"
                     logger.warning(
