@@ -168,6 +168,10 @@ async def _generate_perceptual_snapshots(
 ) -> list[PerceptualEntry]:
     """遍历 messages 中的 files，生成感知记忆内存快照（persist=False）。
 
+    **涵盖范围**：仅处理 `role == "user"` 的消息。assistant 挂的 files 不生成感知记忆、
+    不参与 SSE 事件、不注入到任何 content——与本文件 pilot 阶段的“仅对 user 消息
+    执行完整萃取”语义一致（assistant 消息仅作为上下文）。
+
     优化点：
     1. **共享 session 批解析 URL**：所有 `local_file` 的 URL 解析集中在一个
        `get_db_read()` session 内完成；`remote_url` 无需 DB。
@@ -181,15 +185,19 @@ async def _generate_perceptual_snapshots(
     from app.services.multimodal_service import MultimodalService
 
     # ── Phase 1: 批量解析 URL（一次 session 内完成，remote_url 无需 DB）──
+    # 注意：仅遍历 user 消息，assistant 消息的 files 直接忽略。
     resolved_files: list[tuple[int, WriteMessageItem, FileInput, str]] = []
     needs_db = any(
         f.transfer_method != TransferMethod.REMOTE_URL
         for msg in messages
+        if msg.role == "user"
         for f in (msg.files or [])
     )
 
     async def _collect_urls(mm_service: Optional[MultimodalService]) -> None:
         for msg_idx, msg in enumerate(messages):
+            if msg.role != "user":
+                continue  # 仅 user 消息参与感知记忆；assistant files 不处理
             if not msg.files:
                 continue
             for file in msg.files:
@@ -370,6 +378,69 @@ async def _run_pruning(
         return [dialog], failed_stats
 
 
+# ═════════════════════════════════════════════════════════════════
+# Helper: user-only 拆分（user 为抽取目标，assistant 为上下文）
+# ═════════════════════════════════════════════════════════════════
+
+def _split_user_and_context(dialog: DialogData) -> DialogData:
+    """将对话拆分为“user 抽取目标” + “全对话上下文”。
+
+    拆分语义对齐 write_pipeline：user 消息参与完整萃取链路（分块 -> 陈述句 ->
+    三元组），assistant 消息仅作为 supporting_context 供陈述句抽取时的代词/背景解析。
+
+    具体处理：
+    - `dialog.context.msgs` 仅保留 `role == "user"` 的消息，且 role 就地改为中文 "用户"
+      （对齐 chunker 内部 `Chunk(content=f"{role}: ...", speaker=role)` 的中文 prompt 约束）。
+    - `dialog.metadata["supporting_context"] = {"before_msgs": [全对话中文化 MessageItem], "after_msgs": []}`，
+      全部放到 before_msgs（与 orchestrator fallback “全对话已经发生”的语义一致）。
+    - `dialog.content` 保持不变（上游未赋值，且 orchestrator 优先读 metadata）。
+
+    前置条件：`dialog.context.msgs` 内容为英文 role（"user"/"assistant"），与前置
+    剪枝阶段的 SemanticPruner 配对预期一致。
+
+    Raises:
+        ValueError: 拆分后 user 消息为空（无抽取目标）。
+    """
+    from app.core.memory.storage_services.extraction_engine.steps.schema.extraction_step_schema import (
+        MessageItem,
+    )
+
+    if not (dialog.context and dialog.context.msgs):
+        raise ValueError("pilot run 拆分失败：dialog.context.msgs 为空")
+
+    original_msgs = list(dialog.context.msgs)
+
+    # 构建“全对话上下文”（保序，user+assistant 交错，中文 role）
+    before_msgs = [
+        MessageItem(
+            role=_ROLE_TO_CN.get(m.role, m.role),
+            msg=m.msg,
+        )
+        for m in original_msgs
+        if (m.msg or "").strip()
+    ]
+
+    # 提取 user 消息，就地改中文 role
+    user_msgs = [m for m in original_msgs if m.role == "user"]
+    if not user_msgs:
+        raise ValueError("pilot run 拆分失败：对话中不存在 user 消息，无可抽取目标")
+    for m in user_msgs:
+        m.role = _ROLE_TO_CN.get(m.role, m.role)  # "user" -> "用户"
+
+    dialog.context.msgs = user_msgs
+    if dialog.metadata is None:
+        dialog.metadata = {}
+    dialog.metadata["supporting_context"] = {
+        "before_msgs": before_msgs,
+        "after_msgs": [],
+    }
+    logger.info(
+        f"[PILOT_RUN] user-only 拆分完成：user={len(user_msgs)}, "
+        f"context_msgs={len(before_msgs)}"
+    )
+    return dialog
+
+
 # ════════════════════════════════════════════════════════════════════
 # Helper: 语义分块子流程
 # ════════════════════════════════════════════════════════════════════
@@ -497,6 +568,10 @@ async def run_pilot_extraction(
         if not conv_msgs:
             raise ValueError("messages 为空或所有消息内容为空")
 
+        # 前置校验：pilot 阶段仅对 user 消息执行完整萃取，必须存在至少一条 user 消息。
+        if not any(m.role == "user" for m in conv_msgs):
+            raise ValueError("messages 中不存在 user 消息，pilot run 无可萃取目标")
+
         dialog = DialogData(
             context=ConversationContext(msgs=conv_msgs),
             ref_id="pilot_dialog_1",
@@ -512,11 +587,12 @@ async def run_pilot_extraction(
         else:
             pruned_dialogs = [dialog]
 
-        # 将 role 转为中文（downstream chunker/pipeline 要求）
-        for dlg in pruned_dialogs:
-            if dlg.context and dlg.context.msgs:
-                for msg in dlg.context.msgs:
-                    msg.role = _ROLE_TO_CN.get(msg.role, msg.role)
+        # ── 步骤 2.1.5: user-only 拆分（user=抽取目标 / 全对话=上下文）────────
+        # 语义对齐 write_pipeline：仅 user 参与完整萃取链路；assistant 进 supporting_context。
+        # 剪枝完后可能把 user 删空（剪枝失败 fallback 回退到原 dialog，empty_fallback 也走原 dialog），
+        # 在 helper 内部也会再次校验且抛 ValueError。
+        for pruned in pruned_dialogs:
+            _split_user_and_context(pruned)
 
         # ── 步骤 2.2: 语义分块 ────────────────────────────────────────────
         chunked_dialogs = await _run_chunking(pruned_dialogs, memory_config, llm_client, emit)
