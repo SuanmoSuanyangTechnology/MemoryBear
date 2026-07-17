@@ -3379,6 +3379,45 @@
         }
       }
     },
+    "/v1/memory/read/internal": {
+      "post": {
+        "tags": [
+          "V1 - Memory API"
+        ],
+        "summary": "Read Memory Internal",
+        "description": "Read memory synchronously (internal).\n\nRequires API Key with 'memory' scope.\nExtended version of /read/sync that supports `include` (Neo4j node types filter)\nand `limit` (max memories to return).",
+        "operationId": "read_memory_internal_v1_memory_read_internal_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_read_memory_internal_v1_memory_read_internal_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/write": {
       "post": {
         "tags": [
@@ -7179,6 +7218,20 @@
           "platform"
         ],
         "title": "Body_import_workflow_config_api_apps_workflow_import_post"
+      },
+      "Body_read_memory_internal_v1_memory_read_internal_post": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "body_placeholder": {
+            "type": "string",
+            "title": "Body Placeholder",
+            "description": "Placeholder - actual body parsed via request.json()"
+          }
+        },
+        "type": "object",
+        "title": "Body_read_memory_internal_v1_memory_read_internal_post"
       },
       "Body_read_memory_sync_v1_memory_read_sync_post": {
         "properties": {

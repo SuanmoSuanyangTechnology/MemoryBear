@@ -169,3 +169,32 @@ class AnnotationService:
         except Exception as e:
             logger.error(f"标注匹配失败: {e}")
             return None
+
+    @staticmethod
+    def find_context_candidates(query: str, annotations: List[AppAnnotation],
+                                model_config: Optional[RedBearModelConfig] = None,
+                                threshold: float = 0.6, top_k: int = 3) -> List[dict]:
+        """查找可作为外部上下文的标注，不记录直接命中。"""
+        if not annotations or not model_config or top_k <= 0:
+            return []
+        try:
+            query_embedding = AnnotationService.generate_embedding(query, model_config)
+            candidates = []
+            for annotation in annotations:
+                if not annotation.embedding:
+                    continue
+                similarity = AnnotationService.cosine_similarity(query_embedding, annotation.embedding)
+                if similarity >= threshold:
+                    candidates.append({
+                        "annotation_id": str(annotation.id),
+                        "question": annotation.question,
+                        "answer": annotation.answer,
+                        "similarity": similarity,
+                        "created_at": annotation.created_at.isoformat() if annotation.created_at else None,
+                        "updated_at": annotation.updated_at.isoformat() if annotation.updated_at else None,
+                    })
+            candidates.sort(key=lambda item: item["similarity"], reverse=True)
+            return candidates[:top_k]
+        except Exception as e:
+            logger.error(f"标注上下文候选查询失败: {e}")
+            return []
