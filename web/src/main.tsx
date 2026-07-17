@@ -20,10 +20,12 @@ document.addEventListener('animationstart', (e) => {
   }
 })
 
-// After a new release, old dynamic chunk files are deleted; force a page reload on preload error
-window.addEventListener('vite:preloadError', () => {
-  console.warn('New version detected, reloading page to load latest assets...')
-  window.location.reload()
+// After a new release, old dynamic chunk files are deleted, triggering a preload
+// error. Do NOT force a full-page reload here (it would wipe the sidebar menu).
+// Instead, let the error propagate to the route-level ErrorBoundary, which shows
+// an in-place fallback in the content area while keeping the menu visible.
+window.addEventListener('vite:preloadError', (event) => {
+  console.warn('Asset preload failed (possibly a new version was deployed).', event)
 })
 
 createRoot(document.getElementById('root')!)

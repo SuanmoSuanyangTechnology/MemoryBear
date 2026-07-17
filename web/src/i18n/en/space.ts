@@ -348,6 +348,9 @@ export const space = {
       loadingEmptyDesc: 'Your content is on its way by rocket! It will soon land on your screen',
       pageEmpty: 'Oops！ No search results available at the moment',
       pageEmptyDesc: "Red Bear tilts its head and waits for you to change a new keyword, let's explore together.",
+      loadError: 'Failed to load page',
+      loadErrorDesc: 'A new version or network issue was detected. Please reload.',
+      reload: 'Reload',
     },
     apiKey: {
       name: 'Project Name',
