@@ -59,6 +59,11 @@ def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def chunk_content_sha256(chunk: dict[str, Any]) -> str:
+    content = str(chunk.get("page_content") or "")
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         value = json.load(handle)
@@ -241,9 +246,16 @@ def normalize_snapshot_chunk(
     }
 
 
-def corpus_hash_payload(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+def corpus_hash_payload(
+    snapshot: dict[str, Any], *, recompute_content_hashes: bool = False
+) -> list[dict[str, Any]]:
     rows = []
     for chunk in snapshot.get("chunks") or []:
+        content_sha256 = (
+            chunk_content_sha256(chunk)
+            if recompute_content_hashes
+            else chunk.get("content_sha256")
+        )
         rows.append(
             {
                 "knowledge_id": chunk.get("knowledge_id"),
@@ -254,10 +266,31 @@ def corpus_hash_payload(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "parent_id": chunk.get("parent_id"),
                 "source_chunk_id": chunk.get("source_chunk_id"),
                 "sort_id": chunk.get("sort_id"),
-                "content_sha256": chunk.get("content_sha256"),
+                "content_sha256": content_sha256,
             }
         )
     return sorted(rows, key=canonical_json)
+
+
+def validate_snapshot_integrity(snapshot: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    chunks = snapshot.get("chunks") or []
+    if not isinstance(chunks, list):
+        return ["snapshot chunks must be a list"]
+    for index, chunk in enumerate(chunks, start=1):
+        if not isinstance(chunk, dict):
+            errors.append(f"snapshot chunk[{index}] must be an object")
+            continue
+        stored_hash = str(chunk.get("content_sha256") or "")
+        actual_hash = chunk_content_sha256(chunk)
+        if stored_hash != actual_hash:
+            errors.append(f"snapshot chunk[{index}] content_sha256 mismatch")
+    expected_hash = sha256_json(
+        corpus_hash_payload(snapshot, recompute_content_hashes=True)
+    )
+    if snapshot.get("physical_corpus_sha256") != expected_hash:
+        errors.append("snapshot physical_corpus_sha256 mismatch")
+    return errors
 
 
 def snapshot_command(args: argparse.Namespace) -> int:
@@ -559,9 +592,11 @@ def build_generated_case(
 
 def generate_command(args: argparse.Namespace) -> int:
     snapshot = read_json(args.snapshot)
-    expected_hash = sha256_json(corpus_hash_payload(snapshot))
-    if snapshot.get("physical_corpus_sha256") != expected_hash:
-        raise EvaluationError("Snapshot content does not match physical_corpus_sha256")
+    snapshot_errors = validate_snapshot_integrity(snapshot)
+    if snapshot_errors:
+        raise EvaluationError(
+            "Snapshot validation failed:\n" + "\n".join(snapshot_errors)
+        )
     sources = eligible_source_chunks(snapshot)
     if not sources:
         raise EvaluationError("Snapshot has no eligible non-QA source chunks")
@@ -662,6 +697,8 @@ def validate_cases(
     cases: list[dict[str, Any]], snapshot: dict[str, Any] | None = None
 ) -> list[str]:
     errors: list[str] = []
+    if snapshot is not None:
+        errors.extend(validate_snapshot_integrity(snapshot))
     if not cases:
         errors.append("dataset is empty")
         return errors
