@@ -36,6 +36,16 @@ export const billingUnits = [
     icon: 'end_user',
   },
   {
+    key: 'end_user_memory_limit',
+    unit: 'pcs', placeholder: 'numberPlaceholder',
+    icon: 'api_ops',
+  },
+  {
+    key: 'pre_user_memory_write_qps_limit',
+    unit: 'ops', placeholder: 'numberPlaceholder',
+    icon: 'api_ops',
+  },
+  {
     key: 'ontology_project_quota',
     unit: 'pcs', placeholder: 'numberPlaceholder',
     icon: 'ontology',
@@ -48,16 +58,6 @@ export const billingUnits = [
   {
     key: 'api_ops_rate_limit',
     unit: 'ops', placeholder: 'numberPlaceholder',
-    icon: 'api_ops',
-  },
-  {
-    key: 'pre_user_memory_write_qps_limit',
-    unit: 'ops', placeholder: 'numberPlaceholder',
-    icon: 'api_ops',
-  },
-  {
-    key: 'end_user_memory_limit',
-    unit: 'pcs', placeholder: 'numberPlaceholder',
     icon: 'api_ops',
   },
 ]
