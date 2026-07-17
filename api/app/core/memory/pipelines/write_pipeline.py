@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
@@ -121,6 +122,26 @@ def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: s
         })
 
     return result
+
+
+@dataclass
+class _PerceptualSnapshot:
+    """MemoryPerceptualModel 的 Session 无关快照。
+
+    在 _preprocess_files 内部（DB Session 活跃期）从 ORM 实例拷贝生成，
+    切断与 SQLAlchemy Session 的绑定；供下游异步步骤（如 graph_build_step）
+    安全访问属性。
+    """
+
+    id: Any
+    end_user_id: str
+    perceptual_type: str
+    file_path: str
+    file_name: str
+    file_ext: str
+    summary: str
+    meta_data: Any
+    created_time: Any
 
 
 class ExtractionResult(BaseModel):
@@ -952,7 +973,7 @@ class WritePipeline:
         from app.db import get_db_context
         from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
         from app.schemas.app_schema import FileInput
-        from app.services.memory_perceptual_service import MemoryPerceptualService, _PerceptualSnapshot
+        from app.services.memory_perceptual_service import MemoryPerceptualService
 
         for msg in messages:
             files = msg.get("files") or []

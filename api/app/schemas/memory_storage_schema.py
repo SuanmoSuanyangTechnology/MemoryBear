@@ -343,7 +343,7 @@ class ConfigUpdateForget(BaseModel):  # 更新遗忘引擎配置参数时使用�
     offset: Optional[float] = Field(0.0, ge=0.0, le=1.0, description="偏移度，0-1 小数；默认 0.0")
 
 
-class PilotRunInput(BaseModel):  # v0.3.13 试运行触发请求模型（QA 消息格式）
+class PilotRunInput(BaseModel):  # 试运行触发请求模型（QA 消息格式）
     """试运行请求 — QA 格式输入。
 
     与 /api/memory-storage/write 使用同一 messages 结构，避免两套输入解析逻辑。

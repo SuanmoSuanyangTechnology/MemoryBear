@@ -196,12 +196,6 @@ def analyze_entity_merges(
     ]
 
 
-def analyze_entity_disambiguation(
-    disamb_records: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Return disambiguation records (pass-through)."""
-    return disamb_records if disamb_records else []
-
 
 def parse_dedup_report(
     merge_records: List[Dict[str, Any]],
@@ -304,8 +298,6 @@ async def send_dedup_progress_callback(
                 "total_merges": dedup_details.get("total_merges", 0),
             },
         }
-
-        # v0.3.13: 事件重命名 dedup_disambiguation_complete → dedup_complete，下线实体消歧推送
         await progress_callback("dedup_complete", "去重完成", dedup_stats)
     except Exception as e:
         logger.error("发送去重消歧进度回调失败: %s", e, exc_info=True)
@@ -360,7 +352,7 @@ async def run_dedup(
     logger.info("开始第一层实体去重")
 
     if progress_callback:
-        await progress_callback("deduplication", "正在去重消歧...")
+        await progress_callback("deduplication", "正在去重合并...")
 
     logger.info(
         "去重前: %d 个实体节点, %d 条陈述句-实体边, %d 条实体-实体边",
@@ -424,11 +416,7 @@ async def run_dedup(
                         f"{detail['main_entity_name']}合并{detail['merged_count']}个：相似实体已合并"
                     ),
                 }
-                # v0.3.13: 事件重命名 dedup_disambiguation_result → dedup_result
-                await progress_callback("dedup_result", "实体去重中", dedup_result)
-
-            # v0.3.13: 下线实体消歧 API，移除 entity_disambiguation 子事件推送（
-            # analyze_entity_disambiguation 函数保留，仅不再以 SSE 向外推送）
+                await progress_callback("dedup_result", "实体去重合并中", dedup_result)
 
             await send_dedup_progress_callback(
                 progress_callback,

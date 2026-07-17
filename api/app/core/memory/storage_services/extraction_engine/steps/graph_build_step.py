@@ -125,11 +125,8 @@ async def build_graph_nodes_and_edges(
 
     entity_id_set: set = set()
     perceptual_id_set: set = set()
-    total_dialogs = len(dialog_data_list)
     processed_dialogs = 0
 
-    if progress_callback:
-        await progress_callback("creating_nodes_edges", "正在创建节点和边", {"total_dialogs": total_dialogs})
 
     for dialog_data in dialog_data_list:
         processed_dialogs += 1
@@ -300,22 +297,6 @@ async def build_graph_nodes_and_edges(
                         entity_nodes.append(entity_node)
                         entity_id_set.add(entity.id)
 
-                        # v0.3.13: 新增 entity_creation 子事件（与 relationship_creation 共享同一事件名 creating_nodes_edges_result）
-                        if progress_callback and len(entity_nodes) <= 20:
-                            entity_result = {
-                                "result_type": "entity_creation",
-                                "entity_index": len(entity_nodes),
-                                "name": entity_node.name,
-                                "type": entity_node.entity_type,
-                                "description": entity_node.description,
-                                "dialog_progress": f"{processed_dialogs}/{total_dialogs}",
-                            }
-                            await progress_callback(
-                                "creating_nodes_edges_result",
-                                f"实体创建中 ({processed_dialogs}/{total_dialogs})",
-                                entity_result,
-                            )
-
                     entity_connect_strength = getattr(entity, "connect_strength", "Strong")
                     stmt_entity_edges.append(
                         StatementEntityEdge(
@@ -356,22 +337,6 @@ async def build_graph_nodes_and_edges(
                                 invalid_at=_tv.invalid_at if _tv else None,
                             )
                         )
-
-                        if progress_callback and len(entity_entity_edges) <= 10:
-                            relationship_result = {
-                                "result_type": "relationship_creation",
-                                "relationship_index": len(entity_entity_edges),
-                                "source_entity": triplet.subject_name,
-                                "relation_type": triplet.predicate,
-                                "target_entity": triplet.object_name,
-                                "relationship_text": f"{triplet.subject_name} -[{triplet.predicate}]-> {triplet.object_name}",
-                                "dialog_progress": f"{processed_dialogs}/{total_dialogs}",
-                            }
-                            await progress_callback(
-                                "creating_nodes_edges_result",
-                                f"关系创建中 ({processed_dialogs}/{total_dialogs})",
-                                relationship_result,
-                            )
                     else:
                         missing_subject = "subject" if not subject_entity_id else ""
                         missing_object = "object" if not object_entity_id else ""
@@ -492,18 +457,6 @@ async def build_graph_nodes_and_edges(
             f"原始节点: {len(assistant_original_nodes)}, "
             f"剪枝节点: {len(assistant_pruned_nodes)}"
         )
-
-    if progress_callback:
-        nodes_edges_stats = {
-            "dialogue_nodes_count": len(dialogue_nodes),
-            "chunk_nodes_count": len(chunk_nodes),
-            "statement_nodes_count": len(statement_nodes),
-            "entity_nodes_count": len(entity_nodes),
-            "statement_chunk_edges_count": len(stmt_chunk_edges),
-            "statement_entity_edges_count": len(stmt_entity_edges),
-            "entity_entity_edges_count": len(entity_entity_edges),
-        }
-        await progress_callback("creating_nodes_edges_complete", "创建节点和边完成", nodes_edges_stats)
 
     return GraphBuildResult(
         dialogue_nodes=dialogue_nodes,
