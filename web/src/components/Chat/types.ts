@@ -36,6 +36,11 @@ export interface ChatItem {
     error?: string;
     waiting_human?: boolean;
     execution_id?: string;
+    outputs?: {
+      status?: string;
+      content: string;
+      node_id: string;
+    }[]
   },
   version?: number;
   is_current?: boolean;
@@ -79,6 +84,8 @@ export interface Intervention {
 export interface ChatProps extends Omit<ChatContentProps, 'onSend'> {
   /** Input content change callback */
   onChange: (message: string) => void;
+  /** Current input message (controlled; clearing it empties the input box) */
+  message?: string;
   /** Send message callback */
   onSend: () => void;
   /** Loading state */

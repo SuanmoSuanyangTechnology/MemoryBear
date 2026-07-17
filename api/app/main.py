@@ -119,10 +119,8 @@ async def lifespan(app: FastAPI):
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     await Neo4jConnector.shutdown()
     from app.core.rag.retrieval.async_elasticsearch import AsyncElasticsearchClientProvider
-    from app.core.rag.retrieval.async_models import AsyncRetrievalHttpClientProvider
     from app.core.rag.retrieval.graph_bridge import GraphRetrievalBridge
     await AsyncElasticsearchClientProvider.aclose()
-    await AsyncRetrievalHttpClientProvider.aclose()
     GraphRetrievalBridge.shutdown()
     logger.info("应用程序正在关闭")
 

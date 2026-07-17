@@ -36,6 +36,24 @@ from app.services.prompt import prompt_manager
 business_logger = get_business_logger()
 
 
+class _PerceptualSnapshot:
+    """感知记忆内存快照（不持久化）。
+
+    字段与 MemoryPerceptualModel 对齐，用于试运行等无需写库的场景。
+    调用方按属性访问即可（.summary / .meta_data / .file_name 等）。
+    与写入主流程（WritePipeline._preprocess_files）共用。
+    """
+    __slots__ = (
+        "id", "end_user_id", "perceptual_type",
+        "file_path", "file_name", "file_ext",
+        "summary", "meta_data", "created_time",
+    )
+
+    def __init__(self, **kwargs):
+        for k in self.__slots__:
+            setattr(self, k, kwargs.get(k))
+
+
 class MemoryPerceptualService:
     def __init__(self, db: Session):
         self.db = db
@@ -254,12 +272,24 @@ class MemoryPerceptualService:
             memory_config: MemoryConfig,
             file: FileInput,
             content: str | None = None,
+            persist: bool = True,
     ):
-        with get_db_read() as db:
-            end_user = get_end_user_by_id(db, end_user_id)
-            workspace_id = end_user.workspace_id
-            workspace = get_workspace_by_id(db, workspace_id)
-            tenant_id = workspace.tenant_id
+        """生成感知记忆。
+
+        参数：
+            persist=True  — 默认，写入 memory_perceptual 表，返回 MemoryPerceptualModel。
+            persist=False — 试运行场景，不写库，返回 _PerceptualSnapshot 实例。
+                            同时绕开 end_user → workspace → tenant_id 的 DB 查询，
+                            直接从 memory_config.tenant_id 取。
+        """
+        if persist:
+            with get_db_read() as db:
+                end_user = get_end_user_by_id(db, end_user_id)
+                workspace_id = end_user.workspace_id
+                workspace = get_workspace_by_id(db, workspace_id)
+                tenant_id = workspace.tenant_id
+        else:
+            tenant_id = memory_config.tenant_id
         llm, model_config = self._get_mutlimodal_client(file.type, memory_config, tenant_id)
         if model_config is None or llm is None:
             return None
@@ -360,6 +390,22 @@ class MemoryPerceptualService:
             file_modalities = {
                 "speaker_count": content.get("speaker_count", 0)
             }
+        if not persist:
+            # 试运行：返回内存快照，不写库
+            return _PerceptualSnapshot(
+                id=None,
+                end_user_id=end_user_id,
+                perceptual_type=PerceptualType.trans_from_file_type(file.type),
+                file_path=file.url,
+                file_name=filename,
+                file_ext=file_ext,
+                summary=content.get("summary", ""),
+                meta_data={
+                    "content": file_content,
+                    "modalities": file_modalities,
+                },
+                created_time=None,
+            )
         memory = self.repository.create_perceptual_memory(
             end_user_id=uuid.UUID(end_user_id),
             perceptual_type=PerceptualType.trans_from_file_type(file.type),

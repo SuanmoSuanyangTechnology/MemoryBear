@@ -378,6 +378,8 @@ export const applicationPart1 = {
       add_questions: 'Add Option',
       citation: 'Citation and Attribution',
       citation_desc: 'Display the attribution of source documents and generated content',
+      multi_answer_mode: 'Multi-answer Reply',
+      multi_answer_mode_desc: 'Display content from multiple output nodes as separate segments within a single reply',
       allow_download: 'Allow downloading cited source text',
       invalidVariablesTitle: "The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?",
       deep_thinking: 'Enable Deep Thinking',

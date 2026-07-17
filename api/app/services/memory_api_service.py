@@ -129,7 +129,7 @@ class MemoryAPIService:
         except Exception as e:
             logger.warning(f"Failed to update memory_config_id for end_user {end_user_id}: {e}")
 
-    def write_memory( #TODO(乐力齐):[910]清除旧有无用代码(v0.3.14)
+    async def write_memory( #TODO(乐力齐):[910]清除旧有无用代码(v0.3.14)
             self,
             workspace_id: uuid.UUID,
             end_user_id: str,
@@ -178,7 +178,7 @@ class MemoryAPIService:
         #     storage_type,
         #     user_rag_memory_id or "",
         # )
-        task_id = scheduler.push_task(
+        task_id = await scheduler.push_task(
             "app.core.memory.agent.write_message",
             end_user_id,
             {

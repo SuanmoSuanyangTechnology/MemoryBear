@@ -70,8 +70,8 @@ export const space = {
       extractTheNumberOfEntities: '提取实体数量',
       extractTheNumberOfEntitiesDesc: '去重后合并：{{num}}（精确：{{exact}}，模糊：{{fuzzy}}，LLM：{{llm}}）',
 
-      numberOfEntityDisambiguation: '实体消歧数量',
-      numberOfEntityDisambiguationDesc: '总计{{num}}次（阻止：{{block_count}}）',
+      perceptualMemory: '感知记忆',
+      perceptualMemoryDesc: '共{{num}}条感知记忆',
 
       memoryFragments: '记忆片段',
       memoryFragmentsDesc: '按段落+语义分割',
@@ -93,6 +93,7 @@ export const space = {
       sentenceChunker: '句子分块器',
       lateChunker: '延迟分块器',
       debug: '调试',
+      clearChat: '清空',
       model: '模型',
       chunkerStrategy: '分块策略',
       chunkerStrategyDesc: '选择分块策略。',
@@ -139,23 +140,7 @@ export const space = {
       extractRelationalTriples: '提取的关系三元组（部分）',
       extractRelationalTriplesDesc: '共有{{count}}个具有明确语义边界的片段',
       theEffectOfEntityDisambiguationLLMDriven: '实体消歧的效果（LLM驱动）',
-      exampleText: `学生：宋朝军事弱势的根源是什么？
-记忆熊：宋朝军事弱势主要源于制度性因素：禁军由文官控制导致作战效率低下，厢军装备不足；军费长期占财政支出一半以上，持续战争加剧财政压力，反向制约军力发展；对外战略被动，缺乏战略纵深且机动能力弱；文官集团压制武将，军权分散，军事专业化难以提升。
 
-学生：我对财政压力与军力不足的关系表示困惑。
-记忆熊：简单说，宋朝军费占财政一半以上，钱越花越多，仗却越打越输。财政被军费拖垮后，朝廷只能削减装备、裁撤兵员，结果军队更弱，打仗更吃亏，又要再花钱募兵，形成恶性循环。
-
-学生：废除丞相制度后，官僚体系到底出了什么问题？
-记忆熊：废除丞相制度导致官僚体系僵化，主要表现为：中央决策高度集中于皇帝，降低行政效率；六部之间失去丞相作为协调中枢，缺乏协作机制，政令推行困难；厂卫机构如锦衣卫、东厂、西厂填补部分职能，但侧重监督，加剧行政紧张；官员通过科举选拔，多为文士出身，缺乏系统行政训练与专业分工。
-
-学生：我对"六部缺乏协调机制"的具体影响表示理解不足。
-记忆熊：原来丞相相当于"总理"，六部像今天的各部委，大事小情由他统筹。废丞相后，六部直接对皇帝，皇帝一人批不完，部就互相踢皮球。比如打仗，兵部要银子，户部说没有，工部说武器没材料，没人拍板，战事就拖延。
-
-学生：我在复习春秋战国史，对秦国为何能统一六国表示疑问，认为其他国家也较强。
-记忆熊：秦国统一的原因包括：商鞅变法彻底，建立法律、户籍和军功爵制度，提升国家组织能力；旧贵族势力弱，中央集权程度高；关中地理优越，资源丰富且易守难攻；从孝公到秦始皇政策连续性强。
-
-学生：那我换到唐朝史：安史之乱后，中央已开始整顿，为何藩镇割据反而加剧？
-记忆熊：安史之乱后藩镇割据加剧的原因包括：节度使掌握募兵权、财政调度权与军事指挥权，形成地方军阀；中央财政因均田制瓦解和租庸调失效而衰退，难以支撑军队，导致地方军事力量依附节度使；募兵制使士兵效忠个人而非国家；宦官掌控禁军，文官集团失势，中央制衡能力削弱。`,
       warning: '当您修改左侧的配置项后，点击【调试】，提取结论将在此处实时更新',
       processing: '配置已更新，正在重新萃取示例记忆...',
       success: '记忆萃取完成！',
@@ -177,6 +162,9 @@ export const space = {
       creating_nodes_edges_desc: '实体关系创建完成，共{{num}}条关系',
       deduplication_desc: '去重消歧完成，最终{{count}}个唯一实体',
       custom_text: '调试文本',
+      chatPlaceholder: '输入调试文本，发送后查看 AI 回复',
+      chatEmpty: '发送一条消息，开始调试对话',
+      debugReply: '好的,已根据当前配置对该图文进行记忆萃取,点击右上角「调试」查看提取过程与结果。',
       ontologyCoverage: '本体类型',
       entity_total: '一共{{num}}个实体',
       scene_type_distribution: '场景类型',
@@ -186,6 +174,32 @@ export const space = {
       Pruned: '已剪枝',
       pruning: '剪枝',
       pruning_desc: '文本剪枝{{count}}个片段',
+
+      pruning_result_title: '剪枝',
+      chunking_result_title: '分块',
+      statement_result_title: '陈述句提取',
+      triplet_result_title: '三元组提取',
+      perceptual_result_title: '感知记忆提取',
+      dedup_result_title: '去重',
+      pruning_result_desc: 'Assistant 长文本已压缩为 {{count}} 句记忆提示(hint)，共 {{count}} 条',
+      chunking_result_desc: '共切分为 {{count}} 个分块(total_chunks)，策略：{{strategy}}',
+      statement_result_desc: '共提取 {{count}} 条陈述句(total_count: {{count}})，完成指代消融与时间提取',
+      triplet_result_desc: '识别实体 {{entity}} 个(entity_count: {{entity}})，关系三元组 {{triplet}} 条(triplet_count: {{triplet}})',
+      perceptual_result_desc: '多模态文件理解完成，共生成 {{count}} 个感知节点(新能力)',
+      dedup_result_desc: '同一轮对话内实体合并：{{before}} → {{after}}(before_count → after_count)，合并 {{pairs}} 对',
+      original_preview: '原文预览',
+      compressedInto: '压缩为',
+      memory_hint: '记忆提示',
+      entities: '实体',
+      triplets: '三元组',
+      merged_pairs: '合并对',
+      mergedIntoOne: '合并为 1 个实体',
+      mergedCount: '合并 {{count}} 个相似实体',
+      perceptualType: '类型',
+      perceptualSummary: '摘要',
+      perceptualTopic: '主题',
+      perceptualDomain: '领域',
+      perceptualKeywords: '关键词',
 
       processData: '处理数据',
       finalResult: '最终结果',

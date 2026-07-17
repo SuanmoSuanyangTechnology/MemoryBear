@@ -6,6 +6,7 @@ import threading
 from typing import Dict, Any, Optional
 
 import redis.asyncio as redis
+import redis as sync_redis
 from redis.asyncio import ConnectionPool
 
 from app.core.config import settings
@@ -76,6 +77,34 @@ def get_thread_safe_redis() -> redis.StrictRedis:
         )
 
     return redis.StrictRedis(connection_pool=_thread_local.pool)
+
+
+# Thread-local storage for sync connection pools (same fork/thread safety semantics).
+_sync_thread_local = threading.local()
+
+
+def get_thread_safe_sync_redis() -> sync_redis.StrictRedis:
+    """Return a **synchronous** Redis client whose connection pool is bound to
+    the current thread and process.
+
+    Designed for use in sync functions (Celery sync tasks, scripts, background
+    threads) that need Redis caching without ``asyncio.run()``.
+    """
+    current_pid = os.getpid()
+
+    if not hasattr(_sync_thread_local, "pool") \
+            or getattr(_sync_thread_local, "pid", None) != current_pid:
+        _sync_thread_local.pid = current_pid
+        _sync_thread_local.pool = sync_redis.ConnectionPool.from_url(
+            _REDIS_URL,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+            max_connections=5,
+            health_check_interval=30,
+        )
+
+    return sync_redis.StrictRedis(connection_pool=_sync_thread_local.pool)
 
 
 async def get_redis_connection():
