@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-03 11:08:34
+ * @Last Modified time: 2026-07-16 12:24:45
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -24,6 +24,7 @@ import type {
 import type { TestParams } from '@/views/MemoryConversation'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
+import type { ChatItem } from '@/components/Chat/types'
 
 // Memory conversation
 export const readService = (query: TestParams) => {
@@ -338,7 +339,7 @@ export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory_config/update_config_extracted', values)
 }
 // Memory Extraction Engine - Pilot run
-export const pilotRunMemoryExtractionConfig = (values: { config_id: string | string; dialogue_text: string; custom_text?: string; }, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+export const pilotRunMemoryExtractionConfig = (values: { config_id: string | string; messages: ChatItem[]; }, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE('/memory-storage/pilot_run', values, onMessage, undefined, onAbort)
 }
 // Emotion Engine - Get configuration

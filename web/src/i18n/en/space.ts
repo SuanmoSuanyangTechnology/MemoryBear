@@ -70,8 +70,8 @@ export const space = {
       extractTheNumberOfEntities: 'Extract the number of entities',
       extractTheNumberOfEntitiesDesc: 'Merge after deduplication: {{num}} (exact: {{exact}}, fuzzy: {{fuzzy}}, LLM: {{llm}})',
 
-      numberOfEntityDisambiguation: 'Number of entity disambiguation',
-      numberOfEntityDisambiguationDesc: 'Total {{num}} times (blocking: {{block_count}})',
+      perceptualMemory: 'Perceptual memory',
+      perceptualMemoryDesc: '{{num}} perceptual memories in total',
 
       memoryFragments: 'Memory fragments',
       memoryFragmentsDesc: 'Split by paragraph + semantics',
@@ -93,6 +93,7 @@ export const space = {
       sentenceChunker: 'Sentence Chunker',
       lateChunker: 'Late Chunker',
       debug: 'Debug',
+      clearChat: 'Clear',
       model: 'Model',
       chunkerStrategy: 'Chunker Strategy',
       chunkerStrategyDesc: 'Choose a partitioning strategy.',
@@ -139,24 +140,6 @@ export const space = {
       extractRelationalTriples: 'Extracted relational triples (partial)',
       extractRelationalTriplesDesc: 'There are a total of {{count}} segments with clear semantic boundaries',
       theEffectOfEntityDisambiguationLLMDriven: 'The effect of entity disambiguation (LLM driven)',
-      exampleText: `Student: What was the root cause of the Song dynasty’s military weakness?
-Memory Bear: The Song dynasty’s military weakness mainly stemmed from institutional factors: the imperial guards were controlled by civil officials, which led to low combat efficiency; the regional armies were poorly equipped; military spending consumed more than half of the national budget for a long time, and constant warfare intensified fiscal pressure, which in turn restricted military development; its foreign strategy was passive, lacking strategic depth and mobility; and the dominance of civil officials suppressed military commanders, dispersing military authority and making it difficult to improve professionalization within the armed forces.
-
-Student: I’m confused about the connection between fiscal pressure and insufficient military strength.
-Memory Bear: Simply put, the Song government spent over half its budget on the military—costs kept rising, but the wars kept going badly. As military expenses dragged down the treasury, the court had to cut equipment and reduce troop numbers, which made the army even weaker. Losing battles meant having to spend more again to recruit troops, creating a vicious cycle.
-
-Student: After the position of chancellor was abolished, what exactly went wrong with the bureaucracy?
-Memory Bear: Abolishing the chancellor led to a rigid bureaucratic system, which manifested in several ways: central decision-making became highly concentrated in the emperor, reducing administrative efficiency; the Six Ministries lost the chancellor as their coordinating hub and lacked mechanisms for inter-departmental cooperation, making policy implementation difficult; surveillance agencies such as the Jinyiwei and the Eastern/Western Depots filled part of the gap, but since their focus was on monitoring and control, they intensified administrative tension; and officials selected through the imperial examination system were mostly scholars lacking systematic administrative training and specialization.
-
-Student: I still don’t fully understand the specific impact of the “lack of coordination among the Six Ministries.”
-Memory Bear: Originally, the chancellor functioned like a modern “prime minister,” and the Six Ministries were like today’s major government departments. Big or small, he coordinated everything. After the position was eliminated, the ministries reported directly to the emperor, but the emperor couldn’t possibly review everything himself, so they started passing responsibility around. For example, in wartime the Ministry of War needed funds, the Ministry of Revenue claimed it had none, and the Ministry of Works said it had no materials for weapons. With no one to make final decisions, military operations stalled.
-
-Student: I’m reviewing the history of the Spring and Autumn and Warring States periods. I’m puzzled as to why Qin was able to unify the Six States, since the others were also strong.
-Memory Bear: Qin succeeded for several reasons: Shang Yang’s reforms were thorough, establishing a legal system, household registration, and a military merit-based rank system that strengthened state capacity; the old aristocracy was weak, which allowed for a high degree of centralization; the Guanzhong region had superior geography—resource-rich, easy to defend, and difficult to invade; and from Duke Xiao to the First Emperor, Qin maintained strong policy continuity.
-
-Student: Then switching to Tang history: after the An Lushan Rebellion, the central government began reforms, so why did regional warlordism (the fanzhen problem) actually get worse?
-Memory Bear: After the rebellion, regional warlordism intensified for several reasons: military governors (jiedushi) held the power to recruit troops, control local finances, and command military forces, effectively becoming regional warlords; the central government’s finances declined due to the breakdown of the equal-field system and the collapse of the tax-labor system, making it increasingly unable to support the army, which pushed military forces to rely on the jiedushi; the recruitment-based military system made soldiers loyal to individual commanders rather than the state; eunuchs controlled the imperial guards, the civil bureaucracy lost influence, and the central government’s ability to balance regional power weakened.
-`,
 
       warning: 'When you modify the configuration items on the left, click [Debug], and the extraction conclusions will be updated in real time here',
       processing: 'Configuration updated, re-extracting sample memory...',
@@ -179,6 +162,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       creating_nodes_edges_desc: 'Entity relationship creation completed, {{num}} relationships in total',
       deduplication_desc: 'Deduplication and disambiguation completed, {{count}} unique entities in total',
       custom_text: 'Debug Text',
+      chatPlaceholder: 'Enter debug text and send to view the AI reply',
+      chatEmpty: 'Send a message to start the debug conversation',
+      debugReply: 'Sure, memory has been extracted from this image and text based on the current configuration. Click "Debug" in the top-right corner to view the extraction process and results.',
       ontologyCoverage: 'Ontology Type',
       entity_total: 'Total {{num}} entities',
       scene_type_distribution: 'Scene Type Distribution',
@@ -188,6 +174,32 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       Pruned: 'Pruned',
       pruning: 'Pruning',
       pruning_desc: 'Text pruning {{count}} fragments',
+
+      pruning_result_title: 'Pruning',
+      chunking_result_title: 'Chunking',
+      statement_result_title: 'Statement Extraction',
+      triplet_result_title: 'Triple Extraction',
+      perceptual_result_title: ' Perception',
+      dedup_result_title: 'Deduplication',
+      pruning_result_desc: 'Assistant compressed text into {{count}} statements ({{count}} fragments)',
+      chunking_result_desc: 'Chunking into {{count}} chunks(total_chunks), strategy: {{strategy}}',
+      statement_result_desc: 'Extracted {{count}} statements(total_count: {{count}}), completed anaphora resolution and time extraction',
+      triplet_result_desc: 'Identified {{entity}} entities(entity_count: {{entity}}), triplets {{triplet}} triples(triplet_count: {{triplet}})',
+      perceptual_result_desc: 'Multimodal file understanding completed, generated a total of {{count}} nodes(new capability)',
+      dedup_result_desc: 'Merged entities {{before}} → {{after}}(before_count → after_count), merged {{pairs}} pairs',
+      original_preview: 'Original Preview',
+      compressedInto: 'Compressed Into',
+      memory_hint: 'Memory Hint',
+      entities: 'Entities',
+      triplets: 'Triples',
+      merged_pairs: 'Merged Pairs',
+      mergedIntoOne: 'Merged into 1 entity',
+      mergedCount: 'Merged entities {{count}} pairs',
+      perceptualType: 'Perceptual Type',
+      perceptualSummary: 'Summary',
+      perceptualTopic: 'Topic',
+      perceptualDomain: 'Domain',
+      perceptualKeywords: 'Keywords',
 
       processData: 'Process Data',
       finalResult: 'Final Result',

@@ -6,6 +6,41 @@ from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, 
 from app.models import ModelProvider
 
 
+_DEFAULT_JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
+_JINA_RERANK_PROVIDERS = frozenset(
+    {
+        ModelProvider.XINFERENCE.value,
+        ModelProvider.GPUSTACK.value,
+        ModelProvider.SPEEDBEAR.value,
+    }
+)
+
+
+def _normalize_jina_rerank_url(base_url: Optional[str]) -> str:
+    if not base_url:
+        return _DEFAULT_JINA_RERANK_URL
+    url = base_url.rstrip("/")
+    if url.endswith("/v1/rerank"):
+        return url
+    if url.endswith("/v1"):
+        return f"{url}/rerank"
+    return f"{url}/v1/rerank"
+
+
+class _EndpointBoundSession:
+    """Route a provider session to one immutable rerank endpoint."""
+
+    def __init__(self, session: Any, endpoint: str) -> None:
+        self._session = session
+        self._endpoint = endpoint
+
+    def post(self, _url: str, **kwargs: Any) -> Any:
+        return self._session.post(self._endpoint, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+
 class RedBearRerank(BaseDocumentCompressor):
     """ Rerank → 作为 Runnable 插入任意 LCEL 链"""
 
@@ -15,12 +50,18 @@ class RedBearRerank(BaseDocumentCompressor):
 
     def _create_model(self, config: RedBearModelConfig):
         """创建内部模型实例"""
+        provider = config.provider.lower()
         model_class = get_provider_rerank_class(config.provider)
         model_params = RedBearModelFactory.get_rerank_model_params(config)
         instance = model_class(**model_params)
+        if provider in _JINA_RERANK_PROVIDERS:
+            instance.session = _EndpointBoundSession(
+                instance.session,
+                _normalize_jina_rerank_url(config.base_url),
+            )
         # DashScopeRerank.validate_environment always overwrites `model` with the
         # default gte_rerank — restore the user-specified model name here.
-        if config.provider.lower() == ModelProvider.DASHSCOPE and hasattr(instance, "model"):
+        if provider == ModelProvider.DASHSCOPE and hasattr(instance, "model"):
             instance.model = config.model_name
         return instance
 
@@ -60,24 +101,7 @@ class RedBearRerank(BaseDocumentCompressor):
             top_n: Optional[int] = -1,
     ) -> List[Dict[str, Any]]:
         provider = self._config.provider.lower()
-        if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.SPEEDBEAR]:
-            import langchain_community.document_compressors.jina_rerank as jina_mod
-
-            # 规范化：如果不以 /v1/rerank 结尾，则补齐；若已以 /v1 结尾，则补 /rerank
-            def _normalize_jina_base(base_url: Optional[str]) -> Optional[str]:
-                if not base_url:
-                    return None
-                url = base_url.rstrip('/')
-                if url.endswith("/v1/rerank"):
-                    return url
-                if url.endswith("/v1"):
-                    return url + "/rerank"
-                return url + "/v1/rerank"
-
-            jina_base = _normalize_jina_base(self._config.base_url)
-            if jina_base:
-                # 设置完整的 rerank 端点，例如 http://host:port/v1/rerank
-                jina_mod.JINA_API_URL = jina_base
+        if provider in _JINA_RERANK_PROVIDERS:
             from langchain_community.document_compressors import JinaRerank
             model_instance: JinaRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)

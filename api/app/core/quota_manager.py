@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_auth_logger
 from app.i18n.exceptions import QuotaExceededError, InternalServerError
+from app.utils.redis_cache import redis_cache
 
 logger = get_auth_logger()
 
@@ -189,10 +190,19 @@ async def get_api_ops_rate_limit_async(db, tenant_id: UUID) -> Optional[int]:
     return None
 
 
+@redis_cache(ttl=300, prefix='quota', skip_args=['db'])
 def get_end_user_memory_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     quota_config = _get_quota_config(db, tenant_id)
     if quota_config:
-        return quota_config.get("end_user_memory_limit", 300)
+        return quota_config.get("end_user_memory_limit")
+    return None
+
+
+@redis_cache(ttl=300, prefix='quota', skip_args=['db'])
+async def get_pre_user_memory_write_ops_limit(db: AsyncSession, tenant_id: UUID) -> Optional[int]:
+    quota_config = await _get_quota_config_async(db, tenant_id)
+    if quota_config:
+        return quota_config.get("pre_user_memory_write_qps_limit")
     return None
 
 

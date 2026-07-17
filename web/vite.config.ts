@@ -41,7 +41,9 @@ const virtualModulePlugin = () => ({
         export const MemoryEngine = FallbackComponent;
         export const DynamicWeightEngine = FallbackComponent;
         export const AssociationEngine = FallbackComponent;
-        export default { BrainView, Provider, ReflectMemory, ReflectLogList, ContextEngine, Account, MemoryEngine, DynamicWeightEngine, AssociationEngine };
+        export const ReflectMemoryRef = {};
+        export const MemoryEvolutionEvent = FallbackComponent;
+        export default { BrainView, Provider, ReflectMemory, ReflectLogList, ContextEngine, Account, MemoryEngine, DynamicWeightEngine, AssociationEngine, ReflectMemoryRef, MemoryEvolutionEvent };
       `
     }
     return null

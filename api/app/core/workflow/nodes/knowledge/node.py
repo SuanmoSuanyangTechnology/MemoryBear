@@ -5,7 +5,7 @@ from typing import Any
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.rag.retrieval.async_models import AsyncRetrievalModelGateway
+from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.rag.retrieval.models import ModelRuntimeSnapshot
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
@@ -15,12 +15,13 @@ from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context
 from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
-from app.models.models_model import ModelCapability
+from app.models.models_model import ModelCapability, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
+from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -294,11 +295,25 @@ class KnowledgeRetrievalNode(BaseNode):
             return []
 
         common_metadata_defs, model, generation_options = prepared
-        filter_groups = await AsyncRetrievalModelGateway().generate_metadata_filters(
+        model_type = ModelType.LLM
+        if model.model_type in {ModelType.LLM.value, ModelType.CHAT.value}:
+            model_type = ModelType(model.model_type)
+        llm = RedBearLLM(
+            RedBearModelConfig(
+                model_name=model.model_name,
+                provider=model.provider,
+                api_key=model.api_key,
+                base_url=model.api_base,
+                capability=list(model.capability),
+                is_omni=model.is_omni,
+                extra_params=generation_options,
+            ),
+            type=model_type,
+        )
+        filter_groups = await MetadataAutoFilterService.generate_filter_groups_async(
             query=query,
             metadata_defs=common_metadata_defs,
-            model=model,
-            generation_options=generation_options,
+            llm=llm,
         )
         return [
             FilterGroup(
