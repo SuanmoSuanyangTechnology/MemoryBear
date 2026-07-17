@@ -18,10 +18,11 @@
  */
 
 import { lazy, type LazyExoticComponent, type ComponentType, type ReactNode } from 'react';
-import { createHashRouter, createRoutesFromElements, Route } from 'react-router-dom';
+import { createHashRouter, createRoutesFromElements, Outlet, Route } from 'react-router-dom';
 
 /** Import route configuration JSON */
 import routesConfig from './routes.json';
+import { RouteErrorElement } from '@/components/ErrorBoundary';
 
 /** Recursively collect all element names from routes */
 function collectElements(routes: RouteConfig[]): Set<string> {
@@ -157,7 +158,12 @@ const generateRoutes = (routes: RouteConfig[]): ReactNode => {
 /** Create hash router from route configuration */
 const router = createHashRouter(
   createRoutesFromElements(
-    generateRoutes(routesConfig)
+    // Pathless root route provides a data-router `errorElement`, so a route
+    // whose lazy chunk fails to load (e.g. a layout removed after a redeploy)
+    // renders our fallback instead of the router's default dev error screen.
+    <Route element={<Outlet />} errorElement={<RouteErrorElement />}>
+      {generateRoutes(routesConfig)}
+    </Route>
   )
 );
 

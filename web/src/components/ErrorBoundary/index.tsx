@@ -16,13 +16,14 @@
  * @component
  */
 
-import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { useLocation, useRouteError } from 'react-router-dom';
 import { Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import loadErrorIcon from '@/assets/images/empty/loadError.png';
 import Empty from '@/components/Empty';
+import { useStaticAssetError } from '@/hooks/useStaticAssetError';
 
 /** Detect dynamic import / chunk preload failures across browsers. */
 export function isChunkLoadError(error: unknown): boolean {
@@ -42,7 +43,7 @@ const ErrorFallback = ({ onReload }: { onReload: () => void }) => {
         url={loadErrorIcon}
         title={t('empty.loadError')}
         subTitle={t('empty.loadErrorDesc')}
-        size={[240, 210]}
+        size={[300, 200]}
       />
       <Button type="primary" className="rb:mt-4" onClick={onReload}>
         {t('empty.reload')}
@@ -61,7 +62,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(): ErrorBoundaryState {
@@ -93,11 +94,39 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
 /**
  * Wrapper that injects the current route path as the reset key, so switching to
- * a route whose resources load fine clears any previously caught error.
+ * a route whose resources load fine clears any previously caught error. It also
+ * watches for failed bundled static assets (logo, menu icons, etc.) — which the
+ * class boundary can't catch, since their `error` events never reach React — and
+ * renders the same fallback when one fails to load.
  */
 const RouteErrorBoundary = ({ children }: { children: ReactNode }) => {
   const { pathname } = useLocation();
+  const hasAssetError = useStaticAssetError(pathname);
+
+  if (hasAssetError) {
+    return <ErrorFallback onReload={() => window.location.reload()} />;
+  }
+
   return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
+};
+
+/**
+ * Error element for React Router data routers (`createHashRouter`).
+ *
+ * When a route `element` fails to render — most commonly a lazy-loaded layout
+ * or page chunk that can't be fetched after a redeploy — the data router
+ * intercepts the error itself; it never reaches a React error boundary, so
+ * without this it falls through to the router's default dev error screen. Wire
+ * this as the route `errorElement` to show our own fallback instead.
+ */
+export const RouteErrorElement = () => {
+  const error = useRouteError();
+
+  useEffect(() => {
+    console.error('Route error caught by errorElement:', error);
+  }, [error]);
+
+  return <ErrorFallback onReload={() => window.location.reload()} />;
 };
 
 export default RouteErrorBoundary;
