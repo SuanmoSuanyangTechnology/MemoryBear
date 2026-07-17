@@ -8,6 +8,7 @@ name = "sandbox"
 crate-type = ["cdylib"]
 
 [dependencies]
+landlock = "0.4"
 libc = "0.2.180"
 libseccomp-sys = "0.3.0"
 

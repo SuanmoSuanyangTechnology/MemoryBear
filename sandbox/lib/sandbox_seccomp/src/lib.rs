@@ -17,50 +17,12 @@ use crate::nodejs_syscalls::*;
 use libc::{c_char, c_int, chdir, chroot, gid_t, uid_t};
 use libseccomp_sys::*;
 use std::env;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::str::FromStr;
 
-// ── Landlock constants (Linux 5.13+) ──
+// ── Landlock (safe abstraction via landlock crate) ──
 
-/// Landlock syscall numbers (x86_64).
-const SYS_LANDLOCK_CREATE_RULESET: libc::c_long = 444;
-const SYS_LANDLOCK_ADD_RULE: libc::c_long = 445;
-const SYS_LANDLOCK_RESTRICT_SELF: libc::c_long = 446;
-
-/// Landlock access rights — MUST match the kernel LANDLOCK_ACCESS_FS_* values.
-/// ABI v1 (Linux 5.13+): bits 0–12.
-/// ABI v2 (Linux 5.19+): bit 13 (REFER).
-/// ABI v3 (Linux 6.0+):  bit 14 (TRUNCATE).
-/// ABI v4 (Linux 6.2+):  bit 15 (IOCTL_DEV).
-const LANDLOCK_ACCESS_FS_EXECUTE: u64 = 1 << 0;
-const LANDLOCK_ACCESS_FS_WRITE_FILE: u64 = 1 << 1;
-const LANDLOCK_ACCESS_FS_READ_FILE: u64 = 1 << 2;
-const LANDLOCK_ACCESS_FS_READ_DIR: u64 = 1 << 3;
-const LANDLOCK_ACCESS_FS_REMOVE_DIR: u64 = 1 << 4;
-const LANDLOCK_ACCESS_FS_REMOVE_FILE: u64 = 1 << 5;
-const LANDLOCK_ACCESS_FS_MAKE_CHAR: u64 = 1 << 6;
-const LANDLOCK_ACCESS_FS_MAKE_DIR: u64 = 1 << 7;
-const LANDLOCK_ACCESS_FS_MAKE_REG: u64 = 1 << 8;
-const LANDLOCK_ACCESS_FS_MAKE_SOCK: u64 = 1 << 9;
-const LANDLOCK_ACCESS_FS_MAKE_FIFO: u64 = 1 << 10;
-const LANDLOCK_ACCESS_FS_MAKE_BLOCK: u64 = 1 << 11;
-const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 12;
-const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 13;
-const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
-const LANDLOCK_ACCESS_FS_IOCTL_DEV: u64 = 1 << 15;
-
-const LANDLOCK_RULE_PATH_BENEATH: u64 = 1;
-
-#[repr(C)]
-struct LandlockRulesetAttr {
-    handled_access_fs: u64,
-}
-
-#[repr(C)]
-struct LandlockPathBeneathAttr {
-    allowed_access: u64,
-    parent_fd: i32,
-}
+use landlock::{ABI, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, path_beneath_rules};
 
 /// Allowed syscalls from env `ALLOWED_SYSCALLS` or built-in defaults.
 pub fn get_allowed_syscalls(enable_network: bool) -> (Vec<i32>, Vec<i32>) {
@@ -155,112 +117,37 @@ pub unsafe extern "C" fn apply_landlock(paths: *const *const c_char) -> c_int {
         return -20;
     }
 
-    let handled_access = LANDLOCK_ACCESS_FS_EXECUTE
-        | LANDLOCK_ACCESS_FS_WRITE_FILE
-        | LANDLOCK_ACCESS_FS_READ_FILE
-        | LANDLOCK_ACCESS_FS_READ_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_FILE
-        | LANDLOCK_ACCESS_FS_MAKE_CHAR
-        | LANDLOCK_ACCESS_FS_MAKE_DIR
-        | LANDLOCK_ACCESS_FS_MAKE_REG
-        | LANDLOCK_ACCESS_FS_MAKE_SOCK
-        | LANDLOCK_ACCESS_FS_MAKE_FIFO
-        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-        | LANDLOCK_ACCESS_FS_MAKE_SYM
-        | LANDLOCK_ACCESS_FS_REFER
-        | LANDLOCK_ACCESS_FS_TRUNCATE
-        | LANDLOCK_ACCESS_FS_IOCTL_DEV;
-
-    let ruleset_attr = LandlockRulesetAttr {
-        handled_access_fs: handled_access,
+    // Convert NULL-terminated C string array to Rust &str slice.
+    let path_strs: Vec<&str> = unsafe {
+        let mut p = paths;
+        let mut v = Vec::new();
+        while !(*p).is_null() {
+            if let Ok(s) = CStr::from_ptr(*p).to_str() {
+                v.push(s);
+            }
+            p = p.add(1);
+        }
+        v
     };
 
-    let ruleset_fd = libc::syscall(
-        SYS_LANDLOCK_CREATE_RULESET,
-        &ruleset_attr as *const _,
-        core::mem::size_of::<LandlockRulesetAttr>(),
-        0u32,
-    ) as i32;
-    if ruleset_fd < 0 {
-        // Kernel may reject unknown bits — retry with only ABI v1 bits.
-        let handled_v1 = LANDLOCK_ACCESS_FS_EXECUTE
-            | LANDLOCK_ACCESS_FS_WRITE_FILE
-            | LANDLOCK_ACCESS_FS_READ_FILE
-            | LANDLOCK_ACCESS_FS_READ_DIR
-            | LANDLOCK_ACCESS_FS_REMOVE_DIR
-            | LANDLOCK_ACCESS_FS_REMOVE_FILE
-            | LANDLOCK_ACCESS_FS_MAKE_CHAR
-            | LANDLOCK_ACCESS_FS_MAKE_DIR
-            | LANDLOCK_ACCESS_FS_MAKE_REG
-            | LANDLOCK_ACCESS_FS_MAKE_SOCK
-            | LANDLOCK_ACCESS_FS_MAKE_FIFO
-            | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-            | LANDLOCK_ACCESS_FS_MAKE_SYM;
-        let ruleset_attr = LandlockRulesetAttr { handled_access_fs: handled_v1 };
-        let ruleset_fd = libc::syscall(
-            SYS_LANDLOCK_CREATE_RULESET,
-            &ruleset_attr as *const _,
-            core::mem::size_of::<LandlockRulesetAttr>(),
-            0u32,
-        ) as i32;
-        if ruleset_fd < 0 {
-            return -21;
-        }
+    if path_strs.is_empty() {
+        return -20;
     }
 
-    let allowed_access = LANDLOCK_ACCESS_FS_EXECUTE
-        | LANDLOCK_ACCESS_FS_READ_FILE
-        | LANDLOCK_ACCESS_FS_READ_DIR;
+    let abi = ABI::V5;
+    let status = Ruleset::default()
+        .handle_access(AccessFs::from_all(abi))
+        .and_then(|r| r.create())
+        .and_then(|r| r.add_rules(path_beneath_rules(&path_strs, AccessFs::from_read(abi))))
+        .and_then(|r| r.restrict_self());
 
-    // Add a path_beneath rule for each path in the NULL-terminated array.
-    let mut p = paths;
-    let mut added = 0u32;
-    while !(*p).is_null() {
-        let path = *p;
-        let dir_fd = libc::open(path, libc::O_PATH | libc::O_CLOEXEC);
-        if dir_fd >= 0 {
-            let path_beneath = LandlockPathBeneathAttr {
-                allowed_access,
-                parent_fd: dir_fd,
-            };
-            let ret = libc::syscall(
-                SYS_LANDLOCK_ADD_RULE,
-                ruleset_fd as i64,
-                LANDLOCK_RULE_PATH_BENEATH as i64,
-                &path_beneath as *const _,
-                0u32,
-            );
-            libc::close(dir_fd);
-            if ret == 0 {
-                added += 1;
-            }
-        }
-        p = p.add(1);
+    match status {
+        Ok(s) => match s.ruleset {
+            RulesetStatus::FullyEnforced | RulesetStatus::PartiallyEnforced => 0,
+            RulesetStatus::NotEnforced => -23,
+        },
+        Err(_) => -21,
     }
-    // If no rules were added (all paths failed), the sandbox would be empty.
-    if added == 0 {
-        libc::close(ruleset_fd);
-        return -22;
-    }
-
-    // landlock_restrict_self requires no_new_privs already set.
-    if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
-        libc::close(ruleset_fd);
-        return -24;
-    }
-
-    let ret = libc::syscall(
-        SYS_LANDLOCK_RESTRICT_SELF,
-        ruleset_fd as i64,
-        0u32,
-    );
-    libc::close(ruleset_fd);
-
-    if ret != 0 {
-        return -23;
-    }
-    0
 }
 
 /// Convenience wrapper: apply Landlock for a single path.
@@ -268,7 +155,7 @@ pub unsafe extern "C" fn apply_landlock(paths: *const *const c_char) -> c_int {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn apply_landlock_one(lib_path: *const c_char) -> c_int {
     let paths: [*const c_char; 2] = [lib_path, std::ptr::null()];
-    apply_landlock(paths.as_ptr())
+    unsafe { apply_landlock(paths.as_ptr()) }
 }
 
 /// Install seccomp filter. Default action: SCMP_ACT_KILL_PROCESS.
