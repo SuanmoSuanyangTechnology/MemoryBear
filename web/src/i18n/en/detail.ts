@@ -252,6 +252,8 @@ export const detail = {
       active: 'Active',
       inactive: 'Inactive',
       api_ops_rate_limit: 'API OPS Rate Limit',
+      pre_user_memory_write_qps_limit: 'Pre-User Memory Write QPS Rate Limit',
+      end_user_memory_limit: 'End User Memory Limit',
       ops: 'req/s',
       pcs: 'pcs',
       GB: 'GB',

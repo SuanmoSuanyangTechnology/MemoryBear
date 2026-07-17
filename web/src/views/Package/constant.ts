@@ -50,4 +50,14 @@ export const billingUnits = [
     unit: 'ops', placeholder: 'numberPlaceholder',
     icon: 'api_ops',
   },
+  {
+    key: 'pre_user_memory_write_qps_limit',
+    unit: 'ops', placeholder: 'numberPlaceholder',
+    icon: 'api_ops',
+  },
+  {
+    key: 'end_user_memory_limit',
+    unit: 'pcs', placeholder: 'numberPlaceholder',
+    icon: 'api_ops',
+  },
 ]
