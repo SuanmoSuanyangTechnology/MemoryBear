@@ -27,7 +27,7 @@ from app.core.memory.storage_services.extraction_engine.pipeline_help import (
     export_test_input_doc,
 )
 from app.schemas.memory_config_schema import MemoryConfig
-from app.core.memory.llm_tools.openai_client import OpenAIClient
+
 
 logger = get_memory_logger(__name__)
 
@@ -71,7 +71,7 @@ def _save_triplets_from_dialogs(dialog_data_list: list[DialogData], output_path:
 async def run_pilot_extraction(
     memory_config: MemoryConfig,
     dialogue_text: str,
-    llm_client: OpenAIClient,
+    llm_client,
     progress_callback: Optional[Callable[[str, str, Optional[dict]], Awaitable[None]]] = None,
     language: str = "zh",
 ) -> None:

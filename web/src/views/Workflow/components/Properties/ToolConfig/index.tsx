@@ -1,10 +1,12 @@
 import { type FC, useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Select, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
+
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
 import Editor from "../../Editor";
+import { filterChildrenWithTypes } from '../hooks/useVariableList';
 
 interface Option {
   value?: string | number | null;
@@ -26,6 +28,18 @@ interface Parameter {
   pattern: null | string;
 }
 
+const fetchToolMethods = (toolId: string): Promise<Option[]> => {
+  return getToolMethods(toolId).then(res => {
+    const response = res as Array<{ method_id: string; name: string; parameters: Parameter[] }>
+    return response.map(method => ({
+      value: method.name,
+      label: method.name,
+      isLeaf: true,
+      method_id: method.method_id,
+      parameters: method.parameters
+    }))
+  })
+}
 
 const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   options,
@@ -51,10 +65,8 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
             .then(toolsRes => {
               const tools = toolsRes as ToolItem[]
 
-              getToolMethods(values.tool_id)
-                .then(methodsRes => {
-                  const response = methodsRes as Array<{ method_id: string; name: string; parameters: Parameter[] }>
-
+              fetchToolMethods(values.tool_id)
+                .then(methodOptions => {
                   setOptionList(prevList => {
                     return prevList.map(item => {
                       if (item.value === detail.tool_type) {
@@ -64,13 +76,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                             value: vo.id,
                             label: vo.name,
                             isLeaf: false,
-                            children: vo.id === values.tool_id ? response.map(method => ({
-                              value: method.name,
-                              label: method.name,
-                              isLeaf: true,
-                              method_id: method.method_id,
-                              parameters: method.parameters
-                            })) : undefined
+                            children: vo.id === values.tool_id ? methodOptions : undefined
                           }))
                         }
                       }
@@ -78,18 +84,18 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                     })
                   })
 
-                  if (response.length > 1) {
-                    const filterTarget = response.find(vo => vo.name === values.tool_parameters?.operation)
+                  if (methodOptions.length > 1) {
+                    const filterTarget = methodOptions.find(vo => vo.value === values.tool_parameters?.operation)
                     if (filterTarget) {
-                      setParameters([...filterTarget.parameters])
+                      setParameters([...(filterTarget.parameters ?? [])])
                     } else {
                       setParameters([])
                     }
                   } else {
-                    setParameters([...response[0].parameters])
+                    setParameters([...(methodOptions[0].parameters ?? [])])
                   }
 
-                  form.setFieldValue('tools', [detail.tool_type, values.tool_id, values.tool_parameters?.operation ?? response[0].name])
+                  form.setFieldValue('tools', [detail.tool_type, values.tool_id, values.tool_parameters?.operation ?? methodOptions[0].value])
                 })
             })
         })
@@ -130,18 +136,9 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
           setOptionList([...optionList])
         })
     } else {
-      getToolMethods(targetOption.value as string)
-        .then(res => {
-          const response = res as Array<{ method_id: string; name: string }>
-          targetOption.children = response.map((vo: any) => {
-            return {
-              value: vo.name,
-              label: vo.name,
-              isLeaf: true,
-              method_id: vo.method_id,
-              parameters: vo.parameters
-            }
-          })
+      fetchToolMethods(targetOption.value as string)
+        .then(methodOptions => {
+          targetOption.children = methodOptions
           setOptionList([...optionList])
         })
     }
@@ -178,39 +175,16 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   // boolean -> boolean【只能选true/false】
   // array -> array[file]/array[object]/array[string]/array[number]/array[boolean]
   // object -> object/file
+  // file -> file/array[file]
   const getFilterOptions = (type: string) => {
-    const filterList: Suggestion[] = [];
-    options.forEach(vo => {
-      if (vo.children && vo.children?.length > 0) {
-        const childOptions = vo.children?.filter(child => child.dataType === type || (type === 'integer' && child.dataType === 'number'))
+    const customMatcher = (dataType: string) =>
+      (dataType === 'secret' && type === 'string')
+      || (type === 'integer' && dataType === 'number')
+      || (type === 'array' && dataType.includes(type))
+      || (type === 'object' && dataType === 'file')
+      || (type === 'file' && dataType === 'array[file]')
 
-        if (vo.dataType === type
-          || (vo.dataType === 'secret' && type === 'string')
-          || (type === 'integer' && vo.dataType === 'number')
-          || (type === 'array' && vo.dataType.includes(type))
-          || (type === 'object' && vo.dataType === 'object')
-        ) {
-          filterList.push({
-            ...vo,
-            children: childOptions
-          })
-        } else if (childOptions.length > 0) {
-          filterList.push({
-            ...vo,
-            disabled: true,
-            children: childOptions
-          })
-        }
-      } else if (vo.dataType === type
-        || (vo.dataType === 'secret' && type === 'string')
-        || (type === 'integer' && vo.dataType === 'number')
-        || (type === 'array' && vo.dataType.includes(type))
-        || (type === 'object' && vo.dataType === 'object')) {
-        filterList.push(vo)
-      }
-    })
-
-    return filterList
+    return filterChildrenWithTypes(options, [type], customMatcher)
   }
 
   return (

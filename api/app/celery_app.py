@@ -115,6 +115,7 @@ celery_app.conf.update(
         'app.tasks.do_layer2_reflection': {'queue': 'reflection_tasks'},
         'app.tasks.scan_layer2_dedup_full_scan': {'queue': 'periodic_tasks'},
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
+        'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
@@ -129,6 +130,8 @@ celery_app.conf.update(
         # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
         'app.tasks.scan_refresh_insight_summary_cache': {'queue': 'periodic_tasks'}, # NOTE：扫描器，仅枚举+派发，轻量
         'app.tasks.do_refresh_insight_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：单用户生成记忆洞察、用户摘要缓存
+        'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
+        'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
         'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},
@@ -179,8 +182,10 @@ implicit_emotions_update_schedule = crontab(
 )
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
+reflection_retry_schedule = timedelta(minutes=settings.REFLECTION_RETRY_SCAN_INTERVAL_MINUTES)
 hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
+forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
 # 构建定时任务配置
 beat_schedule_config = {
     # "run-workspace-reflection": {
@@ -193,13 +198,17 @@ beat_schedule_config = {
         "schedule": memory_cache_regeneration_schedule,
         "args": (),
     },
-    "run-forgetting-cycle": {
-        "task": "app.tasks.run_forgetting_cycle_task",
-        "schedule": forgetting_cycle_schedule,
-        "kwargs": {
-            "config_id": None,  # 使用默认配置，可以通过环境变量配置
-        },
+    "scan-forget-candidates": {
+        "task": "app.tasks.scan_forget_candidates",
+        "schedule": forget_scan_schedule,
     },
+    # "run-forgetting-cycle": {
+    #     "task": "app.tasks.run_forgetting_cycle_task",
+    #     "schedule": forgetting_cycle_schedule,
+    #     "kwargs": {
+    #         "config_id": None,  # 使用默认配置，可以通过环境变量配置
+    #     },
+    # },
     "write-all-workspaces-memory": {
         "task": "app.tasks.write_all_workspaces_memory_task",
         "schedule": memory_increment_schedule,
@@ -218,6 +227,11 @@ beat_schedule_config = {
     "run-layer2-dedup-full-scan": {
         "task": "app.tasks.scan_layer2_dedup_full_scan",
         "schedule": layer2_dedup_full_scan_schedule,
+        "args": (),
+    },
+    "scan-reflection-retry": {
+        "task": "app.tasks.scan_reflection_retry",
+        "schedule": reflection_retry_schedule,
         "args": (),
     },
     "refresh-hot-memory-tags-cache": {

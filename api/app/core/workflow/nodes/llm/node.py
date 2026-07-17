@@ -7,6 +7,7 @@ LLM 节点实现
 import asyncio
 import logging
 import json
+import uuid
 from copy import deepcopy
 from typing import Any
 
@@ -28,7 +29,7 @@ from app.core.workflow.nodes.llm.config import (
     _MULTIMODAL_COMPATIBLE_PROVIDERS,
 )
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_context
+from app.db import get_async_db_context, get_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
@@ -497,6 +498,57 @@ class LLMNode(BaseNode):
                 idx = pos + len(seq)
         return text, False
 
+    def _load_model_info_sync(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
+        with get_db_context() as db:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+            if not config:
+                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
+            return ModelInfo(
+                model_name=api_config.model_name,
+                model_type=ModelType(config.type),
+                api_key=api_config.api_key,
+                api_base=api_config.api_base,
+                provider=api_config.provider,
+                is_omni=api_config.is_omni,
+                capability=api_config.capability,
+            )
+
+    async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
+        tenant_id = await self.resolve_tenant_id_async(variable_pool)
+
+        async with get_async_db_context() as db:
+            return await ModelConfigService.get_runtime_model_info_async(
+                db,
+                model_id,
+                tenant_id=tenant_id,
+            )
+
+    async def _prepare_history_prefix_async(
+            self,
+            *,
+            features: dict[str, Any],
+            conversation_id: str,
+            current_input: str,
+            workflow_messages: list[dict[str, Any]],
+            window_size: int,
+            model_config_id: str,
+    ) -> list[dict[str, Any]] | None:
+        async with get_async_db_context() as db:
+            return await ContextEngineManager(db).prepare_workflow_history_prefix(
+                features=features,
+                conversation_id=conversation_id,
+                scope_key=f"node:{self.node_id}",
+                current_input=current_input,
+                workflow_messages=workflow_messages,
+                window_size=window_size,
+                model_config_id=model_config_id,
+            )
+
+    async def _run_after_workflow_turn_async(self, **kwargs: Any) -> None:
+        async with get_async_db_context() as db:
+            await ContextEngineManager(db).after_workflow_turn(**kwargs)
+
     async def _prepare_llm(
             self,
             state: WorkflowState,
@@ -511,31 +563,20 @@ class LLMNode(BaseNode):
         Returns:
             (llm, messages_or_prompt): LLM 实例和消息列表或 prompt 字符串
         """
+        prepare_started_at = asyncio.get_running_loop().time()
+        model_info_ms = 0.0
+        history_prefix_ms = 0.0
+
         self.typed_config = LLMNodeConfig(**self.config)
 
         model_id = self.typed_config.model_id
         if not model_id:
             raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置")
 
-        # 3. 在 with 块内完成所有数据库操作和数据提取
-        with get_db_context() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-
-            # 在 Session 关闭前提取所有需要的数据
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            model_info = ModelInfo(
-                model_name=api_config.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_config.api_key,
-                api_base=api_config.api_base,
-                provider=api_config.provider,
-                is_omni=api_config.is_omni,
-                capability=api_config.capability
-            )
-            self.model_info = model_info
+        model_info_started_at = asyncio.get_running_loop().time()
+        model_info = await self._load_model_info_async(model_id, variable_pool)
+        model_info_ms = (asyncio.get_running_loop().time() - model_info_started_at) * 1000
+        self.model_info = model_info
 
         param_warnings = validate_llm_param_constraints(
             config=self.typed_config,
@@ -717,8 +758,15 @@ class LLMNode(BaseNode):
 
             if self.typed_config.vision_input and effective_vision:
                 file_content = []
-                files = variable_pool.get_instance(self.typed_config.vision_input)
-                for file in files.value:
+                files_instance = variable_pool.get_instance(self.typed_config.vision_input)
+                from app.core.workflow.variable.variable_objects import ArrayVariable, FileVariable
+                if isinstance(files_instance, ArrayVariable):
+                    file_list = files_instance.value  # list[FileVariable]
+                elif isinstance(files_instance, FileVariable):
+                    file_list = [files_instance]  # wrap single file
+                else:
+                    file_list = []
+                for file in file_list:
                     content = await self.process_message(model_info, file.value, effective_vision)
                     if content:
                         file_content.extend(content)
@@ -732,17 +780,16 @@ class LLMNode(BaseNode):
                 conversation_id = self.get_variable("sys.conversation_id", variable_pool, default="", strict=False)
                 history_prefix = None
                 if conversation_id:
-                    with get_db_context() as db:
-                        context_engine_manager = ContextEngineManager(db)
-                        history_prefix = await context_engine_manager.prepare_workflow_history_prefix(
-                            features=self.workflow_config.get("features", {}),
-                            conversation_id=conversation_id,
-                            scope_key=f"node:{self.node_id}",
-                            current_input=self._content_to_text(messages[-1]["content"]) if messages else "",
-                            workflow_messages=state.get("messages", []),
-                            window_size=self.typed_config.memory.window_size,
-                            model_config_id=self.typed_config.model_id,
-                        )
+                    history_prefix_started_at = asyncio.get_running_loop().time()
+                    history_prefix = await self._prepare_history_prefix_async(
+                        features=self.workflow_config.get("features", {}),
+                        conversation_id=conversation_id,
+                        current_input=self._content_to_text(messages[-1]["content"]) if messages else "",
+                        workflow_messages=state.get("messages", []),
+                        window_size=self.typed_config.memory.window_size,
+                        model_config_id=self.typed_config.model_id,
+                    )
+                    history_prefix_ms = (asyncio.get_running_loop().time() - history_prefix_started_at) * 1000
 
                 history_messages = deepcopy(history_prefix) if history_prefix is not None else deepcopy(
                     state["messages"][-self.typed_config.memory.window_size:]
@@ -791,6 +838,21 @@ class LLMNode(BaseNode):
                     system_msg["content"] += json_prompt_suffix
             else:
                 self.messages.insert(0, {"role": "system", "content": json_prompt_suffix})
+
+        logger.info(
+            "[TIMING] workflow.llm_prepare node_id=%s stream=%s total_ms=%.2f model_info_ms=%.2f "
+            "history_prefix_ms=%.2f message_count=%s history_count=%s memory_enabled=%s provider=%s model=%s",
+            self.node_id,
+            stream,
+            (asyncio.get_running_loop().time() - prepare_started_at) * 1000,
+            model_info_ms,
+            history_prefix_ms,
+            len(self.messages) if isinstance(self.messages, list) else 0,
+            len(self.history_messages),
+            self.typed_config.memory.enable,
+            model_info.provider,
+            model_info.model_name,
+        )
 
         return llm
 
@@ -866,10 +928,7 @@ class LLMNode(BaseNode):
                             window_size=self.typed_config.memory.window_size,
                             model_config_id=self.typed_config.model_id,
                         )
-                        async def _run_after_workflow_turn(kwargs=_kwargs):
-                            with get_db_context() as db:
-                                await ContextEngineManager(db).after_workflow_turn(**kwargs)
-                        asyncio.create_task(_run_after_workflow_turn())
+                        asyncio.create_task(self._run_after_workflow_turn_async(**_kwargs))
                 
                 return result
                 
@@ -1018,7 +1077,9 @@ class LLMNode(BaseNode):
 
         for attempt in range(max_attempts):
             try:
+                attempt_started_at = asyncio.get_running_loop().time()
                 llm = await self._prepare_llm(state, variable_pool, True)
+                prepare_done_at = asyncio.get_running_loop().time()
 
                 logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式），尝试 {attempt + 1}/{max_attempts}")
 
@@ -1032,7 +1093,21 @@ class LLMNode(BaseNode):
 
                 last_meta_data = {}
                 last_usage_metadata = {}
+                first_chunk_at: float | None = None
+                model_stream_started_at = asyncio.get_running_loop().time()
                 async for chunk in llm.astream(self.messages):
+                    if first_chunk_at is None:
+                        first_chunk_at = asyncio.get_running_loop().time()
+                        logger.info(
+                            "[TIMING] workflow.llm_stream_first_chunk node_id=%s attempt=%s prepare_ms=%.2f first_chunk_ms=%.2f "
+                            "provider=%s model=%s",
+                            self.node_id,
+                            attempt + 1,
+                            (prepare_done_at - attempt_started_at) * 1000,
+                            (first_chunk_at - model_stream_started_at) * 1000,
+                            self.model_info.provider if self.model_info else "",
+                            self.model_info.model_name if self.model_info else "",
+                        )
                     if hasattr(chunk, 'content'):
                         content = self.process_model_output(chunk.content)
                     else:
@@ -1118,6 +1193,20 @@ class LLMNode(BaseNode):
                 full_response, _ = self._apply_stop_sequences(full_response)
 
                 logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
+                stream_finished_at = asyncio.get_running_loop().time()
+                logger.info(
+                    "[TIMING] workflow.llm_stream_done node_id=%s attempt=%s total_ms=%.2f prepare_ms=%.2f "
+                    "first_chunk_ms=%s stream_body_ms=%.2f chunk_count=%s provider=%s model=%s",
+                    self.node_id,
+                    attempt + 1,
+                    (stream_finished_at - attempt_started_at) * 1000,
+                    (prepare_done_at - attempt_started_at) * 1000,
+                    round((first_chunk_at - model_stream_started_at) * 1000, 2) if first_chunk_at is not None else None,
+                    (stream_finished_at - (first_chunk_at or model_stream_started_at)) * 1000,
+                    chunk_count,
+                    self.model_info.provider if self.model_info else "",
+                    self.model_info.model_name if self.model_info else "",
+                )
 
                 final_message = AIMessage(
                     content=full_response,
@@ -1152,10 +1241,7 @@ class LLMNode(BaseNode):
                             window_size=self.typed_config.memory.window_size,
                             model_config_id=self.typed_config.model_id,
                         )
-                        async def _run_after_workflow_turn(kwargs=_kwargs):
-                            with get_db_context() as db:
-                                await ContextEngineManager(db).after_workflow_turn(**kwargs)
-                        asyncio.create_task(_run_after_workflow_turn())
+                        asyncio.create_task(self._run_after_workflow_turn_async(**_kwargs))
 
                 yield {"__final__": True, "result": result}
                 return

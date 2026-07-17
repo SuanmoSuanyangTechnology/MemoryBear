@@ -2,7 +2,7 @@ import logging
 
 from app.core.models import RedBearLLM
 from app.core.memory.prompt import prompt_manager
-from app.core.memory.utils.llm.llm_utils import StructResponse
+from app.core.models.llm import StructResponse
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,11 @@ class RetrievalSummaryProcessor:
                         f"<content>{content}{memory_l0_str}</content>"},
         ]
         try:
-            summary = await llm_client.ainvoke(
+            response = await llm_client.ainvoke(
                 messages,
                 config={"callbacks": []}
-            ) | StructResponse(mode='str')
+            )
+            summary = StructResponse.extract_text(response)
             return summary
         except:
             logger.error("Failed to generate reply summary, returning original content", exc_info=True)

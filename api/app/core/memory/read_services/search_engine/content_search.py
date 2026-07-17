@@ -5,8 +5,9 @@ import math
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import Neo4jNodeType, TripletPredicate, StorageType
 from app.core.memory.models.service_models import (
@@ -21,10 +22,10 @@ from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool
-from app.core.memory.utils.llm.llm_utils import StructResponse
+from app.core.models.llm import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
-from app.db import get_db_context
+from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
@@ -68,7 +69,7 @@ class Neo4jSearchService:
         if includes is None:
             self.includes = [
                 Neo4jNodeType.STATEMENT,
-                # Neo4jNodeType.CHUNK,
+                Neo4jNodeType.CHUNK,
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
                 Neo4jNodeType.PERCEPTUAL,
@@ -253,43 +254,44 @@ class Neo4jSearchService:
         ]
 
         for _ in range(RELATIONSHIP_LOOP_LIMIT):
-            response: AIMessage = await llm_with_tools.ainvoke(
-                messages,
-                config={
-                    "callbacks": [],
-                }
+            _config_token = var_child_runnable_config.set(
+                RunnableConfig(callbacks=[], tags=[], metadata={})
             )
-            messages.append(response)
+            try:
+                response: AIMessage = await llm_with_tools.ainvoke(messages)
+                messages.append(response)
 
-            if not response.tool_calls:
-                break
+                if not response.tool_calls:
+                    break
 
-            async def run_tool(tc):
-                tool = tool_map[tc["name"]]
-                try:
-                    result = await tool.ainvoke(tc["args"])
-                    return ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        tool_call_id=tc["id"],
-                    )
-                except Exception as e:
-                    return ToolMessage(
-                        content=json.dumps({"error": str(e)}),
-                        tool_call_id=tc["id"],
-                    )
+                async def run_tool(tc):
+                    tool = tool_map[tc["name"]]
+                    try:
+                        result = await tool.ainvoke(tc["args"])
+                        return ToolMessage(
+                            content=json.dumps(result, ensure_ascii=False),
+                            tool_call_id=tc["id"],
+                        )
+                    except Exception as e:
+                        return ToolMessage(
+                            content=json.dumps({"error": str(e)}),
+                            tool_call_id=tc["id"],
+                        )
 
-            tool_messages = await asyncio.gather(*[
-                run_tool(tc) for tc in response.tool_calls
-            ])
+                tool_messages = await asyncio.gather(*[
+                    run_tool(tc) for tc in response.tool_calls
+                ])
 
-            messages.extend(tool_messages)
+                messages.extend(tool_messages)
+            finally:
+                var_child_runnable_config.reset(_config_token)
 
         final_message = next(
             (m for m in reversed(messages) if isinstance(m, AIMessage)),
             messages[-1],
         )
         try:
-            return final_message | StructResponse(mode="pydantic", model=RelationSearchResult)
+            return final_message | StructResponse(RelationSearchResult)
         except Exception:
             logger.debug(
                 "[RelationSearch] LLM final message parsing failed, "
@@ -439,10 +441,10 @@ class RAGSearchService:
         """RAG 不支持纯全文检索，回退到 hybrid_search。"""
         return await self.hybrid_search(query, limit)
 
-    def get_kb_config(self, db: Session, limit: int) -> dict:
+    async def get_kb_config(self, db: AsyncSession, limit: int) -> dict:
         if self.ctx.user_rag_memory_id is None:
             raise RuntimeError("Knowledge base ID not specified")
-        knowledge_config = knowledge_repository.get_knowledge_by_id(
+        knowledge_config = await knowledge_repository.get_knowledge_by_id_async(
             db,
             knowledge_id=uuid.UUID(self.ctx.user_rag_memory_id)
         )
@@ -467,8 +469,8 @@ class RAGSearchService:
 
     async def hybrid_search(self, query: str, limit: int) -> MemorySearchResult:
         try:
-            with get_db_context() as db:
-                kb_config = self.get_kb_config(db, limit)
+            async with get_async_db_context() as db:
+                kb_config = await self.get_kb_config(db, limit)
         except RuntimeError as e:
             logger.error(f"[MemorySearch] get_kb_config error: {self.ctx.user_rag_memory_id} - {e}")
             return MemorySearchResult(memories=[])
@@ -501,28 +503,31 @@ class HistorySearchService:
         self.ctx = ctx
 
     async def run(self) -> MemorySearchResult:
-        with get_db_context() as db:
-            conversation: Conversation | None = db.scalar(
+        async with get_async_db_context() as db:
+            conv_result = await db.execute(
                 select(Conversation).where(
                     Conversation.user_id == self.ctx.end_user_id,
                     Conversation.id != self.ctx.conversation_id,
-                    Conversation.app_id != "00000000-0000-0000-0000-000000000001"
+                    Conversation.app_id != "00000000-0000-0000-0000-000000000001",
                 ).order_by(
                     Conversation.updated_at.desc()
                 ).limit(1)
             )
+            conversation: Conversation | None = conv_result.scalars().first()
 
             if conversation is None:
                 return MemorySearchResult(memories=[])
 
             cursor = conversation.write_cursor
-            messages: list[MemoryMessage] | None = list(db.scalars(
+            msg_result = await db.execute(
                 select(MemoryMessage).where(
                     MemoryMessage.conversation_id == conversation.id,
-                    MemoryMessage.message_seq > cursor
+                    MemoryMessage.message_seq > cursor,
                 ).order_by(MemoryMessage.message_seq)
-            ))
-            if messages is None:
+            )
+            messages: list[MemoryMessage] = list(msg_result.scalars().all())
+
+            if not messages:
                 return MemorySearchResult(memories=[])
 
             messages_lst = []
@@ -541,7 +546,7 @@ class HistorySearchService:
                 source=Neo4jNodeType.HISTORY,
                 query="",
                 id=str(conversation.id),
-                data={"messages": messages_lst}
+                data={"messages": messages_lst},
             )
         return MemorySearchResult(memories=[memory])
 

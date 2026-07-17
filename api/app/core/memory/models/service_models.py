@@ -12,11 +12,13 @@ class LongTermMemoryInput(BaseModel):
     question: str = Field(
         description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
     search_mode: str = Field(
-        description="检索模式。"
+        default="express",
+        description="检索模式（默认为 express）。"
                     "deep=深度检索：拆解复杂问题并做关系(图)检索，返回汇总答案，适合复杂/关系类问题；"
                     "normal=普通检索：拆解问题做混合检索，返回汇总答案，适合一般性问题；"
-                    "quick=快速检索：单次混合检索直接返回原始数据(不拆解/不汇总)，需自行据此推断，适合简单查询或需要原始证据。"
-                    "express=急速检索：单次关键词检索直接返回原始数据(不拆解/不汇总)，需自行据此推断，适合简单查询或需要原始证据。"
+                    "quick=快速检索：单次混合检索直接返回原始数据(不拆解/不汇总)，需自行据此推断，适合简单查询或需要原始证据；"
+                    "express=极速检索：单次关键词检索直接返回原始数据(不拆解/不汇总)，需自行据此推断，适合简单查询或需要原始证据；"
+                    "meta=元数据检索：仅返回用户画像、偏好、习惯等元数据，不做图检索，适合'我的偏好是什么'、'我是什么职业'等用户档案类问题。"
     )
 
 
@@ -56,6 +58,11 @@ class RelationMemory(BaseModel):
     @property
     def dedup_key(self) -> tuple:
         return self.source, self.relation, self.target
+
+
+class QuestionSplit(BaseModel):
+    questions: list = Field(default_factory=list)
+    memory_evidence: str = Field(default_factory=str)
 
 
 class EntityPair(BaseModel):

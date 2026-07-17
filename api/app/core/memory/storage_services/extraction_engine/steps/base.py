@@ -34,7 +34,7 @@ async def call_structured(llm_client, messages: list[dict], response_model: type
     Returns:
         解析后的 Pydantic 模型实例
     """
-    from app.core.memory.utils.llm.llm_utils import StructResponse
+    from app.core.models.llm import StructResponse
 
     try:
         return await llm_client.response_structured(
@@ -50,7 +50,7 @@ async def call_structured(llm_client, messages: list[dict], response_model: type
             raise
 
     ai_message = await llm_client.chat(messages=messages)
-    return ai_message | StructResponse("pydantic", response_model)
+    return ai_message | StructResponse(response_model)
 
 
 @dataclass

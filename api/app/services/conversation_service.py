@@ -1,11 +1,13 @@
 """会话服务"""
 import uuid
+from types import SimpleNamespace
 from datetime import timedelta
 from typing import Annotated
 from typing import Optional, List, Tuple, Dict, Any
 
 import json_repair
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -37,7 +39,7 @@ class ConversationService:
     Delegates database operations to repositories.
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self.conversation_repo = ConversationRepository(db)
         self.message_repo = MessageRepository(db)
@@ -104,6 +106,33 @@ class ConversationService:
 
         return conversation
 
+    async def create_conversation_async(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            user_id: Optional[str] = None,
+            title: Optional[str] = None,
+            is_draft: bool = False,
+            config_snapshot: Optional[dict] = None
+    ) -> Conversation:
+        try:
+            conversation = self.conversation_repo.create_conversation(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=title or "New Conversation",
+                is_draft=is_draft,
+                config_snapshot=config_snapshot
+            )
+            if isinstance(self.db, AsyncSession):
+                await self.db.flush()
+            await self.db.commit()
+            return conversation
+        except Exception as e:
+            logger.error(f"Create Conversation Failed - {str(e)}")
+            await self.db.rollback()
+            raise BusinessException("Error create Convsersation", code=BizCode.DB_ERROR)
+
     def get_conversation(
             self,
             conversation_id: uuid.UUID,
@@ -128,6 +157,29 @@ class ConversationService:
         )
 
         return conversation
+
+    async def get_conversation_async(
+            self,
+            conversation_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None,
+    ) -> Conversation:
+        """
+        Async version of get_conversation.
+
+        Args:
+            conversation_id (uuid.UUID): The conversation UUID.
+            workspace_id (Optional[uuid.UUID]): Optional workspace UUID to restrict the query.
+
+        Raises:
+            ResourceNotFoundException: If the conversation does not exist.
+
+        Returns:
+            Conversation: The requested Conversation instance.
+        """
+        return await self.conversation_repo.get_conversation_by_conversation_id_async(
+            conversation_id=conversation_id,
+            workspace_id=workspace_id,
+        )
 
     def get_user_conversations(
             self,
@@ -246,11 +298,11 @@ class ConversationService:
                         content[:50] + ("..." if len(content) > 50 else "")
                 )
 
-            if sync_memory:
-                self._dispatch_memory_sync(message, conversation, should_memorize)
-
             self.db.commit()
             self.db.refresh(message)
+
+            if sync_memory:
+                self._dispatch_memory_sync(message, conversation, should_memorize)
 
             logger.info(
                 "Message added successfully",
@@ -275,6 +327,76 @@ class ConversationService:
                 },
             )
             self.db.rollback()
+            raise BusinessException(
+                f"Error adding message, conversation_id={conversation_id}",
+                code=BizCode.DB_ERROR
+            )
+
+    async def add_message_async(
+            self,
+            conversation_id: uuid.UUID,
+            role: str,
+            content: str,
+            meta_data: Optional[dict] = None,
+            message_id: Optional[uuid.UUID] = None,
+            status: str = "completed",
+            sync_memory: bool = True,
+            should_memorize: bool = True,
+            parent_message_id: Optional[uuid.UUID] = None,
+    ) -> Message:
+        """AsyncSession 版本的消息写入。"""
+        if getattr(self, "_suppress_message_save", False):
+            return None
+        try:
+            if isinstance(self.db, AsyncSession):
+                conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(
+                    conversation_id
+                )
+            else:
+                conversation = self.conversation_repo.get_conversation_by_conversation_id(
+                    conversation_id
+                )
+
+            message = Message(
+                id=message_id if message_id else uuid.uuid4(),
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                meta_data=meta_data,
+                status=status,
+                parent_message_id=parent_message_id,
+            )
+
+            self.message_repo.add_message(message)
+            conversation.message_count += 1
+
+            if conversation.message_count <= 2 and role == "user":
+                conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+
+            if isinstance(self.db, AsyncSession):
+                await self.db.commit()
+                await self.db.refresh(message)
+            else:
+                self.db.commit()
+                self.db.refresh(message)
+
+            if sync_memory:
+                self._dispatch_memory_sync(message, conversation, should_memorize)
+
+            return message
+        except Exception as e:
+            logger.error(
+                f"Message added error, db roll back - {str(e)}",
+                extra={
+                    "conversation_id": str(conversation_id),
+                    "role": role,
+                    "content_length": len(content),
+                },
+            )
+            if isinstance(self.db, AsyncSession):
+                await self.db.rollback()
+            else:
+                self.db.rollback()
             raise BusinessException(
                 f"Error adding message, conversation_id={conversation_id}",
                 code=BizCode.DB_ERROR
@@ -383,53 +505,51 @@ class ConversationService:
         conversation: Conversation,
         should_memorize: bool = True,
     ) -> None:
-        """触发 dispatch_agent_message 把消息同步到 memory_messages 表。
-
-        fire-and-forget：失败仅记录 warning，不影响 messages 表的主写入流程。
-        在已有事件循环中走 ensure_future（附加 done_callback 记录异常），
-        否则 run_until_complete。
-
-        Args:
-            message: Message 实例（尚未 commit）
-            conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id /
-                is_draft / user_id（即 end_user_id）
-            should_memorize: 透传给 MemoryMessage.should_memorize（会话级记忆开关）
-        """
         try:
             import asyncio
+            from app.db import get_async_db_context
 
             workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
             end_user_id = str(conversation.user_id) if conversation.user_id else ""
-            config_id = MemoryConfigService(self.db).get_workspace_active_config_id(conversation.workspace_id)
-            from app.core.memory.memory_service import MemoryService
-            coro = MemoryService.ingest_agent_message(
-                conversation_id=str(message.conversation_id),
-                message=message,
-                app_id=str(conversation.app_id),
-                config_id=str(config_id),
-                workspace_id=workspace_id,
-                end_user_id=end_user_id,
-                should_memorize=should_memorize,
+            _workspace_id = conversation.workspace_id
+            _app_id = str(conversation.app_id)
+            _conversation_id = str(message.conversation_id)
+            message_snapshot = SimpleNamespace(
+                id=message.id,
+                conversation_id=message.conversation_id,
+                role=message.role,
+                content=message.content,
+                meta_data=dict(message.meta_data or {}),
+                created_at=message.created_at,
             )
 
-            def _on_task_done(task: asyncio.Task) -> None:
-                """回调：记录 fire-and-forget 协程中未被捕获的异常。"""
-                if task.cancelled():
-                    return
-                exc = task.exception()
-                if exc is not None:
+            from app.core.memory.memory_service import MemoryService
+
+            async def _run():
+                try:
+                    async with get_async_db_context() as db:
+                        config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(_workspace_id)
+                    await MemoryService.ingest_agent_message(
+                        conversation_id=_conversation_id,
+                        message=message_snapshot,
+                        app_id=_app_id,
+                        config_id=str(config_id),
+                        workspace_id=workspace_id,
+                        end_user_id=end_user_id,
+                        should_memorize=should_memorize,
+                    )
+                except Exception as exc:
                     logger.warning(
                         f"[ConversationService] dispatch_agent_message 异步执行失败: "
-                        f"conv={message.conversation_id}, err={exc}",
+                        f"conv={_conversation_id}, err={exc}",
                         exc_info=exc,
                     )
 
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                task = asyncio.ensure_future(coro)
-                task.add_done_callback(_on_task_done)
+                asyncio.ensure_future(_run())
             else:
-                loop.run_until_complete(coro)
+                loop.run_until_complete(_run())
         except Exception as e:
             logger.warning(
                 f"[ConversationService] dispatch_agent_message 调度失败（不影响主流程）: "
@@ -455,13 +575,23 @@ class ConversationService:
         Returns:
             List[Message]: List of messages ordered by creation time.
         """
-        messages = self.message_repo.get_message_by_conversation_id(
+        return self.message_repo.get_message_by_conversation_id(
             conversation_id,
             limit,
             current_only=current_only
         )
 
-        return messages
+    async def get_messages_async(
+            self,
+            conversation_id: uuid.UUID,
+            limit: Optional[int] = None,
+            current_only: bool = True
+    ) -> List[Message]:
+        return await self.message_repo.get_message_by_conversation_id_async(
+            conversation_id,
+            limit,
+            current_only=current_only
+        )
 
     def _resolve_v1_internal_user_id(
             self,
@@ -603,11 +733,92 @@ class ConversationService:
             or conversation.is_active is not True
             or conversation.is_draft is not False
         ):
-            # 为避免根据错误码推断会话是否存在，这里与上方保持同样的 NOT_FOUND 返回
             raise BusinessException("会话不存在", BizCode.NOT_FOUND)
 
         try:
             messages = self.message_repo.get_message_by_conversation_id(
+                conversation_id,
+                limit=limit,
+                current_only=True,
+            )
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话消息失败",
+                extra={"conversation_id": str(conversation_id)}
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        items = []
+        for message in messages:
+            if message.role == "system":
+                continue
+            items.append(
+                {
+                    "message_id": message.id,
+                    "role": message.role,
+                    "content": message.content,
+                    "status": message.status,
+                    "meta_data": self._sanitize_v1_message_meta_data(message.meta_data),
+                    "created_at": message.created_at,
+                    "version": message.version or 1,
+                    "is_current": False if message.is_current is False else True,
+                    "parent_message_id": message.parent_message_id,
+                }
+            )
+
+        return {
+            "conversation_id": conversation.id,
+            "items": items,
+            "limit": limit,
+        }
+
+    async def list_v1_conversation_messages_async(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            external_user_id: str,
+            conversation_id: uuid.UUID,
+            limit: int = 50,
+    ) -> dict:
+        """获取 v1 应用对外服务的会话历史消息（异步版本）。"""
+        if not external_user_id:
+            raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+        if limit < 1:
+            raise BusinessException("limit 必须大于等于 1", BizCode.INVALID_PARAMETER)
+        if limit > 200:
+            raise BusinessException("limit 超过最大限制", BizCode.INVALID_PARAMETER)
+
+        internal_user_id = self._resolve_v1_internal_user_id(
+            workspace_id=workspace_id,
+            external_user_id=external_user_id,
+        )
+
+        try:
+            conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(conversation_id)
+        except ResourceNotFoundException as e:
+            raise BusinessException("会话不存在", BizCode.NOT_FOUND, cause=e) from e
+        except Exception as e:
+            logger.exception(
+                "查询 v1 会话详情失败",
+                extra={"conversation_id": str(conversation_id)}
+            )
+            raise BusinessException("查询会话失败", BizCode.DB_ERROR, cause=e) from e
+
+        if internal_user_id is None:
+            raise BusinessException("无权访问该会话", BizCode.FORBIDDEN)
+
+        if (
+            conversation.app_id != app_id
+            or conversation.workspace_id != workspace_id
+            or conversation.user_id != internal_user_id
+            or conversation.is_active is not True
+            or conversation.is_draft is not False
+        ):
+            raise BusinessException("会话不存在", BizCode.NOT_FOUND)
+
+        try:
+            messages = await self.message_repo.get_message_by_conversation_id_async(
                 conversation_id,
                 limit=limit,
                 current_only=True,
@@ -865,7 +1076,7 @@ class ConversationService:
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
         """
-        messages = self.message_repo.get_message_by_conversation_id(
+        messages = await self.message_repo.get_message_by_conversation_id_async(
             conversation_id,
             limit=max_history
         )
@@ -1025,6 +1236,39 @@ class ConversationService:
         )
 
         return conversation
+
+    async def create_or_get_conversation_async(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            is_draft: bool = False,
+            conversation_id: Optional[uuid.UUID] = None,
+            user_id: Optional[str] = None,
+    ) -> Conversation:
+        if conversation_id:
+            try:
+                conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(
+                    conversation_id=conversation_id,
+                    workspace_id=workspace_id
+                )
+                if conversation.app_id != app_id:
+                    raise BusinessException(
+                        "Conversation does not belong to this app",
+                        BizCode.INVALID_CONVERSATION
+                    )
+                return conversation
+            except ResourceNotFoundException:
+                logger.warning(
+                    "Conversation not found. A new conversation will be created.",
+                    extra={"conversation_id": str(conversation_id)}
+                )
+
+        return await self.create_conversation_async(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            is_draft=is_draft
+        )
 
     async def delete_message(
             self,
@@ -1258,10 +1502,10 @@ class ConversationService:
         """
         logger.info(f"Fetching conversation detail for conversation_id={conversation_id}, workspace_id={workspace_id}")
 
-        conversation_detail = self.conversation_repo.get_conversation_detail(
+        conversation_detail = await self.conversation_repo.get_conversation_detail_async(
             conversation_id=conversation_id,
         )
-        conversation = self.get_conversation(
+        conversation = await self.get_conversation_async(
             conversation_id=conversation_id,
         )
         if not conversation:
@@ -1280,7 +1524,7 @@ class ConversationService:
                 info_score=conversation_detail.info_score,
             )
         logger.info("Conversation detail not found, generating new summary using LLM")
-        configs = workspace_service.get_workspace_models_configs(
+        configs = await workspace_service.get_workspace_models_configs_async(
             db=self.db,
             workspace_id=workspace_id,
             user=user
@@ -1289,14 +1533,14 @@ class ConversationService:
         if not model_id:
             logger.error(f"Workspace model configuration not found for workspace_id={workspace_id}")
             raise BusinessException("Workspace model configuration not found. Please configure a model first.", code=BizCode.MODEL_NOT_FOUND)
-        config = ModelConfigService.get_model_by_id(db=self.db, model_id=model_id)
+        config = await ModelConfigService.get_model_by_id_async(db=self.db, model_id=model_id)
 
         if not config:
             logger.error("Configured model not found for model_id={model_id}")
             raise BusinessException("Configured model does not exist.", BizCode.NOT_FOUND)
 
-        tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
-        api_config = ModelApiKeyService.get_available_api_key(
+        tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(self.db, str(workspace_id))
+        api_config = await ModelApiKeyService.get_available_api_key_async(
             self.db,
             model_id,
             tenant_id=tenant_id,
@@ -1392,8 +1636,8 @@ class ConversationService:
                 conversation_detail.takeaways = takeaways
                 conversation_detail.info_score = info_score
 
-            self.db.commit()
-            self.db.refresh(conversation_detail)
+            await self.db.commit()
+            await self.db.refresh(conversation_detail)
 
         logger.info(f"Returning conversation summary for conversation_id={conversation_id}")
         conversation_out = ConversationOut(

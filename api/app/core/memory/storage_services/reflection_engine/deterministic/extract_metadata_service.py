@@ -11,6 +11,7 @@ and runs LLM extraction + patch. Description fragment count is gated by the
 ``min_fragments`` parameter (default 5, shared with description_merge config).
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Tuple
 
@@ -180,9 +181,8 @@ async def extract_metadata_for_user(
 ) -> Dict[str, Any]:
     """对指定用户的 User 实体执行元数据提取 + Neo4j 回写 + PostgreSQL 同步。
 
-    从 Neo4j 中读取当前用户的 User 实体及其 description，
-    调用 MetadataExtractionStep 进行 LLM 结构化提取，
-    将 patch operations 回写 Neo4j 并同步 PostgreSQL。
+    从 Neo4j 中读取当前用户的 User 实体及其 description，直接调 LLM 做
+    结构化元数据提取，将 patch operations 回写 Neo4j 并同步 PostgreSQL。
 
     Args:
         connector: Neo4j 连接器
@@ -196,9 +196,6 @@ async def extract_metadata_for_user(
         {"extracted": N, "failed": N}
     """
     from app.core.memory.models.metadata_models import ALLOWED_METADATA_FIELDS
-    from app.core.memory.models.variate_config import ExtractionPipelineConfig
-    from app.core.memory.storage_services.extraction_engine.steps.base import StepContext
-    from app.core.memory.storage_services.extraction_engine.steps.metadata_step import MetadataExtractionStep
     from app.repositories.neo4j.cypher_queries import (
         ENTITY_METADATA_PATCH,
         ENTITY_METADATA_QUERY,
@@ -240,14 +237,10 @@ async def extract_metadata_for_user(
 
     logger.info(f"[Metadata] 扫描到 {len(candidates)} 个候选 User 实体")
 
-    # ── 2. 构建 step ──
-    pipeline_config = ExtractionPipelineConfig()
-    context = StepContext(
-        llm_client=llm_client,
-        language=language,
-        config=pipeline_config,
-    )
-    step = MetadataExtractionStep(context)
+    # ── 2. 反思侧直接持有 llm_client + language 调 LLM，
+    #      不复用 MetadataExtractionStep：其基类 call_structured 依赖
+    #      llm_client.response_structured（OpenAIClient 接口），与反思注入的
+    #      RedBearLLM 不兼容。模板与 schema 仍复用抽取引擎既有资源。
 
     extracted = 0
     failed = 0
@@ -264,7 +257,8 @@ async def extract_metadata_for_user(
         try:
             patched = await _extract_single_entity(
                 connector=connector,
-                step=step,
+                llm_client=llm_client,
+                language=language,
                 entity_id=entity_id,
                 entity_name=entity_name,
                 descriptions=entity_dict.get("descriptions", []),
@@ -314,9 +308,57 @@ async def extract_metadata_for_user(
     return out
 
 
+async def _run_metadata_llm(
+    llm_client: Any,
+    language: str,
+    inp: "MetadataStepInput",
+) -> "MetadataStepOutput":
+    """反思侧直接调 LLM 完成元数据结构化提取，替代 MetadataExtractionStep.run。
+
+    绕开 MetadataExtractionStep：其基类的 call_structured 依赖
+    llm_client.response_structured（OpenAIClient 接口），反思注入的 RedBearLLM
+    仅提供 call_structured 实例方法。此处复用抽取引擎的模板与 Pydantic schema，
+    仅由反思侧接管调用协议。sidecar 语义：LLM 失败返回空结果、不中断反思。
+    """
+    from app.core.memory.utils.prompt.prompt_utils import prompt_env
+    from app.core.memory.models.metadata_models import MetadataExtractionResponse
+    from app.core.memory.storage_services.extraction_engine.steps.schema import (
+        MetadataStepOutput,
+    )
+
+    template = prompt_env.get_template("extract_user_metadata.jinja2")
+    prompt = template.render(
+        language=language,
+        input_json=json.dumps(
+            {
+                "description": inp.descriptions,
+                "existing_metadata": inp.existing_metadata,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+
+    try:
+        raw = await llm_client.call_structured(
+            [{"role": "user", "content": prompt}],
+            MetadataExtractionResponse,
+        )
+    except Exception as e:
+        logger.warning(f"[Metadata] LLM 提取失败，返回空 operations: {e}")
+        return MetadataStepOutput(operations=[])
+
+    if raw is None:
+        return MetadataStepOutput(operations=[])
+    operations = list(getattr(raw, "operations", []) or [])
+    dropped = getattr(raw, "_dropped_ops_count", 0) or 0
+    return MetadataStepOutput(operations=operations, dropped_ops_count=dropped)
+
+
 async def _extract_single_entity(
     connector: Any,
-    step: Any,
+    llm_client: Any,
+    language: str,
     entity_id: str,
     entity_name: str,
     descriptions: List[str],
@@ -354,7 +396,7 @@ async def _extract_single_entity(
         descriptions=descriptions,
         existing_metadata=existing,
     )
-    result = await step.run(inp)
+    result = await _run_metadata_llm(llm_client, language, inp)
 
     if not result.has_any():
         logger.debug(f"[Metadata] 实体 {entity_name}({entity_id}) 无新增元数据")

@@ -4,12 +4,12 @@ from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Request, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import document_controller
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
-from app.db import get_db
+from app.db import get_async_db
 from app.schemas import document_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
@@ -21,12 +21,12 @@ api_logger = get_business_logger()
 
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_documents(
     kb_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id when type is Folder"),
     page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
     pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
@@ -43,7 +43,7 @@ async def get_documents(
     - Return paging metadata + file list
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -60,11 +60,11 @@ async def get_documents(
 
 
 @router.post("/document", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def create_document(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     kb_id: uuid.UUID = Body(..., description="kb id"),
     file_name: str = Body(..., description="file name"),
 ):
@@ -74,7 +74,7 @@ async def create_document(
     body = await request.json()
     create_data = document_schema.DocumentCreate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -84,18 +84,18 @@ async def create_document(
 
 
 @router.get("/{document_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_document(
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Retrieve document information based on document_id
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -105,12 +105,12 @@ async def get_document(
 
 
 @router.put("/{document_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def update_document(
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     file_name: str = Body(None, description="file name (optional)"),
 ):
     """
@@ -119,7 +119,7 @@ async def update_document(
     body = await request.json()
     update_data = document_schema.DocumentUpdate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -130,18 +130,18 @@ async def update_document(
 
 
 @router.delete("/{document_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def delete_document(
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Delete document
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -151,18 +151,18 @@ async def delete_document(
 
 
 @router.post("/{document_id}/chunks", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def parse_documents(
     document_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     parse document
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 

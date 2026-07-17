@@ -10,7 +10,7 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.memory.config import MemoryReadNodeConfig, MemoryWriteNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
-from app.db import get_db_context
+from app.db import get_async_db_context
 from app.schemas import FileInput
 from app.services.memory_config_service import MemoryConfigService
 
@@ -31,14 +31,14 @@ class MemoryReadNode(BaseNode):
         }
 
     @staticmethod
-    def _get_workspace_memory_config_id(state: WorkflowState) -> uuid.UUID:
+    async def _get_workspace_memory_config_id(state: WorkflowState) -> uuid.UUID:
         workspace_id = state.get("workspace_id")
         if not workspace_id:
             raise RuntimeError("Workspace id is required")
 
         workspace_uuid = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(str(workspace_id))
-        with get_db_context() as db:
-            return MemoryConfigService(db).get_workspace_active_config_id(workspace_uuid)
+        async with get_async_db_context() as db:
+            return await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_uuid)
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryReadNodeConfig(**self.config)
@@ -47,9 +47,9 @@ class MemoryReadNode(BaseNode):
         if not end_user_id:
             raise RuntimeError("End user id is required")
 
-        config_id = self._get_workspace_memory_config_id(state)
+        config_id = await self._get_workspace_memory_config_id(state)
 
-        memory_service = MemoryService(
+        memory_service = await MemoryService.create(
             storage_type=state["memory_storage_type"],
             config_id=config_id,
             end_user_id=end_user_id,
@@ -101,7 +101,7 @@ class MemoryWriteNode(BaseNode):
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
-        config_id = MemoryReadNode._get_workspace_memory_config_id(state)
+        config_id = await MemoryReadNode._get_workspace_memory_config_id(state)
         messages = []
         if self.typed_config.message:
             messages.append({

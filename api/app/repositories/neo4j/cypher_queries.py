@@ -17,7 +17,8 @@ DIALOGUE_NODE_SAVE = """
 STATEMENT_NODE_SAVE = """
 UNWIND $statements AS statement
 MERGE (s:Statement {id: statement.id})
-SET s += {
+SET s.delete_at = null,
+    s += {
     id: statement.id,
     run_id: statement.run_id,
     chunk_id: statement.chunk_id,
@@ -50,6 +51,7 @@ RETURN s.id AS uuid
 STATEMENT_EMOTION_UPDATE = """
 UNWIND $items AS item
 MATCH (s:Statement {id: item.statement_id})
+WHERE s.delete_at IS NULL
 SET s.emotion_type = item.emotion_type,
     s.emotion_intensity = item.emotion_intensity,
     s.emotion_keywords = item.emotion_keywords
@@ -59,7 +61,8 @@ RETURN s.id AS uuid
 CHUNK_NODE_SAVE = """
 UNWIND $chunks AS chunk
 MERGE (c:Chunk {id: chunk.id})
-SET c += {
+SET c.delete_at = null,
+    c += {
     id: chunk.id,
     name: chunk.name,
     end_user_id: chunk.end_user_id,
@@ -80,6 +83,7 @@ EXTRACTED_ENTITY_NODE_SAVE = """
 // Upsert entity nodes safely: preserve existing non-empty fields when incoming is empty
 UNWIND $entities AS entity
 MERGE (e:ExtractedEntity {id: entity.id})
+SET e.delete_at = null
 SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity.name ELSE e.name END,
     e.end_user_id = CASE WHEN entity.end_user_id IS NOT NULL AND entity.end_user_id <> '' THEN entity.end_user_id ELSE e.end_user_id END,
     e.run_id = CASE WHEN entity.run_id IS NOT NULL AND entity.run_id <> '' THEN entity.run_id ELSE e.run_id END,
@@ -133,13 +137,16 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.access_history = CASE WHEN entity.access_history IS NOT NULL THEN entity.access_history ELSE coalesce(e.access_history, []) END,
     e.last_access_time = CASE WHEN entity.last_access_time IS NOT NULL THEN entity.last_access_time ELSE e.last_access_time END,
     e.access_count = CASE WHEN entity.access_count IS NOT NULL THEN entity.access_count ELSE coalesce(e.access_count, 0) END,
-    e.is_explicit_memory = CASE WHEN entity.is_explicit_memory IS NOT NULL THEN entity.is_explicit_memory ELSE coalesce(e.is_explicit_memory, false) END
+    e.is_explicit_memory = CASE WHEN entity.is_explicit_memory IS NOT NULL THEN entity.is_explicit_memory ELSE coalesce(e.is_explicit_memory, false) END,
+    e.extraction_count = CASE WHEN entity.extraction_count IS NOT NULL THEN entity.extraction_count + coalesce(e.extraction_count, 0) ELSE coalesce(e.extraction_count, 1) END,
+    e.delete_at = null
 RETURN e.id AS uuid
 """
 
 # ── 查询用户实体已有的元数据（供增量提取时去重） ──
 ENTITY_METADATA_QUERY = """
 MATCH (e:ExtractedEntity {id: $entity_id})
+WHERE e.delete_at IS NULL
 RETURN e.core_facts AS core_facts,
        e.traits AS traits,
        e.relations AS relations,
@@ -164,6 +171,7 @@ RETURN e.core_facts AS core_facts,
 #      上层调用方对未变更字段传空数组即可，避免 Cypher 内部出现 NULL 分支。
 ENTITY_METADATA_PATCH = """
 MATCH (e:ExtractedEntity {id: $entity_id})
+WHERE e.delete_at IS NULL
 
 // ── core_facts ──
 WITH e,
@@ -253,7 +261,9 @@ ENTITY_RELATIONSHIP_SAVE = """
 UNWIND $relationships AS rel
 // Match entities by stable id within end_user_id, do not constrain by run_id
 MATCH (subject:ExtractedEntity {id: rel.source_id, end_user_id: rel.end_user_id})
+WHERE subject.delete_at IS NULL
 MATCH (object:ExtractedEntity {id: rel.target_id, end_user_id: rel.end_user_id})
+WHERE object.delete_at IS NULL
 // Avoid duplicate edges across runs for the same endpoints
 MERGE (subject)-[r:EXTRACTED_RELATIONSHIP]->(object)
 SET r.predicate = rel.predicate,
@@ -277,7 +287,8 @@ RETURN elementId(r) AS uuid
 WEAK_ENTITY_NODE_SAVE = """
 UNWIND $weak_entities AS entity
 MERGE (e:ExtractedEntity {id: entity.id, run_id: entity.run_id})
-SET e += {
+SET e.delete_at = null,
+    e += {
     name: entity.name,
     end_user_id: entity.end_user_id,
     run_id: entity.run_id,
@@ -294,11 +305,13 @@ RETURN e.id AS id
 SAVE_STRONG_TRIPLE_ENTITIES = """
 UNWIND $items AS item
 MERGE (s:ExtractedEntity {id: item.source_id, run_id: item.run_id})
-SET s += {name: item.subject, end_user_id: item.end_user_id, run_id: item.run_id}
+SET s.delete_at = null,
+    s += {name: item.subject, end_user_id: item.end_user_id, run_id: item.run_id}
 // Independent strong flag
 SET s.is_strong = true
 MERGE (o:ExtractedEntity {id: item.target_id, run_id: item.run_id})
-SET o += {name: item.object, end_user_id: item.end_user_id, run_id: item.run_id}
+SET o.delete_at = null,
+    o += {name: item.object, end_user_id: item.end_user_id, run_id: item.run_id}
 // Independent strong flag
 SET o.is_strong = true
 """
@@ -309,6 +322,7 @@ DIALOGUE_STATEMENT_EDGE_SAVE = """
     MATCH (dialogue:Dialogue)
     WHERE dialogue.uuid = edge.source OR dialogue.ref_id = edge.source
     MATCH (statement:Statement {id: edge.target})
+    WHERE statement.delete_at IS NULL
     // 仅按端点去重，关系属性可更新
     MERGE (dialogue)-[e:MENTIONS]->(statement)
     SET e.uuid = edge.id,
@@ -323,7 +337,9 @@ DIALOGUE_STATEMENT_EDGE_SAVE = """
 CHUNK_STATEMENT_EDGE_SAVE = """
     UNWIND $chunk_statement_edges AS edge
     MATCH (statement:Statement {id: edge.source, run_id: edge.run_id})
+    WHERE statement.delete_at IS NULL
     MATCH (chunk:Chunk {id: edge.target, run_id: edge.run_id})
+    WHERE chunk.delete_at IS NULL
     MERGE (chunk)-[e:CONTAINS {id: edge.id}]->(statement)
     SET e.end_user_id = edge.end_user_id,
         e.run_id = edge.run_id,
@@ -335,8 +351,10 @@ STATEMENT_ENTITY_EDGE_SAVE = """
 UNWIND $relationships AS rel
 // Statement nodes are per-run; keep run_id constraint on statements
 MATCH (statement:Statement {id: rel.source, run_id: rel.run_id})
+WHERE statement.delete_at IS NULL
 // Entities are shared across runs within end_user_id; do not constrain by run_id
 MATCH (entity:ExtractedEntity {id: rel.target, end_user_id: rel.end_user_id})
+WHERE entity.delete_at IS NULL
 // Avoid duplicate edges across runs for same endpoints
 MERGE (statement)-[r:REFERENCES_ENTITY]->(entity)
 SET r.end_user_id = rel.end_user_id,
@@ -351,6 +369,7 @@ CALL db.index.vector.queryNodes('entity_embedding_index', $limit * 100, $embeddi
 YIELD node AS e, score
 WHERE e.name_embedding IS NOT NULL
   AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+  AND e.delete_at IS NULL
 RETURN e.id AS id,
        e.name AS name,
        e.end_user_id AS end_user_id,
@@ -369,6 +388,7 @@ CALL db.index.vector.queryNodes('statement_embedding_index', $limit * 100, $embe
 YIELD node AS s, score
 WHERE s.statement_embedding IS NOT NULL
   AND ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+  AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
        s.end_user_id AS end_user_id,
@@ -391,6 +411,7 @@ CALL db.index.vector.queryNodes('chunk_embedding_index', $limit * 100, $embeddin
 YIELD node AS c, score
 WHERE c.chunk_embedding IS NOT NULL
   AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+  AND c.delete_at IS NULL
 RETURN c.id AS chunk_id,
        c.end_user_id AS end_user_id,
        c.content AS content,
@@ -406,8 +427,11 @@ LIMIT $limit
 SEARCH_STATEMENTS_BY_KEYWORD = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+  AND s.delete_at IS NULL
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+WHERE c.delete_at IS NULL
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE e.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
        s.end_user_id AS end_user_id,
@@ -429,17 +453,19 @@ LIMIT $limit
 SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+  AND e.delete_at IS NULL
 WITH e, score
 With collect({entity: e, score: score}) AS fulltextResults
 
 OPTIONAL MATCH (ae:ExtractedEntity)
 WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
+  AND ae.delete_at IS NULL
   AND ae.aliases IS NOT NULL
   AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($query))
 WITH fulltextResults, collect(ae) AS aliasEntities
 
 UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
-     CASE 
+     CASE
        WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($query)) THEN 1.0
        WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($query)) THEN 0.9
        ELSE 0.8
@@ -448,7 +474,9 @@ UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
 WITH row.entity AS e, row.score AS score
 WITH DISTINCT e, MAX(score) AS score
 OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+WHERE s.delete_at IS NULL
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+WHERE c.delete_at IS NULL
 RETURN e.id AS id,
        e.name AS name,
        e.end_user_id AS end_user_id,
@@ -476,8 +504,11 @@ LIMIT $limit
 SEARCH_CHUNKS_BY_CONTENT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+  AND c.delete_at IS NULL
 OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
+WHERE s.delete_at IS NULL
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE e.delete_at IS NULL
 RETURN c.id AS chunk_id,
        c.end_user_id AS end_user_id,
        c.content AS content,
@@ -554,6 +585,7 @@ LIMIT $limit
 SEARCH_CHUNK_BY_CHUNK_ID = """
 MATCH (c:Chunk)
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+  AND c.delete_at IS NULL
   AND c.id = $chunk_id
 RETURN c.id AS chunk_id,
        c.end_user_id AS end_user_id,
@@ -568,6 +600,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_BY_TEMPORAL = """
 MATCH (s:Statement)
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+  AND s.delete_at IS NULL
   AND ((($start_date IS NULL OR datetime(s.created_at) >= datetime($start_date))
   AND ($end_date IS NULL OR datetime(s.created_at) <= datetime($end_date)))
   OR (($valid_date IS NULL OR (s.valid_at IS NOT NULL AND datetime(s.valid_at) >= datetime($valid_date)))
@@ -591,12 +624,15 @@ LIMIT $limit
 SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+  AND s.delete_at IS NULL
   AND ((($start_date IS NULL OR (s.created_at IS NOT NULL AND datetime(s.created_at) >= datetime($start_date)))
   AND ($end_date IS NULL OR (s.created_at IS NOT NULL AND datetime(s.created_at) <= datetime($end_date))))
   OR (($valid_date IS NULL OR (s.valid_at IS NOT NULL AND datetime(s.valid_at) >= datetime($valid_date)))
   AND ($invalid_date IS NULL OR (s.invalid_at IS NOT NULL AND datetime(s.invalid_at) <= datetime($invalid_date)))))
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+WHERE c.delete_at IS NULL
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE e.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
        s.end_user_id AS end_user_id,
@@ -618,6 +654,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_BY_CREATED_AT = """
 MATCH (n:Statement)
 WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
+  AND n.delete_at IS NULL
   AND ($created_at IS NOT NULL AND date(substring(n.created_at, 0, 10)) = date($created_at))
 RETURN n.id AS id,
        n.statement AS statement,
@@ -634,6 +671,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_BY_VALID_AT = """
 MATCH (n:Statement)
 WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
+  AND n.delete_at IS NULL
   AND ($valid_at IS NOT NULL AND date(substring(n.valid_at, 0, 10)) = date($valid_at))
 RETURN n.id AS id,
        n.statement AS statement,
@@ -650,6 +688,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_G_CREATED_AT = """
 MATCH (n:Statement)
 WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
+  AND n.delete_at IS NULL
   AND ($created_at IS NOT NULL AND date(substring(n.created_at, 0, 19)) = date($created_at))
 RETURN n.id AS id,
        n.statement AS statement,
@@ -666,6 +705,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_L_CREATED_AT = """
 MATCH (n:Statement)
 WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
+  AND n.delete_at IS NULL
   AND ($created_at IS NOT NULL AND date(substring(n.created_at, 0, 19)) < date($created_at))
 RETURN n.id AS id,
        n.statement AS statement,
@@ -682,6 +722,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_G_VALID_AT = """
 MATCH (n:Statement)
 WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
+  AND n.delete_at IS NULL
   AND ($valid_at IS NOT NULL AND date(substring(n.valid_at, 0, 10)) > date($valid_at))
 RETURN n.id AS id,
        n.statement AS statement,
@@ -698,6 +739,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_L_VALID_AT = """
 MATCH (n:Statement)
 WHERE ($end_user_id IS NULL OR n.end_user_id = $end_user_id)
+  AND n.delete_at IS NULL
   AND ($valid_at IS NOT NULL AND date(substring(n.valid_at, 0, 10)) < date($valid_at))
 RETURN n.id AS id,
        n.statement AS statement,
@@ -760,6 +802,7 @@ LIMIT $limit
 # 根据id修改句子的invalid_at的值
 UPDATE_STATEMENT_INVALID_AT = """
 MATCH (n:Statement {end_user_id: $end_user_id, id: $id})
+WHERE n.delete_at IS NULL
 SET n.invalid_at = $new_invalid_at
 """
 
@@ -791,7 +834,9 @@ MEMORY_SUMMARY_STATEMENT_EDGE_SAVE = """
 UNWIND $edges AS e
 MATCH (ms:MemorySummary {id: e.summary_id, run_id: e.run_id})
 MATCH (c:Chunk {id: e.chunk_id, run_id: e.run_id})
+WHERE c.delete_at IS NULL
 MATCH (c)-[:CONTAINS]->(s:Statement {run_id: e.run_id})
+WHERE s.delete_at IS NULL
 MERGE (ms)-[r:DERIVED_FROM_STATEMENT]->(s)
 SET r.end_user_id = e.end_user_id,
     r.run_id = e.run_id,
@@ -802,7 +847,9 @@ RETURN elementId(r) AS uuid
 # Entity Merge Query
 MERGE_ENTITIES = """
 MATCH (canonical:ExtractedEntity {id: $canonical_id})
+WHERE canonical.delete_at IS NULL
 MATCH (losing:ExtractedEntity {id: $losing_id})
+WHERE losing.delete_at IS NULL
 
 // 更新canonical实体的aliases
 SET canonical.aliases = $merged_aliases
@@ -858,9 +905,10 @@ RETURN count(losing) as deleted
 
 neo4j_statement_part = '''
 MATCH (n:Statement)
-WHERE n.end_user_id = "{}" 
+WHERE n.end_user_id = "{}"
+  AND n.delete_at IS NULL
   AND datetime(n.created_at) >= datetime() - duration('P3D')
-RETURN 
+RETURN
   n.statement as statement_name,
   n.id as statement_id,
    n.created_at as   statement_created_at
@@ -868,19 +916,23 @@ RETURN
 '''
 neo4j_statement_all = '''
 MATCH (n:Statement)
-WHERE n.end_user_id = "{}" 
-RETURN 
+WHERE n.end_user_id = "{}"
+  AND n.delete_at IS NULL
+RETURN
   n.statement as statement_name,
   n.id as statement_id
 
 '''
 neo4j_query_part = """
             MATCH (n)-[r]-(m:ExtractedEntity)
-            WHERE n.end_user_id = "{}" 
+            WHERE n.end_user_id = "{}"
+            AND n.delete_at IS NULL
+            AND m.delete_at IS NULL
             AND datetime(n.created_at) >= datetime() - duration('P3D')
             WITH DISTINCT m
             OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
-            RETURN 
+            WHERE other.delete_at IS NULL
+            RETURN
              elementId(m) as id,
             m.name as entity1_name,
             m.description as description,
@@ -896,10 +948,13 @@ neo4j_query_part = """
                           """
 neo4j_query_all = """
                 MATCH (n)-[r]-(m:ExtractedEntity)
-                WHERE n.end_user_id = "{}" 
+                WHERE n.end_user_id = "{}"
+                AND n.delete_at IS NULL
+                AND m.delete_at IS NULL
                 WITH DISTINCT m
                 OPTIONAL MATCH (m)-[rel]-(other:ExtractedEntity)
-                RETURN 
+                WHERE other.delete_at IS NULL
+                RETURN
                  elementId(m) as id,
                 m.name as entity1_name,
                 m.description as description,
@@ -918,6 +973,7 @@ neo4j_query_all = """
 Memory_Timeline_Entity_Events = """
 MATCH (e:ExtractedEntity)
 WHERE elementId(e) = $id
+  AND e.delete_at IS NULL
 RETURN e.name AS entity_name,
        e.entity_type AS entity_type,
        e.description_summary AS description_summary,
@@ -929,6 +985,8 @@ Memory_Timeline_ExtractedEntity = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
 WHERE elementId(n) = $id
   AND (ms:ExtractedEntity OR ms:MemorySummary)
+  AND n.delete_at IS NULL
+  AND e.delete_at IS NULL
 
 RETURN
   collect(
@@ -937,7 +995,7 @@ RETURN
       WHEN ms:ExtractedEntity THEN {
         text: ms.name,
         created_at: ms.created_at,
-     type: "情景记忆" 
+     type: "情景记忆"
       }
     END
   ) AS ExtractedEntity,
@@ -948,7 +1006,7 @@ RETURN
       WHEN ms:MemorySummary THEN {
         text: ms.content,
         created_at: ms.created_at,
-       type: "长期沉淀" 
+       type: "长期沉淀"
       }
     END
   ) AS MemorySummary,
@@ -957,16 +1015,18 @@ RETURN
     DISTINCT {
       text: e.statement,
       created_at: e.created_at,
-      type: "情绪记忆" 
+      type: "情绪记忆"
     }
   ) AS statement;
 
 
 """
-Memory_Timeline_MemorySummary = """ 
+Memory_Timeline_MemorySummary = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
 WHERE elementId(n) =$id
   AND (ms:MemorySummary OR ms:ExtractedEntity)
+  AND n.delete_at IS NULL
+  AND e.delete_at IS NULL
 RETURN
   collect(
     DISTINCT
@@ -974,7 +1034,7 @@ RETURN
       WHEN ms:ExtractedEntity THEN {
         text: ms.name,
         created_at: ms.created_at,
-        type: "情景记忆" 
+        type: "情景记忆"
       }
     END
   ) AS ExtractedEntity,
@@ -985,7 +1045,7 @@ RETURN
       WHEN n:MemorySummary THEN {
         text: n.content,
         created_at: n.created_at,
-        type: "长期沉淀" 
+        type: "长期沉淀"
       }
     END
   ) AS MemorySummary,
@@ -994,36 +1054,39 @@ RETURN
     DISTINCT {
       text: e.statement,
       created_at: e.created_at,
-      type: "情绪记忆" 
+      type: "情绪记忆"
     }
   ) AS statement;
 """
 Memory_Timeline_Statement = """
 MATCH (n)
 WHERE elementId(n) = $id
+  AND n.delete_at IS NULL
 
-CALL {
+CALL () {
   WITH n
   MATCH (n)-[]-(m:ExtractedEntity)
   WHERE NOT m:MemorySummary AND NOT m:Chunk
+    AND m.delete_at IS NULL
   RETURN collect(
     DISTINCT {
       text: m.name,
       created_at: m.created_at,
-      type: "情景记忆" 
+      type: "情景记忆"
     }
   ) AS ExtractedEntity
 }
 
-CALL {
+CALL () {
   WITH n
   MATCH (n)-[]-(m:MemorySummary)
   WHERE NOT m:Chunk
+    AND m.delete_at IS NULL
   RETURN collect(
     DISTINCT {
       text: m.content,
       created_at: m.created_at,
-       type: "长期沉淀" 
+       type: "长期沉淀"
     }
   ) AS MemorySummary
 }
@@ -1034,7 +1097,7 @@ RETURN
   {
     text: n.statement,
     created_at: n.created_at,
-     type: "情绪记忆" 
+     type: "情绪记忆"
   } AS statement;
 
 
@@ -1044,6 +1107,7 @@ RETURN
 Memory_Space_Emotion_Statement = """
 MATCH (n)
 WHERE elementId(n) = $id
+  AND n.delete_at IS NULL
 RETURN
   n.emotion_intensity AS emotion_intensity,
   n.created_at        AS created_at,
@@ -1054,9 +1118,12 @@ RETURN
 Memory_Space_Emotion_MemorySummary = """
 MATCH (n)-[]-(e)
 WHERE elementId(n) = $id
+  AND n.delete_at IS NULL
+  AND e.delete_at IS NULL
   AND EXISTS {
     MATCH (e)-[]-(ms)
-    WHERE ms:MemorySummary OR ms:ExtractedEntity
+    WHERE (ms:MemorySummary OR ms:ExtractedEntity)
+      AND ms.delete_at IS NULL
   }
 RETURN DISTINCT
   e.emotion_intensity AS emotion_intensity,
@@ -1067,8 +1134,11 @@ RETURN DISTINCT
 Memory_Space_Emotion_ExtractedEntity = """
 MATCH (n)-[]-(e)
 WHERE elementId(n) = $id
+  AND n.delete_at IS NULL
+  AND e.delete_at IS NULL
   AND EXISTS {
     MATCH (e)-[]-(ms:ExtractedEntity)
+    WHERE ms.delete_at IS NULL
   }
 RETURN DISTINCT
   e.emotion_intensity AS emotion_intensity,
@@ -1079,12 +1149,16 @@ RETURN DISTINCT
 
 Memory_Space_User = """
 MATCH (n)-[r]->(m)
-WHERE n.end_user_id = $end_user_id  AND m.name="用户" 
+WHERE n.end_user_id = $end_user_id  AND m.name="用户"
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
 return DISTINCT elementId(m) as id
 """
 Memory_Space_Entity = """
 MATCH (n)-[]-(m)
 WHERE elementId(m) = $id AND  m.entity_type = "Person"
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
 RETURN
 DISTINCT m.name as name,m.end_user_id as end_user_id
 """
@@ -1092,6 +1166,9 @@ Memory_Space_Associative = """
 MATCH (u)-[]-(x)-[]-(h)
 WHERE elementId(u) = $user_id
   AND elementId(h) = $id
+  AND u.delete_at IS NULL
+  AND x.delete_at IS NULL
+  AND h.delete_at IS NULL
 RETURN DISTINCT
  x.statement as statement,x.created_at as created_at
 """
@@ -1139,6 +1216,7 @@ def build_graph_nodes_by_type_query(node_type: str) -> str:
 // GRAPH_NODES_BY_TYPE_LIMITS({node_type})
 MATCH (n:{node_type})
 WHERE n.end_user_id = $end_user_id
+  AND n.delete_at IS NULL
 RETURN
     elementId(n)        AS id,
     labels(n)           AS labels,
@@ -1170,6 +1248,7 @@ def build_graph_total_count_by_type_query(node_type: str) -> str:
 // GRAPH_NODES_TOTAL_COUNT_BY_TYPE({node_type})
 MATCH (n:{node_type})
 WHERE n.end_user_id = $end_user_id
+  AND n.delete_at IS NULL
 RETURN count(n) AS total
 """
 
@@ -1189,6 +1268,7 @@ GRAPH_NODES_REL_COUNT_BATCH = """
 // GRAPH_NODES_REL_COUNT_BATCH
 UNWIND $node_ids AS nid
 MATCH (n) WHERE elementId(n) = nid
+  AND n.delete_at IS NULL
 RETURN nid AS id, COUNT { (n)--() } AS rel_count
 """
 
@@ -1198,13 +1278,14 @@ RETURN nid AS id, COUNT { (n)--() } AS rel_count
 Graph_Node_query = """
 MATCH (n:MemorySummary)
 WHERE n.end_user_id = $end_user_id
+  AND n.delete_at IS NULL
 RETURN
   elementId(n) AS id,
   labels(n) AS labels,
   properties(n) AS properties,
   0 AS priority
 LIMIT $limit
-                
+
 UNION ALL
 
 MATCH (n:Dialogue)
@@ -1220,6 +1301,7 @@ UNION ALL
 
 MATCH (n:Statement)
 WHERE n.end_user_id =  $end_user_id
+  AND n.delete_at IS NULL
 RETURN
   elementId(n) AS id,
   labels(n) AS labels,
@@ -1231,6 +1313,7 @@ UNION ALL
 
 MATCH (n:ExtractedEntity)
 WHERE n.end_user_id =  $end_user_id
+  AND n.delete_at IS NULL
 RETURN
   elementId(n) AS id,
   labels(n) AS labels,
@@ -1242,6 +1325,7 @@ UNION ALL
 
 MATCH (n:Chunk)
 WHERE n.end_user_id =  $end_user_id
+  AND n.delete_at IS NULL
 RETURN
   elementId(n) AS id,
   labels(n) AS labels,
@@ -1277,6 +1361,7 @@ RETURN c.community_id AS community_id
 
 ENTITY_JOIN_COMMUNITY = """
 MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
 MERGE (e)-[:BELONGS_TO_COMMUNITY]->(c)
 SET c.updated_at = datetime()
@@ -1285,20 +1370,25 @@ RETURN e.id AS entity_id, c.community_id AS community_id
 
 ENTITY_LEAVE_ALL_COMMUNITIES = """
 MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 MATCH (e)-[r:BELONGS_TO_COMMUNITY]->(:Community)
 DELETE r
 """
 
 GET_ENTITY_NEIGHBORS = """
 MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 
 // 来源一：直接关系邻居（EXTRACTED_RELATIONSHIP 边）
 OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb1.delete_at IS NULL
 
 // 来源二：同 Statement 共现邻居（REFERENCES_ENTITY 边）
 OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+WHERE s.delete_at IS NULL
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
 WHERE nb2.id <> e.id
+  AND nb2.delete_at IS NULL
 
 WITH collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
 UNWIND all_neighbors AS nb
@@ -1313,6 +1403,7 @@ RETURN DISTINCT
 
 GET_ALL_ENTITIES_FOR_USER = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
@@ -1322,16 +1413,19 @@ RETURN e.id AS id,
 
 GET_ENTITY_COUNT_FOR_USER = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 RETURN count(e) AS entity_count
 """
 
 GET_ALL_ENTITY_IDS_FOR_USER = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 RETURN e.id AS id
 """
 
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+WHERE e.delete_at IS NULL
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score,
        e.name_embedding AS name_embedding,
@@ -1342,7 +1436,9 @@ ORDER BY coalesce(e.importance_score, 0) DESC
 
 GET_COMMUNITY_RELATIONSHIPS = """
 MATCH (e1:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+WHERE e1.delete_at IS NULL
 MATCH (e2:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+WHERE e2.delete_at IS NULL
 MATCH (e1)-[r:EXTRACTED_RELATIONSHIP]->(e2)
 RETURN e1.name AS subject, r.predicate AS predicate, e2.name AS object
 ORDER BY e1.name, r.predicate, e2.name
@@ -1353,6 +1449,7 @@ LIMIT 20
 BATCH_ASSIGN_ENTITIES_TO_COMMUNITIES = """
 UNWIND $assignments AS row
 MATCH (e:ExtractedEntity {id: row.entity_id, end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 OPTIONAL MATCH (e)-[old_r:BELONGS_TO_COMMUNITY]->(:Community)
 DELETE old_r
 WITH e, row
@@ -1368,6 +1465,7 @@ GET_COMMUNITY_AVG_EMBEDDINGS_BATCH = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
       -[:BELONGS_TO_COMMUNITY]->(c:Community)
 WHERE c.community_id IN $community_ids
+  AND e.delete_at IS NULL
   AND e.name_embedding IS NOT NULL
 WITH c.community_id AS cid,
      count(e) AS member_count,
@@ -1390,6 +1488,7 @@ RETURN count(c) AS community_count
 
 UPDATE_COMMUNITY_MEMBER_COUNT = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+WHERE e.delete_at IS NULL
 WITH c, count(e) AS cnt
 SET c.member_count = cnt
 RETURN c.community_id AS community_id, cnt AS member_count
@@ -1408,6 +1507,7 @@ RETURN count(c) AS deleted
 RECONCILE_REFRESH_ALL_MEMBER_COUNTS = """
 MATCH (c:Community {end_user_id: $end_user_id})
 OPTIONAL MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+WHERE e.delete_at IS NULL
 WITH c, count(e) AS cnt
 SET c.member_count = cnt
 RETURN count(c) AS refreshed
@@ -1418,6 +1518,7 @@ RECONCILE_REFRESH_MEMBER_COUNTS_SCOPED = """
 MATCH (c:Community {end_user_id: $end_user_id})
 WHERE c.community_id IN $community_ids
 OPTIONAL MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+WHERE e.delete_at IS NULL
 WITH c, count(e) AS cnt
 SET c.member_count = cnt
 RETURN count(c) AS refreshed
@@ -1448,6 +1549,7 @@ RETURN c.community_id AS community_id
 
 GET_ENTITIES_PAGE = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.delete_at IS NULL
 OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN e.id AS id,
        e.name AS name,
@@ -1460,11 +1562,16 @@ SKIP $skip LIMIT $limit
 GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS = """
 // 批量拉取指定实体列表的邻居（用于分批全量聚类）
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
-WHERE e.id IN $entity_ids
+WHERE e.delete_at IS NULL
+  AND e.id IN $entity_ids
+  AND e.delete_at IS NULL
 OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb1.delete_at IS NULL
 OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+WHERE s.delete_at IS NULL
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
 WHERE nb2.id <> e.id
+  AND nb2.delete_at IS NULL
 WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
 UNWIND all_neighbors AS nb
 WITH e, nb WHERE nb IS NOT NULL
@@ -1480,7 +1587,9 @@ RETURN DISTINCT
 GET_COMMUNITY_GRAPH_DATA = """
 MATCH (c:Community {end_user_id: $end_user_id})
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[b:BELONGS_TO_COMMUNITY]->(c)
+WHERE e.delete_at IS NULL
 OPTIONAL MATCH (e)-[r:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e2.delete_at IS NULL
 RETURN
     elementId(c)          AS c_id,
     properties(c)         AS c_props,
@@ -1535,8 +1644,10 @@ RETURN c.community_id AS community_id
 EXPAND_COMMUNITY_STATEMENTS = """
 MATCH (c:Community {community_id: $community_id})
 MATCH (e:ExtractedEntity)-[:BELONGS_TO_COMMUNITY]->(c)
+WHERE e.delete_at IS NULL
 MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
 WHERE s.end_user_id = $end_user_id
+  AND s.delete_at IS NULL
 RETURN s.statement AS statement,
        s.id AS id,
        s.end_user_id AS end_user_id,
@@ -1578,6 +1689,7 @@ PERCEPTUAL_CHUNK_EDGE_SAVE = """
 UNWIND $edges AS edge
 MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
 MATCH (c:Chunk {id: edge.chunk_id, end_user_id: edge.end_user_id})
+WHERE c.delete_at IS NULL
 MERGE (c)-[r:HAS_PERCEPTUAL]->(p)
 ON CREATE SET r.end_user_id = edge.end_user_id,
     r.created_at = edge.created_at
@@ -1599,6 +1711,7 @@ LIMIT $batch_size
 SEARCH_STATEMENTS_BY_USER_ID = """
 MATCH (s:Statement)
 WHERE s.end_user_id = $end_user_id AND s.id > $last_id
+  AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.statement_embedding AS embedding
 ORDER BY s.id
@@ -1608,6 +1721,7 @@ LIMIT $batch_size
 SEARCH_ENTITIES_BY_USER_ID = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id AND e.id > $last_id
+  AND e.delete_at IS NULL
 RETURN e.id AS id,
        e.name_embedding AS embedding
 ORDER BY e.id
@@ -1617,6 +1731,7 @@ LIMIT $batch_size
 SEARCH_CHUNKS_BY_USER_ID = """
 MATCH (c:Chunk)
 WHERE c.end_user_id = $end_user_id AND c.id > $last_id
+  AND c.delete_at IS NULL
 RETURN c.id AS id,
        c.chunk_embedding AS embedding
 ORDER BY c.id
@@ -1664,6 +1779,7 @@ RETURN p.id AS id,
 SEARCH_STATEMENTS_BY_IDS = """
 MATCH (s:Statement)
 WHERE s.id IN $ids
+  AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
        s.end_user_id AS end_user_id,
@@ -1681,6 +1797,7 @@ RETURN s.id AS id,
 SEARCH_CHUNKS_BY_IDS = """
 MATCH (c:Chunk)
 WHERE c.id IN $ids
+  AND c.delete_at IS NULL
 RETURN c.id AS id,
        c.end_user_id AS end_user_id,
        c.content AS content,
@@ -1693,6 +1810,7 @@ RETURN c.id AS id,
 SEARCH_ENTITIES_BY_IDS = """
 MATCH (e:ExtractedEntity)
 WHERE e.id IN $ids
+  AND e.delete_at IS NULL
 RETURN e.id AS id,
        e.name AS name,
        COALESCE(e.aliases, []) AS aliases,
@@ -1760,6 +1878,7 @@ LIMIT $limit
 SEARCH_STATEMENTS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+  AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
        s.end_user_id AS end_user_id,
@@ -1780,6 +1899,7 @@ LIMIT $limit
 SEARCH_ENTITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+  AND e.delete_at IS NULL
 RETURN e.id AS id,
        e.name AS name,
        COALESCE(e.aliases, []) AS aliases,
@@ -1796,6 +1916,7 @@ LIMIT $limit
 SEARCH_CHUNKS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+  AND c.delete_at IS NULL
 RETURN c.id AS id,
        c.content AS content,
        COALESCE(c.activation_value, 0.5) AS activation_value,
@@ -1843,6 +1964,8 @@ LIMIT $limit
 SEARCH_ENITITES_BY_RELATIONSHIP = """
 MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
 WHERE (n.end_user_id = $end_user_id AND n.id = $source_id AND r.predicate_id IN $predicates)
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
 RETURN m.id AS id,
        n.name AS source_name,
        r.predicate AS relation_predicate,
@@ -1852,6 +1975,8 @@ RETURN m.id AS id,
 SEARCH_RELATION_BETWEEN_ENTITIES = """
 MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
 WHERE n.end_user_id = $end_user_id AND n.id = $source_id AND m.id = $target_id
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
 RETURN n.id AS source_id,
        n.name AS source_name,
        r.predicate AS relation_predicate,
@@ -1863,6 +1988,8 @@ SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS = """
 UNWIND $pairs AS pair
 MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
 WHERE n.end_user_id = $end_user_id AND n.id = pair.source_id AND m.id = pair.target_id
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
 RETURN n.id AS source_id,
        n.name AS source_name,
        r.predicate AS relation_predicate,
@@ -1873,6 +2000,7 @@ RETURN n.id AS source_id,
 SEARCH_USER_METADATA = """
 MATCH (n:ExtractedEntity)
 WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
+  AND n.delete_at IS NULL
 RETURN n.description AS description,
        n.aliases AS aliases,
        n.anchors AS anchors,
@@ -1890,6 +2018,7 @@ RETURN n.description AS description,
 USER_ENTITY_FOR_METADATA = """
 MATCH (n:ExtractedEntity)
 WHERE n.end_user_id = $end_user_id
+  AND n.delete_at IS NULL
   AND (n.entity_type = '用户' OR toLower(n.name) IN ['用户', '我', 'user', 'i'])
 RETURN n.id AS entity_id,
        n.name AS entity_name,
@@ -2015,6 +2144,7 @@ RETURN elementId(r) AS uuid
 REFLECTION_DESC_MERGE_CANDIDATES = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id
+  AND e.delete_at IS NULL
   AND e.description IS NOT NULL
   AND e.description <> ""
   AND size(split(e.description, '；')) >= $min_fragments
@@ -2033,6 +2163,7 @@ LIMIT $batch_size
 # Clear description, write summary, timeline and event_timeline
 REFLECTION_DESC_UPDATE = """
 MATCH (e:ExtractedEntity {id: $entity_id})
+WHERE e.delete_at IS NULL
 SET e.description = "",
     e.description_summary = $summary,
     e.description_timeline = $timeline,
@@ -2044,17 +2175,20 @@ RETURN e.id
 REFLECTION_RENAME_CHECK_CONFLICT = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $suggested_name})
 WHERE e.id <> $current_entity_id
+  AND e.delete_at IS NULL
 RETURN count(e) AS conflict_count
 """
 
 REFLECTION_RENAME_ENTITY = """
 MATCH (e:ExtractedEntity {id: $entity_id})
+WHERE e.delete_at IS NULL
 SET e.name = $new_name
 RETURN e.id
 """
 
 REFLECTION_UPDATE_NAME_EMBEDDING = """
 MATCH (e:ExtractedEntity {id: $entity_id})
+WHERE e.delete_at IS NULL
 SET e.name_embedding = $name_embedding
 RETURN e.id
 """
@@ -2063,10 +2197,12 @@ RETURN e.id
 DEDUP_CANDIDATES_BY_NAME = """
 MATCH (e1:ExtractedEntity)
 WHERE e1.end_user_id = $end_user_id
+  AND e1.delete_at IS NULL
   AND NOT toLower(e1.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 WITH e1
 MATCH (e2:ExtractedEntity)
 WHERE e2.end_user_id = $end_user_id
+  AND e2.delete_at IS NULL
   AND e2.entity_type = e1.entity_type
   AND elementId(e1) < elementId(e2)
   AND NOT toLower(e2.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
@@ -2094,11 +2230,13 @@ LIMIT $candidate_cap
 DEDUP_CANDIDATES_BY_EMBED = """
 MATCH (e1:ExtractedEntity)
 WHERE e1.end_user_id = $end_user_id
+  AND e1.delete_at IS NULL
   AND e1.name_embedding IS NOT NULL
   AND NOT toLower(e1.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 CALL db.index.vector.queryNodes('entity_embedding_index', $top_k, e1.name_embedding)
 YIELD node AS e2, score
 WHERE e2.end_user_id = $end_user_id
+  AND e2.delete_at IS NULL
   AND e2.entity_type = e1.entity_type
   AND elementId(e1) < elementId(e2)
   AND score >= $theta_embed_floor
@@ -2116,21 +2254,25 @@ LIMIT $candidate_cap
 # 查两个实体各自度数（用于超级节点保护）
 ENTITY_DEGREE_COUNT = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
-WHERE e.id IN [$id_a, $id_b]
+WHERE e.delete_at IS NULL
+  AND e.id IN [$id_a, $id_b]
 RETURN e.id AS id, COUNT{ (e)--() } AS degree
 """
 
 # 批量查多个实体度数（方案B 桶内同名直合用）
 ENTITY_DEGREES_BY_IDS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
-WHERE e.id IN $ids
+WHERE e.delete_at IS NULL
+  AND e.id IN $ids
 RETURN e.id AS id, COUNT{ (e)--() } AS degree
 """
 
 # 去重两个实体合并
 DEDUP_MERGE_ENTITIES = """
 MATCH (keeper:ExtractedEntity {id: $keeper_id, end_user_id: $end_user_id})
+WHERE keeper.delete_at IS NULL
 MATCH (loser:ExtractedEntity {id: $loser_id, end_user_id: $end_user_id})
+WHERE loser.delete_at IS NULL
 SET keeper.name = $merged_name,
     keeper.aliases = $merged_aliases,
     keeper.description = CASE
@@ -2147,10 +2289,11 @@ SET keeper.name = $merged_name,
       WHEN coalesce(loser.importance_score, 0) > coalesce(keeper.importance_score, 0)
       THEN loser.importance_score ELSE keeper.importance_score END,
     keeper.access_count = coalesce(keeper.access_count, 0) + coalesce(loser.access_count, 0),
+    keeper.extraction_count = coalesce(keeper.extraction_count, 1) + coalesce(loser.extraction_count, 1),
     keeper.created_at = CASE
       WHEN keeper.created_at IS NULL THEN loser.created_at
       WHEN loser.created_at IS NULL THEN keeper.created_at
-      WHEN loser.created_at < keeper.created_at THEN loser.created_at
+      WHEN loser.created_at > keeper.created_at THEN loser.created_at
       ELSE keeper.created_at END,
     keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
     keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
@@ -2162,7 +2305,7 @@ SET keeper.name = $merged_name,
     keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
 WITH keeper, loser
 OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
-WHERE NOT (s)-[:REFERENCES_ENTITY]->(keeper)
+WHERE s.delete_at IS NULL AND NOT (s)-[:REFERENCES_ENTITY]->(keeper)
 FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
   CREATE (s)-[:REFERENCES_ENTITY]->(keeper)
 )
@@ -2189,6 +2332,7 @@ RETURN keeper.id AS merged_id
 DEDUP_FULL_SCAN_ENTITIES = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id
+  AND e.delete_at IS NULL
   AND e.entity_type = $entity_type
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 RETURN e.id AS entity_id, e.name AS name, e.entity_type AS entity_type,
@@ -2201,6 +2345,7 @@ ORDER BY e.created_at
 DEDUP_FULL_SCAN_NEW_COUNT = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id
+  AND e.delete_at IS NULL
   AND e.entity_type = $entity_type
   AND e.created_at > $last_scan_time
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
@@ -2211,6 +2356,7 @@ RETURN count(e) AS new_count
 DEDUP_FULL_SCAN_ENTITY_TYPES = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id
+  AND e.delete_at IS NULL
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 RETURN DISTINCT e.entity_type AS entity_type, count(e) AS count
 """
@@ -2220,6 +2366,7 @@ RETURN DISTINCT e.entity_type AS entity_type, count(e) AS count
 UNRESOLVED_STATEMENT_CANDIDATES = """
 MATCH (s:Statement)
 WHERE s.end_user_id = $end_user_id
+  AND s.delete_at IS NULL
   AND s.has_unsolved_reference = true
 RETURN s.id AS statement_id,
        s.statement AS statement_text,
@@ -2237,8 +2384,10 @@ LIMIT $batch_size
 
 UNRESOLVED_CONTEXT_CHUNKS = """
 MATCH (c:Chunk {id: $chunk_id})
+WHERE c.delete_at IS NULL
 MATCH (nearby:Chunk {end_user_id: $end_user_id})
 WHERE nearby.id <> c.id
+  AND nearby.delete_at IS NULL
 WITH c, nearby,
      abs(duration.between(datetime(nearby.created_at), datetime(c.created_at)).days * 86400
        + duration.between(datetime(nearby.created_at), datetime(c.created_at)).seconds) AS diff_sec
@@ -2257,6 +2406,7 @@ MERGE (e:ExtractedEntity {
   entity_type: $entity_type
 })
 ON CREATE SET
+  e.delete_at = null,
   e.id = randomUUID(),
   e.description = $description,
   e.example = "",
@@ -2274,17 +2424,26 @@ ON CREATE SET
   e.access_count = 0,
   e.last_access_time = null,
   e.is_explicit_memory = $is_explicit_memory,
-  e.created_at = $created_at
+  e.created_at = $created_at,
+  e.extraction_count = 1
 ON MATCH SET
+  e.delete_at = null,
   e.description = CASE
     WHEN e.description IS NULL OR e.description = "" THEN $description
     ELSE e.description + '；' + $description
-  END
+  END,
+  e.extraction_count = coalesce(e.extraction_count, 1) + 1,
+  e.created_at = CASE
+    WHEN e.created_at IS NULL THEN $created_at
+    WHEN $created_at IS NULL THEN e.created_at
+    WHEN $created_at > e.created_at THEN $created_at
+    ELSE e.created_at END
 RETURN e.id AS entity_id, e.name AS name
 """
 
 UNRESOLVED_UPDATE_NAME_EMBEDDING = """
 MATCH (e:ExtractedEntity {id: $entity_id})
+WHERE e.delete_at IS NULL
 SET e.name_embedding = $name_embedding
 RETURN e.id
 """
@@ -2294,6 +2453,7 @@ RETURN e.id
 # 历史变体的情况；end_user_id 唯一约束保证只命中一个全局用户节点。
 UNRESOLVED_APPEND_USER_INFO = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id, entity_type: '用户'})
+WHERE e.delete_at IS NULL
 SET e.description = CASE
     WHEN $description IS NULL OR $description = '' THEN e.description
     WHEN e.description IS NULL OR e.description = '' THEN $description
@@ -2304,7 +2464,9 @@ RETURN e.id AS entity_id
 
 UNRESOLVED_CREATE_RELATIONSHIP = """
 MATCH (subj:ExtractedEntity {end_user_id: $end_user_id, name: $subject_name})
+WHERE subj.delete_at IS NULL
 MATCH (obj:ExtractedEntity {end_user_id: $end_user_id, name: $object_name})
+WHERE obj.delete_at IS NULL
 CREATE (subj)-[r:EXTRACTED_RELATIONSHIP {
   predicate: $predicate,
   predicate_id: $predicate_id,
@@ -2324,7 +2486,9 @@ RETURN r.predicate AS predicate
 
 UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE = """
 MATCH (s:Statement {id: $statement_id})
+WHERE s.delete_at IS NULL
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $entity_name})
+WHERE e.delete_at IS NULL
 MERGE (s)-[r:REFERENCES_ENTITY]->(e)
 SET r.end_user_id = $end_user_id,
     r.run_id = $run_id,
@@ -2335,6 +2499,7 @@ RETURN s.id AS statement_id
 
 UNRESOLVED_UPDATE_STATEMENT_FLAG = """
 MATCH (s:Statement {id: $statement_id})
+WHERE s.delete_at IS NULL
 SET s.has_unsolved_reference = false
 RETURN s.id AS statement_id
 """
@@ -2355,6 +2520,8 @@ MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})
       -[r:EXTRACTED_RELATIONSHIP {predicate: '别名属于'}]->
       (target:ExtractedEntity {end_user_id: $end_user_id})
 WHERE alias.id <> target.id
+  AND alias.delete_at IS NULL
+  AND target.delete_at IS NULL
 RETURN alias.id   AS alias_id,
        alias.name AS alias_name,
        alias.entity_type AS alias_entity_type,
@@ -2378,6 +2545,8 @@ MERGE_ALIAS_BELONGS_TO = """
 // 再一次性 SET，避免多条 别名属于 边对同一 target 反复覆盖。
 MATCH (source:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(target:ExtractedEntity {end_user_id: $end_user_id})
 WHERE r.predicate = '别名属于' AND source.id IN $alias_ids
+  AND source.delete_at IS NULL
+  AND target.delete_at IS NULL
 WITH target,
      coalesce(target.aliases, []) AS existing_aliases,
      coalesce(target.description, '') AS tgt_desc,
@@ -2408,12 +2577,12 @@ RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_alia
 # 处理两类边：
 #   1. EXTRACTED_RELATIONSHIP：其他实体 → 别名节点 或 别名节点 → 其他实体
 #   2. STATEMENT_ENTITY：陈述句 → 别名节点
-# 三段用独立 CALL {} 子查询隔离，避免空输入时分组聚合丢行导致后续段被跳过。
+# 三段用独立 CALL () {} 子查询隔离，避免空输入时分组聚合丢行导致后续段被跳过。
 REDIRECT_ALIAS_EDGES = """
 // 1. 入边：其他实体 → 别名节点，重定向到 target
-CALL {
+CALL () {
   MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
-  WHERE ar.predicate = '别名属于' AND alias.id IN $alias_ids
+  WHERE ar.predicate = '别名属于' AND alias.id IN $alias_ids AND alias.delete_at IS NULL AND user.delete_at IS NULL
   WITH DISTINCT alias, user
   MATCH (other)-[r:EXTRACTED_RELATIONSHIP]->(alias)
   WHERE r.predicate <> '别名属于' AND other.id <> user.id
@@ -2423,9 +2592,9 @@ CALL {
   RETURN count(*) AS redirected_incoming
 }
 // 2. 出边：别名节点 → 其他实体，重定向到 target
-CALL {
+CALL () {
   MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar2:EXTRACTED_RELATIONSHIP]->(user2:ExtractedEntity {end_user_id: $end_user_id})
-  WHERE ar2.predicate = '别名属于' AND alias.id IN $alias_ids
+  WHERE ar2.predicate = '别名属于' AND alias.id IN $alias_ids AND alias.delete_at IS NULL AND user2.delete_at IS NULL
   WITH DISTINCT alias, user2
   MATCH (alias)-[r:EXTRACTED_RELATIONSHIP]->(other)
   WHERE r.predicate <> '别名属于' AND other.id <> user2.id
@@ -2435,9 +2604,9 @@ CALL {
   RETURN count(*) AS redirected_outgoing
 }
 // 3. 陈述句 → 别名节点，重定向到 target
-CALL {
+CALL () {
   MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar3:EXTRACTED_RELATIONSHIP]->(user3:ExtractedEntity {end_user_id: $end_user_id})
-  WHERE ar3.predicate = '别名属于' AND alias.id IN $alias_ids
+  WHERE ar3.predicate = '别名属于' AND alias.id IN $alias_ids AND alias.delete_at IS NULL AND user3.delete_at IS NULL
   WITH DISTINCT alias, user3
   MATCH (stmt)-[r:STATEMENT_ENTITY]->(alias)
   CREATE (stmt)-[nr:STATEMENT_ENTITY]->(user3)
@@ -2454,7 +2623,7 @@ RETURN redirected_incoming, redirected_outgoing, redirected_stmt
 # 使用 DETACH DELETE 一并删除节点和该关系。
 DELETE_ALIAS_NODES = """
 MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
-WHERE r.predicate = '别名属于' AND alias.id IN $alias_ids
+WHERE r.predicate = '别名属于' AND alias.id IN $alias_ids AND alias.delete_at IS NULL AND user.delete_at IS NULL
 WITH alias, count(r) AS rel_count
 DETACH DELETE alias
 RETURN count(alias) AS deleted_count
@@ -2466,6 +2635,8 @@ MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})
       -[r:EXTRACTED_RELATIONSHIP {predicate: '别名属于'}]->
       (target:ExtractedEntity {end_user_id: $end_user_id})
 WHERE alias.id IN $drop_alias_ids
+  AND alias.delete_at IS NULL
+  AND target.delete_at IS NULL
 DELETE r
 RETURN count(r) AS dropped_count
 """
@@ -2476,8 +2647,9 @@ RETURN count(r) AS dropped_count
 # 保持一致：name 命中常见用户称呼，或 entity_type 为 '用户'。
 GET_USER_ENTITY_ALIASES = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
-WHERE toLower(e.name) IN ['用户', '我', 'user', 'i']
-   OR e.entity_type = '用户'
+WHERE e.delete_at IS NULL
+  AND (toLower(e.name) IN ['用户', '我', 'user', 'i']
+   OR e.entity_type = '用户')
 RETURN e.id AS entity_id, e.name AS name, coalesce(e.aliases, []) AS aliases
 """
 
@@ -2487,7 +2659,39 @@ RETURN e.id AS entity_id, e.name AS name, coalesce(e.aliases, []) AS aliases
 SPECIAL_ENTITY_QUERY = """
 MATCH (e:ExtractedEntity)
 WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
+  AND e.delete_at IS NULL
 RETURN e.id AS id, e.name AS name
+"""
+
+# --- UserSource: 保存用户规整前的原文节点 ---
+
+USER_SOURCE_NODE_SAVE = """
+UNWIND $nodes AS n
+MERGE (us:UserSource {id: n.id})
+SET us += {
+    id: n.id,
+    name: n.name,
+    end_user_id: n.end_user_id,
+    run_id: n.run_id,
+    created_at: n.created_at,
+    message_seq: n.message_seq,
+    original_text: n.original_text,
+    pruned_text: n.pruned_text,
+    text_embedding: n.text_embedding
+}
+RETURN n.id AS uuid
+"""
+
+USER_SOURCE_ENTITY_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (us:UserSource {id: edge.source, end_user_id: edge.end_user_id})
+MATCH (e:ExtractedEntity {id: edge.target, end_user_id: edge.end_user_id})
+MERGE (us)-[r:HAS_ORIGINAL_CONTENT]->(e)
+ON CREATE SET r.id = edge.id,
+    r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
 """
 
 DELETE_NODE_BY_ELEMENT_ID = """
@@ -2495,4 +2699,54 @@ MATCH (n)
 WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id
 DETACH DELETE n
 RETURN count(n) AS deleted
+"""
+
+# ── Forgetting engine (soft-delete) ────────────────────────────────────
+
+FORGET_COUNT_ACTIVE_NODES = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+      AND (n:Statement OR n:Chunk OR n:ExtractedEntity)
+    RETURN count(n) AS cnt
+"""
+
+FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+      AND elementId(n) IN $element_ids
+    SET n.delete_at = datetime($now)
+    RETURN count(n) AS deleted
+"""
+
+FORGET_MIXED_CANDIDATES = """
+CALL () {
+    MATCH (c:Chunk {end_user_id: $end_user_id})
+    WHERE c.delete_at IS NULL
+    RETURN 'chunk' AS node_type, elementId(c) AS element_id, c.id AS node_id,
+           coalesce(c.created_at) AS sort_time, 0 AS extraction_count,
+           null AS name, null AS _type
+    ORDER BY sort_time ASC
+    LIMIT $batch_size
+    UNION ALL
+    MATCH (s:Statement {end_user_id: $end_user_id})
+    WHERE s.delete_at IS NULL
+    RETURN 'statement' AS node_type, elementId(s) AS element_id, s.id AS node_id,
+           coalesce(s.created_at) AS sort_time, 0 AS extraction_count,
+           null AS name, null AS _type
+    ORDER BY sort_time ASC
+    LIMIT $batch_size
+    UNION ALL
+    MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+    WHERE e.delete_at IS NULL
+      AND coalesce(e.extraction_count, 0) < $protection_threshold
+    RETURN 'entity' AS node_type, elementId(e) AS element_id, e.id AS node_id,
+           coalesce(e.created_at) AS sort_time,
+           coalesce(e.extraction_count, 0) AS extraction_count,
+           e.name AS name, e.entity_type AS _type
+    ORDER BY sort_time ASC, extraction_count ASC
+    LIMIT $batch_size
+}
+RETURN *
+ORDER BY CASE WHEN sort_time IS NULL THEN 0 ELSE 1 END, sort_time ASC, extraction_count ASC
+LIMIT $batch_size
 """

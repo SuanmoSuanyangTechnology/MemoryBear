@@ -60,8 +60,10 @@ class StatementExtractionResponse(BaseModel):
             return valid_statements
         return v
 
+# NOTE: 此类已被 StatementTemporalStep（统一 ExtractionStep 范式）替代，
+# 当前无任何调用方，保留仅为历史参考，待确认后可安全删除。
 class StatementExtractor:
-    """Class for extracting statements from dialog chunks using LLM"""
+    """(已废弃) Class for extracting statements from dialog chunks using LLM"""
 
     def __init__(self, llm_client: Any, config: StatementExtractionConfig = None):
         """Initialize the StatementExtractor with an LLM client and configuration
@@ -70,7 +72,7 @@ class StatementExtractor:
             llm_client: OpenAIClient instance for processing LLM requests
             config: StatementExtractionConfig for controlling extraction behavior
         """
-        self.llm_client = llm_client
+        self.llm_client = llm_client # 检查一下这里的客户端取的逻辑
         self.config = config or StatementExtractionConfig()
 
     def _get_speaker_from_chunk(self, chunk) -> Optional[str]:
@@ -144,7 +146,7 @@ class StatementExtractor:
 
         try:
             # Get structured response from LLM (statements only)
-            response = await self.llm_client.response_structured(messages, StatementExtractionResponse)
+            response = await self.llm_client.call_structured(messages, StatementExtractionResponse)
             # Defensive: ensure response has the expected structure
             if not hasattr(response, "statements") or response.statements is None:
                 logger.warning("Invalid structured response: missing 'statements'. Returning empty list for this chunk.")

@@ -7,12 +7,13 @@
 Classes:
     MemoryConfigRepository: 记忆配置仓储类，提供CRUD操作
 """
-
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
@@ -52,35 +53,35 @@ class MemoryConfigRepository:
 
     # Chunk count by group
     SEARCH_FOR_CHUNK = """
-    MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
+    MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN COUNT(n) AS num
     """
 
     # Statement count by group
     SEARCH_FOR_STATEMENT = """
-    MATCH (n:Statement) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
+    MATCH (n:Statement) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN COUNT(n) AS num
     """
 
     # ExtractedEntity count by group
     SEARCH_FOR_ENTITY = """
-    MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
+    MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN COUNT(n) AS num
     """
 
     # All counts by label and total
     SEARCH_FOR_ALL = """
     OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id RETURN 'Chunk' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN 'Chunk' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:Statement) WHERE n.end_user_id = $end_user_id RETURN 'Statement' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Statement) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN 'Statement' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id RETURN 'ExtractedEntity' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:ExtractedEntity) WHERE n.end_user_id = $end_user_id  AND n.delete_at is NULL RETURN 'ExtractedEntity' AS Label, COUNT(n) AS Count
     UNION ALL
-    OPTIONAL MATCH (n) WHERE n.end_user_id = $end_user_id RETURN 'ALL' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n) WHERE n.end_user_id = $end_user_id  AND n.delete_at is NULL RETURN 'ALL' AS Label, COUNT(n) AS Count
     """
 
     # 批量查询多个用户的记忆数量（简化版本，只返回total）
     SEARCH_FOR_ALL_BATCH = """
-    MATCH (n) WHERE n.end_user_id IN $end_user_ids
+    MATCH (n) WHERE n.end_user_id IN $end_user_ids AND n.delete_at is NULL
     RETURN 
         n.end_user_id as user_id,
         count(n) as total
@@ -90,7 +91,7 @@ class MemoryConfigRepository:
     # Extracted entity details within group/app/user
     SEARCH_FOR_DETIALS = """
     MATCH (n:ExtractedEntity)
-    WHERE n.end_user_id = $end_user_id
+    WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL
     RETURN n.entity_idx AS entity_idx, 
         n.connect_strength AS connect_strength, 
         n.description AS description, 
@@ -107,7 +108,7 @@ class MemoryConfigRepository:
     # Edges between extracted entities within group/app/user
     SEARCH_FOR_EDGES = """
     MATCH (n:ExtractedEntity)-[r]->(m:ExtractedEntity)
-    WHERE n.end_user_id = $end_user_id
+    WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL
     RETURN
       r.end_user_id AS end_user_id,
       r.apply_id AS apply_id,
@@ -633,6 +634,94 @@ class MemoryConfigRepository:
                 exc_info=True
             )
 
+            db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_config_with_workspace_async(
+            db: AsyncSession,
+            config_id: uuid.UUID,
+    ):
+        start_time = time.perf_counter()
+        try:
+            # Use join query to get both config and workspace
+            stmt = (
+                select(MemoryConfig, Workspace)
+                .join(
+                    Workspace,
+                    MemoryConfig.workspace_id == Workspace.id,
+                )
+                .where(MemoryConfig.config_id == config_id)
+            )
+
+            result = await db.execute(stmt)
+            row = result.first()
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            if not row:
+                # Check if config exists but workspace is missing
+                stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+                config_only = await db.scalar(stmt)
+                if config_only:
+                    if config_only.workspace_id is None:
+                        config_logger.error(
+                            "Configuration has no associated workspace ID",
+                            extra={
+                                "operation": "get_config_with_workspace",
+                                "config_id": config_id,
+                                "workspace_id": None,
+                                "load_result": "no_workspace_id",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
+                        db_logger.error(f"Memory config {config_id} has no associated workspace ID")
+                        raise ValueError(f"Configuration {config_id} has no associated workspace")
+                    else:
+                        config_logger.error(
+                            "Configuration references non-existent workspace",
+                            extra={
+                                "operation": "get_config_with_workspace",
+                                "config_id": config_id,
+                                "workspace_id": str(config_only.workspace_id),
+                                "load_result": "workspace_not_found",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
+                        db_logger.error(
+                            f"Memory config {config_id} references non-existent workspace {config_only.workspace_id}")
+                        raise ValueError(
+                            f"Workspace {config_only.workspace_id} not found for configuration {config_id}")
+
+                config_logger.debug(
+                    "Configuration not found",
+                    extra={
+                        "operation": "get_config_with_workspace",
+                        "config_id": config_id,
+                        "load_result": "not_found",
+                        "elapsed_ms": elapsed_ms
+                    }
+                )
+                db_logger.debug(f"Memory config not found: config_id={config_id}")
+                return None
+
+            config, workspace = row
+
+            # Log successful configuration loading
+            config_logger.info(
+                "Configuration with workspace loaded successfully",
+            )
+
+            db_logger.debug(
+                f"Memory config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
+            return config, workspace
+
+        except ValueError:
+            # Re-raise known business exceptions
+            raise
+        except Exception as e:
+            config_logger.error(
+                "Failed to load configuration with workspace",
+                exc_info=True
+            )
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
 

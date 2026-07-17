@@ -303,6 +303,11 @@ class Settings:
         Annotated[int, Field(ge=0, le=59, description="forgetting cycle cron minute [0, 59]")]
     ).validate_python(int(os.getenv("FORGETTING_CYCLE_MINUTE", "0")))
 
+    # scan-forget-candidates 定时任务扫描间隔（分钟）
+    FORGET_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="forget candidates scan interval in minutes, must be >= 1")]
+    ).validate_python(int(os.getenv("FORGET_SCAN_INTERVAL_MINUTES", "5")))
+
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）
     IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  
@@ -316,6 +321,15 @@ class Settings:
     REFLECT_LAYER2_INACTIVE_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="Layer 2 inactivity filter in hours, must be >= 1")]
     ).validate_python(int(os.getenv("REFLECT_LAYER2_INACTIVE_HOURS", "36")))
+    # Layer2 反思整轮总时间预算（秒）：高频 run() 与低频 _run_dedup_full_scan 共用。
+    # 应用层动态预算熔断的上限；500 = Celery soft_time_limit 540 留 40s 框架余量。
+    LAYER2_REFLECTION_BUDGET_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="Layer 2 reflection total time budget in seconds")]
+    ).validate_python(int(os.getenv("LAYER2_REFLECTION_BUDGET_SECONDS", "500")))
+
+    # 反思失败用户重试：派发任务扫描间隔（分钟）。默认 10。
+    # beat 注册需从 settings 读取，故放这里；其余重试策略常量在 retry_registry.py。
+    REFLECTION_RETRY_SCAN_INTERVAL_MINUTES: int = int(os.getenv("REFLECTION_RETRY_SCAN_INTERVAL_MINUTES", "10"))
     # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]

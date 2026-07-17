@@ -9,7 +9,8 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read
+from app.core.workflow.variable.variable_objects import ArrayVariable, FileVariable
+from app.db import get_async_db_context, get_db_read
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
@@ -74,7 +75,6 @@ class QuestionClassifierNode(BaseNode):
             api_key = api_config.api_key
             base_url = api_config.api_base
             is_omni = api_config.is_omni
-            capability = api_config.capability
             model_type = config.type
 
         return RedBearLLM(
@@ -86,6 +86,29 @@ class QuestionClassifierNode(BaseNode):
                 is_omni=is_omni
             ),
             type=ModelType(model_type)
+        )
+
+    async def _load_model_info_async(self, variable_pool: VariablePool) -> ModelInfo:
+        tenant_id = await self.resolve_tenant_id_async(variable_pool)
+
+        async with get_async_db_context() as db:
+            return await ModelConfigService.get_runtime_model_info_async(
+                db,
+                self.typed_config.model_id,
+                tenant_id=tenant_id,
+            )
+
+    @staticmethod
+    def _build_llm_from_model_info(model_info: ModelInfo) -> RedBearLLM:
+        return RedBearLLM(
+            RedBearModelConfig(
+                model_name=model_info.model_name,
+                provider=model_info.provider,
+                api_key=model_info.api_key,
+                base_url=model_info.api_base,
+                is_omni=model_info.is_omni,
+            ),
+            type=model_info.model_type,
         )
 
     def _build_category_case_map(self) -> dict[str, str]:
@@ -134,8 +157,14 @@ class QuestionClassifierNode(BaseNode):
             return user_prompt
         
         try:
-            files_variable = variable_pool.get_instance(self.typed_config.vision_input)
-            if not files_variable or not files_variable.value:
+            files_instance = variable_pool.get_instance(self.typed_config.vision_input, default=None, strict=False)
+            if isinstance(files_instance, ArrayVariable):
+                file_list = files_instance.value
+            elif isinstance(files_instance, FileVariable):
+                file_list = [files_instance]
+            else:
+                file_list = []
+            if not file_list:
                 return user_prompt
         except Exception:
             logger.warning(f"节点 {self.node_id} 获取视觉变量失败: {self.typed_config.vision_input}")
@@ -143,7 +172,7 @@ class QuestionClassifierNode(BaseNode):
         
         content = [{"type": "text", "text": user_prompt}]
         
-        for file in files_variable.value:
+        for file in file_list:
             file_content = await self.process_message(model_info, file.value, self.typed_config.vision)
             if file_content:
                 if isinstance(file_content, list):
@@ -181,8 +210,8 @@ class QuestionClassifierNode(BaseNode):
             }
 
         try:
-            llm = self._get_llm_instance(variable_pool)
-            model_info = self._get_model_info(variable_pool)
+            model_info = await self._load_model_info_async(variable_pool)
+            llm = self._build_llm_from_model_info(model_info)
 
             # 渲染用户提示词模板，支持工作流变量
             user_prompt = self._render_template(

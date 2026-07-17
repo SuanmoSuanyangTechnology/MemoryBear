@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState, Fragment } from 'react';
 import { Form, Input, InputNumber, Checkbox, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -38,9 +38,24 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
   // 封装保存方法，添加提交逻辑
   const handleSave = () => {
     form.validateFields().then((values) => {
-      refresh([
-        ...(values?.variables ?? []),
-      ])
+      const variables = (values?.variables ?? []).map((variable) => {
+        // file 类型：value 可能是数组(交互过)/对象(默认值未改)/空，统一归一化后取首项转为单个对象
+        if (variable.type === 'file') {
+          const list = Array.isArray(variable.value)
+            ? variable.value
+            : variable.value ? [variable.value] : []
+          return { ...variable, value: list.length > 0 ? list[0] : null }
+        }
+        // array[file] 类型：保持数组格式（单对象默认值也归一化为数组）
+        if (variable.type === 'array[file]') {
+          const list = Array.isArray(variable.value)
+            ? variable.value
+            : variable.value ? [variable.value] : []
+          return { ...variable, value: list }
+        }
+        return variable
+      })
+      refresh(variables)
       handleClose()
     })
   }
@@ -72,12 +87,20 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                 const field = initialValues[index]
                 if (field.type.includes('file')) {
                   return (
-                    <FileVarInput
-                      name={[name, 'value'] as string[]}
-                      dataType={field.type}
-                      form={form}
-                      defaultValue={field.defaultValue || []}
-                    />
+                    <Fragment key={name}>
+                      <label className={field.required ? "ant-form-item-required" : ""}>
+                        {field.required ? <span className="rb:text-[#ff5d34] rb:mr-1 rb:text-[14px] rb:font-[SimSun,sans-serif]">*</span> : ""}
+                        {[Array.isArray(field.name) ? field.name.join('.') : field.name, field.display_name || field.description].filter(Boolean).join('·')}
+                      </label>
+                      <FileVarInput
+                        name={[name, 'value']}
+                        fullName={['variables', name, 'value']}
+                        dataType={field.type}
+                        form={form}
+                        defaultValue={field.value || []}
+                        rules={[{ required: field.required, message: t('common.pleaseSelect') }]}
+                      />
+                    </Fragment>
                   )
                 }
                 return (

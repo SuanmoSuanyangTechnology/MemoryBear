@@ -479,6 +479,7 @@ class ExtractedEntityNode(Node):
     beliefs_or_stances: List[str] = Field(default_factory=list, description="Stable beliefs, values, or stances")
     anchors: List[str] = Field(default_factory=list, description="Personally meaningful objects or symbols")
     events: List[str] = Field(default_factory=list, description="Durable personal experiences or milestones")
+    extraction_count: int = Field(default=1, description="Number of times this entity was extracted")
 
     @field_validator('aliases', mode='before')
     @classmethod
@@ -659,4 +660,33 @@ class ConversationNode(Node):
 
 class AssistantConversationEdge(Edge):
     """Edge connecting an AssistantOriginal node to its Conversation hub node (BELONGS_TO_CONVERSATION)."""
+    pass
+
+class UserSourceNode(Node):
+    """存储 user 消息被剪枝/规整前的完整原文，类似 dialog 节点。
+
+    当 user 消息被语义剪枝后，生成 UserSource 节点保存该条 user 消息的
+    完整原文（即剪枝/规整前的 memory_messages.content），为检索侧提供
+    "Entity → 原文" 的回溯路径。
+
+    name 属性值来自 LLM 产出的 processed_user_topic_entity_hint（实体锚点）。
+
+    Attributes:
+        message_seq: The message sequence number in memory_messages table
+        original_text: Full original user message text before pruning
+        pruned_text: The pruned/regularized text after processing (processed_user_msg)
+        text_embedding: Embedding vector of original_text for semantic retrieval
+    """
+    message_seq: int = Field(..., description="Message sequence number in memory_messages")
+    original_text: str = Field(..., description="Full original user message text before pruning")
+    pruned_text: str = Field(..., description="Pruned/regularized text after processing (processed_user_msg)")
+    text_embedding: Optional[List[float]] = Field(None, description="Embedding vector of original_text")
+
+
+class UserSourceEntityEdge(Edge):
+    """Edge connecting a UserSource node to an ExtractedEntity node (HAS_ORIGINAL_CONTENT).
+
+    Semantics: the original user message contains/references this entity.
+    Retrieval path: Entity → UserSource → original_text
+    """
     pass

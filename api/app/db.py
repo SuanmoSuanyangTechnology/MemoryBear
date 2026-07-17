@@ -1,12 +1,15 @@
 import os
-from contextlib import contextmanager
-from typing import Generator
+import logging
+from contextlib import contextmanager, asynccontextmanager
+from typing import Generator, AsyncGenerator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
 
 SQLALCHEMY_DATABASE_URL = f"postgresql://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
+ASYNC_DATABASE_URL = f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
@@ -22,6 +25,7 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+logger = logging.getLogger(__name__)
 
 
 # Dependency to get a DB session (FastAPI Depends 专用)
@@ -69,6 +73,46 @@ def get_db_read() -> Generator[Session, None, None]:
         db.close()
 
 
+# ==================== Async Engine (工作流专用) ====================
+
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_pre_ping=settings.DB_POOL_PRE_PING,
+    pool_recycle=settings.DB_POOL_RECYCLE,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,  # async 场景下避免 lazy load 触发同步 IO
+)
+
+
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI Depends 专用，async 路由使用"""
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+@asynccontextmanager
+async def get_async_db_context() -> AsyncGenerator[AsyncSession, None]:
+    """上下文管理器版本，用于 event_generator 闭包等非 Depends 场景"""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            if session.in_transaction():
+                await session.rollback()
+
+
+# ==================== 连接池监控 ====================
+
 def get_pool_status():
     """获取连接池状态（用于监控）"""
     pool = engine.pool
@@ -79,5 +123,19 @@ def get_pool_status():
         "overflow": pool.overflow(),
         "total": pool.size() + pool.overflow(),
         "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
-                                                                                                            pool.size() + pool.overflow()) > 0 else 0
+            pool.size() + pool.overflow()) > 0 else 0
+    }
+
+
+def get_async_pool_status():
+    """获取 async 连接池状态（用于热点链路埋点）"""
+    pool = async_engine.pool
+    return {
+        "pool_size": pool.size(),
+        "checked_in": pool.checkedin(),
+        "checked_out": pool.checkedout(),
+        "overflow": pool.overflow(),
+        "total": pool.size() + pool.overflow(),
+        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
+            pool.size() + pool.overflow()) > 0 else 0,
     }

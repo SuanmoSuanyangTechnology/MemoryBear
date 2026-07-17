@@ -25,7 +25,7 @@ class KnowledgeRetrievalCaller(StrEnum):
 class KnowledgeBaseConfig(BaseModel):
     kb_id: uuid.UUID = Field(..., description="Knowledge base ID")
     similarity_threshold: float = Field(default=0.2, ge=0, le=1, description="Knowledge base similarity threshold")
-    vector_similarity_weight: float = Field(default=0.3, ge=0, le=1, description="Knowledge base vector similarity weight")
+    vector_similarity_weight: float | None = Field(default=0.3, ge=0, le=1, description="Knowledge base vector similarity weight（语义/混合/图谱检索使用，分词检索不使用）")
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1, description="Knowledge base rerank score threshold")
     top_k: int = Field(default=4, ge=1, le=100, description="Knowledge base top k")
     retrieve_type: RetrieveType = Field(default=RetrieveType.PARTICIPLE, description="Retrieve type")

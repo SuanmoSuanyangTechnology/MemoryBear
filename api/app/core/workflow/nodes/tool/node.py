@@ -1,15 +1,19 @@
+import asyncio
 import json
 import logging
 import re
 import uuid
 from typing import Any
 
+from sqlalchemy import select
+
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read
+from app.db import get_async_db_context, get_db_read, get_db_context
+from app.models.workspace_model import Workspace
 from app.services.tool_service import ToolService
 from app.models.tool_model import ToolType
 
@@ -36,20 +40,62 @@ class ToolNode(BaseNode):
             "execution_time": VariableType.NUMBER
         }
 
+    @staticmethod
+    def _normalize_uuid(value: Any) -> uuid.UUID | None:
+        if value in (None, ""):
+            return None
+        if isinstance(value, uuid.UUID):
+            return value
+        return uuid.UUID(str(value))
+
+    async def _resolve_tenant_id_async(self, variable_pool: VariablePool) -> uuid.UUID | None:
+        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        if tenant_id:
+            return self._normalize_uuid(tenant_id)
+
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        workspace_uuid = self._normalize_uuid(workspace_id)
+        if not workspace_uuid:
+            return None
+
+        async with get_async_db_context() as db:
+            return (
+                await db.execute(
+                    select(Workspace.tenant_id).where(Workspace.id == workspace_uuid)
+                )
+            ).scalar_one_or_none()
+
+    async def _execute_workflow_tool_legacy_async(
+            self,
+            *,
+            tenant_id: uuid.UUID,
+            user_id: uuid.UUID | None,
+            workspace_id: uuid.UUID | None,
+            rendered_parameters: dict[str, Any],
+    ):
+        def _run():
+            with get_db_read() as db:
+                tool_service = ToolService(db)
+                return asyncio.run(
+                    tool_service.execute_tool(
+                        tool_id=str(self.typed_config.tool_id),
+                        parameters=rendered_parameters,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                    )
+                )
+
+        # ponytail: workflow tools still ride sync WorkflowService internals; keep fallback isolated off the async hot path.
+        return await asyncio.to_thread(_run)
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """执行工具"""
         self.typed_config = ToolNodeConfig(**self.config)
         # 获取租户ID和用户ID
-        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
-        user_id = self.get_variable("sys.user_id", variable_pool)
-        workspace_id = self.get_variable("sys.workspace_id", variable_pool)
-
-        # 如果没有租户ID，尝试从工作流ID获取
-        if not tenant_id:
-            if workspace_id:
-                from app.repositories.tool_repository import ToolRepository
-                with get_db_read() as db:
-                    tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, workspace_id)
+        tenant_id = await self._resolve_tenant_id_async(variable_pool)
+        user_id = self._normalize_uuid(self.get_variable("sys.user_id", variable_pool))
+        workspace_id = self._normalize_uuid(self.get_variable("sys.workspace_id", variable_pool))
 
         if not tenant_id:
             logger.error(f"节点 {self.node_id} 缺少租户ID")
@@ -79,28 +125,38 @@ class ToolNode(BaseNode):
         logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
         self._process = {"tool_id": str(self.typed_config.tool_id), "parameters": rendered_parameters}
 
-        # 执行工具
-        with get_db_read() as db:
+        async with get_async_db_context() as db:
             tool_service = ToolService(db)
+            tool_config = await tool_service.get_tool_config_async(str(self.typed_config.tool_id), tenant_id)
+            if not tool_config:
+                raise ValueError(f"工具不存在或未激活: {self.typed_config.tool_id}")
 
-            # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
-            tool_instance = tool_service.get_tool_instance(self.typed_config.tool_id, tenant_id)
-            if tool_instance and tool_instance.tool_type == ToolType.MCP:
-                operation = rendered_parameters.pop("operation", None)
-                if operation:
-                    old_params = rendered_parameters
-                    rendered_parameters = {
-                        "tool_name": operation,
-                        "arguments": old_params
-                    }
+            if tool_config.tool_type == ToolType.WORKFLOW.value:
+                result = await self._execute_workflow_tool_legacy_async(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    rendered_parameters=rendered_parameters,
+                )
+            else:
+                tool_instance = await tool_service.get_tool_instance_async(str(self.typed_config.tool_id), tenant_id)
+                # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
+                if tool_instance and tool_instance.tool_type == ToolType.MCP:
+                    operation = rendered_parameters.pop("operation", None)
+                    if operation:
+                        old_params = rendered_parameters
+                        rendered_parameters = {
+                            "tool_name": operation,
+                            "arguments": old_params
+                        }
 
-            result = await tool_service.execute_tool(
-                tool_id=self.typed_config.tool_id,
-                parameters=rendered_parameters,
-                tenant_id=tenant_id,
-                user_id=uuid.UUID(user_id),
-                workspace_id=uuid.UUID(workspace_id)
-            )
+                result = await tool_service.execute_tool(
+                    tool_id=str(self.typed_config.tool_id),
+                    parameters=rendered_parameters,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
 
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")

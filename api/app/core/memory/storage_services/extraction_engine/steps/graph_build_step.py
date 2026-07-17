@@ -179,7 +179,7 @@ async def build_graph_nodes_and_edges(
                 summary_embedding = None
                 if embedder_client and p.summary:
                     try:
-                        summary_embedding = (await embedder_client.response([p.summary]))[0]
+                        summary_embedding = (await embedder_client.aembed_documents([p.summary]))[0]
                     except Exception as emb_err:
                         logger.warning(f"Failed to embed perceptual summary: {emb_err}")
 
@@ -291,6 +291,7 @@ async def build_graph_nodes_and_edges(
                             aliases=getattr(entity, "aliases", []) or [],
                             name_embedding=getattr(entity, "name_embedding", None),
                             is_explicit_memory=getattr(entity, "is_explicit_memory", False),
+                            extraction_count=1,
                             end_user_id=dialog_data.end_user_id,
                             run_id=dialog_data.run_id,
                             created_at=dialog_data.created_at,

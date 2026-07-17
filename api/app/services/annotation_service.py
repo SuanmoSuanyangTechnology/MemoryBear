@@ -81,7 +81,8 @@ class AnnotationService:
 
     # ==================== Embedding & Similarity ====================
 
-    def generate_embedding(self, text: str, model_config: RedBearModelConfig) -> List[float]:
+    @staticmethod
+    def generate_embedding(text: str, model_config: RedBearModelConfig) -> List[float]:
         """生成文本的Embedding向量"""
         try:
             embedder = RedBearEmbeddings(model_config)
@@ -90,7 +91,8 @@ class AnnotationService:
             logger.error(f"生成Embedding失败: {e}")
             raise BusinessException(f"生成Embedding失败: {str(e)}", BizCode.EMBEDDING_ERROR)
 
-    def cosine_similarity(self, vec_a: List[float], vec_b: List[float]) -> float:
+    @staticmethod
+    def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
         """计算两个向量的余弦相似度，返回值在 [-1, 1] 范围内"""
         import math
         if not vec_a or not vec_b:

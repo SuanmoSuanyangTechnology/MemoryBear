@@ -20,7 +20,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType, FileObject
-from app.db import get_db_read
+from app.db import get_async_db_context, get_db_read
 from app.models import ModelConfig, ModelApiKey, LoadBalanceStrategy
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import FileInput
@@ -314,7 +314,7 @@ class BaseNode(ABC):
             return None
         cache_input = self._build_cache_input_snapshot(state, variable_pool)
         cache_key = manager.build_cache_key(cache_input)
-        cache_entry = manager.get_active_cache(cache_key)
+        cache_entry = await manager.get_active_cache_async(cache_key)
         if not cache_entry:
             return None
         await self._store_runtime_variables((cache_entry.get("result_data") or {}).get("output"), variable_pool)
@@ -325,7 +325,7 @@ class BaseNode(ABC):
             lookup_started_at=lookup_started_at,
         )
 
-    def _save_cache(
+    async def _save_cache(
             self,
             *,
             state: WorkflowState,
@@ -348,7 +348,7 @@ class BaseNode(ABC):
         cache_payload.pop("cache_status", None)
         cache_payload.pop("cache_hit_count", None)
         cache_payload.pop("cache_origin_elapsed_time", None)
-        manager.save_cache(
+        await manager.save_cache_async(
             cache_key=cache_key,
             input_data=cache_input,
             result_data=cache_payload,
@@ -409,7 +409,7 @@ class BaseNode(ABC):
                 **wrapped_output,
                 "looping": state["looping"]
             } | self.trans_activate(state)
-            self._save_cache(
+            await self._save_cache(
                 state=state,
                 variable_pool=variable_pool,
                 node_output=wrapped_output.get("node_outputs", {}).get(self.node_id, {}),
@@ -531,7 +531,7 @@ class BaseNode(ABC):
                 **final_output,
                 "looping": state["looping"]
             }
-            self._save_cache(
+            await self._save_cache(
                 state=state,
                 variable_pool=variable_pool,
                 node_output=final_output.get("node_outputs", {}).get(self.node_id, {}),
@@ -899,14 +899,18 @@ class BaseNode(ABC):
             cache_key = f"{provider}_{api_config.is_omni}_{'-'.join(sorted(api_config.capability or []))}"
             if content.content_cache.get(cache_key):
                 return content.content_cache[cache_key]
-            with get_db_read() as db:
+            async with get_async_db_context() as db:
                 multimodal_service = MultimodalService(db, api_config=api_config)
+                try:
+                    upload_file_id = uuid.UUID(content.file_id) if content.file_id else None
+                except ValueError:
+                    upload_file_id = None
                 file_obj = FileInput(
                     type=content.type,
                     url=content.url,
                     transfer_method=content.transfer_method,
                     origin_file_type=content.origin_file_type,
-                    upload_file_id=uuid.UUID(content.file_id) if content.file_id else None,
+                    upload_file_id=upload_file_id,
                 )
                 file_obj.set_content(content.get_content())
                 message = await multimodal_service.process_files(
@@ -954,6 +958,23 @@ class BaseNode(ABC):
 
         with get_db_read() as db:
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
+        if tenant_id:
+            return uuid.UUID(str(tenant_id))
+        return None
+
+    async def resolve_tenant_id_async(self, variable_pool: VariablePool) -> uuid.UUID | None:
+        tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        if tenant_id:
+            return uuid.UUID(str(tenant_id))
+
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        if not workspace_id:
+            return None
+
+        async with get_async_db_context() as db:
+            tenant_id = await db.run_sync(
+                lambda sync_db: ToolRepository.get_tenant_id_by_workspace_id(sync_db, str(workspace_id))
+            )
         if tenant_id:
             return uuid.UUID(str(tenant_id))
         return None

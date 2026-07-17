@@ -56,8 +56,8 @@ async def get_chunked_dialogs(
         if role not in ['user', 'assistant']:
             raise ValueError(f"Message {idx} role must be 'user' or 'assistant', got: {role}")
 
-        # 允许空 content 的消息进入列表（MCP 场景需要空 assistant 占位以便配对剪枝）
-        # 空 content 用空字符串表示，后续 _pair_user_assistant 仍可正常配对
+        # 允许空 content 的消息进入列表
+        # 空 content 用空字符串表示
         conversation_messages.append(ConversationMessage(
             role=role,
             msg=content.strip() if content.strip() else "",
@@ -75,80 +75,6 @@ async def get_chunked_dialogs(
         end_user_id=end_user_id,
         config_id=config_id,
     )
-    
-# step2: 语义剪枝步骤（在分块之前）
-    try:
-        from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
-        from app.core.memory.models.config_models import PruningConfig
-        from app.db import get_db_context
-        from app.services.memory_config_service import MemoryConfigService
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-        
-        # 加载剪枝配置（短暂 DB session，查完即关）
-        pruning_config = None
-        llm_client = None
-        if config_id:
-            try:
-                with get_db_context() as db:
-                    config_service = MemoryConfigService(db)
-                    memory_config = config_service.load_memory_config(
-                        config_id=config_id
-                    )
-                    
-                    if memory_config:
-                        pruning_config = PruningConfig(
-                            pruning_switch=memory_config.pruning_enabled,
-                            pruning_scene=memory_config.pruning_scene or "education",
-                            pruning_threshold=memory_config.pruning_threshold,
-                            scene_id=str(memory_config.scene_id) if memory_config.scene_id else None,
-                            ontology_class_infos=memory_config.ontology_class_infos,
-                        )
-                        logger.info(f"[剪枝] 加载配置: switch={pruning_config.pruning_switch}, scene={pruning_config.pruning_scene}, threshold={pruning_config.pruning_threshold}")
-                        
-                        # 获取 LLM 客户端（仅读取 API key/base_url，不做 LLM 调用）
-                        if pruning_config.pruning_switch:
-                            factory = MemoryClientFactory(db)
-                            llm_client = factory.get_llm_client_from_config(memory_config)
-                        else:
-                            logger.info("[剪枝] 配置中剪枝开关关闭，跳过剪枝")
-                # session 在此关闭，关闭DB连接
-
-                # 执行剪枝（LLM 调用在 session 外，不占用 DB 连接）
-                if pruning_config and pruning_config.pruning_switch and llm_client:
-                    import re
-                    import langid
-                    user_text = " ".join(
-                        re.sub(r"<input-file-summary>.*?</input-file-summary>", "", m.msg, flags=re.DOTALL).strip()
-                        for m in dialog_data.context.msgs if m.role == "user" and m.msg
-                    )
-                    pruning_language = langid.classify(user_text)[0] if user_text else "zh"
-                    if pruning_language not in ("zh", "en"):
-                        pruning_language = "en"
-                    pruner = SemanticPruner(config=pruning_config, llm_client=llm_client, language=pruning_language, snapshot=snapshot)
-                    original_msg_count = len(dialog_data.context.msgs)
-                    
-                    # 使用 prune_dataset 而不是 prune_dialog
-                    # prune_dataset 会进行消息级剪枝，即使对话整体相关也会删除不重要消息
-                    pruned_dialogs = await pruner.prune_dataset([dialog_data])
-                    
-                    if pruned_dialogs:
-                        dialog_data = pruned_dialogs[0]
-                        remaining_msg_count = len(dialog_data.context.msgs)
-                        deleted_count = original_msg_count - remaining_msg_count
-                        logger.info(f"[剪枝] 完成: 原始{original_msg_count}条 -> 保留{remaining_msg_count}条 (删除{deleted_count}条)")
-                        
-                        # 将剪枝记录挂到 metadata，供 graph_build_step 构建节点
-                        if pruner.pruning_records:
-                            dialog_data.metadata["assistant_pruning_records"] = [
-                                r.model_dump() for r in pruner.pruning_records
-                            ]
-                            logger.info(f"[剪枝] 收集到 {len(pruner.pruning_records)} 条剪枝记录")
-                    else:
-                        logger.warning("[剪枝] prune_dataset 返回空列表")
-            except Exception as e:
-                logger.warning(f"[剪枝] 加载配置失败，跳过剪枝: {e}", exc_info=True)
-    except Exception as e:
-        logger.warning(f"[剪枝] 执行失败，跳过剪枝: {e}", exc_info=True)
 
 # step3： 分块
     chunker = DialogueChunker(chunker_strategy)

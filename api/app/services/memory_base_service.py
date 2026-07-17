@@ -3,24 +3,32 @@ Memory Base Service
 
 提供记忆服务的基础功能和共享辅助方法。
 """
+# [可移除] asyncio 未被 MemoryBaseService 使用（仅翻译相关代码使用）
 import asyncio
+# [可移除] re 模块在文件中未被使用
 import re
 from datetime import datetime
 from typing import Optional
+# [可移除] BaseModel 仅被 TranslationResponse 使用，TranslationResponse 未被外部引用
 from pydantic import BaseModel
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.logging_config import get_logger
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.emotion_analytics_service import EmotionAnalyticsService
-from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.models.base import RedBearModelConfig
+# [可移除] ModelClientMixin 仅被 MemoryTransService 使用，MemoryTransService 未被外部引用
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+# [可移除] MemoryConfigService 在文件中未被使用
 from app.services.memory_config_service import MemoryConfigService
+# [可移除] get_db_context 仅被 MemoryTransService 使用，MemoryTransService 未被外部引用
 from app.db import get_db_context
 logger = get_logger(__name__)
+
+# [可移除] TranslationResponse 仅被以下 MemoryTransService 使用，MemoryTransService 无外部引用
 class TranslationResponse(BaseModel):
     """翻译响应模型"""
     data: str
 
+# [可移除] MemoryTransService 翻译服务无外部引用，整个类可以移除
 class MemoryTransService:
     """记忆翻译服务，提供中英文翻译功能"""
     
@@ -54,30 +62,7 @@ class MemoryTransService:
         if self.llm_client is None:
             if self.model_id:
                 with get_db_context() as db:
-                    config_service = MemoryConfigService(db)
-                    model_config = config_service.get_model_config(self.model_id)
-                
-                extra_params = {
-                    "temperature": 0.2,
-                    "max_tokens": 400,
-                    "top_p": 0.8,
-                    "stream": False,
-                }
-                
-                self.llm_client = OpenAIClient(
-                    RedBearModelConfig(
-                        model_name=model_config.get("model_name"),
-                        provider=model_config.get("provider"),
-                        api_key=model_config.get("api_key"),
-                        base_url=model_config.get("base_url"),
-                        timeout=model_config.get("timeout", 30),
-                        max_retries=model_config.get("max_retries", 3),
-                        is_omni=model_config.get("is_omni"),
-                        capability=model_config.get("capability"),
-                        extra_params=extra_params
-                    ),
-                    type_=model_config.get("type")
-                )
+                    self.llm_client = ModelClientMixin.get_llm_client(db, self.model_id, None)
             else:
                 raise ValueError("必须提供 llm_client 或 model_id 之一")
         
@@ -103,10 +88,7 @@ class MemoryTransService:
         ]
 
         try:
-            response = await self.llm_client.response_structured(
-                messages=translation_messages,
-                response_model=TranslationResponse
-            )
+            response = await self.llm_client.call_structured(translation_messages, TranslationResponse)
             return response.data
         except Exception as e:
             logger.error(f"翻译失败: {str(e)}")
@@ -161,7 +143,8 @@ class MemoryTransService:
     
 
 
- # 测试翻译服务
+
+# [可移除] Translation_English 函数无外部引用，整个函数可以移除
 async def Translation_English(modid, text, fields=None):
     """
     将数据翻译为英文（支持字段级翻译）
@@ -268,10 +251,12 @@ async def Translation_English(modid, text, fields=None):
     # 其他类型（数字、布尔值、None等）：原样返回
     else:
         return text
+# [使用中] 被 user_memory_service.py 和 implicit_memory_service.py 引用
 # 隐性记忆画像生成所需的最低 MemorySummary 节点数量
 MIN_MEMORY_SUMMARY_COUNT = 5
 
 
+# [使用中] 被 user_memory_service, memory_episodic_service, memory_explicit_service, implicit_memory_service 引用
 class MemoryBaseService:
     """记忆服务基类，提供共享的辅助方法"""
     

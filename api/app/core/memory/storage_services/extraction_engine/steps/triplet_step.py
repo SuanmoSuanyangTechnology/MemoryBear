@@ -109,7 +109,7 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
             },
             {"role": "user", "content": prompt},
         ]
-        return await self.call_structured(
+        return await self.llm_client.call_structured(
             messages, TripletExtractionResponse
         )
 

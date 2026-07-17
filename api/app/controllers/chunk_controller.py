@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import csv
@@ -7,6 +8,8 @@ import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -16,14 +19,15 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
-from app.db import get_db
-from app.dependencies import get_current_user
+from app.db import get_async_db
+from app.dependencies import get_current_user_async
 from app.models.document_model import Document
+from app.models.file_model import File as FileModel
 from app.models.user_model import User
 from app.schemas import chunk_schema
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.schemas.response_schema import ApiResponse
-from app.services import knowledge_service, document_service, file_service
+from app.services import knowledge_service, document_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied, KnowledgeRetrievalService
 from app.services.model_service import ModelApiKeyService
@@ -57,7 +61,7 @@ def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant
 router = APIRouter(
     prefix="/chunks",
     tags=["chunks"],
-    dependencies=[Depends(get_current_user)]  # Apply auth to all routes in this controller
+    dependencies=[Depends(get_current_user_async)]  # Apply auth to all routes in this controller
 )
 
 
@@ -68,8 +72,8 @@ async def get_preview_chunks(
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
         pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Paged query document block preview list
@@ -86,14 +90,14 @@ async def get_preview_chunks(
         )
 
     # 2. Obtain knowledge base information
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The knowledge base does not exist or access is denied"
         )
     # 3. Check if the document exists
-    db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
     if not db_document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -101,7 +105,7 @@ async def get_preview_chunks(
         )
 
     # 4. Check if the file exists
-    db_file = file_service.get_file_by_id(db, file_id=db_document.file_id)
+    db_file = await db.get(FileModel, db_document.file_id)
     if not db_file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -136,7 +140,8 @@ async def get_preview_chunks(
     parent_child_mode = db_document.is_parent_child_mode
     api_logger.debug(f"当前文档分块模式：{db_document.is_parent_child_mode}")
     if parent_child_mode:
-        child_res, parent_res, parent_id_map = chunk(
+        child_res, parent_res, parent_id_map = await asyncio.to_thread(
+            chunk,
             filename=db_file.file_name,
             binary=file_binary,
             from_page=0,
@@ -198,20 +203,23 @@ async def get_preview_chunks(
             )
         res = all_preview
     else:
-        res = chunk(filename=db_file.file_name,
-                    binary=file_binary,
-                    from_page=0,
-                    to_page=5,
-                    callback=progress_callback,
-                    vision_model=vision_model,
-                    parser_config=db_document.parser_config,
-                    is_root=False,
-                    tenant_id=str(current_user.tenant_id),
-                    workspace_id=str(db_knowledge.workspace_id),
-                    knowledge_id=str(db_document.kb_id),
-                    document_id=str(db_document.id),
-                    source_file_id=str(db_document.file_id),
-                    source_file_name=db_file.file_name)
+        res = await asyncio.to_thread(
+            chunk,
+            filename=db_file.file_name,
+            binary=file_binary,
+            from_page=0,
+            to_page=5,
+            callback=progress_callback,
+            vision_model=vision_model,
+            parser_config=db_document.parser_config,
+            is_root=False,
+            tenant_id=str(current_user.tenant_id),
+            workspace_id=str(db_knowledge.workspace_id),
+            knowledge_id=str(db_document.kb_id),
+            document_id=str(db_document.id),
+            source_file_id=str(db_document.file_id),
+            source_file_name=db_file.file_name,
+        )
 
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize
@@ -263,8 +271,8 @@ async def get_preview_chunks_hierarchy(
         pagesize: int = Query(20, gt=0, le=100),
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
         parser_config_param: Optional[dict] = Body(None, description="Parser config overrides, e.g. {\"layout_recognize\":\"mineru\",\"chunk_token_num\":130,\"parent_child_mode\":true,\"parent_chunk_mode\":\"full-doc\"}"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Paged query document chunk preview (nested structure)
@@ -280,21 +288,21 @@ async def get_preview_chunks_hierarchy(
             detail="The paging parameter must be greater than 0"
         )
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The knowledge base does not exist or access is denied"
         )
 
-    db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
     if not db_document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The document does not exist or you do not have permission to access it"
         )
 
-    db_file = file_service.get_file_by_id(db, file_id=db_document.file_id)
+    db_file = await db.get(FileModel, db_document.file_id)
     if not db_file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -341,7 +349,8 @@ async def get_preview_chunks_hierarchy(
 
     try:
         if chunk_mode == "parent_child":
-            child_res, parent_res, parent_id_map = chunk(
+            child_res, parent_res, parent_id_map = await asyncio.to_thread(
+                chunk,
                 filename=db_file.file_name,
                 binary=file_binary,
                 from_page=0,
@@ -365,7 +374,8 @@ async def get_preview_chunks_hierarchy(
                 parent_id_map=parent_id_map,
             )
         elif chunk_mode == "qa":
-            res = chunk(
+            res = await asyncio.to_thread(
+                chunk,
                 filename=db_file.file_name,
                 binary=file_binary,
                 from_page=0,
@@ -383,7 +393,8 @@ async def get_preview_chunks_hierarchy(
             )
             hierarchy = _build_preview_hierarchy(res, chunk_mode="qa")
         else:
-            res = chunk(
+            res = await asyncio.to_thread(
+                chunk,
                 filename=db_file.file_name,
                 binary=file_binary,
                 from_page=0,
@@ -432,8 +443,8 @@ async def get_chunks(
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
         pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Paged query document chunk list
@@ -451,7 +462,7 @@ async def get_chunks(
         )
 
     # 2. Obtain knowledge base information
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -459,7 +470,7 @@ async def get_chunks(
         )
 
     # 3. 获取文档并判断分块模式
-    db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
     if not db_document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -496,11 +507,12 @@ async def get_chunks(
     # 4. Execute paged query
     try:
         api_logger.debug("Start executing document chunk query")
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+        vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
         if db_document.is_parent_child_mode:
             # 方案 1：两次查询 + parent 级分页
             # 4.1 查询 parent chunks（按 sort_id 排序，分页）
-            total_parents, parent_items = vector_service.search_by_segment(
+            total_parents, parent_items = await asyncio.to_thread(
+                vector_service.search_by_segment,
                 document_id=str(document_id),
                 query=keywords,
                 pagesize=pagesize,
@@ -512,7 +524,8 @@ async def get_chunks(
             # fallback：如果 parent 查询为空（旧数据或 chunk_type 缺失），查所有 chunks 在内存中区分
             if not parent_items and total_parents == 0:
                 api_logger.debug("Parent query returned empty, falling back to query all chunks")
-                total_all, all_items = vector_service.search_by_segment(
+                total_all, all_items = await asyncio.to_thread(
+                    vector_service.search_by_segment,
                     document_id=str(document_id),
                     query=keywords,
                     pagesize=10000,
@@ -546,7 +559,8 @@ async def get_chunks(
             parent_doc_ids = [p.metadata["doc_id"] for p in parent_items]
 
             # 4.2 查询这些 parent 下的所有 child chunks（按 sort_id 排序，不分页）
-            _, child_items = vector_service.search_by_segment(
+            _, child_items = await asyncio.to_thread(
+                vector_service.search_by_segment,
                 document_id=str(document_id),
                 pagesize=10000,
                 page=1,
@@ -559,7 +573,8 @@ async def get_chunks(
             result = _build_nested_result(parent_items, child_items, page, pagesize, total_parents)
         else:
             # 普通分块模式：原有逻辑
-            total, items = vector_service.search_by_segment(
+            total, items = await asyncio.to_thread(
+                vector_service.search_by_segment,
                 document_id=str(document_id),
                 query=keywords,
                 pagesize=pagesize,
@@ -592,8 +607,8 @@ async def create_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         create_data: chunk_schema.ChunkCreate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     create chunk
@@ -603,14 +618,14 @@ async def create_chunk(
     api_logger.info(f"Create chunk request: kb_id={kb_id}, document_id={document_id}, content={content}, username: {current_user.username}")
 
     # 1. Obtain knowledge base information
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The knowledge base does not exist or access is denied"
         )
     # 1. Obtain document information
-    db_document = db.query(Document).filter(Document.id == document_id).first()
+    db_document = await db.get(Document, document_id)
     if not db_document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -636,11 +651,11 @@ async def create_chunk(
                 detail="当前文档未启用父子分块模式，不允许创建 parent/child 类型块"
             )
 
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+    vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
 
     # 2. Get the sort ID
     sort_id = 0
-    total, items = vector_service.search_by_segment(document_id=str(document_id), pagesize=1, page=1, asc=False)
+    total, items = await asyncio.to_thread(vector_service.search_by_segment, document_id=str(document_id), pagesize=1, page=1, asc=False)
     if items:
         sort_id = items[0].metadata["sort_id"]
     sort_id = sort_id + 1
@@ -662,11 +677,11 @@ async def create_chunk(
         metadata.update(create_data.qa_metadata)
     chunk = DocumentChunk(page_content=content, metadata=metadata)
     # 3. Segmented vector storage
-    vector_service.add_chunks([chunk])
+    await asyncio.to_thread(vector_service.add_chunks, [chunk])
 
     # 4.update chunk_num
     db_document.chunk_num += 1
-    db.commit()
+    await db.commit()
 
     return success(data=jsonable_encoder(chunk), msg="Document chunk creation successful")
 
@@ -676,8 +691,8 @@ async def create_chunks_batch(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         batch_data: chunk_schema.ChunkBatchCreate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Batch create chunks (max 8)
@@ -690,14 +705,17 @@ async def create_chunks_batch(
             detail=f"Batch size exceeds limit: max {settings.MAX_CHUNK_BATCH_SIZE}, got {len(batch_data.items)}"
         )
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The knowledge base does not exist or access is denied")
 
-    db_document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.kb_id == kb_id
-    ).first()
+    result = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.kb_id == kb_id,
+        )
+    )
+    db_document = result.scalars().first()
     if not db_document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The document does not exist or you do not have permission to access it")
 
@@ -722,11 +740,11 @@ async def create_chunks_batch(
                     detail="当前文档未启用父子分块模式，不允许创建 parent/child 类型块"
                 )
 
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+    vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
 
     # Get current max sort_id
     sort_id = 0
-    total, items = vector_service.search_by_segment(document_id=str(document_id), pagesize=1, page=1, asc=False)
+    total, items = await asyncio.to_thread(vector_service.search_by_segment, document_id=str(document_id), pagesize=1, page=1, asc=False)
     if items:
         sort_id = items[0].metadata["sort_id"]
 
@@ -749,10 +767,10 @@ async def create_chunks_batch(
             metadata.update(create_data.qa_metadata)
         chunks.append(DocumentChunk(page_content=create_data.chunk_content, metadata=metadata))
 
-    vector_service.add_chunks(chunks)
+    await asyncio.to_thread(vector_service.add_chunks, chunks)
 
     db_document.chunk_num += len(chunks)
-    db.commit()
+    await db.commit()
 
     return success(data=jsonable_encoder(chunks), msg=f"Batch created {len(chunks)} chunks successfully")
 
@@ -762,8 +780,8 @@ async def import_qa_new_doc(
         kb_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
         parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async),
         storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
@@ -779,7 +797,7 @@ async def import_qa_new_doc(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 CSV (.csv) 或 Excel (.xlsx) 格式")
 
     # 2. 校验知识库
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权访问")
 
@@ -798,7 +816,13 @@ async def import_qa_new_doc(
         parent_id=parent_id,
         file_name=filename, file_ext=file_ext, file_size=file_size,
     )
-    db_file = file_service.create_file(db=db, file=file_data, current_user=current_user)
+    file_data.created_by = current_user.id
+    if file_data.parent_id is None:
+        file_data.parent_id = kb_id
+    db_file = FileModel(**file_data.model_dump())
+    db.add(db_file)
+    await db.commit()
+    await db.refresh(db_file)
 
     # 5. 上传文件到存储后端
     file_key = generate_kb_file_key(kb_id=kb_id, file_id=db_file.id, file_ext=file_ext)
@@ -809,8 +833,8 @@ async def import_qa_new_doc(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"文件存储失败: {str(e)}")
 
     db_file.file_key = file_key
-    db.commit()
-    db.refresh(db_file)
+    await db.commit()
+    await db.refresh(db_file)
 
     # 6. 创建 Document 记录（标记为 QA 类型）
     doc_data = document_schema.DocumentCreate(
@@ -819,7 +843,7 @@ async def import_qa_new_doc(
         file_meta={}, parser_id="qa",
         parser_config={"doc_type": "qa", "auto_questions": 0}
     )
-    db_document = document_service.create_document(db=db, document=doc_data, current_user=current_user)
+    db_document = await document_service.create_document_async(db=db, document=doc_data, current_user=current_user)
 
     api_logger.info(f"Created doc for QA import: file_id={db_file.id}, document_id={db_document.id}, file_key={file_key}")
 
@@ -843,8 +867,8 @@ async def import_qa_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     导入 QA 问答对（CSV/Excel），异步处理
@@ -857,11 +881,11 @@ async def import_qa_chunks(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 CSV (.csv) 或 Excel (.xlsx) 格式")
 
     # 2. 校验知识库和文档
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权访问")
 
-    db_document = db.query(Document).filter(Document.id == document_id).first()
+    db_document = await db.get(Document, document_id)
     if not db_document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在或无权访问")
 
@@ -883,8 +907,8 @@ async def get_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         doc_id: str,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Retrieve document chunk information based on doc_id
@@ -892,15 +916,15 @@ async def get_chunk(
     api_logger.info(f"Obtain document chunk information: kb_id={kb_id}, document_id={document_id}, doc_id={doc_id}, username: {current_user.username}")
 
     # 1. Obtain knowledge base information
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The knowledge base does not exist or access is denied"
         )
 
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-    total, items = vector_service.get_by_segment(doc_id=doc_id)
+    vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
+    total, items = await asyncio.to_thread(vector_service.get_by_segment, doc_id=doc_id)
     if total:
         return success(data=jsonable_encoder(items[0]), msg="Document chunk query successful")
     else:
@@ -916,8 +940,8 @@ async def update_chunk(
         document_id: uuid.UUID,
         doc_id: str,
         update_data: chunk_schema.ChunkUpdate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     Update document chunk content
@@ -926,22 +950,22 @@ async def update_chunk(
     content = update_data.chunk_content
     api_logger.info(f"Update document chunk content: kb_id={kb_id}, document_id={document_id}, doc_id={doc_id}, content={content}, username: {current_user.username}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The knowledge base does not exist or access is denied"
         )
 
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-    total, items = vector_service.get_by_segment(doc_id=doc_id)
+    vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
+    total, items = await asyncio.to_thread(vector_service.get_by_segment, doc_id=doc_id)
     if total:
         chunk = items[0]
         chunk.page_content = content
         # QA chunk: 更新 metadata 中的 question/answer
         if update_data.is_qa:
             chunk.metadata.update(update_data.qa_metadata)
-        vector_service.update_by_segment(chunk)
+        await asyncio.to_thread(vector_service.update_by_segment, chunk)
         return success(data=jsonable_encoder(chunk), msg="The document chunk has been successfully updated")
     else:
         raise HTTPException(
@@ -956,28 +980,28 @@ async def delete_chunk(
         document_id: uuid.UUID,
         doc_id: str,
         force_refresh: bool = Query(False, description="Force Elasticsearch refresh after deletion"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     """
     delete document chunk
     """
     api_logger.info(f"Request to delete document chunk: kb_id={kb_id}, document_id={document_id}, doc_id={doc_id}, username: {current_user.username}")
 
-    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The knowledge base does not exist or access is denied"
         )
 
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-    if vector_service.text_exists(doc_id):
-        vector_service.delete_by_ids([doc_id], refresh=force_refresh)
+    vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
+    if await asyncio.to_thread(vector_service.text_exists, doc_id):
+        await asyncio.to_thread(vector_service.delete_by_ids, [doc_id], refresh=force_refresh)
         # 更新 chunk_num
-        db_document = db.query(Document).filter(Document.id == document_id).first()
+        db_document = await db.get(Document, document_id)
         db_document.chunk_num -= 1
-        db.commit()
+        await db.commit()
         return success(msg="The document chunk has been successfully deleted")
     else:
         raise HTTPException(
@@ -993,7 +1017,7 @@ def get_retrieve_types():
 
 async def retrieve_chunks_with_caller(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: Session,
+        db: Session | AsyncSession,
         current_user: User,
         caller: chunk_schema.KnowledgeRetrievalCaller,
 ):
@@ -1019,7 +1043,7 @@ async def retrieve_chunks_with_caller(
         retrieval_payload = retrieve_data.model_dump(exclude_none=True)
         retrieval_payload["caller"] = caller
         request = KnowledgeRetrievalRequest(**retrieval_payload)
-        result = KnowledgeRetrievalService.retrieve(
+        result = await KnowledgeRetrievalService.retrieve_async(
             db=db,
             request=request,
             current_user=current_user,
@@ -1036,8 +1060,8 @@ async def retrieve_chunks_with_caller(
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user_async)
 ):
     return await retrieve_chunks_with_caller(
         retrieve_data=retrieve_data,

@@ -17,13 +17,11 @@ import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.config.get_data import (
     extract_and_process_changes,
     get_data,
     get_data_statement,
 )
-from app.core.models.base import RedBearModelConfig
 from app.repositories.neo4j.cypher_queries import (
     neo4j_query_all,
     neo4j_query_part,
@@ -100,6 +98,7 @@ class ReflectionConfig(BaseModel):
     reflexion_range: ReflectionRange = ReflectionRange.PARTIAL
     baseline: ReflectionBaseline = ReflectionBaseline.TIME
     model_id: Optional[str] = None  # Model ID
+    tenant_id: Optional[str] = None  # Tenant ID for SpeedBear model API key resolution
     end_user_id: Optional[str] = None
     output_example: Optional[str] = None  # Output example
 
@@ -218,43 +217,15 @@ class ReflectionEngine:
             self.neo4j_connector = Neo4jConnector()
 
         if self.llm_client is None:
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-            from app.db import get_db_context
-            with get_db_context() as db:
-                factory = MemoryClientFactory(db)
-                self.llm_client = factory.get_llm_client(self.config.model_id, self.tenant_id)
+            raise ValueError(
+                "ReflectionEngine requires an llm_client instance. "
+                "Pass a pre-built RedBearLLM via llm_client parameter."
+            )
         elif isinstance(self.llm_client, str):
-            # If llm_client is a string (model_id), use it to initialize the client
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-            from app.db import get_db_context
-            from app.services.memory_config_service import MemoryConfigService
-            model_id = self.llm_client
-            with get_db_context() as db:
-                factory = MemoryClientFactory(db)
-                # self.llm_client = factory.get_llm_client(model_id)
-
-                # Use MemoryConfigService to get model config
-                config_service = MemoryConfigService(db)
-                model_config = config_service.get_model_config(model_id, self.tenant_id)
-
-            extra_params = {
-                "temperature": 0.2,  # Lower temperature for faster response and consistency
-                "max_tokens": 600,  # Limit maximum token count
-                "top_p": 0.8,  # Optimize sampling parameters
-                "stream": False,  # Ensure non-streaming output for fastest response
-            }
-
-            self.llm_client = OpenAIClient(RedBearModelConfig(
-                model_name=model_config.get("model_name"),
-                provider=model_config.get("provider"),
-                api_key=model_config.get("api_key"),
-                base_url=model_config.get("base_url"),
-                timeout=model_config.get("timeout", 30),
-                is_omni=model_config.get("is_omni"),
-                capability=model_config.get("capability"),
-                max_retries=model_config.get("max_retries", 2),
-                extra_params=extra_params
-            ), type_=model_config.get("type"))
+            raise ValueError(
+                f"ReflectionEngine no longer accepts model_id string (got '{self.llm_client}'). "
+                "Pass a pre-built RedBearLLM instance via llm_client parameter."
+            )
 
         if self.get_data_func is None:
             self.get_data_func = get_data
@@ -394,10 +365,7 @@ class ReflectionEngine:
             }
         ]
 
-        response = await self.llm_client.response_structured(
-            messages=translation_messages,
-            response_model=TranslationResponse
-        )
+        response = await self.llm_client.call_structured(translation_messages, TranslationResponse)
         return response.data
 
     async def extract_translation(self, data):
@@ -651,10 +619,7 @@ class ReflectionEngine:
             logging.info(f"提示词长度: {len(rendered_prompt)}")
 
             # Call LLM for conflict detection
-            response = await self.llm_client.response_structured(
-                messages,
-                self.conflict_schema
-            )
+            response = await self.llm_client.call_structured(messages, self.conflict_schema)
 
             execution_time = asyncio.get_event_loop().time() - start_time
             logging.info(f"冲突检测耗时: {execution_time:.2f} 秒")
@@ -714,10 +679,7 @@ class ReflectionEngine:
                     messages = [{"role": "user", "content": rendered_prompt}]
 
                     # Call LLM for reflection
-                    response = await self.llm_client.response_structured(
-                        messages,
-                        self.reflexion_schema
-                    )
+                    response = await self.llm_client.call_structured(messages, self.reflexion_schema)
 
                     if not response:
                         return None

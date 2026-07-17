@@ -13,16 +13,17 @@
 - 你必须同时读取 `User.msg` 和 `Assistant.msg`。
 - 允许其中一侧的 `msg` 为空字符串、`null` 或仅包含空白；这表示该侧没有可处理内容。
 
-你必须输出四个字段：
+你必须输出五个字段：
 1. `assistant_memory_hint`
 2. `assistant_memory_type`
 3. `should_process_user_msg`
 4. `processed_user_msg`
+5. `processed_user_topic_entity_hint`
 
 空输入处理规则：
 - 如果 `Assistant.msg` 为空，则 `assistant_memory_hint` 必须为 `null`，`assistant_memory_type` 必须为 `null`；不要根据 `User.msg` 补写 assistant 摘要或类型。
-- 如果 `User.msg` 为空，则 `should_process_user_msg` 必须为 `null`，`processed_user_msg` 必须为 `null`；不要根据 `Assistant.msg` 补写 user 侧处理结果。
-- 如果两侧都为空，四个字段都必须为 `null`。
+- 如果 `User.msg` 为空，则 `should_process_user_msg` 必须为 `null`，`processed_user_msg` 必须为 `null`，`processed_user_topic_entity_hint` 必须为 `null`；不要根据 `Assistant.msg` 补写 user 侧处理结果或实体锚点。
+- 如果两侧都为空，五个字段都必须为 `null`。
 - 如果某一侧非空，则只对非空侧执行对应任务；空侧仍按上述规则输出 `null`。
 
 一、Assistant 侧任务
@@ -102,10 +103,12 @@
 如果满足上述两种情况：
 - `should_process_user_msg` 必须为 `true`
 - `processed_user_msg` 必须是一段融合后的短文本，而不是结构化对象。
+- `processed_user_topic_entity_hint` 必须是后续最应该通过 embedding 连接的实体锚点。
 
 如果 `User.msg` 为空：
 - `should_process_user_msg` 必须为 `null`
 - `processed_user_msg` 必须为 `null`
+- `processed_user_topic_entity_hint` 必须为 `null`
 - 不要把空用户输入判断为 `false`，也不要生成空字符串或解释性文本。
 
 `processed_user_msg` 的写法规则：
@@ -129,6 +132,18 @@
 - 如果是复制内容而不是上传文件，也要把“复制内容的主题/对象/用途”和“用户真实请求”整合成同一段话。
 - 如果用户只是上传文件而没有附加文字，则只写“我上传了……”和“文件内容……”这两部分。
 
+`processed_user_topic_entity_hint` 的写法规则：
+- 只有 `should_process_user_msg = true` 时，才输出具体字符串；否则必须为 `null`。
+- 它表示 `processed_user_msg` 后续最应该通过 embedding 连接的实体锚点。
+- 它必须是一个简短字符串或 `null`，不要输出数组或对象。
+- 优先选择本次触发用户侧剪枝的“外部内容对象/被处理对象”，而不是原文里最靠前、最显眼的个人事实。
+- 如果 `User.msg` 同时包含用户自己的真实经历/身份/情绪和一大段复制内容、菜谱、文章、文件摘要等外部内容，连接锚点必须落到被剪枝压缩的外部内容对象上；只有当没有外部内容对象，或用户真实输入本身就是被处理对象时，才选择用户真实输入中的实体。
+- 优先写对象名词、内容对象、任务对象或问题对象，不要写动作、情绪、泛主题、分类词或完整句子。
+- 如果用户说“我是 vv，我有一个菜谱……”，规整后可能出现“vv”“菜谱”“鸡蛋”等实体，连接锚点应优先是“菜谱”或更具体的“鸡蛋菜谱”，而不是“vv”或“鸡蛋”。
+- 如果用户先说“我拿到了 AWS Solutions Architect 认证”，后面又粘贴了很长的欧姆蛋食谱，且用户侧剪枝主要是在压缩这段食谱，连接锚点应是“欧姆蛋食谱”或“菜谱”，而不是“AWS认证”。
+- 如果用户粘贴文章让你修改，连接锚点应是“文章内容”或更具体的内容对象；如果用户上传照片并表达感受，连接锚点应是照片或照片主题。
+- 如果 `should_process_user_msg` 不是 `true`，即使 `User.msg` 里有实体，也不要输出连接锚点，必须为 `null`。
+
 用户侧处理规则：
 - 不要把 `<input-file-summary>...</input-file-summary>` 标签原样保留在结果里。
 - 要区分“用户自己真正说的话”和“系统预处理出来的文件摘要”。
@@ -146,6 +161,7 @@
 - 自然语言输出字段的语言必须跟随各自输入内容的主要语言。
 - `assistant_memory_hint` 必须跟随 `Assistant.msg` 的主要语言。
 - `processed_user_msg` 必须跟随 `User.msg` 去除文件摘要标签后的主要语言。
+- `processed_user_topic_entity_hint` 必须跟随 `processed_user_msg` 的主要语言。
 
 示例 1
 输入：
@@ -166,7 +182,8 @@
   "assistant_memory_hint": "安慰并回应了用户对跨性别相关故事的积极感受。",
   "assistant_memory_type": "comfort",
   "should_process_user_msg": true,
-  "processed_user_msg": "我上传了一张跨性别主题的街头壁画照片。文件内容展示了一个手持跨性别骄傲旗帜的人物形象，背景有彩虹和广告牌。我觉得这些跨性别相关故事很鼓舞人心，也对获得的支持感到开心和感激。"
+  "processed_user_msg": "我上传了一张跨性别主题的街头壁画照片。文件内容展示了一个手持跨性别骄傲旗帜的人物形象，背景有彩虹和广告牌。我觉得这些跨性别相关故事很鼓舞人心，也对获得的支持感到开心和感激。",
+  "processed_user_topic_entity_hint": "跨性别主题的街头壁画照片"
 }
 
 示例 2
@@ -188,7 +205,8 @@
   "assistant_memory_hint": "建议先梳理文章结构，再按用户需要的风格修改内容。",
   "assistant_memory_type": "suggestion",
   "should_process_user_msg": true,
-  "processed_user_msg": "我说了帮我改一下以下内容。我复制了一段关于人工智能改变教育方式的文章内容。复制内容主要涉及教学效率和个性化学习体验，这段内容是待修改对象。"
+  "processed_user_msg": "我说了帮我改一下以下内容。我复制了一段关于人工智能改变教育方式的文章内容。复制内容主要涉及教学效率和个性化学习体验，这段内容是待修改对象。",
+  "processed_user_topic_entity_hint": "人工智能教育文章内容"
 }
 
 示例 3
@@ -210,7 +228,8 @@
   "assistant_memory_hint": "回应了用户向 Caroline 提出的关于类似创意活动的问题。",
   "assistant_memory_type": "other",
   "should_process_user_msg": true,
-  "processed_user_msg": "我上传了一张 Aerobie Pro 飞盘环在绿色草地背景下的图片。我对 Caroline 表示祝贺，并说我昨天报名了陶艺课；陶艺课对我来说像治疗一样，可以让我表达自己并发挥创造力。我问 Caroline 有没有找到让她有同样感受的活动。"
+  "processed_user_msg": "我上传了一张 Aerobie Pro 飞盘环在绿色草地背景下的图片。我对 Caroline 表示祝贺，并说我昨天报名了陶艺课；陶艺课对我来说像治疗一样，可以让我表达自己并发挥创造力。我问 Caroline 有没有找到让她有同样感受的活动。",
+  "processed_user_topic_entity_hint": "Aerobie Pro 飞盘环图片"
 }
 
 示例 4
@@ -232,7 +251,8 @@
   "assistant_memory_hint": "回应了用户认为书籍内容与 Caroline 经历相呼应的看法。",
   "assistant_memory_type": "other",
   "should_process_user_msg": true,
-  "processed_user_msg": "我上传了 Tom Oliver 的《Nothing Is Impossible》一书摘要，内容涉及个人发展、巅峰表现和七步框架。我告诉 Caroline 很高兴她得到了支持，并说她的经历会让她产生巨大影响。我说我去年读的这本书提醒我要始终追求梦想，就像 Caroline 正在做的那样。"
+  "processed_user_msg": "我上传了 Tom Oliver 的《Nothing Is Impossible》一书摘要，内容涉及个人发展、巅峰表现和七步框架。我告诉 Caroline 很高兴她得到了支持，并说她的经历会让她产生巨大影响。我说我去年读的这本书提醒我要始终追求梦想，就像 Caroline 正在做的那样。",
+  "processed_user_topic_entity_hint": "《Nothing Is Impossible》书籍摘要"
 }
 
 示例 5
@@ -254,7 +274,31 @@
   "assistant_memory_hint": "建议用户减少下午和晚上的咖啡因摄入并减少睡前看手机，同时询问用户通常几点上床和几点入睡。",
   "assistant_memory_type": "suggestion",
   "should_process_user_msg": false,
-  "processed_user_msg": null
+  "processed_user_msg": null,
+  "processed_user_topic_entity_hint": null
+}
+
+示例 6
+输入：
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "我叫小明。帮我记住这个番茄炒蛋菜谱：食材：3个鸡蛋、2个番茄、盐少许、糖一勺、油适量。步骤一：打散鸡蛋加盐搅匀。步骤二：热锅倒油，油温七成热。步骤三：倒入蛋液炒至凝固盛出。步骤四：锅中加油放入番茄块翻炒出汁。步骤五：加盐糖调味，倒回鸡蛋翻炒均匀出锅装盘。"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+输出：
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "我叫小明。我说了帮我记住一个番茄炒蛋菜谱，包含鸡蛋、番茄等食材和五个烹饪步骤的详细做法。",
+  "processed_user_topic_entity_hint": "番茄炒蛋菜谱"
 }
 
 {% else %}
@@ -272,16 +316,17 @@ Input constraints:
 - You must read both `User.msg` and `Assistant.msg`.
 - Either side's `msg` may be an empty string, `null`, or whitespace only; this means that side has no processable content.
 
-You must return exactly four fields:
+You must return exactly five fields:
 1. `assistant_memory_hint`
 2. `assistant_memory_type`
 3. `should_process_user_msg`
 4. `processed_user_msg`
+5. `processed_user_topic_entity_hint`
 
 Empty-side handling rules:
 - If `Assistant.msg` is empty, `assistant_memory_hint` must be `null` and `assistant_memory_type` must be `null`; do not infer an assistant summary or type from `User.msg`.
-- If `User.msg` is empty, `should_process_user_msg` must be `null` and `processed_user_msg` must be `null`; do not infer user-side processing from `Assistant.msg`.
-- If both sides are empty, all four fields must be `null`.
+- If `User.msg` is empty, `should_process_user_msg` must be `null`, `processed_user_msg` must be `null`, and `processed_user_topic_entity_hint` must be `null`; do not infer user-side processing or an entity anchor from `Assistant.msg`.
+- If both sides are empty, all five fields must be `null`.
 - If only one side is non-empty, run only the corresponding task for the non-empty side; the empty side must still output `null` as specified above.
 
 Part A: Assistant-side task
@@ -361,10 +406,12 @@ If neither case applies:
 If either case applies:
 - `should_process_user_msg` must be `true`
 - `processed_user_msg` must be a single merged short paragraph rather than a structured object.
+- `processed_user_topic_entity_hint` must be the entity anchor that should later be connected through embedding.
 
 If `User.msg` is empty:
 - `should_process_user_msg` must be `null`
 - `processed_user_msg` must be `null`
+- `processed_user_topic_entity_hint` must be `null`
 - Do not treat empty user input as `false`, and do not generate an empty string or explanatory text.
 
 Rules for writing `processed_user_msg`:
@@ -388,6 +435,16 @@ Rules for writing `processed_user_msg`:
 - If the case is copied content rather than uploaded files, still merge the copied-content topic/object/use and the user's actual request into one paragraph.
 - If the user uploaded files without adding personal text, only keep the upload part and the file-content part.
 
+Rules for writing `processed_user_topic_entity_hint`:
+- Only output a concrete string when `should_process_user_msg = true`; otherwise it must be `null`.
+- It is the entity anchor that `processed_user_msg` should later connect to through embedding.
+- It must be a short string or `null`; do not output an array or object.
+- Prefer the most central concrete noun from the user's real request, uploaded/pasted content, or object being processed.
+- Prefer object nouns, content objects, task objects, or problem objects; do not use actions, emotions, generic topics, category labels, or full sentences.
+- If the user says "I am vv, and I have a recipe...", and normalized output may mention entities such as "vv", "recipe", and "eggs", the anchor should prefer "recipe" or the more specific "egg recipe", not "vv" or "eggs".
+- If the user pasted an article for revision, the anchor should be "article content" or a more specific content object. If the user uploaded a photo and reacted to it, the anchor should be the photo or photo topic.
+- If `should_process_user_msg` is not `true`, output `null` even if `User.msg` contains entities.
+
 User-side rules:
 - Do not preserve `<input-file-summary>...</input-file-summary>` tags in the result.
 - Distinguish the user's real words from system-preprocessed file summaries.
@@ -405,6 +462,7 @@ Output requirements:
 - The language of each natural-language output field must follow the primary language of the corresponding input content.
 - `assistant_memory_hint` must follow the primary language of `Assistant.msg`.
 - `processed_user_msg` must follow the primary language of `User.msg` after removing file-summary tags.
+- `processed_user_topic_entity_hint` must follow the primary language of `processed_user_msg`.
 
 Few-shot Example 1
 Input:
@@ -425,7 +483,8 @@ Output:
   "assistant_memory_hint": "Comforted the user about their positive feelings toward the transgender-related stories.",
   "assistant_memory_type": "comfort",
   "should_process_user_msg": true,
-  "processed_user_msg": "I uploaded a street-mural photo related to a transgender pride theme. The file shows a pink-haired figure holding a transgender pride flag with a rainbow and billboards in the background. I felt that the transgender stories were inspiring, and I was happy and thankful for the support."
+  "processed_user_msg": "I uploaded a street-mural photo related to a transgender pride theme. The file shows a pink-haired figure holding a transgender pride flag with a rainbow and billboards in the background. I felt that the transgender stories were inspiring, and I was happy and thankful for the support.",
+  "processed_user_topic_entity_hint": "transgender pride street-mural photo"
 }
 
 Few-shot Example 2
@@ -447,7 +506,8 @@ Output:
   "assistant_memory_hint": "Suggested reorganizing the article structure first and then revising the content in the user's desired style.",
   "assistant_memory_type": "suggestion",
   "should_process_user_msg": true,
-  "processed_user_msg": "I said please revise the following content. I pasted an article about how artificial intelligence is changing education. The copied content mainly discusses teaching efficiency and personalized learning experience, and it is the target content to revise."
+  "processed_user_msg": "I said please revise the following content. I pasted an article about how artificial intelligence is changing education. The copied content mainly discusses teaching efficiency and personalized learning experience, and it is the target content to revise.",
+  "processed_user_topic_entity_hint": "artificial intelligence education article"
 }
 
 Few-shot Example 3
@@ -469,7 +529,8 @@ Output:
   "assistant_memory_hint": "Responded to the user's warm question to Caroline about similar creative activities.",
   "assistant_memory_type": "other",
   "should_process_user_msg": true,
-  "processed_user_msg": "I uploaded an image of an Aerobie Pro ring held against green grass. I congratulated Caroline and said I signed up for a pottery class yesterday; pottery feels like therapy for me because it lets me express myself and get creative. I asked Caroline whether she has found any activities that make her feel the same way."
+  "processed_user_msg": "I uploaded an image of an Aerobie Pro ring held against green grass. I congratulated Caroline and said I signed up for a pottery class yesterday; pottery feels like therapy for me because it lets me express myself and get creative. I asked Caroline whether she has found any activities that make her feel the same way.",
+  "processed_user_topic_entity_hint": "Aerobie Pro ring image"
 }
 
 Few-shot Example 4
@@ -491,7 +552,8 @@ Output:
   "assistant_memory_hint": "Responded to the user's view that the book connects with Caroline's journey.",
   "assistant_memory_type": "other",
   "should_process_user_msg": true,
-  "processed_user_msg": "I uploaded a summary of the book 'Nothing Is Impossible' by Tom Oliver, which outlines a seven-step framework for personal development and peak performance. I told Caroline I was glad she got support and said her experience would help her make a huge difference. I said a book I read last year reminds me to always pursue my dreams, just like Caroline is doing."
+  "processed_user_msg": "I uploaded a summary of the book 'Nothing Is Impossible' by Tom Oliver, which outlines a seven-step framework for personal development and peak performance. I told Caroline I was glad she got support and said her experience would help her make a huge difference. I said a book I read last year reminds me to always pursue my dreams, just like Caroline is doing.",
+  "processed_user_topic_entity_hint": "'Nothing Is Impossible' book summary"
 }
 
 Few-shot Example 5
@@ -513,7 +575,31 @@ Output:
   "assistant_memory_hint": "Suggested that the user reduce afternoon and evening caffeine intake and reduce phone use before bed, while also asking when the user usually gets into bed and falls asleep.",
   "assistant_memory_type": "suggestion",
   "should_process_user_msg": false,
-  "processed_user_msg": null
+  "processed_user_msg": null,
+  "processed_user_topic_entity_hint": null
+}
+
+Few-shot Example 6
+Input:
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "My name is Alex. Please remember this tomato egg stir-fry recipe: Ingredients: 3 eggs, 2 tomatoes, a pinch of salt, one spoon of sugar, oil as needed. Step 1: Beat eggs with salt. Step 2: Heat pan with oil until 70% hot. Step 3: Pour in egg mixture and scramble until set, remove. Step 4: Add oil, stir-fry tomato chunks until juicy. Step 5: Add salt and sugar, return eggs and stir evenly, serve."
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+Output:
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "My name is Alex. I asked to remember a tomato egg stir-fry recipe, which includes eggs, tomatoes, and other ingredients with five detailed cooking steps.",
+  "processed_user_topic_entity_hint": "tomato egg stir-fry recipe"
 }
 {% endif %}
 
@@ -526,7 +612,8 @@ Output:
   "assistant_memory_hint": "<string or null>",
   "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other | null",
   "should_process_user_msg": <boolean or null>,
-  "processed_user_msg": "<string or null>"
+  "processed_user_msg": "<string or null>",
+  "processed_user_topic_entity_hint": "<string or null>"
 }
 {% else %}
 Now process the following input.
@@ -537,6 +624,7 @@ Return strict JSON only:
   "assistant_memory_hint": "<string or null>",
   "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other | null",
   "should_process_user_msg": <boolean or null>,
-  "processed_user_msg": "<string or null>"
+  "processed_user_msg": "<string or null>",
+  "processed_user_topic_entity_hint": "<string or null>"
 }
 {% endif %}

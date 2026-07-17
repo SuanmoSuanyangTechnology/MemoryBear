@@ -1,4 +1,6 @@
 from datetime import datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import uuid
@@ -11,13 +13,14 @@ from app.repositories.model_repository import ModelConfigRepository, ModelApiKey
 from app.schemas import model_schema
 from app.schemas.model_schema import (
     ModelConfigCreate, ModelConfigUpdate, ModelApiKeyCreate, ModelApiKeyUpdate,
-    ModelConfigQuery, ModelStats, ModelConfigQueryNew
+    ModelConfigQuery, ModelStats, ModelConfigQueryNew, ModelInfo
 )
 from app.core.config import settings
 from app.core.logging_config import get_business_logger
 from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.utils.datetime_utils import utcnow_naive
 
 logger = get_business_logger()
 
@@ -37,6 +40,70 @@ class ModelConfigService:
                 BizCode.MODEL_DEPRECATED,
             )
         return model
+
+    @staticmethod
+    async def get_model_by_id_async(
+            db: AsyncSession,
+            model_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
+    ) -> ModelConfig:
+        """Async version of get_model_by_id with the same availability checks."""
+        model = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id=tenant_id)
+        if not model:
+            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        if model.model_base and model.model_base.is_deprecated:
+            raise BusinessException(
+                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
+                BizCode.MODEL_DEPRECATED,
+            )
+        return model
+
+    @staticmethod
+    async def get_model_by_id_async(
+        db: AsyncSession,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> ModelConfig:
+        """根据ID异步获取模型配置"""
+        model = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id=tenant_id)
+        if not model:
+            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        if model.model_base and model.model_base.is_deprecated:
+            raise BusinessException(
+                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
+                BizCode.MODEL_DEPRECATED,
+            )
+        return model
+
+    @staticmethod
+    async def get_runtime_model_info_async(
+        db: AsyncSession,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> ModelInfo:
+        """统一获取运行时模型信息（异步）"""
+        model = await ModelConfigService.get_model_by_id_async(
+            db,
+            model_id,
+            tenant_id=tenant_id,
+        )
+        api_key = await ModelApiKeyService.get_available_api_key_async(
+            db,
+            model.id,
+            tenant_id=tenant_id,
+        )
+        if not api_key:
+            raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
+
+        return ModelInfo(
+            model_name=api_key.model_name,
+            model_type=ModelType(model.type),
+            api_key=api_key.api_key,
+            api_base=api_key.api_base,
+            provider=api_key.provider,
+            is_omni=api_key.is_omni,
+            capability=api_key.capability,
+        )
 
     @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
@@ -587,6 +654,52 @@ class ModelApiKeyService:
         )
 
     @staticmethod
+    async def _build_speedbear_runtime_api_key_async(
+        db,
+        model_config: ModelConfig,
+        tenant_id: uuid.UUID | None,
+    ) -> ModelApiKey:
+        """Async version of _build_speedbear_runtime_api_key."""
+        from sqlalchemy import select
+
+        from premium.platform_admin.models import TenantSpeedBearBinding
+
+        if not tenant_id:
+            raise BusinessException(
+                "SpeedBear 公共模型运行时缺少租户上下文",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        if not model_config.is_active:
+            raise BusinessException(
+                "当前模型已禁用，无法调用",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        stmt = (
+            select(TenantSpeedBearBinding)
+            .filter(TenantSpeedBearBinding.tenant_id == tenant_id)
+        )
+        result = await db.execute(stmt)
+        binding = result.scalars().first()
+        if not binding:
+            raise BusinessException(
+                "当前租户未绑定 SpeedBear Key，请联系平台管理员初始化",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+
+        base_url = f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1"
+
+        return ModelApiKey(
+            model_name=model_config.name,
+            provider=ModelProvider.SPEEDBEAR,
+            api_key=binding.gateway_api_key,
+            api_base=base_url,
+            capability=model_config.capability,
+            is_omni=model_config.is_omni,
+        )
+
+    @staticmethod
     def get_api_key_by_id(db: Session, api_key_id: uuid.UUID) -> ModelApiKey:
         """根据ID获取API Key"""
         api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
@@ -842,6 +955,50 @@ class ModelApiKeyService:
         return api_keys[0]
 
     @staticmethod
+    async def get_available_api_key_async(
+        db: AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Optional[ModelApiKey]:
+        """Async version of get_available_api_key."""
+        model_config = await ModelConfigRepository.get_by_id_async(db, model_config_id)
+        if not model_config:
+            return None
+
+        if not model_config.is_active:
+            return None
+
+        if ModelApiKeyService._is_public_speedbear_model(model_config):
+            return await ModelApiKeyService._build_speedbear_runtime_api_key_async(db, model_config, tenant_id)
+
+        api_keys = [key for key in model_config.api_keys if key.is_active]
+        if not api_keys:
+            return None
+
+        if model_config.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
+            return min(api_keys, key=lambda x: (int(x.usage_count or "0"), x.last_used_at or datetime.min))
+
+        return api_keys[0]
+
+    @staticmethod
+    async def get_available_api_key_bridge_async(
+        db: Session | AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Optional[ModelApiKey]:
+        if isinstance(db, AsyncSession):
+            return await ModelApiKeyService.get_available_api_key_async(
+                db,
+                model_config_id,
+                tenant_id=tenant_id,
+            )
+        return ModelApiKeyService.get_available_api_key(
+            db,
+            model_config_id,
+            tenant_id=tenant_id,
+        )
+
+    @staticmethod
     def record_api_key_usage(db: Session, api_key_id: uuid.UUID | None) -> bool:
         """记录API Key使用"""
         if api_key_id:
@@ -850,6 +1007,28 @@ class ModelApiKeyService:
                 db.commit()
             return success
         return False
+
+    @staticmethod
+    async def record_api_key_usage_bridge_async(
+        db: Session | AsyncSession,
+        api_key_id: uuid.UUID | None,
+    ) -> bool:
+        """兼容 Session/AsyncSession 的 API Key 使用统计"""
+        if not api_key_id:
+            return False
+
+        if isinstance(db, AsyncSession):
+            api_key = await db.get(ModelApiKey, api_key_id)
+            if not api_key:
+                return False
+
+            current_count = int(api_key.usage_count or "0")
+            api_key.usage_count = str(current_count + 1)
+            api_key.last_used_at = utcnow_naive()
+            await db.commit()
+            return True
+
+        return ModelApiKeyService.record_api_key_usage(db, api_key_id)
 
     @staticmethod
     def get_a_api_key(db: Session, model_config_id: uuid.UUID) -> ModelApiKey:

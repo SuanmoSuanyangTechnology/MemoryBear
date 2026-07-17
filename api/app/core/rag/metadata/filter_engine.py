@@ -1,6 +1,8 @@
 import uuid
 import logging
 from typing import Any
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, exists, or_
 from app.core.exceptions import BusinessException
@@ -38,7 +40,7 @@ class FilterGroup:
 class MetadataFilterEngine:
     """元数据过滤引擎：将多条件过滤转化为 SQLAlchemy 查询"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self._strategies = {
             "string": StringFilterStrategy(),
@@ -108,10 +110,69 @@ class MetadataFilterEngine:
         )
         return query
 
+    def build_statement(
+        self,
+        knowledge_id: uuid.UUID,
+        filter_groups: list[FilterGroup],
+        metadata_defs: dict[str, dict],
+    ):
+        """Build an async-compatible SQLAlchemy select statement."""
+        stmt = select(Document.id).where(Document.kb_id == knowledge_id)
+
+        group_conditions = []
+        for group in filter_groups:
+            conditions = []
+            for cond in group.conditions:
+                field_def = metadata_defs.get(cond.field)
+                if not field_def:
+                    raise BusinessException(
+                        f"未知元数据字段: {cond.field}",
+                        code=BizCode.METADATA_FIELD_NOT_FOUND,
+                    )
+
+                is_builtin = field_def.get("is_builtin", False)
+
+                if is_builtin:
+                    filter_expr = self._build_builtin_filter(cond, field_def)
+                else:
+                    strategy = self._strategies[field_def["type"]]
+                    if cond.operator not in ("is_missing", "not_missing") and not strategy.supports(cond.operator):
+                        raise BusinessException(
+                            f"字段 '{cond.field}' (类型 {field_def['type']}) "
+                            f"不支持操作符 '{cond.operator}'",
+                            code=BizCode.METADATA_INVALID_OPERATOR,
+                        )
+                    filter_expr = self._build_custom_filter(cond, field_def, strategy)
+
+                conditions.append(filter_expr)
+
+            if not conditions:
+                continue
+
+            if group.logic == "OR":
+                group_conditions.append(or_(*conditions))
+            else:
+                group_conditions.append(and_(*conditions))
+
+        if group_conditions:
+            stmt = stmt.where(and_(*group_conditions))
+
+        logger.debug(
+            "[MetadataFilterEngine] built statement: %s",
+            str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        )
+        return stmt
+
     def execute(self, *args, **kwargs) -> list[uuid.UUID]:
         """执行过滤，返回符合条件的 document_id 列表"""
         query = self.build_query(*args, **kwargs)
         return [row[0] for row in query.all()]
+
+    async def execute_async(self, *args, **kwargs) -> list[uuid.UUID]:
+        """Async version of execute."""
+        stmt = self.build_statement(*args, **kwargs)
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
 
     def _build_custom_filter(self, cond: FilterCondition, field_def: dict, strategy):
         metadata_id = field_def.get("id")

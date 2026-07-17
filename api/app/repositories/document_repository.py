@@ -1,4 +1,6 @@
 import uuid
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.core.utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from app.models.document_model import Document
@@ -57,6 +59,48 @@ def get_documents_paginated(
         raise
 
 
+async def get_documents_paginated_async(
+        db: AsyncSession,
+        filters: list,
+        page: int,
+        pagesize: int,
+        orderby: str = None,
+        desc: bool = False
+) -> tuple[int, list]:
+    """Async version of get_documents_paginated."""
+    db_logger.debug(
+        f"Query documents in pages (async): page={page}, pagesize={pagesize}, "
+        f"orderby={orderby}, desc={desc}, filters_count={len(filters)}"
+    )
+
+    try:
+        stmt = select(Document)
+        for filter_cond in filters:
+            stmt = stmt.where(filter_cond)
+
+        total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        total = total_result.scalar_one()
+
+        if orderby:
+            order_attr = getattr(Document, orderby, None)
+            if order_attr is not None:
+                stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
+
+        stmt = stmt.offset((page - 1) * pagesize).limit(pagesize)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
+        db_logger.info(
+            f"The document paging query has been successful (async): "
+            f"total={total}, Number of current page={len(items)}"
+        )
+        return total, [document_schema.Document.model_validate(item) for item in items]
+    except Exception as e:
+        db_logger.error(
+            f"Querying document pagination failed (async): page={page}, pagesize={pagesize} - {str(e)}"
+        )
+        raise
+
+
 def create_document(db: Session, document: document_schema.DocumentCreate) -> Document:
     db_logger.debug(f"Create a document record: file_name={document.file_name}")
     
@@ -72,6 +116,23 @@ def create_document(db: Session, document: document_schema.DocumentCreate) -> Do
         raise
 
 
+async def create_document_async(db: AsyncSession, document: document_schema.DocumentCreate) -> Document:
+    """Async version of create_document."""
+    db_logger.debug(f"Create a document record (async): file_name={document.file_name}")
+
+    try:
+        db_document = Document(**document.model_dump())
+        db.add(db_document)
+        await db.commit()
+        await db.refresh(db_document)
+        db_logger.info(f"Document record created successfully (async): {document.file_name} (ID: {db_document.id})")
+        return db_document
+    except Exception as e:
+        db_logger.error(f"Failed to create a document record (async): title={document.file_name} - {str(e)}")
+        await db.rollback()
+        raise
+
+
 def get_document_by_id(db: Session, document_id: uuid.UUID) -> Document | None:
     db_logger.debug(f"Query documents based on ID: document_id={document_id}")
     
@@ -84,6 +145,17 @@ def get_document_by_id(db: Session, document_id: uuid.UUID) -> Document | None:
         return document
     except Exception as e:
         db_logger.error(f"Failed to query the document based on the ID: document_id={document_id} - {str(e)}")
+        raise
+
+
+async def get_document_by_id_async(db: AsyncSession, document_id: uuid.UUID) -> Document | None:
+    """Async version of get_document_by_id."""
+    try:
+        stmt = select(Document).where(Document.id == document_id)
+        result = await db.execute(stmt)
+        return result.scalars().first()
+    except Exception as e:
+        db_logger.error(f"Failed to query document by ID (async): document_id={document_id} - {str(e)}")
         raise
 
 
@@ -132,6 +204,32 @@ def reset_documents_progress_by_kb_id(db: Session, kb_id: uuid.UUID) -> int:
         raise
 
 
+async def reset_documents_progress_by_kb_id_async(db: AsyncSession, kb_id: uuid.UUID) -> int:
+    """Async version of reset_documents_progress_by_kb_id."""
+    db_logger.debug(f"Reset document processing progress by knowledge base (async): kb_id={kb_id}")
+    try:
+        update_data = {
+            Document.chunk_num: 0,
+            Document.progress: 0,
+            Document.progress_msg: _pending_progress_msg(),
+            Document.process_duration: 0,
+            Document.run: 0,
+            Document.updated_at: utcnow_naive(),
+        }
+        result = await db.execute(
+            update(Document)
+            .where(Document.kb_id == kb_id)
+            .values(update_data)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        return result.rowcount or 0
+    except Exception as e:
+        await db.rollback()
+        db_logger.error(f"Failed to reset document progress by KB (async): kb_id={kb_id} - {str(e)}")
+        raise
+
+
 
 def delete_document_by_id(db: Session, document_id: uuid.UUID):
     db_logger.debug(f"Delete document record: document_id={document_id}")
@@ -154,4 +252,23 @@ def delete_document_by_id(db: Session, document_id: uuid.UUID):
     except Exception as e:
         db_logger.error(f"Failed to delete document record: document_id={document_id} - {str(e)}")
         db.rollback()
+        raise
+
+
+async def delete_document_by_id_async(db: AsyncSession, document_id: uuid.UUID):
+    """Async version of delete_document_by_id."""
+    try:
+        document = await get_document_by_id_async(db, document_id)
+        file_name = document.file_name if document else "unknown"
+
+        result = await db.execute(delete(Document).where(Document.id == document_id))
+        await db.commit()
+
+        if result.rowcount and result.rowcount > 0:
+            db_logger.info(f"Document record deleted successfully (async): {file_name} (ID: {document_id})")
+        else:
+            db_logger.warning(f"The document record does not exist, and cannot be deleted (async): document_id={document_id}")
+    except Exception as e:
+        db_logger.error(f"Failed to delete document record (async): document_id={document_id} - {str(e)}")
+        await db.rollback()
         raise

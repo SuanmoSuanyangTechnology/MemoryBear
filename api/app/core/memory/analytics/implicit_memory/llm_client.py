@@ -1,7 +1,7 @@
 """LLM Client Wrapper for Implicit Memory Analysis
 
 This module provides a specialized LLM client wrapper that integrates with the
-MemoryClientFactory to perform implicit memory analysis tasks including preference
+ModelClientMixin to perform implicit memory analysis tasks including preference
 extraction, personality dimension analysis, interest categorization, and habit detection.
 """
 
@@ -15,8 +15,8 @@ from app.core.memory.analytics.implicit_memory.prompts import (
     get_interest_analysis_prompt,
     get_preference_analysis_prompt,
 )
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.llm_tools.llm_client import LLMClientException
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.schemas.implicit_memory_schema import UserMemorySummary
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -64,7 +64,7 @@ class ImplicitMemoryLLMClient:
         """
         self.db = db
         self.default_model_id = default_model_id
-        self._client_factory = MemoryClientFactory(db, tenant_id=tenant_id)
+        self._tenant_id = tenant_id
         
         logger.debug("ImplicitMemoryLLMClient initialized")
 
@@ -75,18 +75,17 @@ class ImplicitMemoryLLMClient:
             model_id: LLM model ID to use, defaults to default_model_id
             
         Returns:
-            LLM client instance
+            RedBearLLM client instance
             
         Raises:
-            ValueError: If no model ID is provided and no default is set
-            LLMClientException: If client creation fails
+            LLMClientException: If no model ID is provided and no default is set
         """
         effective_model_id = model_id or self.default_model_id
         if not effective_model_id:
             raise ValueError("No LLM model ID provided and no default model ID set")
         
         try:
-            client = self._client_factory.get_llm_client(effective_model_id)
+            client = ModelClientMixin.get_llm_client(self.db, effective_model_id, self._tenant_id)
             logger.debug(f"Created LLM client for model: {effective_model_id}")
             return client
         except Exception as e:
@@ -154,10 +153,7 @@ class ImplicitMemoryLLMClient:
             messages = [{"role": "user", "content": prompt}]
             
             # Use structured output for reliable parsing
-            response = await llm_client.response_structured(
-                messages=messages,
-                response_model=PreferenceAnalysisResponse
-            )
+            response = await llm_client.call_structured(messages, PreferenceAnalysisResponse)
             
             result = response.model_dump()
             logger.info(f"Analyzed preferences for user {user_id}: found {len(result.get('preferences', []))} preferences")
@@ -205,10 +201,7 @@ class ImplicitMemoryLLMClient:
             messages = [{"role": "user", "content": prompt}]
             
             # Use structured output for reliable parsing
-            response = await llm_client.response_structured(
-                messages=messages,
-                response_model=DimensionAnalysisResponse
-            )
+            response = await llm_client.call_structured(messages, DimensionAnalysisResponse)
             
             result = response.model_dump()
             dimensions = result.get('dimensions', {})
@@ -257,10 +250,7 @@ class ImplicitMemoryLLMClient:
             messages = [{"role": "user", "content": prompt}]
             
             # Use structured output for reliable parsing
-            response = await llm_client.response_structured(
-                messages=messages,
-                response_model=InterestAnalysisResponse
-            )
+            response = await llm_client.call_structured(messages, InterestAnalysisResponse)
             
             result = response.model_dump()
             interest_dist = result.get('interest_distribution', {})
@@ -309,10 +299,7 @@ class ImplicitMemoryLLMClient:
             messages = [{"role": "user", "content": prompt}]
             
             # Use structured output for reliable parsing
-            response = await llm_client.response_structured(
-                messages=messages,
-                response_model=HabitAnalysisResponse
-            )
+            response = await llm_client.call_structured(messages, HabitAnalysisResponse)
             
             result = response.model_dump()
             logger.info(f"Analyzed habits for user {user_id}: found {len(result.get('habits', []))} habits")

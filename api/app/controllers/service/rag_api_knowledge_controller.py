@@ -1,16 +1,16 @@
 """RAG 服务接口 - 基于 API Key 认证"""
 
-from typing import Optional, Dict
+from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Request, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import knowledge_controller
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_async_db
 from app.models import knowledge_model
 from app.schemas import knowledge_schema
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -38,19 +38,19 @@ def get_parser_types():
 
 
 @router.get("/knowledge_graph_entity_types", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_knowledge_graph_entity_types(
     llm_id: uuid.UUID,
     scenario: str,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     get knowledge graph entity types based on llm_id
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -61,11 +61,11 @@ async def get_knowledge_graph_entity_types(
 
 
 @router.get("/knowledges", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_knowledges(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
     page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
     pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
@@ -82,7 +82,7 @@ async def get_knowledges(
     - Return paging metadata + file list
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -98,11 +98,11 @@ async def get_knowledges(
 
 
 @router.post("/knowledge", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def create_knowledge(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     name: str = Body(..., description="KB name"),
 ):
     """
@@ -111,7 +111,7 @@ async def create_knowledge(
     body = await request.json()
     create_data = knowledge_schema.KnowledgeCreate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -121,18 +121,18 @@ async def create_knowledge(
 
 
 @router.get("/{knowledge_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Retrieve knowledge base information based on knowledge_id
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -142,18 +142,18 @@ async def get_knowledge(
 
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def update_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     name: str = Body(None, description="KB name (optional)"),
 ):
     body = await request.json()
     update_data = knowledge_schema.KnowledgeUpdate(**body)
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -164,18 +164,18 @@ async def update_knowledge(
 
 
 @router.delete("/{knowledge_id}", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def delete_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Soft-delete knowledge base
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -185,18 +185,18 @@ async def delete_knowledge(
 
 
 @router.get("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def get_knowledge_graph(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Retrieve knowledge_graph base information based on knowledge_id
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -206,18 +206,18 @@ async def get_knowledge_graph(
 
 
 @router.delete("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def delete_knowledge_graph(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     delete knowledge graph
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -227,18 +227,18 @@ async def delete_knowledge_graph(
 
 
 @router.post("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def rebuild_knowledge_graph(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     rebuild knowledge graph
     """
     # 0. Obtain the creator of the api key
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -248,18 +248,18 @@ async def rebuild_knowledge_graph(
 
 
 @router.get("/check/yuque/auth", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def check_yuque_auth(
     yuque_user_id: str,
     yuque_token: str,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     check yuque auth info
     """
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -272,19 +272,19 @@ async def check_yuque_auth(
 
 
 @router.get("/check/feishu/auth", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def check_feishu_auth(
     feishu_app_id: str,
     feishu_app_secret: str,
     feishu_folder_token: str,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     check feishu auth info
     """
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
@@ -298,21 +298,20 @@ async def check_feishu_auth(
 
 
 @router.post("/{knowledge_id}/sync", response_model=ApiResponse)
-@require_api_key(scopes=["rag"])
+@require_api_key_self_db(scopes=["rag"])
 async def sync_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     sync knowledge base information based on knowledge_id
     """
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = api_key.creator
     current_user.current_workspace_id = api_key_auth.workspace_id
 
     return await knowledge_controller.sync_knowledge(knowledge_id=knowledge_id,
                                                      db=db,
                                                      current_user=current_user)
-

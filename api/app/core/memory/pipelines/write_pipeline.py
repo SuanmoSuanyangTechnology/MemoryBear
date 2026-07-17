@@ -28,7 +28,6 @@ from pydantic import BaseModel, Field, ConfigDict
 if TYPE_CHECKING:
     from app.core.memory.models.message_models import DialogData
     from app.schemas.memory_config_schema import MemoryConfig
-    from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
 
 from app.core.memory.models.graph_models import (
     ChunkNode,
@@ -41,6 +40,7 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
     StatementNode,
 )
+from app.core.memory.utils.name_similarity_utils import cosine_similarity
 
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
@@ -52,9 +52,9 @@ bear = BearLogger("memory.pipeline")
 
 
 def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: str = "") -> List[dict]:
-    """将 PruningPipeline 收集的剪枝记录转换为 graph_build_step 期望的格式。
+    """将剪枝记录转换为 graph_build_step 期望的格式。
 
-    PruningPipeline.prune() 产生的记录格式（用于快照/日志）：
+    pruning_service.prune_messages() 产生的记录格式（用于快照/日志）：
       {
         "conversation_id": str,
         "message_seq": int,
@@ -86,6 +86,10 @@ def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: s
     result: List[dict] = []
     _now = datetime.now(_tz.utc).isoformat()
     for idx, r in enumerate(raw_records):
+        # 只处理 assistant_pruning 类型的记录，user_pruning 不产生 AssistantOriginal 节点
+        if r.get("type") != "assistant_pruning":
+            continue
+
         conv_id = r.get("conversation_id", "")
         seq = r.get("message_seq", 0)
         # pair_id 基于 conversation_id + message_seq 确定性生成，
@@ -154,6 +158,8 @@ class ExtractionResult(BaseModel):
     assistant_pruned_edges: List[Any] = Field(default_factory=list)
     conversation_nodes: List[Any] = Field(default_factory=list)
     assistant_conversation_edges: List[Any] = Field(default_factory=list)
+    user_source_nodes: List[Any] = Field(default_factory=list)
+    user_source_edges: List[Any] = Field(default_factory=list)
     dialog_data_list: List[Any] = Field(
         default_factory=list,
         description="原始 DialogData 列表，类型为 Any 以避免循环依赖",
@@ -334,61 +340,89 @@ class WritePipeline:
                     },
                 )
 
-                from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
-                pruning_pipeline = PruningPipeline(
-                    memory_config=self.memory_config,
-                    end_user_id=self.end_user_id,
-                    language=self.language,
-                )
+                # Step 1: 剪枝 - 统一剪枝所有消息
+                async with bear.step(1, 6, "剪枝", "统一剪枝") as s:
+                    # 合并所有消息，记录 target 位置
+                    target_idx = len(context_before)
+                    all_messages = context_before + [target_message] + context_after
 
-                # Step 1: 剪枝 - 构建 Pruned_Context
-                async with bear.step(1, 6, "剪枝", "构建 Pruned_Context") as s:
-                    pruning_records: list = []
-                    context_before_pruned = await self._build_pruned_context(
-                        messages=context_before,
+                    # 文件预处理：先对 target 注入 file-summary（剪枝判断依赖此标签）
+                    await self._preprocess_files([all_messages[target_idx]])
+                    await self._preprocess_files(context_before)
+                    await self._preprocess_files(context_after)
+
+                    # 统一剪枝
+                    from app.core.memory.storage_services.extraction_engine.data_preprocessing.pruning_service import prune_messages
+                    all_pruned, pruning_records = await prune_messages(
+                        messages=all_messages,
+                        memory_config=self.memory_config,
+                        end_user_id=self.end_user_id,
                         conversation_id=conversation_id,
-                        pruning_pipeline=pruning_pipeline,
-                        pruning_records=pruning_records,
+                        source=source,
+                        language=self.language,
+                        persist=not is_pilot_run,
                     )
-                    context_after_pruned = await self._build_pruned_context(
-                        messages=context_after,
-                        conversation_id=conversation_id,
-                        pruning_pipeline=pruning_pipeline,
-                        pruning_records=pruning_records,
-                        preceding_user_content=target_message.get("content", ""),
-                    )
+
+                    # 拆回三部分
+                    context_before_pruned = all_pruned[:target_idx]
+                    messages = [all_pruned[target_idx]]
+                    context_after_pruned = all_pruned[target_idx + 1:]
+
                     s.metadata(
                         before_count=len(context_before_pruned),
                         after_count=len(context_after_pruned),
                         pruned_count=len(pruning_records),
                     )
-                    recorder = getattr(self, "_recorder", None)
-                    if recorder is not None:
-                        recorder.record_pruning_results(pruning_records)
 
-                messages = [target_message]
+                # 记录剪枝快照
+                recorder = getattr(self, "_recorder", None)
+                if recorder is not None and self.memory_config.pruning_enabled:
+                    recorder.record_pruning_results(pruning_records)
 
-                # MCP 路径：追加空 assistant 占位消息，使 get_chunked_dialogs 内的
-                # prune_dataset 能配对出 (user, assistant) 并对 user 执行规整
-                if target_message.get("_mcp_pair_assistant"):
-                    messages.append({
-                        "role": "assistant",
-                        "content": "",
-                        "dialog_at": target_message.get("dialog_at", ""),
-                    })
-
-                # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
-                await self._preprocess_files(messages)
-                await self._preprocess_files(context_before_pruned)
-                await self._preprocess_files(context_after_pruned)
-
-                # target_message User 侧 pruning
-                await self._prune_target_message_user_side(
-                    messages=messages,
-                    context_after_original=context_after,
-                    conversation_id=conversation_id,
-                    pruning_pipeline=pruning_pipeline,
-                )
+                # 从 pruning_records 提取 target user 规整信息（用于后续构建 UserSource 节点）
+                # 如果 user 内容有被剪枝，保存原文作为 UserSource 节点（类似 dialog 节点），
+                # 可以直接取 dialog 节点的内容作为 UserSource 节点的内容
+                self._user_pruning_info = None
+                if pruning_records:
+                    # 优先匹配 LLM 剪枝路径（source=llm, should_process_user_msg=True）
+                    target_pruning = next(
+                        (r for r in pruning_records
+                         if r.get("message_seq") == message_seq
+                         and r.get("type") == "user_pruning"
+                         and r.get("source") == "llm"
+                         and (r.get("output") or {}).get("should_process_user_msg")),
+                        None,
+                    )
+                    if target_pruning:
+                        _orig_text = target_pruning["input"]["msgs"][0]["msg"]
+                        _output = target_pruning["output"]
+                        self._user_pruning_info = {
+                            "original_text": _orig_text,
+                            "pruned_text": _output.get("processed_user_msg", ""),
+                            "message_seq": message_seq,
+                            "conversation_id": conversation_id or f"{self.end_user_id}_{source}",
+                            "topic_entity_hint": _output.get("processed_user_topic_entity_hint", ""),
+                        }
+                    else:
+                        # 回退：DB 缓存路径（source=db）— 前一次任务已完成 LLM 剪枝并回写 PG
+                        target_pruning_db = next(
+                            (r for r in pruning_records
+                             if r.get("message_seq") == message_seq
+                             and r.get("type") == "user_pruning"
+                             and r.get("source") == "db"
+                             and (r.get("output") or {}).get("topic_entity_hint")),
+                            None,
+                        )
+                        if target_pruning_db:
+                            _orig_text = target_pruning_db["input"]["msgs"][0]["msg"]
+                            _output = target_pruning_db["output"]
+                            self._user_pruning_info = {
+                                "original_text": _orig_text,
+                                "pruned_text": _output.get("pruned_content", ""),
+                                "message_seq": message_seq,
+                                "conversation_id": conversation_id or f"{self.end_user_id}_{source}",
+                                "topic_entity_hint": _output.get("topic_entity_hint", ""),
+                            }
 
                 # Step 2: 预处理 - 消息分块
                 async with bear.step(2, 6, "预处理", "消息分块") as s:
@@ -449,6 +483,10 @@ class WritePipeline:
                         elapsed_seconds=0.0,
                     )
 
+                # Step 3.5: 构建 UserSource 子图（剪枝原文 → 实体连边）
+                if self._user_pruning_info:
+                    await self._build_user_source_subgraph(extraction_result)
+
                 async with bear.step(4, 6, "存储", "写入 Neo4j"):
                     await self._store(extraction_result)
 
@@ -482,12 +520,11 @@ class WritePipeline:
 
     async def _preprocess(self, messages: List[dict], ref_id: str) -> List[DialogData]:
         """
-        预处理：消息校验 → AI消息语义剪枝 → 对话分块。
+        预处理：消息校验 → 对话分块。
 
         委托给 get_chunked_dialogs()，保持现有预处理逻辑不变。
         get_dialogs.py 内部已包含：
           - 消息格式校验（role/content 必填）
-          - AI消息语义剪枝（根据 config 中 pruning_enabled 决定）
           - DialogueChunker 分块
         """
         from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -652,6 +689,8 @@ class WritePipeline:
                     assistant_pruned_edges=result.assistant_pruned_edges,
                     conversation_nodes=result.conversation_nodes,
                     assistant_conversation_edges=result.assistant_conversation_edges,
+                    user_source_nodes=result.user_source_nodes,
+                    user_source_edges=result.user_source_edges,
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
@@ -670,6 +709,145 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     raise
+
+    # ──────────────────────────────────────────────
+    # Step 3.5: 构建 UserSource 子图
+    # ──────────────────────────────────────────────
+
+    # 通用角色实体排除列表，这些实体不应与 UserSource 建边
+    _USER_SOURCE_EXCLUDED_ENTITY_NAMES = frozenset({
+        "用户", "我", "user", "i", "ai助手", "助手", "助理", "ai", "assistant", "ai回复", "ai assistant",
+    })
+
+    # UserSource → Entity 建边的余弦相似度阈值
+    _USER_SOURCE_SIMILARITY_THRESHOLD = 0.5
+
+    async def _build_user_source_subgraph(self, result: ExtractionResult) -> None:
+        """构建 UserSource 节点和 HAS_ORIGINAL_CONTENT 边。
+
+        当 user 消息被剪枝/规整后，创建 UserSource 节点保存原文（类似 dialog 节点），
+        并通过 HAS_ORIGINAL_CONTENT 边连接到**语义相关的** Entity 节点，
+        为检索侧提供 "Entity → 原文" 的回溯路径。
+
+        连边逻辑：
+        1. 预先排除通用角色实体（"用户""AI助手"等）
+        2. 用 UserSourceNode.name（= processed_user_topic_entity_hint）的 embedding
+           与每个 ExtractedEntity.name_embedding 做余弦相似度匹配
+        3. 只对超过阈值的 entity 建 HAS_ORIGINAL_CONTENT 边
+
+        节点 name 属性使用 LLM 产出的 processed_user_topic_entity_hint（实体锚点）。
+        原文来源：直接取 dialog 节点的内容（memory_messages.content）。
+
+        前置条件：self._user_pruning_info 已在 Step 1 后设置。
+        """
+        from app.core.memory.models.graph_models import (
+            UserSourceNode,
+            UserSourceEntityEdge,
+        )
+
+        info = self._user_pruning_info
+        if not info:
+            return
+
+        # 生成 original_text 的 embedding（存入节点，供向量检索回溯）
+        text_embedding = None
+        if self._embedder_client and info["original_text"]:
+            try:
+                text_embedding = await self._embedder_client.aembed_query(info["original_text"])
+            except Exception as e:
+                logger.warning(f"[UserSource] 生成 text_embedding 失败（不影响写入）: {e}")
+
+        # 构建节点
+        node_id = uuid.uuid4().hex
+        from app.core.utils.datetime_utils import to_iso_z, utcnow
+        now_iso = to_iso_z(utcnow())
+        run_id = result.dialogue_nodes[0].run_id if result.dialogue_nodes else uuid.uuid4().hex
+
+        # name 使用 LLM 产出的实体锚点（processed_user_topic_entity_hint）
+        node_name = info.get("topic_entity_hint") or f"UserSource_{node_id[:8]}"
+
+        us_node = UserSourceNode(
+            id=node_id,
+            name=node_name,
+            end_user_id=self.end_user_id,
+            run_id=run_id,
+            created_at=now_iso,
+            message_seq=info["message_seq"],
+            original_text=info["original_text"],
+            pruned_text=info["pruned_text"],
+            text_embedding=text_embedding,
+        )
+
+        # 选择性建边：排除角色实体 + embedding 相似度匹配
+        matched = await self._select_entities_for_user_source(node_name, result.entity_nodes)
+
+        # 为匹配的 entity 创建 HAS_ORIGINAL_CONTENT 边
+        edges = [
+            UserSourceEntityEdge(
+                id=uuid.uuid4().hex,
+                source=node_id,
+                target=entity.id,
+                end_user_id=self.end_user_id,
+                run_id=run_id,
+                created_at=now_iso,
+            )
+            for entity in matched
+        ]
+
+        result.user_source_nodes = [us_node]
+        result.user_source_edges = edges
+
+        logger.info(
+            f"[UserSource] 构建完成 - node_id={node_id[:8]}, name={node_name}, "
+            f"total_entities={len(result.entity_nodes)}, matched={len(matched)}, "
+            f"original_len={len(info['original_text'])}"
+        )
+
+    async def _select_entities_for_user_source(
+        self, hint_name: str, entities: list
+    ) -> list:
+        """筛选与 UserSource 语义相关的 entity（排除角色实体 + embedding 匹配）。
+
+        Args:
+            hint_name: UserSourceNode.name（= processed_user_topic_entity_hint）
+            entities: 本次萃取出的 ExtractedEntityNode 列表
+
+        Returns:
+            通过过滤和相似度匹配的 entity 子集
+        """
+        # 生成 hint_name 的 embedding
+        hint_emb = None
+        if self._embedder_client and hint_name:
+            try:
+                hint_emb = await self._embedder_client.aembed_query(hint_name)
+            except Exception as e:
+                logger.warning(f"[UserSource] hint embedding 失败，降级全连: {e}")
+
+        excluded = self._USER_SOURCE_EXCLUDED_ENTITY_NAMES
+        threshold = self._USER_SOURCE_SIMILARITY_THRESHOLD
+
+        matched = []
+        skipped_role = 0
+        skipped_sim = 0
+
+        for entity in entities:
+            # 排除通用角色实体
+            if entity.name and entity.name.lower().strip() in excluded:
+                skipped_role += 1
+                continue
+            # embedding 相似度匹配
+            if hint_emb:
+                emb = entity.name_embedding
+                if emb and cosine_similarity(hint_emb, emb) < threshold:
+                    skipped_sim += 1
+                    continue
+            matched.append(entity)
+
+        logger.debug(
+            f"[UserSource] entity 匹配 - hint={hint_name}, "
+            f"skipped_role={skipped_role}, skipped_sim={skipped_sim}, matched={len(matched)}"
+        )
+        return matched
 
     # ──────────────────────────────────────────────
     # Step 4: 聚类
@@ -754,7 +932,6 @@ class WritePipeline:
     # ──────────────────────────────────────────────
     # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
     # ──────────────────────────────────────────────
-
     async def _preprocess_files(self, messages: List[dict]) -> None:
         """处理消息中附带的文件，生成 Perceptual 记录并注入 summary 到 content。
 
@@ -850,97 +1027,6 @@ class WritePipeline:
                         exc_info=True,
                     )
 
-    async def _prune_target_message_user_side(
-        self,
-        messages: List[dict],
-        context_after_original: List[dict],
-        conversation_id: str,
-        pruning_pipeline: "PruningPipeline",
-    ) -> None:
-        """对 target_message 执行 User 侧 pruning（规整）。
-
-        当 target_message 的 content 包含 <input-file-summary> 标签或长文复制内容时，
-        pruning LLM 会判断 should_process_user_msg=true 并返回 processed_user_msg。
-        此时用 processed_user_msg 替换 target_message 的 content 进入后续流程。
-
-        配对逻辑：使用 context_after 中第一条原始 assistant 消息作为配对。
-        若 context_after 中没有 assistant 消息，则跳过 pruning。
-
-        Args:
-            messages: [target_message] 列表（原地修改）
-            context_after_original: 原始（未剪枝）的下文消息列表
-            conversation_id: 对话 ID
-            pruning_pipeline: 已初始化的 PruningPipeline 实例
-        """
-        if not messages:
-            return
-
-        # 剪枝开关关闭时跳过 User 侧规整
-        if not self.memory_config.pruning_enabled:
-            logger.debug(
-                "[WritePipeline] target_message User 侧 pruning 跳过: 剪枝开关已关闭"
-            )
-            return
-
-        target_msg = messages[0]
-        target_content = target_msg.get("content", "")
-
-        # 只有 content 中包含 <input-file-summary> 或内容较长时才需要 User 侧规整
-        if "<input-file-summary>" not in target_content and len(target_content) < 500:
-            logger.debug(
-                f"[WritePipeline] target_message User 侧 pruning 跳过: "
-                f"无 <input-file-summary> 且长度 {len(target_content)} < 500"
-            )
-            return
-
-        # 从原始 context_after 中找第一条 assistant 消息作为配对
-        assistant_content = ""
-        assistant_seq = 0
-        for msg in (context_after_original or []):
-            if msg.get("role") == "assistant":
-                assistant_content = msg.get("content", "")
-                assistant_seq = msg.get("message_seq", 0)
-                break
-
-        if not assistant_content:
-            # 没有配对的 assistant 消息，跳过 User 侧 pruning
-            logger.debug(
-                "[WritePipeline] target_message User 侧 pruning 跳过: "
-                "context_after 中无 assistant 消息"
-            )
-            return
-
-        logger.info(
-            f"[WritePipeline] target_message User 侧 pruning 开始: "
-            f"content_len={len(target_content)}, assistant_seq={assistant_seq}"
-        )
-
-        try:
-            # 直接调用 LLM 剪枝，不走缓存（避免与 _build_pruned_context 的缓存冲突）
-            _, _, should_process, processed_msg = await pruning_pipeline._call_llm_prune(
-                content=assistant_content,
-                user_content=target_content,
-            )
-
-            if should_process and processed_msg and processed_msg.strip():
-                logger.info(
-                    f"[WritePipeline] target_message User 侧规整完成: "
-                    f"原文长度={len(target_content)}, 规整后长度={len(processed_msg)}, "
-                    f"规整结果='{processed_msg[:80]}'"
-                )
-                messages[0]["content"] = processed_msg
-            else:
-                logger.info(
-                    f"[WritePipeline] target_message User 侧 pruning: LLM 判断无需规整 "
-                    f"(should_process={should_process})"
-                )
-        except Exception as e:
-            logger.warning(
-                f"[WritePipeline] target_message User 侧 pruning 失败（不影响主流程）: "
-                f"conv={conversation_id}, err={e}",
-                exc_info=True,
-            )
-
     # ──────────────────────────────────────────────
     # 辅助方法
     # ──────────────────────────────────────────────
@@ -949,22 +1035,20 @@ class WritePipeline:
         """
         从 MemoryConfig 构建 LLM 和 Embedding 客户端。
 
-        使用 MemoryClientFactory 工厂模式，需要短暂的 DB session 来
+        使用 ModelClientMixin 静态方法，需要短暂的 DB session 来
         查询模型配置（API key、base_url 等），查询完毕立即释放。
 
         幂等：若已初始化则跳过，避免重复 DB 查询。
         """
-        if self._llm_client is not None and self._embedder_client is not None:
-            return
-
-        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
         from app.db import get_db_context
 
-        with get_db_context() as db:
-            factory = MemoryClientFactory(db)
-            self._llm_client = factory.get_llm_client_from_config(self.memory_config)
-            self._embedder_client = factory.get_embedder_client_from_config(
-                self.memory_config
+        with get_db_context() as db: # 考虑写入是否需要增加异步方法，get_async_db_context
+            self._llm_client = ModelClientMixin.get_llm_client(
+                db, self.memory_config.llm_model_id, self.memory_config.tenant_id
+            )
+            self._embedder_client = ModelClientMixin.get_embedding_client(
+                db, self.memory_config.embedding_model_id, self.memory_config.tenant_id
             )
         logger.info("LLM and embedding clients constructed")
 
@@ -1077,91 +1161,6 @@ class WritePipeline:
             )
         except Exception as e:
             logger.warning(f"写入活动统计缓存失败（不影响主流程）: {e}")
-
-    # ──────────────────────────────────────────────
-    # 滑动窗口写入：辅助方法
-    # ──────────────────────────────────────────────
-
-    async def _build_pruned_context(
-        self,
-        messages: List[dict],
-        conversation_id: str,
-        pruning_pipeline: "PruningPipeline",
-        pruning_records: Optional[list] = None,
-        preceding_user_content: str = "",
-    ) -> List[dict]:
-        """将消息列表中的 assistant 消息替换为剪枝后版本（A'），同时处理 user 消息规整。
-
-        assistant 消息剪枝并发执行（asyncio.gather），窗口上下文中多条
-        assistant 消息之间无依赖关系。单条失败时回退到原文，不阻塞其他剪枝任务。
-
-        当 LLM 判断 user 消息需要规整（should_process_user_msg=true）时，
-        用 processed_user_msg 替换原始 user 消息内容进入下一阶段。
-
-        Args:
-            messages: 消息列表，每条消息包含 role、content、message_seq 等字段
-            conversation_id: 对话 ID
-            pruning_pipeline: 已初始化的 PruningPipeline 实例
-            pruning_records: 可选的列表，若传入则将剪枝记录追加到其中
-            preceding_user_content: 列表之前紧邻的 user 消息内容（用于 context_after
-                场景，将 target_message 的 content 传入，使列表首条 assistant 能配对）
-
-        Returns:
-            替换后的消息列表（Pruned_Context）
-
-        Requirements: 2.1, 2.3
-        """
-        # 预计算每条 assistant 消息紧邻的 user 消息内容
-        last_user_content = preceding_user_content
-        last_user_idx = -1
-        prune_tasks: list = []  # (index, user_idx, coroutine)
-        result: List[Optional[dict]] = [None] * len(messages)
-        for i, msg in enumerate(messages):
-            if msg.get("role") == "user":
-                last_user_content = msg.get("content", "")
-                last_user_idx = i
-                result[i] = msg
-            elif msg.get("role") == "assistant":
-                user_ctx = last_user_content
-                user_idx = last_user_idx
-                prune_tasks.append((i, user_idx, pruning_pipeline.prune(
-                    conversation_id=conversation_id,
-                    message_seq=msg.get("message_seq", 0),
-                    content=msg.get("content", ""),
-                    user_content=user_ctx,
-                    _pruning_records=pruning_records,
-                )))
-                last_user_content = ""
-                last_user_idx = -1
-            else:
-                result[i] = msg
-
-        # 并发执行所有剪枝任务
-        if prune_tasks:
-            coros = [coro for _, _, coro in prune_tasks]
-            pruned_results = await asyncio.gather(*coros, return_exceptions=True)
-            for (idx, user_idx, _), prune_result in zip(prune_tasks, pruned_results):
-                if isinstance(prune_result, BaseException):
-                    logger.warning(
-                        f"[WritePipeline] 剪枝失败，回退原文: "
-                        f"conv={conversation_id}, seq={messages[idx].get('message_seq')}, err={prune_result}"
-                    )
-                    result[idx] = messages[idx]
-                else:
-                    pruned_content, should_process_user_msg, processed_user_msg = prune_result
-                    # 替换 assistant 消息为剪枝后内容
-                    result[idx] = {**messages[idx], "content": pruned_content}
-                    # 如果 user 消息需要规整，用 processed_user_msg 替换
-                    if (
-                        should_process_user_msg
-                        and processed_user_msg is not None
-                        and processed_user_msg.strip() != ""
-                        and user_idx >= 0
-                        and result[user_idx] is not None
-                    ):
-                        result[user_idx] = {**result[user_idx], "content": processed_user_msg}
-
-        return [m for m in result if m is not None]
 
     async def _cleanup(self) -> None:
         """

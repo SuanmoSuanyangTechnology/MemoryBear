@@ -8,10 +8,11 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 import asyncio
 import time
 import uuid
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
@@ -19,13 +20,16 @@ from app.core.logging_config import get_config_logger, get_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
+    validate_and_resolve_model_id_async,
 )
 from app.i18n.service import t
 from app.models import Workspace
 from app.models.app_model import AppType
-from app.repositories.end_user_repository import get_end_user_by_id
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from app.repositories.end_user_repository import get_end_user_by_id, get_end_user_by_id_async
 from app.repositories.memory_config_repository import MemoryConfigRepository
-from app.repositories.workspace_repository import get_workspace_memory_config_id
+from app.repositories.ontology_class_repository import OntologyClassRepository
+from app.repositories.workspace_repository import get_workspace_memory_config_id, get_workspace_memory_config_id_async
 from app.schemas.memory_config_schema import (
     ConfigurationError,
     InvalidConfigError,
@@ -34,14 +38,11 @@ from app.schemas.memory_config_schema import (
     ModelNotFoundError,
 )
 
-if TYPE_CHECKING:
-    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-
 logger = get_logger(__name__)
 config_logger = get_config_logger()
 
 
-def _validate_config_id(config_id, db: Session = None):
+def _validate_config_id(config_id, db: Session):
     """Validate configuration ID format (supports both UUID and integer)."""
     if isinstance(config_id, uuid.UUID):
         return config_id
@@ -136,7 +137,6 @@ def _load_ontology_class_infos(db: Session, scene_id) -> list:
     if not scene_id:
         return []
     try:
-        from app.repositories.ontology_class_repository import OntologyClassRepository
         repo = OntologyClassRepository(db)
         classes = repo.get_classes_by_scene(scene_id)
         return [
@@ -146,6 +146,100 @@ def _load_ontology_class_infos(db: Session, scene_id) -> list:
     except Exception as e:
         logger.warning(f"Failed to load ontology class infos for scene_id={scene_id}: {e}")
         return []
+
+
+async def _load_ontology_class_infos_async(db: AsyncSession, scene_id) -> list:
+    """Async version of _load_ontology_class_infos — delegates to OntologyClassRepository."""
+    if not scene_id:
+        return []
+    try:
+        repo = OntologyClassRepository(db)
+        classes = await repo.get_classes_by_scene_async(scene_id)
+        return [
+            {"class_name": c.class_name, "class_description": c.class_description or ""}
+            for c in classes if c.class_name
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to load ontology class infos for scene_id={scene_id}: {e}")
+        return []
+
+
+def _build_memory_config(
+    memory_config_row,
+    workspace,
+    llm_uuid, llm_name,
+    embedding_uuid, embedding_name,
+    rerank_uuid, rerank_name,
+    vision_uuid, vision_name,
+    audio_uuid, audio_name,
+    video_uuid, video_name,
+    ontology_class_infos,
+) -> MemoryConfig:
+    """Construct a MemoryConfig from validated models — shared by sync and async paths."""
+    return MemoryConfig(
+        config_id=memory_config_row.config_id,
+        config_name=memory_config_row.config_name,
+        workspace_id=workspace.id,
+        workspace_name=workspace.name,
+        tenant_id=workspace.tenant_id,
+        llm_model_id=llm_uuid,
+        llm_model_name=llm_name,
+        embedding_model_id=embedding_uuid,
+        embedding_model_name=embedding_name,
+        rerank_model_id=rerank_uuid,
+        rerank_model_name=rerank_name,
+        video_model_id=video_uuid,
+        video_model_name=video_name,
+        vision_model_id=vision_uuid,
+        vision_model_name=vision_name,
+        audio_model_id=audio_uuid,
+        audio_model_name=audio_name,
+        storage_type=workspace.storage_type or "neo4j",
+        chunker_strategy=memory_config_row.chunker_strategy or "RecursiveChunker",
+        reflexion_enabled=memory_config_row.enable_self_reflexion or False,
+        reflexion_iteration_period=int(memory_config_row.iteration_period or "3"),
+        reflexion_range=memory_config_row.reflexion_range or "partial",
+        reflexion_baseline=memory_config_row.baseline or "Time",
+        loaded_at=utcnow_naive(),
+        # Pipeline config: Deduplication
+        enable_llm_dedup_blockwise=bool(
+            memory_config_row.enable_llm_dedup_blockwise) if memory_config_row.enable_llm_dedup_blockwise is not None else False,
+        enable_llm_disambiguation=bool(
+            memory_config_row.enable_llm_disambiguation) if memory_config_row.enable_llm_disambiguation is not None else False,
+        deep_retrieval=bool(
+            memory_config_row.deep_retrieval) if memory_config_row.deep_retrieval is not None else True,
+        t_type_strict=float(
+            memory_config_row.t_type_strict) if memory_config_row.t_type_strict is not None else 0.8,
+        t_name_strict=float(
+            memory_config_row.t_name_strict) if memory_config_row.t_name_strict is not None else 0.8,
+        t_overall=float(
+            memory_config_row.t_overall) if memory_config_row.t_overall is not None else 0.8,
+        # Pipeline config: Statement extraction
+        statement_granularity=int(
+            memory_config_row.statement_granularity) if memory_config_row.statement_granularity is not None else 2,
+        include_dialogue_context=bool(
+            memory_config_row.include_dialogue_context) if memory_config_row.include_dialogue_context is not None else False,
+        max_dialogue_context_chars=int(
+            memory_config_row.max_context) if memory_config_row.max_context is not None else 1000,
+        # Pipeline config: Forgetting engine
+        lambda_time=float(
+            memory_config_row.lambda_time) if memory_config_row.lambda_time is not None else 0.5,
+        lambda_mem=float(
+            memory_config_row.lambda_mem) if memory_config_row.lambda_mem is not None else 0.5,
+        offset=float(memory_config_row.offset) if memory_config_row.offset is not None else 0.0,
+        # Pipeline config: Pruning
+        pruning_enabled=bool(
+            memory_config_row.pruning_enabled) if memory_config_row.pruning_enabled is not None else False,
+        pruning_scene=memory_config_row.pruning_scene or "education",
+        pruning_threshold=float(
+            memory_config_row.pruning_threshold) if memory_config_row.pruning_threshold is not None else 0.5,
+        # Pipeline config: Emotion extraction
+        emotion_enabled=bool(
+            memory_config_row.emotion_enabled) if memory_config_row.emotion_enabled is not None else False,
+        # Ontology scene association
+        scene_id=memory_config_row.scene_id,
+        ontology_class_infos=ontology_class_infos,
+    )
 
 
 class MemoryConfigService:
@@ -161,13 +255,107 @@ class MemoryConfigService:
         model_config = config_service.get_model_config(model_id)
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         """Initialize the service with a database session.
 
         Args:
             db: SQLAlchemy database session
         """
         self.db = db
+
+    def _validate_model_with_fallback(
+        self,
+        model_id: str,
+        model_type: str,
+        workspace_default: str,
+        workspace_tenant_id,
+        config_id,
+        workspace_id,
+        required: bool = False,
+    ) -> tuple:
+        """Validate a model with workspace default fallback — sync variant."""
+        if model_id:
+            try:
+                return validate_and_resolve_model_id(
+                    model_id, model_type, self.db, workspace_tenant_id,
+                    required=False, config_id=config_id, workspace_id=workspace_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"{model_type} model validation failed, trying workspace default: {e}"
+                )
+
+        if workspace_default:
+            try:
+                result = validate_and_resolve_model_id(
+                    workspace_default, model_type, self.db, workspace_tenant_id,
+                    required=required, config_id=config_id, workspace_id=workspace_id,
+                )
+                if result[0]:
+                    logger.info(f"Using workspace default {model_type} model: {workspace_default}")
+                return result
+            except Exception as e:
+                logger.error(f"Workspace default {model_type} model also invalid: {e}")
+                if required:
+                    raise
+
+        if required:
+            raise InvalidConfigError(
+                f"{model_type.title()} model is required but not configured",
+                field_name=f"{model_type}_model_id",
+                invalid_value=model_id,
+                config_id=config_id,
+                workspace_id=workspace_id,
+            )
+
+        return None, None
+
+    async def _validate_model_with_fallback_async(
+        self,
+        model_id: str,
+        model_type: str,
+        workspace_default: str,
+        workspace_tenant_id,
+        config_id,
+        workspace_id,
+        required: bool = False,
+    ) -> tuple:
+        """Validate a model with workspace default fallback — async variant."""
+        if model_id:
+            try:
+                return await validate_and_resolve_model_id_async(
+                    model_id, model_type, self.db, workspace_tenant_id,
+                    required=False, config_id=config_id, workspace_id=workspace_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"{model_type} model validation failed, trying workspace default: {e}"
+                )
+
+        if workspace_default:
+            try:
+                result = await validate_and_resolve_model_id_async(
+                    workspace_default, model_type, self.db, workspace_tenant_id,
+                    required=required, config_id=config_id, workspace_id=workspace_id,
+                )
+                if result[0]:
+                    logger.info(f"Using workspace default {model_type} model: {workspace_default}")
+                return result
+            except Exception as e:
+                logger.error(f"Workspace default {model_type} model also invalid: {e}")
+                if required:
+                    raise
+
+        if required:
+            raise InvalidConfigError(
+                f"{model_type.title()} model is required but not configured",
+                field_name=f"{model_type}_model_id",
+                invalid_value=model_id,
+                config_id=config_id,
+                workspace_id=workspace_id,
+            )
+
+        return None, None
 
     async def _validate_model_connectivity(
             self,
@@ -345,7 +533,7 @@ class MemoryConfigService:
 
     def load_memory_config(
             self,
-            config_id: UUID | None = None
+            config_id: UUID
     ) -> MemoryConfig:
         """
         Load memory configuration from database with optional fallback.
@@ -370,7 +558,7 @@ class MemoryConfigService:
         try:
             # Use get_config_with_fallback if workspace_id is provided
             validated_config_id = _validate_config_id(config_id, self.db)
-            from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
             memory_config = self.db.get(MemoryConfigModel, validated_config_id)
 
             if not memory_config:
@@ -397,103 +585,32 @@ class MemoryConfigService:
 
             memory_config, workspace = result
 
-            # Helper function to validate model with workspace fallback
-            def _validate_model_with_fallback(
-                    model_id: str,
-                    model_type: str,
-                    workspace_default: str,
-                    required: bool = False
-            ) -> tuple:
-                """Validate model ID, falling back to workspace default if invalid.
-                
-                Args:
-                    model_id: The model ID to validate
-                    model_type: Type of model (llm, embedding, rerank)
-                    workspace_default: Workspace default model ID to use as fallback
-                    required: Whether the model is required
-                    
-                Returns:
-                    Tuple of (model_uuid, model_name) or (None, None)
-                """
-                # Try the configured model first
-                if model_id:
-                    try:
-                        return validate_and_resolve_model_id(
-                            model_id,
-                            model_type,
-                            self.db,
-                            workspace.tenant_id,
-                            required=False,
-                            config_id=validated_config_id,
-                            workspace_id=workspace.id,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"{model_type} model validation failed, trying workspace default: {e}"
-                        )
-
-                # Fallback to workspace default
-                if workspace_default:
-                    try:
-                        result = validate_and_resolve_model_id(
-                            workspace_default,
-                            model_type,
-                            self.db,
-                            workspace.tenant_id,
-                            required=required,
-                            config_id=validated_config_id,
-                            workspace_id=workspace.id,
-                        )
-                        if result[0]:
-                            logger.info(
-                                f"Using workspace default {model_type} model: {workspace_default}"
-                            )
-                        return result
-                    except Exception as e:
-                        logger.error(f"Workspace default {model_type} model also invalid: {e}")
-                        if required:
-                            raise
-
-                if required:
-                    raise InvalidConfigError(
-                        f"{model_type.title()} model is required but not configured",
-                        field_name=f"{model_type}_model_id",
-                        invalid_value=model_id,
-                        config_id=validated_config_id,
-                        workspace_id=workspace.id
-                    )
-
-                return None, None
-
             # Step 2: Validate embedding model with workspace fallback
             embed_start = time.time()
-            embedding_uuid, embedding_name = _validate_model_with_fallback(
-                memory_config.embedding_id,
-                "embedding",
-                workspace.embedding,
-                required=True
+            embedding_uuid, embedding_name = self._validate_model_with_fallback(
+                memory_config.embedding_id, "embedding", workspace.embedding,
+                workspace.tenant_id, validated_config_id, workspace.id,
+                required=True,
             )
             embed_time = time.time() - embed_start
             logger.info(f"[PERF] Embedding validation: {embed_time:.4f}s")
 
             # Step 3: Resolve LLM model with workspace fallback
             llm_start = time.time()
-            llm_uuid, llm_name = _validate_model_with_fallback(
-                memory_config.llm_id,
-                "llm",
-                workspace.llm,
-                required=True
+            llm_uuid, llm_name = self._validate_model_with_fallback(
+                memory_config.llm_id, "llm", workspace.llm,
+                workspace.tenant_id, validated_config_id, workspace.id,
+                required=True,
             )
             llm_time = time.time() - llm_start
             logger.info(f"[PERF] LLM validation: {llm_time:.4f}s")
 
             # Step 4: Resolve optional rerank model with workspace fallback
             rerank_start = time.time()
-            rerank_uuid, rerank_name = _validate_model_with_fallback(
-                memory_config.rerank_id,
-                "rerank",
-                workspace.rerank,
-                required=False
+            rerank_uuid, rerank_name = self._validate_model_with_fallback(
+                memory_config.rerank_id, "rerank", workspace.rerank,
+                workspace.tenant_id, validated_config_id, workspace.id,
+                required=False,
             )
             rerank_time = time.time() - rerank_start
             if memory_config.rerank_id or workspace.rerank:
@@ -529,62 +646,15 @@ class MemoryConfigService:
                 workspace_id=workspace.id,
             )
             # Create immutable MemoryConfig object
-            config = MemoryConfig(
-                config_id=memory_config.config_id,
-                config_name=memory_config.config_name,
-                workspace_id=workspace.id,
-                workspace_name=workspace.name,
-                tenant_id=workspace.tenant_id,
-                llm_model_id=llm_uuid,
-                llm_model_name=llm_name,
-                embedding_model_id=embedding_uuid,
-                embedding_model_name=embedding_name,
-                rerank_model_id=rerank_uuid,
-                rerank_model_name=rerank_name,
-                video_model_id=video_uuid,
-                video_model_name=video_name,
-                vision_model_id=vision_uuid,
-                vision_model_name=vision_name,
-                audio_model_id=audio_uuid,
-                audio_model_name=audio_name,
-                storage_type=workspace.storage_type or "neo4j",
-                chunker_strategy=memory_config.chunker_strategy or "RecursiveChunker",
-                reflexion_enabled=memory_config.enable_self_reflexion or False,
-                reflexion_iteration_period=int(memory_config.iteration_period or "3"),
-                reflexion_range=memory_config.reflexion_range or "partial",
-                reflexion_baseline=memory_config.baseline or "Time",
-                loaded_at=utcnow_naive(),
-                # Pipeline config: Deduplication
-                enable_llm_dedup_blockwise=bool(
-                    memory_config.enable_llm_dedup_blockwise) if memory_config.enable_llm_dedup_blockwise is not None else False,
-                enable_llm_disambiguation=bool(
-                    memory_config.enable_llm_disambiguation) if memory_config.enable_llm_disambiguation is not None else False,
-                deep_retrieval=bool(memory_config.deep_retrieval) if memory_config.deep_retrieval is not None else True,
-                t_type_strict=float(memory_config.t_type_strict) if memory_config.t_type_strict is not None else 0.8,
-                t_name_strict=float(memory_config.t_name_strict) if memory_config.t_name_strict is not None else 0.8,
-                t_overall=float(memory_config.t_overall) if memory_config.t_overall is not None else 0.8,
-                # Pipeline config: Statement extraction
-                statement_granularity=int(
-                    memory_config.statement_granularity) if memory_config.statement_granularity is not None else 2,
-                include_dialogue_context=bool(
-                    memory_config.include_dialogue_context) if memory_config.include_dialogue_context is not None else False,
-                max_dialogue_context_chars=int(
-                    memory_config.max_context) if memory_config.max_context is not None else 1000,
-                # Pipeline config: Forgetting engine
-                lambda_time=float(memory_config.lambda_time) if memory_config.lambda_time is not None else 0.5,
-                lambda_mem=float(memory_config.lambda_mem) if memory_config.lambda_mem is not None else 0.5,
-                offset=float(memory_config.offset) if memory_config.offset is not None else 0.0,
-                # Pipeline config: Pruning
-                pruning_enabled=bool(
-                    memory_config.pruning_enabled) if memory_config.pruning_enabled is not None else False,
-                pruning_scene=memory_config.pruning_scene or "education",
-                pruning_threshold=float(
-                    memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
-                # Pipeline config: Emotion extraction
-                emotion_enabled=bool(
-                    memory_config.emotion_enabled) if memory_config.emotion_enabled is not None else False,
-                # Ontology scene association
-                scene_id=memory_config.scene_id,
+            config = _build_memory_config(
+                memory_config_row=memory_config,
+                workspace=workspace,
+                llm_uuid=llm_uuid, llm_name=llm_name,
+                embedding_uuid=embedding_uuid, embedding_name=embedding_name,
+                rerank_uuid=rerank_uuid, rerank_name=rerank_name,
+                vision_uuid=vision_uuid, vision_name=vision_name,
+                audio_uuid=audio_uuid, audio_name=audio_name,
+                video_uuid=video_uuid, video_name=video_name,
                 ontology_class_infos=_load_ontology_class_infos(self.db, memory_config.scene_id),
             )
 
@@ -613,6 +683,131 @@ class MemoryConfigService:
                 extra={
                     "operation": "load_memory_config",
                     "config_id": config_id,
+                    "load_result": "error",
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "elapsed_ms": elapsed_ms,
+                },
+                exc_info=True,
+            )
+
+            logger.error(f"Failed to load memory configuration {config_id}: {e}")
+            if isinstance(e, (ConfigurationError, ValueError)):
+                raise
+            else:
+                raise ConfigurationError(f"Failed to load configuration {config_id}: {e}")
+
+    async def load_memory_config_async(self, config_id: UUID) -> MemoryConfig:
+        """Async version of load_memory_config — uses true async DB calls via AsyncSession.
+
+        Mirrors the sync version's logic (model validation, workspace fallback, etc.)
+        but with ``await`` on every DB operation so the event loop is never blocked.
+        """
+        start_time = time.perf_counter()
+        logger.info(f"Loading memory configuration from database: config_id={config_id}")
+
+        try:
+            # Step 1: load config row + workspace in a single JOIN query
+            result = await MemoryConfigRepository.get_config_with_workspace_async(
+                self.db, config_id
+            )
+            if not result:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                config_logger.error(
+                    "Configuration not found in database",
+                    extra={
+                        "operation": "load_memory_config_async",
+                        "config_id": str(config_id),
+                        "load_result": "not_found",
+                        "elapsed_ms": elapsed_ms,
+                    },
+                )
+                raise ConfigurationError(
+                    f"Configuration not found: config_id={config_id}"
+                )
+            memory_config_row, workspace = result
+
+            # Step 2: validate all models + load ontology concurrently
+            v_start = time.time()
+            (
+                (embedding_uuid, embedding_name),
+                (llm_uuid, llm_name),
+                (rerank_uuid, rerank_name),
+                (vision_uuid, vision_name),
+                (audio_uuid, audio_name),
+                (video_uuid, video_name),
+                ontology_class_infos,
+            ) = await asyncio.gather(
+                self._validate_model_with_fallback_async(
+                    memory_config_row.embedding_id, "embedding", workspace.embedding,
+                    workspace.tenant_id, memory_config_row.config_id, workspace.id,
+                    required=True,
+                ),
+                self._validate_model_with_fallback_async(
+                    memory_config_row.llm_id, "llm", workspace.llm,
+                    workspace.tenant_id, memory_config_row.config_id, workspace.id,
+                    required=True,
+                ),
+                self._validate_model_with_fallback_async(
+                    memory_config_row.rerank_id, "rerank", workspace.rerank,
+                    workspace.tenant_id, memory_config_row.config_id, workspace.id,
+                    required=False,
+                ),
+                validate_and_resolve_model_id_async(
+                    memory_config_row.vision_id, "llm", self.db, workspace.tenant_id,
+                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
+                ),
+                validate_and_resolve_model_id_async(
+                    memory_config_row.audio_id, "llm", self.db, workspace.tenant_id,
+                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
+                ),
+                validate_and_resolve_model_id_async(
+                    memory_config_row.video_id, "llm", self.db, workspace.tenant_id,
+                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
+                ),
+                _load_ontology_class_infos_async(self.db, memory_config_row.scene_id),
+            )
+            v_time = time.time() - v_start
+            logger.info(f"[PERF] All model validations + ontology load: {v_time:.4f}s (concurrent)")
+
+            # Step 4: build the immutable MemoryConfig
+            config = _build_memory_config(
+                memory_config_row=memory_config_row,
+                workspace=workspace,
+                llm_uuid=llm_uuid, llm_name=llm_name,
+                embedding_uuid=embedding_uuid, embedding_name=embedding_name,
+                rerank_uuid=rerank_uuid, rerank_name=rerank_name,
+                vision_uuid=vision_uuid, vision_name=vision_name,
+                audio_uuid=audio_uuid, audio_name=audio_name,
+                video_uuid=video_uuid, video_name=video_name,
+                ontology_class_infos=ontology_class_infos,
+            )
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+            config_logger.info(
+                "Memory configuration loaded successfully",
+                extra={
+                    "operation": "load_memory_config_async",
+                    "config_id": str(memory_config_row.config_id),
+                    "config_name": config.config_name,
+                    "workspace_id": str(config.workspace_id),
+                    "load_result": "success",
+                    "elapsed_ms": elapsed_ms,
+                },
+            )
+
+            logger.info(f"Memory configuration loaded successfully: {config.config_name}")
+            return config
+
+        except Exception as e:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+            config_logger.error(
+                "Failed to load memory configuration",
+                extra={
+                    "operation": "load_memory_config_async",
+                    "config_id": str(config_id),
                     "load_result": "error",
                     "error_type": type(e).__name__,
                     "error_message": str(e),
@@ -888,6 +1083,15 @@ class MemoryConfigService:
             raise BusinessException(f"空间{workspace_id}无启用的记忆配置")
         return config_id
 
+    async def get_workspace_active_config_id_async(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> uuid.UUID:
+        config_id = await get_workspace_memory_config_id_async(self.db, workspace_id)
+        if not config_id:
+            raise BusinessException(f"空间{workspace_id}无启用的记忆配置")
+        return config_id
+
     def get_config_id_by_end_user(
             self,
             end_user_id: uuid.UUID | str,
@@ -897,6 +1101,16 @@ class MemoryConfigService:
 
         end_user = get_end_user_by_id(self.db, end_user_id)
         config_id = self.get_workspace_active_config_id(end_user.workspace_id)
+        return config_id
+
+    async def get_config_id_by_end_user_async(
+            self,
+            end_user_id: uuid.UUID | str,
+    ):
+        if isinstance(end_user_id, str):
+            end_user_id = uuid.UUID(end_user_id)
+        end_user = await get_end_user_by_id_async(self.db, end_user_id)
+        config_id = await self.get_workspace_active_config_id_async(end_user.workspace_id)
         return config_id
 
     def get_config_with_fallback(

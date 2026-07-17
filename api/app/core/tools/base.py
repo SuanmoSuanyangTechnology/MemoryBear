@@ -87,17 +87,27 @@ class BaseTool(ABC):
         """
         errors = {}
         param_definitions = {p.name: p for p in self.parameters}
-        
+
         # 检查必需参数
+        # 工作流节点里，用户没填的字段前端会提交空字符串 "" 而不是缺省这个 key，
+        # 所以这里把空字符串也当作"未填写"，否则会漏判必填缺失，转而在下面的
+        # 类型检查里报出一个容易误导人的 "invalid type" 错误。
         for param_def in self.parameters:
-            if param_def.required and param_def.name not in parameters:
+            if param_def.required and (
+                param_def.name not in parameters or parameters.get(param_def.name) in (None, "")
+            ):
                 errors[param_def.name] = f"Required parameter '{param_def.name}' is missing"
-        
+
         # 检查参数类型和约束
         for param_name, param_value in parameters.items():
             if param_name not in param_definitions:
                 continue
-                
+
+            # 空字符串视为"未填写"：必填缺失已经在上面报过了，可选参数留空
+            # 也不应该再去校验类型/约束（例如可选 integer 参数为空字符串）。
+            if param_value == "":
+                continue
+
             param_def = param_definitions[param_name]
             
             # 类型检查
@@ -115,14 +125,29 @@ class BaseTool(ABC):
         """验证参数类型"""
         if value is None:
             return not param_def.required
-        
+
+        # 数值类型：工作流模板渲染 / 表单输入常把数字传成字符串（如 "0"），
+        # 只要能转换成数字就认为类型合法，交由工具自身按需 int()/float()。
+        if param_def.type in (ParameterType.INTEGER, ParameterType.NUMBER):
+            if isinstance(value, bool):
+                return False
+            if isinstance(value, (int, float)):
+                return True
+            if isinstance(value, str):
+                try:
+                    float(value)
+                    return True
+                except ValueError:
+                    return False
+            return False
+
         type_mapping = {
             ParameterType.STRING: str,
-            ParameterType.INTEGER: int,
-            ParameterType.NUMBER: (int, float),
             ParameterType.BOOLEAN: bool,
             ParameterType.ARRAY: list,
-            ParameterType.OBJECT: dict
+            ParameterType.OBJECT: dict,
+            # file 类型: 同时接受 file variable (list/dict) 和 URL 字符串
+            ParameterType.FILE: (str, list, dict),
         }
         
         expected_type = type_mapping.get(param_def.type)
@@ -142,9 +167,13 @@ class BaseTool(ABC):
         
         # 数值范围检查
         if param_def.type in [ParameterType.INTEGER, ParameterType.NUMBER]:
-            if param_def.minimum is not None and value < param_def.minimum:
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                return f"Value must be a number, got {value!r}"
+            if param_def.minimum is not None and numeric_value < param_def.minimum:
                 return f"Value must be >= {param_def.minimum}"
-            if param_def.maximum is not None and value > param_def.maximum:
+            if param_def.maximum is not None and numeric_value > param_def.maximum:
                 return f"Value must be <= {param_def.maximum}"
         
         # 字符串模式检查

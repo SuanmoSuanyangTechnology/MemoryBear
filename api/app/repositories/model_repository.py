@@ -1,7 +1,8 @@
 import uuid
 from typing import List, Optional, Dict, Any, Tuple
 
-from sqlalchemy import and_, or_, func, desc
+from sqlalchemy import and_, or_, func, desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -23,13 +24,13 @@ class ModelConfigRepository:
     def get_by_id(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
         """根据ID获取模型配置"""
         db_logger.debug(f"根据ID查询模型配置: model_id={model_id}, tenant_id={tenant_id}")
-        
+
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.api_keys),
                 joinedload(ModelConfig.model_base),
             ).filter(ModelConfig.id == model_id)
-            
+
             # 添加租户过滤
             if tenant_id:
                 query = query.filter(
@@ -38,9 +39,9 @@ class ModelConfigRepository:
                         ModelConfig.is_public
                     )
                 )
-            
+
             model = query.first()
-            
+
             if model:
                 db_logger.debug(f"模型配置查询成功: {model.name} (ID: {model_id})")
             else:
@@ -48,6 +49,36 @@ class ModelConfigRepository:
             return model
         except Exception as e:
             db_logger.error(f"根据ID查询模型配置失败: model_id={model_id} - {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_by_id_async(db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
+        """Async version of get_by_id — uses select() for AsyncSession compatibility."""
+
+        try:
+            query = select(ModelConfig).options(
+                joinedload(ModelConfig.api_keys),
+                joinedload(ModelConfig.model_base),
+            ).filter(ModelConfig.id == model_id)
+
+            if tenant_id:
+                query = query.filter(
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public,
+                    )
+                )
+
+            result = await db.execute(query)
+            model = result.scalars().first()
+
+            if model:
+                db_logger.debug(f"模型配置查询成功(异步): {model.name} (ID: {model_id})")
+            else:
+                db_logger.debug(f"模型配置不存在(异步): model_id={model_id}")
+            return model
+        except Exception as e:
+            db_logger.error(f"根据ID查询模型配置失败(异步): model_id={model_id} - {str(e)}")
             raise
 
     @staticmethod

@@ -1,13 +1,33 @@
 import uuid
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session, selectinload
 from app.models.document_model import Document
 from app.models.knowledge_model import Knowledge, PermissionType
+from app.models.models_model import ModelApiKey, ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
+
+
+def knowledge_schema_load_options():
+    def model_config_options(relationship_attr):
+        return (
+            selectinload(relationship_attr).selectinload(ModelConfig.model_base),
+            selectinload(relationship_attr)
+            .selectinload(ModelConfig.api_keys)
+            .selectinload(ModelApiKey.model_configs),
+        )
+
+    return (
+        selectinload(Knowledge.created_user),
+        *model_config_options(Knowledge.embedding),
+        *model_config_options(Knowledge.reranker),
+        *model_config_options(Knowledge.llm),
+        *model_config_options(Knowledge.image2text),
+    )
 
 
 def get_knowledges_paginated(
@@ -54,6 +74,48 @@ def get_knowledges_paginated(
         raise
 
 
+async def get_knowledges_paginated_async(
+        db: AsyncSession,
+        filters: list,
+        page: int,
+        pagesize: int,
+        orderby: str = None,
+        desc: bool = False
+) -> tuple[int, list]:
+    """Async version of get_knowledges_paginated."""
+    db_logger.debug(
+        f"Query knowledge base in pages (async): page={page}, pagesize={pagesize}, "
+        f"orderby={orderby}, desc={desc}, filters_count={len(filters)}"
+    )
+
+    try:
+        stmt = select(Knowledge).options(*knowledge_schema_load_options())
+        for filter_cond in filters:
+            stmt = stmt.where(filter_cond)
+
+        total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        total = total_result.scalar_one()
+
+        if orderby:
+            order_attr = getattr(Knowledge, orderby, None)
+            if order_attr is not None:
+                stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
+
+        stmt = stmt.offset((page - 1) * pagesize).limit(pagesize)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
+        db_logger.info(
+            f"The knowledge base paging query has been successful (async): "
+            f"total={total}, Number of current page={len(items)}"
+        )
+        return total, [knowledge_schema.Knowledge.model_validate(item) for item in items]
+    except Exception as e:
+        db_logger.error(
+            f"Querying knowledge base pagination failed (async): page={page}, pagesize={pagesize} - {str(e)}"
+        )
+        raise
+
+
 def get_chunked_knowledgeids(
         db: Session,
         filters: list
@@ -83,6 +145,22 @@ def get_chunked_knowledgeids(
         raise
 
 
+async def get_chunked_knowledgeids_async(
+        db: AsyncSession,
+        filters: list
+) -> list:
+    """Async version of get_chunked_knowledgeids."""
+    try:
+        stmt = select(Knowledge.id, Knowledge.workspace_id)
+        for filter_cond in filters:
+            stmt = stmt.where(filter_cond)
+        result = await db.execute(stmt)
+        return result.all()
+    except Exception as e:
+        db_logger.error(f"Querying vectorized knowledge IDs failed (async): {str(e)}")
+        raise
+
+
 def create_knowledge(db: Session, knowledge: knowledge_schema.KnowledgeCreate) -> Knowledge:
     db_logger.debug(f"Create a knowledge base record: name={knowledge.name}")
     
@@ -98,6 +176,24 @@ def create_knowledge(db: Session, knowledge: knowledge_schema.KnowledgeCreate) -
         raise
 
 
+async def create_knowledge_async(db: AsyncSession, knowledge: knowledge_schema.KnowledgeCreate) -> Knowledge:
+    """Async version of create_knowledge."""
+    db_logger.debug(f"Create a knowledge base record (async): name={knowledge.name}")
+
+    try:
+        db_knowledge = Knowledge(**knowledge.model_dump())
+        db.add(db_knowledge)
+        await db.commit()
+        await db.refresh(db_knowledge)
+        loaded_knowledge = await get_knowledge_by_id_async(db, db_knowledge.id)
+        db_logger.info(f"knowledge base record created successfully (async): {knowledge.name} (ID: {db_knowledge.id})")
+        return loaded_knowledge or db_knowledge
+    except Exception as e:
+        db_logger.error(f"Failed to create a knowledge base record (async): name={knowledge.name} - {str(e)}")
+        await db.rollback()
+        raise
+
+
 def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | None:
     db_logger.debug(f"Query knowledge base based on ID: knowledge_id={knowledge_id}")
 
@@ -110,6 +206,24 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | Non
         return knowledge
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge base based on the ID: knowledge_id={knowledge_id} - {str(e)}")
+        raise
+
+
+async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -> Knowledge | None:
+    """Async version of get_knowledge_by_id."""
+    db_logger.debug(f"Query knowledge base based on ID (async): knowledge_id={knowledge_id}")
+
+    try:
+        stmt = select(Knowledge).options(*knowledge_schema_load_options()).where(Knowledge.id == knowledge_id)
+        result = await db.execute(stmt)
+        knowledge = result.scalars().first()
+        if knowledge:
+            db_logger.debug(f"knowledge base query successful (async): {knowledge.name} (ID: {knowledge_id})")
+        else:
+            db_logger.debug(f"knowledge base does not exist (async): knowledge_id={knowledge_id}")
+        return knowledge
+    except Exception as e:
+        db_logger.error(f"Failed to query the knowledge base based on the ID (async): knowledge_id={knowledge_id} - {str(e)}")
         raise
 
 
@@ -132,6 +246,25 @@ def get_knowledge_by_external_id(db: Session, external_id: str, workspace_id: uu
         raise
 
 
+async def get_knowledge_by_external_id_async(
+        db: AsyncSession,
+        external_id: str,
+        workspace_id: uuid.UUID
+) -> Knowledge | None:
+    """Async version of get_knowledge_by_external_id."""
+    try:
+        stmt = select(Knowledge).options(*knowledge_schema_load_options()).where(
+            Knowledge.external_id == external_id,
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1,
+        )
+        result = await db.execute(stmt)
+        return result.scalars().first()
+    except Exception as e:
+        db_logger.error(f"Failed to query knowledge by external_id (async): external_id={external_id} - {str(e)}")
+        raise
+
+
 def get_knowledge_ids_by_external_ids(db: Session, external_ids: list[str], workspace_id: uuid.UUID) -> list[uuid.UUID]:
     """解析 external_ids 为 knowledge UUID 列表（仅返回存在的）"""
     db_logger.debug(f"Resolve external_ids to knowledge UUIDs: external_ids={external_ids}, workspace_id={workspace_id}")
@@ -150,6 +283,25 @@ def get_knowledge_ids_by_external_ids(db: Session, external_ids: list[str], work
         raise
 
 
+async def get_knowledge_ids_by_external_ids_async(
+        db: AsyncSession,
+        external_ids: list[str],
+        workspace_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Async version of get_knowledge_ids_by_external_ids."""
+    try:
+        stmt = select(Knowledge.id).where(
+            Knowledge.external_id.in_(external_ids),
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1,
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+    except Exception as e:
+        db_logger.error(f"Failed to resolve external_ids (async): external_ids={external_ids} - {str(e)}")
+        raise
+
+
 def get_knowledges_by_parent_id(db: Session, parent_id: uuid.UUID) -> list[Knowledge]:
     db_logger.debug(f"Query knowledge bases based on parent ID: parent_id={parent_id}")
     try:
@@ -161,6 +313,17 @@ def get_knowledges_by_parent_id(db: Session, parent_id: uuid.UUID) -> list[Knowl
         return knowledges
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge bases based on parent ID: parent_id={parent_id} - {str(e)}")
+        raise
+
+
+async def get_knowledges_by_parent_id_async(db: AsyncSession, parent_id: uuid.UUID) -> list[Knowledge]:
+    """Async version of get_knowledges_by_parent_id."""
+    try:
+        stmt = select(Knowledge).where(Knowledge.parent_id == parent_id, Knowledge.status == 1)
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+    except Exception as e:
+        db_logger.error(f"Failed to query knowledge bases by parent ID (async): parent_id={parent_id} - {str(e)}")
         raise
 
 
@@ -197,6 +360,29 @@ def get_knowledges_by_parent_ids(
         raise
 
 
+async def get_knowledges_by_parent_ids_async(
+        db: AsyncSession,
+        parent_ids: list[uuid.UUID],
+        workspace_id: uuid.UUID,
+) -> list[knowledge_schema.Knowledge]:
+    """Async version of get_knowledges_by_parent_ids."""
+    if not parent_ids:
+        return []
+
+    try:
+        stmt = select(Knowledge).options(*knowledge_schema_load_options()).where(
+            Knowledge.parent_id.in_(parent_ids),
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status != 2,
+            Knowledge.permission_id != PermissionType.Memory,
+        )
+        result = await db.execute(stmt)
+        return [knowledge_schema.Knowledge.model_validate(item) for item in result.scalars().all()]
+    except Exception as e:
+        db_logger.error(f"Failed to batch query knowledge bases by parent IDs (async): workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
 def get_document_counts_by_knowledge_ids(
         db: Session,
         knowledge_ids: list[uuid.UUID],
@@ -230,6 +416,31 @@ def get_document_counts_by_knowledge_ids(
         raise
 
 
+async def get_document_counts_by_knowledge_ids_async(
+        db: AsyncSession,
+        knowledge_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """Async version of get_document_counts_by_knowledge_ids."""
+    if not knowledge_ids:
+        return {}
+
+    unique_knowledge_ids = list(dict.fromkeys(knowledge_ids))
+    try:
+        stmt = (
+            select(Document.kb_id, func.count(Document.id))
+            .where(
+                Document.kb_id.in_(unique_knowledge_ids),
+                Document.status == 1,
+            )
+            .group_by(Document.kb_id)
+        )
+        result = await db.execute(stmt)
+        return {kb_id: int(count) for kb_id, count in result.all()}
+    except Exception as e:
+        db_logger.error(f"Failed to query document counts by knowledge IDs (async): {str(e)}")
+        raise
+
+
 def get_knowledge_by_name(db: Session, name: str, workspace_id: uuid.UUID) -> Knowledge | None:
     db_logger.debug(f"Query knowledge base based on name and workspace_id: name={name}, workspace_id={workspace_id}")
 
@@ -244,6 +455,28 @@ def get_knowledge_by_name(db: Session, name: str, workspace_id: uuid.UUID) -> Kn
         return knowledge
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge base based on the name and workspace_id: name={name}, workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+async def get_knowledge_by_name_async(db: AsyncSession, name: str, workspace_id: uuid.UUID) -> Knowledge | None:
+    """Async version of get_knowledge_by_name."""
+    db_logger.debug(f"Query knowledge base based on name and workspace_id (async): name={name}, workspace_id={workspace_id}")
+
+    try:
+        stmt = (
+            select(Knowledge)
+            .options(*knowledge_schema_load_options())
+            .where(Knowledge.name == name, Knowledge.workspace_id == workspace_id, Knowledge.status == 1)
+        )
+        result = await db.execute(stmt)
+        knowledge = result.scalars().first()
+        if knowledge:
+            db_logger.debug(f"knowledge base query successful (async): {name} (ID: {knowledge.id})")
+        else:
+            db_logger.debug(f"knowledge base does not exist (async): name={name}, workspace_id={workspace_id}")
+        return knowledge
+    except Exception as e:
+        db_logger.error(f"Failed to query the knowledge base based on the name and workspace_id (async): {str(e)}")
         raise
 
 
@@ -268,6 +501,25 @@ def delete_knowledge_by_id(db: Session, knowledge_id: uuid.UUID):
     except Exception as e:
         db_logger.error(f"Failed to delete knowledge base record: knowledge_id={knowledge_id} - {str(e)}")
         db.rollback()
+        raise
+
+
+async def delete_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID):
+    """Async version of delete_knowledge_by_id."""
+    try:
+        knowledge = await get_knowledge_by_id_async(db, knowledge_id)
+        knowledge_name = knowledge.name if knowledge else "unknown"
+
+        result = await db.execute(delete(Knowledge).where(Knowledge.id == knowledge_id))
+        await db.commit()
+
+        if result.rowcount and result.rowcount > 0:
+            db_logger.info(f"knowledge base record deleted successfully (async): {knowledge_name} (ID: {knowledge_id})")
+        else:
+            db_logger.warning(f"The knowledge base record does not exist, and cannot be deleted (async): knowledge_id={knowledge_id}")
+    except Exception as e:
+        db_logger.error(f"Failed to delete knowledge base record (async): knowledge_id={knowledge_id} - {str(e)}")
+        await db.rollback()
         raise
 
 

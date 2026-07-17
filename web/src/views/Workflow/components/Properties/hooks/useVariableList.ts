@@ -474,27 +474,29 @@ export const getChildNodeVariables = (
 };
 
 
-// Recursively filter string/number type variables from children
-export const filterChildrenWithTypes = (variables: Suggestion[], types: string[]): Suggestion[] => {
-  return variables.filter((variable) => {
-    // Include string or number type directly (handle both 'number' and 'Number')
-    if (types.includes(variable.dataType)) {
-      return true;
+// Recursively filter variables by types, with optional custom matcher
+export const filterChildrenWithTypes = (
+  variables: Suggestion[],
+  types: string[],
+  customMatcher?: (dataType: string) => boolean
+): Suggestion[] => {
+  return variables.flatMap((variable): Suggestion[] => {
+    const matches = types.includes(variable.dataType) || (customMatcher?.(variable.dataType) ?? false)
+    if (matches) {
+      if (variable.children && variable.children?.length > 0) {
+        const filteredChildren = filterChildrenWithTypes(variable.children, types, customMatcher)
+        return [{ ...variable, children: filteredChildren, disabled: false }]
+      }
+      return [{ ...variable, disabled: false }]
     }
-    // For file type or other types with children, recursively filter
     if (variable.children && variable.children?.length > 0) {
-      const stringChildren = filterChildrenWithTypes(variable.children, types);
-      if (stringChildren.length > 0) {
-        // Keep the parent but mark as disabled and with filtered children
-        Object.assign(variable, {
-          disabled: true,
-          children: stringChildren
-        });
-        return true;
+      const filteredChildren = filterChildrenWithTypes(variable.children, types, customMatcher)
+      if (filteredChildren.length > 0) {
+        return [{ ...variable, disabled: true, children: filteredChildren }]
       }
     }
-    return false;
-  });
+    return []
+  })
 }
 
 /**

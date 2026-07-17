@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.models import RedBearLLM, RedBearModelConfig
@@ -13,8 +15,8 @@ from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_db_read
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller
+from app.db import get_async_db_context, get_db_read
+from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
 from app.models import ModelType
 from app.models.models_model import ModelCapability
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
@@ -273,9 +275,31 @@ class KnowledgeRetrievalNode(BaseNode):
             type=model_info.model_type,
         )
 
+    def _prepare_auto_filter_state_sync(
+        self,
+        db: Session,
+    ) -> tuple[dict[str, Any], RedBearLLM] | None:
+        cfg = self._get_typed_config()
+        metadata_defs_by_kb = {
+            kb.kb_id: KnowledgeMetadataService.get_metadata_defs_for_filtering(db, kb.kb_id)
+            for kb in cfg.knowledge_bases
+        }
+        common_metadata_defs = KnowledgeRetrievalService._get_common_metadata_defs(metadata_defs_by_kb)
+
+        if not common_metadata_defs:
+            logger.info(
+                "node: %s auto filter: no common metadata fields, skip extraction",
+                self.node_id,
+            )
+            return None
+
+        return common_metadata_defs, self._build_auto_filter_llm(db)
+
     def _extract_auto_filter_groups(
         self,
         query: str,
+        common_metadata_defs: dict[str, Any],
+        llm: RedBearLLM,
     ) -> list:
         """auto 模式：用配置好的模型 + 参数，调用 LLM 提取出源数据过滤条件。
 
@@ -289,24 +313,6 @@ class KnowledgeRetrievalNode(BaseNode):
                 "auto 模式必须配置 metadata_model.model_id",
                 code=BizCode.INVALID_PARAMETER,
             )
-
-        with get_db_read() as db:
-            # 1. 取各知识库的元数据定义，求公共字段（与 service._build_metadata_document_filter 一致）
-            metadata_defs_by_kb = {
-                kb.kb_id: KnowledgeMetadataService.get_metadata_defs_for_filtering(db, kb.kb_id)
-                for kb in cfg.knowledge_bases
-            }
-            common_metadata_defs = KnowledgeRetrievalService._get_common_metadata_defs(metadata_defs_by_kb)
-
-            if not common_metadata_defs:
-                logger.info(
-                    "node: %s auto filter: no common metadata fields, skip extraction",
-                    self.node_id,
-                )
-                return []
-
-            # 2. 构造配置好的 LLM（含模型参数，照搬 LLM 节点 RedBearLLM 构造）
-            llm = self._build_auto_filter_llm(db)
 
         # 3. 调用提取方法（参数已在 llm 实例上，不再单独传 gen_conf）
         logger.info(
@@ -344,6 +350,21 @@ class KnowledgeRetrievalNode(BaseNode):
         )
         return filter_groups
 
+    async def _extract_auto_filter_groups_async(self, query: str) -> list:
+        async with get_async_db_context() as db:
+            prepared = await db.run_sync(lambda sync_db: self._prepare_auto_filter_state_sync(sync_db))
+
+        if not prepared:
+            return []
+
+        common_metadata_defs, llm = prepared
+        return await asyncio.to_thread(
+            self._extract_auto_filter_groups,
+            query,
+            common_metadata_defs,
+            llm,
+        )
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
         Execute the knowledge retrieval workflow node.
@@ -378,22 +399,25 @@ class KnowledgeRetrievalNode(BaseNode):
         # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
         auto_filter_groups: list | None = None
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            # generate_filter_groups 内部走同步 llm.invoke 网络调用，放到工作线程避免阻塞事件循环
-            auto_filter_groups = await asyncio.to_thread(
-                self._extract_auto_filter_groups, query
-            )
+            auto_filter_groups = await self._extract_auto_filter_groups_async(query)
 
         # 3. Construct KnowledgeRetrievalRequest
         first_kb = self.typed_config.knowledge_bases[0]
         kb_ids = [kb.kb_id for kb in self.typed_config.knowledge_bases]
 
+        # 分词检索不使用 vector_similarity_weight，其他检索类型从配置读取
+        if first_kb.retrieve_type == RetrieveType.PARTICIPLE:
+            vector_similarity_weight = None
+        else:
+            vector_similarity_weight = first_kb.vector_similarity_weight
+        
         request = KnowledgeRetrievalRequest(
             query=query,
             caller=KnowledgeRetrievalCaller.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
             similarity_threshold=first_kb.similarity_threshold,
-            vector_similarity_weight=first_kb.vector_similarity_weight,
+            vector_similarity_weight=vector_similarity_weight,
             top_k=self.typed_config.reranker_top_k or first_kb.top_k,
             retrieve_type=first_kb.retrieve_type,
             rerank_id=self.typed_config.reranker_id,

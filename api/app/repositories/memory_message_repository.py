@@ -452,6 +452,121 @@ class MemoryMessageRepository:
             ).scalars().all()
         )
 
+    def batch_update_pruned_content(
+        self,
+        updates: List[tuple],
+        conversation_id: Optional[str] = None,
+        end_user_id: str = "",
+        source: str = "",
+    ) -> None:
+        """批量回写 pruned_content 和 topic_entity_hint 到 memory_messages 表。
+
+        使用 CASE WHEN 单条 SQL 完成多行更新，避免 N 次 roundtrip。
+
+        Args:
+            updates: [(message_seq, pruned_content, topic_entity_hint), ...] 列表
+                     兼容旧格式 (message_seq, pruned_content) — topic_entity_hint 视为 None
+            conversation_id: 对话 ID（agent/workflow 路径）
+            end_user_id: 终端用户 ID（API/MCP 路径）
+            source: 写入来源（API/MCP 路径）
+        """
+        if not updates:
+            return
+
+        seqs = [u[0] for u in updates]
+
+        # 构建 pruned_content CASE WHEN 表达式
+        content_whens = {u[0]: u[1] for u in updates}
+        content_case = sa.case(
+            content_whens,
+            value=MemoryMessage.message_seq,
+        )
+
+        # 构建 topic_entity_hint CASE WHEN 表达式（只包含非 None 的值，避免冗余 WHEN seq THEN NULL）
+        hint_whens = {u[0]: u[2] for u in updates if len(u) > 2 and u[2] is not None}
+
+        # 构建 WHERE 条件
+        if conversation_id:
+            conv_uuid = uuid.UUID(conversation_id)
+            where_clause = sa.and_(
+                MemoryMessage.conversation_id == conv_uuid,
+                MemoryMessage.message_seq.in_(seqs),
+            )
+        else:
+            where_clause = sa.and_(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.source == source,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.message_seq.in_(seqs),
+            )
+
+        values = {"pruned_content": content_case}
+        if hint_whens:
+            hint_case = sa.case(
+                hint_whens,
+                value=MemoryMessage.message_seq,
+            )
+            values["topic_entity_hint"] = hint_case
+
+        self.db.execute(
+            update(MemoryMessage)
+            .where(where_clause)
+            .values(**values)
+        )
+
+    def batch_get_pruned_content(
+        self,
+        seqs: List[int],
+        conversation_id: Optional[str] = None,
+        end_user_id: str = "",
+        source: str = "",
+    ) -> dict:
+        """批量查询指定消息的 pruned_content 和 topic_entity_hint（仅返回非 NULL 的结果）。
+
+        用于 WritePipeline 执行时刷新 dispatcher 快照中尚未回写的 pruned_content。
+
+        Args:
+            seqs: 需要查询的 message_seq 列表
+            conversation_id: 对话 ID（agent/workflow 路径）
+            end_user_id: 终端用户 ID（API/MCP 路径）
+            source: 写入来源（API/MCP 路径）
+
+        Returns:
+            {message_seq: {"pruned_content": str, "topic_entity_hint": str|None}} 字典，
+            只包含 pruned_content 非 NULL 的行
+        """
+        if not seqs:
+            return {}
+
+        if conversation_id:
+            conv_uuid = uuid.UUID(conversation_id)
+            where_clause = sa.and_(
+                MemoryMessage.conversation_id == conv_uuid,
+                MemoryMessage.message_seq.in_(seqs),
+                MemoryMessage.pruned_content.isnot(None),
+            )
+        else:
+            where_clause = sa.and_(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.source == source,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.message_seq.in_(seqs),
+                MemoryMessage.pruned_content.isnot(None),
+            )
+
+        rows = self.db.execute(
+            select(MemoryMessage.message_seq, MemoryMessage.pruned_content, MemoryMessage.topic_entity_hint)
+            .where(where_clause)
+        ).all()
+
+        return {
+            row.message_seq: {
+                "pruned_content": row.pruned_content,
+                "topic_entity_hint": row.topic_entity_hint,
+            }
+            for row in rows
+        }
+
 
 def message_to_dict(message: MemoryMessage) -> dict:
     """将 MemoryMessage ORM 对象转换为字典格式。"""
@@ -463,4 +578,6 @@ def message_to_dict(message: MemoryMessage) -> dict:
         "created_at": to_iso_z(message.created_at) if message.created_at else None,
         "dialog_at": message.dialog_at,
         "files": message.files,
+        "pruned_content": message.pruned_content,
+        "topic_entity_hint": message.topic_entity_hint,
     }

@@ -3,7 +3,7 @@ from typing import List, Tuple
 
 from pydantic import BaseModel, Field
 
-from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_config_service import MemoryConfigService
@@ -55,8 +55,9 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
             )
 
        
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client_from_config(memory_config)
+            llm_client = ModelClientMixin.get_llm_client(
+                db, memory_config.llm_model_id, memory_config.tenant_id
+            )
 
         # 3. 构建Prompt
         tag_list_str = ", ".join(tags)
@@ -72,10 +73,7 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
         ]
 
         # 调用LLM进行结构化输出
-        structured_response = await llm_client.response_structured(
-            messages=messages,
-            response_model=FilteredTags
-        )
+        structured_response = await llm_client.call_structured(messages, FilteredTags)
 
         return structured_response.meaningful_tags
 
@@ -114,8 +112,9 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
             )
 
 
-            factory = MemoryClientFactory(db)
-            llm_client = factory.get_llm_client_from_config(memory_config)
+            llm_client = ModelClientMixin.get_llm_client(
+                db, memory_config.llm_model_id, memory_config.tenant_id
+            )
 
         tag_list_str = ", ".join(tags)
         from app.core.memory.utils.prompt.prompt_utils import render_interest_filter_prompt
@@ -127,10 +126,7 @@ async def filter_interests_with_llm(tags: List[str], end_user_id: str, language:
             }
         ]
 
-        structured_response = await llm_client.response_structured(
-            messages=messages,
-            response_model=InterestTags
-        )
+        structured_response = await llm_client.call_structured(messages, InterestTags)
 
         return structured_response.interest_tags
 

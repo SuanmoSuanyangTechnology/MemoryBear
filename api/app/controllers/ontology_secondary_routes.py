@@ -28,8 +28,6 @@ from app.schemas.ontology_schemas import (
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.ontology_service import OntologyService
-from app.core.memory.llm_tools.openai_client import OpenAIClient
-from app.core.models.base import RedBearModelConfig
 from app.repositories.ontology_class_repository import OntologyClassRepository
 
 
@@ -37,19 +35,13 @@ api_logger = get_api_logger()
 business_logger = get_business_logger()
 
 
-def _get_dummy_ontology_service(db: Session) -> OntologyService:
-    """获取OntologyService实例（不需要LLM）
-    
-    场景和类型管理不需要LLM，创建一个dummy配置。
+def _get_ontology_service(db: Session) -> OntologyService:
+    """获取 OntologyService 实例（不带 LLM 客户端）
+
+    场景和类型管理接口仅需数据库操作，不需要 LLM，
+    统一通过此辅助方法获取实例，避免在多处重复实例化代码。
     """
-    dummy_config = RedBearModelConfig(
-        model_name="dummy",
-        provider="openai",
-        api_key="dummy",
-        base_url="https://api.openai.com/v1"
-    )
-    llm_client = OpenAIClient(model_config=dummy_config)
-    return OntologyService(llm_client=llm_client, db=db)
+    return OntologyService(db=db)
 
 
 # 这些函数将被导入到主Controller中
@@ -96,7 +88,7 @@ async def scenes_handler(
                 return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
         # 创建Service
-        service = _get_dummy_ontology_service(db)
+        service = _get_ontology_service(db)
         
         # 根据是否提供 scene_name 决定查询方式
         if scene_name and scene_name.strip():
@@ -253,7 +245,7 @@ async def create_class_handler(
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
         # 创建Service
-        service = _get_dummy_ontology_service(db)
+        service = _get_ontology_service(db)
         
         # 准备类型数据
         classes_data = [
@@ -404,7 +396,7 @@ async def update_class_handler(
             )
         
         # 创建Service
-        service = _get_dummy_ontology_service(db)
+        service = _get_ontology_service(db)
         
         # 更新类型
         ontology_class = service.update_class(
@@ -481,7 +473,7 @@ async def delete_class_handler(
             )
         
         # 创建Service
-        service = _get_dummy_ontology_service(db)
+        service = _get_ontology_service(db)
         
         # 删除类型
         success_flag = service.delete_class(
@@ -532,7 +524,7 @@ async def get_class_handler(
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
         # 创建Service
-        service = _get_dummy_ontology_service(db)
+        service = _get_ontology_service(db)
         
         # 获取类型（会抛出ValueError如果不存在）
         ontology_class = service.get_class_by_id(class_uuid, workspace_id)
@@ -603,7 +595,7 @@ async def classes_handler(
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
         # 创建Service
-        service = _get_dummy_ontology_service(db)
+        service = _get_ontology_service(db)
         
         # 获取场景信息
         scene = service.get_scene_by_id(scene_uuid, workspace_id)

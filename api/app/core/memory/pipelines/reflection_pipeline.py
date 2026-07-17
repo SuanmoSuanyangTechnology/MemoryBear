@@ -67,11 +67,11 @@ class ReflectionPipeline:
         # 延迟初始化的客户端
         self._llm_client = None
 
-    def _lazy_init(self):
+    async def _lazy_init(self):
         """延迟初始化依赖，避免循环导入和不必要的连接创建"""
         if self._llm_client is None:
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-            from app.db import get_db_context
+            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+            from app.db import get_async_db_context
 
             llm_id = (
                 getattr(self.memory_config, 'reflection_model_id', None)
@@ -79,12 +79,12 @@ class ReflectionPipeline:
                 or getattr(self.memory_config, 'llm_id', None)
             )
 
-            with get_db_context() as db:
-                if llm_id:
-                    factory = MemoryClientFactory(db, tenant_id=getattr(self.memory_config, "tenant_id", None))
-                    self._llm_client = factory.get_llm_client(
+            if llm_id:
+                async with get_async_db_context() as db:
+                    self._llm_client = await ModelClientMixin.get_llm_client_async(
+                        db,
                         llm_id,
-                        tenant_id=getattr(self.memory_config, "tenant_id", None),
+                        getattr(self.memory_config, "tenant_id", None),
                     )
 
         # 构建 embedding_client（用于更名后重新生成 name_embedding）
@@ -94,9 +94,9 @@ class ReflectionPipeline:
             if embedding_id:
                 try:
                     from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-                    from app.db import get_db_context
-                    with get_db_context() as db:
-                        self._embedding_client = ModelClientMixin.get_embedding_client(
+                    from app.db import get_async_db_context
+                    async with get_async_db_context() as db:
+                        self._embedding_client = await ModelClientMixin.get_embedding_client_async(
                             db,
                             embedding_id,
                             tenant_id=getattr(self.memory_config, "tenant_id", None),
@@ -109,7 +109,7 @@ class ReflectionPipeline:
 
         执行顺序：子问题 1→2→5→3→6→4（当前只实现子问题 3 和 6）
         """
-        self._lazy_init()
+        await self._lazy_init()
 
         if not self._llm_client:
             return {"status": "skipped", "reason": "no llm_id configured"}
@@ -136,7 +136,7 @@ class ReflectionPipeline:
 
     async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """方案B：低频全量扫描去重 — 由每天一次的定时任务调用"""
-        self._lazy_init()
+        await self._lazy_init()
 
         if not self._llm_client:
             return {"status": "skipped", "reason": "no llm_id configured"}
@@ -149,6 +149,7 @@ class ReflectionPipeline:
             neo4j_connector=connector,
             llm_client=self._llm_client,
             log_repo_factory=_create_log_repo,
+            embedding_client=self._embedding_client,
         )
 
         try:

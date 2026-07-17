@@ -1,9 +1,11 @@
 """App 服务接口 - 基于 API Key 认证"""
 import json
+import time
 import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Body, Query, File, UploadFile, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -12,25 +14,25 @@ from app.services.file_storage_service import (
     get_file_storage_service,
     upload_workspace_file,
 )
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key, require_api_key_self_db
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.quota_manager import check_end_user_quota_async
 from app.core.response_utils import success
-from app.db import get_db, get_db_context
+from app.db import get_db, get_async_db_context
 from app.models.app_model import AppType
 from app.models.workspace_model import Workspace
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas import AppChatRequest, app_schema, conversation_schema
+from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
-from app.schemas.human_intervention_schema import HumanInterventionSubmitRequest
 from app.services import workspace_service
 from app.services.agent_config_helper import enrich_agent_config
-from app.services.app_chat_service import AppChatService, get_app_chat_service
+from app.services.app_chat_service import AppChatService
 from app.services.app_service import get_app_service, AppService
 from app.services.conversation_service import ConversationService, get_conversation_service
 from app.services.intervention_registry import submit_intervention
@@ -40,6 +42,68 @@ from app.utils.app_config_utils import workflow_config_4_app_release, \
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
 logger = get_business_logger()
+
+
+async def _prepare_v1_chat_memory_context_async(
+        db: AsyncSession,
+        workspace_id: uuid.UUID,
+) -> tuple[str, str]:
+    storage_type = await workspace_service.get_workspace_storage_type_without_auth_async(
+        db=db,
+        workspace_id=workspace_id,
+    )
+    if storage_type is None:
+        storage_type = "neo4j"
+
+    user_rag_memory_id = ""
+    if storage_type == "rag":
+        knowledge = await knowledge_repository.get_knowledge_by_name_async(
+            db=db,
+            name="USER_RAG_MERORY",
+            workspace_id=workspace_id,
+        )
+        if knowledge:
+            user_rag_memory_id = str(knowledge.id)
+        else:
+            logger.warning(
+                f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储"
+            )
+            storage_type = "neo4j"
+
+    return storage_type, user_rag_memory_id
+
+
+async def _get_or_create_v1_end_user_async(
+        db: AsyncSession,
+        *,
+        app_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        other_id: str,
+):
+    end_user_repo = EndUserRepository(db)
+    existing_end_user = await end_user_repo.get_end_user_by_other_id_async(
+        workspace_id=workspace_id,
+        other_id=other_id,
+    )
+    if existing_end_user is not None:
+        if existing_end_user.app_id != app_id:
+            existing_end_user.app_id = app_id
+            await db.commit()
+        return existing_end_user
+
+    workspace = await db.get(Workspace, workspace_id)
+    if workspace:
+        await check_end_user_quota_async(
+            db,
+            workspace.tenant_id,
+            workspace_id=workspace_id,
+        )
+
+    return await end_user_repo.get_or_create_end_user_async(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        other_id=other_id,
+    )
 
 
 @router.get("")
@@ -170,14 +234,10 @@ async def get_app_variables(
 
 
 @router.post("/chat")
-@require_api_key(scopes=["app"])
+@require_api_key_self_db(scopes=["app"])
 async def chat(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
-        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
-        app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
-        app_service: Annotated[AppService, Depends(get_app_service)] = None,
         message: str | None = Body(None, description="聊天消息内容"),
 ):
     """
@@ -188,88 +248,81 @@ async def chat(
     """
     body = await request.json()
     payload = AppChatRequest(**body)
+    request_started_at = time.perf_counter()
 
-    app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as db:
+        app_service = AppService(db)
+        conversation_service = ConversationService(db)
+        app = await app_service.get_app_async(api_key_auth.resource_id, api_key_auth.workspace_id)
 
-    # 版本切换：指定 release_id 时查找对应历史快照，否则使用当前激活版本
-    if payload.version is not None:
-        active_release = app_service.get_release_by_id(app.id, payload.version)
-    else:
-        active_release = app.current_release
-    other_id = payload.user_id
-    workspace_id = api_key_auth.workspace_id
-    end_user_repo = EndUserRepository(db)
-
-    # 仅在新建终端用户时检查配额，已有用户复用不受限制
-    existing_end_user = end_user_repo.get_end_user_by_other_id(workspace_id=workspace_id, other_id=other_id)
-    if existing_end_user is None:
-        from app.core.quota_manager import _check_quota
-        from app.models.workspace_model import Workspace
-        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        if ws:
-            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
-
-    new_end_user = end_user_repo.get_or_create_end_user(
-        app_id=app.id,
-        workspace_id=workspace_id,
-        other_id=other_id,
-    )
-    end_user_id = str(new_end_user.id)
-    web_search = True
-    memory = True
-    # 提前验证和准备（在流式响应开始前完成）
-    storage_type = workspace_service.get_workspace_storage_type_without_auth(
-        db=db,
-        workspace_id=workspace_id
-    )
-    if storage_type is None:
-        storage_type = 'neo4j'
-    user_rag_memory_id = ''
-    if storage_type == 'rag':
-        if workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db,
-                name="USER_RAG_MERORY",
-                workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-            else:
-                logger.warning(
-                    f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储")
-                storage_type = 'neo4j'
+        if payload.version is not None:
+            active_release = await app_service.get_release_by_id_async(app.id, payload.version)
         else:
-            logger.warning("workspace_id 为空，无法使用 rag 存储，将使用 neo4j 存储")
-            storage_type = 'neo4j'
-    app_type = app.type
-    # check app config
-    _checkAppConfig(active_release)
+            active_release = await app_service.get_current_release_async(
+                app_id=app.id,
+                workspace_id=api_key_auth.workspace_id,
+            )
+            if not active_release:
+                raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
 
-    if app_type != AppType.PURE_WORKFLOW and not payload.message:
-        raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
-
-    # pure_workflow 不强制创建会话；传入 conversation_id 时仍支持复用。
-    conversation = None
-    if app_type != AppType.PURE_WORKFLOW or payload.conversation_id:
-        conversation = conversation_service.create_or_get_conversation(
+        other_id = payload.user_id
+        workspace_id = api_key_auth.workspace_id
+        new_end_user = await _get_or_create_v1_end_user_async(
+            db,
             app_id=app.id,
             workspace_id=workspace_id,
-            user_id=end_user_id,
-            is_draft=False,
-            conversation_id=payload.conversation_id
+            other_id=other_id,
         )
+        end_user_id = str(new_end_user.id)
+        web_search = True
+        memory = True
+        storage_type, user_rag_memory_id = await _prepare_v1_chat_memory_context_async(
+            db,
+            workspace_id,
+        )
+        app_type = app.type
+        _checkAppConfig(active_release)
 
-    # 提前提取 ORM 对象属性为纯值，避免 event_generator 闭包持有 ORM 引用导致 db 连接无法释放
-    _app_id = app.id
-    _release_id = active_release.id if active_release else None
-    _conversation_id = conversation.id if conversation else None
+        if app_type != AppType.PURE_WORKFLOW and not payload.message:
+            raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
+
+        conversation_id = None
+        if app_type != AppType.PURE_WORKFLOW or payload.conversation_id:
+            conversation = await conversation_service.create_or_get_conversation_async(
+                app_id=app.id,
+                workspace_id=workspace_id,
+                user_id=end_user_id,
+                is_draft=False,
+                conversation_id=payload.conversation_id
+            )
+            conversation_id = conversation.id
+
+        app_id = app.id
+        release_id = active_release.id if active_release else None
+
+        runtime_config = None
+        if app_type == AppType.AGENT:
+            runtime_config = agent_config_4_app_release(active_release)
+        elif app_type == AppType.MULTI_AGENT:
+            runtime_config = multi_agent_config_4_app_release(active_release)
+        elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            runtime_config = workflow_config_4_app_release(active_release)
+
+    logger.info(
+        f"[AppApiChatTiming] preprocess_ready elapsed_ms={round((time.perf_counter() - request_started_at) * 1000, 2)} "
+        f"app_type={app_type} stream={payload.stream}",
+        extra={
+            "app_id": str(app_id),
+            "conversation_id": str(conversation_id) if conversation_id else None,
+            "app_type": app_type,
+            "stream": payload.stream,
+            "elapsed_ms": round((time.perf_counter() - request_started_at) * 1000, 2),
+        },
+    )
 
     if app_type == AppType.AGENT:
 
-        # print("="*50)
-        # print(app.current_release.default_model_config_id)
-        agent_config = agent_config_4_app_release(active_release)
-        # print(agent_config.default_model_config_id)
+        agent_config = runtime_config
 
         # thinking 开关：仅当 agent 配置了 deep_thinking 且请求 thinking=True 时才启用
         if not (agent_config.model_parameters.get("deep_thinking", False) and payload.thinking):
@@ -278,12 +331,11 @@ async def chat(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                with get_db_context() as stream_db:
-                    from app.services.app_chat_service import AppChatService as _AppChatService
-                    _chat_service = _AppChatService(stream_db)
-                    async for event in _chat_service.agent_chat_stream(
+                async with get_async_db_context() as stream_db:
+                    app_chat_service = AppChatService(stream_db)
+                    async for event in app_chat_service.agent_chat_stream(
                             message=payload.message,
-                             conversation_id=_conversation_id,
+                            conversation_id=conversation_id,
                             user_id=end_user_id,
                             variables=payload.variables,
                             web_search=web_search,
@@ -307,31 +359,32 @@ async def chat(
             )
 
         # 非流式返回
-        result = await app_chat_service.agent_chat(
-            message=payload.message,
-            conversation_id=conversation.id,  # 使用已创建的会话 ID
-            user_id=end_user_id,  # 转换为字符串
-            variables=payload.variables,
-            config=agent_config,
-            web_search=web_search,
-            memory=memory,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            workspace_id=str(workspace_id),
-            files=payload.files  # 传递多模态文件
-        )
+        async with get_async_db_context() as db:
+            app_chat_service = AppChatService(db)
+            result = await app_chat_service.agent_chat(
+                message=payload.message,
+                conversation_id=conversation_id,
+                user_id=end_user_id,
+                variables=payload.variables,
+                config=agent_config,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                workspace_id=str(workspace_id),
+                files=payload.files
+            )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
         # 多 Agent 流式返回
-        config = multi_agent_config_4_app_release(active_release)
+        config = runtime_config
         if payload.stream:
             async def event_generator():
-                with get_db_context() as stream_db:
-                    from app.services.app_chat_service import AppChatService as _AppChatService
-                    _chat_service = _AppChatService(stream_db)
-                    async for event in _chat_service.multi_agent_chat_stream(
+                async with get_async_db_context() as stream_db:
+                    app_chat_service = AppChatService(stream_db)
+                    async for event in app_chat_service.multi_agent_chat_stream(
                             message=payload.message,
-                             conversation_id=_conversation_id,
+                            conversation_id=conversation_id,
                             user_id=end_user_id,
                             variables=payload.variables,
                             config=config,
@@ -353,30 +406,30 @@ async def chat(
             )
 
         # 多 Agent 非流式返回
-        result = await app_chat_service.multi_agent_chat(
-            message=payload.message,
-            conversation_id=conversation.id,  # 使用已创建的会话 ID
-            user_id=end_user_id,  # 转换为字符串
-            variables=payload.variables,
-            config=config,
-            web_search=web_search,
-            memory=memory,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id
-        )
+        async with get_async_db_context() as db:
+            app_chat_service = AppChatService(db)
+            result = await app_chat_service.multi_agent_chat(
+                message=payload.message,
+                conversation_id=conversation_id,
+                user_id=end_user_id,
+                variables=payload.variables,
+                config=config,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id
+            )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-        # 多 Agent 流式返回
-        config = workflow_config_4_app_release(active_release)
+        config = runtime_config
         if payload.stream:
             async def event_generator():
-                with get_db_context() as stream_db:
-                    from app.services.app_chat_service import AppChatService as _AppChatService
-                    _chat_service = _AppChatService(stream_db)
-                    async for event in _chat_service.workflow_chat_stream(
+                async with get_async_db_context() as stream_db:
+                    app_chat_service = AppChatService(stream_db)
+                    async for event in app_chat_service.workflow_chat_stream(
                             message=payload.message,
-                             conversation_id=_conversation_id,
+                            conversation_id=conversation_id,
                             user_id=end_user_id,
                             variables=payload.variables,
                             files=payload.files,
@@ -385,9 +438,9 @@ async def chat(
                             memory=memory,
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
-                             app_id=_app_id,
+                            app_id=app_id,
                             workspace_id=workspace_id,
-                             release_id=_release_id,
+                            release_id=release_id,
                             public=True
                     ):
                         event_type = event.get("event", "message")
@@ -406,22 +459,23 @@ async def chat(
             )
 
         # workflow 非流式返回
-        result = await app_chat_service.workflow_chat(
-
-            message=payload.message,
-            conversation_id=conversation.id if conversation else None,
-            user_id=end_user_id,  # 转换为字符串
-            variables=payload.variables,
-            config=config,
-            web_search=web_search,
-            memory=memory,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            files=payload.files,
-            app_id=app.id,
-            workspace_id=workspace_id,
-            release_id=active_release.id
-        )
+        async with get_async_db_context() as db:
+            app_chat_service = AppChatService(db)
+            result = await app_chat_service.workflow_chat(
+                message=payload.message,
+                conversation_id=conversation_id,
+                user_id=end_user_id,
+                variables=payload.variables,
+                config=config,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                files=payload.files,
+                app_id=app_id,
+                workspace_id=workspace_id,
+                release_id=release_id
+            )
         logger.debug(
             "工作流试运行返回结果",
             extra={
@@ -481,7 +535,7 @@ async def list_v1_conversation_messages(
         limit: int = Query(20, description="返回消息数量，最大 200"),
 ):
     """获取当前应用下指定会话的历史消息。"""
-    result = conversation_service.list_v1_conversation_messages(
+    result = await conversation_service.list_v1_conversation_messages_async(
         app_id=api_key_auth.resource_id,
         workspace_id=api_key_auth.workspace_id,
         external_user_id=user_id,

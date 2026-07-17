@@ -115,11 +115,30 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
       .then((values) => {
         const { inputs = {} } = values
         const params: Record<string, any> = {};
+
+        // 构建 inputs 顶层字段名 → dataType 映射，用于区分 file / array[file]
+        const inputTypeMap: Record<string, string> = {}
+        inputVars.forEach((v: Suggestion) => {
+          // trigger 为嵌套结构，不涉及文件类型场景
+          if (v.nodeData?.type === 'trigger') return
+          const key = v.value.replace('{{', '').replace('}}', '')
+          inputTypeMap[key] = v.dataType
+        })
+        // llm 视觉输入变量
+        if (isLlm && nodeData?.config?.vision?.defaultValue) {
+          const ref = nodeData.config.vision_input?.defaultValue
+          if (ref) {
+            const key = ref.replace('{{', '').replace('}}', '')
+            const visionVar = variableList.find(v => v.value === ref)
+            inputTypeMap[key] = visionVar?.dataType ?? 'array[file]'
+          }
+        }
+
         Object.keys(inputs).forEach(key => {
           const value = inputs[key]
 
           if (Array.isArray(value)) {
-            params[key] = value.map((file: any) => {
+            const files = value.map((file: any) => {
               if (file.url) {
                 return file
               } else {
@@ -130,6 +149,12 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                 }
               }
             })
+            // file 类型转为单个对象（空则为 null）；array[file] 及其余数组保持数组格式
+            if (inputTypeMap[key] === 'file') {
+              params[key] = files.length > 0 ? files[0] : null
+            } else {
+              params[key] = files
+            }
           } else {
             params[key] = value;
           }
@@ -256,7 +281,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
           headerType="borderless"
           headerClassName="rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!"
           className="rb:h-full! rb:hover:shadow-none!"
-          bodyClassName="rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:px-3! rb:pt-0! rb:pb-3!"
+          bodyClassName="rb:overflow-y-auto! rb:h-[calc(100%-80px)]! rb:px-3! rb:pt-0! rb:pb-3!"
         >
           <Form form={form} layout="vertical" size="small" className="rb:mb-0!">
             <Flex vertical gap={12}>

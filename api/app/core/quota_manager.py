@@ -10,7 +10,9 @@ from functools import wraps
 from typing import Optional, Callable, Dict, Any
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_auth_logger
@@ -97,6 +99,11 @@ def _get_tenant_id_from_kwargs(db: Session, kwargs: dict):
     return None
 
 
+async def _get_tenant_id_from_kwargs_async(db: AsyncSession, kwargs: dict):
+    """Resolve tenant context through AsyncSession without sync DB access in the event loop."""
+    return await db.run_sync(lambda sync_db: _get_tenant_id_from_kwargs(sync_db, kwargs))
+
+
 def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
     """
     获取租户的配额配置
@@ -129,14 +136,42 @@ def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def _get_quota_config_async(db: AsyncSession, tenant_id: UUID) -> Optional[Dict[str, Any]]:
+    """Async version of _get_quota_config.
+
+    Community edition: db is unused (falls through to DEFAULT_FREE_PLAN).
+    SaaS edition: premium's TenantSubscriptionService path still sync; callers
+    with AsyncSession should be aware until premium provides an async counterpart.
+    """
+    # 尝试从 premium 模块获取（SaaS 版）
+    try:
+        from premium.platform_admin.package_plan_service import TenantSubscriptionService
+        quota_config = await TenantSubscriptionService(db).get_effective_quota_async(tenant_id)
+        if quota_config:
+            logger.debug(f"从 premium 模块获取租户 {tenant_id} 配额配置")
+            return quota_config
+        logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
+    except (ModuleNotFoundError, ImportError):
+        logger.debug("premium 模块不存在，使用社区版免费套餐配额")
+
+    # 降级到社区版配置文件
+    try:
+        from app.config.default_free_plan import DEFAULT_FREE_PLAN
+        logger.debug(f"使用社区版免费套餐配额: tenant={tenant_id}")
+        return DEFAULT_FREE_PLAN.get("quotas")
+    except Exception as e:
+        logger.error(f"无法从配置文件获取配额: {e}")
+        return None
+
+
 def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     """
     获取租户套餐的 API 操作速率限制（QPS 上限）
-    
+
     该函数兼容社区版和 SaaS 版：
     - SaaS 版：从 premium 模块的套餐配额读取
     - 社区版：从 default_free_plan.py 配置文件读取
-    
+
     Returns:
         int: api_ops_rate_limit 值，如果未配置则返回 None
     """
@@ -146,10 +181,18 @@ def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     return None
 
 
+async def get_api_ops_rate_limit_async(db, tenant_id: UUID) -> Optional[int]:
+    """Async version of get_api_ops_rate_limit."""
+    quota_config = await _get_quota_config_async(db, tenant_id)
+    if quota_config:
+        return quota_config.get("api_ops_rate_limit")
+    return None
+
+
 def get_end_user_memory_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     quota_config = _get_quota_config(db, tenant_id)
     if quota_config:
-        return quota_config.get("end_user_memory_limit")
+        return quota_config.get("end_user_memory_limit", 300)
     return None
 
 
@@ -234,6 +277,35 @@ class QuotaUsageRepository:
         if trial_user_ids:
             query = query.filter(~EndUser.other_id.in_(trial_user_ids))
         return query.count()
+
+    async def count_end_users_async(self, tenant_id: UUID, workspace_id: Optional[UUID] = None) -> int:
+        from app.models.end_user_model import EndUser
+        from app.models.workspace_model import Workspace
+        from app.models.user_model import User
+
+        trial_user_ids = [
+            str(user_id)
+            for user_id in (
+                await self.db.scalars(
+                    select(User.id).where(User.tenant_id == tenant_id)
+                )
+            ).all()
+        ]
+
+        stmt = (
+            select(func.count())
+            .select_from(EndUser)
+            .join(Workspace, EndUser.workspace_id == Workspace.id)
+            .where(EndUser.is_active == True)
+        )
+        if workspace_id:
+            stmt = stmt.where(EndUser.workspace_id == workspace_id)
+        else:
+            stmt = stmt.where(Workspace.tenant_id == tenant_id)
+        if trial_user_ids:
+            stmt = stmt.where(~EndUser.other_id.in_(trial_user_ids))
+
+        return int((await self.db.scalar(stmt)) or 0)
 
     def count_models(self, tenant_id: UUID) -> int:
         from app.models.models_model import ModelConfig
@@ -326,6 +398,59 @@ def _check_quota(
         raise
 
 
+async def _check_quota_async(
+        db: AsyncSession,
+        tenant_id: UUID,
+        quota_type: str,
+        resource_name: str,
+        usage_func: Optional[Callable] = None,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """Run the existing quota semantics through an AsyncSession greenlet context."""
+    await db.run_sync(
+        lambda sync_db: _check_quota(
+            sync_db,
+            tenant_id,
+            quota_type,
+            resource_name,
+            usage_func,
+            workspace_id,
+        )
+    )
+
+
+async def check_end_user_quota_async(
+        db: AsyncSession,
+        tenant_id: UUID,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """Async 版终端用户配额检查，供 chat 入口等 AsyncSession 主链复用。"""
+    quota_config = await _get_quota_config_async(db, tenant_id)
+    if not quota_config:
+        logger.warning(f"租户 {tenant_id} 无有效配额配置，跳过配额检查")
+        return
+
+    quota_limit = quota_config.get("end_user_quota")
+    if quota_limit is None:
+        logger.warning("配额配置未包含 end_user_quota，跳过配额检查")
+        return
+
+    current_usage = await QuotaUsageRepository(db).count_end_users_async(
+        tenant_id,
+        workspace_id,
+    )
+    if current_usage >= quota_limit:
+        logger.warning(
+            f"配额不足: tenant={tenant_id}, workspace={workspace_id}, type=end_user_quota, "
+            f"usage={current_usage}, limit={quota_limit}"
+        )
+        raise QuotaExceededError(
+            resource="end_user",
+            current_usage=current_usage,
+            quota_limit=quota_limit,
+        )
+
+
 # ─── 具名装饰器 ────────────────────────────────────────────────────────────
 
 def check_workspace_quota(func: Callable) -> Callable:
@@ -411,11 +536,14 @@ def check_app_quota(func: Callable) -> Callable:
 def check_knowledge_capacity_quota(func: Callable) -> Callable:
     @wraps(func)
     async def async_wrapper(*args, **kwargs):
-        db: Session = kwargs.get("db")
+        db: Session | AsyncSession = kwargs.get("db")
         if not db:
             logger.error(f"配额检查失败：{func.__name__} 缺少 db 参数，拒绝请求")
             raise InternalServerError()
-        tenant_id = _get_tenant_id_from_kwargs(db, kwargs)
+        if isinstance(db, AsyncSession):
+            tenant_id = await _get_tenant_id_from_kwargs_async(db, kwargs)
+        else:
+            tenant_id = _get_tenant_id_from_kwargs(db, kwargs)
         if not tenant_id:
             logger.error(f"配额检查失败：{func.__name__} 无法获取 tenant_id，拒绝请求")
             raise InternalServerError()
@@ -423,7 +551,22 @@ def check_knowledge_capacity_quota(func: Callable) -> Callable:
         if not workspace_id:
             logger.error(f"配额检查失败：{func.__name__} 无法获取 workspace_id，拒绝请求")
             raise InternalServerError()
-        _check_quota(db, tenant_id, "knowledge_capacity_quota", "knowledge_capacity", workspace_id=workspace_id)
+        if isinstance(db, AsyncSession):
+            await _check_quota_async(
+                db,
+                tenant_id,
+                "knowledge_capacity_quota",
+                "knowledge_capacity",
+                workspace_id=workspace_id,
+            )
+        else:
+            _check_quota(
+                db,
+                tenant_id,
+                "knowledge_capacity_quota",
+                "knowledge_capacity",
+                workspace_id=workspace_id,
+            )
         return await func(*args, **kwargs)
 
     @wraps(func)

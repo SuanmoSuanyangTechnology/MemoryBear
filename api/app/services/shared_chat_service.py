@@ -6,7 +6,9 @@ import uuid
 from typing import Optional, Dict, Any, AsyncGenerator
 
 from deprecated import deprecated
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.error_codes import BizCode
@@ -28,7 +30,7 @@ logger = get_business_logger()
 class SharedChatService:
     """基于分享链接的聊天服务"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self.conversation_service = ConversationService(db)
         self.share_service = ReleaseShareService(db)
@@ -102,6 +104,35 @@ class SharedChatService:
 
         return share, release
 
+    async def get_release_by_share_token_async(
+            self,
+            share_token: str,
+            password: Optional[str] = None
+    ) -> tuple[ReleaseShare, AppRelease]:
+        share = await self.share_service.repo.get_by_share_token_async(share_token)
+        if not share:
+            raise ResourceNotFoundException("分享链接", share_token)
+
+        if not share.is_enabled:
+            raise BusinessException("该分享链接已被禁用", BizCode.SHARE_DISABLED)
+
+        if share.require_password:
+            if not password:
+                raise BusinessException("需要提供访问密码", BizCode.PASSWORD_REQUIRED)
+            if not self.share_service.verify_password(share_token, password):
+                raise BusinessException("访问密码错误", BizCode.INVALID_PASSWORD)
+
+        release = await self.db.get(AppRelease, share.release_id)
+        if not release:
+            raise ResourceNotFoundException("发布版本", str(share.release_id))
+
+        try:
+            await self.share_service.repo.increment_view_count_async(share.id)
+        except Exception as e:
+            logger.warning(f"更新访问统计失败: {str(e)}")
+
+        return share, release
+
     def create_or_get_conversation(
             self,
             share_token: str,
@@ -149,6 +180,40 @@ class SharedChatService:
             }
         )
 
+        return conversation
+
+    async def create_or_get_conversation_async(
+            self,
+            share_token: str,
+            conversation_id: Optional[uuid.UUID] = None,
+            user_id: Optional[str] = None,
+            password: Optional[str] = None
+    ) -> Conversation:
+        share, release = await self.get_release_by_share_token_async(share_token, password)
+
+        if conversation_id:
+            try:
+                conversation = await self.conversation_service.create_or_get_conversation_async(
+                    app_id=release.app_id,
+                    workspace_id=release.app.workspace_id,
+                    is_draft=False,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                )
+                return conversation
+            except ResourceNotFoundException:
+                logger.warning(
+                    "会话不存在，将创建新会话",
+                    extra={"conversation_id": str(conversation_id)}
+                )
+
+        conversation = await self.conversation_service.create_conversation_async(
+            app_id=release.app_id,
+            workspace_id=release.app.workspace_id,
+            user_id=user_id,
+            is_draft=False,
+            config_snapshot=release.config
+        )
         return conversation
 
     @deprecated("Use the chat method under app_chat_service instead.")
