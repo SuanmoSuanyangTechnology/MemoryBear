@@ -45,6 +45,8 @@ import TechnicalSupportSvg from '@/assets/images/package/technical_support.svg?r
 import ApiOpsSvg from '@/assets/images/package/api_ops.svg?react'
 import arrowSvg from '@/assets/images/package/arrow.svg?react'
 import slaSvg from '@/assets/images/package/sla.svg?react';
+import MemoryWriteQpsSvg from '@/assets/images/package/memory_write_qps.svg?react'
+import UserMemoryLimitSvg from '@/assets/images/package/memory_limit.svg?react'
 
 const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   space: SpaceSvg,
@@ -58,6 +60,8 @@ const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   technical_support: TechnicalSupportSvg,
   api_ops: ApiOpsSvg,
   sla: slaSvg,
+  memory_write_qps: MemoryWriteQpsSvg,
+  user_memory_limit: UserMemoryLimitSvg,
 }
 const btnClassNames = {
   permanent_free: 'rb:h-10! rb:rounded-[8px]!',
