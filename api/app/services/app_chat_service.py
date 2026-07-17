@@ -42,7 +42,6 @@ from app.services.tool_orchestrator import ToolOrchestrator
 from app.services.context_assembler import (
     ContextEvidence,
     append_external_context_rule,
-    resolve_evidence_max_tokens,
 )
 
 logger = get_business_logger()
@@ -841,9 +840,6 @@ class AppChatService:
             context_query=message,
             context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
             context_evidence_loader=load_annotation_context,
-            evidence_max_tokens=resolve_evidence_max_tokens(
-                model_parameters.get("max_tokens") or 2000
-            ),
         )
 
         # 为需要运行时上下文的工具注入上下文
@@ -1286,9 +1282,6 @@ class AppChatService:
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
-                evidence_max_tokens=resolve_evidence_max_tokens(
-                    effective_params.get("max_tokens") or 2000
-                ),
             )
 
             # 为需要运行时上下文的工具注入上下文

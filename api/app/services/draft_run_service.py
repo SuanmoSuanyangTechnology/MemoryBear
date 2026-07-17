@@ -50,7 +50,6 @@ from app.services.tool_orchestrator import ToolOrchestrator
 from app.services.context_assembler import (
     ContextEvidence,
     append_external_context_rule,
-    resolve_evidence_max_tokens,
 )
 from app.services.tool_service import ToolService
 
@@ -1361,9 +1360,6 @@ class AgentRunService:
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
-                evidence_max_tokens=resolve_evidence_max_tokens(
-                    effective_params.get("max_tokens") or 2000
-                ),
             )
 
             for t in tools:
@@ -1797,9 +1793,6 @@ class AgentRunService:
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
-                evidence_max_tokens=resolve_evidence_max_tokens(
-                    effective_params.get("max_tokens") or 2000
-                ),
             )
 
             for t in tools:

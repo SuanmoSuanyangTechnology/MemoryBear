@@ -249,7 +249,6 @@ class LangChainAgent:
             context_query: str = "",
             context_base_text: str = "",
             context_evidence_loader: Optional[Any] = None,
-            evidence_max_tokens: Optional[int] = None,
     ):
         """初始化 LangChain Agent
 
@@ -279,10 +278,7 @@ class LangChainAgent:
         self._context_base_text = context_base_text
         self._context_evidence_loader = context_evidence_loader
         from app.services.context_assembler import resolve_evidence_max_tokens
-        self._evidence_max_tokens = max(
-            1,
-            int(evidence_max_tokens or resolve_evidence_max_tokens(max_tokens)),
-        )
+        self._evidence_max_tokens = resolve_evidence_max_tokens(max_tokens)
 
         # 构建工具名 → 元数据映射（用于执行记录中补充具体资源信息）
         self._tool_meta_map: Dict[str, Dict[str, Any]] = {}
