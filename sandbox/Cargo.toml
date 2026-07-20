@@ -1,0 +1,4 @@
+[workspace]
+resolver = "2"
+members = ["server", "lib/sandbox_seccomp"]
+default-members = ["server"]

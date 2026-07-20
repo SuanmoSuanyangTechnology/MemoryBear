@@ -154,7 +154,7 @@ class CodeNode(BaseNode):
                 response = await client.post(
                     f"{settings.SANDBOX_URL}/v1/sandbox/run",
                     headers={
-                        "x-api-key": 'redbear-sandbox'
+                        "x-api-key": settings.SANDBOX_API_KEY
                     },
                     json={
                         "language": self.typed_config.language,
