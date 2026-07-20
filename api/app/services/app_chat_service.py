@@ -158,7 +158,7 @@ class AppChatService:
                 )
             )
             rows = result.scalars().all()
-        return {str(row.id): row for row in rows}
+            return {str(row.id): row for row in rows}
 
     async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
         if self._uses_async_session():
