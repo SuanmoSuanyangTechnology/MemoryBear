@@ -147,18 +147,28 @@ class AppChatService:
             return await self.db.get(model, identity)
         return self.db.get(model, identity)
 
-    async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, FileMetadata]:
+    async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, SimpleNamespace]:
         if not local_ids:
             return {}
         async with get_async_db_context() as db:
             result = await db.execute(
-                select(FileMetadata).where(
+                select(
+                    FileMetadata.id,
+                    FileMetadata.file_name,
+                    FileMetadata.file_size,
+                ).where(
                     FileMetadata.id.in_(local_ids),
                     FileMetadata.status == "completed",
                 )
             )
-            rows = result.scalars().all()
-            return {str(row.id): row for row in rows}
+            # 在 Session 关闭前复制为普通值，避免调用方访问 detached ORM 实例。
+            return {
+                str(row.id): SimpleNamespace(
+                    file_name=row.file_name,
+                    file_size=row.file_size,
+                )
+                for row in result.all()
+            }
 
     async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
         if self._uses_async_session():
