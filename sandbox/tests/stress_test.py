@@ -19,6 +19,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import base64
 import json
 import os
@@ -26,7 +27,6 @@ import random
 import statistics
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -255,25 +255,21 @@ LANGUAGE_MAP = {
 # ── HTTP client ──────────────────────────────────────────────────────────
 
 
-# Shared httpx client (set up in main() once CLI flags are known).
-# This module-level variable is initialised before any thread touches it,
-# so the single assignment is safe without a lock.  httpx.Client itself
-# is explicitly documented as thread-safe.
-_http_client: "Optional[httpx.Client]" = None
+# Shared httpx async client (set up in main() once CLI flags are known).
+# Each test run creates its own semaphore for concurrency control, while the
+# client itself is shared across runs (connection-pool warmth is preserved).
+_http_client: "Optional[httpx.AsyncClient]" = None
 
 
 def init_http_client(*, keep_alive: bool = True, max_connections: int = 25) -> None:
-    """Initialise the module-level httpx client.
+    """Initialise the module-level async httpx client.
 
     Parameters
     ----------
     keep_alive:
-        When ``True`` (default) connections are reused across requests.
-        A TCP handshake happens once per thread, then every subsequent
-        request on that connection only pays HTTP overhead (~1-2 ms).
-        With 25 concurrent threads this still distributes well across K8s
-        pods while cutting per-request latency by ~80 % vs a new TCP
-        handshake every time.
+        When ``True`` (default) connections are reused across requests
+        (HTTP keep-alive / connection pooling).  This cuts per-request
+        latency by ~80 % vs a new TCP handshake every time.
 
         Set to ``False`` (``--no-keep-alive``) to force a fresh TCP
         connection per request — useful for verifying LB per-request
@@ -290,7 +286,7 @@ def init_http_client(*, keep_alive: bool = True, max_connections: int = 25) -> N
     # Transport-level retries are OFF — they have zero backoff, which turns
     # a transient network blip into a retry storm.  We handle retry ourselves
     # in send_request() with exponential backoff + jitter.
-    _http_client = httpx.Client(
+    _http_client = httpx.AsyncClient(
         base_url=BASE_URL,
         timeout=httpx.Timeout(30.0, connect=30.0),
         limits=limits,
@@ -299,6 +295,14 @@ def init_http_client(*, keep_alive: bool = True, max_connections: int = 25) -> N
             "X-Api-Key": API_KEY,
         },
     )
+
+
+async def close_http_client() -> None:
+    """Shut down the shared async client and release connections."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
 
 
 # ── Request sender ───────────────────────────────────────────────────────
@@ -318,12 +322,12 @@ _MAX_RETRIES = 3
 _RETRY_BASE_SEC = 0.125   # first retry 125 ms, then 250 ms, then 500 ms
 
 
-def send_request(task: TaskDef, language: str) -> tuple[float, int, str]:
+async def send_request(task: TaskDef, language: str) -> tuple[float, int, str]:
     """Send one code-execution request. Returns (latency_ms, http_status, body).
 
     Transient connection errors are retried up to 3 times with exponential
     backoff + random jitter, so a brief network hiccup doesn't turn into a
-    cascade of simultaneous retries across all 200 threads.
+    cascade of simultaneous retries across all concurrent tasks.
     """
     assert _http_client is not None, "init_http_client() must be called first"
 
@@ -335,7 +339,7 @@ def send_request(task: TaskDef, language: str) -> tuple[float, int, str]:
 
     for attempt in range(1 + _MAX_RETRIES):  # 1 initial + 3 retries
         try:
-            resp = _http_client.post("/v1/sandbox/run", json=payload)
+            resp = await _http_client.post("/v1/sandbox/run", json=payload)
             latency = (time.perf_counter() - t0) * 1000
             return latency, resp.status_code, resp.text
         except _RETRYABLE_EXC as e:
@@ -344,7 +348,7 @@ def send_request(task: TaskDef, language: str) -> tuple[float, int, str]:
                 # exponential backoff: 125, 250, 500 ms + 0-25% jitter
                 sleep_s = _RETRY_BASE_SEC * (2 ** attempt)
                 sleep_s += random.uniform(0, sleep_s * 0.25)
-                time.sleep(sleep_s)
+                await asyncio.sleep(sleep_s)
         except Exception as e:
             latency = (time.perf_counter() - t0) * 1000
             return latency, 0, f"{type(e).__name__}: {e}"
@@ -393,10 +397,10 @@ def check_response(task: TaskDef, language: str, status: int, body: str) -> tupl
     return None, None
 
 
-def warmup(task: TaskDef, language: str, n: int = 3) -> None:
+async def warmup(task: TaskDef, language: str, n: int = 3) -> None:
     """Send a few warm-up requests to prime caches / connections."""
     for _ in range(n):
-        send_request(task, language)
+        await send_request(task, language)
 
 
 # ── Single-run executor ──────────────────────────────────────────────────
@@ -431,25 +435,45 @@ def _percentile(sorted_data: list[float], p: int) -> float:
     return round(sorted_data[idx], 1)
 
 
-def run_single(task: TaskDef, language: str, total: int, concurrency: int) -> RunResult:
-    """Execute `total` requests with `concurrency` concurrent workers for one task."""
+async def run_single(task: TaskDef, language: str, total: int, concurrency: int) -> RunResult:
+    """Execute `total` requests with up to `concurrency` in-flight at a time.
+
+    Uses ``asyncio`` + ``httpx.AsyncClient`` so concurrency is limited by the
+    semaphore rather than by OS threads.  This matches the async nature of the
+    sandbox server under test and avoids thread-per-request overhead at high
+    concurrency (e.g. 200).
+    """
     latencies: list[float] = []
     error_kinds: list[str] = []
     first_failure: Optional[str] = None
+    # ``first_failure`` is protected by a lock so the first failure in
+    # completion order is captured deterministically.
+    first_failure_lock = asyncio.Lock()
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _one_request(_index: int) -> None:
+        nonlocal first_failure
+
+        async with semaphore:
+            lat, status, body = await send_request(task, language)
+
+        err_kind, err_detail = check_response(task, language, status, body)
+        if err_kind:
+            error_kinds.append(err_kind)
+            async with first_failure_lock:
+                if first_failure is None and err_detail:
+                    first_failure = err_detail
+        else:
+            latencies.append(lat)
 
     t_start = time.perf_counter()
 
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [pool.submit(send_request, task, language) for _ in range(total)]
-        for future in as_completed(futures):
-            lat, status, body = future.result()
-            err_kind, err_detail = check_response(task, language, status, body)
-            if err_kind:
-                error_kinds.append(err_kind)
-                if first_failure is None and err_detail:
-                    first_failure = err_detail
-            else:
-                latencies.append(lat)
+    # Launch all tasks at once — the semaphore gates actual concurrency.
+    tasks = [asyncio.create_task(_one_request(i)) for i in range(total)]
+    # ``return_exceptions=True`` so a single crashed task (e.g. a bug in
+    # ``send_request``) doesn't cancel all other in-flight requests.
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     elapsed = time.perf_counter() - t_start
     ok = len(latencies)
@@ -838,78 +862,95 @@ Examples:
     # ── Init HTTP client ──
     init_http_client(keep_alive=not args.no_keep_alive, max_connections=args.max_connections)
 
-    # ── Health check ──
-    print(f"Checking {BASE_URL}/health ... ", end="", flush=True)
+    # ── Run async test suite ──
     try:
-        resp = _http_client.get("/health")
-        data = resp.json()
-        if data.get("ok"):
-            print(f"{GREEN}OK{RESET} (workers={data.get('workers', '?')})")
-        else:
-            print(f"{RED}FAIL{RESET}: server returned ok=false")
+        asyncio.run(_run(args))
+    except KeyboardInterrupt:
+        print(f"\n{YELLOW}Interrupted by user{RESET}")
+        sys.exit(130)
+    # asyncio.run() closes the event loop; _run() cleans up the client on the
+    # same loop before returning (see finally block inside _run).
+
+
+async def _run(args: argparse.Namespace) -> None:
+    """Core test logic, runs inside ``asyncio.run()``."""
+
+    try:
+        # ── Health check ──
+        print(f"Checking {BASE_URL}/health ... ", end="", flush=True)
+        try:
+            resp = await _http_client.get("/health")
+            data = resp.json()
+            if data.get("ok"):
+                print(f"{GREEN}OK{RESET} (workers={data.get('workers', '?')})")
+            else:
+                print(f"{RED}FAIL{RESET}: server returned ok=false")
+                sys.exit(1)
+        except Exception as e:
+            print(f"{RED}FAIL{RESET}: {e}")
             sys.exit(1)
-    except Exception as e:
-        print(f"{RED}FAIL{RESET}: {e}")
-        sys.exit(1)
 
-    # ── Determine languages ──
-    languages: list[str] = (
-        ["python3", "javascript"] if args.language == "all" else [args.language]
-    )
+        # ── Determine languages ──
+        languages: list[str] = (
+            ["python3", "javascript"] if args.language == "all" else [args.language]
+        )
 
-    # ── Determine tasks ──
-    tasks = [ALL_TASKS[name] for name in args.task]
+        # ── Determine tasks ──
+        tasks = [ALL_TASKS[name] for name in args.task]
 
-    # ── Run tests ──
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    timestamp_file = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        # ── Run tests ──
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        timestamp_file = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    total_combinations = len(tasks) * len(languages) * len(args.concurrency)
-    print(f"\n{BOLD}Test plan:{RESET} {len(tasks)} task(s) × {len(languages)} language(s) × "
-          f"{len(args.concurrency)} concurrency level(s) = {total_combinations} run(s)")
-    print(f"Total requests formula: concurrency × {args.multiplier} (min 10)")
-    print()
+        total_combinations = len(tasks) * len(languages) * len(args.concurrency)
+        print(f"\n{BOLD}Test plan:{RESET} {len(tasks)} task(s) × {len(languages)} language(s) × "
+              f"{len(args.concurrency)} concurrency level(s) = {total_combinations} run(s)")
+        print(f"Total requests formula: concurrency × {args.multiplier} (min 10)")
+        print()
 
-    all_results: list[RunResult] = []
-    run_num = 0
+        all_results: list[RunResult] = []
+        run_num = 0
 
-    for task in tasks:
-        for language in languages:
-            if args.warmup:
-                print(f"  {DIM}Warming up {task.name} ({language})...{RESET}", end=" ", flush=True)
-                warmup(task, language, n=3)
-                print(f"{GREEN}done{RESET}")
+        for task in tasks:
+            for language in languages:
+                if args.warmup:
+                    print(f"  {DIM}Warming up {task.name} ({language})...{RESET}", end=" ", flush=True)
+                    await warmup(task, language, n=3)
+                    print(f"{GREEN}done{RESET}")
 
-            for concurrency in args.concurrency:
-                run_num += 1
-                total_requests = args.total if args.total is not None else max(concurrency * args.multiplier, 10)
+                for concurrency in args.concurrency:
+                    run_num += 1
+                    total_requests = args.total if args.total is not None else max(concurrency * args.multiplier, 10)
 
-                print(f"  [{run_num}/{total_combinations}] {task.name} ({language}) "
-                      f"c={concurrency} n={total_requests} ... ", end="", flush=True)
+                    print(f"  [{run_num}/{total_combinations}] {task.name} ({language}) "
+                          f"c={concurrency} n={total_requests} ... ", end="", flush=True)
 
-                result = run_single(task, language, total_requests, concurrency)
-                all_results.append(result)
+                    result = await run_single(task, language, total_requests, concurrency)
+                    all_results.append(result)
 
-                cf = _color_for_fail_rate(result.ok, result.failed)
-                print(f"{cf}{result.ok} ok, {result.failed} fail, "
-                      f"{result.elapsed_s}s, {result.throughput} req/s, "
-                      f"p95={result.latency_p95}ms{RESET}")
+                    cf = _color_for_fail_rate(result.ok, result.failed)
+                    print(f"{cf}{result.ok} ok, {result.failed} fail, "
+                          f"{result.elapsed_s}s, {result.throughput} req/s, "
+                          f"p95={result.latency_p95}ms{RESET}")
 
-    # ── Generate reports ──
-    print_report(all_results, timestamp)
+        # ── Generate reports ──
+        print_report(all_results, timestamp)
 
-    json_path = args.output_dir / f"report_{timestamp_file}.json"
-    save_json_report(all_results, timestamp, json_path)
+        json_path = args.output_dir / f"report_{timestamp_file}.json"
+        save_json_report(all_results, timestamp, json_path)
 
-    if args.markdown:
-        md_path = args.output_dir / f"report_{timestamp_file}.md"
-        save_markdown_report(all_results, timestamp, md_path)
+        if args.markdown:
+            md_path = args.output_dir / f"report_{timestamp_file}.md"
+            save_markdown_report(all_results, timestamp, md_path)
 
-    # ── Exit code ──
-    total_failed = sum(r.failed for r in all_results)
-    if total_failed > 0:
-        print(f"{RED}{total_failed} total failures across all runs{RESET}")
-        sys.exit(1)
+        # ── Exit code ──
+        total_failed = sum(r.failed for r in all_results)
+        if total_failed > 0:
+            print(f"{RED}{total_failed} total failures across all runs{RESET}")
+            sys.exit(1)
+    finally:
+        # Close on the SAME event loop the client was created on.
+        await close_http_client()
 
 
 if __name__ == "__main__":
