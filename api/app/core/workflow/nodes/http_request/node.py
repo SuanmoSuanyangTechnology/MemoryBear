@@ -14,6 +14,7 @@ import magic
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.http_client import get_http_client
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
 from app.core.workflow.utils.file_processor import mime_to_file_type
@@ -365,13 +366,8 @@ class HttpRequestNode(BaseNode):
         rendered_url = self._render_template(self.typed_config.url, variable_pool)
         built_headers = self._build_header(variable_pool) | self._build_auth(variable_pool)
         built_params = self._build_params(variable_pool)
-        async with httpx.AsyncClient(
-                verify=self.typed_config.verify_ssl,
-                timeout=self._build_timeout(),
-                headers=built_headers,
-                params=built_params,
-                follow_redirects=True
-        ) as client:
+
+        async def _execute_with_client(client: AsyncClient) -> dict | str:
             retries = self.typed_config.retry.max_attempts
             while retries > 0:
                 try:
@@ -379,6 +375,10 @@ class HttpRequestNode(BaseNode):
                     built_content = await self._build_content(variable_pool)
                     resp = await request_func(
                         url=rendered_url,
+                        headers=built_headers,
+                        params=built_params,
+                        timeout=self._build_timeout(),
+                        follow_redirects=True,
                         **built_content
                     )
                     resp.raise_for_status()
@@ -421,3 +421,10 @@ class HttpRequestNode(BaseNode):
                         )
                         return {"output": "ERROR"}
                 raise RuntimeError("http request failed")
+
+        # ponytail: shared client keeps connection reuse on the hot path; fall back only when a node explicitly disables SSL verify.
+        if self.typed_config.verify_ssl:
+            return await _execute_with_client(get_http_client())
+
+        async with httpx.AsyncClient(verify=False) as client:
+            return await _execute_with_client(client)

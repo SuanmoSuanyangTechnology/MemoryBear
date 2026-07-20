@@ -55,6 +55,7 @@ class InternalReadInput(BaseModel):
         description="要包含的 Neo4j 节点类型列表，如 CHUNK, COMMUNITY, DIALOGUE 等。不传则包含全部类型。",
     )
     limit: int = Field(default=10, description="返回的记忆数量上限", ge=1, le=100)
+    skip_summary: bool = Field(default=False, description="跳过摘要")
 
 
 class WriteMessageItem(BaseModel):

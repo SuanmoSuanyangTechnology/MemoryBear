@@ -631,6 +631,92 @@ def cur_workspace_access_guard():
     return _decorator
 
 
+def cur_workspace_access_guard_async():
+    """
+    @ 装饰器（异步版本）：纯异步的工作空间访问校验。
+    要求端点函数签名包含：
+      - current_user: CurrentUserSnapshot = Depends(get_current_user_async)
+
+    使用独立的 AsyncSession 做权限查询，不阻塞事件循环。
+    仅支持 async def 端点。
+    """
+    from functools import wraps
+
+    def _decorator(func):
+        @wraps(func)
+        async def _wrapper(*args, **kwargs):
+            guard_started_at = time.perf_counter()
+            user = kwargs.get("current_user")
+            workspace_id = user.current_workspace_id
+            if workspace_id is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+
+            await _check_workspace_access_async(user, workspace_id)
+
+            auth_logger.info(
+                "[TIMING] auth.cur_workspace_access_guard_async stage=checked elapsed_ms=%s workspace_id=%s user_id=%s",
+                round((time.perf_counter() - guard_started_at) * 1000, 2),
+                str(workspace_id),
+                str(user.id),
+            )
+            return await func(*args, **kwargs)
+
+        return _wrapper
+
+    return _decorator
+
+
+async def _check_workspace_access_async(user, workspace_id: uuid.UUID):
+    """纯异步的工作空间权限校验。使用独立 AsyncSession。"""
+    from app.db import get_async_db_context
+    from app.models.workspace_model import Workspace, WorkspaceMember
+    from sqlalchemy import select
+
+    async with get_async_db_context() as db:
+        # 1) 工作空间存在性
+        result = await db.execute(
+            select(Workspace).where(Workspace.id == workspace_id)
+        )
+        workspace = result.scalars().first()
+        if not workspace:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+        # 2) 超级用户跳过成员检查
+        if user.is_superuser:
+            if user.tenant_id == workspace.tenant_id:
+                return workspace
+            else:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+        # 3) 普通用户检查 membership
+        from app.core.permissions import permission_service, Subject, Resource, Action
+        from app.core.permissions.policies import WorkspaceMemberPolicy, SameTenantSuperuserPolicy
+
+        member_result = await db.execute(
+            select(WorkspaceMember).where(
+                WorkspaceMember.user_id == user.id,
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.is_active.is_(True),
+            )
+        )
+        member = member_result.scalars().first()
+        workspace_memberships = {workspace_id} if member else set()
+
+        subject = Subject.from_user(user, workspace_memberships=workspace_memberships)
+        resource = Resource.from_workspace(workspace)
+
+        temp_service = permission_service
+        if member:
+            temp_service.add_policy(WorkspaceMemberPolicy(allowed_actions={Action.READ, Action.UPDATE, Action.MANAGE}))
+        temp_service.add_policy(SameTenantSuperuserPolicy())
+
+        try:
+            permission_service.require_permission(subject, Action.READ, resource, error_message="Forbidden")
+            return workspace
+        except PermissionDeniedException:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
 def cur_workspace_access_guard_self_db():
     """
     @ 装饰器：在端点进入前执行工作空间访问校验（自带 db session 版本）。

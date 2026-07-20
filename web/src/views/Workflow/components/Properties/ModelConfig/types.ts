@@ -37,3 +37,18 @@ export interface ModelConfigForm {
   frequency_penalty?: EnableItem;
   [key: string]: any;
 }
+
+
+export type JsonSchema = Field[];
+export interface StructuredOutputSchemaModalRef {
+  handleOpen: (schema: JsonSchema) => void;
+  handleClose: () => void;
+}
+
+export interface Field {
+  name?: string;
+  type: string;
+  children?: Field[];
+  description?: string;
+  required?: boolean;
+}

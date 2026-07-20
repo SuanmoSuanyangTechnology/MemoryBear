@@ -250,13 +250,17 @@ class MemoryService:
         )
 
     @staticmethod
-    def dispatch_flush_conversation(conversation_id: str) -> int:
+    async def dispatch_flush_conversation(conversation_id: str) -> int:
         """Flush 兜底任务派发。"""
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
-        return dispatch_flush_conversation(conversation_id)
+        return await dispatch_flush_conversation(conversation_id)
 
     @staticmethod
-    async def delete_node_by_element_id(element_id: str, end_user_id: str) -> bool:
+    async def delete_node_by_element_id(
+        element_id: str,
+        end_user_id: str,
+        operator: uuid.UUID,
+    ) -> bool:
         """通过 elementId 删除 Neo4j 图节点（同时 DETACH DELETE 关联边）。"""
         from app.core.memory.models.service_models import MemoryContext
         from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
@@ -265,6 +269,7 @@ class MemoryService:
         return await pipeline.delete_node_by_element_id(
             element_id=element_id,
             end_user_id=end_user_id,
+            operator=operator,
         )
 
     @staticmethod
@@ -380,12 +385,20 @@ class MemoryService:
             history: list | None = None,
             limit: int = 10,
             includes: list | None = None,
+            skip_summary: bool = False,
     ) -> MemorySearchResult:
         if history is None:
             history = []
         if self.ctx.memory_config is None:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
-        return await ReadPipeLine(self.ctx).run(query, search_switch, history, limit, includes=includes)
+        return await ReadPipeLine(self.ctx).run(
+            query,
+            search_switch,
+            history,
+            limit,
+            includes=includes,
+            skip_summary=skip_summary
+        )
 
     async def forget(self) -> dict:
         return await ForgettingPipeline(self.ctx).run()

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 19:20:53
+ * @Last Modified time: 2026-07-16 17:18:50
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -14,11 +14,11 @@ import ChatContent from './ChatContent'
  * Provides complete chat interface functionality, including message display and input interaction
  */
 const Chat: FC<ChatProps> = ({
-  empty,
   data,
   onChange,
   onSend,
   loading,
+  message,
   contentClassName = '',
   children,
   fileList,
@@ -43,6 +43,7 @@ const Chat: FC<ChatProps> = ({
       {!readOnly &&
         <ChatInput
           fileList={fileList}
+          message={message}
           onChange={onChange}
           onSend={onSend}
           loading={loading}

@@ -1408,6 +1408,46 @@ def get_workspace_models_configs(
     return _build_workspace_models_response(configs, locale=locale)
 
 
+async def get_workspace_models_configs_async(
+        db: AsyncSession,
+        workspace_id: uuid.UUID,
+        user: User,
+        locale: str = "zh",
+) -> dict:
+    """Async version of get_workspace_models_configs.
+
+    Args:
+        db: 异步数据库会话
+        workspace_id: 工作空间ID
+        user: 当前用户
+        locale: 语言代码（zh / en），用于 i18n 告警消息
+
+    Returns:
+        dict: 包含 llm, embedding, rerank 的字典
+    """
+    from app.models.workspace_model import Workspace
+
+    business_logger.info(f"用户 {user.username} 请求获取工作空间 {workspace_id} 的模型配置")
+
+    await _check_workspace_member_permission_async(db, workspace_id, user)
+
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = result.scalars().first()
+
+    if workspace is None:
+        business_logger.error(f"工作空间不存在: workspace_id={workspace_id}")
+        raise BusinessException(
+            code=BizCode.WORKSPACE_NOT_FOUND,
+            message="工作空间不存在",
+        )
+
+    business_logger.info(
+        f"成功获取工作空间 {workspace_id} 的模型配置: "
+        f"llm={workspace.llm}, embedding={workspace.embedding}, rerank={workspace.rerank}"
+    )
+    return _build_workspace_models_response(workspace, locale=locale)
+
+
 async def validate_workspace_models_configs(
         db: Session,
         workspace_id: uuid.UUID,

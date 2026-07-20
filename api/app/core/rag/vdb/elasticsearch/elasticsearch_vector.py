@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -22,15 +22,28 @@ from app.models.models_model import ModelApiKey
 from app.services.model_service import ModelApiKeyService
 
 from app.models.knowledge_model import Knowledge
+from app.core.rag.retrieval.elasticsearch_queries import (
+    VECTOR_SEARCH_MODE_ENV as VECTOR_SEARCH_MODE_ENV,
+    VECTOR_SEARCH_MODE_KNN as VECTOR_SEARCH_MODE_KNN,
+    VECTOR_SEARCH_MODE_SCRIPT_SCORE as VECTOR_SEARCH_MODE_SCRIPT_SCORE,
+    build_full_text_query,
+    build_knn_query,
+    build_parent_lookup_query,
+    build_vector_filter_clauses,
+    build_vector_script_query,
+    full_text_hits_to_chunks,
+    merge_parent_chunks,
+    normalize_vector,
+    raise_on_shard_failures,
+    resolve_vector_search_mode,
+    vector_hits_to_chunks,
+)
 from app.core.rag.vdb.field import Field
 from app.core.rag.vdb.vector_base import BaseVector
 from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 
 logger = logging.getLogger(__name__)
 
-VECTOR_SEARCH_MODE_ENV = "ELASTICSEARCH_VECTOR_SEARCH_MODE"
-VECTOR_SEARCH_MODE_KNN = "knn"
-VECTOR_SEARCH_MODE_SCRIPT_SCORE = "script_score"
 DEFAULT_INDEX_REFRESH_INTERVAL = "1s"
 
 
@@ -488,66 +501,7 @@ class ElasticSearchVector(BaseVector):
 
     @staticmethod
     def _normalize_vector(vector: Any) -> list[float]:
-        if hasattr(vector, "tolist"):
-            return vector.tolist()
-        return list(vector)
-
-    @staticmethod
-    def _build_vector_filter_clauses(
-        file_names_filter: list[str] | None,
-        document_ids_include: list[str] | None,
-    ) -> list[dict[str, Any]]:
-        filters: list[dict[str, Any]] = [
-            {"term": {"metadata.status": 1}},
-            {"exists": {"field": Field.VECTOR.value}},
-        ]
-        if file_names_filter:
-            filters.append({"terms": {"metadata.file_name": file_names_filter}})
-        if document_ids_include:
-            filters.append({"terms": {Field.DOCUMENT_ID.value: document_ids_include}})
-        return filters
-
-    @staticmethod
-    def _resolve_knn_num_candidates(top_k: int, configured: Any = None) -> int:
-        raw_value = configured if configured is not None else os.getenv("ELASTICSEARCH_KNN_NUM_CANDIDATES")
-        if raw_value is not None:
-            try:
-                return max(int(raw_value), top_k)
-            except (TypeError, ValueError):
-                logger.warning(f"Invalid ELASTICSEARCH_KNN_NUM_CANDIDATES value: {raw_value}")
-        return max(top_k * 10, 100)
-
-    @staticmethod
-    def _resolve_vector_search_mode() -> str:
-        raw_value = os.getenv(VECTOR_SEARCH_MODE_ENV, VECTOR_SEARCH_MODE_SCRIPT_SCORE)
-        mode = raw_value.strip().lower()
-        if mode == VECTOR_SEARCH_MODE_KNN:
-            return VECTOR_SEARCH_MODE_KNN
-        if mode in ("", VECTOR_SEARCH_MODE_SCRIPT_SCORE):
-            return VECTOR_SEARCH_MODE_SCRIPT_SCORE
-
-        logger.warning(f"Invalid {VECTOR_SEARCH_MODE_ENV} value: {raw_value}, using script_score")
-        return VECTOR_SEARCH_MODE_SCRIPT_SCORE
-
-    @staticmethod
-    def _build_vector_script_query(
-        query_vector: list[float],
-        filters: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return {
-            "bool": {
-                "must": {
-                    "script_score": {
-                        "query": {"match_all": {}},
-                        "script": {
-                            "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
-                            "params": {"query_vector": query_vector},
-                        },
-                    }
-                },
-                "filter": filters,
-            }
-        }
+        return normalize_vector(vector)
 
     def _search_by_knn(
         self,
@@ -557,17 +511,10 @@ class ElasticSearchVector(BaseVector):
         filters: list[dict[str, Any]],
         knn_num_candidates: Any = None,
     ):
-        num_candidates = self._resolve_knn_num_candidates(top_k, knn_num_candidates)
-        knn_query = {
-            "field": Field.VECTOR.value,
-            "query_vector": query_vector,
-            "k": top_k,
-            "num_candidates": num_candidates,
-            "filter": filters,
-        }
+        knn_query = build_knn_query(query_vector, top_k, filters, knn_num_candidates)
         logger.debug(
             f"[ES search_by_vector] mode=knn indices={indices} top_k={top_k} "
-            f"num_candidates={num_candidates} vector_dims={len(query_vector)} filter_count={len(filters)}"
+            f"num_candidates={knn_query['num_candidates']} vector_dims={len(query_vector)} filter_count={len(filters)}"
         )
         return self._client.search(
             index=indices,
@@ -582,7 +529,7 @@ class ElasticSearchVector(BaseVector):
         top_k: int,
         filters: list[dict[str, Any]],
     ):
-        query_str = self._build_vector_script_query(query_vector, filters)
+        query_str = build_vector_script_query(query_vector, filters)
         logger.debug(
             f"[ES search_by_vector] mode=script_score indices={indices} top_k={top_k} "
             f"vector_dims={len(query_vector)} filter_count={len(filters)}"
@@ -603,51 +550,17 @@ class ElasticSearchVector(BaseVector):
         resolve_parents: bool,
         indices: str | None = None,
     ) -> list[DocumentChunk]:
-        self._raise_on_shard_failures(result, "vector search")
-        if "errors" in result:
-            raise ValueError(f"Error during query: {result['errors']}")
-
-        docs: list[DocumentChunk] = []
-        for res in result["hits"]["hits"]:
-            source = res["_source"]
-            page_content = source.get(Field.CONTENT_KEY.value)
-            metadata = source.get(Field.METADATA_KEY.value) or {}
-            chunk_type = source.get(Field.CHUNK_TYPE.value)
-            score = res["_score"] / 2 if normalize_script_score else res["_score"]
-
-            # QA chunk returns question and answer together as retrieval context.
-            if chunk_type == "qa":
-                question = source.get(Field.QUESTION.value, "")
-                answer = source.get(Field.ANSWER.value, "")
-                page_content = f"question: {question}\nanswer: {answer}"
-                metadata["chunk_type"] = "qa"
-                metadata["question"] = question
-                metadata["answer"] = answer
-
-            if score_threshold is None or score > score_threshold:
-                metadata["score"] = score
-                docs.append(DocumentChunk(page_content=page_content, metadata=metadata))
-
+        raise_on_shard_failures(result, "vector search")
+        docs = vector_hits_to_chunks(
+            result,
+            score_threshold,
+            normalize_script_score=normalize_script_score,
+        )
         return self.resolve_parent_chunks(docs, indices=indices) if resolve_parents else docs
 
     @staticmethod
     def _raise_on_shard_failures(result: dict[str, Any], context: str) -> None:
-        shards = result.get("_shards") or {}
-        failed = int(shards.get("failed") or 0)
-        if failed <= 0:
-            return
-        failures = shards.get("failures") or []
-        failure_summary = []
-        for failure in failures[:3]:
-            index = failure.get("index")
-            reason = failure.get("reason") or {}
-            reason_type = reason.get("type")
-            reason_text = reason.get("reason")
-            failure_summary.append(f"index={index}, type={reason_type}, reason={reason_text}")
-        raise ValueError(
-            f"Elasticsearch shard failures during {context}: failed={failed}, "
-            f"failures={failure_summary}"
-        )
+        raise_on_shard_failures(result, context)
 
     def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Search the nearest neighbors to a vector."""
@@ -666,7 +579,7 @@ class ElasticSearchVector(BaseVector):
         document_ids_include = kwargs.get("document_ids_include")
         if document_ids_include is None:
             document_ids_include = kwargs.get("document_ids_filter")
-        filters = self._build_vector_filter_clauses(file_names_filter, document_ids_include)
+        filters = build_vector_filter_clauses(file_names_filter, document_ids_include)
 
         logger.info(
             "[ES vector_search] indices=%s top_k=%s score_threshold=%s "
@@ -678,7 +591,7 @@ class ElasticSearchVector(BaseVector):
             len(document_ids_include or []),
         )
 
-        if self._resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
+        if resolve_vector_search_mode() == VECTOR_SEARCH_MODE_KNN:
             try:
                 result = self._search_by_knn(
                     indices=indices,
@@ -739,42 +652,11 @@ class ElasticSearchVector(BaseVector):
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multiple indexes are also supported, such as "index1, index2, index3"
         file_names_filter = kwargs.get("file_names_filter") # ["doc1", "doc2", "doc3"]
 
-        # Basic Query（BM25）
-        content_match_query = {
-            "multi_match": {
-                "query": query,
-                "fields": [Field.CONTENT_KEY.value, Field.VISION_TEXT.value],
-                "analyzer": "ik_max_word",
-            }
-        }
-        query_str: dict[str, Any] = {
-            "bool": {
-                "must": content_match_query,
-                "filter": [
-                    {"term": {"metadata.status": 1}},
-                ]
-            }
-        }
-
-        # If file_names_filter is passed in, merge the filtering conditions
-        if file_names_filter:
-            query_str = {
-                "bool": {
-                    "must": content_match_query,
-                    "filter": [
-                        {"term": {"metadata.status": 1}},
-                        {"terms": {"metadata.file_name": file_names_filter}},
-                    ],
-                }
-            }
-
         document_ids_include = kwargs.get("document_ids_include")
         if document_ids_include is None:
             document_ids_include = kwargs.get("document_ids_filter")
+        query_str = build_full_text_query(query, file_names_filter, document_ids_include)
         if document_ids_include:
-            query_str["bool"]["filter"].append({
-                "terms": {Field.DOCUMENT_ID.value: document_ids_include}
-            })
             logger.info(
                 "[ES full_text_search] indices=%s top_k=%s score_threshold=%s "
                 "file_filter_count=%s document_filter_count=%s",
@@ -804,39 +686,8 @@ class ElasticSearchVector(BaseVector):
         )
         # logger.info(result)
 
-        self._raise_on_shard_failures(result, "full text search")
-        if "errors" in result:
-            raise ValueError(f"Error during query: {result['errors']}")
-
-        docs_and_scores = []
-        max_score = result["hits"]["max_score"] or 1.0  # Get the maximum score. If it is None, use 1.0
-        for res in result["hits"]["hits"]:
-            source = res["_source"]
-            page_content = source.get(Field.CONTENT_KEY.value)
-            metadata = source.get(Field.METADATA_KEY.value, {})
-            chunk_type = source.get(Field.CHUNK_TYPE.value)
-
-            # QA chunk: 返回 Q+A 拼接作为上下文
-            if chunk_type == "qa":
-                question = source.get(Field.QUESTION.value, "")
-                answer = source.get(Field.ANSWER.value, "")
-                page_content = f"question: {question}\nanswer: {answer}"
-                metadata["chunk_type"] = "qa"
-                metadata["question"] = question
-                metadata["answer"] = answer
-
-            # Normalize the score to the [0,1] interval
-            normalized_score = res["_score"] / max_score
-            docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), normalized_score))
-
-        # docs = [doc for doc, score in docs_and_scores]
-        docs = []
-        for doc, score in docs_and_scores:
-            # check score threshold
-            if score_threshold is None or score > score_threshold:
-                if doc.metadata is not None:
-                    doc.metadata["score"] = score
-                    docs.append(doc)
+        raise_on_shard_failures(result, "full text search")
+        docs = full_text_hits_to_chunks(result, score_threshold)
 
         logger.debug(
             "[ES full_text_search] hits=%s returned_docs=%s score_threshold=%s",
@@ -855,12 +706,9 @@ class ElasticSearchVector(BaseVector):
         Non-child chunks (regular "chunk", "qa") pass through unchanged.
         """
         child_results = []
-        other_results = []
         for doc in chunks:
             if (doc.metadata or {}).get("chunk_type") == "child":
                 child_results.append(doc)
-            else:
-                other_results.append(doc)
 
         if not child_results:
             return chunks
@@ -870,60 +718,18 @@ class ElasticSearchVector(BaseVector):
         if not parent_ids:
             return chunks
 
-        # Batch-fetch parent chunks from ES by doc_id
-        parent_map = {}
         try:
             result = self._client.search(
                 index=indices or self._collection_name,
                 body={
-                    "query": {
-                        "bool": {
-                            "must": [
-                                {"terms": {"metadata.doc_id": parent_ids}}
-                            ]
-                        }
-                    }
+                    "query": build_parent_lookup_query(parent_ids),
                 },
                 size=len(parent_ids),
             )
-            for hit in result.get("hits", {}).get("hits", []):
-                source = hit["_source"]
-                parent_doc_id = source.get("metadata", {}).get("doc_id", "")
-                parent_map[parent_doc_id] = DocumentChunk(
-                    page_content=source.get(Field.CONTENT_KEY.value, ""),
-                    metadata=source.get(Field.METADATA_KEY.value, {}),
-                )
         except Exception as e:
             logger.warning(f"Failed to resolve parent chunks: {e}")
             return chunks
-
-        # Replace child content with parent content, dedup by parent_id
-        seen_parents: dict[str, DocumentChunk] = {}
-        for doc in child_results:
-            parent_id = doc.metadata.get("parent_id", "")
-            if parent_id in seen_parents:
-                existing = seen_parents[parent_id]
-                if doc.metadata.get("score", 0) > existing.metadata.get("score", 0):
-                    seen_parents[parent_id] = DocumentChunk(
-                        page_content=existing.page_content,
-                        metadata={**existing.metadata, "score": doc.metadata.get("score", 0)},
-                    )
-                continue
-
-            parent = parent_map.get(parent_id)
-            if parent:
-                # Replace page_content with parent's, preserve child's score
-                score = doc.metadata.get("score", 0)
-                merged_metadata = {**parent.metadata, "score": score, "chunk_type": "parent"}
-                seen_parents[parent_id] = DocumentChunk(
-                    page_content=parent.page_content,
-                    metadata=merged_metadata,
-                )
-            else:
-                # Parent not found, keep child as-is
-                seen_parents[parent_id] = doc
-
-        return list(seen_parents.values()) + other_results
+        return merge_parent_chunks(chunks, result.get("hits", {}).get("hits", []))
 
     def rerank(self, query: str, docs: list[DocumentChunk], top_k: int) -> list[DocumentChunk]:
         """

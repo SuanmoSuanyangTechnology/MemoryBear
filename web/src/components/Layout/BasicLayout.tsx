@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:12:42 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-24 15:07:38
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-07-14 16:13:15 
  */
 /**
  * BasicLayout Component
@@ -22,6 +22,7 @@ import { useEffect, type FC } from 'react';
 import { Layout } from 'antd';
 
 import { useUser } from '@/store/user';
+import ErrorBoundary from '@/components/ErrorBoundary'
 
 /**
  * Basic layout component for pages without navigation UI.
@@ -38,8 +39,10 @@ const BasicLayout: FC = () => {
 
   return (
     <Layout className="rb:min-h-screen!">
-      {/* Render child routes without additional UI */}
-      <Outlet />
+      <ErrorBoundary>
+        {/* Render child routes without additional UI */}
+        <Outlet />
+      </ErrorBoundary>
     </Layout>
   )
 };

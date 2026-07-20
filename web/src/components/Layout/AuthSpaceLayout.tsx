@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:11:43 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:00:54
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-07-14 16:13:15 
  */
 /**
  * AuthSpaceLayout Component
@@ -25,6 +25,7 @@ import useRouteGuard from '@/hooks/useRouteGuard';
 import { useNavigationBreadcrumbs } from '@/hooks/useNavigationBreadcrumbs';
 import AppHeader from '@/components/Header';
 import Sider from '@/components/SiderMenu';
+import ErrorBoundary from '@/components/ErrorBoundary'
 import { useUser } from '@/store/user';
 import { cookieUtils } from '@/utils/request';
 
@@ -64,8 +65,11 @@ const AuthSpaceLayout: FC = () => {
         <AppHeader source="space" />
         {/* Main content area for knowledge base pages - renders child routes */}
         <Content className="rb:px-3! rb:pb-3! rb:z-0! rb:flex-1! rb:overflow-y-auto!">
-          <Outlet />
-        </Content> 
+          {/* Keep sidebar/header visible when a lazy route chunk fails to load */}
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
+        </Content>
       </Layout>
     </Layout>
   )

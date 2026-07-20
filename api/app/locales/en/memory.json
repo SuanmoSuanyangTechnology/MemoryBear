@@ -1,0 +1,13 @@
+{
+  "forget_reason": {
+    "timeout": "Timeout expired",
+    "manual": "User manual"
+  },
+  "default_operator": "Forgetting Engine",
+  "recover_success": "Memory recovered successfully",
+  "errors": {
+    "recover_not_allowed": "This memory cannot be recovered, it may have already been recovered or is of an unrecoverable type",
+    "neo4j_node_not_found": "Neo4j node does not exist or has been deleted",
+    "internal_error": "Failed to recover memory"
+  }
+}

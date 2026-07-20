@@ -83,6 +83,9 @@ class Settings:
     ELASTICSEARCH_RETRY_ON_TIMEOUT: bool = os.getenv("ELASTICSEARCH_RETRY_ON_TIMEOUT", "True").lower() == "true"
     ELASTICSEARCH_MAX_RETRIES: int = int(os.getenv("ELASTICSEARCH_MAX_RETRIES", "10"))
     KNOWLEDGE_RETRIEVAL_MAX_WORKERS: int = int(os.getenv("KNOWLEDGE_RETRIEVAL_MAX_WORKERS", "3"))
+    KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY: int = int(
+        os.getenv("KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY", "2")
+    )
 
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
@@ -251,6 +254,10 @@ class Settings:
     LOG_STREAM_MAX_CONNECTIONS: int = int(os.getenv("LOG_STREAM_MAX_CONNECTIONS", "10"))
     LOG_STREAM_BUFFER_SIZE: int = int(os.getenv("LOG_STREAM_BUFFER_SIZE", "8192"))  # 8KB
     LOG_FILE_MAX_SIZE_MB: int = int(os.getenv("LOG_FILE_MAX_SIZE_MB", "10"))  # 10MB
+
+    # Celery Task Scheduler Configuration
+    # 每个 (task_name, user_id) 队列的最大待处理消息数，0 表示不限制
+    SCHEDULER_MAX_QUEUE_LEN: int = int(os.getenv("SCHEDULER_MAX_QUEUE_LEN", "1000"))
 
     # Celery configuration (internal)
     # NOTE: 变量名不以 CELERY_ 开头，避免被 Celery CLI 的前缀匹配机制劫持

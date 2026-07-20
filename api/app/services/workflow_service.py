@@ -1542,7 +1542,7 @@ class WorkflowService:
         }
 
     @staticmethod
-    def _get_execution_source(execution: WorkflowExecution | None) -> str:
+    def _get_execution_source(execution: WorkflowExecution | WorkflowExecutionRef | None) -> str:
         if not execution:
             return "workflow_execution"
         meta_data = execution.meta_data or {}
@@ -1816,12 +1816,12 @@ class WorkflowService:
     def _build_public_execution_snapshot_record(
             self,
             *,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             node_executions: list[WorkflowNodeExecution],
             output_data: dict[str, Any],
             workflow_config: "WorkflowConfig | None" = None,
     ) -> dict[str, Any]:
-        workflow_config = workflow_config or execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        workflow_config = workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         type_maps = self._build_snapshot_type_maps(workflow_config)
         raw_groups = self._extract_execution_snapshot_raw_groups(
             output_data=output_data,
@@ -2153,7 +2153,7 @@ class WorkflowService:
         )
 
     def _refresh_workflow_debug_state_from_execution(self, execution: WorkflowExecution, workflow_config: WorkflowConfig | None = None) -> None:
-        workflow_config = workflow_config or execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
+        workflow_config = workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
         output_data = self._serialize_execution_value(execution.output_data or {})
         snapshot = self._build_public_execution_snapshot_record(
@@ -2171,7 +2171,7 @@ class WorkflowService:
             source=self._get_execution_source(execution),
         )
 
-    def _extract_execution_messages(self, execution: WorkflowExecution | None) -> list[dict[str, Any]]:
+    def _extract_execution_messages(self, execution: WorkflowExecution | WorkflowExecutionRef | None) -> list[dict[str, Any]]:
         if not execution or not isinstance(execution.output_data, dict):
             return []
         messages = self._serialize_execution_value(execution.output_data.get("messages") or [])
@@ -3495,18 +3495,16 @@ class WorkflowService:
             logger.info(f"创建工作流执行记录: execution_id={execution_id}")
             return self._build_execution_ref(execution)
 
-    async def _get_execution_async(self, execution_id: str) -> WorkflowExecution | None:
+    async def _get_execution_async(self, execution_id: str) -> WorkflowExecutionRef | None:
         async with get_async_db_context() as db:
             result = await db.execute(
                 select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
             )
             execution = result.scalar_one_or_none()
             if execution:
-                return execution
+                return self._build_execution_ref(execution)
             runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
-            if runtime_execution:
-                return self._build_execution_record_from_ref(runtime_execution)
-            return None
+            return runtime_execution
 
     async def _patch_execution_async(
             self,
@@ -3614,7 +3612,7 @@ class WorkflowService:
             assistant_meta: Optional[dict],
             workflow_output_data: Any,
             token_usage: Any,
-    ) -> WorkflowExecution:
+    ) -> WorkflowExecutionRef:
         async with get_async_db_context() as db:
             started_at = time.perf_counter()
             conversation = await db.get(Conversation, conversation_id)
@@ -3694,7 +3692,7 @@ class WorkflowService:
                 pool_status["usage_percent"],
             )
             await self._delete_runtime_execution_snapshot_async(execution_id)
-            return execution
+            return self._build_execution_ref(execution)
 
     async def _update_message_async(
             self,
@@ -3759,7 +3757,7 @@ class WorkflowService:
             action_id: str,
             form_data: dict | None,
             kind: str | None,
-    ) -> WorkflowExecution | None:
+    ) -> WorkflowExecutionRef | None:
         execution = await self._get_execution_async(execution_id)
         if not execution or not node_id:
             return execution
@@ -3842,7 +3840,7 @@ class WorkflowService:
 
     async def _persist_workflow_node_executions_async(
             self,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             workflow_config: WorkflowConfig,
             result: dict[str, Any],
     ) -> None:
@@ -3970,29 +3968,28 @@ class WorkflowService:
 
     async def _refresh_workflow_debug_state_from_execution_async(
             self,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             workflow_config: WorkflowConfig | None = None,
     ) -> None:
         resolved_workflow_config = workflow_config
+        output_data = self._serialize_execution_value(execution.output_data or {})
         async with get_async_db_context() as db:
             if resolved_workflow_config is None and execution.workflow_config_id:
                 resolved_workflow_config = await db.get(WorkflowConfig, execution.workflow_config_id)
+            if resolved_workflow_config is None:
+                return
             stmt = (
                 select(WorkflowNodeExecution)
                 .where(WorkflowNodeExecution.execution_id == execution.id)
                 .order_by(WorkflowNodeExecution.execution_order)
             )
             node_executions = list((await db.execute(stmt)).scalars())
-
-        if resolved_workflow_config is None:
-            return
-        output_data = self._serialize_execution_value(execution.output_data or {})
-        snapshot = self._build_public_execution_snapshot_record(
-            execution=execution,
-            node_executions=node_executions,
-            output_data=output_data if isinstance(output_data, dict) else {},
-            workflow_config=resolved_workflow_config,
-        )
+            snapshot = self._build_public_execution_snapshot_record(
+                execution=execution,
+                node_executions=node_executions,
+                output_data=output_data if isinstance(output_data, dict) else {},
+                workflow_config=resolved_workflow_config,
+            )
         await self._write_workflow_debug_state_async(
             app_id=execution.app_id,
             workflow_config=resolved_workflow_config,
@@ -4068,23 +4065,22 @@ class WorkflowService:
             fetch_remote_file_meta,
         )
 
-        files_struct = []
-        for file in files:
+        async def _resolve_file(file: FileInput) -> dict:
             url = await self._get_file_url_async(file)
             file_type = str(file.type)
             origin_file_type = file.file_type or file_type
 
             if file.transfer_method.value == "local_file" and file.upload_file_id:
                 fo = await self._resolve_local_file_async(file.upload_file_id, file_type, origin_file_type)
-                files_struct.append(fo or build_file_object_dict_from_meta(
+                return fo or build_file_object_dict_from_meta(
                     file_type=file_type, transfer_method="local_file",
                     origin_file_type=origin_file_type,
                     file_id=str(file.upload_file_id), url=url,
                     file_name=None, file_size=None, file_ext=None, content_type=None,
-                ))
-            else:
-                files_struct.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
-        return files_struct
+                )
+            return await fetch_remote_file_meta(url, file_type, origin_file_type)
+
+        return await asyncio.gather(*(_resolve_file(file) for file in files))
 
     async def _get_file_url_async(self, file: FileInput) -> str:
         from app.core.config import settings
@@ -4174,6 +4170,26 @@ class WorkflowService:
 
         resolved = dict(variables)
 
+        async def _resolve_runtime_file(value: dict[str, Any]) -> dict[str, Any] | None:
+            url = value.get("url", "")
+            transfer_method = value.get("transfer_method", "local_file" if value.get("upload_file_id") else "remote_url")
+            file_type = str(FileType.trans(value.get("type", "document")))
+            origin_file_type = value.get("file_type") or file_type
+
+            if transfer_method == "local_file" and value.get("upload_file_id"):
+                fo = await self._resolve_local_file_async(value["upload_file_id"], file_type, origin_file_type)
+                return fo or build_file_object_dict_from_meta(
+                    file_type=file_type,
+                    transfer_method="local_file",
+                    origin_file_type=origin_file_type,
+                    file_id=str(value["upload_file_id"]),
+                    url=url,
+                )
+            if url:
+                return await fetch_remote_file_meta(url, file_type, origin_file_type)
+            return None
+
+        pending: list[tuple[str, asyncio.Task]] = []
         for var_def in start_node_vars:
             var_name = var_def.get("name")
             var_type = var_def.get("type", "")
@@ -4188,42 +4204,31 @@ class WorkflowService:
             value = resolved[var_name]
 
             if var_type == "file" and isinstance(value, dict) and not value.get("is_file"):
-                url = value.get("url", "")
-                transfer_method = value.get("transfer_method", "local_file" if value.get("upload_file_id") else "remote_url")
-                file_type = str(FileType.trans(value.get("type", "document")))
-                origin_file_type = value.get("file_type") or file_type
-
-                if transfer_method == "local_file" and value.get("upload_file_id"):
-                    fo = await self._resolve_local_file_async(value["upload_file_id"], file_type, origin_file_type)
-                    resolved[var_name] = fo or build_file_object_dict_from_meta(
-                        file_type=file_type, transfer_method="local_file",
-                        origin_file_type=origin_file_type,
-                        file_id=str(value["upload_file_id"]), url=url,
-                    )
-                elif url:
-                    resolved[var_name] = await fetch_remote_file_meta(url, file_type, origin_file_type)
+                pending.append((var_name, asyncio.create_task(_resolve_runtime_file(value))))
 
             elif var_type == "array[file]" and isinstance(value, list):
-                resolved_list = []
-                for item in value:
-                    if isinstance(item, dict) and item.get("is_file"):
-                        resolved_list.append(item)
-                    elif isinstance(item, dict):
-                        url = item.get("url", "")
-                        transfer_method = item.get("transfer_method", "local_file" if item.get("upload_file_id") else "remote_url")
-                        file_type = str(FileType.trans(item.get("type", "document")))
-                        origin_file_type = item.get("file_type") or file_type
+                async def _resolve_array(items: list[Any]) -> list[Any]:
+                    async_indexes = [
+                        idx for idx, item in enumerate(items)
+                        if isinstance(item, dict) and not item.get("is_file")
+                    ]
+                    resolved_async_items = await asyncio.gather(
+                        *(_resolve_runtime_file(items[idx]) for idx in async_indexes)
+                    )
+                    resolved_items = list(items)
+                    for idx, resolved_item in zip(async_indexes, resolved_async_items):
+                        resolved_items[idx] = resolved_item
+                    return [
+                        item for item in resolved_items
+                        if not (isinstance(item, dict) and not item.get("is_file")) and item is not None
+                    ]
 
-                        if transfer_method == "local_file" and item.get("upload_file_id"):
-                            fo = await self._resolve_local_file_async(item["upload_file_id"], file_type, origin_file_type)
-                            resolved_list.append(fo or build_file_object_dict_from_meta(
-                                file_type=file_type, transfer_method="local_file",
-                                origin_file_type=origin_file_type,
-                                file_id=str(item["upload_file_id"]), url=url,
-                            ))
-                        elif url:
-                            resolved_list.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
-                resolved[var_name] = resolved_list
+                pending.append((var_name, asyncio.create_task(_resolve_array(value))))
+
+        for var_name, task in pending:
+            resolved_value = await task
+            if resolved_value is not None:
+                resolved[var_name] = resolved_value
 
         return resolved
 
@@ -4420,7 +4425,7 @@ class WorkflowService:
 
     def _set_human_intervention_state(
             self,
-            execution: WorkflowExecution,
+            execution: WorkflowExecution | WorkflowExecutionRef,
             visible_interventions: list[dict] | None = None,
             backlog_interventions: list[dict] | None = None,
     ) -> None:
@@ -6001,6 +6006,8 @@ class WorkflowService:
             trigger_payload: dict[str, Any] | None = None,
             regenerate_mode: bool = False,
             regenerate_history: Optional[tuple] = None,
+            prepared_memory_storage_type: str | None = None,
+            prepared_user_rag_memory_id: str | None = None,
     ):
         """运行工作流
 
@@ -6245,7 +6252,11 @@ class WorkflowService:
         files = []
         try:
             files = await self._handle_file_input(payload.files)
-            storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
+            if prepared_memory_storage_type is not None:
+                storage_type = prepared_memory_storage_type
+                user_rag_memory_id = prepared_user_rag_memory_id or ""
+            else:
+                storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
             message_id = uuid.uuid4()
             # 预生成 user_message_id：重新生成模式不创建新 user 消息，置 None
@@ -6398,8 +6409,8 @@ class WorkflowService:
                     )
                 execution_record = await self._get_execution_async(execution.execution_id)
                 if execution_record:
-                    self._persist_workflow_node_executions(execution_record, config, result)
-                    self._refresh_workflow_debug_state_from_execution(execution_record)
+                    await self._persist_workflow_node_executions_async(execution_record, config, result)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
 
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
@@ -6415,8 +6426,8 @@ class WorkflowService:
                 )
                 execution_record = await self._get_execution_async(execution.execution_id)
                 if execution_record:
-                    self._persist_workflow_node_executions(execution_record, config, result)
-                    self._refresh_workflow_debug_state_from_execution(execution_record)
+                    await self._persist_workflow_node_executions_async(execution_record, config, result)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
                 final_messages = result.get("messages", [])[init_message_length:]
@@ -6461,8 +6472,8 @@ class WorkflowService:
                 try:
                     execution_record = await self._get_execution_async(execution.execution_id)
                     if execution_record and execution_record.output_data:
-                        self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
-                        self._refresh_workflow_debug_state_from_execution(execution_record)
+                        await self._persist_workflow_node_executions_async(execution_record, config, execution_record.output_data)
+                        await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
                 except Exception as persist_err:
                     logger.warning(f"Failed to persist node executions on waiting_human: {persist_err}")
                 raise BusinessException(
@@ -6484,8 +6495,8 @@ class WorkflowService:
             try:
                 execution_record = await self._get_execution_async(execution.execution_id)
                 if execution_record and execution_record.output_data:
-                    self._persist_workflow_node_executions(execution_record, config, execution_record.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution_record)
+                    await self._persist_workflow_node_executions_async(execution_record, config, execution_record.output_data)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution_record, workflow_config=config)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
@@ -6512,6 +6523,8 @@ class WorkflowService:
             regenerate_history: Optional[tuple] = None,
             regenerate_message_id: Optional[uuid.UUID] = None,
             preserved_execution: "WorkflowExecution | None" = None,
+            prepared_memory_storage_type: str | None = None,
+            prepared_user_rag_memory_id: str | None = None,
     ):
         """当 `preserved_execution` 不为 None 时，跳过本方法内部三处
         `create_execution` 调用，复用调用方已创建的 WorkflowExecution 行。
@@ -6861,7 +6874,11 @@ class WorkflowService:
 
         try:
             files = await self._handle_file_input(payload.files)
-            storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
+            if prepared_memory_storage_type is not None:
+                storage_type = prepared_memory_storage_type
+                user_rag_memory_id = prepared_user_rag_memory_id or ""
+            else:
+                storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
             _log_before_execute_step(
                 "before_execute_files_ready",
@@ -6986,6 +7003,10 @@ class WorkflowService:
             )
 
             accumulated_content = ""
+            # One workflow execution owns one assistant message.  Individual
+            # Answer/End outputs are kept as logical responses inside that
+            # message and are addressed by node_id.
+            output_contents: dict[str, str] = {}
             queued_intervention_events = []
 
             moderation_flagged = False
@@ -7021,7 +7042,11 @@ class WorkflowService:
                     if output_moderation.accumulate(chunk):
                         moderation_flagged = True
                         yield {"event": "message_replace",
-                               "data": {"content": output_moderation.preset_response}}
+                               "data": {
+                                   "message_id": str(message_id),
+                                   "node_id": event_data.get("node_id"),
+                                   "content": output_moderation.preset_response,
+                               }}
 
                         # 审查触发后，立即保存对话、更新执行状态，合成结束事件并退出循环
                         preset_response = output_moderation.preset_response
@@ -7103,7 +7128,11 @@ class WorkflowService:
                     if first_message_at is None:
                         first_message_at = time.perf_counter()
                         _log_run_stream_timing("first_message_chunk", content_len=len(event_data.get("content", "") or ""))
-                    accumulated_content += event_data.get("content", "") or ""
+                    chunk = event_data.get("content", "") or ""
+                    accumulated_content += chunk
+                    output_node_id = event_data.get("node_id")
+                    if output_node_id:
+                        output_contents[output_node_id] = output_contents.get(output_node_id, "") + chunk
 
                 if event_type == "cycle_item":
                     cycle_id = event_data.get("cycle_id")
@@ -7159,8 +7188,26 @@ class WorkflowService:
                         assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
+                        if output_contents:
+                            assistant_meta["outputs"] = [
+                                {
+                                    "node_id": output_node_id,
+                                    "content": content,
+                                    "status": "completed",
+                                }
+                                for output_node_id, content in output_contents.items()
+                            ]
                         # 输出审查触发时，将 moderation 信息写入 execution output_data
                         workflow_output_data = event.get("data") or {}
+                        if output_contents:
+                            workflow_output_data["outputs"] = [
+                                {
+                                    "node_id": output_node_id,
+                                    "content": content,
+                                    "status": "completed",
+                                }
+                                for output_node_id, content in output_contents.items()
+                            ]
                         if output_moderation and output_moderation.is_flagged:
                             workflow_output_data["moderation_flagged"] = True
                             workflow_output_data["preset_response"] = output_moderation.preset_response
@@ -7504,8 +7551,8 @@ class WorkflowService:
                                 ],
                             },
                         }
-                        # ★ 修复：execution 在 5787 close 后 detached，ORM 赋值 context 不落库，
-                        # 改用 Core query.update 显式更新 context，确保 resolved_interventions 持久化
+                        # ★ 修复：execution 在 5787 close 后 detached，通过异步 helper 重新开独立 Session
+                        # 持久化 context，确保 resolved_interventions 能落库。
                         execution = await self._patch_execution_async(
                             execution.execution_id,
                             context=_new_ctx,
@@ -7883,10 +7930,10 @@ class WorkflowService:
                 error_message=str(e),
             )
             try:
-                execution = self.get_execution(execution.execution_id)
+                execution = await self._get_execution_async(execution.execution_id)
                 if execution and execution.output_data:
-                    self._persist_workflow_node_executions(execution, config, execution.output_data)
-                    self._refresh_workflow_debug_state_from_execution(execution, workflow_config=config)
+                    await self._persist_workflow_node_executions_async(execution, config, execution.output_data)
+                    await self._refresh_workflow_debug_state_from_execution_async(execution, workflow_config=config)
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on stream error: {persist_err}")
             # Clean up registry on failure to avoid leaks.
@@ -9252,7 +9299,8 @@ class WorkflowService:
                     event_type = data.get("type", "node_chunk")
                     if event_type == "node_chunk":
                         async for msg_event in executor.event_handler.handle_node_chunk_event(data):
-                            full_content += msg_event["data"]["content"]
+                            if msg_event.get("event") == "message":
+                                full_content += msg_event["data"].get("content", "")
                             yield msg_event
                     elif event_type == "node_error":
                         async for error_event in executor.event_handler.handle_node_error_event(data):
@@ -9292,7 +9340,8 @@ class WorkflowService:
                         async for msg_event in executor.event_handler.handle_updates_event(
                             filtered_data, graph, execution_context.checkpoint_config
                         ):
-                            full_content += msg_event["data"]["content"]
+                            if msg_event.get("event") == "message":
+                                full_content += msg_event["data"].get("content", "")
                             yield msg_event
 
             logger.info(
@@ -9301,7 +9350,8 @@ class WorkflowService:
             )
 
             async for msg_event in executor.stream_coordinator.flush_remaining_chunk(executor.variable_pool):
-                full_content += msg_event["data"]["content"]
+                if msg_event.get("event") == "message":
+                    full_content += msg_event["data"].get("content", "")
                 yield msg_event
 
             graph_state = await graph.aget_state(execution_context.checkpoint_config)

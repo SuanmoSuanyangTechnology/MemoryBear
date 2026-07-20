@@ -17,6 +17,7 @@ from app.core.logging_config import get_api_logger
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
+from app.core.rag.retrieval.models import RetrievalPrincipal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
 from app.db import get_async_db
@@ -1017,8 +1018,7 @@ def get_retrieve_types():
 
 async def retrieve_chunks_with_caller(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: Session | AsyncSession,
-        current_user: User,
+        principal: RetrievalPrincipal | None,
         caller: chunk_schema.KnowledgeRetrievalCaller,
 ):
     """
@@ -1028,7 +1028,7 @@ async def retrieve_chunks_with_caller(
         "retrieve chunk request received: username=%s, caller=%s, query_len=%s, kb_count=%s, "
         "ex_id_count=%s, retrieve_type=%s, top_k=%s, "
         "metadata_mode=%s, metadata_filter_groups=%s",
-        current_user.username,
+        principal.username if principal and principal.username else "anonymous",
         caller,
         len(retrieve_data.query or ""),
         len(retrieve_data.kb_ids or []),
@@ -1044,9 +1044,8 @@ async def retrieve_chunks_with_caller(
         retrieval_payload["caller"] = caller
         request = KnowledgeRetrievalRequest(**retrieval_payload)
         result = await KnowledgeRetrievalService.retrieve_async(
-            db=db,
             request=request,
-            current_user=current_user,
+            principal=principal,
         )
     except KnowledgeRetrievalAccessDenied as exc:
         raise HTTPException(
@@ -1060,12 +1059,10 @@ async def retrieve_chunks_with_caller(
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user_async)
 ):
     return await retrieve_chunks_with_caller(
         retrieve_data=retrieve_data,
-        db=db,
-        current_user=current_user,
+        principal=RetrievalPrincipal.from_user(current_user),
         caller=chunk_schema.KnowledgeRetrievalCaller.IN_API,
     )

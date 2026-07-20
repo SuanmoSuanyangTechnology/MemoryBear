@@ -1,8 +1,13 @@
 import logging
+import uuid
 from typing import Any
 
-from app.core.memory.models.service_models import MemoryContext
+from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.models.service_models import MemoryContext, ForgetLog
 from app.core.utils.datetime_utils import utcnow, to_iso_z
+from app.db import get_db_context
+from app.models.memory_forget_model import ForgetTrigger
+from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.neo4j.graph_search import (
     forget_count_active_nodes,
     forget_get_mixed_candidates,
@@ -21,7 +26,7 @@ class ForgetService:
         self.ctx = ctx
         self.trigger_count = memory_limit
         self._connector: Neo4jConnector | None = None
-        self._audit: list[dict[str, Any]] = []
+        self._audit: list[ForgetLog] = []
         self.target_ratio = (1 - self.ctx.memory_config.lambda_mem)
         self.target_count = max(int(memory_limit * self.target_ratio), 50)
 
@@ -100,15 +105,17 @@ class ForgetService:
 
             for row in candidates:
                 node_type = row.get("node_type", "unknown")
-                entry: dict[str, Any] = {
-                    "node_id": row.get("node_id"),
-                    "node_type": node_type,
-                    "user_id": self.ctx.end_user_id,
-                    "delete_at": now,
-                    "delete_reason": "mixed_time_asc",
-                    "sort_time": row.get("sort_time"),
-                    "extraction_count": row.get("extraction_count"),
-                }
+                entry: ForgetLog = ForgetLog(
+                    node_id=row.get("element_id"),
+                    node_type=node_type,
+                    end_user_id=uuid.UUID(self.ctx.end_user_id),
+                    reason="timeout",
+                    recoverable=True,
+                    operator=None,
+                    delete_at=now,
+                    trigger=ForgetTrigger.Scheduled.value,
+                    content=row.get("content")
+                )
                 self._audit.append(entry)
 
             logger.info(
@@ -116,11 +123,14 @@ class ForgetService:
                 "types=%s",
                 len(element_ids), deleted_in_batch, total_deleted, budget,
                 {t: sum(1 for r in candidates if r.get("node_type") == t)
-                 for t in ("chunk", "statement", "entity")},
+                 for t in (Neo4jNodeType.CHUNK, Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY)},
             )
 
             if deleted_in_batch < len(element_ids):
                 break
+        with get_db_context() as db:
+            ForgetLogRepository.sync_logs(db, self._audit)
+            db.commit()
 
         active_count = await forget_count_active_nodes(connector, self.ctx.end_user_id)
         new_budget = max(0, active_count - self.target_count)

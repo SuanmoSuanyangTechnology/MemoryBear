@@ -3,6 +3,7 @@ import asyncio
 import json
 import time
 import uuid
+from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
 from datetime import datetime
 
@@ -16,7 +17,7 @@ from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_n
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.db import get_db, get_db_context, get_async_db_context
+from app.db import get_db, get_async_db_context
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
@@ -38,8 +39,24 @@ from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.services.tool_orchestrator import ToolOrchestrator
+from app.services.context_assembler import (
+    ContextEvidence,
+    append_external_context_rule,
+)
 
 logger = get_business_logger()
+
+
+def _snapshot_annotations(annotations: List[Any]) -> List[SimpleNamespace]:
+    """Copy ORM values while the async database session is still open."""
+    return [SimpleNamespace(
+        id=item.id,
+        question=item.question,
+        answer=item.answer,
+        embedding=list(item.embedding) if item.embedding else None,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    ) for item in annotations]
 
 
 class CustomJsonEncoder(json.JSONEncoder):
@@ -133,20 +150,15 @@ class AppChatService:
     async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, FileMetadata]:
         if not local_ids:
             return {}
-        if self._uses_async_session():
-            result = await self.db.execute(
+        async with get_async_db_context() as db:
+            result = await db.execute(
                 select(FileMetadata).where(
                     FileMetadata.id.in_(local_ids),
                     FileMetadata.status == "completed",
                 )
             )
             rows = result.scalars().all()
-        else:
-            rows = self.db.query(FileMetadata).filter(
-                FileMetadata.id.in_(local_ids),
-                FileMetadata.status == "completed",
-            ).all()
-        return {str(row.id): row for row in rows}
+            return {str(row.id): row for row in rows}
 
     async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
         if self._uses_async_session():
@@ -214,28 +226,7 @@ class AppChatService:
             return
         repo.update_completed(execution_id, **kwargs)
 
-    async def _save_opening_statement_async(
-            self,
-            *,
-            conversation_id: uuid.UUID,
-            opening_statement: str,
-            suggested_questions: Optional[List[str]] = None,
-    ) -> None:
-        if self._uses_async_session():
-            async with get_async_db_context() as db:
-                await ConversationService(db).add_message_async(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=opening_statement,
-                    meta_data={"suggested_questions": suggested_questions or []},
-                )
-            return
-        await self.conversation_service.add_message_async(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=opening_statement,
-            meta_data={"suggested_questions": suggested_questions or []},
-        )
+
 
     async def _persist_final_agent_execution(
             self,
@@ -297,60 +288,9 @@ class AppChatService:
         self.db.commit()
         return execution.id
 
-    async def _save_versioned_assistant_message_async(
-            self,
-            *,
-            message_id: uuid.UUID,
-            conversation_id: uuid.UUID,
-            content: str,
-            version: int,
-            parent_message_id: Optional[uuid.UUID],
-            meta_data: dict,
-    ) -> None:
-        async with get_async_db_context() as db:
-            new_msg = Message(
-                id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=content,
-                version=version,
-                is_current=True,
-                parent_message_id=parent_message_id,
-                meta_data=meta_data,
-            )
-            db.add(new_msg)
-            conv = await db.get(Conversation, conversation_id)
-            if conv:
-                conv.message_count += 1
-            await db.commit()
 
-    async def _save_failed_stream_messages_async(
-            self,
-            *,
-            message_id: uuid.UUID,
-            user_message_id: uuid.UUID,
-            conversation_id: uuid.UUID,
-            message: str,
-            human_meta: dict,
-            error_message: str,
-    ) -> None:
-        async with get_async_db_context() as db:
-            service = ConversationService(db)
-            await service.add_message_async(
-                message_id=user_message_id,
-                conversation_id=conversation_id,
-                role="user",
-                content=message,
-                meta_data=human_meta,
-            )
-            await service.add_message_async(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content="",
-                meta_data={"error": error_message[:2000]},
-                status="failed",
-            )
+
+
 
     async def _check_annotation_match_async(
             self,
@@ -379,7 +319,7 @@ class AppChatService:
                         AppAnnotation.is_active == 1,
                     )
                 )
-                annotations = list(result.scalars().all())
+                annotations = _snapshot_annotations(list(result.scalars().all()))
                 if not annotations:
                     return None
 
@@ -507,6 +447,78 @@ class AppChatService:
             logger.error(f"标注匹配失败: {e}")
             return None
 
+    async def _load_annotation_context_evidence(self, app_id: uuid.UUID, message: str) -> List[ContextEvidence]:
+        """延迟查询候选标注；只由成功产生证据的知识库/记忆工具触发。"""
+        try:
+            from app.core.models.base import RedBearModelConfig
+            from app.models.annotation_model import AppAnnotation, AppAnnotationSetting
+            api_key_config: dict[str, Any] | None = None
+            if self._uses_async_session():
+                async with get_async_db_context() as db:
+                    setting = (await db.execute(select(AppAnnotationSetting).where(
+                        AppAnnotationSetting.app_id == app_id).limit(1))).scalar_one_or_none()
+                    if not setting or not setting.enabled or not setting.model_config_id:
+                        return []
+                    annotations = _snapshot_annotations(list((await db.execute(select(AppAnnotation).where(
+                        AppAnnotation.app_id == app_id, AppAnnotation.is_active == 1))).scalars().all()))
+                    tenant_id = await self._resolve_app_tenant_id_async(app_id)
+                    api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                        db, setting.model_config_id, tenant_id=tenant_id)
+                    if api_key_obj:
+                        api_key_config = {
+                            "model_name": api_key_obj.model_name,
+                            "provider": api_key_obj.provider,
+                            "api_key": api_key_obj.api_key,
+                            "api_base": api_key_obj.api_base,
+                        }
+            else:
+                service = AnnotationService(self.db)
+                setting = service.get_setting(app_id)
+                if not setting or not setting.enabled or not setting.model_config_id:
+                    return []
+                annotations = service.repo.get_all_active_by_app(app_id)
+                api_key_obj = ModelApiKeyService.get_available_api_key(
+                    self.db, setting.model_config_id, tenant_id=self._resolve_app_tenant_id(app_id))
+                if api_key_obj:
+                    api_key_config = {
+                        "model_name": api_key_obj.model_name,
+                        "provider": api_key_obj.provider,
+                        "api_key": api_key_obj.api_key,
+                        "api_base": api_key_obj.api_base,
+                    }
+            if not annotations or not api_key_config:
+                return []
+            model_config = RedBearModelConfig(
+                model_name=api_key_config["model_name"], provider=api_key_config["provider"],
+                api_key=api_key_config["api_key"], base_url=api_key_config["api_base"] or None,
+                timeout=60, max_retries=3,
+            )
+            candidates = await asyncio.to_thread(
+                AnnotationService.find_context_candidates,
+                message, annotations, model_config, 0.6, 3,
+            )
+            logger.info(
+                "[上下文组装] 标注候选 | "
+                f"应用={str(app_id)[:8]} | 标注总数={len(annotations)} | "
+                f"候选={len(candidates)} | 阈值=0.6 | top_k=3",
+                extra={
+                    "app_id": str(app_id),
+                    "annotation_total": len(annotations),
+                    "candidate_count": len(candidates),
+                    "threshold": 0.6,
+                    "top_k": 3,
+                },
+            )
+            return [ContextEvidence(
+                source_type="annotation", source_id=item["annotation_id"],
+                content=f"参考问题：{item['question']}\n参考答案：{item['answer']}",
+                score=item["similarity"], created_at=item.get("created_at"),
+                updated_at=item.get("updated_at"), metadata={"question": item["question"]},
+            ) for item in candidates]
+        except Exception:
+            logger.warning("标注上下文候选加载失败", exc_info=True)
+            return []
+
     async def agent_chat(
             self,
             message: str,
@@ -625,6 +637,10 @@ class AppChatService:
 
         # 获取模型参数
         model_parameters = config.model_parameters
+        async def load_annotation_context():
+            return await self._load_annotation_context_evidence(config.app_id, message)
+
+        system_prompt = append_external_context_rule(system_prompt)
 
         model_info = ModelInfo(
             model_name=api_key_obj.model_name,
@@ -714,7 +730,8 @@ class AppChatService:
             "is_omni": api_key_obj.is_omni,
             "capability": capability,
         }
-        if ModelCapability.FUNCTION_CALL not in capability and tools:
+        use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+        if not use_agent_mode and tools:
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
                 system_prompt=system_prompt,
@@ -724,6 +741,7 @@ class AppChatService:
                 model_config=model_info,
                 effective_params=model_parameters,
                 processed_files=processed_files,
+                context_evidence_loader=load_annotation_context,
             )
             tools = []
 
@@ -742,6 +760,9 @@ class AppChatService:
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
             capability=capability,
+            context_query=message,
+            context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+            context_evidence_loader=load_annotation_context,
         )
 
         # 为需要运行时上下文的工具注入上下文
@@ -772,7 +793,7 @@ class AppChatService:
                 "provider": api_key_obj.provider,
             },
         )
-        await self._create_agent_execution(agent_exec_repo, agent_execution)
+        agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
 
         try:
             # 调用 Agent（支持多模态）
@@ -787,7 +808,7 @@ class AppChatService:
             elapsed_time = time.time() - start_time
             await self._update_agent_execution(
                 agent_exec_repo,
-                execution_id=agent_execution.id,
+                execution_id=agent_execution_id,
                 steps=[],
                 status="failed",
                 elapsed_time=elapsed_time,
@@ -891,12 +912,8 @@ class AppChatService:
                     model_config_id=config.default_model_config_id,
                 )
                 async def _run_after_turn(kwargs=_ctx_kwargs):
-                    if self._uses_async_session():
-                        async with get_async_db_context() as db2:
-                            await ContextEngineManager(db2).after_app_turn(**kwargs)
-                    else:
-                        with get_db_context() as db2:
-                            await ContextEngineManager(db2).after_app_turn(**kwargs)
+                    async with get_async_db_context() as db2:
+                        await ContextEngineManager(db2).after_app_turn(**kwargs)
                 asyncio.create_task(_run_after_turn())
         else:
             new_msg = Message(
@@ -922,7 +939,7 @@ class AppChatService:
         node_executions = orchestrator_node_executions + result.get("node_executions", [])
         await self._update_agent_execution(
             agent_exec_repo,
-            execution_id=agent_execution.id,
+            execution_id=agent_execution_id,
             steps=node_executions,
             status="completed",
             elapsed_time=elapsed_time,
@@ -1056,6 +1073,10 @@ class AppChatService:
 
             # 获取模型参数
             model_parameters = config.model_parameters
+            async def load_annotation_context():
+                return await self._load_annotation_context_evidence(config.app_id, message)
+
+            system_prompt = append_external_context_rule(system_prompt)
 
             model_info = ModelInfo(
                 model_name=api_key_obj.model_name,
@@ -1141,7 +1162,8 @@ class AppChatService:
                 "is_omni": api_key_obj.is_omni,
                 "capability": capability,
             }
-            if ModelCapability.FUNCTION_CALL not in capability and tools:
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            if not use_agent_mode and tools:
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
@@ -1151,6 +1173,7 @@ class AppChatService:
                     model_config=model_info,
                     effective_params=model_parameters,
                     processed_files=processed_files,
+                    context_evidence_loader=load_annotation_context,
                 )
                 # 把已完成的工具调用步骤作为事件补发给前端
                 for step in orchestrator_node_executions:
@@ -1175,6 +1198,9 @@ class AppChatService:
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
                 capability=capability,
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
             )
 
             # 为需要运行时上下文的工具注入上下文
@@ -1213,15 +1239,12 @@ class AppChatService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
 
-            first_chunk_logged = False
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
                     context=None,
                     files=processed_files
             ):
-                if not first_chunk_logged:
-                    first_chunk_logged = True
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
@@ -1293,59 +1316,43 @@ class AppChatService:
 
             # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
             # 这里不再触发老的 write_long_term 路径。
+            if files:
+                local_ids = [f.upload_file_id for f in files
+                             if f.transfer_method.value == "local_file" and f.upload_file_id
+                             and (not f.name or not f.size)]
+                meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
+                for f in files:
+                    name, size = f.name, f.size
+                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                        meta = meta_map.get(str(f.upload_file_id))
+                        if meta:
+                            name = name or meta.file_name
+                            size = size or meta.file_size
+                    human_meta["files"].append({
+                        "type": f.type,
+                        "url": f.url,
+                        "name": name,
+                        "size": size,
+                        "file_type": f.file_type,
+                    })
+            if processed_files:
+                human_meta["history_files"] = {
+                    "content": processed_files,
+                    "provider": _api_key_provider,
+                    "is_omni": _api_key_is_omni
+                }
+
             if not skip_save:
-                if opening_statement:
-                    await self._save_opening_statement_async(
-                        conversation_id=conversation_id,
-                        opening_statement=opening_statement,
-                        suggested_questions=opening_suggested_questions,
-                    )
-                if self._uses_async_session():
-                    await self.agent_service._save_conversation_message(
-                        conversation_id=str(conversation_id),
-                        user_message=message,
-                        assistant_message=full_content,
-                        message_id=message_id,
-                        user_message_id=user_message_id,
-                        app_id=config.app_id,
-                        user_id=user_id,
-                        meta_data=assistant_meta,
-                        files=files,
-                        processed_files=processed_files,
-                        audio_url=stream_audio_url,
-                        citations=filtered_citations,
-                        provider=_api_key_provider,
-                        is_omni=_api_key_is_omni,
-                    )
-                else:
-                    if files:
-                        local_ids = [f.upload_file_id for f in files
-                                     if f.transfer_method.value == "local_file" and f.upload_file_id
-                                     and (not f.name or not f.size)]
-                        meta_map = {}
-                        if local_ids:
-                            meta_map = await self._fetch_completed_file_metadata(local_ids)
-                        for f in files:
-                            name, size = f.name, f.size
-                            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                                meta = meta_map.get(str(f.upload_file_id))
-                                if meta:
-                                    name = name or meta.file_name
-                                    size = size or meta.file_size
-                            human_meta["files"].append({
-                                "type": f.type,
-                                "url": f.url,
-                                "name": name,
-                                "size": size,
-                                "file_type": f.file_type,
-                            })
-                    if processed_files:
-                        human_meta["history_files"] = {
-                            "content": processed_files,
-                            "provider": _api_key_provider,
-                            "is_omni": _api_key_is_omni
-                        }
-                    await self.conversation_service.add_message_async(
+                async with get_async_db_context() as db:
+                    svc = ConversationService(db)
+                    if opening_statement:
+                        await svc.add_message_async(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=opening_statement,
+                            meta_data={"suggested_questions": opening_suggested_questions},
+                        )
+                    await svc.add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id,
                         role="user",
@@ -1353,7 +1360,7 @@ class AppChatService:
                         meta_data=human_meta,
                         should_memorize=memory,
                     )
-                    await self.conversation_service.add_message_async(
+                    await svc.add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id,
                         role="assistant",
@@ -1371,24 +1378,11 @@ class AppChatService:
                         model_config_id=config.default_model_config_id,
                     )
                     async def _run_after_turn(kwargs=_ctx_kwargs):
-                        if self._uses_async_session():
-                            async with get_async_db_context() as db2:
-                                await ContextEngineManager(db2).after_app_turn(**kwargs)
-                        else:
-                            with get_db_context() as db2:
-                                await ContextEngineManager(db2).after_app_turn(**kwargs)
+                        async with get_async_db_context() as db2:
+                            await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
             else:
-                if self._uses_async_session():
-                    await self._save_versioned_assistant_message_async(
-                        message_id=message_id,
-                        conversation_id=conversation_id,
-                        content=full_content,
-                        version=version,
-                        parent_message_id=parent_message_id,
-                        meta_data=assistant_meta,
-                    )
-                else:
+                async with get_async_db_context() as db:
                     new_msg = Message(
                         id=message_id,
                         conversation_id=conversation_id,
@@ -1399,11 +1393,11 @@ class AppChatService:
                         parent_message_id=parent_message_id,
                         meta_data=assistant_meta,
                     )
-                    self.db.add(new_msg)
-                    conv = await self._db_get(Conversation, conversation_id)
+                    db.add(new_msg)
+                    conv = await db.get(Conversation, conversation_id)
                     if conv:
                         conv.message_count += 1
-                    self.db.commit()
+                    await db.commit()
             # 首包后再一次性落 Agent execution，避免首包前 create + 尾部 update 双写。
             all_node_executions = orchestrator_node_executions + node_executions
             await self._persist_final_agent_execution(
@@ -1441,24 +1435,17 @@ class AppChatService:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
             try:
-                if self._uses_async_session():
-                    await self._save_failed_stream_messages_async(
-                        message_id=message_id,
-                        user_message_id=user_message_id,
-                        conversation_id=conversation_id,
-                        message=message,
-                        human_meta=human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}},
-                        error_message=str(e),
-                    )
-                else:
-                    await self.conversation_service.add_message_async(
+                _human_meta = human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}}
+                async with get_async_db_context() as db:
+                    svc = ConversationService(db)
+                    await svc.add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id,
                         role="user",
                         content=message,
-                        meta_data=human_meta,
+                        meta_data=_human_meta,
                     )
-                    await self.conversation_service.add_message_async(
+                    await svc.add_message_async(
                         message_id=message_id,
                         conversation_id=conversation_id,
                         role="assistant",
@@ -1704,6 +1691,8 @@ class AppChatService:
             workspace_id=workspace_id,
             release_id=release_id,
             source=source,
+            prepared_memory_storage_type=storage_type,
+            prepared_user_rag_memory_id=user_rag_memory_id,
         )
 
     async def workflow_chat_stream(
@@ -1741,7 +1730,9 @@ class AppChatService:
                 workspace_id=workspace_id,
                 release_id=release_id,
                 public=public,
-                source=source
+                source=source,
+                prepared_memory_storage_type=storage_type,
+                prepared_user_rag_memory_id=user_rag_memory_id,
         ):
             yield event
 

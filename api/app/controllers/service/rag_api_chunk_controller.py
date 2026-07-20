@@ -3,7 +3,7 @@
 from typing import Any, Optional, Union
 import uuid
 
-from fastapi import APIRouter, Body, Depends, File, Request, status, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, status, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import chunk_controller
@@ -17,6 +17,8 @@ from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
+from app.services.rag_access_service import get_api_key_retrieval_principal_async
 
 
 router = APIRouter(prefix="/chunks", tags=["V1 - RAG API"])
@@ -232,7 +234,6 @@ def get_retrieve_types():
 async def retrieve_chunks(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
     query: str = Body(..., description="question"),
 ):
     """
@@ -240,17 +241,18 @@ async def retrieve_chunks(
     """
     body = await request.json()
     retrieve_data = chunk_schema.ChunkRetrieve(**body)
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
-
-    return await chunk_controller.retrieve_chunks_with_caller(
-        retrieve_data=retrieve_data,
-        db=db,
-        current_user=current_user,
-        caller=chunk_schema.KnowledgeRetrievalCaller.EX_API,
-    )
+    try:
+        principal = await get_api_key_retrieval_principal_async(api_key_auth)
+        return await chunk_controller.retrieve_chunks_with_caller(
+            retrieve_data=retrieve_data,
+            principal=principal,
+            caller=chunk_schema.KnowledgeRetrievalCaller.EX_API,
+        )
+    except KnowledgeRetrievalAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)

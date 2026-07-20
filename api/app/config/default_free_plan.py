@@ -21,7 +21,8 @@ def _get_quota_from_env():
         "ontology_project_quota",
         "model_quota",
         "api_ops_rate_limit",
-        "end_user_memory_limit"
+        "end_user_memory_limit",
+        "pre_user_memory_write_qps_limit"
     ]
     quotas = {}
     for key in quota_keys:
@@ -65,7 +66,8 @@ def _build_default_free_plan():
             "ontology_project_quota": 3,
             "model_quota": 1,
             "api_ops_rate_limit": 50,
-            "end_user_memory_limit": 300
+            "end_user_memory_limit": 300,
+            "pre_user_memory_write_qps_limit": 50
         },
     }
 

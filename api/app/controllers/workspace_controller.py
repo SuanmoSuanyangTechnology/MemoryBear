@@ -8,10 +8,13 @@ from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import (
+    CurrentUserSnapshot,
     cur_workspace_access_guard,
+    cur_workspace_access_guard_async,
     get_current_superuser,
     get_current_tenant,
     get_current_user,
+    get_current_user_async,
     workspace_access_guard,
 )
 from app.i18n.dependencies import get_current_language, get_translator
@@ -387,21 +390,21 @@ def switch_workspace(
 
 
 @router.get("/storage", response_model=ApiResponse)
-@cur_workspace_access_guard()
-def get_workspace_storage_type(
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+@cur_workspace_access_guard_async()
+async def get_workspace_storage_type(
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         t: callable = Depends(get_translator)
 ):
-    """获取当前工作空间的存储类型"""
+    """获取当前工作空间的存储类型（纯异步版本）"""
+    from app.db import get_async_db_context
+
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的存储类型")
 
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
+    async with get_async_db_context() as async_db:
+        storage_type = await workspace_service.get_workspace_storage_type_async(
+            db=async_db, workspace_id=workspace_id, user=current_user
+        )
     api_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {storage_type}")
     return success(data={"storage_type": storage_type}, msg=t("workspace.storage.type_retrieved"))
 

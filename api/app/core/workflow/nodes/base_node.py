@@ -901,12 +901,16 @@ class BaseNode(ABC):
                 return content.content_cache[cache_key]
             async with get_async_db_context() as db:
                 multimodal_service = MultimodalService(db, api_config=api_config)
+                try:
+                    upload_file_id = uuid.UUID(content.file_id) if content.file_id else None
+                except ValueError:
+                    upload_file_id = None
                 file_obj = FileInput(
                     type=content.type,
                     url=content.url,
                     transfer_method=content.transfer_method,
                     origin_file_type=content.origin_file_type,
-                    upload_file_id=uuid.UUID(content.file_id) if content.file_id else None,
+                    upload_file_id=upload_file_id,
                 )
                 file_obj.set_content(content.get_content())
                 message = await multimodal_service.process_files(

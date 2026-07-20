@@ -1,6 +1,6 @@
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import sqlalchemy as sa
 from sqlalchemy import select, or_
@@ -418,6 +418,80 @@ class EndUserRepository:
             db_logger.error(f"查询终端用户 {end_user_id} 时出错: {str(e)}")
             raise
 
+    def filter_existing_ids(self, end_user_ids: List[uuid.UUID]) -> Set[str]:
+        """批量校验 end_user_id 是否存在，返回实际存在且活跃的 ID 集合。
+
+        Args:
+            end_user_ids: 待校验的终端用户 ID 列表
+
+        Returns:
+            set[str]: 存在且 is_active=True 的 end_user_id 字符串集合
+        """
+        if not end_user_ids:
+            return set()
+        try:
+            rows = (
+                self.db.query(EndUser.id)
+                .filter(EndUser.id.in_(end_user_ids), EndUser.is_active == True)
+                .all()
+            )
+            return {str(uid) for (uid,) in rows}
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"批量校验终端用户ID时出错: {str(e)}")
+            raise
+
+    async def get_memory_insight_by_end_user_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
+        "获取用户缓存的记忆洞察"
+        from sqlalchemy import select
+        result = await self.db.execute(
+            select(
+                EndUser.memory_insight,
+                EndUser.behavior_pattern,
+                EndUser.key_findings,
+                EndUser.growth_trajectory,
+                EndUser.memory_insight_updated_at,
+            ).where(EndUser.id == end_user_id).limit(1)
+        )
+        return result.mappings().one_or_none()
+
+    async def get_user_summary_by_end_user_id_async(self, end_user_id: uuid.UUID) -> Optional[dict]:
+        """获取用户缓存的用户摘要"""
+        from sqlalchemy import select
+        result = await self.db.execute(
+            select(
+                EndUser.user_summary,
+                EndUser.personality_traits,
+                EndUser.core_values,
+                EndUser.one_sentence_summary,
+                EndUser.user_summary_updated_at,
+            ).where(EndUser.id == end_user_id).limit(1)
+        )
+        return result.mappings().one_or_none()
+
+    async def get_forgetting_threshold_async(self, end_user_id: uuid.UUID) -> Optional[float]:
+        """获取用户的遗忘阈值配置。
+
+        路径: EndUser → workspace → workspace.memory_config → MemoryConfig.forgetting_threshold
+        """
+        from sqlalchemy import select
+        from app.models.memory_config_model import MemoryConfig
+        from app.models.workspace_model import Workspace
+
+        stmt = (
+            select(MemoryConfig.forgetting_threshold)
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .join(MemoryConfig, MemoryConfig.config_id == Workspace.memory_config)
+            .where(
+                EndUser.id == end_user_id,
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+        
     def update_memory_insight(
             self,
             end_user_id: uuid.UUID,

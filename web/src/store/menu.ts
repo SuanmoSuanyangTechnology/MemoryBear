@@ -18,7 +18,7 @@
  */
 
 import { create } from 'zustand'
-import AllMenus from './menu.json'
+import AllMenus from './menuData'
 
 /** Menu item interface */
 export interface MenuItem {
@@ -33,7 +33,7 @@ export interface MenuItem {
   level: number;
   sort: number;
   icon?: string | null;
-  iconActive?: string | null;
+  active_icon?: string | null;
   menuDesc?: string | null;
   deleted?: string | null;
   updateTime?: number;

@@ -196,12 +196,6 @@ def analyze_entity_merges(
     ]
 
 
-def analyze_entity_disambiguation(
-    disamb_records: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Return disambiguation records (pass-through)."""
-    return disamb_records if disamb_records else []
-
 
 def parse_dedup_report(
     merge_records: List[Dict[str, Any]],
@@ -300,14 +294,11 @@ async def send_dedup_progress_callback(
                 "reduced_count": ent_edges_reduced,
             },
             "dedup_examples": dedup_details.get("dedup_examples", []),
-            "disamb_examples": dedup_details.get("disamb_examples", []),
             "summary": {
                 "total_merges": dedup_details.get("total_merges", 0),
-                "total_disambiguations": dedup_details.get("total_disambiguations", 0),
             },
         }
-
-        await progress_callback("dedup_disambiguation_complete", "去重消歧完成", dedup_stats)
+        await progress_callback("dedup_complete", "去重完成", dedup_stats)
     except Exception as e:
         logger.error("发送去重消歧进度回调失败: %s", e, exc_info=True)
         try:
@@ -319,7 +310,7 @@ async def send_dedup_progress_callback(
                 },
                 "summary": f"实体去重合并{original_entities - final_entities}个",
             }
-            await progress_callback("dedup_disambiguation_complete", "去重消歧完成", basic_stats)
+            await progress_callback("dedup_complete", "去重完成", basic_stats)
         except Exception as e2:
             logger.error("发送基本去重统计失败: %s", e2, exc_info=True)
 
@@ -361,7 +352,7 @@ async def run_dedup(
     logger.info("开始第一层实体去重")
 
     if progress_callback:
-        await progress_callback("deduplication", "正在去重消歧...")
+        await progress_callback("deduplication", "正在去重合并...")
 
     logger.info(
         "去重前: %d 个实体节点, %d 条陈述句-实体边, %d 条实体-实体边",
@@ -425,20 +416,7 @@ async def run_dedup(
                         f"{detail['main_entity_name']}合并{detail['merged_count']}个：相似实体已合并"
                     ),
                 }
-                await progress_callback("dedup_disambiguation_result", "实体去重中", dedup_result)
-
-            disamb_info = analyze_entity_disambiguation(disamb_records)
-            for i, detail in enumerate(disamb_info[:5]):
-                disamb_result = {
-                    "result_type": "entity_disambiguation",
-                    "disambiguated_entity_name": detail["entity_name"],
-                    "disambiguation_type": detail["disamb_type"],
-                    "confidence": detail.get("confidence", "unknown"),
-                    "reason": detail.get("reason", ""),
-                    "disamb_progress": f"{i + 1}/{min(len(disamb_info), 5)}",
-                    "message": f"{detail['entity_name']}消歧完成：{detail['disamb_type']}",
-                }
-                await progress_callback("dedup_disambiguation_result", "实体消歧中", disamb_result)
+                await progress_callback("dedup_result", "实体去重合并中", dedup_result)
 
             await send_dedup_progress_callback(
                 progress_callback,

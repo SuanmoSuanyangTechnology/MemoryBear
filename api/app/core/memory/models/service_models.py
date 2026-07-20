@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Self
 
 from pydantic import BaseModel, Field, field_serializer, ConfigDict, computed_field
@@ -133,3 +134,17 @@ class MemorySearchResult(BaseModel):
 
         merged.content_str = other.content_str or self.content_str
         return merged
+
+
+class ForgetLog(BaseModel):
+    node_id: str = Field(...)
+    end_user_id: uuid.UUID = Field(...)
+    node_type: str = Field(...)
+    content: str = Field(...)
+    trigger: int = Field(...)
+    reason: str = Field(...)
+    recoverable: bool = Field(...)
+    operator: uuid.UUID | None = Field(default=None)
+
+    delete_at: datetime = Field(...)
+    is_recovered: bool = Field(default=False)

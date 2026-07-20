@@ -65,11 +65,30 @@ class TextMerger:
 
     def _hard_split(self, text: str, limit: int) -> list[str]:
         tokens = encoder.encode(text)
-        return [
-            encoder.decode(tokens[index:index + limit])
-            for index in range(0, len(tokens), limit)
-            if tokens[index:index + limit]
-        ]
+        chunks: list[str] = []
+        start = 0
+
+        def find_decodable_boundary(begin: int, end: int, step: int) -> tuple[int, str] | None:
+            while begin < end <= len(tokens):
+                try:
+                    return end, encoder.decode(tokens[begin:end], errors="strict")
+                except UnicodeDecodeError:
+                    end += step
+            return None
+
+        while start < len(tokens):
+            end = min(start + limit, len(tokens))
+            boundary = find_decodable_boundary(start, end, -1)
+            if boundary is None:
+                boundary = find_decodable_boundary(start, min(start + limit + 1, len(tokens)), 1)
+            if boundary is None:
+                raise RuntimeError(f"Unable to find a valid UTF-8 boundary from token index {start}.")
+
+            end, chunk = boundary
+            chunks.append(chunk)
+            start = end
+
+        return chunks
 
     @staticmethod
     def _within_limit(text: str, limit: int) -> bool:

@@ -5,6 +5,7 @@
 多轮执行直到模型给出最终答案，将完整的工具调用过程注入 system_prompt。
 """
 import asyncio
+import inspect
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -170,6 +171,11 @@ class ToolOrchestrator:
         self.tools: Dict[str, Any] = {t.name: t for t in tools}
         self.max_rounds = max_rounds
         self._single_call_counts: Dict[str, int] = {}
+        from app.services.context_assembler import ContextEvidenceCollector
+        self.context_collector = ContextEvidenceCollector()
+        self.context_assembler = None
+        self.context_query = ""
+        self.context_base_text = ""
 
     @classmethod
     async def create_and_run(
@@ -182,6 +188,8 @@ class ToolOrchestrator:
         model_config: Any,
         effective_params: Dict[str, Any],
         processed_files: Optional[List[Dict]] = None,
+        context_evidence: Optional[List[Any]] = None,
+        context_evidence_loader: Optional[Any] = None,
         max_rounds: int = 10,
     ) -> Tuple[str, List[Dict]]:
         """
@@ -195,6 +203,9 @@ class ToolOrchestrator:
         from app.core.models import RedBearLLM, RedBearModelConfig
 
         orchestrator = cls(tools, max_rounds=max_rounds)
+        orchestrator.context_collector.add(context_evidence or [])
+        orchestrator.context_evidence_loader = context_evidence_loader
+        orchestrator.context_evidence_loaded = False
         react_system_prompt = orchestrator.build_react_system_prompt(system_prompt)
 
         _react_llm = RedBearLLM(
@@ -205,10 +216,25 @@ class ToolOrchestrator:
                 base_url=api_key_config.get("api_base"),
                 capability=api_key_config.get("capability", []),
                 is_omni=api_key_config.get("is_omni", False),
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 extra_params={"temperature": effective_params.get("temperature", 0.7)}
             ),
             type=model_config.type if hasattr(model_config, 'type') else model_config.model_type
         )
+
+        from app.services.context_assembler import (
+            ContextAssembler,
+            create_evidence_compressor,
+            resolve_evidence_max_tokens,
+        )
+        orchestrator.context_assembler = ContextAssembler(
+            resolve_evidence_max_tokens(effective_params.get("max_tokens") or 2000),
+            compressor=create_evidence_compressor(_react_llm),
+        )
+        orchestrator.context_query = message
+        # Evidence budgeting is independent from prompt/history/output tokens.
+        orchestrator.context_base_text = react_system_prompt
 
         async def _llm_caller(msgs):
             full_msgs = [{"role": "system", "content": react_system_prompt}] + msgs
@@ -251,6 +277,10 @@ class ToolOrchestrator:
             return f"{original_system_prompt}\n\n{react_block}"
         return react_block
 
+    async def _call_sync_tool(self, tool: Any, input_dict: dict) -> Any:
+        """Run legacy synchronous tools without blocking the event loop."""
+        return await asyncio.to_thread(tool.func, **input_dict)
+
     async def _call_tool(self, name: str, input_dict: dict) -> dict:
         """执行单个工具调用"""
         # 单次调用工具超过1次直接提示换工具
@@ -262,9 +292,11 @@ class ToolOrchestrator:
         if not tool:
             return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}
         try:
+            if getattr(tool, "coroutine", None):
+                result = await tool.ainvoke(input_dict)
             # LangchainToolWrapper 使用 _arun，@tool 装饰器生成的工具使用 func
-            if hasattr(tool, 'func') and callable(tool.func):
-                result = await asyncio.to_thread(tool.func, **input_dict)
+            elif hasattr(tool, 'func') and callable(tool.func):
+                result = await self._call_sync_tool(tool, input_dict)
             else:
                 # LangchainToolWrapper: 工具名可能含 operation 后缀（如 datetime_tool_now）
                 # 需要从工具名中提取 operation 并注入参数
@@ -319,6 +351,11 @@ class ToolOrchestrator:
                 ).strip()
                 final_answer = clean or response.strip()
                 logger.info(f"ReAct 第 {round_idx + 1} 轮：模型给出最终答案")
+                if not self.context_collector.snapshot():
+                    logger.info(
+                        "[上下文组装] 未触发 | "
+                        "原因=ReAct 未调用知识库或长期记忆工具，因此没有外部证据可组装"
+                    )
                 break
 
             thought, action, input_dict = parsed
@@ -336,6 +373,45 @@ class ToolOrchestrator:
             error: Optional[str] = tool_result.get("error")
 
             observation = f"[错误: {error}]" if error else output
+            tool = self.tools.get(action)
+            evidence = getattr(tool, "_context_evidence", None) if tool else None
+            if success and tool and not evidence:
+                from app.services.context_assembler import context_evidence_from_tool_result
+                evidence = context_evidence_from_tool_result(tool, output, input_dict)
+            context_stats = None
+            if success and evidence and self.context_assembler:
+                self.context_collector.add(evidence)
+                if not getattr(self, "context_evidence_loaded", False) and getattr(self, "context_evidence_loader", None):
+                    extra = self.context_evidence_loader()
+                    if inspect.isawaitable(extra):
+                        extra = await extra
+                    self.context_collector.add(extra or [])
+                    self.context_evidence_loaded = True
+                tool._context_evidence = []
+                assembled = await self.context_assembler.assemble(
+                    self.context_collector.snapshot(), query=self.context_query,
+                    base_text=(
+                        self.context_base_text + "\n" +
+                        json.dumps(messages, ensure_ascii=False, default=str) + "\n" +
+                        response
+                    ),
+                    message_count=len(messages) + 1,
+                    triggered_by=[action],
+                )
+                if assembled.context_text:
+                    observation = assembled.context_text
+                else:
+                    observation = "[外部上下文未注入：组装后为空，避免回退发送原始大段工具结果]"
+                    logger.warning(
+                        "[上下文组装] 未注入原始工具正文 | 原因=组装结果为空，已阻止大段工具结果回退"
+                    )
+                context_stats = {
+                    "triggered_by": assembled.triggered_by,
+                    "evidence_count": len(assembled.evidence),
+                    "compressed_count": len(assembled.compressed_evidence_keys),
+                    "dropped_count": len(assembled.dropped_evidence),
+                    "estimated_tokens": assembled.estimated_tokens,
+                }
 
             # 构建步骤记录
             tool = self.tools.get(action)
@@ -359,6 +435,10 @@ class ToolOrchestrator:
                     node["meta"] = {}
                 node["meta"]["sources"] = tool._last_sources
                 tool._last_sources = []
+            if context_stats:
+                if not node["meta"]:
+                    node["meta"] = {}
+                node["meta"]["context_assembly"] = context_stats
             node_executions.append(node)
 
             # 记录本轮轨迹

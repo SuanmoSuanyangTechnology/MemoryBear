@@ -4,6 +4,10 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { SSEMessage } from '@/utils/stream'
 import { mapLastVersion } from './helpers'
 import type { NodeContext, StreamEventData } from './types'
+import {
+  appendOutputByNodeId,
+  finalizeOutputs,
+} from '@/components/Chat/utils/messageOutputs'
 
 export interface WorkflowStreamDeps {
   conversationId: string | null;
@@ -75,6 +79,7 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
         }
         case 'message':
           appendStreamContent(payload.content)
+          setChatList(prev => appendOutputByNodeId(prev, payload.node_id, payload.content))
           break
         case 'message_replace':
           replaceStreamContent(payload.content)
@@ -242,6 +247,7 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
             content: current.content === '' ? null : current.content,
             meta_data: { ...(current.meta_data || {}), citations },
           })))
+          setChatList(prev => finalizeOutputs(prev))
           setStreamLoading(false)
           setLoading(false)
           if (execution_id && executionId !== execution_id) {
