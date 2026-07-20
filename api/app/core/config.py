@@ -267,6 +267,7 @@ class Settings:
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     
     SANDBOX_URL: str = os.getenv("SANDBOX_URL", "")
+    SANDBOX_API_KEY: str = os.getenv("SANDBOX_API_KEY", "redbear-sandbox")
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
