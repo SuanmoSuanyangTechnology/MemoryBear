@@ -250,10 +250,10 @@ class MemoryService:
         )
 
     @staticmethod
-    def dispatch_flush_conversation(conversation_id: str) -> int:
+    async def dispatch_flush_conversation(conversation_id: str) -> int:
         """Flush 兜底任务派发。"""
         from app.core.memory.pipelines.dispatcher import dispatch_flush_conversation
-        return dispatch_flush_conversation(conversation_id)
+        return await dispatch_flush_conversation(conversation_id)
 
     @staticmethod
     async def delete_node_by_element_id(

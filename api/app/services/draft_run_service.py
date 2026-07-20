@@ -8,6 +8,7 @@ import datetime
 import json
 import time
 import uuid
+from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from langchain.tools import tool
@@ -46,9 +47,41 @@ from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_orchestrator import ToolOrchestrator
+from app.services.context_assembler import (
+    ContextEvidence,
+    append_external_context_rule,
+)
 from app.services.tool_service import ToolService
 
 logger = get_business_logger()
+
+
+def _snapshot_annotations(annotations: List[AppAnnotation]) -> List[SimpleNamespace]:
+    """Detach annotation values before an embedding calculation runs in a worker thread."""
+    return [SimpleNamespace(
+        id=item.id,
+        question=item.question,
+        answer=item.answer,
+        embedding=list(item.embedding) if item.embedding else None,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    ) for item in annotations]
+
+
+def _snapshot_message(message: Message) -> SimpleNamespace:
+    """Copy message values that are used after its async session has closed."""
+    return SimpleNamespace(
+        id=message.id,
+        conversation_id=message.conversation_id,
+        role=message.role,
+        content=message.content,
+        meta_data=dict(message.meta_data or {}),
+        parent_message_id=message.parent_message_id,
+        version=message.version,
+        is_current=message.is_current,
+        is_deleted=message.is_deleted,
+        created_at=message.created_at,
+    )
 
 
 class KnowledgeRetrievalInput(BaseModel):
@@ -239,13 +272,30 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
                     })
                 # 把来源信息挂到函数属性上，供外部读取
                 knowledge_retrieval_tool._last_sources = sources
+                from app.services.context_assembler import ContextEvidence
+                knowledge_retrieval_tool._context_evidence = [
+                    ContextEvidence(
+                        source_type="knowledge",
+                        source_id=str((chunk.metadata or {}).get("chunk_id") or
+                                      (chunk.metadata or {}).get("id") or "") or None,
+                        content=chunk.page_content or "",
+                        score=(chunk.metadata or {}).get("score"),
+                        metadata={
+                            "knowledge_id": str((chunk.metadata or {}).get("knowledge_id", "")),
+                            "document_id": str((chunk.metadata or {}).get("document_id", "")),
+                            "file_name": (chunk.metadata or {}).get("file_name", ""),
+                        },
+                    ) for chunk in retrieve_chunks_result if chunk.page_content
+                ]
 
                 return f"检索到以下相关信息：\n\n{context}"
             else:
                 knowledge_retrieval_tool._last_sources = []
+                knowledge_retrieval_tool._context_evidence = []
                 logger.warning("知识库检索未找到结果")
                 return "未找到相关信息"
         except Exception as e:
+            knowledge_retrieval_tool._context_evidence = []
             logger.error("知识库检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"检索失败: {str(e)}"
 
@@ -296,9 +346,10 @@ class AgentRunService:
             )
             return result.scalar_one_or_none()
 
-    async def _get_message_async(self, message_id: uuid.UUID) -> Optional[Message]:
+    async def _get_message_async(self, message_id: uuid.UUID) -> Optional[SimpleNamespace]:
         async with get_async_db_context() as db:
-            return await db.get(Message, message_id)
+            message = await db.get(Message, message_id)
+            return _snapshot_message(message) if message else None
 
     async def _mark_message_not_current_async(self, message_id: uuid.UUID) -> None:
         async with get_async_db_context() as db:
@@ -316,7 +367,7 @@ class AgentRunService:
             version: int,
             parent_message_id: uuid.UUID,
             meta_data: dict,
-    ) -> Message:
+    ) -> SimpleNamespace:
         async with get_async_db_context() as db:
             new_msg = Message(
                 conversation_id=conversation_id,
@@ -335,7 +386,7 @@ class AgentRunService:
 
             await db.commit()
             await db.refresh(new_msg)
-            return new_msg
+            return _snapshot_message(new_msg)
 
     async def _create_tts_file_metadata_async(
             self,
@@ -638,7 +689,7 @@ class AgentRunService:
                         AppAnnotation.is_active == 1,
                     )
                 )
-                annotations = list(result.scalars().all())
+                annotations = _snapshot_annotations(list(result.scalars().all()))
                 if not annotations:
                     return None
 
@@ -652,13 +703,19 @@ class AgentRunService:
                     return None
 
                 threshold = setting.similarity_threshold
+                api_key_data = {
+                    "model_name": api_key_obj.model_name,
+                    "provider": api_key_obj.provider,
+                    "api_key": api_key_obj.api_key,
+                    "api_base": api_key_obj.api_base,
+                }
 
             from app.core.models.base import RedBearModelConfig
             config = RedBearModelConfig(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                base_url=api_key_obj.api_base or None,
+                model_name=api_key_data["model_name"],
+                provider=api_key_data["provider"],
+                api_key=api_key_data["api_key"],
+                base_url=api_key_data["api_base"] or None,
                 timeout=60,
                 max_retries=3,
             )
@@ -704,6 +761,59 @@ class AgentRunService:
         except Exception as e:
             logger.warning(f"标注匹配检查失败: {e}")
             return None
+
+    async def _load_annotation_context_evidence(
+            self, app_id: uuid.UUID, message: str
+    ) -> List[ContextEvidence]:
+        """只在知识库或记忆工具返回有效证据后调用。"""
+        try:
+            async with get_async_db_context() as db:
+                setting = (await db.execute(select(AppAnnotationSetting).where(
+                    AppAnnotationSetting.app_id == app_id).limit(1))).scalar_one_or_none()
+                if not setting or not setting.enabled or not setting.model_config_id:
+                    return []
+                annotations = _snapshot_annotations(list((await db.execute(select(AppAnnotation).where(
+                    AppAnnotation.app_id == app_id,
+                    AppAnnotation.is_active == 1,
+                ))).scalars().all()))
+                if not annotations:
+                    return []
+                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                    db, setting.model_config_id,
+                    tenant_id=await self._resolve_app_tenant_id_async(app_id),
+                )
+                if not api_key_obj:
+                    return []
+                api_key_data = {
+                    "model_name": api_key_obj.model_name,
+                    "provider": api_key_obj.provider,
+                    "api_key": api_key_obj.api_key,
+                    "api_base": api_key_obj.api_base,
+                }
+            from app.core.models.base import RedBearModelConfig
+            model_config = RedBearModelConfig(
+                model_name=api_key_data["model_name"], provider=api_key_data["provider"],
+                api_key=api_key_data["api_key"], base_url=api_key_data["api_base"] or None,
+                timeout=60, max_retries=3,
+            )
+            candidates = await asyncio.to_thread(
+                AnnotationService.find_context_candidates,
+                message, annotations, model_config, 0.6, 3,
+            )
+            logger.info(
+                "[上下文组装] 标注候选 | "
+                f"应用={str(app_id)[:8]} | 标注总数={len(annotations)} | "
+                f"候选={len(candidates)} | 阈值=0.6 | top_k=3"
+            )
+            return [ContextEvidence(
+                source_type="annotation", source_id=item["annotation_id"],
+                content=f"参考问题：{item['question']}\n参考答案：{item['answer']}",
+                score=item["similarity"], created_at=item.get("created_at"),
+                updated_at=item.get("updated_at"), metadata={"question": item["question"]},
+            ) for item in candidates]
+        except Exception:
+            logger.warning("[上下文组装] 标注候选加载失败，继续使用知识库/记忆证据", exc_info=True)
+            return []
 
     @staticmethod
     def prepare_variables(
@@ -865,10 +975,8 @@ class AgentRunService:
         enabled = bool(memory_config and memory_config.get("enabled"))
         config_id = None
         if enabled and workspace_id:
-            if isinstance(self.db, AsyncSession):
-                config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
-            else:
-                config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
+            async with get_async_db_context() as db:
+                config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_id)
 
         tool = create_long_term_memory_tool(
             memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
@@ -1112,7 +1220,7 @@ class AgentRunService:
                         conv_uuid = uuid.UUID(conversation_id)
                         conv_uuid = uuid.UUID(conversation_id)
                         parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
-                        user_msg = await self._add_message_async(
+                        await self._add_message_async(
                             message_id=user_message_id,
                             conversation_id=conv_uuid,
                             role="user",
@@ -1126,7 +1234,7 @@ class AgentRunService:
                             role="assistant",
                             content=annotation_match["answer"],
                             meta_data={"usage": {}},
-                            parent_message_id=user_msg.id,
+                            parent_message_id=user_message_id,
                         )
                     return {
                         "message": annotation_match["answer"],
@@ -1213,6 +1321,9 @@ class AgentRunService:
 
             # 7. 根据模型能力选择执行路径
             capability = api_key_config.get("capability", [])
+            async def load_annotation_context():
+                return await self._load_annotation_context_evidence(agent_config.app_id, message)
+            system_prompt = append_external_context_rule(system_prompt)
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
@@ -1226,6 +1337,7 @@ class AgentRunService:
                     model_config=model_config,
                     effective_params=effective_params,
                     processed_files=processed_files,
+                    context_evidence_loader=load_annotation_context,
                 )
                 tools = []
 
@@ -1243,6 +1355,9 @@ class AgentRunService:
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
                 capability=capability,
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
             )
 
             for t in tools:
@@ -1529,7 +1644,7 @@ class AgentRunService:
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
                         parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
-                        user_msg = await self._add_message_async(
+                        await self._add_message_async(
                             message_id=user_message_id,
                             conversation_id=conv_uuid,
                             role="user",
@@ -1543,7 +1658,7 @@ class AgentRunService:
                             role="assistant",
                             content=annotation_match["answer"],
                             meta_data={"usage": {}},
-                            parent_message_id=user_msg.id,
+                            parent_message_id=user_message_id,
                         )
                     yield self._format_sse_event("start", {
                         "conversation_id": conversation_id,
@@ -1637,6 +1752,9 @@ class AgentRunService:
 
             # 7. 根据模型能力选择执行路径
             capability = api_key_config.get("capability", [])
+            async def load_annotation_context():
+                return await self._load_annotation_context_evidence(agent_config.app_id, message)
+            system_prompt = append_external_context_rule(system_prompt)
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
@@ -1650,6 +1768,7 @@ class AgentRunService:
                     model_config=model_config,
                     effective_params=effective_params,
                     processed_files=processed_files,
+                    context_evidence_loader=load_annotation_context,
                 )
                 tools = []
 
@@ -1669,6 +1788,9 @@ class AgentRunService:
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
                 capability=capability,
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
             )
 
             for t in tools:
@@ -1886,11 +2008,13 @@ class AgentRunService:
                 try:
                     conv_uuid = uuid.UUID(conversation_id)
                     parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
-                    user_msg = await self._add_message_async(
+                    failed_user_message_id = uuid.uuid4()
+                    await self._add_message_async(
                         conversation_id=conv_uuid,
                         role="user",
                         content=message,
                         meta_data={"files": [], "history_files": {}},
+                        message_id=failed_user_message_id,
                         parent_message_id=parent_message_id,
                     )
                     await self._add_message_async(
@@ -1899,7 +2023,7 @@ class AgentRunService:
                         content="",
                         meta_data={"error": json.dumps(compact_error, ensure_ascii=False)[:2000]},
                         status="failed",
-                        parent_message_id=user_msg.id,
+                        parent_message_id=failed_user_message_id,
                     )
                 except Exception:
                     pass
@@ -2145,11 +2269,20 @@ class AgentRunService:
                 if max_history:
                     stmt = stmt.limit(max_history)
                 result = await db.execute(stmt)
-                messages = list(result.scalars().all())
+                # Do not carry ORM Message instances outside this async
+                # session: attributes may expire after the context exits.
+                messages = [
+                    {
+                        "role": item.role,
+                        "content": item.content,
+                        "meta_data": dict(item.meta_data or {}),
+                    }
+                    for item in result.scalars().all()
+                ]
 
             history = []
             for msg in messages:
-                history_files = msg.meta_data.get("history_files", {}) if msg.meta_data else {}
+                history_files = msg["meta_data"].get("history_files", {})
 
                 has_files = bool(history_files and current_provider and current_is_omni is not None)
                 if has_files:
@@ -2159,29 +2292,28 @@ class AgentRunService:
                     if stored_provider != current_provider or stored_is_omni != current_is_omni:
                         continue
 
-                    content = [{"type": "text", "text": msg.content}]
+                    content = [{"type": "text", "text": msg["content"]}]
                     content.extend(history_files.get("content", []))
                 else:
-                    content = msg.content
+                    content = msg["content"]
 
                 history.append({
-                    "role": msg.role,
+                    "role": msg["role"],
                     "content": content
                 })
 
-            logger.debug(
-                "加载会话历史",
-                extra={
-                    "conversation_id": conversation_id,
-                    "max_history": max_history,
-                    "loaded_count": len(history)
-                }
+            logger.info(
+                "[会话历史] 加载完成 | "
+                f"会话={conversation_id} | 请求上限={max_history} | 实际加载={len(history)}"
             )
 
             return history
 
         except Exception as e:
-            logger.warning("加载会话历史失败", extra={"conversation_id": conversation_id, "error": str(e)})
+            logger.warning(
+                "[会话历史] 加载失败 | "
+                f"会话={conversation_id} | 异常={type(e).__name__}: {e}"
+            )
             return []
 
     async def _load_history_before_message(
@@ -3587,7 +3719,9 @@ class AgentRunService:
 
     # ==================== 重新生成功能 ====================
 
-    async def _locate_or_restore_parent_user_message(self, original_msg: "Message") -> "Message":
+    async def _locate_or_restore_parent_user_message(
+            self, original_msg: SimpleNamespace
+    ) -> SimpleNamespace:
         """定位原 assistant 消息对应的父 user 消息。
 
         查找顺序：
@@ -3619,7 +3753,8 @@ class AgentRunService:
                     .order_by(Message.created_at.desc())
                     .limit(1)
                 )
-                parent_msg = result.scalar_one_or_none()
+                parent_record = result.scalar_one_or_none()
+                parent_msg = _snapshot_message(parent_record) if parent_record else None
         if not parent_msg:
             # 兜底：同会话内最近一条 user 消息（不论时间顺序），覆盖 created_at 异常的脏数据
             async with get_async_db_context() as db:
@@ -3632,7 +3767,8 @@ class AgentRunService:
                     .order_by(Message.created_at.desc())
                     .limit(1)
                 )
-                parent_msg = result.scalar_one_or_none()
+                parent_record = result.scalar_one_or_none()
+                parent_msg = _snapshot_message(parent_record) if parent_record else None
         if not parent_msg:
             raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
         restored_deleted = False
@@ -3648,7 +3784,7 @@ class AgentRunService:
                 restored_deleted = True
             await db.commit()
             await db.refresh(parent_record)
-            parent_msg = parent_record
+            parent_msg = _snapshot_message(parent_record)
         original_msg.parent_message_id = parent_msg.id
         if restored_deleted:
             logger.info(
@@ -3700,6 +3836,12 @@ class AgentRunService:
         if original_msg.is_deleted:
             raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
 
+        # Keep scalar values before any later await/yield.  The message snapshot is
+        # already detached from its short-lived lookup session.
+        conversation_uuid = original_msg.conversation_id
+        conversation_id = str(conversation_uuid)
+        new_version = original_msg.version + 1
+
         # 2. 将原版本标记为非当前
         await self._mark_message_not_current_async(message_id)
         original_msg.is_current = False
@@ -3734,11 +3876,9 @@ class AgentRunService:
                         continue
 
         # 4. 加载上下文（到父消息为止，不包含当前要重新生成的消息）
-        conversation_id = str(original_msg.conversation_id)
-
         # 使用封装的方法加载父消息之前的历史
         filtered_history = await self._load_history_before_message(
-            conversation_id=original_msg.conversation_id,
+            conversation_id=conversation_uuid,
             before_time=parent_msg.created_at,
             max_history=settings.AGENT_MAX_HISTORY
         )
@@ -3759,9 +3899,8 @@ class AgentRunService:
         )
 
         # 6. 保存新版本消息
-        new_version = original_msg.version + 1
         new_msg = await self._save_regenerated_message_async(
-            conversation_id=original_msg.conversation_id,
+            conversation_id=conversation_uuid,
             content=result["message"],
             version=new_version,
             parent_message_id=parent_msg_id,
@@ -3829,6 +3968,12 @@ class AgentRunService:
         if original_msg.is_deleted:
             raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
 
+        # Cache values needed after the stream starts. Never rely on an ORM
+        # instance across its short-lived lookup session or later yield points.
+        conversation_uuid = original_msg.conversation_id
+        conversation_id = str(conversation_uuid)
+        new_version = original_msg.version + 1
+
         # 2. 将原版本标记为非当前
         await self._mark_message_not_current_async(message_id)
         original_msg.is_current = False
@@ -3863,10 +4008,8 @@ class AgentRunService:
                         continue
 
         # 4. 加载上下文
-        conversation_id = str(original_msg.conversation_id)
-
         filtered_history = await self._load_history_before_message(
-            conversation_id=original_msg.conversation_id,
+            conversation_id=conversation_uuid,
             before_time=parent_msg.created_at,
             max_history=settings.AGENT_MAX_HISTORY
         )
@@ -3882,7 +4025,7 @@ class AgentRunService:
         # 发送开始事件
         yield self._format_sse_event("start", {
             "conversation_id": conversation_id,
-            "version": original_msg.version + 1,
+            "version": new_version,
             "timestamp": time.time()
         })
 
@@ -3931,9 +4074,8 @@ class AgentRunService:
                 citations = event_data.get("citations", [])
 
         # 6. 保存新版本消息
-        new_version = original_msg.version + 1
         new_msg = await self._save_regenerated_message_async(
-            conversation_id=original_msg.conversation_id,
+            conversation_id=conversation_uuid,
             content=full_content,
             version=new_version,
             parent_message_id=parent_msg_id,

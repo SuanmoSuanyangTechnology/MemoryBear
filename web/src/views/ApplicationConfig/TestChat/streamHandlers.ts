@@ -13,6 +13,7 @@ import {
   applyMessageId,
   applyUserMessageId,
   appendWorkflowContent,
+  replaceWorkflowContent,
   appendWorkflowIntervention,
   markWorkflowInterventionTimeout,
   mergeWorkflowAgentLog,
@@ -21,6 +22,11 @@ import {
   updateWorkflowCycle,
   updateWorkflowEnd,
 } from './helpers'
+// Shared per-node meta_data.outputs helpers (single source of truth).
+import {
+  appendOutputByNodeId as appendWorkflowOutputByNodeId,
+  finalizeOutputs as finalizeWorkflowOutputs,
+} from '@/components/Chat/utils/messageOutputs'
 
 type SetChatList = Dispatch<SetStateAction<Array<ChatItem | ChatItem[]>>>
 
@@ -175,6 +181,11 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
         // Append streaming text chunks to assistant message
         case 'message':
           setChatList(prev => appendWorkflowContent(prev, content))
+          setChatList(prev => appendWorkflowOutputByNodeId(prev, node_id, content))
+          break
+        // Replace the assistant message content wholesale and drop the segmented outputs
+        case 'message_replace':
+          setChatList(prev => replaceWorkflowContent(prev, content))
           break
         case 'intervention_required':
           setChatList(prev => appendWorkflowIntervention(prev, {
@@ -206,6 +217,7 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
           if (citations && citations.length > 0) {
             setChatList(prev => updateWorkflowEnd(prev, item.data as NodeData, citations))
           }
+          setChatList(prev => finalizeWorkflowOutputs(prev))
           setStreamLoading(false)
           streamLoadingRef.current = false
           setLoading(false)

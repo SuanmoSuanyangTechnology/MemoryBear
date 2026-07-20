@@ -8,7 +8,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_db_logger
 from app.core.utils.datetime_utils import to_iso_z, utcnow
 from app.core.memory.models.service_models import ForgetLog
-from app.models.memory_forget_model import ForgetAuditModel
+from app.models.memory_forget_model import ForgetAuditModel, ForgetTrigger
 from app.models.user_model import User
 from app.repositories.neo4j.graph_search import forget_recover_by_element_id
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -177,7 +177,7 @@ class ForgetLogRepository:
             )
         elif status == "deleted":
             conditions.append(
-                or_(
+                and_(
                     ForgetAuditModel.is_recovered == False,
                     ForgetAuditModel.recoverable == False,
                 )
@@ -208,3 +208,66 @@ class ForgetLogRepository:
                 operator_names[row.id] = row.username
 
         return items, operator_names, total
+
+    @staticmethod
+    async def get_forget_stats(
+        db: AsyncSession,
+        end_user_id: uuid.UUID,
+    ) -> dict:
+        """获取遗忘统计信息。
+
+        Args:
+            db: SQLAlchemy 异步会话。
+            end_user_id: 终端用户 ID。
+
+        Returns:
+            dict: 包含 total, manual_count, scheduled_count, recoverable_count。
+        """
+        base = select(func.count()).select_from(ForgetAuditModel).where(
+            ForgetAuditModel.end_user_id == end_user_id
+        )
+
+        def _where(*extra):
+            return base.where(*extra)
+
+        total_result = await db.execute(base)
+        total = total_result.scalar_one()
+
+        manual_result = await db.execute(_where(ForgetAuditModel.trigger == ForgetTrigger.Manual))
+        manual = manual_result.scalar_one()
+
+        scheduled_result = await db.execute(_where(ForgetAuditModel.trigger == ForgetTrigger.Scheduled))
+        scheduled = scheduled_result.scalar_one()
+
+        recoverable_result = await db.execute(
+            _where(
+                ForgetAuditModel.is_recovered == False,
+                ForgetAuditModel.recoverable == True,
+            )
+        )
+        recoverable = recoverable_result.scalar_one()
+
+        return {
+            "total": total,
+            "manual_count": manual,
+            "scheduled_count": scheduled,
+            "recoverable_count": recoverable,
+        }
+
+    @staticmethod
+    async def get_total(db: AsyncSession, end_user_id: uuid.UUID) -> int:
+        """获取遗忘日志总数。
+
+        Args:
+            db: SQLAlchemy 异步会话。
+            end_user_id: 终端用户 ID。
+
+        Returns:
+            int: 总记录数。
+        """
+        result = await db.scalar(
+            select(func.count()).select_from(ForgetAuditModel).where(
+                ForgetAuditModel.end_user_id == end_user_id
+            )
+        )
+        return int(result or 0)

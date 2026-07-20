@@ -1786,7 +1786,8 @@ SET n += {
 RETURN n.id AS uuid
 """
 
-# 感知记忆与对话的关联边
+# 感知记忆与分块的关联边（Chunk→Perceptual）
+# 与 PERCEPTUAL_ENTITY_EDGE_SAVE 共存：前者按对话上下文建边，后者按语义相似度建边。
 PERCEPTUAL_CHUNK_EDGE_SAVE = """
 UNWIND $edges AS edge
 MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
@@ -1794,7 +1795,27 @@ MATCH (c:Chunk {id: edge.chunk_id, end_user_id: edge.end_user_id})
 WHERE c.delete_at IS NULL
 MERGE (c)-[r:HAS_PERCEPTUAL]->(p)
 ON CREATE SET r.end_user_id = edge.end_user_id,
-    r.created_at = edge.created_at
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at,
+    r.perceptual_type = edge.perceptual_type,
+    r.perceptual_type_id = edge.perceptual_type_id
+RETURN elementId(r) AS uuid
+"""
+
+# 感知记忆与实体的语义关联边（ExtractedEntity→Perceptual）
+# 与 PERCEPTUAL_CHUNK_EDGE_SAVE 共存，两者采用相同的关系属性 schema。
+# 方向：(ExtractedEntity)-[:HAS_PERCEPTUAL]->(Perceptual)
+PERCEPTUAL_ENTITY_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
+MATCH (e:ExtractedEntity {id: edge.entity_id, end_user_id: edge.end_user_id})
+WHERE e.delete_at IS NULL
+MERGE (e)-[r:HAS_PERCEPTUAL]->(p)
+ON CREATE SET r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at,
+    r.perceptual_type = edge.perceptual_type,
+    r.perceptual_type_id = edge.perceptual_type_id
 RETURN elementId(r) AS uuid
 """
 

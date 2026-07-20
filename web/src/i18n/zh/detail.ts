@@ -252,6 +252,8 @@ export const detail = {
       active: '启用',
       inactive: '停用',
       api_ops_rate_limit: 'API OPS 频次',
+      pre_user_memory_write_qps_limit: '记忆写入 QPS 频次',
+      end_user_memory_limit: '用户记忆数量',
       ops: '次/秒',
       pcs: '个',
       GB: 'GB',

@@ -1,6 +1,6 @@
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import sqlalchemy as sa
 from sqlalchemy import select, or_
@@ -416,6 +416,29 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询终端用户 {end_user_id} 时出错: {str(e)}")
+            raise
+
+    def filter_existing_ids(self, end_user_ids: List[uuid.UUID]) -> Set[str]:
+        """批量校验 end_user_id 是否存在，返回实际存在且活跃的 ID 集合。
+
+        Args:
+            end_user_ids: 待校验的终端用户 ID 列表
+
+        Returns:
+            set[str]: 存在且 is_active=True 的 end_user_id 字符串集合
+        """
+        if not end_user_ids:
+            return set()
+        try:
+            rows = (
+                self.db.query(EndUser.id)
+                .filter(EndUser.id.in_(end_user_ids), EndUser.is_active == True)
+                .all()
+            )
+            return {str(uid) for (uid,) in rows}
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"批量校验终端用户ID时出错: {str(e)}")
             raise
 
     async def get_memory_insight_by_end_user_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:

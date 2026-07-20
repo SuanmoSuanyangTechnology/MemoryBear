@@ -155,7 +155,8 @@ export function useChatMessages() {
           audio_status: audio_status || lastMsg.meta_data?.audio_status,
           citations: citations || lastMsg.meta_data?.citations,
           suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions,
-          error: error || lastMsg.meta_data?.error
+          error: error || lastMsg.meta_data?.error,
+          outputs: replace ? undefined : lastMsg.meta_data?.outputs
         }
       }
       if (lastMsg?.role === 'assistant') {

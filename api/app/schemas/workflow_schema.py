@@ -78,6 +78,22 @@ class ExecutionConfig(BaseModel):
     parallel_limit: int = Field(default=5, ge=1, le=20, description="并行执行限制")
 
 
+class MultiAnswerModeConfig(BaseModel):
+    """一问多答模式配置"""
+    enabled: bool = Field(
+        default=False,
+        description="是否启用一问多答模式。开启后多个回复节点可并行输出，message事件携带node_id"
+    )
+
+
+class FeaturesConfig(BaseModel):
+    """工作流功能配置"""
+    multi_answer_mode: MultiAnswerModeConfig = Field(
+        default_factory=MultiAnswerModeConfig,
+        description="一问多答模式配置"
+    )
+
+
 class TriggerConfig(BaseModel):
     """触发器配置"""
     id: str | None = Field(default=None, description="触发器 ID")

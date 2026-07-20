@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:12:48
+ * @Last Modified time: 2026-07-16 17:40:40
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -10,7 +10,7 @@
  * Supports real-time testing with example data
  */
 
-import { type FC, useState, useEffect } from 'react'
+import { type FC, useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Space, Select, InputNumber, App, Form, Input, Flex, Tooltip, Divider } from 'antd'
@@ -19,15 +19,18 @@ import clsx from 'clsx'
 import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
-import Markdown from '@/components/Markdown'
+import ChatContent from '@/components/Chat/ChatContent'
+import type { ChatItem } from '@/components/Chat/types'
 import { configList, modelConfigList } from './constant'
 import Result from './components/Result'
+import { getDebugChatMock } from './components/result/debugChatMock'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import ModelSelect from '@/components/ModelSelect'
 import RbSlider from '@/components/RbSlider';
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import LabelWrapper from '@/components/FormItem/LabelWrapper'
 import { useI18n } from '@/store/locale'
+import { formatDateTime } from '@/utils/format'
 
 /** Available configuration section keys */
 const keys = [
@@ -62,6 +65,10 @@ const MemoryExtractionEngine: FC = () => {
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
   const [isDefault, setIsDefault] = useState(true)
+
+  /** Example conversation taken directly from the sample mock, split by language */
+  const exampleMessages = useMemo<ChatItem[]>(() => getDebugChatMock(language),
+  [language])
 
   useEffect(() => {
     document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
@@ -150,8 +157,14 @@ const MemoryExtractionEngine: FC = () => {
                 </Flex>
 
                 {expandedKeys.includes('example') &&
-                  <div className="rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2.5 rb:mb-1.5">
-                    <Markdown content={t('memoryExtractionEngine.exampleText')} />
+                  <div className="rb:mt-2.5 rb:mb-1.5">
+                    <ChatContent
+                      data={exampleMessages}
+                      streamLoading={false}
+                      contentClassNames="rb:max-w-full!"
+                      labelFormat={(item) => formatDateTime(item.created_at)}
+                      labelPosition="bottom"
+                    />
                   </div>
                 }
               </div>
@@ -310,6 +323,7 @@ const MemoryExtractionEngine: FC = () => {
             loading={loading}
             handleSave={handleSave}
             disabled={isDefault}
+            pruningEnabled={values?.pruning_enabled}
           />
         </Col>
       </Row>

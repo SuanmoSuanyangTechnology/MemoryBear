@@ -165,6 +165,7 @@ class MemoryMessageRepository:
                 "message_seq": next_seq,
                 "content": content,
                 "dialog_at": memory_message.dialog_at,
+                "files": memory_message.files,
             })
             logger.debug(
                 "[MemoryMessageRepository] 写入 memory_messages: "

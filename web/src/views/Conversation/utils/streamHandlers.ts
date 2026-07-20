@@ -1,12 +1,14 @@
 /**
- * 会话「发送」与「重新生成」共用的 SSE 流式处理工厂。
- * 逻辑与原 index.tsx 中的 handleStreamMessage 完全一致，仅抽离为可复用工厂函数。
+ * Shared SSE stream-handling factory for conversation "send" and "regenerate".
+ * Behaviour matches the original handleStreamMessage in index.tsx; only extracted
+ * into reusable factory functions.
  */
 import { type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
+import { appendOutputByNodeId, finalizeOutputs } from '@/components/Chat/utils/messageOutputs'
 import type { StreamData } from '../types';
 
-/** start/node_start 事件：把最近一条 user 消息的 id 回填为真实的 user_message_id */
+/** start/node_start event: backfills the most recent user message's id with the real user_message_id */
 const applyUserMessageId = (
   prev: Array<ChatItem | ChatItem[]>,
   id?: string,
@@ -23,7 +25,7 @@ const applyUserMessageId = (
 }
 
 
-/** 收到 intervention_required 事件：为末条助手消息追加一条待处理人工干预 */
+/** On intervention_required: appends a pending human intervention to the last assistant message */
 const appendInterventionRequired = (
   prev: Array<ChatItem | ChatItem[]>,
   data: StreamData,
@@ -84,7 +86,7 @@ const appendInterventionRequired = (
   return prev
 }
 
-/** 收到 intervention_timeout 事件：数组形态追加干预，单条形态把对应干预标记为超时 */
+/** On intervention_timeout: array form appends the intervention; single form marks the matching intervention as timed out */
 const markInterventionTimeout = (
   prev: Array<ChatItem | ChatItem[]>,
   data: StreamData,
@@ -147,7 +149,7 @@ const markInterventionTimeout = (
 }
 
 export interface StreamHandlerDeps {
-  /** 当前会话 id */
+  /** Current conversation id */
   conversationId: string | null
   setChatList: React.Dispatch<React.SetStateAction<Array<ChatItem | ChatItem[]>>>
   setConversationId: (id: string | null) => void
@@ -169,7 +171,7 @@ export interface StreamHandlerDeps {
   streamLoadingRef: React.MutableRefObject<boolean>
 }
 
-/** 普通发送场景的流式处理器（含人工干预事件） */
+/** Stream handler for the normal send scenario (includes human intervention events) */
 export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
   const {
     conversationId, setChatList, setConversationId, setLoading,
@@ -185,6 +187,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
         message_id,
         user_message_id,
         file_id,
+        node_id,
         content, conversation_id: curId, audio_url, citations, suggested_questions, error,
       } = item.data as StreamData;
       switch (item.event) {
@@ -215,6 +218,11 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
           break
         case 'message':
           updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
+          setChatList(prev => appendOutputByNodeId(prev, node_id, content))
+          if (curId) currentConversationId = curId;
+          break
+        case 'message_replace':
+          updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, undefined, true)
           if (curId) currentConversationId = curId;
           break
         case 'intervention_required': {
@@ -239,6 +247,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)
           }
+          setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
           getHistory(true)
           if (currentConversationId && currentConversationId !== conversationId) {
@@ -251,7 +260,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
   }
 }
 
-/** 重新生成场景的流式处理器（为指定 message 追加新版本） */
+/** Stream handler for the regenerate scenario (appends a new version to the specified message) */
 export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messageId: string }) => {
   const {
     messageId, conversationId, setChatList, setConversationId, setLoading,
@@ -263,7 +272,7 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
 
   return (data: SSEMessage[]) => {
     data.forEach((item) => {
-      const { message_id, user_message_id, file_id, content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as StreamData;
+      const { message_id, user_message_id, file_id, node_id, content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as StreamData;
       switch (item.event) {
         case 'start':
         case 'node_start': {
@@ -302,6 +311,11 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           break
         case 'message':
           updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, messageId)
+          setChatList(prev => appendOutputByNodeId(prev, node_id, content))
+          if (curId) currentConversationId = curId;
+          break
+        case 'message_replace':
+          updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, messageId, true)
           if (curId) currentConversationId = curId;
           break
         case 'intervention_required': {
@@ -331,6 +345,7 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error, messageId)
           }
+          setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
           getHistory(true)
           if (currentConversationId && currentConversationId !== conversationId) {
