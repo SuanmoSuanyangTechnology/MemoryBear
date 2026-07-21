@@ -44,6 +44,11 @@ class ExtractionResult(BaseModel):
     relations: list[ExtractedRelation] = Field(default_factory=list)
 
 
+class GraphQueryAnalysis(BaseModel):
+    entity_terms: list[str] = Field(default_factory=list)
+    relation_terms: list[str] = Field(default_factory=list)
+
+
 class EntityEvidence(BaseModel):
     id: str
     kb_id: str
@@ -96,6 +101,8 @@ class GraphEvidenceHit(BaseModel):
     source_chunk_id: str
     document_id: str
     score: float
+    entity_key: str | None = None
+    relation_key: str | None = None
     entity_name: str | None = None
     relation_label: str | None = None
 

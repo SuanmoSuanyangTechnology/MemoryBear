@@ -619,11 +619,15 @@ class GraphElasticsearchStore:
             if document_type == ENTITY_EVIDENCE:
                 key = str(source.get("entity_key_kwd") or "")
                 group = (ENTITY_EVIDENCE, key)
+                entity_key = key
+                relation_key = None
                 entity_name = str(source.get("entity_name_kwd") or "") or None
                 relation_label = None
             elif document_type == RELATION_EVIDENCE:
                 key = str(source.get("relation_key_kwd") or "")
                 group = (RELATION_EVIDENCE, key)
+                entity_key = None
+                relation_key = key
                 entity_name = None
                 relation_label = self._relation_label(source)
             else:
@@ -635,7 +639,9 @@ class GraphElasticsearchStore:
                 GraphEvidenceHit(
                     source_chunk_id=str(source["source_chunk_id_kwd"]),
                     document_id=str(source["document_id"]),
-                    score=float(hit.get("_score") or 0.0),
+                    score=float(source.get("confidence_flt") or 0.0),
+                    entity_key=entity_key,
+                    relation_key=relation_key,
                     entity_name=entity_name,
                     relation_label=relation_label,
                 )
