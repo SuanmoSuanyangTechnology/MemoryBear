@@ -101,6 +101,15 @@ class RedisFairLock:
         self.auto_renewal = auto_renewal
         self._renew_thread = None
         self._stop_renew = threading.Event()
+        self._renewal_lost = threading.Event()
+
+    @property
+    def is_valid(self) -> bool:
+        return self._locked and not self._renewal_lost.is_set()
+
+    def ensure_valid(self) -> None:
+        if not self.is_valid:
+            raise RuntimeError(f"Redis lock ownership lost: {self.key}")
 
     def _exec_with_retry(self, func, *args, raise_on_fail=True, **kwargs):
         """
@@ -143,6 +152,7 @@ class RedisFairLock:
 
             if ok == 1:
                 self._locked = True
+                self._renewal_lost.clear()
                 if self.auto_renewal:
                     self._start_renewal()
                 return True
@@ -162,16 +172,29 @@ class RedisFairLock:
             if self._stop_renew.is_set():
                 break
 
-            success = self._exec_with_retry(
-                self.redis.eval,
-                RENEW_SCRIPT,
-                1,
-                self.key,
-                self.value,
-                str(self.expire),
-                raise_on_fail=False,
-            )
+            try:
+                success = self._exec_with_retry(
+                    self.redis.eval,
+                    RENEW_SCRIPT,
+                    1,
+                    self.key,
+                    self.value,
+                    str(self.expire),
+                    raise_on_fail=False,
+                )
+            except RedisError:
+                self._renewal_lost.set()
+                self._logger.exception(
+                    "[RedisFairLock] Redis renewal failed for key=%s",
+                    self.key,
+                )
+                break
             if not success:
+                self._renewal_lost.set()
+                self._logger.error(
+                    "[RedisFairLock] Redis lock renewal lost ownership for key=%s",
+                    self.key,
+                )
                 break
 
     def _start_renewal(self):
