@@ -412,9 +412,11 @@ const VariableSelect: FC<VariableSelectProps> = ({
   return (
     <div ref={containerRef} className={`rb:relative rb:w-full rb:min-w-0 rb:max-w-full ${className}`}>
       {/* Trigger */}
-      <div
+      <Flex
+        align="center"
+        justify="space-between"
         className={clsx(
-          'rb:w-full rb:flex rb:items-center rb:justify-between rb:cursor-pointer rb:rounded-lg rb:px-2 rb:transition-colors', {
+          'rb:w-full rb:cursor-pointer rb:rounded-lg rb:px-2! rb:transition-colors', {
             'rb:bg-[#F6F6F6] rb:border-none rb:shadow-none': variant === 'filled',
             'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff] rb:bg-white': variant === 'outlined',
             'rb:border-[#171719]!': variant === 'outlined' && open,
@@ -423,9 +425,9 @@ const VariableSelect: FC<VariableSelectProps> = ({
             'rb:text-[14px]': size !== 'small',
           },
           multiple && size === 'small'
-            ? 'rb:min-h-7 rb:py-0.75'
+            ? 'rb:min-h-7 rb:py-0.75!'
             : multiple
-            ? 'rb:min-h-8 rb:py-1'
+            ? 'rb:min-h-8 rb:py-1!'
             : size === 'small'
             ? 'rb:h-7 rb:text-[10px]'
             : size === 'large'
@@ -484,7 +486,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
               <span className="rb:text-[rgba(23,23,25,0.25)] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{placeholder}</span>
           )
         ) : selectedSuggestion ? (
-          <div className="rb:flex rb:flex-1 rb:min-w-0 rb:max-w-full">
+          <Flex className="rb:flex-1 rb:min-w-0 rb:max-w-full">
             <span
               className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:cursor-pointer rb:max-w-full!"
             >
@@ -495,7 +497,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
                 {parentOfSelected ? <>{parentOfSelected.label}{sep}{selectedSuggestion.label}</> : selectedSuggestion.label}
               </span>
             </span>
-          </div>
+          </Flex>
         ) : (
             <span className="rb:text-[rgba(23,23,25,0.25)] rb:flex-1">{placeholder}</span>
         )}
@@ -513,7 +515,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
             'rb:rotate-180': !open,
           })}></div>
         </Space>
-      </div>
+      </Flex>
 
       {/* Dropdown via portal */}
       {open && createPortal(

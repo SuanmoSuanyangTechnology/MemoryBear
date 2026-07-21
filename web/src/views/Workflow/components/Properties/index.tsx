@@ -775,10 +775,12 @@ const Properties: FC<PropertiesProps> = ({
                           options={nodeLibrary.map(category => ({
                             label: t(`workflow.${category.category}`),
                             options: category.nodes.filter(item => !['cycle-start', 'break'].includes(item.type)).map(node => ({
-                              label: <div className="rb:flex rb:items-center rb:gap-2 rb:flex-1">
-                                <div className={`rb:size-3.5 rb:bg-cover ${node.icon}`} />
-                                <div className="rb:wrap-break-word rb:line-clamp-1">{t(`workflow.${node.type}`)}</div>
-                              </div>,
+                              label: (
+                                <Flex align="center" gap={8} className="rb:flex-1">
+                                  <div className={`rb:size-3.5 rb:bg-cover ${node.icon}`} />
+                                  <div className="rb:wrap-break-word rb:line-clamp-1">{t(`workflow.${node.type}`)}</div>
+                                </Flex>
+                              ),
                               value: node.type
                             }))
                           }))}
