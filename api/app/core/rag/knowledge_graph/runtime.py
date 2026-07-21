@@ -13,7 +13,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
 )
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge
-from app.models.models_model import ModelType
+from app.models.models_model import ModelConfig
 from app.models.workspace_model import Workspace
 from app.services.model_service import ModelApiKeyService
 
@@ -35,6 +35,17 @@ def _require_runtime_api_key(api_key: object | None, model_role: str) -> object:
             f"no available {model_role} API key for graph runtime"
         )
     return api_key
+
+
+def _require_model_config(db, model_id: uuid.UUID, model_role: str) -> ModelConfig:
+    model_config = db.query(ModelConfig).filter(
+        ModelConfig.id == model_id
+    ).first()
+    if model_config is None:
+        raise GraphPipelineConfigError(
+            f"{model_role} model config does not exist: {model_id}"
+        )
+    return model_config
 
 
 def snapshot_graph_runtime(knowledge_id: str) -> GraphIndexRuntime:
@@ -69,6 +80,17 @@ def snapshot_graph_runtime(knowledge_id: str) -> GraphIndexRuntime:
             raise GraphPipelineConfigError(
                 "graph runtime requires both LLM and embedding models"
             )
+
+        llm_config = _require_model_config(
+            db,
+            knowledge.llm_id,
+            "LLM",
+        )
+        embedding_config = _require_model_config(
+            db,
+            knowledge.embedding_id,
+            "embedding",
+        )
 
         llm_api_key = _require_runtime_api_key(
             ModelApiKeyService.get_available_api_key(
@@ -109,11 +131,11 @@ def snapshot_graph_runtime(knowledge_id: str) -> GraphIndexRuntime:
             scene_name=str(graph_config.get("scene_name") or ""),
             llm=ModelRuntimeSnapshot.from_api_key(
                 llm_api_key,
-                model_type=ModelType.LLM.value,
+                model_type=str(llm_config.type),
             ),
             embedding=ModelRuntimeSnapshot.from_api_key(
                 embedding_api_key,
-                model_type=ModelType.EMBEDDING.value,
+                model_type=str(embedding_config.type),
             ),
         )
 
