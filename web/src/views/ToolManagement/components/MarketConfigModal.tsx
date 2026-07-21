@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Button, App, Space } from 'antd';
+import { Form, Input, Button, App, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { CopyOutlined, EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { createMarketConfig,updateMarketConfig } from '@/api/tools';
@@ -140,8 +140,8 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
     >
       <div>
         {/* 市场源信息头部 */}
-        <div className="rb:flex rb:gap-4 rb:mb-6 rb:p-4 rb:bg-gray-50 rb:rounded-lg">
-          <div className="rb:w-16 rb:h-16 rb:flex rb:items-center rb:justify-center rb:bg-white rb:rounded-lg rb:flex-shrink-0 rb:overflow-hidden">
+        <Flex gap={16} className="rb:mb-6! rb:p-4! rb:bg-gray-50 rb:rounded-lg">
+          <Flex align="center" justify="center" className="rb:size-16 rb:bg-white rb:rounded-lg rb:flex-shrink-0 rb:overflow-hidden">
             {currentSource.logo_url ? (
               <img 
                 src={currentSource.logo_url} 
@@ -159,12 +159,12 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
             ) : (
               <span className="rb:text-4xl">🏪</span>
             )}
-          </div>
+          </Flex>
           <div className="rb:flex-1">
             <h3 className="rb:text-base rb:font-semibold rb:mb-1 rb:text-gray-900">{currentSource.name}</h3>
             <p className="rb:text-sm rb:text-gray-600 rb:leading-relaxed">{currentSource.description}</p>
           </div>
-        </div>
+        </Flex>
 
         <Form
           key={currentSource?.id || 'new'}
@@ -215,12 +215,12 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
             />
           </FormItem>
 
-          <div className="rb:flex rb:items-center rb:gap-2 rb:p-3 rb:bg-gray-50 rb:rounded rb:text-sm">
+          <Flex align="center" gap={8} className="rb:p-3! rb:bg-gray-50 rb:rounded rb:text-sm">
             <span className="rb:text-gray-600">{t('tool.marketConnectionStatus')}：</span>
             <span className={`rb:font-medium ${currentSource.connected ? 'rb:text-green-600' : 'rb:text-gray-400'}`}>
               {currentSource.connected ? t('tool.marketConnected') : t('tool.marketDisconnected')}
             </span>
-          </div>
+          </Flex>
         </Form>
       </div>
     </RbModal>

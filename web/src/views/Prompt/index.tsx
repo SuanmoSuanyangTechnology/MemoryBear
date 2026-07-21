@@ -190,19 +190,20 @@ const Prompt: FC = () => {
 
   return (
     <>
-      <Form form={form}>
-        <div className="rb:grid rb:grid-cols-2 rb:gap-3">
-          <div>
-            <Header title={t(`menu.prompt`)} desc={t('prompt.promptDesc')} className="rb:mb-3" />
+      <Form form={form} className="rb:h-full!">
+        <div className="rb:grid rb:grid-cols-2 rb:gap-3 rb:h-full!">
+          <Flex vertical gap={12} className="rb:h-full!">
+            <Header title={t(`menu.prompt`)} desc={t('prompt.promptDesc')} />
 
             <RbCard
               title={t('prompt.chatTitle')}
               headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
+              className="rb:h-full!"
             >
               <ChatContent
-                classNames="rb:h-[calc(100vh-257px)] rb:mb-[12px]!"
+                classNames="rb:h-[calc(100vh-242px)] rb:mb-[12px]!"
                 contentClassNames="rb:max-w-75!"
                 empty={<Empty url={ConversationEmptyIcon} title={t(`prompt.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
                 data={chatList || []}
@@ -243,10 +244,10 @@ const Prompt: FC = () => {
               </Flex>
 
             </RbCard>
-          </div>
+          </Flex>
 
-          <div>
-            <Flex align="center" justify="end" gap={8} className="rb:h-12.5 rb:mb-3!">
+          <Flex vertical gap={12} className="rb:h-full!">
+            <Flex align="center" justify="end" gap={8} className="rb:h-12.5">
               <Form.Item
                 name="model_id"
                 noStyle
@@ -255,6 +256,7 @@ const Prompt: FC = () => {
                   params={{ type: 'llm,chat' }}
                   className={`rb:w-75! ${styles.select}`}
                   variant="filled"
+                  placeholder={t('common.selectPlaceholder', { title: t('prompt.model') })}
                 />
               </Form.Item>
               <Button className="rb:border-none!" onClick={handleJump}>{t('prompt.history')}</Button>
@@ -264,6 +266,7 @@ const Prompt: FC = () => {
               headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
+              className="rb:h-full!"
               extra={
                 <Space size={8}>
                   <Button
@@ -281,7 +284,8 @@ const Prompt: FC = () => {
                     disabled={!values?.current_prompt || loading}
                     onClick={handleAdd}
                   ></Button>
-                </Space>}
+                </Space>
+              }
             >
               <Form.Item name="current_prompt" noStyle>
                 {values?.current_prompt
@@ -298,7 +302,7 @@ const Prompt: FC = () => {
                 }
               </Form.Item>
             </RbCard>
-          </div>
+          </Flex>
         </div>
       </Form>
 

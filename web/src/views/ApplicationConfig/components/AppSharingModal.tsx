@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-03-18 16:03:46
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Checkbox, App, Form } from 'antd';
+import { Checkbox, App, Form, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal';
@@ -149,7 +149,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
             {spaceList.map(space => {
               const isShared = sharedIds.includes(space.id);
               return (
-                <div key={space.id} className="rb:flex rb:items-center rb:gap-2 rb:px-4 rb:py-3 rb:cursor-pointer" onClick={() => handleToggle(space.id, isShared)}>
+                <Flex key={space.id} align="center" gap={8} className="rb:px-4! rb:py-3! rb:cursor-pointer" onClick={() => handleToggle(space.id, isShared)}>
                   <Checkbox
                     checked={isShared || selectedIds.includes(space.id)}
                     disabled={isShared}
@@ -160,7 +160,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
                   {isShared && (
                     <span className="rb:text-xs rb:text-[#5B6167]">{t('application.alreadyShared')}</span>
                   )}
-                </div>
+                </Flex>
               );
             })}
           </div>

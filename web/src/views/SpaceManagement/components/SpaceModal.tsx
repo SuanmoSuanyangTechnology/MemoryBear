@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Steps, Button, Select } from 'antd';
+import { Form, Input, App, Steps, Button, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceModalData, SpaceModalRef, Space, StorageType } from '../types'
@@ -289,13 +289,15 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           ) : (
             <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4">
               {customModelFields.map(field => (
-                <div
+                <Flex
                   key={field.name}
-                  className="rb:flex rb:items-center rb:justify-between rb:py-3.5 rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
+                  align="center"
+                  justify="space-between"
+                  className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
                 >
                   <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
                   <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
-                </div>
+                </Flex>
               ))}
             </div>
           )}

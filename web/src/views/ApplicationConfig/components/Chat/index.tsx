@@ -434,7 +434,7 @@ const Chat: FC<ChatProps> = ({
               </Flex>
             ))}
           </div>
-          <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:mt-4">
+          <Flex align="center" className="rb:relative rb:mt-4!">
             <ChatInput
               message={message}
               className="rb:relative! rb:bottom-0!"
@@ -467,7 +467,7 @@ const Chat: FC<ChatProps> = ({
                 }
               />
             </ChatInput>
-          </div>
+          </Flex>
         </>
       }
       {id && <ReportModal ref={reportModalRef} appId={id} />}

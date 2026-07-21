@@ -10,7 +10,7 @@
  */
 
 import { type FC, useEffect, useState } from 'react';
-import { Form, App, Button, Skeleton, Select } from 'antd';
+import { Form, App, Button, Skeleton, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceConfigData } from './types'
@@ -151,10 +151,10 @@ const SpaceConfig: FC = () => {
 
           {!isSaas || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
             <>
-              <div className="rb:flex rb:items-baseline rb:gap-2 rb:pb-3 rb:mb-6 rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
+              <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
                 <span className="rb:font-medium rb:text-[#212332]">{t('space.baseModel')}</span>
                 <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.baseModelDesc')}</span>
-              </div>
+              </Flex>
               {baseModelFields.map(field => (
                 <Form.Item
                   key={field.name}
@@ -175,10 +175,10 @@ const SpaceConfig: FC = () => {
                 </Form.Item>
               ))}
 
-              <div className="rb:flex rb:items-baseline rb:gap-2 rb:pb-3 rb:mb-6 rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
+              <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
                 <span className="rb:font-medium rb:text-[#212332]">{t('space.multimodalModel')}</span>
                 <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.multimodalModelDesc')}</span>
-              </div>
+              </Flex>
               {multimodalModelFields.map(field => (
                 <Form.Item
                   key={field.name}
@@ -201,13 +201,15 @@ const SpaceConfig: FC = () => {
           ) : (
             <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4 rb:mb-6 rb:max-w-137.5">
               {[...baseModelFields, ...multimodalModelFields].map(field => (
-                <div
+                <Flex
                   key={field.name}
-                  className="rb:flex rb:items-center rb:justify-between rb:py-3.5 rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
+                  align="center"
+                  justify="between"
+                  className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
                 >
                   <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
                   <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
-                </div>
+                </Flex>
               ))}
             </div>
           )}

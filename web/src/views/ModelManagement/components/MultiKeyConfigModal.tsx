@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Button } from 'antd';
+import { Form, Input, App, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ModelListItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps } from '../types';
@@ -108,13 +108,13 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
       {model.api_keys && model.api_keys.length > 0 && (
         <div className="rb:mb-4">
           {model.api_keys.map((key) => (
-            <div key={key.id} className="rb:flex rb:gap-3 rb:items-center rb:justify-between rb:p-3 rb:bg-[#F5F6F7] rb:rounded-lg rb:mb-2">
+            <Flex align="center" justify="space-between" gap={12} key={key.id} className="rb:p-3! rb:bg-[#F5F6F7] rb:rounded-lg rb:mb-2!">
               <div className="rb:flex-1">
                 <div className="rb:text-[#1D2129] rb:text-[14px] rb:font-medium rb:break-all">{key.api_key}</div>
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:mt-1">{key.api_base}</div>
               </div>
               <Button type="primary" danger ghost onClick={() => handleDelete(key.id)}>{t('common.remove')}</Button>
-            </div>
+            </Flex>
           ))}
         </div>
       )}
