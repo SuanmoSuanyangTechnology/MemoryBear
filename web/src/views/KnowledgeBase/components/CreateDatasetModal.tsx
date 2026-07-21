@@ -122,37 +122,35 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
       onOk={handleCreateDataset}
       confirmLoading={loading}
     >
-        <div className='rb:flex rb:flex-col rb:text-left'>
-            <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.selectSource')}</h4>
-            <div className='rb:flex rb:flex-col rb:text-left rb:gap-4 rb:mt-4 '>
-              <Radio.Group onChange={onChange} value={value} style={style}>
-                <Radio value={0} style={getActiveRadioStyle(value === 0)} className='rb:w-full'>
-                  <Flex gap="small" align='start' justify='start' vertical>
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[0].title}</span>
-                    <span className='rb:text-xs rb:text-gray-500'>{items[0].description}</span>
-                  </Flex>
-                </Radio>
-                {/* <Radio value={1} style={getActiveRadioStyle(value === 1)} className='rb:w-full'>
-                  <Flex gap="small" align='start' justify='start' vertical>
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
-                    <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
-                  </Flex>
-                </Radio> */}
-                <Radio value={2} style={getActiveRadioStyle(value === 2)} className='rb:w-full'>
-                  <Flex gap="small" align='start' justify='start' vertical>
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
-                    <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
-                  </Flex>
-                </Radio>
-                <Radio value={3} style={getActiveRadioStyle(value === 3)} className='rb:w-full'>
-                  <Flex gap="small" align='start' justify='start' vertical>
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[2].title}</span>
-                    <span className='rb:text-xs rb:text-gray-500'>{items[2].description}</span>
-                  </Flex>
-                </Radio> 
-              </Radio.Group>
-            </div>
-        </div>
+      <h4 className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-4'>{t('knowledgeBase.selectSource')}</h4>
+      <Flex vertical gap={16} className='rb:text-left'>
+        <Radio.Group onChange={onChange} value={value} style={style}>
+          <Radio value={0} style={getActiveRadioStyle(value === 0)} className='rb:w-full'>
+            <Flex gap="small" align='start' justify='start' vertical>
+              <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[0].title}</span>
+              <span className='rb:text-xs rb:text-gray-500'>{items[0].description}</span>
+            </Flex>
+          </Radio>
+          {/* <Radio value={1} style={getActiveRadioStyle(value === 1)} className='rb:w-full'>
+            <Flex gap="small" align='start' justify='start' vertical>
+              <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
+              <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
+            </Flex>
+          </Radio> */}
+          <Radio value={2} style={getActiveRadioStyle(value === 2)} className='rb:w-full'>
+            <Flex gap="small" align='start' justify='start' vertical>
+              <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
+              <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
+            </Flex>
+          </Radio>
+          <Radio value={3} style={getActiveRadioStyle(value === 3)} className='rb:w-full'>
+            <Flex gap="small" align='start' justify='start' vertical>
+              <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[2].title}</span>
+              <span className='rb:text-xs rb:text-gray-500'>{items[2].description}</span>
+            </Flex>
+          </Radio> 
+        </Radio.Group>
+      </Flex>
     </RbModal>
   );
 });

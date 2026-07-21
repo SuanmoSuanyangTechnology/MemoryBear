@@ -8,7 +8,7 @@
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App } from 'antd';
+import { App, Flex } from 'antd';
 import type { ShareModalRef, ShareModalRefProps, KnowledgeBase} from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
 // import betchControlIcon from '@/assets/images/knowledgeBase/betch-control.png';
@@ -17,7 +17,7 @@ import kbIcon from '@/assets/images/knowledgeBase/knowledge-management.png';
 import { getSpaceList, shareKnowledgeBase } from '@/api/knowledgeBase';
 import { NoData } from './noData';
 import type { SpaceItem } from '@/views/KnowledgeBase/types';
-import { formatDateTime } from '@/utils/format';
+// import { formatDateTime } from '@/utils/format';
 const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: onShare }, ref) => {
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp()
@@ -36,7 +36,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     setVisible(false);
   };
 
-  const handleOpen = (kb_id?: string,knowledgeBase?: KnowledgeBase | null, spaceIds?:string) => {
+  const handleOpen = (kb_id?: string, knowledgeBase?: KnowledgeBase | null, spaceIds?:string) => {
     setKbId(kb_id ?? '');
     setSpaceIds(spaceIds ?? '')
     setKnowledgeBase(knowledgeBase ?? null);
@@ -104,28 +104,29 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
       onOk={handleShare}
       confirmLoading={loading}
     >
-        <div className='rb:flex rb:flex-col rb:text-left'>
+        <Flex vertical className='rb:text-left'>
             <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.shareTitle')}</h4>
             <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.shareNote')}</span>
-            <div className='rb:flex rb:flex-col rb:text-left rb:gap-4 rb:mt-4 '>
+            <Flex vertical gap={16} className='rb:text-left rb:mt-4!'>
               {spaceList.length === 0 && (
                 <NoData />
               )}
               {spaceList.map((item,index) => (
-                  <div key={index} 
-                      className={`rb:flex rb:items-center rb:justify-between ${curIndex === index ? 'rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF]' : 'rb:border-gray-200'} ${item.is_active ? 'rb:cursor-pointer rb:hover:bg-[rgba(21,94,239,0.06)] rb:hover:border-[#155EEF]' : 'rb:cursor-not-allowed rb:bg-[#F9F9F9]'} rb:gap-2 rb:rounded-lg rb:p-4 rb:border`}
-                      onClick={item.is_active ? () => handleClick(index, item.is_active) : undefined}
+                  <Flex key={index}
+                    align="center"
+                    justify="space-between"
+                    gap={8}
+                    className={`${curIndex === index ? 'rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF]' : 'rb:border-gray-200'} ${item.is_active ? 'rb:cursor-pointer rb:hover:bg-[rgba(21,94,239,0.06)] rb:hover:border-[#155EEF]' : 'rb:cursor-not-allowed rb:bg-[#F9F9F9]'} rb:rounded-lg rb:p-4! rb:border`}
+                    onClick={item.is_active ? () => handleClick(index, item.is_active) : undefined}
                   >
-                    <div className='rb:flex rb:items-center rb:gap-2'>
-                        <img src={item.icon || kbIcon} className='rb:size-[20px]' />
-                        <div className='rb:flex rb:flex-col rb:text-left rb:gap-1'>
-                            <span className='rb:text-base rb:font-medium rb:text-gray-800'>{item.name}</span>
-                        </div>
-                    </div>
-                  </div>
+                    <Flex align="center" gap={8}>
+                        <img src={item.icon || kbIcon} className='rb:size-[20px] rb:rounded-[6px]' />
+                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>{item.name}</span>
+                    </Flex>
+                  </Flex>
               ))}
-            </div>
-        </div>
+            </Flex>
+        </Flex>
     </RbModal>
     </>
   );

@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { message, Tabs } from 'antd';
+import { message, Tabs, type TabsProps, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import RbModal from '@/components/RbModal';
 import RbMarkdown from '@/components/Markdown';
@@ -13,7 +13,7 @@ export interface InsertModalRef {
 interface InsertModalProps {
   onInsert?: (documentId: string, content: string | Record<string, string>, chunkId?: string, parentChunkId?: string) => Promise<boolean>;
   onSuccess?: () => void;
-  isParentChildMode?: boolean | string;
+  isParentChildMode?: boolean;
 }
 
 const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, onSuccess, isParentChildMode }, ref) => {
@@ -157,7 +157,7 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
   }));
 
   // 构建标签页项目
-  const tabItems = [
+  const tabItems: TabsProps['items'] = [
       {
       key: 'normalMode',
       label: t('knowledgeBase.normalMode'),
@@ -168,9 +168,6 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
             showHtmlComments={true} 
             editable={true}
             onContentChange={setContent}
-            onSave={(newContent) => {
-              setContent(newContent);
-            }}
           />
         // </div>
       ),
@@ -181,36 +178,30 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
       disabled: isParentChildMode,
       children: (
         // QA 模式的编辑界面
-        <div className='rb:flex rb:flex-col rb:gap-4'>
+        <Flex vertical gap={16}>
           <div>
-            <div className='rb:w-full rb:font-medium rb:leading-8 rb:mb-2'>{t('knowledgeBase.question') || '问题'}</div>
+            <div className='rb:w-full rb:font-medium rb:leading-8 rb:mb-2'>{t('knowledgeBase.question')}</div>
             {/* <div className='rb:border rb:border-[#D9D9D9] rb:rounded rb:p-4 rb:min-h-[120px] rb:max-h-[200px] rb:overflow-y-auto rb:bg-white'> */}
               <RbMarkdown 
                 content={question} 
                 showHtmlComments={true} 
                 editable={true}
                 onContentChange={setQuestion}
-                onSave={(newContent) => {
-                  setQuestion(newContent);
-                }}
               />
             {/* </div> */}
           </div>
           <div>
-            <div className='rb:w-full rb:font-medium rb:leading-8 rb:mb-2'>{t('knowledgeBase.answer') || '答案'}</div>
+            <div className='rb:w-full rb:font-medium rb:leading-8 rb:mb-2'>{t('knowledgeBase.answer')}</div>
             {/* <div className='rb:border rb:border-[#D9D9D9] rb:rounded rb:p-4 rb:min-h-[120px] rb:max-h-[200px] rb:overflow-y-auto rb:bg-white'> */}
               <RbMarkdown 
                 content={answer} 
                 showHtmlComments={true} 
                 editable={true}
                 onContentChange={setAnswer}
-                onSave={(newContent) => {
-                  setAnswer(newContent);
-                }}
               />
             {/* </div> */}
           </div>
-        </div>
+        </Flex>
       ) 
     }
 
@@ -229,15 +220,12 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
       okText={t('common.confirm') || '确认'}
       cancelText={t('common.cancel') || '取消'}
       width={600}
-      className='rb:h-[800px]'
     >
-      <div className='rb:flex rb:flex-col rb:gap-4'>
-        <Tabs
-          activeKey={activeTab}
-          onChange={handleTabsChange}
-          items={tabItems}
-        />
-      </div>
+      <Tabs
+        activeKey={activeTab}
+        onChange={handleTabsChange}
+        items={tabItems}
+      />
     </RbModal>
   );
 });
