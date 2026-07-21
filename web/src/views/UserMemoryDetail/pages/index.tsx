@@ -21,9 +21,8 @@ import WorkingDetail from './WorkingDetail'
 import GraphDetail from './GraphDetail'
 import { MemoryEvolutionEvent } from '@redbear/memory-brick'
 import { request } from '@/utils/request';
+import PrivateWrap from '@/components/PrivateWrap'
 
-
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 /**
  * Detail page for user memory - renders different memory type views
  * based on the `type` route param
@@ -75,11 +74,12 @@ const Detail: FC = () => {
       setLoading(false)
     }
   }
-
-  if (type === 'REFLECT_LOGS' && isSaas && MemoryEvolutionEvent) {
-    return <MemoryEvolutionEvent request={request} />
-  } else if (type === 'REFLECT_LOGS') {
-    return null;
+  if (type === 'REFLECT_LOGS') {
+    return (
+      <PrivateWrap>
+        {() => <MemoryEvolutionEvent request={request} />}
+      </PrivateWrap>
+    );
   }
 
   if (type === 'GRAPH') {

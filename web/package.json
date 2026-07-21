@@ -8,7 +8,10 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "install:private": "node install-private.js"
+    "install:private": "node install-private.js",
+    "install:private:dev": "node install-private.js dev",
+    "install:private:test": "node install-private.js test",
+    "install:private:prod": "node install-private.js prod"
   },
   "dependencies": {
     "@antv/layout": "^1.2.14-beta.8",
