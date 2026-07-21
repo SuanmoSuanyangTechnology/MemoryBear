@@ -29,6 +29,7 @@ from app.core.memory.agent.utils.type_classifier import status_typle
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.db import get_db_context, get_db_read
 from app.models.knowledge_model import Knowledge, KnowledgeType
+from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.services.memory_config_service import MemoryConfigService
@@ -328,7 +329,8 @@ class MemoryAgentService:
                 memory_config = config_service.load_memory_config(
                     config_id=config_id
                 )
-                model_config = config_service.get_model_config(str(memory_config.llm_model_id))
+                tenant_id = get_tenant_id_by_end_user_id(db, end_user_id)
+                model_config = config_service.get_model_config(str(memory_config.llm_model_id), tenant_id)
             except Exception as e:
                 if "No memory configuration found" in str(e):
                     raise  # Re-raise our specific error
