@@ -1,9 +1,12 @@
 import asyncio
+import json
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
-from elasticsearch import AsyncElasticsearch, NotFoundError
+from elasticsearch import AsyncElasticsearch, BadRequestError, NotFoundError
 
 from app.core.rag.knowledge_graph.models import (
     AffectedProjectionKeys,
@@ -39,9 +42,38 @@ EVIDENCE_GRAPH_TYPES = (
 )
 
 
+@lru_cache(maxsize=1)
+def _graph_index_definition() -> dict[str, Any]:
+    mapping_path = (
+        Path(__file__).resolve().parents[1]
+        / "res"
+        / "mapping.json"
+    )
+    definition = json.loads(mapping_path.read_text(encoding="utf-8"))
+    if not isinstance(definition.get("settings"), Mapping) or not isinstance(
+        definition.get("mappings"), Mapping
+    ):
+        raise ValueError("invalid graph index mapping definition")
+    return definition
+
+
 class GraphElasticsearchStore:
     def __init__(self, client: AsyncElasticsearch) -> None:
         self._client = client
+
+    async def ensure_graph_index(self, index_name: str) -> None:
+        if await self._client.indices.exists(index=index_name):
+            return
+        definition = _graph_index_definition()
+        try:
+            await self._client.indices.create(
+                index=index_name,
+                settings=definition["settings"],
+                mappings=definition["mappings"],
+            )
+        except BadRequestError:
+            if not await self._client.indices.exists(index=index_name):
+                raise
 
     async def ensure_vector_mapping(
         self,
@@ -482,6 +514,7 @@ class GraphElasticsearchStore:
         await self._client.delete_by_query(
             index=index_name,
             conflicts="proceed",
+            ignore_unavailable=True,
             refresh=True,
             query=self._graph_query(knowledge_id, EVIDENCE_GRAPH_TYPES),
         )
@@ -497,6 +530,7 @@ class GraphElasticsearchStore:
         await self._client.delete_by_query(
             index=index_name,
             conflicts="proceed",
+            ignore_unavailable=True,
             refresh=True,
             query={
                 "bool": {
@@ -925,7 +959,7 @@ class GraphElasticsearchStore:
             "entity_keys_kwd": sorted(entity_keys),
             "relation_keys_kwd": sorted(relation_keys),
             "source_chunk_ids_kwd": sorted(source_chunk_ids),
-            "updated_at": utcnow_naive().isoformat(),
+            "updated_at": utcnow_naive().strftime("%Y-%m-%d %H:%M:%S"),
         }
         await self._bulk(
             self._index_operation(

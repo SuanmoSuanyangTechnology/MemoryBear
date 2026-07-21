@@ -181,6 +181,8 @@ class KnowledgeGraphIndexPipeline:
         document_active: bool,
     ) -> None:
         self._lock_guard.ensure_valid()
+        await self._store.ensure_graph_index(runtime.graph_index_name)
+        self._lock_guard.ensure_valid()
         await self._store.refresh_sources(
             runtime.chunk_index_name,
             runtime.graph_index_name,
