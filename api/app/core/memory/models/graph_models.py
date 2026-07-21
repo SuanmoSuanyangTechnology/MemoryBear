@@ -233,7 +233,7 @@ class DialogueNode(Node):
                                            description="Configuration ID used to process this dialogue (integer or string)")
     
     write_mode: str = Field(default="normal",description="写入管线标识：'fast' | 'normal'")
-    emotion: Optional[str] = Field(default=None,description="情绪字段，本期落库但不填值；结构由后续 BERT 情绪识别方案定义")
+    emotion: Optional[str] = Field(default=None,description="情绪字段")
 
 
 class StatementNode(Node):

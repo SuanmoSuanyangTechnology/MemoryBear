@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
 
 from app.core.memory.models.graph_models import DialogueNode
+from app.core.memory.utils.dialogue_id_utils import build_dialogue_id
 from app.core.memory.utils.log.bear_logger import BearLogger
 from app.core.utils.datetime_utils import (
     as_utc_aware,
@@ -46,26 +47,12 @@ def _is_punct_only(text: str) -> bool:
     return bool(_PUNCT_PATTERN.fullmatch(text))
 
 
-def _build_dialogue_id(conv_id: str, seq: int, source: str, user_id: str) -> str:
-    """确定性生成 DialogueNode ID（幂等 MERGE 的关键）。
-
-    - conv_id 非空（agent / workflow）→ f"Dialog_{conv_id}_{seq}"
-    - 否则（service_api / mcp）→ f"Dialog_{user_id}_{source}_{seq}"
-
-    前缀统一为中性 Dialog_（快慢共用），ID 确定性保证重复触发不产生重复节点。
-    """
-    if conv_id:
-        return f"Dialog_{conv_id}_{seq}"
-    return f"Dialog_{user_id}_{source}_{seq}"
-
-
 class FastWritePipeline:
     """快速写入三步流水线编排器。"""
 
     CONTENT_WARN_THRESHOLD = 8_000   # 超长告警阈值（不阻止写入）
     NEO4J_MERGE_MAX_RETRY = 3
     # Embedding 单步硬上限（秒）。底层 LangChain client 自带 max_retries * timeout，
-    # 慢/挂起的 endpoint 会突破 celery 任务的 soft_time_limit(30) / time_limit(60)，
     # 导致 worker 被 SIGKILL 而非降级。此处用 asyncio.wait_for 兜底，超时即降级为 None。
     EMBED_TIMEOUT_SEC = 15
 
@@ -101,7 +88,7 @@ class FastWritePipeline:
         """
         async with bear.pipeline(
             "FastWritePipeline",
-            mode="快速",
+            mode="快速写入",
             end_user_id=self.end_user_id,
             conv=conversation_id or "-",
             seq=message_seq,
@@ -248,7 +235,7 @@ class FastWritePipeline:
     ) -> DialogueNode:
         """Step 3 — 构造 DialogueNode。
 
-        - 确定性 id：_build_dialogue_id（会话/无会话两种模板），保证幂等 MERGE。
+        - 确定性 id：build_dialogue_id（会话/无会话两种模板），保证幂等 MERGE。
         - 随机 ref_id / run_id：uuid.uuid4().hex（与正路径一致）。
         - content 为完整原文（不切块、不截断，即使超过告警阈值）。
         - dialog_embedding 可为 None。
@@ -257,12 +244,12 @@ class FastWritePipeline:
           不再使用 worker 执行时刻，保证可回溯。
         - 固定属性：write_mode="fast"、emotion=None。
         """
-        dialog_id = _build_dialogue_id(
+        dialog_id = build_dialogue_id(
             conversation_id, message_seq, source, self.end_user_id
         )
         return DialogueNode(
             id=dialog_id,
-            name=f"Dialog_{dialog_id}",
+            name=dialog_id,
             ref_id=uuid.uuid4().hex,
             end_user_id=self.end_user_id,
             run_id=uuid.uuid4().hex,
