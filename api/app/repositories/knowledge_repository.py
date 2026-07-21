@@ -7,9 +7,19 @@ from app.models.knowledge_model import Knowledge, PermissionType
 from app.models.models_model import ModelApiKey, ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
+from app.core.rag.parser_config import build_default_knowledge_parser_config
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
+
+
+def _knowledge_values(
+        knowledge: knowledge_schema.KnowledgeCreate
+) -> dict:
+    values = knowledge.model_dump()
+    if values.get("parser_config") is None:
+        values["parser_config"] = build_default_knowledge_parser_config()
+    return values
 
 
 def knowledge_schema_load_options():
@@ -165,7 +175,7 @@ def create_knowledge(db: Session, knowledge: knowledge_schema.KnowledgeCreate) -
     db_logger.debug(f"Create a knowledge base record: name={knowledge.name}")
     
     try:
-        db_knowledge = Knowledge(**knowledge.model_dump())
+        db_knowledge = Knowledge(**_knowledge_values(knowledge))
         db.add(db_knowledge)
         db.commit()
         db_logger.info(f"knowledge base record created successfully: {knowledge.name} (ID: {db_knowledge.id})")
@@ -181,7 +191,7 @@ async def create_knowledge_async(db: AsyncSession, knowledge: knowledge_schema.K
     db_logger.debug(f"Create a knowledge base record (async): name={knowledge.name}")
 
     try:
-        db_knowledge = Knowledge(**knowledge.model_dump())
+        db_knowledge = Knowledge(**_knowledge_values(knowledge))
         db.add(db_knowledge)
         await db.commit()
         await db.refresh(db_knowledge)

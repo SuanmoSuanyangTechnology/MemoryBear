@@ -122,7 +122,12 @@ async def create_knowledgeshare(
             parser_id=db_knowledge.parser_id,
             parser_config=db_knowledge.parser_config
         )
-        db_knowledge = await knowledge_service.create_knowledge_async(db=db, knowledge=knowledge, current_user=current_user)
+        db_knowledge = await knowledge_service.create_knowledge_async(
+            db=db,
+            knowledge=knowledge,
+            current_user=current_user,
+            preserve_source_parser_config=True,
+        )
         # 2. Create a knowledge base for sharing
         api_logger.debug(f"Start creating the knowledge base sharing: {db_knowledge.name}")
         create_data.target_kb_id = db_knowledge.id

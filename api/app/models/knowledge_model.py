@@ -5,6 +5,7 @@ from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.core.rag.parser_config import build_default_knowledge_parser_config
 from sqlalchemy.orm import relationship
 
 
@@ -64,42 +65,7 @@ class Knowledge(Base):
     chunk_num = Column(Integer, default=0, comment="chunk num")
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")
     parser_config = Column(JSON, nullable=False,
-                           default={
-                               "entry_url": "https://ai.redbearai.com",
-                               "max_pages": 20,
-                               "delay_seconds": 1.0,
-                               "timeout_seconds": 10,
-                               "user_agent": "KnowledgeBaseCrawler/1.0",
-                               "yuque_user_id": "User ID",
-                               "yuque_token": "Token",
-                               "feishu_app_id": "App ID",
-                               "feishu_app_secret": "App Secret",
-                               "feishu_folder_token": "Folder Token",
-                               "sync_cron": "30 7 * * 1-5",
-                               "layout_recognize": "DeepDOC",
-                               "chunk_token_num": 128,
-                               "delimiter": "\n",
-                               "auto_keywords": 0,
-                               "auto_questions": 0,
-                               "html4excel": False,
-                               "parent_child_mode": False,
-                               "parent_chunk_token_num": 1024,
-                               "parent_chunk_delimiter": "\n\n",
-                               "graphrag": {
-                                   "use_graphrag": False,
-                                   "scene_name": "",
-                                   "entity_types": [
-                                       "organization",
-                                       "person",
-                                       "geo",
-                                       "event",
-                                       "category"
-                                   ],
-                                   "method": "general",
-                                   "resolution": True,
-                                   "community": True
-                               }
-                           },
+                           default=build_default_knowledge_parser_config,
                            comment="default parser config")
     status = Column(Integer, index=True, default=1, comment="is it validate(0: disable, 1: enable, 2:Soft-delete)")
     builtin_metadata_enabled = Column(Integer, default=0, nullable=False, server_default='0',
