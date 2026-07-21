@@ -7,7 +7,7 @@
 import { useEffect, useState, useMemo, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Progress, App, Table } from 'antd'
+import { Row, Col, Progress, App } from 'antd'
 
 import RbCard from '@/components/RbCard/Card'
 import {

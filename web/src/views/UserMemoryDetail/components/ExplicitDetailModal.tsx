@@ -6,7 +6,7 @@
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useParams } from 'react-router-dom'
-import { Descriptions, Skeleton } from 'antd';
+import { Descriptions, Skeleton, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal'
@@ -110,10 +110,10 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
       {loading ? <Skeleton active />
         : <Descriptions column={1} classNames={{ label: 'rb:w-20' }}>
           {data.emotion && <Descriptions.Item label={t('explicitDetail.emotion')}>
-            <div className="rb:flex rb:items-center rb:gap-2">
+            <Flex align="center" gap={8}>
               <div className="rb:w-3 rb:h-3 rb:rounded-full" style={{ backgroundColor: getEmotionColor(data.emotion) }}></div>
               <span className="rb:text-gray-600">{t(`statementDetail.${data.emotion || 'neutral'}`)}</span>
-            </div>
+            </Flex>
           </Descriptions.Item>}
           {data.core_definition && <Descriptions.Item label={t('explicitDetail.core_definition')}>
             {data.core_definition}
