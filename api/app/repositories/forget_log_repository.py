@@ -193,7 +193,7 @@ class ForgetLogRepository:
         page = max(page, 1)
         offset = (page - 1) * pagesize
         result = await db.execute(
-            base_query.order_by(ForgetAuditModel.delete_at.desc()).offset(offset).limit(pagesize)
+            base_query.order_by(ForgetAuditModel.delete_at.desc(), ForgetAuditModel.id.desc()).offset(offset).limit(pagesize)
         )
         items = list(result.scalars().all())
 
