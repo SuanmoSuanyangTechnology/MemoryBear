@@ -17,6 +17,12 @@ use crate::nodejs_syscalls::*;
 use libc::{c_char, c_int, chdir, chroot, gid_t, uid_t};
 use libseccomp_sys::*;
 use std::env;
+
+// ioctl request code (<sys/ioctl.h>, stable since Linux 1.0).
+// Not in the `libc` crate — defined here for seccomp argument filtering.
+// FIONBIO is what socket.setblocking()/settimeout() uses; it is the only
+// ioctl request we ALLOW. Every other request returns EPERM (see below).
+const FIONBIO:   u64 = 0x5421;  // set/clear non-blocking (→ settimeout)
 use std::ffi::{CStr, CString};
 use std::str::FromStr;
 
@@ -191,6 +197,38 @@ fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
                     datum_b: libc::O_CREAT as u64,      // mask
                 };
                 if seccomp_rule_add_array(ctx, SCMP_ACT_ALLOW, sc, 1, &cmp) != 0 {
+                    seccomp_release(ctx);
+                    return Err(-7);
+                }
+            } else if sc == libc::SYS_ioctl as i32 {
+                // Allow ONLY FIONBIO (socket.setblocking/settimeout); every other
+                // ioctl request returns EPERM (graceful) instead of KILL_PROCESS.
+                //
+                // IMPORTANT: the EPERM rule uses `arg != FIONBIO` (SCMP_CMP_NE),
+                // NOT a no-argument catch-all. A no-arg ERRNO rule would also match
+                // FIONBIO, and since ERRNO outranks ALLOW in seccomp action
+                // precedence it would shadow the ALLOW and EPERM *everything*
+                // (breaking settimeout). The `!=` keeps the two rules disjoint.
+                // (This is why we can only ALLOW a single ioctl request value here:
+                // libseccomp rejects multiple comparisons on the same arg, so an
+                // "allow a set, EPERM the rest" filter is not expressible.)
+                let allow_cmp = scmp_arg_cmp {
+                    arg: 1,
+                    op: scmp_compare::SCMP_CMP_EQ,
+                    datum_a: FIONBIO,
+                    datum_b: 0,
+                };
+                if seccomp_rule_add_array(ctx, SCMP_ACT_ALLOW, sc, 1, &allow_cmp) != 0 {
+                    seccomp_release(ctx);
+                    return Err(-7);
+                }
+                let eperm_cmp = scmp_arg_cmp {
+                    arg: 1,
+                    op: scmp_compare::SCMP_CMP_NE,
+                    datum_a: FIONBIO,
+                    datum_b: 0,
+                };
+                if seccomp_rule_add_array(ctx, SCMP_ACT_ERRNO(libc::EPERM as u16), sc, 1, &eperm_cmp) != 0 {
                     seccomp_release(ctx);
                     return Err(-7);
                 }

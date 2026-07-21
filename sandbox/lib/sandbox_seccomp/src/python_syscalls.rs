@@ -18,6 +18,7 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_rt_sigaction as i32,
     libc::SYS_rt_sigprocmask as i32,
     libc::SYS_sigaltstack as i32,
+    libc::SYS_ioctl as i32,
     // Thread
     libc::SYS_futex as i32,
     libc::SYS_set_tid_address as i32,
@@ -65,7 +66,6 @@ pub static ALLOW_ERROR_SYSCALLS: &[i32] = &[
     libc::SYS_mkdirat as i32,
     libc::SYS_mkdir as i32,
     libc::SYS_tgkill as i32,
-    libc::SYS_ioctl as i32,
     libc::SYS_prlimit64 as i32,
 ];
 
