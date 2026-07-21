@@ -16,6 +16,15 @@ from app.core.models import (
     RedBearModelConfig,
     RedBearRerank,
 )
+from app.core.rag.knowledge_graph.config import GraphPipeline
+from app.core.rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
+from app.core.rag.knowledge_graph.models import (
+    GraphIndexRuntime,
+    GraphRetrievalRequest,
+)
+from app.core.rag.knowledge_graph.retrieval_pipeline import (
+    KnowledgeGraphRetrievalPipeline,
+)
 from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
     FilterGroup as EngineFilterGroup,
@@ -27,6 +36,7 @@ from app.core.rag.retrieval.async_elasticsearch import (
 )
 from app.core.rag.retrieval.graph_bridge import GraphRetrievalBridge
 from app.core.rag.retrieval.models import (
+    GraphTargetSnapshot,
     ModelRuntimeSnapshot,
     RetrievalParams,
     RetrievalPreparation,
@@ -279,7 +289,10 @@ class KnowledgeRetrievalService:
             log_id,
             timings,
         )
-        if preparation.graph:
+        if (
+            preparation.graph
+            and preparation.graph.pipeline is GraphPipeline.LEGACY
+        ):
             graph_document = await GraphRetrievalBridge.retrieve(preparation.graph, timings)
             if graph_document:
                 chunks.insert(0, graph_document)
@@ -374,6 +387,14 @@ class KnowledgeRetrievalService:
             ),
         )
         semaphore = asyncio.Semaphore(max_workers)
+        graph_targets_by_knowledge_id = (
+            {
+                graph_target.knowledge_id: graph_target
+                for graph_target in preparation.graph.targets
+            }
+            if preparation.graph is not None
+            else {}
+        )
 
         async def retrieve_one(
             index: int,
@@ -391,6 +412,9 @@ class KnowledgeRetrievalService:
                         and target.params.retrieve_type == RetrieveType.HYBRID
                     ),
                     request_reranker=preparation.request_reranker,
+                    graph_target=graph_targets_by_knowledge_id.get(
+                        target.knowledge_id
+                    ),
                     timings=timings,
                 )
                 return index, chunks
@@ -429,10 +453,26 @@ class KnowledgeRetrievalService:
         *,
         use_request_reranker: bool,
         request_reranker: Any,
+        graph_target: GraphTargetSnapshot | None = None,
         timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
         started_at = time.perf_counter()
         target_type = target.params.retrieve_type
+        if (
+            target_type == RetrieveType.Graph
+            and graph_target is not None
+            and graph_target.pipeline is GraphPipeline.EVIDENCE
+        ):
+            return await cls._retrieve_evidence_graph_target(
+                request,
+                target,
+                graph_target,
+                document_ids_include,
+                store,
+                started_at,
+                timings,
+            )
+
         full_text_options = cls._search_options(
             target,
             request,
@@ -517,6 +557,93 @@ class KnowledgeRetrievalService:
         return chunks
 
     @classmethod
+    async def _retrieve_evidence_graph_target(
+        cls,
+        request: KnowledgeRetrievalRequest,
+        target: RetrievalTarget,
+        graph_target: GraphTargetSnapshot,
+        document_ids_include: list[str] | None,
+        store: AsyncElasticSearchRetrieval,
+        started_at: float,
+        timings: RetrievalTimings | None,
+    ) -> list[DocumentChunk]:
+        if graph_target.knowledge_id != target.knowledge_id:
+            raise ValueError("graph target does not match retrieval target")
+
+        graph_started_at = time.perf_counter()
+        try:
+            client = await AsyncElasticsearchClientProvider.get_shared_client()
+            graph_store = GraphElasticsearchStore(client)
+            llm_type = (
+                ModelType.CHAT
+                if graph_target.llm.model_type == ModelType.CHAT.value
+                else ModelType.LLM
+            )
+            llm = RedBearLLM(
+                cls._model_config(graph_target.llm),
+                type=llm_type,
+            )
+            embedding = RedBearEmbeddings(
+                cls._model_config(graph_target.embedding)
+            )
+            pipeline = KnowledgeGraphRetrievalPipeline(
+                graph_store,
+                llm,
+                embedding,
+                store.resolve_parent_chunks,
+            )
+            chunks = await pipeline.retrieve(
+                GraphRetrievalRequest(
+                    query=request.query,
+                    runtime=GraphIndexRuntime(
+                        knowledge_id=str(graph_target.knowledge_id),
+                        workspace_id=str(graph_target.workspace_id),
+                        graph_index_name=graph_target.graph_index_name,
+                        chunk_index_name=graph_target.chunk_index_name,
+                        entity_types=(),
+                        scene_name="",
+                        llm=graph_target.llm,
+                        embedding=graph_target.embedding,
+                    ),
+                    allowed_document_ids=(
+                        tuple(document_ids_include)
+                        if document_ids_include is not None
+                        else None
+                    ),
+                    file_names=tuple(request.file_names_filter),
+                    entity_top_n=settings.KNOWLEDGE_GRAPH_ENTITY_TOP_N,
+                    relation_top_n=settings.KNOWLEDGE_GRAPH_RELATION_TOP_N,
+                    neighbor_top_n=settings.KNOWLEDGE_GRAPH_NEIGHBOR_TOP_N,
+                    evidence_per_key=settings.KNOWLEDGE_GRAPH_EVIDENCE_PER_KEY,
+                    max_chunks_per_document=(
+                        settings.KNOWLEDGE_GRAPH_MAX_CHUNKS_PER_DOCUMENT
+                    ),
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[Retrieval] graph target failed kb=%s error_type=%s",
+                cls._compact_id(target.knowledge_id),
+                type(exc).__name__,
+            )
+            chunks = []
+        finally:
+            cls._record_timing(timings, "graph_ms", graph_started_at)
+
+        cls._log_target_done(
+            target,
+            0,
+            0,
+            len(chunks),
+            len(chunks),
+            started_at,
+            timings=timings,
+        )
+        return chunks
+
+    @classmethod
     async def _finalize_retrieval_chunks(
         cls,
         request: KnowledgeRetrievalRequest,
@@ -538,6 +665,12 @@ class KnowledgeRetrievalService:
         )
         needs_global_rerank = len(targets) > 1 or (
             request.rerank_id is not None and not single_hybrid_uses_request_rerank
+        ) or (
+            len(targets) == 1
+            and targets[0].params.retrieve_type == RetrieveType.Graph
+            and preparation.graph is not None
+            and preparation.graph.pipeline is GraphPipeline.EVIDENCE
+            and targets[0].reranker is not None
         )
         if needs_global_rerank:
             global_rerank_started_at = time.perf_counter()

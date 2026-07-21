@@ -6,10 +6,17 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rag.knowledge_graph.config import (
+    GraphPipeline,
+    GraphPipelineConfigError,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
 from app.core.rag.metadata.filter_engine import FilterGroup as EngineFilterGroup, MetadataFilterEngine
 from app.core.rag.retrieval.exceptions import KnowledgeRetrievalConfigError
 from app.core.rag.retrieval.models import (
     GraphRetrievalSnapshot,
+    GraphTargetSnapshot,
     ModelRuntimeSnapshot,
     RetrievalParams,
     RetrievalPreparation,
@@ -524,17 +531,71 @@ class KnowledgeRetrievalPreparation:
         targets: list[RetrievalTarget],
         tenant_id: uuid.UUID | None,
     ) -> GraphRetrievalSnapshot | None:
-        if not any(target.params.retrieve_type == RetrieveType.Graph for target in targets):
+        graph_targets = [
+            target
+            for target in targets
+            if target.params.retrieve_type == RetrieveType.Graph
+        ]
+        if not graph_targets:
             return None
-        llm = await cls._snapshot_model_runtime(db, refs[0].knowledge.llm_id, tenant_id)
-        if not llm:
+
+        refs_by_knowledge_id = {
+            ref.knowledge.id: ref
+            for ref in refs
+        }
+        resolved_targets: list[
+            tuple[RetrievalTarget, Any, GraphPipeline]
+        ] = []
+        pipelines: set[GraphPipeline] = set()
+        for target in graph_targets:
+            ref = refs_by_knowledge_id.get(target.knowledge_id)
+            if ref is None:
+                raise KnowledgeRetrievalConfigError(
+                    f"knowledge snapshot is missing for graph target {target.knowledge_id}"
+                )
+            knowledge = ref.knowledge
+            if not is_graph_enabled(knowledge.parser_config):
+                raise KnowledgeRetrievalConfigError(
+                    f"knowledge graph is disabled: {knowledge.id}"
+                )
+            try:
+                pipeline = resolve_graph_pipeline(knowledge.parser_config)
+            except GraphPipelineConfigError as exc:
+                raise KnowledgeRetrievalConfigError(str(exc)) from exc
+            pipelines.add(pipeline)
+            resolved_targets.append((target, knowledge, pipeline))
+
+        if len(pipelines) != 1:
             raise KnowledgeRetrievalConfigError(
-                f"No LLM api key found for knowledge {refs[0].knowledge.id}",
+                "all graph targets must use the same graph pipeline"
             )
+
+        target_snapshots: list[GraphTargetSnapshot] = []
+        for target, knowledge, pipeline in resolved_targets:
+            llm = await cls._snapshot_model_runtime(
+                db,
+                knowledge.llm_id,
+                tenant_id,
+            )
+            if not llm:
+                raise KnowledgeRetrievalConfigError(
+                    f"No LLM api key found for knowledge {knowledge.id}",
+                )
+            target_snapshots.append(
+                GraphTargetSnapshot(
+                    knowledge_id=target.knowledge_id,
+                    workspace_id=target.workspace_id,
+                    chunk_index_name=target.index_name,
+                    graph_index_name=f"graphrag_{target.workspace_id}",
+                    pipeline=pipeline,
+                    llm=llm,
+                    embedding=target.embedding,
+                )
+            )
+
+        pipeline = target_snapshots[0].pipeline
         return GraphRetrievalSnapshot(
             query=request.query,
-            workspace_ids=tuple(str(target.workspace_id) for target in targets),
-            knowledge_ids=tuple(str(target.knowledge_id) for target in targets),
-            llm=llm,
-            embedding=targets[0].embedding,
+            pipeline=pipeline,
+            targets=tuple(target_snapshots),
         )

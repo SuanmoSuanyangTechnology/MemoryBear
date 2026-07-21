@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import ClassVar
 
 from app.core.config import settings
+from app.core.rag.knowledge_graph.config import GraphPipeline
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.models.chunk import DocumentChunk
@@ -44,6 +45,8 @@ class GraphRetrievalBridge:
     ) -> DocumentChunk | None:
         if not isinstance(snapshot, GraphRetrievalSnapshot):
             raise TypeError("GraphRetrievalBridge requires a GraphRetrievalSnapshot")
+        if snapshot.pipeline is not GraphPipeline.LEGACY:
+            raise ValueError("legacy graph bridge requires the legacy pipeline")
 
         wait_started_at = time.perf_counter()
         semaphore = cls._get_semaphore()
