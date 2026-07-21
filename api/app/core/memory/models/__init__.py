@@ -88,7 +88,6 @@ from app.core.memory.models.variate_config import (
     StatementExtractionConfig,
     ForgettingEngineConfig,
     TripletExtractionConfig,
-    TemporalExtractionConfig,
     DedupConfig,
     ExtractionPipelineConfig,
 )
@@ -146,7 +145,6 @@ __all__ = [
     "StatementExtractionConfig",
     "ForgettingEngineConfig",
     "TripletExtractionConfig",
-    "TemporalExtractionConfig",
     "DedupConfig",
     "ExtractionPipelineConfig",
 ]
