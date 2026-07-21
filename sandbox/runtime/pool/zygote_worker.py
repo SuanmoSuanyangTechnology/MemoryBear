@@ -43,6 +43,10 @@ class _ReqInfo(TypedDict):
 # pipes (applying backpressure to the producing child instead of growing this
 # buffer without bound).
 _SEND_BUF_CAP = 4 * 1024 * 1024  # 4 MiB
+# Max single frame payload (16 MiB).  The server JSON payload is well under
+# 1 MiB; anything larger is either a corrupt stream or an attack.  Capping plen
+# here prevents an OOM from a malicious / broken frame header claiming 4 GiB.
+_MAX_FRAME_PAYLOAD = 16 * 1024 * 1024
 
 
 def _log(msg: str) -> None:
@@ -81,6 +85,10 @@ def _xor(data: bytes, key: bytes) -> bytes:
 
 class Zygote:
     def __init__(self, ctrl_fd: int, lib_so: str, lib_dir: str, warm_modules=()):
+        # Hide /proc/<pid>/ from same-UID peers (defense-in-depth).
+        # PR_SET_DUMPABLE = 4
+        ctypes.CDLL(None).prctl(4, 0, 0, 0, 0)
+
         self.lib_dir = lib_dir
         # Children start (and later chroot) here; also where the .so lives.
         os.chdir(lib_dir)
@@ -193,6 +201,9 @@ class Zygote:
         self._recv_buf.extend(chunk)
         while len(self._recv_buf) >= P.HEADER_SIZE:
             plen, mtype, req_id = P.HEADER.unpack_from(self._recv_buf, 0)
+            if plen > _MAX_FRAME_PAYLOAD:
+                _log(f"oversized frame: plen={plen} (max={_MAX_FRAME_PAYLOAD}); closing")
+                os._exit(1)
             if len(self._recv_buf) < P.HEADER_SIZE + plen:
                 break
             payload = bytes(self._recv_buf[P.HEADER_SIZE:P.HEADER_SIZE + plen])
@@ -344,14 +355,21 @@ class Zygote:
         req_id, mtype = self.fd_map[fd]
         try:
             data = os.read(fd, 65536)
-        except OSError:
+        except (OSError, MemoryError):
             data = b""
         if data:
             self._send(mtype, req_id, data)
             return
         # EOF on this stream.
-        os.close(fd)
-        del self.fd_map[fd]
+        self._teardown_pipe_fd(fd, req_id)
+
+    def _teardown_pipe_fd(self, fd: int, req_id: int) -> None:
+        """Close one child-output fd and finish the request if both are done."""
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        self.fd_map.pop(fd, None)
         req = self.reqs.get(req_id)
         if not req:
             return
@@ -359,13 +377,17 @@ class Zygote:
         if req["open"]:
             return
         # Both streams closed -> child exited; reap and report.
+        # Pop the request BEFORE waitpid so that any concurrent MSG_KILL
+        # (same req_id) sees the entry is already gone and bails out,
+        # closing the PID-reuse window.
+        pid = req["pid"]
+        self.reqs.pop(req_id, None)
         try:
-            _, status = os.waitpid(req["pid"], 0)
+            _, status = os.waitpid(pid, 0)
             exit_code = os.waitstatus_to_exitcode(status)
         except ChildProcessError:
             exit_code = -1
         self._send(P.MSG_DONE, req_id, P.DONE_STRUCT.pack(exit_code))
-        del self.reqs[req_id]
 
     # ------------------------------------------------------------------ loop
     def serve(self) -> None:
@@ -387,15 +409,30 @@ class Zygote:
             if writable:
                 self._flush()
             for fd in readable:
-                if fd == ctrl_fd:
-                    for mtype, req_id, payload in self._read_ctrl_frames():
-                        if mtype == P.MSG_RUN:
-                            self._handle_run(req_id, payload)
-                        elif mtype == P.MSG_KILL:
-                            self._handle_kill(req_id)
-                else:
-                    if fd in self.fd_map:
-                        self._on_pipe_readable(fd)
+                try:
+                    if fd == ctrl_fd:
+                        for mtype, req_id, payload in self._read_ctrl_frames():
+                            if mtype == P.MSG_RUN:
+                                self._handle_run(req_id, payload)
+                            elif mtype == P.MSG_KILL:
+                                self._handle_kill(req_id)
+                    else:
+                        if fd in self.fd_map:
+                            self._on_pipe_readable(fd)
+                except BaseException:
+                    # A single broken request / pipe must never crash the whole
+                    # zygote worker. Log, clean up the fd if we know it, and
+                    # keep serving other in-flight requests.
+                    try:
+                        _log(f"handler crash (fd={fd}):\n{traceback.format_exc()}")
+                    except Exception:
+                        pass
+                    if fd != ctrl_fd and fd in self.fd_map:
+                        try:
+                            req_id = self.fd_map[fd][0]
+                            self._teardown_pipe_fd(fd, req_id)
+                        except Exception:
+                            pass
 
 
 def main() -> None:

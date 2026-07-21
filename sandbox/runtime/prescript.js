@@ -22,6 +22,13 @@ if (!privilege) {
         throw `Landlock failed - ${ll_rc}`
     }
 }
+// Force initialization of stdout/stderr streams before seccomp blocks ioctl.
+// Node.js lazily creates these SyncWriteStream wrappers on first access; the
+// internal setup calls ioctl(fd, TCGETS) to check TTY status.  Doing it now
+// ensures user code can write to stdout/stderr after seccomp is applied.
+void process.stdout.isTTY
+void process.stderr.isTTY
+
 let seccomp_init = initSeccomp(uid, gid, options['enable_network'], options['max_as'], privilege)
 if (seccomp_init !== 0) {
     throw `code executor err - ${seccomp_init}`
