@@ -21,6 +21,8 @@ from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.llm.chat_model import Base
+from app.core.rag.knowledge_graph.config import GraphPipelineConfigError
+from app.core.rag.parser_config import normalize_knowledge_parser_config_update
 from app.core.rag.nlp import rag_tokenizer, search
 from app.core.rag.prompts.generator import graph_entity_types
 from app.core.rag.utils.redis_conn import REDIS_CONN
@@ -381,6 +383,20 @@ async def create_knowledge(
         db_knowledge = await knowledge_service.create_knowledge_async(db=db, knowledge=create_data, current_user=current_user)
         api_logger.info(f"The knowledge base has been successfully created: {db_knowledge.name} (ID: {db_knowledge.id})")
         return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base has been successfully created")
+    except GraphPipelineConfigError as e:
+        api_logger.warning(
+            "Invalid graph pipeline configuration during knowledge creation",
+            extra={
+                "knowledge_name": create_data.name,
+                "error_type": type(e).__name__,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except HTTPException:
+        raise
     except Exception as e:
         api_logger.error(f"The creation of the knowledge base failed: {create_data.name} - {str(e)}")
         raise
@@ -578,7 +594,25 @@ async def _update_knowledge(
             )
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
-        update_dict = update_data.dict(exclude_unset=True)
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if "parser_config" in update_dict:
+            try:
+                update_dict["parser_config"] = normalize_knowledge_parser_config_update(
+                    db_knowledge.parser_config,
+                    update_dict["parser_config"],
+                )
+            except GraphPipelineConfigError as exc:
+                api_logger.warning(
+                    "Invalid graph pipeline configuration during knowledge update",
+                    extra={
+                        "knowledge_id": str(knowledge_id),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
         embedding_changed = False
         if "name" in update_dict:
             name = update_dict["name"]
@@ -602,13 +636,16 @@ async def _update_knowledge(
         # 2. Update fields (only update non-null fields)
         api_logger.debug(f"Start updating the knowledge base fields: {knowledge_id}")
         updated_fields = []
-        for field, value in update_data.dict(exclude_unset=True).items():
+        for field, value in update_dict.items():
             if hasattr(db_knowledge, field):
                 old_value = getattr(db_knowledge, field)
                 if old_value != value:
                     # update value
                     setattr(db_knowledge, field, value)
-                    updated_fields.append(f"{field}: {old_value} -> {value}")
+                    if field == "parser_config":
+                        updated_fields.append("parser_config: changed")
+                    else:
+                        updated_fields.append(f"{field}: {old_value} -> {value}")
 
         if embedding_changed and db_knowledge.chunk_num != 0:
             old_chunk_num = db_knowledge.chunk_num
