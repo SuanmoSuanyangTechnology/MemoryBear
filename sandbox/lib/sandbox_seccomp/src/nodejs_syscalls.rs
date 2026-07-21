@@ -7,7 +7,6 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_openat as i32,
     libc::SYS_newfstatat as i32,
     libc::SYS_statx as i32,
-    libc::SYS_ioctl as i32,
     libc::SYS_lseek as i32,
     libc::SYS_fstat as i32,
     libc::SYS_readlink as i32,
@@ -26,7 +25,6 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_rt_sigprocmask as i32,
     libc::SYS_sigaltstack as i32,
     libc::SYS_rt_sigreturn as i32,
-    libc::SYS_tgkill as i32,
     // Thread
     libc::SYS_futex as i32,
     libc::SYS_sched_yield as i32,
@@ -51,7 +49,12 @@ pub static ALLOW_SYSCALLS: &[i32] = &[
     libc::SYS_eventfd2 as i32,
 ];
 
-pub static ALLOW_ERROR_SYSCALLS: &[i32] = &[libc::SYS_clone as i32, libc::SYS_clone3 as i32];
+pub static ALLOW_ERROR_SYSCALLS: &[i32] = &[
+    libc::SYS_clone as i32,
+    libc::SYS_clone3 as i32,
+    libc::SYS_tgkill as i32,
+    libc::SYS_ioctl as i32,
+];
 
 pub static ALLOW_NETWORK_SYSCALLS: &[i32] = &[
     libc::SYS_socket as i32,

@@ -38,7 +38,17 @@ fn build_script(
         let mut paths = vec![LIB_PATH.to_string()];
         paths.extend(config.python_lib_paths.iter().cloned());
         paths.extend(config.nodejs_lib_paths.iter().cloned());
-        paths.extend(["/etc/ssl/certs".into(), "/etc".into()]);
+        paths.extend([
+            "/etc/ssl/certs".into(),
+            "/etc/hosts".into(),
+            "/etc/resolv.conf".into(),
+            "/etc/nsswitch.conf".into(),
+            "/etc/localtime".into(),
+            // /etc/localtime is typically a symlink into /usr/share/zoneinfo;
+            // Landlock resolves symlinks to the target, so the real path must
+            // also be reachable.
+            "/usr/share/zoneinfo".into(),
+        ]);
         serde_json::to_string(&paths).unwrap_or_else(|_| "[]".into())
     };
 
@@ -85,7 +95,13 @@ pub async fn run(
                     let mut paths = vec![LIB_PATH.to_string()];
                     paths.extend(config.python_lib_paths.iter().cloned());
                     paths.extend(config.nodejs_lib_paths.iter().cloned());
-                    paths.extend(["/etc/ssl/certs".into(), "/etc".into()]);
+                    paths.extend([
+                        "/etc/ssl/certs".into(),
+                        "/etc/hosts".into(),
+                        "/etc/resolv.conf".into(),
+                        "/etc/nsswitch.conf".into(),
+                        "/etc/localtime".into(),
+                    ]);
                     paths
                 };
                 let limits = crate::services::zygote::SandboxLimits {
@@ -144,9 +160,7 @@ pub async fn run(
         .stderr(Stdio::piped())
         .current_dir(LIB_PATH)
         .kill_on_drop(true);
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn python: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("spawn python: {e}"))?;
 
     // Write the script to stdin, then close it so Python starts execution.
     if let Some(mut stdin) = child.stdin.take() {
@@ -156,13 +170,10 @@ pub async fn run(
             .map_err(|e| format!("stdin write: {e}"))?;
     }
 
-    let output = tokio::time::timeout(
-        Duration::from_secs(timeout_secs),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| "Execution timeout".to_string())?
-    .map_err(|e| format!("process: {e}"))?;
+    let output = tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+        .await
+        .map_err(|_| "Execution timeout".to_string())?
+        .map_err(|e| format!("process: {e}"))?;
 
     Ok(ExecutionResult {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

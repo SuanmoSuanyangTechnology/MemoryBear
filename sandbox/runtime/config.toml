@@ -1,6 +1,6 @@
 # ── Sandbox runtime ──
 max_workers = 4
-worker_timeout = 30
+worker_timeout = 15
 
 enable_network = true
 enable_preload = false

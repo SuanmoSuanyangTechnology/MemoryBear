@@ -143,6 +143,9 @@ async fn main() -> std::io::Result<()> {
         std::env::var("CONFIG_PATH").unwrap_or_else(|_| "runtime/config.toml".into());
     let config = Config::load(&config_path).expect("Failed to load config");
 
+    // Hide /proc/<pid>/ from same-UID peers (defense-in-depth).
+    unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
+
     let queue = QueueController::start(config.max_workers);
 
     let port = config.app.port;

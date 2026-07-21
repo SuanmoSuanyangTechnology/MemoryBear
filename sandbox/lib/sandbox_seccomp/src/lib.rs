@@ -22,7 +22,7 @@ use std::str::FromStr;
 
 // ── Landlock (safe abstraction via landlock crate) ──
 
-use landlock::{ABI, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, path_beneath_rules};
+use landlock::{ABI, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, Scope, path_beneath_rules};
 
 /// Allowed syscalls from env `ALLOWED_SYSCALLS` or built-in defaults.
 pub fn get_allowed_syscalls(enable_network: bool) -> (Vec<i32>, Vec<i32>) {
@@ -72,6 +72,12 @@ fn set_no_new_privs() -> Result<(), c_int> {
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(-3);
     }
+    // Prevent other processes (even same-UID) from reading /proc/<pid>/ files
+    // (maps, fd, environ, …).  The kernel already rejects non-owner access, but
+    // PR_SET_DUMPABLE=0 additionally hides the process from same-UID peers.
+    if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
+        return Err(-12);
+    }
     Ok(())
 }
 
@@ -101,6 +107,8 @@ fn set_memory_limit(max_as_bytes: u64) -> Result<(), c_int> {
         rlim_max: max_as_bytes as libc::rlim_t,
     };
     if unsafe { libc::setrlimit(libc::RLIMIT_AS, &lim) } != 0 {
+        let err = unsafe { *libc::__errno_location() };
+        eprintln!("set_memory_limit({max_as_bytes}) failed: errno={err}");
         return Err(-11);
     }
     Ok(())
@@ -134,9 +142,10 @@ pub unsafe extern "C" fn apply_landlock(paths: *const *const c_char) -> c_int {
         return -20;
     }
 
-    let abi = ABI::V5;
+    let abi = ABI::V6;
     let status = Ruleset::default()
         .handle_access(AccessFs::from_all(abi))
+        .and_then(|r| r.scope(Scope::Signal))
         .and_then(|r| r.create())
         .and_then(|r| r.add_rules(path_beneath_rules(&path_strs, AccessFs::from_read(abi))))
         .and_then(|r| r.restrict_self());
