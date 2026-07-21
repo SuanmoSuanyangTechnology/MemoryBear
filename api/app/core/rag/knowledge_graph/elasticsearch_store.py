@@ -1,8 +1,9 @@
+import asyncio
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from elasticsearch import AsyncElasticsearch
+from elasticsearch import AsyncElasticsearch, NotFoundError
 
 from app.core.rag.knowledge_graph.models import (
     AffectedProjectionKeys,
@@ -506,6 +507,125 @@ class GraphElasticsearchStore:
                 }
             },
         )
+
+    async def load_projection_graph(
+        self,
+        index_name: str,
+        knowledge_id: str,
+        *,
+        node_limit: int = 256,
+        edge_limit: int = 128,
+    ) -> dict[str, Any]:
+        empty_graph = {
+            "directed": True,
+            "multigraph": False,
+            "graph": {"source_id": []},
+            "nodes": [],
+            "edges": [],
+        }
+        try:
+            node_result, edge_result = await asyncio.gather(
+                self._client.search(
+                    index=index_name,
+                    size=max(1, node_limit),
+                    query=self._graph_query(
+                        knowledge_id,
+                        ENTITY_PROJECTION,
+                    ),
+                    sort=[
+                        {"degree_int": {"order": "desc", "unmapped_type": "long"}},
+                        {
+                            "evidence_count_int": {
+                                "order": "desc",
+                                "unmapped_type": "long",
+                            }
+                        },
+                        {"entity_key_kwd": {"order": "asc"}},
+                    ],
+                ),
+                self._client.search(
+                    index=index_name,
+                    size=max(1, edge_limit * 4),
+                    query=self._graph_query(
+                        knowledge_id,
+                        RELATION_PROJECTION,
+                    ),
+                    sort=[
+                        {
+                            "evidence_count_int": {
+                                "order": "desc",
+                                "unmapped_type": "long",
+                            }
+                        },
+                        {"relation_key_kwd": {"order": "asc"}},
+                    ],
+                ),
+            )
+        except NotFoundError:
+            return empty_graph
+
+        raise_on_shard_failures(node_result, "load graph entity projections")
+        raise_on_shard_failures(edge_result, "load graph relation projections")
+
+        nodes: list[dict[str, Any]] = []
+        for hit in self._hits(node_result):
+            source = hit.get("_source") or {}
+            entity_key = str(source.get("entity_key_kwd") or "")
+            if not entity_key:
+                continue
+            nodes.append(
+                {
+                    "id": entity_key,
+                    "entity_name": str(source.get("entity_name_kwd") or ""),
+                    "entity_type": str(source.get("entity_type_kwd") or ""),
+                    "description": str(source.get("description") or ""),
+                    "pagerank": 0.0,
+                    "source_id": [],
+                    "aliases": list(source.get("aliases_kwd") or ()),
+                    "evidence_count": int(source.get("evidence_count_int") or 0),
+                    "document_count": int(source.get("document_count_int") or 0),
+                    "degree": int(source.get("degree_int") or 0),
+                }
+            )
+            if len(nodes) >= node_limit:
+                break
+
+        node_ids = {node["id"] for node in nodes}
+        edges: list[dict[str, Any]] = []
+        for hit in self._hits(edge_result):
+            source = hit.get("_source") or {}
+            relation_key = str(source.get("relation_key_kwd") or "")
+            from_key = str(source.get("from_entity_key_kwd") or "")
+            to_key = str(source.get("to_entity_key_kwd") or "")
+            if (
+                not relation_key
+                or not from_key
+                or not to_key
+                or from_key == to_key
+                or from_key not in node_ids
+                or to_key not in node_ids
+            ):
+                continue
+            predicate = str(source.get("predicate_kwd") or "")
+            edges.append(
+                {
+                    "id": relation_key,
+                    "src_id": from_key,
+                    "tgt_id": to_key,
+                    "source": from_key,
+                    "target": to_key,
+                    "description": str(source.get("description") or ""),
+                    "keywords": [predicate] if predicate else [],
+                    "weight": int(source.get("evidence_count_int") or 1),
+                    "source_id": [],
+                    "directed": bool(source.get("directed_int")),
+                    "document_count": int(source.get("document_count_int") or 0),
+                }
+            )
+            if len(edges) >= edge_limit:
+                break
+
+        return {**empty_graph, "nodes": nodes, "edges": edges}
 
     async def search_entity_projections(
         self,

@@ -47,3 +47,22 @@ def dispatch_knowledge_graph_rebuild(
         else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
     )
     return celery_app.send_task(task_name, args=[str(knowledge_id)])
+
+
+def dispatch_graph_enabled_transition(
+    knowledge_id: str,
+    previous_enabled: bool,
+    parser_config: Mapping[str, Any] | None,
+) -> Any | None:
+    current_enabled = is_graph_enabled(parser_config)
+    if current_enabled == previous_enabled:
+        return None
+    if current_enabled:
+        return dispatch_knowledge_graph_rebuild(
+            str(knowledge_id),
+            parser_config,
+        )
+    return celery_app.send_task(
+        "app.core.rag.tasks.clear_all_knowledge_graph_data",
+        args=[str(knowledge_id)],
+    )
