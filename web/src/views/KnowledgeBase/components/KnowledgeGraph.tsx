@@ -1,12 +1,11 @@
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Col } from 'antd'
-import RbCard from '@/components/RbCard/Card'
+import { Col, Flex, Spin } from 'antd'
+import RbCard from '@/components/RbCard'
 import ReactEcharts from 'echarts-for-react'
 import zoom from '@/assets/images/userMemory/zoom.svg'
 import drag from '@/assets/images/userMemory/drag.svg'
 import pointer from '@/assets/images/userMemory/pointer.svg'
-import empty from '@/assets/images/userMemory/empty.svg'
 import Empty from '@/components/Empty'
 
 // Knowledge graph data type definitions
@@ -55,6 +54,7 @@ export interface KnowledgeGraphResponse {
 }
 
 interface KnowledgeGraphProps {
+  title?: string;
   data?: KnowledgeGraphResponse
   loading?: boolean
 }
@@ -82,7 +82,7 @@ const generateEntityTypeColors = (entityTypes: string[]): Record<string, string>
   return colorMap
 }
 
-const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
+const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null)
   const resizeScheduledRef = useRef(false)
@@ -271,15 +271,15 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
   return (
     <Col span={24}>
       <RbCard 
-        title={t('knowledgeBase.knowledgeGraph')}
+        title={[title, t('knowledgeBase.knowledgeGraph')].filter(Boolean).join(' - ')}
         variant="outlined"
-        headerClassName="rb:text-sm! rb:leading-11 rb:bg-[#FAFAFA]! rb:w-full rb:ml-0! rb:px-3!"
+        headerClassName="rb:text-sm! rb:leading-11 rb:bg-[#FAFAFA]! rb:w-full rb:py-0! rb:px-3!"
       >
         <div className="rb:h-124 rb:relative">
           {loading ? (
-            <div className="rb:h-full rb:flex rb:items-center rb:justify-center">
-              <div className="rb:text-[#5B6167]">加载中...</div>
-            </div>
+            <Flex align="center" justify="center" className="rb:h-full">
+              <Spin tip={t('common.loading')}><div className="rb:size-32" /></Spin>
+            </Flex>
           ) : nodes.length === 0 ? (
             <Empty className="rb:h-full" />
           ) : (
@@ -390,21 +390,25 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
                   }}
                 >
                   {/* Modal header - draggable area */}
-                  <div
-                    className="rb:flex rb:items-center rb:justify-between rb:mb-3 rb:pb-2 rb:border-b rb:border-[#EBEBEB] rb:cursor-grab"
+                  <Flex
+                    align="center"
+                    justify="space-between"
+                    className="rb:mb-3! rb:pb-2! rb:border-b rb:border-[#EBEBEB] rb:cursor-grab"
                     onMouseDown={handleMouseDown}
                     style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
                   >
                     <div className="rb:text-[16px] rb:font-medium rb:text-[#1A1A1A]">
                       {t('knowledgeBase.entityDetails')}
                     </div>
-                    <button
+                    <Flex
+                      align="center"
+                      justify="center"
                       onClick={handleCloseModal}
-                      className="rb:w-6 rb:h-6 rb:flex rb:items-center rb:justify-center rb:text-[#5B6167] hover:rb:text-[#1A1A1A] hover:rb:bg-[#F0F3F8] rb:rounded rb:transition-colors"
+                      className="rb:size-6 rb:text-[#5B6167] hover:rb:text-[#1A1A1A] hover:rb:bg-[#F0F3F8] rb:rounded rb:transition-colors"
                     >
                       ×
-                    </button>
-                  </div>
+                    </Flex>
+                  </Flex>
                   
                   {/* Modal content */}
                   <div>
@@ -437,14 +441,14 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
             </>
           )}
         </div>
-        <div className="rb:bg-[#FAFAFA] rb:border-box rb:border-t rb:border-gray-200 rb:flex rb:items-center rb:justify-between rb:gap-6 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-16px_-20px_-16px]">
+        <Flex align="center" justify="space-between" gap={24} className="rb:bg-[#FAFAFA] rb:border-box rb:border-t rb:border-gray-200 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px]! rb:m-[0_-16px_-16px_-16px]!">
           {operations.map((item) => (
-            <div key={item.name} className="rb:flex rb:items-center rb:text-[#5B6167] rb:leading-5">
-              <img src={item.icon} className="rb:w-5 rb:h-5 rb:mr-1" />
+            <Flex key={item.name} align="center" className="rb:text-[#5B6167] rb:leading-5">
+              <img src={item.icon} className="rb:size-5 rb:mr-1" />
               {t(`userMemory.${item.name}`)}
-            </div>
+            </Flex>
           ))}
-        </div>
+        </Flex>
       </RbCard>
     </Col>
   )

@@ -206,7 +206,7 @@ const ExtractedEntityGraphDetail: FC = () => {
             title={t('userMemory.timelineMemories')}
             headerType="borderless"
             headerClassName="rb:min-h-[53px]! rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:px-4! rb:py-0! rb:h-[calc(100%-53px)]!"
+            bodyClassName="rb:px-4! rb:py-0! rb:h-[calc(100%-38px)]!"
             className="rb:w-full! rb:h-full!"
           >
             <BtnTabs

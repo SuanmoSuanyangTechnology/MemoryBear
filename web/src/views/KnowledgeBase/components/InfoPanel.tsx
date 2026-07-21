@@ -7,6 +7,7 @@
  * @LastEditTime: 2026-06-05 13:39:40 
  */
 import type { ReactElement } from 'react';
+import { Flex } from 'antd';
 
 export interface InfoItem {
   key: string;
@@ -25,17 +26,17 @@ const InfoPanel = ({ title, items, className = '' }: InfoPanelProps) => {
   return (
     <div className={`rb:w-full ${className}`}>
       <h2 className="rb:text-lg rb:font-medium rb:mb-3">{title}</h2>
-      <div className='rb:flex rb:flex-col rb:items-start rb:gap-6'>
+      <Flex vertical align="start" gap={24}>
         {items.map((item) => (
-          <div key={item.key} className='rb:flex rb:w-full rb:items-start rb:justify-start rb:gap-2'>
+          <Flex key={item.key} align="start" justify="start" gap={8} className='rb:w-full'>
             {item.icon && <img src={item.icon} className='rb:size-4 rb:mt-0.5' alt="" />}
-            <div className='rb:flex rb:flex-col rb:text-left rb:gap-2'>
+            <Flex vertical gap={8} className='rb:text-left'>
               <span className='rb:text-gray-500 rb:text-sm'>{item.label}</span>
               <span className='rb:text-gray-800'>{item.value ?? '-'}</span>
-            </div>
-          </div>
+            </Flex>
+          </Flex>
         ))}
-      </div>
+      </Flex>
     </div>
   );
 };

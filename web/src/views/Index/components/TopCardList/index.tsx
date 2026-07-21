@@ -48,7 +48,7 @@ const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
               {item.key === 'running_apps' &&  String(data?.[`${item.key}` as keyof DataResponse] || 0)}
               {item.key !== 'spaces' && item.key !== 'running_apps' && String(data?.[`total_${item.key}` as keyof DataResponse] || 0)}
             </div>
-            <div className='rb:flex rb:flex-col rb:items-start rb:mt-2'>
+            <Flex vertical align="start" className='rb:mt-2!'>
               {item.key === 'models'
                 ? (
                   <div className='rb:text-xs rb:leading-4 rb:text-[#5F6266] rb:w-32.25'>
@@ -56,7 +56,7 @@ const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
                   </div>
                 )
                 : (<>                  
-                  <div className='rb:flex rb:items-center rb:text-xs rb:leading-4 rb:gap-1'> 
+                  <Flex align="center" gap={4} className='rb:text-xs rb:leading-4'> 
                     {item.key === 'spaces' && (<>
                       <div className={clsx("rb:size-3 rb:bg-cover rb:mr-0.5", {
                         "rb:bg-[url('@/assets/images/index/arrow_up_d.svg')]": Number(data?.new_workspaces_this_week || 0) >= 0,
@@ -87,13 +87,13 @@ const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
                         "rb:text-[#FF5D34]": Number(data?.new_apps_this_week || 0) < 0,
                       })}>{Number(data?.new_apps_this_week || 0) >= 0 ? '+' : '-'}{Math.abs(Number(data?.new_apps_this_week || 0))}</span>
                     </>)}
-                  </div>
+                  </Flex>
                   <div className='rb:text-[12px] rb:leading-4 rb:text-[#5F6266]'>
                     {t(`dashboard.${'desc_' + item.key}`)}
                   </div>
                 </>)
               }
-            </div>
+            </Flex>
             
             {item.key === 'models' && (<Tag color={Number(data?.model_week_growth_rate || 0) >= 0 ? "success" : "warning"} className="rb:mt-2">
               <Flex align="center">

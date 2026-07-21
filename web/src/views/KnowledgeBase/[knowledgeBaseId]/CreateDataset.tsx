@@ -295,18 +295,16 @@ const CreateDataset = () => {
         } else if (value >= 0 && value < 1) {
           // Processing, show progress bar
           return (
-            <div className="rb:flex rb:items-center rb:gap-2">
-              <Progress 
-                percent={Math.round(value * 100)} 
-                size="small" 
-                status="active"
-                strokeColor={{
-                  '0%': '#108ee9',
-                  '100%': '#87d068',
-                }}
-                style={{ width: '120px' }}
-              />
-            </div>
+            <Progress 
+              percent={Math.round(value * 100)} 
+              size="small" 
+              status="active"
+              strokeColor={{
+                '0%': '#108ee9',
+                '100%': '#87d068',
+              }}
+              style={{ width: '120px' }}
+            />
           );
         } else {
           // value = 0 or other cases, show pending
@@ -619,21 +617,22 @@ const CreateDataset = () => {
   }
 
   return (<>
-    <div className='rb:p-3 rb:pt-2 rb:h-full rb:flex rb:flex-col'>
+    <Flex vertical className='rb:p-3! rb:pt-2! rb:h-full'>
       {/* <Typography.Title level={4} className='rb:!m-0 rb:!mb-4'>
         {t('knowledgeBase.createA') + ' ' + t('knowledgeBase.dataset')}
       </Typography.Title> */}
-      <div className='rb:flex rb:items-center rb:gap-2 rb:mb-4 rb:cursor-pointer' onClick={handleBack}>
-          <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
-          <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
-      </div>
-      {source !== 'csv' && <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-xl'>
+      <Flex align="center" gap={8} className='rb:mb-4! rb:cursor-pointer' onClick={handleBack}>
+        <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
+        <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
+      </Flex>
+      {source !== 'csv' &&
+        <div className='rb:px-24 rb:py-5 rb:bg-white rb:rounded-xl'>
           <Steps current={current} items={steps} className="custom-steps" />
-      </div> } 
+        </div>
+      } 
       <div className='rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3'>
-
         {current === 0 && (<>
-          <div className='rb:flex rb:w-full rb:p-6'>
+          <Flex className='rb:w-full rb:p-6!'>
             {source && (source === 'local' || source === 'csv') && (
               <UploadFiles 
                 ref={uploadRef}
@@ -678,7 +677,7 @@ const CreateDataset = () => {
               />
             )}
             {source && source === 'link' && (
-              <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
+              <Flex vertical className='rb:w-full rb:mt-10! rb:px-40!'>
 
                 <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
                     {t('knowledgeBase.webLink')}
@@ -691,10 +690,10 @@ const CreateDataset = () => {
                     {t('knowledgeBase.selectorTutorial')}
                 </div>
                 <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-              </div>
+              </Flex>
             )}
             {source && source === 'text' && (
-              <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-20'>
+              <Flex vertical className='rb:w-full rb:mt-10! rb:px-20!'>
                 <Form 
                   form={form} 
                   layout="vertical"
@@ -734,9 +733,9 @@ const CreateDataset = () => {
                     {t('knowledgeBase.customContent')}
                 </div>
                 <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
-              </div>
+              </Flex>
             )}
-          </div>
+          </Flex>
           {source === 'csv' &&
             <a
               href="csv_template.csv"
@@ -749,51 +748,50 @@ const CreateDataset = () => {
         </>)}
 
         {current === 1 && (
-          <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
+          <Flex vertical  className='rb:mt-10! rb:px-40!'>
               {rechunkFileIds.length > 0 && (
-                <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:items-center rb:flex-wrap rb:gap-2'>
+                <Flex align="center" wrap gap={8} className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:px-3! rb:py-2! rb:mb-4! rb:text-xs rb:text-gray-600'>
                     <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
                     {rechunkFileIds.map((id) => (
                       <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
                     ))}
-                </div>
+                </Flex>
               )}
               <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-4'>
                   {t('knowledgeBase.fileParsingSettings')}
               </div>
-              <div className='rb:mt-4'>
-                <div 
-                  className={`rb:flex rb:items-center rb:justify-between rb:w-full rb:border rb:rounded-xl rb:p-4 rb:cursor-pointer ${
+              <Flex
+                align="center"
+                justify="space-between" 
+                className={`rb:w-full rb:border rb:rounded-xl rb:p-4! rb:mt-4! rb:cursor-pointer ${
                   pdfEnhancementEnabled ? 'rb:border-[#171719] rb:bg-[#FAFAFA]' : 'rb-border'
-                  }`}
-                  // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
+                }`}
+                // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
+              >
+                <Checkbox 
+                  checked={pdfEnhancementEnabled}
+                  onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
+                  className='rb:mr-3'
                 >
-                  <Checkbox 
-                    checked={pdfEnhancementEnabled}
-                    onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
-                    className='rb:mr-3'
-                  >
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
-                      {t('knowledgeBase.pdfEnhancementAnalysis')}
-                    </span>
-                  </Checkbox>
-                  {pdfEnhancementEnabled && (
-                    <div className='rb:ml-10'>
-                      <Select
-                        value={pdfEnhancementMethod}
-                        onChange={(value) => setPdfEnhancementMethod(value)}
-                        className='rb:w-[300px]'
-                        options={[
-                          { value: 'deepdoc', label: 'DeepDoc' },
-                          { value: 'mineru', label: 'MinerU' },
-                          { value: 'textln', label: 'TextLN' }
-                        ]}
-                      />
-                    </div>
-                  )}
-                </div>
-                
-              </div>
+                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                    {t('knowledgeBase.pdfEnhancementAnalysis')}
+                  </span>
+                </Checkbox>
+                {pdfEnhancementEnabled && (
+                  <div className='rb:ml-10'>
+                    <Select
+                      value={pdfEnhancementMethod}
+                      onChange={(value) => setPdfEnhancementMethod(value)}
+                      className='rb:w-[300px]'
+                      options={[
+                        { value: 'deepdoc', label: 'DeepDoc' },
+                        { value: 'mineru', label: 'MinerU' },
+                        { value: 'textln', label: 'TextLN' }
+                      ]}
+                    />
+                  </div>
+                )}
+              </Flex>
               <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-6'>
                   {t('knowledgeBase.dataProcessingSettings')}
               </div>
@@ -874,7 +872,7 @@ const CreateDataset = () => {
               {parameterSettings === 'customSettings' && processingMethod === 'parentChildBlock' &&
                 <ParentChildBlockConfig initialValue={parentChildConfig} onChange={setParentChildConfig} />
               }
-          </div>
+          </Flex>
         )}
 
         {/* 暂时隐藏第三步：数据预览 */}
@@ -884,7 +882,7 @@ const CreateDataset = () => {
                   <div className='rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4 rb:py-3 rb:border-b rb:border-[#DFE4ED]'>
                       {t('knowledgeBase.fileList')}
                   </div>
-                  <div className='rb:flex rb:flex-col rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
+                  <Flex vertical className='rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
                       {data.map((item, index) => (
                           <div key={index} className={`rb:h-11 rb:w-full rb:text-sm rb:text-gray-800 rb:px-4 rb:py-3  rb:hover:text-[#155EEF] rb:cursor-pointer ${curSelectedFileId === index ? styles.textBg + ' ' + styles.active : ''}`}
                               onClick={() => handlePreview(item, index)}>
@@ -893,15 +891,15 @@ const CreateDataset = () => {
                           ))
                       }
                       
-                  </div>
+                  </Flex>
               </div>
               <div className='rb:h-full rb:overflow-hidden'>
-                  <div className='rb:flex rb:items-center rb:justify-between rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4 rb:py-3 rb:border-b rb:border-[#DFE4ED]'>
+                  <Flex align="center" justify="space-between" className='rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4! rb:py-3! rb:border-b rb:border-[#DFE4ED]'>
                       {t('knowledgeBase.dataPreview')}
                       <span className='rb:text-sm rb:text-gray-500'>{t('knowledgeBase.maxPreviewChunks', {count: total, max: chunkData.length})}</span>
-                  </div>
+                  </Flex>
                   <Spin spinning={previewLoading}>
-                      <div className='rb:flex rb:flex-col rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
+                      <Flex vertical className='rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
                           {chunkData.length > 0 ? (
                               chunkData.map((item, index) => (
                                   <div key={index} className='rb:text-sm rb:text-gray-800 rb:px-4 rb:py-3'
@@ -914,7 +912,7 @@ const CreateDataset = () => {
                                   image={noDataIcon}
                               />
                           )}
-                      </div>
+                      </Flex>
                   </Spin>
               </div>
           </div>
@@ -944,26 +942,28 @@ const CreateDataset = () => {
             </div>
           // </Spin>
         )}
-        <div className={`rb:flex rb:p-6 rb:gap-3 rb:mt-6 ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-28 rb:mt-10' : ''}`}>
+        <Flex gap={12} className={`rb:p-6! rb:mt-6! ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-28! rb:mt-10!' : ''}`}>
           {current !== 0 && (
-              <Button onClick={handlePrev} disabled={current === 0 || pollingLoading}>
-              {t('common.previous') || 'Prev'}
-              </Button>
+            <Button onClick={handlePrev} disabled={current === 0 || pollingLoading}>
+            {t('common.previous') || 'Prev'}
+            </Button>
           )}
-          {source !== 'csv' && <Button 
-            type='primary' 
-            onClick={current === 2 ? handleStartUpload : handleNext}
-            disabled={
-              pollingLoading || 
-              (current === 0 && source === 'local' && rechunkFileIds.length === 0) ||
-              (current === 0 && source === 'text' && !textFormValid)
-            }
-          >
-            {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
-          </Button>}
-        </div>
+          {source !== 'csv' && (
+            <Button 
+              type='primary' 
+              onClick={current === 2 ? handleStartUpload : handleNext}
+              disabled={
+                pollingLoading || 
+                (current === 0 && source === 'local' && rechunkFileIds.length === 0) ||
+                (current === 0 && source === 'text' && !textFormValid)
+              }
+            >
+              {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
+            </Button>
+          )}
+        </Flex>
       </div>
-    </div>
+    </Flex>
   </>);
 };
 

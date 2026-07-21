@@ -94,7 +94,7 @@ const EdgeDetailPanel: React.FC<EdgeDetailPanelProps> = ({
   return (
     <div>
       {displayList.length > 1 && (
-        <div className="rb:flex rb:gap-2 rb:mb-4 rb:flex-wrap">
+        <Flex gap={8} wrap className="rb:mb-4!">
           {displayList.map((_relation, index) => (
             <div
               key={index}
@@ -108,7 +108,7 @@ const EdgeDetailPanel: React.FC<EdgeDetailPanelProps> = ({
               {t('userMemory.relation')}{index + 1}
             </div>
           ))}
-        </div>
+        </Flex>
       )}
 
       {/* 仅展示 activeRelationIndex 对应的关系信息（不铺开 a_to_b / b_to_a） */}

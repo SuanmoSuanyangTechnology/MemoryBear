@@ -6,13 +6,15 @@
  */
 import { useState, useEffect, forwardRef, useImperativeHandle, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Checkbox, Spin, Button } from 'antd';
+import { Checkbox, Spin, Button, Flex } from 'antd';
 import { useNavigate } from 'react-router-dom';
+import clsx from 'clsx';
 
 import RbModal from '@/components/RbModal';
 import type { MetadataField, MetadataModalRef } from '../types';
 import { getMetadataFields } from '@/api/knowledgeBase';
 import MetadataModal from '../components/MetadataModal';
+import Empty from '@/components/Empty';
 
 interface MetadataFieldSelectorModalProps {
   knowledgeBaseId: string;
@@ -108,11 +110,16 @@ const MetadataFieldSelectorModal = forwardRef<MetadataFieldSelectorModalRef, Met
             <Spin />
           </div>
         ) : (
-          <>
+          <Flex vertical gap={8} className="rb:mt-3!">
             {metadataFields.map(field => (
-              <div
+              <Flex
                 key={field.id}
-                className="rb:flex rb:items-center rb:gap-3 rb:cursor-pointer rb:p-2 rb:rounded-lg rb:hover:bg-[#F9F9F9]"
+                align="center"
+                gap={12}
+                className={clsx("rb:cursor-pointer rb:p-2! rb:rounded-lg", {
+                  'rb:border rb:border-[rgba(21,94,239,0.25)] rb:bg-[rgba(21,94,239,0.06)]': !!selectedFields.find(item => item.name === field.name),
+                  'rb-border rb:hover:bg-[#F9F9F9]': !selectedFields.find(item => item.name === field.name),
+                })}
                 onClick={() => handleSelect(field)}
               >
                 <Checkbox
@@ -121,14 +128,12 @@ const MetadataFieldSelectorModal = forwardRef<MetadataFieldSelectorModalRef, Met
                 />
                 <span className="rb:text-sm">{field.name}</span>
                 <span className="rb:text-xs rb:text-gray-400 rb:ml-auto">{field.type}</span>
-              </div>
+              </Flex>
             ))}
             {metadataFields.length === 0 && (
-              <div className="rb:py-8 rb:text-center rb:text-gray-400">
-                {t('knowledgeBase.metadata.noAvailableFields')}
-              </div>
+              <Empty size={88} subTitle={t('knowledgeBase.metadata.noAvailableFields')} />
             )}
-          </>
+          </Flex>
         )}
       </RbModal>
 

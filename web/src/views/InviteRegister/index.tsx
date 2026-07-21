@@ -13,14 +13,12 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Button, Input, Form, Progress, App } from 'antd';
+import { Button, Input, Form, Progress, App, Flex } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import type { FormProps } from 'antd';
 
 import { useUser, type LoginInfo } from '@/store/user';
 import { login } from '@/api/user'
-import inviteBg from '@/assets/images/login/inviteBg.png'
-import checkBg from '@/assets/images/login/checkBg.png'
 import type { LoginForm, ValidateToken } from './types';
 import { validateInviteToken } from '@/api/member'
 import RbAlert from '@/components/RbAlert'
@@ -30,10 +28,10 @@ import styles from './index.module.css'
  * Alert extra content wrapper
  */
 const Extra = ({ children }: { children: React.ReactNode }) => (
-  <div className="rb:flex rb:items-start">
+  <Flex align="start">
     <ExclamationCircleFilled className="rb:mr-1 rb:mt-0.75" />
     {children}
-  </div>
+  </Flex>
 )
 
 /**
@@ -152,8 +150,8 @@ const InviteRegister: React.FC = () => {
 
 
   return (
-    <div className="rb:w-screen rb:h-screen rb:flex rb:items-center rb:justify-center">
-      <img src={inviteBg} className="rb:w-screen rb:h-screen rb:fixed rb:top-0 rb:left-0 rb:z-0" />
+    <Flex align="center" justify="center" className="rb:w-screen rb:h-screen">
+      <div className="rb:fixed rb:left-0 rb:top-0 rb:bottom-0 rb:right-0 rb:z-0 rb:bg-cover rb:bg-no-repeat rb:bg-[url('@/assets/images/login/inviteBg.png')]"></div>
 
       <div className="rb:relative rb:z-1 rb:w-120 rb:max-h-full rb:overflow-y-auto rb:bg-[#FFFFFF] rb:rounded-xl rb:shadow-[0px_2px_10px_0px_rgba(11,49,124,0.2)]">
         <div className="rb:bg-[url('@/assets/images/login/inviteForm.png')] rb:bg-cover rb:bg-no-repeat rb:text-[24px] rb:font-bold rb:leading-8 rb:p-[28px_24px]">
@@ -166,7 +164,7 @@ const InviteRegister: React.FC = () => {
           layout="vertical"
           className={styles.form}
         >
-          <RbAlert icon={<img src={checkBg} className="rb:w-6 rb:h-6" />} className="rb:mb-6">
+          <RbAlert icon={<div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/login/checkBg.png')]" />} className="rb:mb-6!">
             <div className="rb:text-[14px] rb:font-medium rb:leading-5">
               {t('login.invitationVerified')}
               <div className="rb:text-[12px] rb:font-regular rb:leading-4 rb:mt-1">{t('login.account')}: {values?.email || '-'}</div>
@@ -256,7 +254,7 @@ const InviteRegister: React.FC = () => {
           </Button>
         </Form>
       </div>
-    </div>
+    </Flex>
   );
 };
 

@@ -5,8 +5,7 @@
  * @Last Modified time: 2026-02-04 10:00:02
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Switch, Button, Tooltip } from 'antd';
-import clsx from 'clsx';
+import { Switch, Button, Tooltip, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiKey, ApiKeyModalRef } from '../types';
@@ -63,24 +62,24 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
       open={visible}
       onCancel={handleClose}
     >
-      <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.baseInfo')}</div>
-      {['id', 'name', 'is_expired', 'created_at'].map((key, index) => (
-        <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px]", {
-          'rb:mt-3': index !== 0
-        })}>
-          <span className="rb:text-[#5B6167]">{t(`apiKey.${key}`)}</span>
-          <span className="rb:text-right rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
-            { key === 'created_at'
-              ? formatDateTime(data[key], 'YYYY-MM-DD HH:mm:ss')
-              : key === 'is_expired'
-                ? <Tag color={data[key] ? 'error' : 'processing'}>{data[key] ? t('apiKey.inactive') : t('apiKey.active')}</Tag>
-                : <Tooltip title={String(data[key as keyof ApiKey])}>{String(data[key as keyof ApiKey])}</Tooltip>
-            }
-          </span>
-        </div>
-      ))}
+      <Flex vertical gap={12}>
+        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5">{t('apiKey.baseInfo')}</div>
+        {['id', 'name', 'is_expired', 'created_at'].map((key) => (
+          <Flex justify="space-between" gap={20} key={key} className="rb:font-regular rb:text-[14px]">
+            <span className="rb:text-[#5B6167]">{t(`apiKey.${key}`)}</span>
+            <span className="rb:text-right rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
+              { key === 'created_at'
+                ? formatDateTime(data[key], 'YYYY-MM-DD HH:mm:ss')
+                : key === 'is_expired'
+                  ? <Tag color={data[key] ? 'error' : 'processing'}>{data[key] ? t('apiKey.inactive') : t('apiKey.active')}</Tag>
+                  : <Tooltip title={String(data[key as keyof ApiKey])}>{String(data[key as keyof ApiKey])}</Tooltip>
+              }
+            </span>
+          </Flex>
+        ))}
+      </Flex>
 
-      <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:mt-5 rb:p-[8px_16px] rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
+      <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:mt-5! rb:py-2! rb:px-4! rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
         {maskApiKeys(data.api_key)}
 
         <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(data.api_key)}>
@@ -89,45 +88,49 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
           ></div>
           {t('common.copy')}
         </Button>
-      </div>
+      </Flex>
 
-      <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:my-4">{t('apiKey.permissionInfo')}</div>
+      <Flex vertical gap={12} className="rb:mt-4!">
+        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-1">{t('apiKey.permissionInfo')}</div>
 
-      <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
-        <span className="rb:text-[#5B6167]">{t(`apiKey.memoryEngine`)}</span>
-        <span>
-          <Switch checked={data.scopes?.includes('memory')} disabled />
-        </span>
-      </div>
-      <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
-        <span className="rb:text-[#5B6167]">{t(`apiKey.knowledgeBase`)}</span>
-        <span>
-          <Switch checked={data.scopes?.includes('rag')} disabled />
-        </span>
-      </div>
-
-      <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:my-4">{t('apiKey.advancedSettings')}</div>
-
-      {data.expires_at &&
-        <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
-          <span className="rb:text-[#5B6167]">{t(`apiKey.expires_at`)}</span>
+        <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+          <span className="rb:text-[#5B6167]">{t(`apiKey.memoryEngine`)}</span>
           <span>
-            {data.expires_at ? formatDateTime(data.expires_at as number, 'YYYY-MM-DD HH:mm:ss') : '-'}
+            <Switch checked={data.scopes?.includes('memory')} disabled />
           </span>
-        </div>
-      }
-      <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
-        <span className="rb:text-[#5B6167]">{t(`application.qpsLimit`)}</span>
-        <span>
-          {data.rate_limit} {t('application.qpsLimitUnit')}
-        </span>
-      </div>
-      <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
-        <span className="rb:text-[#5B6167]">{t(`application.dailyUsageLimit`)}</span>
-        <span>
-          {data.daily_request_limit} {t('application.dailyUsageLimitUnit')}
-        </span>
-      </div>
+        </Flex>
+        <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+          <span className="rb:text-[#5B6167]">{t(`apiKey.knowledgeBase`)}</span>
+          <span>
+            <Switch checked={data.scopes?.includes('rag')} disabled />
+          </span>
+        </Flex>
+      </Flex>
+
+      <Flex vertical gap={12} className="rb:mt-4!">
+        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-1">{t('apiKey.advancedSettings')}</div>
+
+        {data.expires_at &&
+          <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+            <span className="rb:text-[#5B6167]">{t(`apiKey.expires_at`)}</span>
+            <span>
+              {data.expires_at ? formatDateTime(data.expires_at as number, 'YYYY-MM-DD HH:mm:ss') : '-'}
+            </span>
+          </Flex>
+        }
+        <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+          <span className="rb:text-[#5B6167]">{t(`application.qpsLimit`)}</span>
+          <span>
+            {data.rate_limit} {t('application.qpsLimitUnit')}
+          </span>
+        </Flex>
+        <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+          <span className="rb:text-[#5B6167]">{t(`application.dailyUsageLimit`)}</span>
+          <span>
+            {data.daily_request_limit} {t('application.dailyUsageLimitUnit')}
+          </span>
+        </Flex>
+      </Flex>
     </RbModal>
   );
 });

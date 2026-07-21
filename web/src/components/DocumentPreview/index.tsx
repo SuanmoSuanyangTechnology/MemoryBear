@@ -7,7 +7,7 @@
  * @LastEditTime: 2026-03-20 12:12:20
  */
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
-import { Spin, Alert, Button, Table, InputNumber, Image } from 'antd';
+import { Spin, Alert, Button, Table, InputNumber, Image, Flex } from 'antd';
 import {
   ReloadOutlined,
   DownloadOutlined,
@@ -16,6 +16,8 @@ import {
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
+
 import RbMarkdown from '../Markdown';
 import { cookieUtils } from '@/utils/request';
 import mammoth from 'mammoth';
@@ -43,6 +45,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   height = '600px',
   className = '',
 }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -170,7 +173,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       setLoading(false);
     } catch (err: any) {
       console.error('加载 PDF 文件失败:', err);
-      handleError(err.message || '加载 PDF 文件失败');
+      handleError(err.message || t('knowledgeBase.pdfLoadFailed'));
     }
   }, [fileUrl, pdfScale, renderPdfPage]);
 
@@ -224,7 +227,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       }
     } catch (err: any) {
       console.error('加载 PPT 文件失败:', err);
-      handleError(err.message || '加载 PPT 文件失败');
+      handleError(err.message || t('knowledgeBase.pptLoadFailedDesc'));
     }
   }, [fileUrl]);
 
@@ -246,7 +249,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       setLoading(false);
     } catch (err: any) {
       console.error('加载图片文件失败:', err);
-      handleError(err.message || '图片加载失败');
+      handleError(err.message || t('knowledgeBase.imageLoadFailed'));
     }
   };
 
@@ -266,19 +269,19 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       const contentType = response.headers.get('Content-Type') || '';
       if (contentType.startsWith('image/')) {
-        handleError('文件实际是图片类型，但被标记为文本文件');
+        handleError(t('knowledgeBase.imagePreviewFailedDesc'));
         return;
       }
       const text = await response.text();
       if (text.startsWith('\x89PNG') || text.startsWith('�PNG')) {
-        handleError('文件内容是图片，但扩展名是文本');
+        handleError(t('knowledgeBase.imagePreviewFailed'));
         return;
       }
       setTextContent(text);
       setLoading(false);
     } catch (err: any) {
       console.error('加载文本文件失败:', err);
-      handleError(err.message || '加载文本文件失败');
+      handleError(err.message || t('knowledgeBase.textPreviewFailed'));
     }
   };
 
@@ -299,14 +302,14 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       if (header[0] !== 0x50 || header[1] !== 0x4B) {
         // 不是 ZIP/docx 格式，可能是 HTML 错误页或 JSON 响应
         const text = new TextDecoder().decode(arrayBuffer.slice(0, 200));
-        throw new Error(`文件内容不是有效的 docx 格式: ${text.substring(0, 100)}`);
+        throw new Error(t('knowledgeBase.wordPreviewFailedDesc') + text.substring(0, 100));
       }
       const result = await mammoth.convertToHtml({ arrayBuffer });
       setHtmlContent(result.value);
       setLoading(false);
     } catch (err: any) {
       console.error('加载 Word 文件失败:', err);
-      handleError(err.message || '加载 Word 文件失败，文件可能已损坏');
+      handleError(err.message || t('knowledgeBase.wordPreviewFailed'));
     }
   };
 
@@ -413,7 +416,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       setLoading(false);
     } catch (err: any) {
       console.error('加载 Excel 文件失败:', err);
-      handleError(err.message || '加载 Excel 文件失败，文件可能已损坏');
+      handleError(err.message || t('knowledgeBase.excelPreviewFailed'));
     }
   };
 
@@ -456,14 +459,14 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     onPageChange: (page: number) => void;
     extraControls?: React.ReactNode;
   }) => (
-    <div className="rb:flex rb:items-center rb:justify-center rb:gap-3 rb:py-2 rb:px-4 rb:bg-white rb:border-t rb:border-gray-200 rb:select-none">
+    <Flex align="center" justify="center" gap={12} className="rb:py-2! rb:px-4! rb:bg-white rb:border-t rb:border-gray-200 rb:select-none">
       <Button
         size="small"
         icon={<LeftOutlined />}
         disabled={currentPage <= 1}
         onClick={() => onPageChange(currentPage - 1)}
       />
-      <span className="rb:text-sm rb:text-gray-600 rb:flex rb:items-center rb:gap-1">
+      <Flex align="center" gap={4} className="rb:text-sm rb:text-gray-600">
         <InputNumber
           size="small"
           min={1}
@@ -473,7 +476,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
           style={{ width: 56 }}
         />
         <span>/ {totalPages}</span>
-      </span>
+      </Flex>
       <Button
         size="small"
         icon={<RightOutlined />}
@@ -481,14 +484,14 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         onClick={() => onPageChange(currentPage + 1)}
       />
       {extraControls}
-    </div>
+    </Flex>
   );
 
   if (!isPreviewable()) {
     return (
       <Alert
-        message="不支持的文件类型"
-        description={`仅支持预览：${previewableTypes.join(', ')}`}
+        message={t('knowledgeBase.fileAcceptTip')}
+        description={`${t('knowledgeBase.previewableTypes')}${previewableTypes.join(', ')}`}
         type="warning"
         showIcon
       />
@@ -496,52 +499,54 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   }
 
   return (
-    <div className={`rb:relative rb:flex rb:flex-col ${className}`} style={{ width, height }}>
+    <Flex vertical className={`rb:relative ${className}`} style={{ width, height }}>
       {loading && (
-        <div className="rb:absolute rb:inset-0 rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:z-10">
-          <Spin size="large" tip="加载文档预览中..." />
-        </div>
+        <Flex align="center" justify="center" className="rb:absolute rb:inset-0 rb:bg-gray-50 rb:z-10">
+          <Spin size="large" tip={t('knowledgeBase.loadingPreview')}>
+            <div className="rb:w-50 rb:h-16" />
+          </Spin>
+        </Flex>
       )}
 
       {error && (
-        <div className="rb:absolute rb:inset-0 rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:z-10">
+        <Flex align="center" justify="center" className="rb:absolute rb:inset-0 rb:bg-gray-50 rb:z-10">
           <Alert
-            message="预览失败"
+            message={t('knowledgeBase.previewFailed')}
             description={
               <div>
-                <p className="rb:mb-2">无法加载文档预览</p>
+                <p className="rb:mb-2">{t('knowledgeBase.previewFailedDesc')}</p>
                 {errorMessage && (
-                  <p className="rb:text-sm rb:text-red-600 rb:mb-3">错误详情：{errorMessage}</p>
+                  <p className="rb:text-sm rb:text-red-600 rb:mb-3">{t('knowledgeBase.errorDetails')}{errorMessage}</p>
                 )}
-                <p className="rb:text-sm rb:text-gray-600 rb:mb-3">可能的原因：</p>
+                <p className="rb:text-sm rb:text-gray-600 rb:mb-3">{t('knowledgeBase.possibleReasons')}</p>
                 <ul className="rb:list-disc rb:pl-5 rb:text-sm rb:text-gray-600 rb:mb-3">
-                  <li>文件 URL 无法访问（401/403/404）</li>
-                  <li>认证 token 已过期</li>
-                  <li>文件格式损坏或不匹配</li>
-                  <li>网络连接问题</li>
+                  <li>{t('knowledgeBase.fileUrlAccessError')}</li>
+                  <li>{t('knowledgeBase.tokenExpired')}</li>
+                  <li>{t('knowledgeBase.fileFormatError')}</li>
+                  <li>{t('knowledgeBase.networkError')}</li>
                 </ul>
-                <div className="rb:mt-4 rb:flex rb:gap-2">
-                  <Button icon={<ReloadOutlined />} onClick={handleRetry}>重试</Button>
-                  <Button icon={<DownloadOutlined />} onClick={handleDownload}>下载文件</Button>
-                </div>
+                <Flex gap={8} className="rb:mt-4!">
+                  <Button icon={<ReloadOutlined />} onClick={handleRetry}>{t('knowledgeBase.retry')}</Button>
+                  <Button icon={<DownloadOutlined />} onClick={handleDownload}>{t('knowledgeBase.downloadFile')}</Button>
+                </Flex>
               </div>
             }
             type="error"
             showIcon
           />
-        </div>
+        </Flex>
       )}
 
       {/* 图片预览 */}
       {isImageFile() && !error && !loading && (
-        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-50 rb:flex rb:items-center rb:justify-center">
+        <Flex align="center" justify="center" className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-50">
           <Image
             src={imageBlobUrl}
-            alt={fileName || '图片预览'}
+            alt={fileName || t('knowledgeBase.imagePreview')}
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-            onError={() => handleError('图片渲染失败')}
+            onError={() => handleError(t('knowledgeBase.imageRenderFailed'))}
           />
-        </div>
+        </Flex>
       )}
 
       {/* Markdown 预览 */}
@@ -560,12 +565,12 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       {isWordFile() && !error && !loading && (
         getFileExtension() === '.doc' ? (
           /* .doc 旧格式前端无法解析，提示下载 */
-          <div className="rb:w-full rb:flex-1 rb:flex rb:items-center rb:justify-center rb:bg-gray-50">
+          <Flex align="center" justify="center" className="rb:w-full rb:flex-1 rb:bg-gray-50">
             <div className="rb:text-center">
-              <p className="rb:text-gray-600 rb:mb-4">.doc 格式暂不支持在线预览，请下载后查看</p>
-              <Button icon={<DownloadOutlined />} type="primary" onClick={handleDownload}>下载文件</Button>
+              <p className="rb:text-gray-600 rb:mb-4">{t('knowledgeBase.docFormatNotSupported')}</p>
+              <Button icon={<DownloadOutlined />} type="primary" onClick={handleDownload}>{t('knowledgeBase.downloadFile')}</Button>
             </div>
-          </div>
+          </Flex>
         ) : (
           <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
             <div
@@ -581,7 +586,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
           {csvTruncated && (
             <div className="rb:mb-3 rb:px-3 rb:py-2 rb:bg-yellow-50 rb:border rb:border-yellow-200 rb:rounded rb:text-sm rb:text-yellow-700">
-              文件较大，仅预览前 {MAX_PREVIEW_ROWS} 行数据
+              {t('knowledgeBase.fileTooLargePreview', { MAX_PREVIEW_ROWS })}
             </div>
           )}
           {excelData.map((sheet, index) => (
@@ -591,7 +596,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                 <Table
                   dataSource={sheet.data.slice(1).map((row, idx) => ({ key: idx, ...row }))}
                   columns={sheet.data[0]?.map((header: any, colIdx: number) => ({
-                    title: header || `列 ${colIdx + 1}`,
+                    title: header || `${t('knowledgeBase.columnPreview')} ${colIdx + 1}`,
                     dataIndex: colIdx,
                     key: colIdx,
                     width: 150,
@@ -611,16 +616,16 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       {/* PDF 预览 - 带分页和缩放 */}
       {isPdfFile() && !error && !loading && (
         <>
-          <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:flex rb:justify-center rb:p-4">
+          <Flex justify="center" className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:p-4!">
             <canvas ref={pdfCanvasRef} className="rb:shadow-lg" />
-          </div>
+          </Flex>
           {pdfTotalPages > 0 && (
             <PaginationBar
               currentPage={pdfCurrentPage}
               totalPages={pdfTotalPages}
               onPageChange={handlePdfPageChange}
               extraControls={
-                <div className="rb:flex rb:items-center rb:gap-1 rb:ml-4">
+                <Flex align="center" gap={4} className="rb:ml-4!">
                   <Button
                     size="small"
                     icon={<ZoomOutOutlined />}
@@ -636,7 +641,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                     disabled={pdfScale >= 3}
                     onClick={() => handlePdfZoom(0.25)}
                   />
-                </div>
+                </Flex>
               }
             />
           )}
@@ -649,13 +654,13 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
           {pptSlides.length > 0 ? (
             /* 本地渲染模式（服务端返回了可解析的格式） */
             <>
-              <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:flex rb:justify-center rb:items-center rb:p-4">
+              <Flex align="center" justify="center" className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:p-4!">
                 <img
                   src={pptSlides[pptCurrentPage - 1]}
                   alt={`Slide ${pptCurrentPage}`}
                   className="rb:max-w-full rb:max-h-full rb:object-contain rb:shadow-lg"
                 />
-              </div>
+              </Flex>
               <PaginationBar
                 currentPage={pptCurrentPage}
                 totalPages={pptTotalPages}
@@ -666,28 +671,28 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
             </>
           ) : (
             /* Office Online Viewer fallback */
-            <div className="rb:w-full rb:flex-1 rb:flex rb:flex-col">
+            <Flex vertical className="rb:w-full rb:flex-1">
               <iframe
                 src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`}
                 width="100%"
                 height="100%"
-                title={fileName || 'PPT 预览'}
+                title={fileName || t('knowledgeBase.pptPreview')}
                 className="rb:border-0 rb:flex-1"
                 style={{ border: 'none' }}
                 onLoad={() => setLoading(false)}
-                onError={() => handleError('PPT 在线预览加载失败')}
+                onError={() => handleError(t('knowledgeBase.pptPreviewFailed'))}
               />
-              <div className="rb:flex rb:items-center rb:justify-center rb:gap-3 rb:py-2 rb:px-4 rb:bg-white rb:border-t rb:border-gray-200">
-                <span className="rb:text-sm rb:text-gray-500">使用 Office Online 预览</span>
+              <Flex align="center" justify="center" gap={12} className="rb:py-2! rb:px-4! rb:bg-white rb:border-t rb:border-gray-200">
+                <span className="rb:text-sm rb:text-gray-500">{t('knowledgeBase.useOfficeOnlinePreview')}</span>
                 <Button size="small" icon={<DownloadOutlined />} onClick={handleDownload}>
-                  下载文件
+                  {t('knowledgeBase.downloadFile')}
                 </Button>
-              </div>
-            </div>
+              </Flex>
+            </Flex>
           )}
         </>
       )}
-    </div>
+    </Flex>
   );
 };
 

@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Switch, Button, Dropdown, Space, Radio, Tooltip, App, Flex, Divider } from 'antd';
+import { Switch, Button, Dropdown, Space, Radio, Tooltip, App, Flex, Divider, Spin } from 'antd';
 import type { MenuProps } from 'antd';
 import SearchInput from '@/components/SearchInput'
 import Table, { type TableRef } from '@/components/Table'
@@ -42,8 +42,9 @@ import { formatDateTime } from '@/utils/format';
 import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import './Private.css'
-import Tag from '@/components/Tag'
 import copy from 'copy-to-clipboard'
+import Empty from '@/components/Empty'
+import NoData from '@/assets/images/knowledgeBase/noData.png'
 // Tree node data type
 
 const Private: FC = () => {
@@ -681,11 +682,22 @@ const Private: FC = () => {
   ];
     // Refresh list data
   if (loading) {
-    return <div>Loading...</div>;
+    return (
+      <Flex align="center" justify="center" className="rb:h-full!">
+        <Spin size="large" />
+      </Flex>
+    )
   }
 
   if (!knowledgeBase) {
-    return <div>知识库不存在</div>;
+    return (
+      <Empty
+        url={NoData}
+        subTitle={t('knowledgeBase.knowledgeBaseNotFound')}
+        size={[260, 180]}
+        className="rb:h-full!"
+      />
+    );
   }
   const refreshDirectoryTree = async () => {
     // First refresh knowledge base details to ensure data is up-to-date
@@ -811,8 +823,7 @@ const Private: FC = () => {
   }
 
   return (
-    <>
-    <div className="rb:flex rb:h-full rb:bg-white rb:rounded-xl">
+    <Flex className="rb:h-full! rb:bg-white rb:rounded-xl">
       {folder && (
         <div className="rb:w-64 rb:py-4 rb:shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
             <FolderTree
@@ -919,7 +930,7 @@ const Private: FC = () => {
             
           </Flex>
         </Flex>
-        <div className="rb:rounded rb:max-h-[calc(100%-100px)] rb:overflow-y-auto">
+        <div className="rb:rounded rb:max-h-[calc(100%-112px)] rb:overflow-y-auto">
           {isGraph ? (
             <KnowledgeGraphCard 
               knowledgeBase={knowledgeBase} 
@@ -967,8 +978,7 @@ const Private: FC = () => {
         ref={createImageDataset}
         refreshTable={refreshDirectoryTree}
       />
-    </div>
-    </>
+    </Flex>
   );
 };
 

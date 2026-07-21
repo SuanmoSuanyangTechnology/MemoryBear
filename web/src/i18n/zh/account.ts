@@ -232,5 +232,6 @@ export const account = {
       number: '数字',
       or: '或',
       variable: '变量',
+      loadFailed: '加载失败',
     },
 }

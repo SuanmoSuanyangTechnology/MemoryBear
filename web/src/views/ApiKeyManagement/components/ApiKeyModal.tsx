@@ -205,9 +205,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           }
 
           <div className="rb:mb-4">
-            <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
-              <span className="rb:text-sm rb:text-gray-500">{t('apiKey.apiKey')}</span>
-            </div>
+            <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.apiKey')}</div>
             <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
               <span className="rb:text-sm">{createdApiKey?.api_key}</span>
 
@@ -222,10 +220,10 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
 
           {createdApiKey?.end_user_id && (
             <div className="rb:mb-6">
-              <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
+              <Flex align="center" justify="space-between" className="rb:mb-2!">
                 <span className="rb:text-sm rb:text-gray-500">{t('apiKey.endUserId')}</span>
                 <span className="rb:text-xs rb:text-orange-500">{t('apiKey.pleaseSave')}</span>
-              </div>
+              </Flex>
               <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
                 <span className="rb:text-sm">{createdApiKey?.end_user_id}</span>
 
@@ -241,14 +239,14 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
 
           <div className="rb-border-t rb:pt-4">
             <div className="rb:text-sm rb:text-gray-500 rb:font-medium rb:mb-2">{t('apiKey.basicInfo')}</div>
-            <div className="rb:flex rb:justify-between rb:items-center rb:py-2">
+            <Flex align="center" justify="space-between" className="rb:py-2!">
               <span className="rb:text-gray-600">{t('apiKey.name')}</span>
               <span>{createdApiKey?.name}</span>
-            </div>
-            <div className="rb:flex rb:justify-between rb:items-center rb:py-2">
+            </Flex>
+            <Flex align="center" justify="space-between" className="rb:py-2!">
               <span className="rb:text-gray-600">{t('apiKey.createdAt')}</span>
               <span>{createdApiKey?.created_at ? dayjs(createdApiKey.created_at).format('YYYY-MM-DD HH:mm:ss') : ''}</span>
-            </div>
+            </Flex>
           </div>
         </>
       ) : (
