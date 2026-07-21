@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import datetime
 import os
 from typing import Optional
@@ -14,6 +15,7 @@ from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
+from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
@@ -269,9 +271,11 @@ async def update_document(
         # kb_mode=1 且 new=False，或 kb_mode=2 且 new=True：通过，不改知识库
 
     # 3.1 If updating the status, synchronize the document status switch to whether it can be retrieved from the vector database
+    status_changed = False
     if "status" in update_dict:
         new_status = update_dict["status"]
         if new_status != db_document.status:
+            status_changed = True
             await asyncio.to_thread(
                 ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).change_document_status,
                 document_id=str(document_id),
@@ -293,6 +297,8 @@ async def update_document(
         api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
     db_document.updated_at = utcnow_naive()
+    graph_parser_config = copy.deepcopy(db_knowledge.parser_config or {})
+    graph_knowledge_id = str(db_knowledge.id)
 
     # 4. Save to database
     try:
@@ -305,6 +311,14 @@ async def update_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Document update failed: {str(e)}"
+        )
+
+    if status_changed:
+        dispatch_document_graph_sync(
+            graph_knowledge_id,
+            str(document_id),
+            graph_parser_config,
+            dispatch_legacy=False,
         )
 
     # 5. Return the updated document
@@ -355,6 +369,9 @@ async def delete_document(
 
         # 3. Delete vector index (non-404 failures raise, caught by except below)
         db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
+        graph_parser_config = copy.deepcopy(db_knowledge.parser_config or {})
+        graph_knowledge_id = str(db_knowledge.id)
+        document_file_name = db_document.file_name
         await asyncio.to_thread(
             ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field,
             key="document_id",
@@ -372,8 +389,14 @@ async def delete_document(
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
         await db.delete(db_document)
         await db.commit()
+        dispatch_document_graph_sync(
+            graph_knowledge_id,
+            str(document_id),
+            graph_parser_config,
+            dispatch_legacy=False,
+        )
 
-        api_logger.info(f"The document has been successfully deleted: {db_document.file_name} (ID: {document_id})")
+        api_logger.info(f"The document has been successfully deleted: {document_file_name} (ID: {document_id})")
         return success(msg="The document has been successfully deleted")
     except Exception as e:
         api_logger.error(f"Failed to delete from the document: document_id={document_id} - {str(e)}")

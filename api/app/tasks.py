@@ -7,11 +7,13 @@ import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import redis
+from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
@@ -20,11 +22,31 @@ from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.knowledge_graph.config import (
+    GraphPipeline,
+    GraphPipelineConfigError,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
+from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
+from app.core.rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
+from app.core.rag.knowledge_graph.extractor import LLMEntityRelationExtractor
+from app.core.rag.knowledge_graph.index_pipeline import KnowledgeGraphIndexPipeline
+from app.core.rag.knowledge_graph.lock import create_knowledge_graph_lock
+from app.core.rag.knowledge_graph.runtime import (
+    build_model_config,
+    snapshot_graph_runtime,
+)
+from app.core.rag.parser_config import set_graph_pipeline_for_migration
+from app.core.rag.retrieval.async_elasticsearch import (
+    build_async_elasticsearch_client_config,
+)
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
@@ -55,6 +77,7 @@ from app.core.utils.datetime_utils import (
 from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
+from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_end_users_by_workspace
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
@@ -82,6 +105,321 @@ EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+
+@dataclass(frozen=True)
+class _GraphTaskState:
+    knowledge_id: str
+    workspace_id: str
+    pipeline: GraphPipeline
+    graph_enabled: bool
+    document_active: bool | None
+    active_document_ids: tuple[str, ...]
+    fingerprint: str
+
+
+def _canonical_graph_uuid(value: object, field_name: str) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise GraphPipelineConfigError(
+            f"invalid {field_name}: {value}"
+        ) from exc
+
+
+def _graph_task_fingerprint(knowledge: Knowledge) -> str:
+    import hashlib
+
+    graph_config = (knowledge.parser_config or {}).get("graphrag")
+    payload = {
+        "llm_id": str(knowledge.llm_id) if knowledge.llm_id else None,
+        "embedding_id": (
+            str(knowledge.embedding_id) if knowledge.embedding_id else None
+        ),
+        "graphrag": graph_config,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_graph_task_state(
+        knowledge_id: str,
+        document_id: str | None = None,
+        *,
+        include_active_documents: bool = False,
+) -> _GraphTaskState:
+    knowledge_uuid = uuid.UUID(
+        _canonical_graph_uuid(knowledge_id, "knowledge id")
+    )
+    document_uuid = (
+        uuid.UUID(_canonical_graph_uuid(document_id, "document id"))
+        if document_id
+        else None
+    )
+
+    with get_db_context() as db:
+        knowledge = db.query(Knowledge).filter(
+            Knowledge.id == knowledge_uuid
+        ).first()
+        if knowledge is None:
+            raise GraphPipelineConfigError(
+                f"knowledge does not exist: {knowledge_id}"
+            )
+        workspace = db.query(Workspace).filter(
+            Workspace.id == knowledge.workspace_id
+        ).first()
+        if workspace is None:
+            raise GraphPipelineConfigError(
+                f"workspace does not exist: {knowledge.workspace_id}"
+            )
+
+        document_active: bool | None = None
+        if document_uuid is not None:
+            document = db.query(Document).filter(
+                Document.id == document_uuid,
+                Document.kb_id == knowledge_uuid,
+            ).first()
+            document_active = document is not None and document.status == 1
+
+        active_document_ids: tuple[str, ...] = ()
+        if include_active_documents:
+            documents = db.query(Document).filter(
+                Document.kb_id == knowledge_uuid,
+                Document.status == 1,
+                Document.chunk_num > 0,
+            ).order_by(Document.id).all()
+            active_document_ids = tuple(str(document.id) for document in documents)
+
+        return _GraphTaskState(
+            knowledge_id=str(knowledge.id),
+            workspace_id=str(workspace.id),
+            pipeline=resolve_graph_pipeline(knowledge.parser_config),
+            graph_enabled=is_graph_enabled(knowledge.parser_config),
+            document_active=document_active,
+            active_document_ids=active_document_ids,
+            fingerprint=_graph_task_fingerprint(knowledge),
+        )
+
+
+def _build_evidence_index_pipeline(runtime, client, lock_guard):
+    llm_type = (
+        ModelType.CHAT
+        if runtime.llm.model_type == ModelType.CHAT.value
+        else ModelType.LLM
+    )
+    llm = RedBearLLM(build_model_config(runtime.llm), type=llm_type)
+    embedding = RedBearEmbeddings(build_model_config(runtime.embedding))
+    extractor = LLMEntityRelationExtractor(
+        llm,
+        runtime.entity_types,
+        runtime.scene_name,
+    )
+    return KnowledgeGraphIndexPipeline(
+        store=GraphElasticsearchStore(client),
+        extractor=extractor,
+        embedding=embedding,
+        lock_guard=lock_guard,
+    )
+
+
+async def _run_evidence_document_async(
+        runtime,
+        document_id: str,
+        document_active: bool,
+        lock_guard,
+) -> None:
+    client = AsyncElasticsearch(**build_async_elasticsearch_client_config())
+    try:
+        pipeline = _build_evidence_index_pipeline(runtime, client, lock_guard)
+        await pipeline.sync_document(runtime, document_id, document_active)
+    finally:
+        await client.close()
+
+
+async def _run_evidence_rebuild_async(runtime, active_document_ids, lock_guard) -> None:
+    client = AsyncElasticsearch(**build_async_elasticsearch_client_config())
+    try:
+        pipeline = _build_evidence_index_pipeline(runtime, client, lock_guard)
+        await pipeline.rebuild_knowledge(runtime, active_document_ids)
+    finally:
+        await client.close()
+
+
+async def _run_evidence_clear_async(
+        graph_index_name: str,
+        knowledge_id: str,
+        lock_guard,
+        *,
+        clear_all: bool,
+) -> None:
+    client = AsyncElasticsearch(**build_async_elasticsearch_client_config())
+    try:
+        store = GraphElasticsearchStore(client)
+        if clear_all:
+            await store.clear_all_graph_documents(
+                graph_index_name,
+                knowledge_id,
+                ensure_valid=lock_guard.ensure_valid,
+            )
+        else:
+            await store.clear_evidence_graph(
+                graph_index_name,
+                knowledge_id,
+                ensure_valid=lock_guard.ensure_valid,
+            )
+    finally:
+        await client.close()
+
+
+def _execute_evidence_document(
+        state: _GraphTaskState,
+        document_id: str,
+        lock_guard,
+) -> None:
+    runtime = snapshot_graph_runtime(state.knowledge_id)
+    asyncio.run(
+        _run_evidence_document_async(
+            runtime,
+            str(document_id),
+            bool(state.document_active),
+            lock_guard,
+        )
+    )
+
+
+def _execute_evidence_rebuild(state: _GraphTaskState, lock_guard) -> None:
+    runtime = snapshot_graph_runtime(state.knowledge_id)
+    asyncio.run(
+        _run_evidence_rebuild_async(
+            runtime,
+            state.active_document_ids,
+            lock_guard,
+        )
+    )
+
+
+def _execute_evidence_clear(
+        state: _GraphTaskState,
+        lock_guard,
+        *,
+        clear_all: bool,
+) -> None:
+    asyncio.run(
+        _run_evidence_clear_async(
+            f"graphrag_{state.workspace_id}",
+            state.knowledge_id,
+            lock_guard,
+            clear_all=clear_all,
+        )
+    )
+
+
+def _commit_evidence_pipeline(
+        knowledge_id: str,
+        expected_fingerprint: str,
+) -> None:
+    knowledge_uuid = uuid.UUID(
+        _canonical_graph_uuid(knowledge_id, "knowledge id")
+    )
+    with get_db_context() as db:
+        knowledge = db.query(Knowledge).filter(
+            Knowledge.id == knowledge_uuid
+        ).with_for_update().first()
+        if knowledge is None:
+            raise GraphPipelineConfigError(
+                f"knowledge does not exist: {knowledge_id}"
+            )
+        if resolve_graph_pipeline(knowledge.parser_config) is GraphPipeline.EVIDENCE:
+            return
+        if _graph_task_fingerprint(knowledge) != expected_fingerprint:
+            raise RuntimeError(
+                "graph migration inputs changed while rebuilding"
+            )
+        knowledge.parser_config = set_graph_pipeline_for_migration(
+            knowledge.parser_config,
+            GraphPipeline.EVIDENCE,
+        )
+        db.commit()
+
+
+def _run_evidence_graph_document(
+        knowledge_id: str,
+        document_id: str,
+) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    document_id = _canonical_graph_uuid(document_id, "document id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(knowledge_id, document_id)
+        if state.pipeline is not GraphPipeline.EVIDENCE:
+            return {"status": "skipped", "reason": "pipeline_changed"}
+        if not state.graph_enabled:
+            return {"status": "skipped", "reason": "graph_disabled"}
+        _execute_evidence_document(state, document_id, lock_guard)
+        lock_guard.ensure_valid()
+        return {
+            "status": "completed",
+            "knowledge_id": knowledge_id,
+            "document_id": document_id,
+        }
+
+
+def _run_evidence_graph_rebuild(knowledge_id: str) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(
+            knowledge_id,
+            include_active_documents=True,
+        )
+        if state.pipeline is not GraphPipeline.EVIDENCE:
+            return {"status": "skipped", "reason": "pipeline_changed"}
+        if not state.graph_enabled:
+            return {"status": "skipped", "reason": "graph_disabled"}
+        _execute_evidence_rebuild(state, lock_guard)
+        lock_guard.ensure_valid()
+        return {"status": "completed", "knowledge_id": knowledge_id}
+
+
+def _run_evidence_graph_migration(knowledge_id: str) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(
+            knowledge_id,
+            include_active_documents=True,
+        )
+        if state.pipeline is GraphPipeline.EVIDENCE:
+            return {"status": "already_evidence", "knowledge_id": knowledge_id}
+
+        if state.graph_enabled and state.active_document_ids:
+            _execute_evidence_rebuild(state, lock_guard)
+        else:
+            _execute_evidence_clear(state, lock_guard, clear_all=False)
+        lock_guard.ensure_valid()
+        _commit_evidence_pipeline(knowledge_id, state.fingerprint)
+        lock_guard.ensure_valid()
+        return {"status": "migrated", "knowledge_id": knowledge_id}
+
+
+def _run_clear_all_knowledge_graph_data(knowledge_id: str) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(knowledge_id)
+        _execute_evidence_clear(state, lock_guard, clear_all=True)
+        lock_guard.ensure_valid()
+        return {"status": "cleared", "knowledge_id": knowledge_id}
+
+
+def _graph_task_retry_countdown(task) -> int:
+    return min(300, 2 ** int(task.request.retries or 0))
 
 
 def _resolve_model_api_key(db, model_config_id, tenant_id, role: str):
@@ -453,7 +791,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             document_label = file_name or str(document_id)
 
             parser_config = db_document.parser_config or {}
-            knowledge_parser_config = db_knowledge.parser_config or {}
             auto_questions_topn = parser_config.get("auto_questions", 0)
             document_info = {
                 "id": str(db_document.id),
@@ -470,9 +807,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             if auto_questions_topn:
                 llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
-            use_graphrag = bool(
-                knowledge_parser_config.get("graphrag", {}).get("use_graphrag", False)
-            )
             vision_model = _build_vision_model(file_name, db, db_knowledge.image2text_id, tenant_id)
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
@@ -858,18 +1192,34 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         _update_document(document_id, _mark_done)
 
-        if use_graphrag:
+        with get_db_context() as graph_db:
+            current_knowledge = graph_db.query(Knowledge).filter(
+                Knowledge.id == uuid.UUID(knowledge_id)
+            ).first()
+            current_graph_config = (
+                dict(current_knowledge.parser_config or {})
+                if current_knowledge is not None
+                else None
+            )
+
+        if current_graph_config is not None and is_graph_enabled(current_graph_config):
             if _should_abort(document_id):
                 _clear_redis_state(document_id)
                 logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
                 return f"parse document '{document_label}' aborted (deleted or cancelled)."
-            progress_lines.append(f"{_progress_ts()} GraphRAG enabled, dispatching async task.")
+            progress_lines.append(
+                f"{_progress_ts()} Knowledge graph enabled, dispatching async task."
+            )
 
             def _mark_graphrag_dispatched(doc):
                 doc.progress_msg = _progress_msg()
 
             _update_document(document_id, _mark_graphrag_dispatched)
-            build_graphrag_for_document.delay(str(document_id), knowledge_id)
+            dispatch_document_graph_sync(
+                knowledge_id,
+                str(document_id),
+                current_graph_config,
+            )
 
         _clear_redis_state(document_id)
         result = f"parse document '{document_info['file_name']}' processed successfully."
@@ -926,6 +1276,8 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             graphrag_conf = parser_config.get("graphrag", {})
             if not graphrag_conf.get("use_graphrag", False):
                 return f"build knowledge graph '{kb_name}' skipped: graphrag not enabled"
+            if resolve_graph_pipeline(parser_config) is not GraphPipeline.LEGACY:
+                return f"build knowledge graph '{kb_name}' skipped: pipeline changed"
 
             db_documents = db.query(Document).filter(Document.kb_id == kb_id).all()
             document_ids = [str(doc.id) for doc in db_documents]
@@ -1004,6 +1356,16 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
             tenant_id = db_workspace.tenant_id
             parser_config = db_knowledge.parser_config or {}
             graphrag_conf = parser_config.get("graphrag", {})
+            if not graphrag_conf.get("use_graphrag", False):
+                return (
+                    f"build_graphrag_for_document '{document_id}' skipped: "
+                    "graphrag not enabled"
+                )
+            if resolve_graph_pipeline(parser_config) is not GraphPipeline.LEGACY:
+                return (
+                    f"build_graphrag_for_document '{document_id}' skipped: "
+                    "pipeline changed"
+                )
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
@@ -1062,6 +1424,97 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
     except Exception as e:
         logger.error(f"[GraphRAG] doc={document_id} failed: {e}", exc_info=True)
         return f"build_graphrag_for_document '{document_id}' failed: {e}"
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.sync_evidence_graph_document",
+    max_retries=5,
+)
+def sync_evidence_graph_document(
+        self,
+        knowledge_id: str,
+        document_id: str,
+):
+    try:
+        return _run_evidence_graph_document(knowledge_id, document_id)
+    except GraphPipelineConfigError:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[EvidenceGraph] document sync failed",
+            extra={
+                "knowledge_id": str(knowledge_id),
+                "document_id": str(document_id),
+            },
+        )
+        raise self.retry(
+            exc=exc,
+            countdown=_graph_task_retry_countdown(self),
+        )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.rebuild_evidence_graph_knowledge",
+    max_retries=5,
+)
+def rebuild_evidence_graph_knowledge(self, knowledge_id: str):
+    try:
+        return _run_evidence_graph_rebuild(knowledge_id)
+    except GraphPipelineConfigError:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[EvidenceGraph] knowledge rebuild failed",
+            extra={"knowledge_id": str(knowledge_id)},
+        )
+        raise self.retry(
+            exc=exc,
+            countdown=_graph_task_retry_countdown(self),
+        )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.migrate_evidence_graph_knowledge",
+    max_retries=5,
+)
+def migrate_evidence_graph_knowledge(self, knowledge_id: str):
+    try:
+        return _run_evidence_graph_migration(knowledge_id)
+    except GraphPipelineConfigError:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[EvidenceGraph] knowledge migration failed",
+            extra={"knowledge_id": str(knowledge_id)},
+        )
+        raise self.retry(
+            exc=exc,
+            countdown=_graph_task_retry_countdown(self),
+        )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.clear_all_knowledge_graph_data",
+    max_retries=5,
+)
+def clear_all_knowledge_graph_data(self, knowledge_id: str):
+    try:
+        return _run_clear_all_knowledge_graph_data(knowledge_id)
+    except GraphPipelineConfigError:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[EvidenceGraph] clear all graph data failed",
+            extra={"knowledge_id": str(knowledge_id)},
+        )
+        raise self.retry(
+            exc=exc,
+            countdown=_graph_task_retry_countdown(self),
+        )
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.chunk.metadata import merge_parser_metadata
+from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.models import RetrievalPrincipal
@@ -683,6 +684,12 @@ async def create_chunk(
     # 4.update chunk_num
     db_document.chunk_num += 1
     await db.commit()
+    dispatch_document_graph_sync(
+        str(kb_id),
+        str(document_id),
+        db_knowledge.parser_config,
+        dispatch_legacy=False,
+    )
 
     return success(data=jsonable_encoder(chunk), msg="Document chunk creation successful")
 
@@ -772,6 +779,12 @@ async def create_chunks_batch(
 
     db_document.chunk_num += len(chunks)
     await db.commit()
+    dispatch_document_graph_sync(
+        str(kb_id),
+        str(document_id),
+        db_knowledge.parser_config,
+        dispatch_legacy=False,
+    )
 
     return success(data=jsonable_encoder(chunks), msg=f"Batch created {len(chunks)} chunks successfully")
 
@@ -967,6 +980,12 @@ async def update_chunk(
         if update_data.is_qa:
             chunk.metadata.update(update_data.qa_metadata)
         await asyncio.to_thread(vector_service.update_by_segment, chunk)
+        dispatch_document_graph_sync(
+            str(kb_id),
+            str(document_id),
+            db_knowledge.parser_config,
+            dispatch_legacy=False,
+        )
         return success(data=jsonable_encoder(chunk), msg="The document chunk has been successfully updated")
     else:
         raise HTTPException(
@@ -1003,6 +1022,12 @@ async def delete_chunk(
         db_document = await db.get(Document, document_id)
         db_document.chunk_num -= 1
         await db.commit()
+        dispatch_document_graph_sync(
+            str(kb_id),
+            str(document_id),
+            db_knowledge.parser_config,
+            dispatch_legacy=False,
+        )
         return success(msg="The document chunk has been successfully deleted")
     else:
         raise HTTPException(
