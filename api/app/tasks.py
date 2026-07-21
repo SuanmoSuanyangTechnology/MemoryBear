@@ -1919,6 +1919,103 @@ def write_message_task(
             _shutdown_loop_gracefully(loop)
 
 
+@celery_app.task(
+    name="app.core.memory.fast_write_message",
+    bind=True,
+    acks_late=False,
+    max_retries=0
+)
+def fast_write_message_task(
+        self,
+        end_user_id: str,
+        target_message: Optional[dict] = None,
+        config_id: str = "",
+        workspace_id: str = "",
+        conversation_id: str = "",
+        message_seq: int = 0,
+        language: str = "zh",
+        dispatch_at: str = "",
+        source: str = "",
+) -> Dict[str, Any]:
+    """快速写入任务 — 构造 MemoryService 并驱动 fast_write。
+
+    职责：提供事件循环 + 计时 + backend 状态映射，不夹带业务加载逻辑。
+
+    backend 状态与业务结果分层：
+    - ``success`` / ``dropped`` 是 Pipeline 业务结果，放在返回值的 ``result`` 中；
+      任务正常返回时 backend 为 ``SUCCESS``。
+    - 持久化 / 配置 / 代码异常必须抛出任务函数，backend 才会标记 ``FAILURE``，
+      scheduler tracker 与失败率监控才能拿到真实状态。
+    - ``max_retries=0``：不做 Celery 层重试；Neo4j deadlock 的有界重试在 Pipeline 内完成。
+
+    Args:
+        end_user_id: 终端用户 ID（分片键）
+        target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+        config_id: 记忆配置 ID
+        workspace_id: 工作空间 ID
+        conversation_id: 对话 ID（会话类入口非空，用于确定性 ID 生成）
+        message_seq: 消息序号
+        language: 语言
+        dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+        source: 写入来源（agent/service_api/mcp/workflow）
+
+    Returns:
+        Dict containing status, result, task_id
+    """
+    logger.info(
+        f"[CELERY FAST WRITE] Starting - end_user_id={end_user_id}, "
+        f"config_id={config_id}, conv={conversation_id or '-'}, "
+        f"seq={message_seq}, language={language}, source={source or '-'}"
+    )
+    start_time = time.time()
+
+    async def _run() -> dict:
+        from app.core.memory.memory_service import MemoryService
+
+        service = MemoryService(
+            config_id=uuid.UUID(config_id),
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+        return await service.fast_write(
+            target_message=target_message or {"role": "user", "content": ""},
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            source=source,
+            dispatch_at=dispatch_at,
+        )
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
+        elapsed_time = time.time() - start_time
+
+        logger.info(f"[CELERY FAST WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
+
+        try:
+            safe_result = jsonable_encoder(result)
+        except Exception:
+            safe_result = str(result)
+
+        return {
+            "status": "SUCCESS",
+            "result": safe_result,
+            "task_id": self.request.id,
+        }
+    except BaseException:
+        elapsed_time = time.time() - start_time
+        logger.exception(f"[CELERY FAST WRITE] Failed - elapsed_time={elapsed_time:.2f}s")
+        # 异常必须逃出任务函数，Celery backend 才会标记 FAILURE
+        raise
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
 def _is_active_recently(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
     """用户是否活跃：end_user.write_time 距今 < inactive_hours 小时（NULL 或读取失败视为不活跃）。
 

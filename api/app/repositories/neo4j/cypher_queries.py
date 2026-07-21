@@ -8,13 +8,25 @@ from app.core.memory.enums import Neo4jNodeType
 DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
     MERGE (n:Dialogue {id: dialogue.id})
-    SET n.uuid = coalesce(n.uuid, dialogue.id),
-        n.end_user_id = dialogue.end_user_id,
-        n.run_id = dialogue.run_id,
-        n.ref_id = dialogue.ref_id,
-        n.created_at = dialogue.created_at,
-        n.content = dialogue.content,
-        n.dialog_embedding = dialogue.dialog_embedding
+    SET n.uuid = coalesce(n.uuid, dialogue.id)
+    // 覆盖竞态守卫：只许 normal 覆盖 fast，不许 fast 反向降级 normal。
+    // 当已存在节点为 normal 且本次写入为 fast 时跳过内容写入（canWrite=[]），
+    // 保留正写的权威版本；其余情况（新建 / normal 覆盖 fast / 同模式重试）照常写入。
+    WITH n, dialogue,
+         CASE WHEN n.write_mode = 'normal' AND dialogue.write_mode = 'fast'
+              THEN [] ELSE [1] END AS canWrite
+    FOREACH (_ IN canWrite |
+        SET n.end_user_id = dialogue.end_user_id,
+            n.run_id = dialogue.run_id,
+            n.ref_id = dialogue.ref_id,
+            n.created_at = dialogue.created_at,
+            n.content = dialogue.content,
+            n.name = dialogue.name,
+            n.dialog_embedding = dialogue.dialog_embedding,
+            n.config_id = dialogue.config_id,
+            n.write_mode = coalesce(dialogue.write_mode, 'normal'),
+            n.emotion = dialogue.emotion
+    )
     RETURN n.id AS uuid
 """
 

@@ -223,12 +223,17 @@ class DialogueNode(Node):
         content: Full dialogue content as text
         dialog_embedding: Optional embedding vector for the entire dialogue
         config_id: Configuration ID used to process this dialogue
+        write_mode: Write pipeline marker ('fast' | 'normal')
+        emotion: Emotion field, persisted but unset this iteration (structure defined by later BERT emotion recognition)
     """
     ref_id: str = Field(..., description="Reference identifier of the dialog")
     content: str = Field(..., description="Dialogue content")
     dialog_embedding: Optional[List[float]] = Field(None, description="Dialog embedding vector")
     config_id: Optional[int | str] = Field(None,
                                            description="Configuration ID used to process this dialogue (integer or string)")
+    
+    write_mode: str = Field(default="normal",description="写入管线标识：'fast' | 'normal'")
+    emotion: Optional[str] = Field(default=None,description="情绪字段")
 
 
 class StatementNode(Node):

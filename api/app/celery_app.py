@@ -101,6 +101,9 @@ celery_app.conf.update(
         # Memory tasks → memory_tasks queue (threads worker)
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
 
+        # Fast Write tasks → memory_fast_tasks queue (threads worker，独立队列，避免与普通写入互相阻塞)
+        'app.core.memory.fast_write_message': {'queue': 'memory_fast_tasks'},
+
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},

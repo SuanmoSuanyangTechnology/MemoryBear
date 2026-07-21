@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import DialogueChunker
 from app.core.memory.models.message_models import DialogData, ConversationContext, ConversationMessage
+from app.core.memory.utils.dialogue_id_utils import build_dialogue_id
 
 
 async def get_chunked_dialogs(
@@ -14,6 +15,9 @@ async def get_chunked_dialogs(
         snapshot=None,
         context_before: Optional[List[dict]] = None,
         context_after: Optional[List[dict]] = None,
+        conversation_id: str = "",
+        message_seq: int = 0,
+        source: str = "",
 ) -> List[DialogData]:
     """Generate chunks from structured messages using the specified chunker strategy.
 
@@ -69,12 +73,18 @@ async def get_chunked_dialogs(
         raise ValueError("Message list cannot be empty after filtering")
 
     conversation_context = ConversationContext(msgs=conversation_messages)
-    dialog_data = DialogData(
+    dialog_kwargs = dict(
         context=conversation_context,
         ref_id=ref_id,
         end_user_id=end_user_id,
         config_id=config_id,
     )
+    # 有分组信息（正写路径）时，出生即赋与快写统一的确定性 id（Dialog_{...}），使 DialogueNode.id
+    # 及所有引用 dialog_data.id 的子节点（Chunk/Assistant*/MemorySummary 的 dialog_id）天然一致，
+    # 由正写覆盖升级快写占位节点。缺少分组信息（如试运行）时省略 id，回退模型默认的随机 uuid。
+    if conversation_id or source:
+        dialog_kwargs["id"] = build_dialogue_id(conversation_id, message_seq, source, end_user_id)
+    dialog_data = DialogData(**dialog_kwargs)
 
 # step3： 分块
     chunker = DialogueChunker(chunker_strategy)

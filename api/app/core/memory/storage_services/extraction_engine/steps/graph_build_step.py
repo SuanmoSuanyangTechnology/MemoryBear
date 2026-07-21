@@ -121,9 +121,13 @@ def _resolve_perceptual_type(file_type: Optional[str]) -> tuple[str, int]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _build_dialogue_node(dialog_data: DialogData) -> DialogueNode:
-    """从 DialogData 构建 DialogueNode。"""
+    """
+    从 DialogData 构建 DialogueNode。
+    write_mode 显式置 'normal'，用于覆盖升级快写占位节点。
+    """
     return DialogueNode(
-        name=f"Dialog_{dialog_data.id}",
+        # dialog_data.id 可能已是带 Dialog_ 前缀的确定性 id，name 直接复用，避免 Dialog_Dialog_ 双前缀
+        name=dialog_data.id,
         id=dialog_data.id,
         content=dialog_data.context.content if dialog_data.context else "",
         dialog_embedding=dialog_data.dialog_embedding,
@@ -134,6 +138,7 @@ def _build_dialogue_node(dialog_data: DialogData) -> DialogueNode:
         created_at=dialog_data.created_at,
         metadata=dialog_data.metadata,
         config_id=dialog_data.config_id,
+        write_mode="normal",
     )
 
 
