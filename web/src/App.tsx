@@ -3,7 +3,7 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-24 19:00:14
- * @LastEditors: zhaoying zhaoyingyz@126.com
+ * @LastEditors: zhaoying
  * @LastEditTime: 2026-05-13 16:50:52
  */
 import { RouterProvider } from 'react-router-dom';
@@ -19,22 +19,20 @@ import {
   App as AntdApp
 } from 'antd';
 import i18n from 'i18next';
-import { lightTheme } from './styles/antdThemeConfig.ts'
-import router from './routes';
-import { useI18n } from '@/store/locale'
 import dayjs from 'dayjs'
 import 'dayjs/locale/en'
 import 'dayjs/locale/zh-cn'
 import 'dayjs/plugin/timezone'
 import 'dayjs/plugin/utc'
+
+import { lightTheme } from './styles/antdThemeConfig.ts'
+import router from './routes';
+import { useI18n } from '@/store/locale'
 import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
+import PrivateWrap from '@/components/PrivateWrap'
 import { Provider as PrivateProvider } from '@redbear/memory-brick'
-
 import menuJson from '@/store/menuData';
-
-console.log('PrivateProvider', PrivateProvider)
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 
 type MenuEntry = { path: string; i18nKey: string };
@@ -73,24 +71,22 @@ const SKIP_TITLE_PATTERNS = [
   '/reflection-engine/:id',
 ];
 
-
-
-
-// 根据环境选择 Provider：saas 用私有组件库的 Provider，其他用 antd ConfigProvider
+// Choose the Provider based on whether the private package is available: use the private component library's Provider when available, otherwise antd's ConfigProvider
 const AppProvider: FC<{ locale: any; theme: any; children: ReactNode; lng: string; }> = ({ locale, theme, lng, children }) => {
-  if (isSaas && PrivateProvider) {
-    return (
-      <Suspense fallback={<Spin fullscreen />}>
+  return (
+    <PrivateWrap
+      fallback={(
+        <ConfigProvider locale={locale} theme={theme}>
+        {children}
+      </ConfigProvider>
+      )}
+    >
+      {() => (
         <PrivateProvider locale={locale} theme={theme} lng={lng}>
           {children}
         </PrivateProvider>
-      </Suspense>
-    )
-  }
-  return (
-    <ConfigProvider locale={locale} theme={theme}>
-      {children}
-    </ConfigProvider>
+      )}
+    </PrivateWrap>
   )
 }
 
@@ -129,7 +125,7 @@ function App() {
     localStorage.setItem('language', language)
   }, [language])
   useEffect(() => {
-    // 设置dayjs的时区
+    // Set the default time zone for dayjs
     dayjs.tz.setDefault(timeZone)
     localStorage.setItem('timeZone', timeZone)
   }, [timeZone])
