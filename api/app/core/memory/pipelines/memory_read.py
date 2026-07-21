@@ -71,7 +71,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         return res
 
-    async def _get_search_service(self, includes=None, need_embedder=True, need_llm=True):
+    async def _get_search_serxvice(self, includes=None, need_embedder=True, need_llm=True):
         if self.ctx.storage_type == StorageType.NEO4J:
             if need_embedder and need_llm:
                 embedder, llm = await asyncio.gather(

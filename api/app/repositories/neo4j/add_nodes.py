@@ -18,7 +18,7 @@ async def delete_all_nodes(end_user_id: str, connector: Neo4jConnector):
     return result
 
 
-async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConnector) -> Optional[List[str]]:
+async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConnector) -> List[str]:
     """Add dialogue nodes to Neo4j database.
 
     Args:
@@ -26,7 +26,14 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
         connector: Neo4j connector instance
 
     Returns:
-        List of created node UUIDs or None if failed
+        List of created node UUIDs (empty list when there is nothing to save).
+
+    Raises:
+        Exception: Re-raises the original underlying exception on persistence
+            failure after logging the full traceback. Callers must handle the
+            exception or let it propagate; the function never returns None on
+            failure so upstream can classify errors (e.g. Neo4j deadlock vs
+            permanent failures).
     """
     if not dialogues:
         logger.info("No dialogues to save")
@@ -44,7 +51,10 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
                 "name": dialogue.name,
                 "created_at": to_iso_z(dialogue.created_at),
                 "content": dialogue.content,
-                "dialog_embedding": dialogue.dialog_embedding
+                "dialog_embedding": dialogue.dialog_embedding,
+                "config_id": dialogue.config_id,
+                "write_mode": getattr(dialogue, "write_mode", "normal"),
+                "emotion": getattr(dialogue, "emotion", None),
             })
 
         result = await connector.execute_query(
@@ -56,9 +66,9 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
         logger.info(f"Successfully created {len(created_uuids)} dialogue nodes: {created_uuids}")
         return created_uuids
 
-    except Exception as e:
-        logger.error(f"Error creating dialogue nodes: {e}")
-        return None
+    except Exception:
+        logger.exception("Error creating dialogue nodes")
+        raise
 
 
 async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jConnector) -> Optional[List[str]]:

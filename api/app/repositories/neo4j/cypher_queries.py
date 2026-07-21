@@ -14,7 +14,11 @@ DIALOGUE_NODE_SAVE = """
         n.ref_id = dialogue.ref_id,
         n.created_at = dialogue.created_at,
         n.content = dialogue.content,
-        n.dialog_embedding = dialogue.dialog_embedding
+        n.name = dialogue.name,
+        n.dialog_embedding = dialogue.dialog_embedding,
+        n.config_id = dialogue.config_id,
+        n.write_mode = coalesce(dialogue.write_mode, 'normal'),
+        n.emotion = dialogue.emotion
     RETURN n.id AS uuid
 """
 
