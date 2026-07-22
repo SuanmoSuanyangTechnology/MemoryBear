@@ -3,6 +3,8 @@ import re
 import json
 import time
 import os
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any
 from urllib.parse import urlparse
 
 import copy
@@ -17,6 +19,7 @@ from app.core.rag.utils.doc_store_conn import DocStoreConnection, MatchExpr, Ord
 from app.core.rag.nlp import is_english, rag_tokenizer
 from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
+from app.core.rag.vdb.elasticsearch.pit_search import iter_pit_search_hits
 
 ATTEMPT_TIME = 2
 
@@ -272,6 +275,25 @@ class ESConnection(DocStoreConnection):
 
         logger.error(f"ESConnection.search timeout for {ATTEMPT_TIME} times!")
         raise Exception("ESConnection.search timeout.")
+
+    def iter_search_after(
+            self,
+            *,
+            index_name: str,
+            query: Mapping[str, Any],
+            fields: Sequence[str],
+            batch_size: int = 1000,
+    ) -> Iterator[dict[str, Any]]:
+        for hit in iter_pit_search_hits(
+            self.es,
+            index=index_name,
+            query=query,
+            source_includes=fields,
+            batch_size=batch_size,
+        ):
+            source = dict(hit.get("_source") or {})
+            source["_id"] = hit.get("_id")
+            yield source
 
     def get(self, chunkId: str, indexName: str, knowledgebaseIds: list[str]) -> dict | None:
         for i in range(ATTEMPT_TIME):
