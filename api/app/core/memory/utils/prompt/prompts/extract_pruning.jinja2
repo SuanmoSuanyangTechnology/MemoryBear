@@ -75,8 +75,8 @@
 
 类型判断补充：
 - `question`：主动作是向用户提问、追问、澄清、确认选项或收集偏好。
-- `suggestion`：主动作是给用户建议；即使末尾顺带问一句，也仍以建议为主。
-- `recommendation`：主动作是推荐某个方案、菜谱、产品或选择。
+- `suggestion`：主动作是给用户建议，包括“减少……”“避免……”等直接行动建议；即使末尾顺带问一句，也仍以建议为主。
+- `recommendation`：主动作是推荐一个具体方案、菜谱、产品或选项，而不是一般行动建议。
 - `warning`：主动作是提醒风险、限制、禁忌或后果。
 - `instruction`：主动作是说明操作顺序、步骤或执行流程。
 - `comfort`：主动作是安慰、理解、支持用户情绪。
@@ -104,6 +104,7 @@
 - `should_process_user_msg` 必须为 `true`
 - `processed_user_msg` 必须是一段融合后的短文本，而不是结构化对象。
 - `processed_user_topic_entity_hint` 必须是后续最应该通过 embedding 连接的实体锚点。
+- 示例只用于学习格式和判断边界；不得把示例中的人名、地名、菜名、物品名或其他实体复制到当前输出，除非这些实体确实出现在当前 `User.msg` 或 `Assistant.msg` 中。
 
 如果 `User.msg` 为空：
 - `should_process_user_msg` 必须为 `null`
@@ -126,6 +127,7 @@
   4. 如果用户还额外说了真实请求、补充说明或其他原话内容，则写：`我说了……`
 - 第 3 句只有在用户真实输入和外部内容之间存在明确关联时才写；如果没有关联，就不要写这一句。
 - 如果存在多个关联点，则都写出来，但仍保持短而连贯。
+- 如果用户真实输入中提到了具体照片/图片对象，且 `<input-file-summary>` 也能确认该对象，`processed_user_msg` 中描述照片的句子必须包含具体对象名；例如应写“拍了一张雷峰塔的照片”，不要只写“拍了一张特别好看的照片”。
 - 如果有多个上传文件，需要先判断文件之间是否相关：
   - 若相关，则合并成一个连贯描述；
   - 若不相关，则按最短可理解方式并列概括。
@@ -169,21 +171,21 @@
   "msgs": [
     {
       "role": "User",
-      "msg": "<input-file-summary>这是一张展示街头壁画的照片，壁画上有一个粉色头发的人物形象，手持“跨性别骄傲”旗帜，背景有彩虹和广告牌。</input-file-summary>这些跨性别故事太鼓舞人心了！我对大家给予的支持感到特别开心，也特别感激。"
+      "msg": "帮我改一下以下内容：人工智能正在改变教育方式。它可以提高教学效率并提供个性化学习体验……【长文省略】"
     },
     {
       "role": "Assistant",
-      "msg": "这听起来真的很打动人。这些故事似乎给了你很多力量和希望。"
+      "msg": "我可以先梳理结构，再按更正式的语气修改。"
     }
   ]
 }
 输出：
 {
-  "assistant_memory_hint": "安慰并回应了用户对跨性别相关故事的积极感受。",
-  "assistant_memory_type": "comfort",
+  "assistant_memory_hint": "建议先梳理文章结构，再按更正式的语气修改内容。",
+  "assistant_memory_type": "suggestion",
   "should_process_user_msg": true,
-  "processed_user_msg": "我上传了一张跨性别主题的街头壁画照片。文件内容展示了一个手持跨性别骄傲旗帜的人物形象，背景有彩虹和广告牌。我觉得这些跨性别相关故事很鼓舞人心，也对获得的支持感到开心和感激。",
-  "processed_user_topic_entity_hint": "跨性别主题的街头壁画照片"
+  "processed_user_msg": "我说了帮我修改以下内容。我复制了一段关于人工智能改变教育方式的文章，涉及教学效率和个性化学习体验，是待修改对象。",
+  "processed_user_topic_entity_hint": "人工智能教育文章"
 }
 
 示例 2
@@ -192,99 +194,7 @@
   "msgs": [
     {
       "role": "User",
-      "msg": "帮我改一下以下内容：人工智能正在改变教育方式。它可以帮助老师提高效率，也可以帮助学生获得更个性化的学习体验……【此处省略长段正文】"
-    },
-    {
-      "role": "Assistant",
-      "msg": "可以，我可以先帮你梳理结构，再按你想要的风格修改。"
-    }
-  ]
-}
-输出：
-{
-  "assistant_memory_hint": "建议先梳理文章结构，再按用户需要的风格修改内容。",
-  "assistant_memory_type": "suggestion",
-  "should_process_user_msg": true,
-  "processed_user_msg": "我说了帮我改一下以下内容。我复制了一段关于人工智能改变教育方式的文章内容。复制内容主要涉及教学效率和个性化学习体验，这段内容是待修改对象。",
-  "processed_user_topic_entity_hint": "人工智能教育文章内容"
-}
-
-示例 3
-输入：
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "<input-file-summary>这是一张图片，展示了一个 Aerobie Pro 飞盘环被拿在手中，背景是绿色草地。</input-file-summary>Wow, Caroline! That's great! I just signed up for a pottery class yesterday. It's like therapy for me, letting me express myself and get creative. Have you found any activities that make you feel the same way?"
-    },
-    {
-      "role": "Assistant",
-      "msg": "That's such a thoughtful question to ask Caroline."
-    }
-  ]
-}
-输出：
-{
-  "assistant_memory_hint": "回应了用户向 Caroline 提出的关于类似创意活动的问题。",
-  "assistant_memory_type": "other",
-  "should_process_user_msg": true,
-  "processed_user_msg": "我上传了一张 Aerobie Pro 飞盘环在绿色草地背景下的图片。我对 Caroline 表示祝贺，并说我昨天报名了陶艺课；陶艺课对我来说像治疗一样，可以让我表达自己并发挥创造力。我问 Caroline 有没有找到让她有同样感受的活动。",
-  "processed_user_topic_entity_hint": "Aerobie Pro 飞盘环图片"
-}
-
-示例 4
-输入：
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "Caroline, so glad you got the support! Your experience really brought you to where you need to be. You're gonna make a huge difference! This book I read last year reminds me to always pursue my dreams, just like you are doing!🌟<input-file-summary>This book, titled 'Nothing Is Impossible' by Tom Oliver, serves as a guide for personal development and achieving peak performance. It outlines a seven-step framework designed to help readers harness their internal potential and maximize real-world outcomes.</input-file-summary>"
-    },
-    {
-      "role": "Assistant",
-      "msg": "That sounds inspiring, and it connects nicely with Caroline's journey."
-    }
-  ]
-}
-输出：
-{
-  "assistant_memory_hint": "回应了用户认为书籍内容与 Caroline 经历相呼应的看法。",
-  "assistant_memory_type": "other",
-  "should_process_user_msg": true,
-  "processed_user_msg": "我上传了 Tom Oliver 的《Nothing Is Impossible》一书摘要，内容涉及个人发展、巅峰表现和七步框架。我告诉 Caroline 很高兴她得到了支持，并说她的经历会让她产生巨大影响。我说我去年读的这本书提醒我要始终追求梦想，就像 Caroline 正在做的那样。",
-  "processed_user_topic_entity_hint": "《Nothing Is Impossible》书籍摘要"
-}
-
-示例 5
-输入：
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "我最近总失眠，白天特别困，想先自己调一调。"
-    },
-    {
-      "role": "Assistant",
-      "msg": "你可以先减少下午和晚上的咖啡因摄入，睡前也尽量少看手机。如果方便的话，我还想了解一下，你通常晚上大概几点上床、几点真正睡着？"
-    }
-  ]
-}
-输出：
-{
-  "assistant_memory_hint": "建议用户减少下午和晚上的咖啡因摄入并减少睡前看手机，同时询问用户通常几点上床和几点入睡。",
-  "assistant_memory_type": "suggestion",
-  "should_process_user_msg": false,
-  "processed_user_msg": null,
-  "processed_user_topic_entity_hint": null
-}
-
-示例 6
-输入：
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "我叫小明。帮我记住这个番茄炒蛋菜谱：食材：3个鸡蛋、2个番茄、盐少许、糖一勺、油适量。步骤一：打散鸡蛋加盐搅匀。步骤二：热锅倒油，油温七成热。步骤三：倒入蛋液炒至凝固盛出。步骤四：锅中加油放入番茄块翻炒出汁。步骤五：加盐糖调味，倒回鸡蛋翻炒均匀出锅装盘。"
+      "msg": "帮我记住这个番茄炒蛋菜谱：食材有3个鸡蛋、2个番茄、盐、糖和油。先将鸡蛋加盐打散，热锅倒油后炒至凝固盛出；再把番茄翻炒出汁，加盐和糖调味，最后倒回鸡蛋翻炒均匀出锅。"
     },
     {
       "role": "Assistant",
@@ -297,8 +207,31 @@
   "assistant_memory_hint": null,
   "assistant_memory_type": null,
   "should_process_user_msg": true,
-  "processed_user_msg": "我叫小明。我说了帮我记住一个番茄炒蛋菜谱，包含鸡蛋、番茄等食材和五个烹饪步骤的详细做法。",
+  "processed_user_msg": "我说了帮我记住一个番茄炒蛋菜谱，包含鸡蛋、番茄等食材和具体做法。",
   "processed_user_topic_entity_hint": "番茄炒蛋菜谱"
+}
+
+示例 3
+输入：
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "我叫苏晴，今年26岁，在杭州做产品经理。上周末我和大学室友林悦去了西湖，在雷峰塔那边拍了一张风景照。<input-file-summary>图片展示了蓝天下的雷峰塔和周围的秋季林木。</input-file-summary>"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+输出：
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "我叫苏晴，今年26岁，在杭州做产品经理。上周末我和大学室友林悦去了西湖，在雷峰塔那边拍了一张雷峰塔的照片。文件内容展示了蓝天下的雷峰塔和周围的秋季林木。",
+  "processed_user_topic_entity_hint": "雷峰塔的照片"
 }
 
 {% else %}
@@ -378,8 +311,8 @@ Compression principles:
 
 Type notes:
 - `question`: the primary action is asking, clarifying, confirming options, or collecting preferences.
-- `suggestion`: the primary action is giving advice, even if a question appears at the end.
-- `recommendation`: the primary action is recommending a plan, dish, product, or choice.
+- `suggestion`: the primary action is advice, including direct actions such as "reduce..." or "avoid...", even if a question follows.
+- `recommendation`: the primary action is recommending a specific plan, dish, product, or choice, not general action advice.
 - `warning`: the primary action is warning about a risk, restriction, taboo, or consequence.
 - `instruction`: the primary action is explaining an operation order, steps, or execution flow.
 - `comfort`: the primary action is emotional support or comfort.
@@ -407,6 +340,7 @@ If either case applies:
 - `should_process_user_msg` must be `true`
 - `processed_user_msg` must be a single merged short paragraph rather than a structured object.
 - `processed_user_topic_entity_hint` must be the entity anchor that should later be connected through embedding.
+- Few-shot examples are only for learning format and boundary decisions. Do not copy names, places, dish names, object names, or other entities from examples into the current output unless those entities actually appear in the current `User.msg` or `Assistant.msg`.
 
 If `User.msg` is empty:
 - `should_process_user_msg` must be `null`
@@ -429,6 +363,7 @@ Rules for writing `processed_user_msg`:
   4. If the user also gave a concrete request or extra real input, add `I said ...`
 - Only include sentence 3 when there is a clear relation between the user's real message and the external content.
 - If there are multiple relevant relations, include all of them, but keep the result short and coherent.
+- If the user's real words mention a concrete photo/image object and `<input-file-summary>` confirms it, the sentence describing the photo in `processed_user_msg` must name that object. For example, write "I took a photo of Leifeng Pagoda", not only "I took a beautiful photo."
 - If there are multiple uploaded files, first judge whether they are related:
   - if related, merge them into one coherent description;
   - if unrelated, summarize them side by side in the shortest understandable way.
@@ -439,9 +374,11 @@ Rules for writing `processed_user_topic_entity_hint`:
 - Only output a concrete string when `should_process_user_msg = true`; otherwise it must be `null`.
 - It is the entity anchor that `processed_user_msg` should later connect to through embedding.
 - It must be a short string or `null`; do not output an array or object.
-- Prefer the most central concrete noun from the user's real request, uploaded/pasted content, or object being processed.
+- Prefer the external content object or object being processed that triggered user-side pruning, not the earliest or most prominent personal fact in the raw text.
+- If `User.msg` contains both the user's own real experience/identity/emotion and a large copied passage, recipe, article, file summary, or other external content, the anchor must point to the pruned external content object. Only choose an entity from the user's real words when there is no external content object, or when the user's real words are themselves the object being processed.
 - Prefer object nouns, content objects, task objects, or problem objects; do not use actions, emotions, generic topics, category labels, or full sentences.
 - If the user says "I am vv, and I have a recipe...", and normalized output may mention entities such as "vv", "recipe", and "eggs", the anchor should prefer "recipe" or the more specific "egg recipe", not "vv" or "eggs".
+- If the user first says "I got an AWS Solutions Architect certification" and then pastes a long omelette recipe, and user-side pruning mainly compresses that recipe, the anchor should be "omelette recipe" or "recipe", not "AWS certification".
 - If the user pasted an article for revision, the anchor should be "article content" or a more specific content object. If the user uploaded a photo and reacted to it, the anchor should be the photo or photo topic.
 - If `should_process_user_msg` is not `true`, output `null` even if `User.msg` contains entities.
 
@@ -470,21 +407,21 @@ Input:
   "msgs": [
     {
       "role": "User",
-      "msg": "<input-file-summary>This is a photo of a street mural showing a pink-haired figure holding a transgender pride flag, with a rainbow and billboards in the background.</input-file-summary>The transgender stories were so inspiring! I was so happy and thankful for all the support."
+      "msg": "Please revise this content: Artificial intelligence is changing education through teacher efficiency and personalized learning... [long passage omitted]"
     },
     {
       "role": "Assistant",
-      "msg": "That sounds really moving. It seems like those stories gave you a lot of strength and hope."
+      "msg": "I can reorganize the structure first and then revise it in a more formal tone."
     }
   ]
 }
 Output:
 {
-  "assistant_memory_hint": "Comforted the user about their positive feelings toward the transgender-related stories.",
-  "assistant_memory_type": "comfort",
+  "assistant_memory_hint": "Suggested reorganizing the article structure before revising it in a more formal tone.",
+  "assistant_memory_type": "suggestion",
   "should_process_user_msg": true,
-  "processed_user_msg": "I uploaded a street-mural photo related to a transgender pride theme. The file shows a pink-haired figure holding a transgender pride flag with a rainbow and billboards in the background. I felt that the transgender stories were inspiring, and I was happy and thankful for the support.",
-  "processed_user_topic_entity_hint": "transgender pride street-mural photo"
+  "processed_user_msg": "I asked to revise the following content. I pasted an article about artificial intelligence changing education through teacher efficiency and personalized learning, and it is the target content to revise.",
+  "processed_user_topic_entity_hint": "artificial intelligence education article"
 }
 
 Few-shot Example 2
@@ -493,99 +430,7 @@ Input:
   "msgs": [
     {
       "role": "User",
-      "msg": "Please revise the following content: Artificial intelligence is changing education. It can help teachers improve efficiency and also help students get a more personalized learning experience... [long passage omitted]"
-    },
-    {
-      "role": "Assistant",
-      "msg": "Sure. I can first help you reorganize the structure and then revise it in the style you want."
-    }
-  ]
-}
-Output:
-{
-  "assistant_memory_hint": "Suggested reorganizing the article structure first and then revising the content in the user's desired style.",
-  "assistant_memory_type": "suggestion",
-  "should_process_user_msg": true,
-  "processed_user_msg": "I said please revise the following content. I pasted an article about how artificial intelligence is changing education. The copied content mainly discusses teaching efficiency and personalized learning experience, and it is the target content to revise.",
-  "processed_user_topic_entity_hint": "artificial intelligence education article"
-}
-
-Few-shot Example 3
-Input:
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "<input-file-summary>I uploaded an image of an Aerobie Pro ring held against a background of green grass.</input-file-summary>Wow, Caroline! That's great! I just signed up for a pottery class yesterday. It's like therapy for me, letting me express myself and get creative. Have you found any activities that make you feel the same way?"
-    },
-    {
-      "role": "Assistant",
-      "msg": "That's a warm and thoughtful way to connect with Caroline."
-    }
-  ]
-}
-Output:
-{
-  "assistant_memory_hint": "Responded to the user's warm question to Caroline about similar creative activities.",
-  "assistant_memory_type": "other",
-  "should_process_user_msg": true,
-  "processed_user_msg": "I uploaded an image of an Aerobie Pro ring held against green grass. I congratulated Caroline and said I signed up for a pottery class yesterday; pottery feels like therapy for me because it lets me express myself and get creative. I asked Caroline whether she has found any activities that make her feel the same way.",
-  "processed_user_topic_entity_hint": "Aerobie Pro ring image"
-}
-
-Few-shot Example 4
-Input:
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "Caroline, so glad you got the support! Your experience really brought you to where you need to be. You're gonna make a huge difference! This book I read last year reminds me to always pursue my dreams, just like you are doing!🌟<input-file-summary>This book, titled 'Nothing Is Impossible' by Tom Oliver, serves as a guide for personal development and achieving peak performance. It outlines a seven-step framework designed to help readers harness their internal potential and maximize real-world outcomes.</input-file-summary>"
-    },
-    {
-      "role": "Assistant",
-      "msg": "That sounds inspiring, and it connects nicely with Caroline's journey."
-    }
-  ]
-}
-Output:
-{
-  "assistant_memory_hint": "Responded to the user's view that the book connects with Caroline's journey.",
-  "assistant_memory_type": "other",
-  "should_process_user_msg": true,
-  "processed_user_msg": "I uploaded a summary of the book 'Nothing Is Impossible' by Tom Oliver, which outlines a seven-step framework for personal development and peak performance. I told Caroline I was glad she got support and said her experience would help her make a huge difference. I said a book I read last year reminds me to always pursue my dreams, just like Caroline is doing.",
-  "processed_user_topic_entity_hint": "'Nothing Is Impossible' book summary"
-}
-
-Few-shot Example 5
-Input:
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "I've been having insomnia lately, I feel especially tired during the day, and I want to adjust it myself first."
-    },
-    {
-      "role": "Assistant",
-      "msg": "You can first reduce caffeine intake in the afternoon and evening and also try to look at your phone less before bed. If it's convenient, I'd also like to know what time you usually get into bed and what time you actually fall asleep."
-    }
-  ]
-}
-Output:
-{
-  "assistant_memory_hint": "Suggested that the user reduce afternoon and evening caffeine intake and reduce phone use before bed, while also asking when the user usually gets into bed and falls asleep.",
-  "assistant_memory_type": "suggestion",
-  "should_process_user_msg": false,
-  "processed_user_msg": null,
-  "processed_user_topic_entity_hint": null
-}
-
-Few-shot Example 6
-Input:
-{
-  "msgs": [
-    {
-      "role": "User",
-      "msg": "My name is Alex. Please remember this tomato egg stir-fry recipe: Ingredients: 3 eggs, 2 tomatoes, a pinch of salt, one spoon of sugar, oil as needed. Step 1: Beat eggs with salt. Step 2: Heat pan with oil until 70% hot. Step 3: Pour in egg mixture and scramble until set, remove. Step 4: Add oil, stir-fry tomato chunks until juicy. Step 5: Add salt and sugar, return eggs and stir evenly, serve."
+      "msg": "Remember this tomato-and-egg recipe: use 3 eggs, 2 tomatoes, salt, sugar, and oil. Beat the eggs with salt, cook them until set, and remove them. Stir-fry the tomatoes until juicy, season with salt and sugar, then return the eggs to the pan and mix well."
     },
     {
       "role": "Assistant",
@@ -598,8 +443,31 @@ Output:
   "assistant_memory_hint": null,
   "assistant_memory_type": null,
   "should_process_user_msg": true,
-  "processed_user_msg": "My name is Alex. I asked to remember a tomato egg stir-fry recipe, which includes eggs, tomatoes, and other ingredients with five detailed cooking steps.",
-  "processed_user_topic_entity_hint": "tomato egg stir-fry recipe"
+  "processed_user_msg": "I asked to remember a tomato-and-egg recipe containing eggs, tomatoes, other ingredients, and specific cooking instructions.",
+  "processed_user_topic_entity_hint": "tomato-and-egg recipe"
+}
+
+Few-shot Example 3
+Input:
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "My name is Susan, I'm 26, and I work as a product manager in Hangzhou. Last weekend my college roommate Lynn and I visited West Lake and took a scenic photo near Leifeng Pagoda.<input-file-summary>The image shows Leifeng Pagoda under a blue sky, surrounded by autumn trees.</input-file-summary>"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+Output:
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "My name is Susan, I'm 26, and I work as a product manager in Hangzhou. Last weekend my college roommate Lynn and I visited West Lake and took a photo of Leifeng Pagoda. The file shows Leifeng Pagoda under a blue sky, surrounded by autumn trees.",
+  "processed_user_topic_entity_hint": "photo of Leifeng Pagoda"
 }
 {% endif %}
 
