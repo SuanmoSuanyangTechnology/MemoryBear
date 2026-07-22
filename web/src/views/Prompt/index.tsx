@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 16:30:26
+ * @Last Modified time: 2026-07-21 18:52:25
  */
 /**
  * Prompt Editor Component
@@ -203,7 +203,7 @@ const Prompt: FC = () => {
               className="rb:h-full!"
             >
               <ChatContent
-                classNames="rb:h-[calc(100vh-242px)] rb:mb-[12px]!"
+                classNames="rb:h-[calc(100vh-254px)] rb:mb-[12px]!"
                 contentClassNames="rb:max-w-75!"
                 empty={<Empty url={ConversationEmptyIcon} title={t(`prompt.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
                 data={chatList || []}

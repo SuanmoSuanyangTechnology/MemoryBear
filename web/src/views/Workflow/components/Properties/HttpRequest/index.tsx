@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 15:58:16
+ * @Last Modified time: 2026-07-21 19:03:45
  */
 import { type FC, useMemo, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -282,7 +282,6 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               size="small"
               parentName={['body', 'data']}
               options={filterVariablesWithFile}
-              filterBooleanType={true}
             />
           </Form.Item>
         }
