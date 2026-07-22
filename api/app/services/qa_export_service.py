@@ -8,6 +8,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorClientProvider,
     ElasticSearchVectorIndexOps,
 )
+from app.core.rag.vdb.elasticsearch.pit_search import iter_pit_search_hits
 from app.core.rag.vdb.field import Field
 
 
@@ -54,6 +55,38 @@ def iter_qa_pairs_by_knowledge(
             return
 
 
+def iter_qa_pairs_by_document(
+    kb_id: uuid.UUID | str,
+    document_id: uuid.UUID | str,
+    batch_size: int = QA_EXPORT_BATCH_SIZE,
+) -> Iterator[dict[str, str]]:
+    kb_id_str = str(kb_id)
+    index_name = ElasticSearchVectorIndexOps.collection_name_for_knowledge(kb_id_str)
+    client = ElasticSearchVectorClientProvider.get_shared_client()
+
+    if not client.indices.exists(index=index_name):
+        return
+
+    filters: list[dict[str, Any]] = [
+        {"term": {Field.CHUNK_TYPE.value: "qa"}},
+        {"term": {Field.KNOWLEDGE_ID.value: kb_id_str}},
+        {"term": {Field.DOCUMENT_ID.value: str(document_id)}},
+    ]
+    for hit in iter_pit_search_hits(
+        client,
+        index=index_name,
+        query={"bool": {"filter": filters}},
+        source_includes=[Field.QUESTION.value, Field.ANSWER.value],
+        sort=_qa_export_sort(),
+        batch_size=max(1, min(batch_size, 10000)),
+    ):
+        source = hit.get("_source") or {}
+        yield {
+            "question": _normalize_csv_value(source.get(Field.QUESTION.value)),
+            "answer": _normalize_csv_value(source.get(Field.ANSWER.value)),
+        }
+
+
 def iter_qa_csv_chunks(
     kb_id: uuid.UUID | str,
     batch_size: int = QA_EXPORT_BATCH_SIZE,
@@ -61,6 +94,32 @@ def iter_qa_csv_chunks(
     yield _write_csv_rows([QA_EXPORT_COLUMNS]).encode("utf-8-sig")
     for pair in iter_qa_pairs_by_knowledge(kb_id=kb_id, batch_size=batch_size):
         yield _write_csv_rows([(pair["question"], pair["answer"])]).encode("utf-8")
+
+
+def _qa_export_sort() -> list[dict[str, Any]]:
+    return [
+        {
+            Field.DOCUMENT_ID.value: {
+                "order": "asc",
+                "unmapped_type": "keyword",
+                "missing": "_last",
+            }
+        },
+        {
+            Field.SORT_ID.value: {
+                "order": "asc",
+                "unmapped_type": "long",
+                "missing": "_last",
+            }
+        },
+        {
+            Field.DOC_ID.value: {
+                "order": "asc",
+                "unmapped_type": "keyword",
+                "missing": "_last",
+            }
+        },
+    ]
 
 
 def _build_qa_export_search_body(
@@ -80,29 +139,7 @@ def _build_qa_export_search_body(
         },
         "_source": [Field.QUESTION.value, Field.ANSWER.value],
         "size": batch_size,
-        "sort": [
-            {
-                Field.DOCUMENT_ID.value: {
-                    "order": "asc",
-                    "unmapped_type": "keyword",
-                    "missing": "_last",
-                }
-            },
-            {
-                Field.SORT_ID.value: {
-                    "order": "asc",
-                    "unmapped_type": "long",
-                    "missing": "_last",
-                }
-            },
-            {
-                Field.DOC_ID.value: {
-                    "order": "asc",
-                    "unmapped_type": "keyword",
-                    "missing": "_last",
-                }
-            },
-        ],
+        "sort": _qa_export_sort(),
     }
     if search_after:
         body["search_after"] = search_after

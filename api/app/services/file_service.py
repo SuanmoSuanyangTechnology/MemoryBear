@@ -13,6 +13,7 @@ from app.models.file_model import File
 from app.schemas.file_schema import FileCreate, FileUpdate
 from app.repositories import file_repository
 from app.core.logging_config import get_business_logger
+from app.services.qa_export_service import iter_qa_pairs_by_document
 
 # Obtain a dedicated logger for business logic
 business_logger = get_business_logger()
@@ -110,7 +111,6 @@ def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple
     """
     from app.models.document_model import Document
     from app.models.knowledge_model import Knowledge
-    from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 
     db_file = db.query(File).filter(File.id == file_id).first()
     doc = db.query(Document).filter(Document.file_id == file_id).first()
@@ -121,18 +121,7 @@ def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple
     if not db_knowledge:
         return None
 
-    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-    _, items = vector_service.search_by_segment(
-        document_id=str(doc.id), pagesize=10000, page=1, asc=True
-    )
-
-    qa_pairs = []
-    for item in items:
-        if (item.metadata or {}).get("chunk_type") == "qa":
-            qa_pairs.append({
-                "question": (item.metadata or {}).get("question", ""),
-                "answer": (item.metadata or {}).get("answer", ""),
-            })
+    qa_pairs = list(iter_qa_pairs_by_document(kb_id, doc.id))
 
     if not qa_pairs:
         return None
