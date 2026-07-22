@@ -133,7 +133,7 @@ class MemoryService:
             end_user_id: str,
             workspace_id: str,
     ) -> Dict[str, Any]:
-        """刷新单个用户的名片 Tag 缓存。"""
+        """通过统一的记忆服务入口刷新单个用户的名片 Tag 缓存。"""
         from app.core.memory.analytics.user_card_tags import refresh_user_card_tags
 
         return await refresh_user_card_tags(end_user_id, workspace_id)

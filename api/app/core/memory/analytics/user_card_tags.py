@@ -32,11 +32,15 @@ USER_CARD_TAG_LLM_TIMEOUT_SECONDS = 12
 
 
 class UserCardTagCandidate(BaseModel):
+    """LLM 返回的单个候选 Tag，category 用于限制各类 Tag 的展示数量。"""
+
     name: str = Field(min_length=1)
     category: Literal["interests", "traits", "goals"]
 
 
 class UserCardTagOutput(BaseModel):
+    """LLM 结构化输出，候选数量可以略多于最终展示数量。"""
+
     tags: list[UserCardTagCandidate] = Field(
         default_factory=list,
         max_length=USER_CARD_TAG_CANDIDATE_LIMIT,
@@ -45,13 +49,14 @@ class UserCardTagOutput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def accept_top_level_tag_list(cls, value: Any) -> Any:
+        """兼容模型直接返回 Tag 数组的情况，统一转换为标准对象结构。"""
         if isinstance(value, list):
             return {"tags": value}
         return value
 
 
 def build_user_card_tag_input(meta_data: object) -> dict[str, list[str]]:
-    """Copy only metadata fields allowed for user-card tags."""
+    """只提取允许生成名片 Tag 的 metadata 字段，并清理字符串空白。"""
     if not isinstance(meta_data, dict):
         return {field: [] for field in USER_CARD_TAG_META_FIELDS}
 
@@ -71,7 +76,7 @@ def build_user_card_tag_input(meta_data: object) -> dict[str, list[str]]:
 
 
 def build_user_card_tag_source_fingerprint(tag_input: dict[str, list[str]]) -> str:
-    """Build a stable SHA-256 fingerprint from the normalized LLM input."""
+    """为规范化后的 LLM 输入生成稳定指纹，用于判断是否需要重新调用模型。"""
     source_json = json.dumps(
         tag_input,
         ensure_ascii=False,
@@ -82,6 +87,7 @@ def build_user_card_tag_source_fingerprint(tag_input: dict[str, list[str]]) -> s
 
 
 def validate_user_card_tags(candidates: list[UserCardTagCandidate]) -> list[str]:
+    """清理候选 Tag，并执行长度、去重、分类数量和总展示数量限制。"""
     tags: list[str] = []
     seen: set[str] = set()
     category_counts = {field: 0 for field in USER_CARD_TAG_META_FIELDS}
@@ -106,6 +112,7 @@ def validate_user_card_tags(candidates: list[UserCardTagCandidate]) -> list[str]
 
 
 def normalize_stored_user_card_tags(stored_tags: object) -> list[str]:
+    """读取缓存时再次规范化，避免历史数据绕过当前展示约束。"""
     if not isinstance(stored_tags, list):
         return []
 
@@ -131,6 +138,7 @@ async def generate_user_card_tags(
         *,
         log_context: str | None = None,
 ) -> list[str]:
+    """调用 LLM 生成候选 Tag，并返回通过展示规则校验的结果。"""
     tag_input = build_user_card_tag_input(meta_data)
     if not any(tag_input.values()):
         return []
@@ -187,12 +195,17 @@ async def generate_user_card_tags(
 
 
 async def refresh_user_card_tags(end_user_id: str, workspace_id: str) -> dict[str, Any]:
-    """Regenerate one user's cached card tags from the current metadata version."""
+    """根据用户当前 metadata 刷新名片 Tag 缓存。
+
+    PostgreSQL 使用多个同步短会话：先读取源数据，再加载模型配置，LLM 调用结束后才开启
+    写回会话。这样等待 LLM 时不会占用数据库连接，写回时也能校验源数据是否仍是原版本。
+    """
     total_started_at = time.monotonic()
     end_user_uuid = uuid.UUID(end_user_id)
     workspace_uuid = uuid.UUID(workspace_id)
 
     source_started_at = time.monotonic()
+    # 只在短会话内读取生成所需的数据；离开 with 后连接立即归还连接池。
     with get_db_context() as db:
         source = EndUserRepository(db).get_scoped_user_tag_source(
             workspace_id=workspace_uuid,
@@ -247,6 +260,7 @@ async def refresh_user_card_tags(end_user_id: str, workspace_id: str) -> dict[st
         )
     elif any(tag_input.values()):
         config_started_at = time.monotonic()
+        # 模型客户端创建完成后即关闭数据库会话，后续 await LLM 时不持有数据库连接。
         with get_db_context() as db:
             config_service = MemoryConfigService(db)
             config_id = config_service.get_config_id_by_end_user(end_user_uuid)
@@ -290,6 +304,7 @@ async def refresh_user_card_tags(end_user_id: str, workspace_id: str) -> dict[st
         logger.info("用户名片Tag阶段=generation_skipped user=%s reason=empty_input", end_user_id)
 
     update_started_at = time.monotonic()
+    # LLM 执行期间 metadata 可能已更新，因此只允许原版本对应的结果写回。
     with get_db_context() as db:
         updated = EndUserRepository(db).update_user_tags_if_source_unchanged(
             workspace_id=workspace_uuid,

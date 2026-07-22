@@ -20,6 +20,8 @@ db_logger = get_db_logger()
 
 
 class UserTagRefreshCandidate(NamedTuple):
+    """扫描阶段使用的轻量候选记录，避免批量加载完整 metadata。"""
+
     end_user_id: uuid.UUID
     workspace_id: uuid.UUID
     metadata_updated_at: datetime | None
@@ -482,7 +484,11 @@ class EndUserRepository:
             after_id: uuid.UUID | None,
             limit: int,
     ) -> List[UserTagRefreshCandidate]:
-        """分页获取需要刷新用户名片 Tag 的用户，不加载完整 metadata。"""
+        """按主键游标分页获取需要刷新名片 Tag 的有效用户。
+
+        Tag 缓存字段不完整，或 metadata 的更新时间晚于 Tag 更新时间时，用户会进入候选集。
+        查询只返回派发任务所需的轻量字段，避免扫描阶段占用过多数据库连接和内存。
+        """
         query = (
             self.db.query(
                 EndUser.id,
@@ -503,6 +509,7 @@ class EndUserRepository:
             )
         )
         if after_id is not None:
+            # 使用主键游标继续下一页，避免数据量增大时 OFFSET 扫描逐页变慢。
             query = query.filter(EndUser.id > after_id)
 
         rows = query.order_by(EndUser.id.asc()).limit(limit).all()
@@ -520,7 +527,7 @@ class EndUserRepository:
             workspace_id: uuid.UUID,
             end_user_id: uuid.UUID,
     ) -> Optional[dict]:
-        """读取有效 Workspace 下单个有效用户的 Tag 源数据。"""
+        """读取有效 Workspace 下单个有效用户的 Tag 源数据和当前缓存状态。"""
         result = self.db.execute(
             select(
                 EndUserInfo.meta_data.label("meta_data"),
@@ -558,7 +565,11 @@ class EndUserRepository:
             source_fingerprint: str,
             refreshed_at: datetime,
     ) -> bool:
-        """仅在 metadata 版本未变化时更新 Tag 缓存及源指纹。"""
+        """仅在 metadata 仍是读取时的版本时更新 Tag 缓存及源指纹。
+
+        LLM 生成期间 metadata 可能被其他任务修改。把版本条件放进 UPDATE，可避免较旧的
+        LLM 结果覆盖新数据；返回 False 表示版本已变化或用户、Workspace 已失效。
+        """
         timestamp_matches = (
             EndUserInfo.updated_at.is_(None)
             if expected_metadata_updated_at is None

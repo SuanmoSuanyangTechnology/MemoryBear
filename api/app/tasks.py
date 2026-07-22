@@ -3112,9 +3112,7 @@ def do_refresh_insight_summary_cache(
     return result
 
 
-# ============================================================
-# 用户名片 Tag 刷新：独立扫描 + 单用户领域入口
-# ============================================================
+# 用户名片 Tag 定时刷新任务
 
 USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
 USER_TAG_INFLIGHT_TTL_SEC = 600
@@ -3131,7 +3129,11 @@ USER_TAG_SCAN_PAGE_SIZE = 500
     soft_time_limit=540,
 )
 def scan_refresh_user_tags(self) -> Dict[str, Any]:
-    """扫描 metadata 已变化的用户并派发独立 Tag 刷新任务。"""
+    """分页扫描待刷新用户，并为每个用户派发独立的 Tag 刷新任务。
+
+    扫描任务只负责筛选和派发，不读取完整 metadata，也不调用 LLM，避免一个长任务持续
+    占用数据库连接。实际生成由 ``do_refresh_user_tags`` 在 heavy worker 中完成。
+    """
     from app.repositories.end_user_repository import EndUserRepository
 
     start_time = time.time()
@@ -3157,6 +3159,7 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
             inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
             lock_acquired = False
             try:
+                # Redis 在途标记防止相邻两轮扫描为同一用户重复派发任务。
                 if redis_client is not None:
                     lock_acquired = bool(
                         redis_client.set(
@@ -3170,6 +3173,7 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
                         skip_inflight += 1
                         continue
 
+                # 每 60 个任务分散到 5 分钟内启动，削平 LLM 和数据库的瞬时压力。
                 countdown = (dispatched % 60) * 5
                 do_refresh_user_tags.apply_async(
                     kwargs={
@@ -3231,7 +3235,11 @@ def do_refresh_user_tags(
         end_user_id: str,
         workspace_id: str,
 ) -> Dict[str, Any]:
-    """调用记忆领域入口刷新单个用户的名片 Tag。"""
+    """在 heavy worker 中调用记忆领域入口，刷新单个用户的名片 Tag。
+
+    Celery 任务本身是同步函数，新事件循环只用于驱动异步 LLM 调用；领域层中的 PostgreSQL
+    操作仍使用同步短会话，并且不会在等待 LLM 时持有数据库连接。
+    """
     inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
     start_time = time.time()
 
@@ -3245,6 +3253,7 @@ def do_refresh_user_tags(
         result = loop.run_until_complete(_run())
     finally:
         _shutdown_loop_gracefully(loop)
+        # 无论任务成功还是异常都释放在途标记，让后续扫描可以再次处理该用户。
         try:
             redis_client = get_sync_redis_client()
             if redis_client is not None:
