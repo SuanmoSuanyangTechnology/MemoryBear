@@ -672,14 +672,20 @@ class KnowledgeRetrievalService:
             and len(targets) == 1
             and targets[0].params.retrieve_type == RetrieveType.HYBRID
         )
-        needs_global_rerank = len(targets) > 1 or (
-            request.rerank_id is not None and not single_hybrid_uses_request_rerank
-        ) or (
-            len(targets) == 1
-            and targets[0].params.retrieve_type == RetrieveType.Graph
-            and preparation.graph is not None
+        evidence_graph_only = (
+            preparation.graph is not None
             and preparation.graph.pipeline is GraphPipeline.EVIDENCE
-            and targets[0].reranker is not None
+            and all(
+                target.params.retrieve_type == RetrieveType.Graph
+                for target in targets
+            )
+        )
+        needs_global_rerank = not evidence_graph_only and (
+            len(targets) > 1
+            or (
+                request.rerank_id is not None
+                and not single_hybrid_uses_request_rerank
+            )
         )
         if needs_global_rerank:
             global_rerank_started_at = time.perf_counter()

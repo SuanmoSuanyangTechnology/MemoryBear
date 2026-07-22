@@ -97,11 +97,6 @@ class KnowledgeRetrievalPreparation:
             for target in targets
         }
         common_metadata_defs = cls._get_common_metadata_defs(metadata_defs_by_kb)
-        request_reranker = await cls._snapshot_model_runtime(
-            db,
-            request.rerank_id,
-            tenant_id,
-        )
         metadata_llm = await cls._build_metadata_llm_snapshot(
             db,
             request,
@@ -116,6 +111,21 @@ class KnowledgeRetrievalPreparation:
             targets,
             tenant_id,
         )
+        evidence_graph_only = (
+            graph is not None
+            and graph.pipeline is GraphPipeline.EVIDENCE
+            and all(
+                target.params.retrieve_type == RetrieveType.Graph
+                for target in targets
+            )
+        )
+        request_reranker = None
+        if not evidence_graph_only:
+            request_reranker = await cls._snapshot_model_runtime(
+                db,
+                request.rerank_id,
+                tenant_id,
+            )
         return RetrievalPreparation(
             targets=tuple(targets),
             tenant_id=tenant_id,
@@ -200,23 +210,36 @@ class KnowledgeRetrievalPreparation:
         tenant_id: uuid.UUID | None,
     ) -> RetrievalTarget:
         knowledge = ref.knowledge
+        params = cls._build_retrieval_params(request, ref.config)
+        evidence_graph = False
+        if params.retrieve_type == RetrieveType.Graph:
+            try:
+                evidence_graph = (
+                    resolve_graph_pipeline(knowledge.parser_config)
+                    is GraphPipeline.EVIDENCE
+                )
+            except GraphPipelineConfigError as exc:
+                raise KnowledgeRetrievalConfigError(str(exc)) from exc
         if not knowledge.embedding_id:
             raise KnowledgeRetrievalConfigError(f"embedding_id config error: {knowledge.id}")
-        if not knowledge.reranker_id:
-            raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
 
         embedding = await cls._snapshot_model_runtime(db, knowledge.embedding_id, tenant_id)
-        reranker = await cls._snapshot_model_runtime(db, knowledge.reranker_id, tenant_id)
         if not embedding:
             raise KnowledgeRetrievalConfigError(f"No embedding api key found for knowledge {knowledge.id}")
-        if not reranker:
-            raise KnowledgeRetrievalConfigError(f"No reranker api key found for knowledge {knowledge.id}")
+
+        reranker = None
+        if not evidence_graph:
+            if not knowledge.reranker_id:
+                raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
+            reranker = await cls._snapshot_model_runtime(db, knowledge.reranker_id, tenant_id)
+            if not reranker:
+                raise KnowledgeRetrievalConfigError(f"No reranker api key found for knowledge {knowledge.id}")
 
         return RetrievalTarget(
             knowledge_id=knowledge.id,
             workspace_id=knowledge.workspace_id,
             index_name=ElasticSearchVectorIndexOps.collection_name_for_knowledge(knowledge.id),
-            params=cls._build_retrieval_params(request, ref.config),
+            params=params,
             embedding=embedding,
             reranker=reranker,
         )
