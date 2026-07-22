@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -39,12 +40,18 @@ from app.core.rag.retrieval.elasticsearch_queries import (
     vector_hits_to_chunks,
 )
 from app.core.rag.vdb.field import Field
+from app.core.rag.vdb.elasticsearch.pit_search import (
+    iter_pit_search_hits,
+    pit_search_slice,
+)
 from app.core.rag.vdb.vector_base import BaseVector
 from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_INDEX_REFRESH_INTERVAL = "1s"
+ES_DEFAULT_MAX_RESULT_WINDOW = 10000
+ES_FULL_SCAN_BATCH_SIZE = 1000
 
 
 @dataclass(frozen=True)
@@ -194,69 +201,156 @@ class ElasticSearchVector(BaseVector):
             logger.warning(f"Index {self._collection_name} does not exist")
             return
 
-        # Obtaining All Actual ES _id,not metadata.doc_id
-        actual_ids = []
+        deleted = 0
+        for start in range(0, len(ids), ES_FULL_SCAN_BATCH_SIZE):
+            batch = ids[start:start + ES_FULL_SCAN_BATCH_SIZE]
+            result = self._client.delete_by_query(
+                index=self._collection_name,
+                query={"terms": {Field.DOC_ID.value: batch}},
+                refresh=False,
+                conflicts="abort",
+                wait_for_completion=True,
+            )
+            deleted += int(result.get("deleted", 0))
 
-        for doc_id in ids:
-            es_ids = self.get_ids_by_metadata_field('doc_id', doc_id)
-            if es_ids:
-                actual_ids.extend(es_ids)
-            else:
-                logger.warning(f"Document with metadata doc_id {doc_id} not found for deletion")
+        if refresh:
+            self._client.indices.refresh(index=self._collection_name)
+        logger.info(
+            "Deleted Elasticsearch documents by metadata IDs: index=%s requested=%s deleted=%s",
+            self._collection_name,
+            len(ids),
+            deleted,
+        )
 
-        if actual_ids:
-            actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
-            try:
-                helpers.bulk(self._client, actions)
-                if refresh:
-                    self._client.indices.refresh(index=self._collection_name)
-            except BulkIndexError as e:
-                for error in e.errors:
-                    delete_error = error.get('delete', {})
-                    status = delete_error.get('status')
-                    doc_id = delete_error.get('_id')
-
-                    if status == 404:
-                        logger.warning(f"Document not found for deletion: {doc_id}")
-                    else:
-                        logger.error(f"Error deleting document: {error}")
-
-    def get_ids_by_metadata_field(self, key: str, value: str):
-        query = {"query": {"term": {f"{Field.METADATA_KEY.value}.{key}": value}}}
-        response = self._client.search(index=self._collection_name, body=query, size=10000)
-        if response['hits']['hits']:
-            return [hit['_id'] for hit in response['hits']['hits']]
-        else:
-            return None
+    def get_ids_by_metadata_field(self, key: str, value: str) -> list[str] | None:
+        ids = [
+            hit["_id"]
+            for hit in iter_pit_search_hits(
+                self._client,
+                index=self._collection_name,
+                query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
+                batch_size=ES_FULL_SCAN_BATCH_SIZE,
+                source=False,
+            )
+        ]
+        return ids or None
 
     def delete_by_metadata_field(self, key: str, value: str, *, refresh: bool = False):
         if not self._client.indices.exists(index=self._collection_name):
             return False
-        actual_ids = self.get_ids_by_metadata_field(key, value)
-
-        if actual_ids:
-            actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
-            try:
-                helpers.bulk(self._client, actions)
-                if refresh:
-                    self._client.indices.refresh(index=self._collection_name)
-            except BulkIndexError as e:
-                for error in e.errors:
-                    delete_error = error.get('delete', {})
-                    status = delete_error.get('status')
-                    doc_id = delete_error.get('_id')
-
-                    if status == 404:
-                        logger.warning(f"Document not found for deletion: {doc_id}")
-                    else:
-                        logger.error(f"Error deleting document: {error}")
-                        raise
-
+        result = self._client.delete_by_query(
+            index=self._collection_name,
+            query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
+            refresh=refresh,
+            conflicts="abort",
+            wait_for_completion=True,
+        )
+        logger.info(
+            "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
+            self._collection_name,
+            key,
+            result.get("deleted", 0),
+        )
         return True
 
     def delete(self):
         if self._client.indices.exists(index=self._collection_name):
             self._client.indices.delete(index=self._collection_name, ignore=[400, 404])
+
+    def _build_segment_query(
+        self,
+        document_id: str | None,
+        query: str | None,
+        chunk_types: list[str] | str | None,
+        parent_ids: list[str] | str | None,
+    ) -> dict[str, Any]:
+        must: list[dict[str, Any]] = []
+        if document_id:
+            must.append({"term": {Field.DOCUMENT_ID.value: document_id}})
+        if query:
+            must.append({
+                "multi_match": {
+                    "query": query,
+                    "fields": [Field.CONTENT_KEY.value, Field.VISION_TEXT.value],
+                    "analyzer": "ik_max_word",
+                },
+            })
+        if chunk_types:
+            types = chunk_types if isinstance(chunk_types, list) else [chunk_types]
+            must.append({"terms": {Field.CHUNK_TYPE.value: types}})
+        if parent_ids:
+            values = parent_ids if isinstance(parent_ids, list) else [parent_ids]
+            must.append({
+                "terms": {f"{Field.METADATA_KEY.value}.{Field.PARENT_ID.value}": values}
+            })
+        return {"bool": {"must": must}}
+
+    @staticmethod
+    def _segment_sort(asc: bool) -> list[dict[str, Any]]:
+        order = "asc" if asc else "desc"
+        return [
+            {
+                Field.SORT_ID.value: {
+                    "order": order,
+                    "unmapped_type": "long",
+                    "missing": "_last",
+                }
+            },
+            {
+                Field.DOC_ID.value: {
+                    "order": order,
+                    "unmapped_type": "keyword",
+                    "missing": "_last",
+                }
+            },
+        ]
+
+    @staticmethod
+    def _segment_hit_to_chunk(hit: Mapping[str, Any]) -> DocumentChunk:
+        source = hit.get("_source") or {}
+        metadata = dict(source.get(Field.METADATA_KEY.value) or {})
+        chunk_type = source.get(Field.CHUNK_TYPE.value)
+        page_content = source.get(Field.CONTENT_KEY.value)
+        if chunk_type:
+            metadata["chunk_type"] = chunk_type
+        if chunk_type == "qa":
+            metadata["question"] = source.get(Field.QUESTION.value, "")
+            metadata["answer"] = source.get(Field.ANSWER.value, "")
+            page_content = (
+                f"question: {metadata['question']}\nanswer: {metadata['answer']}"
+            )
+        metadata["score"] = hit.get("_score")
+        return DocumentChunk(page_content=page_content, vector=None, metadata=metadata)
+
+    def iter_by_segment(
+        self,
+        document_id: str | None = None,
+        query: str | None = None,
+        *,
+        batch_size: int = ES_FULL_SCAN_BATCH_SIZE,
+        asc: bool = True,
+        chunk_types: list[str] | str | None = None,
+        parent_ids: list[str] | str | None = None,
+        **kwargs: Any,
+    ) -> Iterator[DocumentChunk]:
+        indices = kwargs.get("indices", self._collection_name)
+        if not self._client.indices.exists(index=indices):
+            return
+
+        segment_query = self._build_segment_query(
+            document_id,
+            query,
+            chunk_types,
+            parent_ids,
+        )
+        for hit in iter_pit_search_hits(
+            self._client,
+            index=indices,
+            query=segment_query,
+            sort=self._segment_sort(asc),
+            batch_size=batch_size,
+        ):
+            yield self._segment_hit_to_chunk(hit)
 
     def search_by_segment(self, document_id: str | None = None, query: str | None = None, pagesize: int = 10, page: int = 1, asc: bool = True, chunk_types: list[str] | str | None = None, parent_ids: list[str] | str | None = None, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
         """
@@ -278,94 +372,43 @@ class ElasticSearchVector(BaseVector):
         if not self._client.indices.exists(index=indices):
             return 0, []
 
-        # Calculate the start position for the current page
-        from_ = pagesize * (page-1)
+        offset = pagesize * (page - 1)
+        segment_query = self._build_segment_query(
+            document_id,
+            query,
+            chunk_types,
+            parent_ids,
+        )
+        sort = self._segment_sort(asc)
 
-        # Construct the query with optional keyword matching
-        query_str = {
-            "query": {
-                "bool": {
-                    "must": []
-                }
-            },
-            "sort": [
-                {Field.SORT_ID.value: "asc" if asc else "desc"}  # Sort by the specified metadata field
-            ]
-        }
-
-        if document_id:
-            query_str["query"]["bool"]["must"].append({
-                "term": {
-                    Field.DOCUMENT_ID.value: document_id  # exact match document_id
-                }
-            })
-
-        if query:
-            query_str["query"]["bool"]["must"].append({
-                "multi_match": {
-                    "query": query,
-                    "fields": [Field.CONTENT_KEY.value, Field.VISION_TEXT.value],
-                    "analyzer": "ik_max_word",
-                },
-            })
-
-        if chunk_types:
-            types = chunk_types if isinstance(chunk_types, list) else [chunk_types]
-            query_str["query"]["bool"]["must"].append({
-                "terms": {
-                    Field.CHUNK_TYPE.value: types
-                }
-            })
-
-        if parent_ids:
-            pids = parent_ids if isinstance(parent_ids, list) else [parent_ids]
-            query_str["query"]["bool"]["must"].append({
-                "terms": {
-                    f"metadata.{Field.PARENT_ID.value}": pids
-                }
-            })
-
-        # For simplicity, we use from/size here which has a limit (usually up to 10,000).
-        try:
-            result = self._client.search(
+        if offset + pagesize <= ES_DEFAULT_MAX_RESULT_WINDOW:
+            try:
+                result = self._client.search(
+                    index=indices,
+                    from_=offset,
+                    size=pagesize,
+                    query=segment_query,
+                    sort=sort,
+                    track_total_hits=True,
+                )
+            except NotFoundError:
+                return 0, []
+            if "errors" in result:
+                raise ValueError(f"Error during query: {result['errors']}")
+            total = int(result["hits"]["total"]["value"])
+            hits = result["hits"]["hits"]
+        else:
+            total, hits = pit_search_slice(
+                self._client,
                 index=indices,
-                from_=from_,  # Only use from_ for the first page (simplified)
+                query=segment_query,
+                sort=sort,
+                offset=offset,
                 size=pagesize,
-                body=query_str,
+                batch_size=ES_FULL_SCAN_BATCH_SIZE,
             )
-        except NotFoundError:
-            return 0, []
 
-        if "errors" in result:
-            raise ValueError(f"Error during query: {result['errors']}")
-        total = result["hits"]["total"]["value"]  # Get total count
-
-        docs_and_scores = []
-        for res in result["hits"]["hits"]:
-            source = res["_source"]
-            page_content = source.get(Field.CONTENT_KEY.value)
-            vector = None
-            metadata = source.get(Field.METADATA_KEY.value, {})
-            chunk_type = source.get(Field.CHUNK_TYPE.value)
-            score = res["_score"]
-
-            # 将 QA 字段注入 metadata 供前端展示
-            if chunk_type:
-                metadata["chunk_type"] = chunk_type
-            if chunk_type == "qa":
-                metadata["question"] = source.get(Field.QUESTION.value, "")
-                metadata["answer"] = source.get(Field.ANSWER.value, "")
-                page_content = f"question: {metadata['question']}\nanswer: {metadata['answer']}"
-
-            docs_and_scores.append((DocumentChunk(page_content=page_content, vector=vector, metadata=metadata), score))
-
-        docs = []
-        for doc, score in docs_and_scores:
-            if doc.metadata is not None:
-                doc.metadata["score"] = score
-            docs.append(doc)
-
-        return total, docs
+        return total, [self._segment_hit_to_chunk(hit) for hit in hits]
 
     def get_by_segment(self, doc_id: str, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
         """
@@ -951,13 +994,6 @@ class ElasticSearchVectorIndexOps:
         if self._client.indices.exists(index=self._collection_name):
             self._client.indices.delete(index=self._collection_name, ignore=[400, 404])
 
-    def _get_ids_by_metadata_field(self, key: str, value: str) -> list[str] | None:
-        query = {"query": {"term": {f"{Field.METADATA_KEY.value}.{key}": value}}}
-        response = self._client.search(index=self._collection_name, body=query, size=10000)
-        if response["hits"]["hits"]:
-            return [hit["_id"] for hit in response["hits"]["hits"]]
-        return None
-
     def delete_by_metadata_field(
             self,
             key: str,
@@ -968,27 +1004,19 @@ class ElasticSearchVectorIndexOps:
         if not self._client.indices.exists(index=self._collection_name):
             return False
 
-        actual_ids = self._get_ids_by_metadata_field(key, value)
-        if not actual_ids:
-            return True
-
-        actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
-        try:
-            helpers.bulk(self._client, actions)
-            if refresh:
-                self._client.indices.refresh(index=self._collection_name)
-        except BulkIndexError as e:
-            for error in e.errors:
-                delete_error = error.get("delete", {})
-                status = delete_error.get("status")
-                doc_id = delete_error.get("_id")
-
-                if status == 404:
-                    logger.warning(f"Document not found for deletion: {doc_id}")
-                else:
-                    logger.error(f"Error deleting document: {error}")
-                    raise
-
+        result = self._client.delete_by_query(
+            index=self._collection_name,
+            query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
+            refresh=refresh,
+            conflicts="abort",
+            wait_for_completion=True,
+        )
+        logger.info(
+            "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
+            self._collection_name,
+            key,
+            result.get("deleted", 0),
+        )
         return True
 
     def change_document_status(self, document_id: str, status: int) -> int:
