@@ -79,13 +79,12 @@ pub async fn run(
     }
 
     // Cap V8's JS heap so JS-object bombs die with a clean heap-OOM below the
-    // RLIMIT_AS ceiling. Override with NODE_MAX_OLD_SPACE_MB.
-    let old_space_mb = std::env::var("NODE_MAX_OLD_SPACE_MB")
-        .ok()
-        .and_then(|v| v.trim().parse::<u32>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(768);
+    // RLIMIT_AS ceiling. Configurable via config or NODEJS_MAX_OLD_SPACE_MB env.
+    let old_space_mb = config.nodejs_max_old_space_mb;
     cmd.arg(format!("--max-old-space-size={old_space_mb}"))
+        .arg("--jitless")
+        .arg("--no-expose_wasm")
+        .arg("--disable-proto=throw")
         .arg("-")
         .arg(LIB_PATH)
         .arg(sandbox_uid.to_string())

@@ -23,10 +23,15 @@ sandbox_uid = 65537
 sandbox_gid = 65537
 
 # Per-request virtual address space cap (RLIMIT_AS), in bytes, passed to
-# init_seccomp. Bounds a single execution's memory. 0 disables. Node needs a
-# higher value than Python (V8 reserves ~700MB of virtual space just to start).
-python_max_as_bytes = 1073741824   # 1 GiB
-nodejs_max_as_bytes = 2147483648   # 2 GiB
+# init_seccomp. Bounds a single execution's memory. 0 disables.
+# Node uses --jitless so V8 virtual-space reservation is much lower.
+python_max_as_bytes = 268435456    # 256 MiB
+nodejs_max_as_bytes = 536870912    # 512 MiB (jitless)
+
+# V8 --max-old-space-size in MiB. Caps JS heap below RLIMIT_AS so heap-OOM
+# produces a clean JS error instead of SIGKILL / ENOMEM panic.
+# Default: 256 MiB.
+nodejs_max_old_space_mb = 256
 
 # ── Server ──
 [app]

@@ -35,7 +35,7 @@ fn build_script(
         // Privileged mode — Landlock not used, paths never read.
         "[]".into()
     } else {
-        let mut paths = vec![LIB_PATH.to_string()];
+        let mut paths: Vec<String> = vec![];
         paths.extend(config.python_lib_paths.iter().cloned());
         paths.extend(config.nodejs_lib_paths.iter().cloned());
         paths.extend([
@@ -92,7 +92,7 @@ pub async fn run(
                 let allowed_paths: Vec<String> = if config.privilege {
                     vec![]
                 } else {
-                    let mut paths = vec![LIB_PATH.to_string()];
+                    let mut paths: Vec<String> = vec![];
                     paths.extend(config.python_lib_paths.iter().cloned());
                     paths.extend(config.nodejs_lib_paths.iter().cloned());
                     paths.extend([
