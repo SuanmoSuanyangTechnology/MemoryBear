@@ -142,6 +142,16 @@ class GraphElasticsearchStore:
             index=chunk_index_name,
             size=10000,
             query={"bool": {"filter": filters}},
+            source_includes=[
+                "page_content",
+                "metadata.knowledge_id",
+                "metadata.document_id",
+                "metadata.status",
+                "metadata.doc_id",
+                "metadata.sort_id",
+                "metadata.chunk_type",
+                "metadata.parent_id",
+            ],
             sort=[
                 {"metadata.sort_id": {"order": "asc", "unmapped_type": "long"}},
                 {"metadata.doc_id": {"order": "asc"}},
