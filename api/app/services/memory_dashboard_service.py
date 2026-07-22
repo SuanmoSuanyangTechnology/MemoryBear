@@ -1,26 +1,23 @@
-from sqlalchemy.orm import Session, load_only
-from sqlalchemy import desc, nullslast, or_, cast, String, func
-from typing import List, Optional, Dict, Any
 import uuid
-from fastapi import HTTPException
+from typing import List, Optional, Dict, Any
 
+from fastapi import HTTPException
+from sqlalchemy import desc, nullslast
+from sqlalchemy.orm import Session
+
+from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
-from app.models.user_model import User
-from app.models.app_model import App
 from app.models.end_user_model import EndUser, EndUser as EndUserModel
 from app.models.memory_increment_model import MemoryIncrement
-
+from app.models.user_model import User
 from app.repositories import (
     app_repository,
-    end_user_repository,
     memory_increment_repository,
     knowledge_repository
 )
 from app.schemas.end_user_schema import EndUser as EndUserSchema
 from app.schemas.memory_increment_schema import MemoryIncrement as MemoryIncrementSchema
-from app.schemas.app_schema import App as AppSchema
-from app.core.logging_config import get_business_logger
-
+from app.utils.redis_cache import redis_cache
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
@@ -542,7 +539,6 @@ def get_dashboard_yesterday_changes(
             "total_api_call_change": float | None
         }
     """
-    from datetime import datetime
     from sqlalchemy import func
     from app.models.api_key_model import ApiKey, ApiKeyLog
     from app.models.knowledge_model import Knowledge
@@ -1096,4 +1092,41 @@ def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
     except Exception as e:
         business_logger.warning(f"获取API调用统计失败: {e}")
 
+    return result
+
+
+@redis_cache(ttl=60, prefix="active_counts")
+async def batch_get_active_counts(
+    end_user_ids: tuple[str, ...],
+) -> dict[str, int]:
+    """批量查询 Neo4j 活跃节点数（Statement + Chunk + ExtractedEntity，delete_at IS NULL）。
+
+    结果通过 ``@redis_cache`` 缓存 60 秒。
+    ``end_user_ids`` 使用 tuple 以确保参数可哈希（装饰器需要）。
+    """
+    from app.repositories.neo4j.graph_search import forget_count_active_nodes_batch
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    async with Neo4jConnector() as conn:
+        return await forget_count_active_nodes_batch(conn, list(end_user_ids))
+
+
+def batch_get_memory_limits(
+    db: Session,
+    end_user_ids: list[str],
+) -> dict[str, int]:
+    """批量获取每个 end_user 的 memory_limit（来自租户套餐配额，默认 300）。"""
+    from uuid import UUID as _UUID
+
+    from app.core.quota_manager import get_end_user_memory_limit
+    from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
+
+    result: dict[str, int] = {}
+    for uid in end_user_ids:
+        try:
+            tenant_id = get_tenant_id_by_end_user_id(db, _UUID(uid))
+            limit = get_end_user_memory_limit(db, tenant_id) or 300
+        except Exception:
+            limit = 300
+        result[uid] = limit
     return result

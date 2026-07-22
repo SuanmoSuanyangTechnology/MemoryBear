@@ -509,6 +509,14 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
+    async def get_by_id_async(db: AsyncSession, config_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """根据ID获取记忆配置（异步版）。"""
+        result = await db.execute(
+            select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     def get_config_with_workspace(
             db: Session,
             config_id: uuid.UUID | int | str

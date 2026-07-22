@@ -14,6 +14,7 @@ from app.repositories.neo4j.graph_search import (
     forget_soft_delete_by_element_ids,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.utils.redis_cache import invalidate_cache
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,12 @@ class ForgetService:
                 "ForgetService done — deleted=%d final=%d remaining_budget=%d",
                 deleted, final_count, summary["budget"],
             )
+            try:
+                uid = self.ctx.end_user_id
+                await invalidate_cache(prefix=f"forget_candidates:{uid}")
+                await invalidate_cache(prefix=f"quota_breakdown:{uid}")
+            except Exception:
+                logger.warning("Failed to invalidate forget cache", exc_info=True)
             return summary
 
     async def _mixed_clean(self, budget: int) -> int:

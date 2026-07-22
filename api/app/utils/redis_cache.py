@@ -1,28 +1,44 @@
 """
 Redis 查询结果缓存装饰器
 
-提供 ``@redis_cache`` 装饰器，自动缓存异步函数的返回值到 Redis
+提供 ``@redis_cache`` 装饰器，自动缓存异步/同步函数的返回值到 Redis。
 
 用法::
 
-    from app.utils.redis_cache import redis_cache
+    from app.utils.redis_cache import redis_cache, invalidate_cache
 
-    # skip_args 支持参数名，db 等连接参数自动跳过
+    # skip_args / id_arg 都支持「参数名」或「位置索引」，二者等价。
+    # 推荐用参数名，可读且不依赖参数顺序。
+
+    # skip_args：不参与缓存 key 计算（db 等连接对象通常要跳过）
     @redis_cache(ttl=300, prefix="forget_logs", skip_args=["db"])
     async def get_forget_logs(db, end_user_id, page=1, pagesize=10):
         ...
 
-    # 也支持位置索引
+    # 等价写法：位置索引（skip_args=[0] 与 skip_args=["db"] 效果相同）
     @redis_cache(ttl=120, prefix="user", skip_args=[0])
     async def get_user(db, user_id):
         ...
 
-    # 自定义 key 构建
+    # id_arg：把某个参数值嵌入 key 前缀，便于按 id 精确批量失效
+    @redis_cache(ttl=60, prefix="quota_breakdown", id_arg="end_user_id")
+    async def get_quota_breakdown(end_user_id):
+        ...
+
+    # 失效该 end_user_id 下的全部缓存条目
+    await invalidate_cache(prefix=f"quota_breakdown:{end_user_id}")
+
+    # 自定义 key 构建（完全接管，skip_args / id_arg 不生效）
     @redis_cache(ttl=60, key_builder=lambda *a, **kw: f"custom:{kw['user_id']}")
     async def expensive_query(user_id):
         ...
 
-Key 格式： ``cache:{prefix}:{qualname}:{args_hash}``
+参数按签名归一化（``sig.bind``）后再计算 key，因此位置传参与关键字传参
+（``f(db, 1)`` 与 ``f(db, user_id=1)``）会命中同一个缓存。
+
+Key 格式：
+- 无 id_arg： ``cache:{prefix}:{qualname}:{args_hash}``
+- 有 id_arg： ``cache:{prefix}:{id_value}:{qualname}:{args_hash}``
 """
 
 import hashlib
@@ -41,55 +57,27 @@ logger = logging.getLogger(__name__)
 DEFAULT_TTL = 300  # 默认 5 分钟
 
 
-def _resolve_skip_indices(
+def _resolve_param_names(
         func: Callable,
-        skip_args: list[int | str],
-) -> frozenset[int]:
-    """将 ``skip_args`` 中的参数名解析为位置索引，与已有的 int 索引合并。"""
-    indices: set[int] = set()
+        values: list[int | str],
+) -> frozenset[str]:
+    """将 ``values`` 中的位置索引 (int) 与参数名 (str) 统一解析为参数名集合。
+
+    越界的 int 索引会被忽略；无法内省签名时（如内置函数）只保留 str 参数名。
+    """
+    try:
+        params = list(inspect.signature(func).parameters)
+    except (ValueError, TypeError):
+        params = []
+
     names: set[str] = set()
-    for v in skip_args:
+    for v in values:
         if isinstance(v, int):
-            indices.add(v)
+            if 0 <= v < len(params):
+                names.add(params[v])
         else:
             names.add(v)
-
-    if names:
-        try:
-            sig = inspect.signature(func)
-            for i, (pname, _param) in enumerate(sig.parameters.items()):
-                if pname in names:
-                    indices.add(i)
-        except (ValueError, TypeError):
-            pass
-
-    return frozenset(indices)
-
-
-def _default_key_builder(
-        prefix: str,
-        func: Callable,
-        args: tuple,
-        kwargs: dict,
-        skip_indices: frozenset[int],
-) -> str:
-    """默认缓存 key 构建器。
-
-    Key 格式：``cache:{prefix}:{qualname}:{args_hash}``
-    """
-    qualname = getattr(func, "__qualname__", func.__name__)
-    # 跳过标记位置的参数
-    if skip_indices:
-        filtered_args = tuple(
-            v for i, v in enumerate(args) if i not in skip_indices
-        )
-    else:
-        filtered_args = args
-
-    raw = _make_hashable(filtered_args, kwargs)
-    payload = json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str)
-    digest = hashlib.md5(payload.encode()).hexdigest()[:12]
-    return f"cache:{prefix}:{qualname}:{digest}"
+    return frozenset(names)
 
 
 def _make_hashable(args: tuple, kwargs: dict) -> list:
@@ -128,6 +116,7 @@ def redis_cache(
         ttl: int = DEFAULT_TTL,
         prefix: str = "default",
         skip_args: list[int | str] | None = None,
+        id_arg: int | str | None = None,
         key_builder: Callable[..., str] | None = None,
         cache_none: bool = False,
 ) -> Callable:
@@ -137,21 +126,55 @@ def redis_cache(
         ttl: 缓存过期时间（秒），默认 300。
         prefix: 缓存 key 前缀，最终 key 为 ``cache:{prefix}:...``。
         skip_args: 不参与 key 计算的参数。支持位置索引 (int) 或参数名 (str)。
-                   例：``skip_args=[0]`` 跳过第一个位置参数；
-                   ``skip_args=["db", "redis"]`` 跳过名为 db、redis 的参数。
-        key_builder: 自定义 key 构建函数，签名为
-                     ``(prefix, func, args, kwargs) -> str``。
-                     提供后忽略 ``skip_args`` 和默认 key 逻辑。
-        cache_none: 是否缓存 ``None`` 返回值。默认 ``False``，避免缓存空结果。
+        id_arg: 嵌入 key 前缀的参数，支持位置索引 (int) 或参数名 (str)。
+                设置后 key 格式变为 ``cache:{prefix}:{id_value}:{qualname}:{hash}``，
+                可通过 ``invalidate_cache(prefix=f"{prefix}:{value}")`` 精确清除。
+        key_builder: 自定义 key 构建函数。
+        cache_none: 是否缓存 ``None`` 返回值。
     """
 
     def deco(func: Callable):
-        _skip_indices = _resolve_skip_indices(func, skip_args or [])
+        # 只内省一次签名，装饰期把 skip/id 统一归一化为参数名
+        try:
+            sig = inspect.signature(func)
+        except (ValueError, TypeError):
+            sig = None
+
+        _skip_names = _resolve_param_names(func, skip_args or [])
+        _id_name: str | None = None
+        if id_arg is not None:
+            _id_name = next(iter(_resolve_param_names(func, [id_arg])), None)
 
         def _build_key(fn: Callable, args: tuple, kwargs: dict) -> str:
             if key_builder is not None:
                 return key_builder(prefix, fn, args, kwargs)
-            return _default_key_builder(prefix, fn, args, kwargs, _skip_indices)
+
+            id_value: str | None = None
+            if sig is not None:
+                try:
+                    bound = sig.bind(*args, **kwargs)
+                    bound.apply_defaults()
+                    arguments = bound.arguments  # 统一的 name -> value
+                    if _id_name is not None and _id_name in arguments:
+                        id_value = str(arguments[_id_name])
+                    raw: Any = {
+                        k: _to_hashable(v)
+                        for k, v in arguments.items()
+                        if k not in _skip_names and k != _id_name
+                    }
+                except TypeError:
+                    # bind 失败（签名不匹配）时回退到原始 args/kwargs
+                    raw = _make_hashable(args, kwargs)
+            else:
+                # 无法内省签名时的回退
+                raw = _make_hashable(args, kwargs)
+
+            payload = json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str)
+            digest = hashlib.md5(payload.encode()).hexdigest()[:12]
+            qualname = getattr(fn, "__qualname__", fn.__name__)
+            if id_value is not None:
+                return f"cache:{prefix}:{id_value}:{qualname}:{digest}"
+            return f"cache:{prefix}:{qualname}:{digest}"
 
         async def _cache_read_write(cache_key: str, compute):
             """共享的缓存读取→回退计算→写入逻辑（异步）。"""
@@ -203,6 +226,7 @@ def redis_cache(
 
             async_wrapper._cache_prefix = prefix
             async_wrapper._cache_ttl = ttl
+            async_wrapper._cache_build_key = _build_key
             return async_wrapper
 
         else:
@@ -246,6 +270,7 @@ def redis_cache(
 
             sync_wrapper._cache_prefix = prefix
             sync_wrapper._cache_ttl = ttl
+            sync_wrapper._cache_build_key = _build_key
             return sync_wrapper
 
     return deco
