@@ -181,6 +181,12 @@ class RedisTaskScheduler:
             try:
                 meta = json.loads(all_pending[task_id])
                 lock_key = meta["lock_key"]
+                task_name = meta.get("task_name")
+                user_id = meta.get("user_id")
+                if not task_name or not user_id:
+                    # 兼容升级前写入的 pending 元数据。lock_key 格式固定为
+                    # ``{task_name}:{user_id}``，从右侧切分可避免影响任务名。
+                    task_name, _, user_id = lock_key.rpartition(":")
                 dispatched_at = meta.get("dispatched_at", 0)
                 age = now - dispatched_at
 
@@ -192,14 +198,16 @@ class RedisTaskScheduler:
                     if result_data.get("status") in ("SUCCESS", "FAILURE", "REVOKED"):
                         should_cleanup = True
                         logger.info(
-                            "Task finished: %s state=%s", task_id,
+                            "Task finished: task=%s user=%s task_id=%s msg_id=%s state=%s",
+                            task_name, user_id, task_id, meta.get("msg_id"),
                             result_data.get("status"),
                         )
                 elif age > TASK_TIMEOUT:
                     should_cleanup = True
                     logger.warning(
-                        "Task expired or lost: %s age=%.0fs, force cleanup",
-                        task_id, age,
+                        "Task expired or lost: task=%s user=%s task_id=%s msg_id=%s "
+                        "age=%.0fs, force cleanup",
+                        task_name, user_id, task_id, meta.get("msg_id"), age,
                     )
 
                 if should_cleanup:
@@ -279,13 +287,17 @@ class RedisTaskScheduler:
         user_id = unit_key.split(":", 1)[1] if ":" in unit_key else unit_key
         return stable_hash(user_id) % self._shard_count == self._shard_index
 
-    def _commit_post_dispatch(self, lock_key, task, msg_id, dispatch_lock):
+    def _commit_post_dispatch(
+        self, lock_key, task, msg_id, dispatch_lock, task_name, user_id,
+    ):
         pipe = self.redis.pipeline()
         pipe.set(lock_key, task.id, ex=3600)
         pipe.hset(PENDING_HASH, task.id, json.dumps({
             "lock_key": lock_key,
             "dispatched_at": time.time(),
             "msg_id": msg_id,
+            "task_name": task_name,
+            "user_id": user_id,
         }))
         pipe.delete(dispatch_lock)
         pipe.set(
@@ -329,7 +341,9 @@ class RedisTaskScheduler:
             return False
         for attempt in range(2):
             try:
-                self._commit_post_dispatch(lock_key, task, msg_id, dispatch_lock)
+                self._commit_post_dispatch(
+                    lock_key, task, msg_id, dispatch_lock, task_name, user_id,
+                )
                 break
             except Exception as e:
                 logger.error(
@@ -340,7 +354,10 @@ class RedisTaskScheduler:
                 self.errors += 1
 
         self.dispatched += 1
-        logger.info("Task dispatched: %s (msg=%s)", task.id, msg_id)
+        logger.info(
+            "Task dispatched: task=%s user=%s task_id=%s msg_id=%s",
+            task_name, user_id, task.id, msg_id,
+        )
         return True
 
     def _process_batch(self, unit_keys):

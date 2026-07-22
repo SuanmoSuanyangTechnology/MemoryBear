@@ -8,7 +8,7 @@
  */
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Button } from 'antd';
+import { Button, Flex } from 'antd';
 import KnowledgeGraph, { type KnowledgeGraphResponse } from './KnowledgeGraph'
 import { getKnowledgeGraph } from '@/api/knowledgeBase';
 import { type KnowledgeBase } from '../types';
@@ -56,31 +56,27 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
   }, [knowledgeBase?.id])
 
   return (
-    <div className='rb:flex rb:w-full rb:flex-col'>
-      <div className='rb:flex rb:w-full rb:flex-col rb:p-4'>
+    <Flex vertical className='rb:w-full'>
+      <Flex align="center" justify="space-between" className='rb:w-full rb:px-4! rb:pb-4!'>
+        <div>
           <div className='rb:w-full rb:text-lg rb:font-medium rb:text-[#212332] rb:leading-6'>
-             {t('knowledgeBase.graphTitle')}
+              {t('knowledgeBase.graphTitle')}
           </div>
           <div className='rb:w-full rb:text-xs rb:text-[#5B6167] rb:leading-4 rb:mt-2'>
             {t('knowledgeBase.graphTips')}
           </div>
-          <div className='rb:flex rb:w-full rb:items-center rb:justify-between rb:mt-4'>
-            <span className='rb:text-base rb:font-medium rb:text-[#212332]'>
-              {knowledgeBase?.parser_config?.graphrag?.scene_name}
-            </span>
-            <Button type="primary" onClick={() => handleRebuildGraph()}>
-                {t('knowledgeBase.rebuildGraph')}
-            </Button>
-          </div>
-      </div>
-      <div className='rb:p-4 rb:pt-0'>
+        </div>
+        <Button type="primary" onClick={() => handleRebuildGraph()}>
+          {t('knowledgeBase.rebuildGraph')}
+        </Button>
+      </Flex>
+      <div className='rb:px-4 rb:pb-4'>
         {knowledgeBase?.parser_config?.graphrag?.use_graphrag ? 
-          (<KnowledgeGraph data={data} loading={loading} />) 
+          (<KnowledgeGraph title={knowledgeBase?.parser_config?.graphrag?.scene_name} data={data} loading={loading} />) 
           : 
           <Empty title={t('knowledgeBase.graphEmpty')}/>}
       </div>
-      
-    </div>
+    </Flex>
   )
 }
 

@@ -150,13 +150,13 @@ const WordCloud: FC = () => {
             <Flex vertical gap={20} className="rb:pt-1!">
               {wordCloud.tags.map(item => (
                 <div key={item.emotion_type}>
-                  <div className="rb:flex rb:items-center rb:justify-between">
+                  <Flex align="center" justify="space-between">
                     <div>
                       <span className="rb:font-medium rb:text-[#212332]">{t(`statementDetail.${item.emotion_type}`)}</span>
                       <span className="rb:font-regular rb:text-[#5B6167]">({item.count} {t('statementDetail.pieces')})</span>
                     </div>
                     <div className="rb:font-medium">{item.percentage.toFixed(1)}%</div>
-                  </div>
+                  </Flex>
                   <Progress strokeColor="#155EEF" percent={item.percentage} showInfo={false} />
                 </div>
               ))}

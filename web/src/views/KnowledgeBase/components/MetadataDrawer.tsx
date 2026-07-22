@@ -130,7 +130,7 @@ const MetadataDrawer = forwardRef<MetadataDrawerRef>((_props, ref) => {
                     justify="space-between"
                     className="rb:w-full! rb-border rb:rounded-lg rb:p-2! rb:relative rb:group"
                   >
-                    <div className="rb:flex rb:items-center rb:gap-2">
+                    <Flex align="center" gap={8}>
                       <span className="rb:text-[#5B6167] rb:text-[12px]">
                         {item.type === 'string'
                           ? <FieldStringOutlined />
@@ -141,7 +141,7 @@ const MetadataDrawer = forwardRef<MetadataDrawerRef>((_props, ref) => {
                       </span>
                       <span className="rb:font-medium">{item.name}</span>
                       <Tag color="blue">{item.type}</Tag>
-                    </div>
+                    </Flex>
                     <span className="rb:text-[12px] rb:text-[#5B6167]">
                       {item.count || 0} {t('knowledgeBase.metadata.valueCount')}
                     </span>
@@ -180,7 +180,7 @@ const MetadataDrawer = forwardRef<MetadataDrawerRef>((_props, ref) => {
                       'rb:opacity-65': !builtinEnabled,
                     })}
                   >
-                    <div className="rb:flex rb:items-center rb:gap-2">
+                    <Flex align="center" gap={8}>
                       <span className="rb:text-[#5B6167] rb:text-[12px]">
                         {item.type === 'string'
                           ? <FieldStringOutlined />
@@ -191,7 +191,7 @@ const MetadataDrawer = forwardRef<MetadataDrawerRef>((_props, ref) => {
                       </span>
                       <span className="rb:font-medium">{item.name}</span>
                       <Tag color="blue">{item.type}</Tag>
-                    </div>
+                    </Flex>
                     {!builtinEnabled && t('knowledgeBase.metadata.builtinDisabled')}
                   </Flex>
                 ))}

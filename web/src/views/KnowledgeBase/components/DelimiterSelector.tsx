@@ -1,5 +1,5 @@
 import { useState, useEffect, type FC } from 'react';
-import { Select, Input } from 'antd';
+import { Select, Input, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { DELIMITER_OPTIONS, isCustomDelimiter } from '../constants/delimiter';
 
@@ -64,11 +64,11 @@ const DelimiterSelector: FC<DelimiterSelectorProps> = ({
   };
 
   return (
-    <div className={`rb:flex rb:gap-2 ${className}`}>
+    <Flex gap={8} className={`${className}`}>
       <Select
         value={selectedValue}
         onChange={handleSelectChange}
-        placeholder={placeholder || t('knowledgeBase.selectDelimiter') || '请选择分隔符'}
+        placeholder={placeholder || t('knowledgeBase.selectDelimiter')}
         className='rb:w-full'
         options={DELIMITER_OPTIONS.map(opt => ({
           label: opt.label,
@@ -80,11 +80,11 @@ const DelimiterSelector: FC<DelimiterSelectorProps> = ({
         <Input
           value={customValue}
           onChange={handleCustomInputChange}
-          placeholder={t('knowledgeBase.customDelimiterPlaceholder') || '请输入自定义分隔符'}
+          placeholder={t('knowledgeBase.customDelimiterPlaceholder')}
           maxLength={50}
         />
       )}
-    </div>
+    </Flex>
   );
 };
 

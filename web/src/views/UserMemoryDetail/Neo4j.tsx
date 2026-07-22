@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 11:53:08
+ * @Last Modified time: 2026-07-21 17:59:51
  */
 /**
  * Neo4j User Memory Detail View
@@ -27,13 +27,9 @@ import {
   analyticsRefresh,
 } from '@/api/memory'
 import { useI18n } from '@/store/locale'
-
 import PrivateWrap from '@/components/PrivateWrap'
 import { BrainView, ReflectMemory, type ReflectMemoryRef } from '@redbear/memory-brick'
 import { request } from '@/utils/request'
-
-
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 const Neo4j: FC = () => {
   const { id } = useParams()
@@ -118,7 +114,7 @@ const Neo4j: FC = () => {
               <div className="rb:size-12 rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logo.png')]"></div>
             </Popover>
             <Flex gap={16} vertical className="rb:max-h-[calc(100vh-243px)] rb:overflow-y-auto">
-              {isSaas && BrainView && (
+              <PrivateWrap>
                 <Flex
                   align="center"
                   justify="center"
@@ -133,7 +129,7 @@ const Neo4j: FC = () => {
                     "rb:bg-[url('@/assets/images/userMemory/brain_active.svg')]": selectedKey === 'Brain'
                   })}></div>
                 </Flex>
-              )}
+              </PrivateWrap>
 
               <Flex
                 align="center"
@@ -195,14 +191,18 @@ const Neo4j: FC = () => {
                 })}></div>
               </Flex>
 
-              {isSaas && ReflectMemory &&
-                <ReflectMemory
-                  ref={reflectMemoryRef}
-                  request={request}
-                  onOpenChange={(e) => onOpenChange(e, 'reflect')}
-                  selectedKey={selectedKey}
-                />
-              }
+              <PrivateWrap>
+                {() => (
+                  <ReflectMemory
+                    ref={reflectMemoryRef}
+                    request={request}
+                    onOpenChange={(e) => {
+                      onOpenChange(e, 'reflect')
+                    }}
+                    selectedKey={selectedKey}
+                  />
+                )}
+              </PrivateWrap>
             </Flex>
           </Flex>
 
@@ -232,19 +232,19 @@ const Neo4j: FC = () => {
       <div onClick={(e) => e.stopPropagation()}>
         <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
         <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
-        {BrainView && (
-          <Suspense fallback={null}>
-            <PrivateWrap>
+        <Suspense fallback={null}>
+          <PrivateWrap>
+            {() => (
               <BrainView
                 ref={brainViewRef}
                 visible={selectedKey === 'Brain'}
                 className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'}
                 onMemoriesChange={handleBrainMemoriesChange}
-                onClose={() => { setSelectedKey(null); setBrainMemories([]); setRegionId(null) }}
+                onClose={() => { setSelectedKey((prev) => (prev === 'Brain' ? null : prev)); setBrainMemories([]); setRegionId(null) }}
               />
-            </PrivateWrap>
-          </Suspense>
-        )}
+            )}
+          </PrivateWrap>
+        </Suspense>
         <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
         <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
       </div>

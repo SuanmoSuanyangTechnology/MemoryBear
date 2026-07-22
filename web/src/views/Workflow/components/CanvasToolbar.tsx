@@ -1,5 +1,5 @@
 import { useState, forwardRef, useImperativeHandle, useRef } from 'react';
-import { Select, Divider, Tooltip } from 'antd';
+import { Select, Divider, Tooltip, Flex } from 'antd';
 import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import { Node } from '@antv/x6';
@@ -83,7 +83,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
           })}
         ></div>
         {/* 缩放控制按钮 */}
-        <div className={clsx("rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:absolute rb:bottom-5 rb:flex rb:flex-row rb:items-center rb:gap-4 rb:z-1000", {
+        <Flex align="center" gap={16} className={clsx("rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3! rb:py-2! rb:absolute rb:bottom-5 rb:z-1000", {
           'rb:right-8': !selectedNode,
           'rb:right-95.5': selectedNode,
           'rb:bottom-5': !isVariableInspectorVisible,
@@ -156,7 +156,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
           </Tooltip>
           <Divider type="vertical" className="rb:h-4" />
           <FileAddOutlined onClick={addNotes} />
-        </div>
+        </Flex>
       </div>
 
       {/* 变量检查面板 */}

@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Form, Input, Select, App, Button, Tabs, Space } from 'antd';
+import { Form, Input, Select, App, Button, Tabs, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { MCPToolItem, ToolItem } from '../types'
@@ -346,11 +346,13 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         </>
         {/* 请求头模块 */}
         <div className={activeTab !== 'requestHeader' ? 'rb:hidden' : ''}>
-          <div className="rb:flex rb:items-center rb:justify-between rb:mb-1 rb:w-full">
-            <div className="rb:font-medium rb:leading-5">{t('tool.requestHeader')}</div>
+          <Flex align="center" justify="space-between" className="rb:mb-3! rb:w-full">
+            <div>
+              <div className="rb:font-medium rb:leading-5 rb:mb-1">{t('tool.requestHeader')}</div>
+              <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4">{t('tool.requestHeaderDesc')}</div>
+            </div>
             <Button style={{padding: '0 8px', height: '24px'}} onClick={() => handleEditRequestHeader()}>+{t('tool.addRequestHeader')}</Button>
-          </div>
-          <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4 rb:mb-3">{t('tool.requestHeaderDesc')}</div>
+          </Flex>
 
           {requestHeaderList.length === 0
             ? <Empty size={88} />
@@ -364,7 +366,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
                   title: t('tool.requestHeaderName'),
                   dataIndex: 'key',
                   key: 'key',
-                  width: 120,
+                  width: 140,
                 },
                 {
                   title: t('tool.requestHeaderValue'),

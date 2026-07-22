@@ -18,7 +18,6 @@ interface EditableTableProps {
   title?: string;
   options?: Suggestion[];
   typeOptions?: { value: string, label: string }[]
-  filterBooleanType?: boolean;
   size?: "small"
 }
 
@@ -27,7 +26,6 @@ const EditableTable: FC<EditableTableProps> = ({
   title,
   options = [],
   typeOptions = [],
-  filterBooleanType = false,
   size = 'small'
 }) => {
   const { t } = useTranslation();
@@ -80,20 +78,20 @@ const EditableTable: FC<EditableTableProps> = ({
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
     const contentClassName = hasType ? 'rb:w-[110px]!' : "rb:w-[148px]!"
-    const formClassName = 'rb:mb-0! rb:bg-[#F6F6F6] rb:rounded-[8px] rb:py-[2px]! rb:px-[6px]!'
 
     return [
       {
         title: t('workflow.config.name'),
         dataIndex: 'key',
         render: (_: any, __: TableRow, index: number) => (
-          <Form.Item name={[index, 'key']} className={formClassName}>
+          <Form.Item name={[index, 'key']} noStyle>
             <Editor
               options={namefilterOptions}
               type="input"
               className={contentClassName}
               size={size}
-              variant="borderless"
+              height={28}
+              variant="filled"
             />
           </Form.Item>
         )
@@ -140,13 +138,14 @@ const EditableTable: FC<EditableTableProps> = ({
               const filteredOptions = valueFilterOptions(currentType)
               
               return (
-                <Form.Item name={[index, 'value']} className={formClassName}>
+                <Form.Item name={[index, 'value']} noStyle>
                   <Editor
                     options={filteredOptions}
                     type="input"
                     className={contentClassName}
                     size={size}
-                    variant="borderless"
+                    height={28}
+                    variant="filled"
                   />
                 </Form.Item>
               );

@@ -103,10 +103,12 @@ const ButtonStyleModal = forwardRef<ButtonStyleModalRef, ButtonStyleModalProps>(
         >
           <Flex gap={16} wrap="wrap">
             {buttonStyles.map((variant) => (
-              <div
+              <Flex
                 key={variant.value}
+                align="center"
+                justify="center"
                 onClick={() => form.setFieldsValue({ variant: variant.value })}
-                className={`rb:cursor-pointer rb:p-4 rb:border rb:rounded-lg rb:flex rb:items-center rb:justify-center rb:w-[calc(50%-8px)] rb:h-16 ${
+                className={`rb:cursor-pointer rb:p-4! rb:border rb:rounded-lg rb:w-[calc(50%-8px)] rb:h-16 ${
                   currentStyle === variant.value
                     ? 'rb:border-[#1677FF] rb:bg-[#E8F4FD]'
                     : 'rb:border-[#E5E6EB] rb:bg-white'
@@ -118,7 +120,7 @@ const ButtonStyleModal = forwardRef<ButtonStyleModalRef, ButtonStyleModalProps>(
                 >
                   {buttonText}
                 </Button>
-              </div>
+              </Flex>
             ))}
           </Flex>
         </FormItem>

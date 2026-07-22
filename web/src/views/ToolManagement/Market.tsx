@@ -284,7 +284,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   const renderSourceDetail = () => {
     if (!selectedSource) {
       return (
-        <div className="rb:flex rb:flex-col rb:items-center rb:justify-center rb:h-full rb:text-center">
+        <Flex vertical align="center" justify="center" className="rb:h-full rb:text-center">
           <Empty
             url={pageEmptyIcon}
             title={t('tool.marketSelectTitle')}
@@ -293,7 +293,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
             className="rb:h-full"
           />
 
-        </div>
+        </Flex>
       );
     }
 
@@ -394,7 +394,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                         </Flex>
                       }
                       isNeedTooltip={false}
-                      footer={<Flex justify="space-between" align="center" className="rb:text-[#5B6167] rb:text-[12px] rb:mb-1!">
+                      footer={<Flex justify={mcp.publisher && mcp.view_count ? 'space-between' : mcp.view_count ? 'flex-end' : 'flex-start'} align="center" className="rb:text-[#5B6167] rb:text-[12px]">
                         {mcp.publisher && <span>{mcp.publisher.startsWith('@') ? mcp.publisher : `@${mcp.publisher}`}</span>}
                         {mcp.view_count && <Space size={4}>
                           <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/global_outline.svg')]"></div>
@@ -443,7 +443,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                     })}
                     onClick={() => handleSelectSource(source.id)}
                   >
-                    <div className="rb:size-7 rb:shrink-0 rb:flex rb:items-center rb:justify-center rb:overflow-hidden rb:rounded rb:bg-gray-100">
+                    <Flex align="center" justify="center" className="rb:size-7 rb:shrink-0 rb:overflow-hidden rb:rounded rb:bg-gray-100">
                       {source.logo_url ? (
                         <img
                           src={source.logo_url}
@@ -457,7 +457,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                       ) : (
                         <div className="rb:size-7 rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/tool/market.png')]"></div>
                       )}
-                    </div>
+                    </Flex>
                     <span className="rb:flex-1 rb:font-medium rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
                       {source.name}
                     </span>
