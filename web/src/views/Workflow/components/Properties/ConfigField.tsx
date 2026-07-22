@@ -1,17 +1,12 @@
-import { type FC } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Graph, Node } from '@antv/x6'
-import { Form, Flex, type FormInstance } from 'antd'
+import type { FC } from 'react'
 import clsx from 'clsx'
+import { useTranslation } from 'react-i18next'
+import { Form, Flex } from 'antd'
 
-import type { NodeConfig } from '../../types'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import type { LexicalEditorProps } from '../Editor'
-import type { Model } from '@/views/ModelManagement/types'
-import type { Memory } from '@/views/MemoryManagement/types'
-import type { Application } from '@/views/ApplicationManagement/types'
-import MessageEditor from './MessageEditor'
 import Knowledge from '@/components/Knowledge'
+import MessageEditor from './MessageEditor'
 import ParamsList from './ParamsList'
 import GroupVariableList from './GroupVariableList'
 import CaseList from './CaseList'
@@ -27,71 +22,35 @@ import RadioGroupBtn from './RadioGroupBtn'
 import Retry from './Retry'
 import ToolList from './ToolList'
 import MetadataFilter from './MetadataFilter'
-import ConfigFieldControl from './ConfigFieldControl'
+import BasicField from './BasicField'
+import { useProperties } from './PropertiesContext'
 
-/**
- * Props for ConfigFieldRenderer
- */
-interface ConfigFieldRendererProps {
-  /** Configuration key being rendered */
+interface ConfigFieldProps {
+  /** Configuration key */
   configKey: string
-  /** Configuration descriptor for this key */
-  config: NodeConfig
-  /** Current form values */
-  values: any
-  /** Currently selected node */
-  selectedNode: Node
-  /** Reference to graph instance */
-  graphRef: React.MutableRefObject<Graph | undefined>
-  /** Form instance */
-  form: FormInstance
-  /** Full variable list */
-  variableList: Suggestion[]
-  /** Get filtered variable list bound to the selected node */
-  getVariables: (nodeType?: string, key?: string) => Suggestion[]
-  /** Application type */
-  appType?: Application['type']
-  /** Active memory configuration */
-  activeMemoryConfig?: Memory | null
-  /** Model options resolved by ModelSelect */
-  modelOptions: Model[]
-  /** Setter for model options */
-  setModelOptions: (models: Model[]) => void
-  /** Advanced settings collapsed flag */
-  advancedSettingsCollapsed: boolean
-  /** Toggle advanced settings collapsed flag */
-  setAdvancedSettingsCollapsed: (collapsed: boolean) => void
-  /** Handler for model change */
-  handleChangeModel: (value: string, option: any) => void
-  /** Handler for variable list change */
-  handleChangeVariableList: (value: string, option: any, key: string) => void
 }
 
 /**
- * Renders a single node configuration field.
- * Dispatches on the config `type` (and on some node-type / key specific rules)
- * to produce the right form control. Extracted from Properties to keep the
- * orchestrating component small.
+ * Dispatches a single node configuration field to the right control.
+ * Handles all the "complex" config types and special-cased keys, and falls
+ * back to `BasicField` for primitive controls.
  */
-const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
-  configKey: key,
-  config,
-  values,
-  selectedNode,
-  graphRef,
-  form,
-  variableList,
-  getVariables,
-  appType,
-  activeMemoryConfig,
-  modelOptions,
-  setModelOptions,
-  advancedSettingsCollapsed,
-  setAdvancedSettingsCollapsed,
-  handleChangeModel,
-  handleChangeVariableList,
-}) => {
+const ConfigField: FC<ConfigFieldProps> = ({ configKey: key }) => {
   const { t } = useTranslation()
+  const {
+    configs,
+    values,
+    selectedNode,
+    graphRef,
+    appType,
+    variableList,
+    advancedSettingsCollapsed,
+    setAdvancedSettingsCollapsed,
+    modelOptions,
+    getFilteredVariableList,
+  } = useProperties()
+
+  const config = configs[key] || {}
 
   if (config.dependsOn && (values as any)?.[config.dependsOn as string] !== config.dependsOnValue) {
     return null
@@ -115,14 +74,14 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
       <ModelConfig
         key={key}
         parentName={selectedNode?.data?.type === 'agent' ? key : undefined}
-        variableOptions={getVariables(selectedNode?.data?.type)}
+        variableOptions={getFilteredVariableList(selectedNode?.data?.type)}
         hideStructuredOutputConfig={!(key === 'model_id' && selectedNode?.data?.type === 'llm')}
       />
     )
   }
   if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
-    // Add context variable support for LLM nodes when isArray=true
-    let contextVariableList = [...getVariables('llm')];
+    // 为llm节点且isArray=true时添加context变量支持
+    let contextVariableList = [...getFilteredVariableList('llm')];
     const isArrayMode = config.isArray !== false; // 默认为true
 
     if (isArrayMode) {
@@ -228,7 +187,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
           isArray={!!config.isArray}
           parentName={key}
           language={config.language as LexicalEditorProps['language']}
-          options={getVariables(selectedNode?.data?.type, key)}
+          options={getFilteredVariableList(selectedNode?.data?.type, key)}
           titleVariant={config.titleVariant}
           size="small"
         />
@@ -250,7 +209,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
       <Form.Item key={key} name={key}>
         <GroupVariableList
           name={key}
-          options={getVariables(selectedNode?.data?.type, key)}
+          options={getFilteredVariableList(selectedNode?.data?.type, key)}
           isCanAdd={!!(values as any)?.group}
           size="small"
         />
@@ -262,7 +221,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
       <Form.Item key={key} name={key} noStyle>
         <CaseList
           name={key}
-          options={getVariables(selectedNode?.data?.type, key)}
+          options={getFilteredVariableList(selectedNode?.data?.type, key)}
           selectedNode={selectedNode}
           graphRef={graphRef}
         />
@@ -275,7 +234,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
         <CycleVarsList
           size="small"
           parentName={key}
-          options={getVariables(selectedNode?.data?.type, key)}
+          options={getFilteredVariableList(selectedNode?.data?.type, key)}
           selectedNode={selectedNode}
           graphRef={graphRef}
         />
@@ -291,9 +250,9 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
             if (config.filterLoopIterationVars) {
               const loopIterationVars: Suggestion[] = [];
 
-              return [...getVariables(selectedNode?.data?.type, key), ...loopIterationVars];
+              return [...getFilteredVariableList(selectedNode?.data?.type, key), ...loopIterationVars];
             }
-            return getVariables(selectedNode?.data?.type, key);
+            return getFilteredVariableList(selectedNode?.data?.type, key);
           })()
           }
         />
@@ -311,7 +270,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
         <MemoryConfig
           parentName={key}
           needMsg={config.needMsg as boolean}
-          options={getVariables('llm')}
+          options={getFilteredVariableList('llm')}
         />
       </Form.Item>
     )
@@ -327,7 +286,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
           parentName={key}
           options={(() => {
             const cycleVars = values?.cycle_vars || [];
-            const cycleVarSuggestions: Suggestion[] = cycleVars.filter((vo: any) => vo.name && vo.name.trim() !== '').map((cycleVar: any) => ({
+            const cycleVarSuggestions: Suggestion[] = cycleVars.filter(vo => vo.name && vo.name.trim() !== '').map((cycleVar: any) => ({
               key: `${selectedNode.id}_cycle_${cycleVar.name}`,
               label: cycleVar.name,
               type: 'variable',
@@ -336,7 +295,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
               nodeData: selectedNode.getData(),
             }));
 
-            return [...getVariables(selectedNode?.data?.type, key), ...cycleVarSuggestions];
+            return [...getFilteredVariableList(selectedNode?.data?.type, key), ...cycleVarSuggestions];
           })()}
           selectedNode={selectedNode}
           graphRef={graphRef}
@@ -350,7 +309,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
       key={key}
       label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
       name={key}
-      options={getVariables(selectedNode?.data?.type, key)}
+      options={getFilteredVariableList(selectedNode?.data?.type, key)}
       isNeedType={config.isNeedType as boolean}
     />
   }
@@ -379,43 +338,7 @@ const ConfigFieldRenderer: FC<ConfigFieldRendererProps> = ({
     )
   }
 
-  return (
-    <Form.Item
-      key={key}
-      name={key}
-      label={key === 'vision_input'
-        ? undefined : key === 'parallel_count'
-          ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
-          : t(`workflow.config.${selectedNode?.data?.type}.${key}`)
-      }
-      tooltip={config.tip ? t(config.tip) : undefined}
-      layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
-      className={
-        key === 'parallel' && values?.parallel
-          ? 'rb:mb-1!'
-          : key === 'vision' && values?.vision
-            ? 'rb:mb-2!'
-            : key === 'group' && values?.group
-              ? 'rb:mb-3!'
-              : ''
-      }
-      hidden={Boolean(config.hidden)}
-      required={config.required}
-    >
-      <ConfigFieldControl
-        configKey={key}
-        config={config}
-        selectedNode={selectedNode}
-        graphRef={graphRef}
-        form={form}
-        getVariables={getVariables}
-        activeMemoryConfig={activeMemoryConfig}
-        setModelOptions={setModelOptions}
-        handleChangeModel={handleChangeModel}
-        handleChangeVariableList={handleChangeVariableList}
-      />
-    </Form.Item>
-  )
+  return <BasicField configKey={key} config={config} />
 }
 
-export default ConfigFieldRenderer
+export default ConfigField

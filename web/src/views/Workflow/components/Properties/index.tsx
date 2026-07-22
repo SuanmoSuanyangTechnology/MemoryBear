@@ -1,30 +1,31 @@
 /*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 15:39:59 
+ * @Author: ZhaoYing
+ * @Date: 2026-02-03 15:39:59
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-07-15 11:05:08
  */
-import { type FC, useEffect, useState, useMemo } from "react";
+import { type FC, useEffect, useState } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
 import { Form, Input, Flex, Space, Dropdown, type MenuProps, App, Popover, Tabs } from 'antd';
 
 import type { NodeConfig, ChatVariable, EnvVariable } from '../../types'
-import { useVariableList, getCurrentNodeVariables } from './hooks/useVariableList'
+import { useVariableList } from './hooks/useVariableList'
+import { useFilteredVariableList } from './hooks/useFilteredVariableList'
 import { useWorkflowStore } from '@/store/workflow'
 import styles from './properties.module.css'
-import { nodeLibrary, cannotRunNodes } from '../../constant';
+import { cannotRunNodes } from '../../constant';
 import RbCard from '@/components/RbCard/Card';
-import SingleNodeRun from '../SingleNodeRun'
 import type { Model } from '@/views/ModelManagement/types';
+import SingleNodeRun from '../SingleNodeRun'
 import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisplay'
 import type { Application } from '@/views/ApplicationManagement/types'
 import { getWorkflowNodeLastRunDetail } from '@/api/application'
 import { openHelpCenter } from '@/utils/help';
 import type { Memory } from '@/views/MemoryManagement/types'
-import { getFilteredVariableList as getFilteredVariableListRaw } from './getFilteredVariableList'
-import NodeSettingsBody from './NodeSettingsBody'
+import { PropertiesProvider, type PropertiesContextValue } from './PropertiesContext'
+import SettingBody from './SettingBody'
 
 /**
  * Props for Properties component
@@ -82,11 +83,21 @@ const Properties: FC<PropertiesProps> = ({
 }) => {
   const { t, i18n } = useTranslation()
   const { message } = App.useApp()
+  const { getCheckResults } = useWorkflowStore()
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
   const values = Form.useWatch([], form);
   const variableList = useVariableList(selectedNode, graphRef, chatVariables, envVariables, appType)
+  const getFilteredVariableList = useFilteredVariableList(selectedNode, graphRef, variableList)
   const data = selectedNode.getData() || {}
+
+  const [advancedSettingsCollapsed, setAdvancedSettingsCollapsed] = useState(false)
+  const [modelOptions, setModelOptions] = useState<Model[]>([])
+  const [isRun, setIsRun] = useState(false);
+  const [nameHover, setNameHover] = useState(false)
+  const [activeKey, setActiveKey] = useState('setting')
+  const [result, setResult] = useState<RunResult>({} as RunResult)
+  const [resultLoading, setResultLoading] = useState(false)
 
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
@@ -157,70 +168,7 @@ const Properties: FC<PropertiesProps> = ({
       }, { deep: false })
     }
   }, [values, selectedNode, form])
-  /**
-   * Get filtered variable list bound to the current node / graph.
-   * @param nodeType - Type of the node
-   * @param key - Configuration key
-   * @returns Filtered variable list
-   */
-  const getFilteredVariableList = (nodeType?: string, key?: string) =>
-    getFilteredVariableListRaw(selectedNode, graphRef, variableList, nodeType, key);
 
-
-  /**
-   * Get current node output variables
-   */
-  const currentNodeVariables = useMemo(() => {
-    if (!selectedNode) return []
-    return getCurrentNodeVariables(selectedNode?.getData(), values, variableList)
-  }, [selectedNode?.getData(), values])
-
-  /**
-   * Handle variable list change and update output type for iteration nodes
-   * @param _value - Selected value
-   * @param option - Selected option
-   * @param key - Configuration key
-   */
-  const handleChangeVariableList = (_value: string, option: any, key: string) => {
-    if (selectedNode?.data?.type === 'iteration' && key === 'output') {
-      form.setFieldValue('output_type', option?.dataType)
-    }
-  }
-  const handleSureReplace = () => {
-    const { replaceNode } = values;
-    const nodeLibraryConfig = [...nodeLibrary]
-      .flatMap(category => category.nodes)
-      .find(n => n.type === replaceNode)
-
-    if (replaceNode && nodeLibraryConfig) {
-      // Preserve existing config values when switching node types
-      const currentData = selectedNode?.data || {};
-      const currentConfig = currentData.config || {};
-      const newConfig = nodeLibraryConfig.config || {};
-
-      // Merge configs: keep existing values for matching keys, add new keys from template
-      const mergedConfig: Record<string, any> = {};
-      Object.keys(newConfig).forEach(key => {
-        if (currentConfig[key] && currentConfig[key].defaultValue !== undefined) {
-          // Preserve existing value if it exists
-          mergedConfig[key] = {
-            ...newConfig[key],
-            defaultValue: currentConfig[key].defaultValue
-          };
-        } else {
-          // Use new config template
-          mergedConfig[key] = { ...newConfig[key] };
-        }
-      });
-
-      selectedNode?.setData({
-        ...currentData,
-        ...nodeLibraryConfig,
-        config: mergedConfig
-      })
-      blankClick()
-    }
-  }
   const handleClick: MenuProps['onClick'] = (e) => {
     switch (e.key) {
       case 'delete':
@@ -231,8 +179,6 @@ const Properties: FC<PropertiesProps> = ({
     }
   }
 
-  const [isRun, setIsRun] = useState(false);
-  const { getCheckResults } = useWorkflowStore()
   const handleRun = () => {
     handleSave?.(false)
       .then(() => {
@@ -247,49 +193,6 @@ const Properties: FC<PropertiesProps> = ({
         setIsRun(true)
       })
   }
-  const [advancedSettingsCollapsed, setAdvancedSettingsCollapsed] = useState(false)
-  const [modelOptions, setModelOptions] = useState<Model[]>([])
-
-  const handleChangeModel = (_value: string, option: any) => {
-    if (!option?.capability?.includes('function_call') && data.type === 'parameter-extractor') {
-      form.setFieldValue('inference_mode', 'prompt')
-    }
-  }
-
-  const handleAddNode = (e: React.MouseEvent, portId?: string) => {
-    const graph = graphRef.current;
-    if (!graph) return;
-
-    let sourcePortId = portId;
-    if (!sourcePortId) {
-      const sourceNodePort = selectedNode.getPorts().find((p: any) => p.group === 'right');
-      sourcePortId = sourceNodePort?.id || 'right';
-    }
-
-    const tempElement = document.createElement('div');
-    tempElement.style.cssText = 'position: fixed; width: 1px; height: 1px; z-index: 9999;';
-    
-    tempElement.style.left = `${e.clientX}px`;
-    tempElement.style.top = `${e.clientY}px`;
-    
-    document.body.appendChild(tempElement);
-
-    const event = new CustomEvent('port:click', {
-      detail: {
-        node: selectedNode,
-        port: sourcePortId,
-        element: tempElement,
-        edgeInsertion: null,
-      },
-    });
-    window.dispatchEvent(event);
-  }
-
-  const [nameHover, setNameHover] = useState(false)
-  const [activeKey, setActiveKey] = useState('setting')
-
-  const [result, setResult] = useState<RunResult>({} as RunResult)
-  const [resultLoading, setResultLoading] = useState(false)
 
   const getNodeLastRun = () => {
     if (!appId || !data?.id) return
@@ -308,6 +211,7 @@ const Properties: FC<PropertiesProps> = ({
     const lang = currentLang === 'zh' ? 'zh' : 'en';
     openHelpCenter(lang, data.type);
   };
+
   useEffect(() => {
     if (!isRun) {
       getNodeLastRun()
@@ -322,6 +226,26 @@ const Properties: FC<PropertiesProps> = ({
       getNodeLastRun()
     }
   }, [activeKey])
+
+  const contextValue: PropertiesContextValue = {
+    selectedNode,
+    graphRef,
+    form,
+    values: values as NodeConfig,
+    data,
+    variableList,
+    configs,
+    appType,
+    activeMemoryConfig,
+    modelOptions,
+    setModelOptions,
+    advancedSettingsCollapsed,
+    setAdvancedSettingsCollapsed,
+    getFilteredVariableList,
+    blankClick,
+    nodeClick,
+  }
+
   return (
     <div className={clsx("rb:h-[calc(100vh-132px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-30 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical" className="rb:h-full!">
@@ -390,28 +314,9 @@ const Properties: FC<PropertiesProps> = ({
           />
           <div className="rb:h-[calc(100%-54px)] rb:overflow-y-auto!">
             {activeKey === 'setting' &&
-              <NodeSettingsBody
-                selectedNode={selectedNode}
-                graphRef={graphRef}
-                data={data}
-                configs={configs}
-                values={values}
-                form={form}
-                variableList={variableList}
-                currentNodeVariables={currentNodeVariables}
-                getVariables={getFilteredVariableList}
-                appType={appType}
-                activeMemoryConfig={activeMemoryConfig}
-                modelOptions={modelOptions}
-                setModelOptions={setModelOptions}
-                advancedSettingsCollapsed={advancedSettingsCollapsed}
-                setAdvancedSettingsCollapsed={setAdvancedSettingsCollapsed}
-                handleChangeModel={handleChangeModel}
-                handleChangeVariableList={handleChangeVariableList}
-                handleSureReplace={handleSureReplace}
-                handleAddNode={handleAddNode}
-                nodeClick={nodeClick}
-              />
+              <PropertiesProvider value={contextValue}>
+                <SettingBody />
+              </PropertiesProvider>
             }
             {activeKey === 'lastRun' &&
               <div className="rb:px-3!">
