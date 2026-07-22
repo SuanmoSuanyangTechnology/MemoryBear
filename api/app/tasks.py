@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import redis
 from elasticsearch import AsyncElasticsearch
@@ -420,6 +420,90 @@ def _run_clear_all_knowledge_graph_data(knowledge_id: str) -> dict[str, Any]:
 
 def _graph_task_retry_countdown(task) -> int:
     return min(300, 2 ** int(task.request.retries or 0))
+
+
+def _redacted_graph_exc_info(exc: Exception):
+    redacted = RuntimeError(f"{type(exc).__name__}: message redacted")
+    return type(redacted), redacted, exc.__traceback__
+
+
+def _run_observed_graph_task(
+        task,
+        *,
+        task_name: str,
+        knowledge_id: str,
+        operation: Callable[[], dict[str, Any]],
+        document_id: str | None = None,
+) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    task_id = str(getattr(task.request, "id", None) or "unknown")
+    retry = int(getattr(task.request, "retries", 0) or 0)
+    document_field = (
+        f" document_id={document_id}" if document_id is not None else ""
+    )
+    logger.info(
+        "[EvidenceGraph] task_start"
+        " task=%s task_id=%s kb_id=%s%s retry=%d",
+        task_name,
+        task_id,
+        str(knowledge_id),
+        document_field,
+        retry,
+    )
+    try:
+        result = operation()
+    except GraphPipelineConfigError as exc:
+        logger.error(
+            "[EvidenceGraph] task_failed"
+            " task=%s task_id=%s kb_id=%s%s"
+            " status=failure error_type=%s retry=%d elapsed_ms=%d",
+            task_name,
+            task_id,
+            str(knowledge_id),
+            document_field,
+            type(exc).__name__,
+            retry,
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        raise
+    except Exception as exc:
+        countdown = _graph_task_retry_countdown(task)
+        logger.warning(
+            "[EvidenceGraph] task_retry"
+            " task=%s task_id=%s kb_id=%s%s"
+            " error_type=%s retry=%d countdown=%d elapsed_ms=%d",
+            task_name,
+            task_id,
+            str(knowledge_id),
+            document_field,
+            type(exc).__name__,
+            retry,
+            countdown,
+            int((time.perf_counter() - started_at) * 1000),
+            exc_info=_redacted_graph_exc_info(exc),
+        )
+        raise task.retry(exc=exc, countdown=countdown)
+
+    status_value = str(result.get("status") or "completed")
+    is_skip = status_value in {"skipped", "already_evidence"}
+    reason = str(
+        result.get("reason")
+        or ("idempotent" if status_value == "already_evidence" else "none")
+    )
+    logger.info(
+        "[EvidenceGraph] %s"
+        " task=%s task_id=%s kb_id=%s%s"
+        " status=%s reason=%s elapsed_ms=%d",
+        "task_skip" if is_skip else "task_done",
+        task_name,
+        task_id,
+        str(knowledge_id),
+        document_field,
+        status_value,
+        reason,
+        int((time.perf_counter() - started_at) * 1000),
+    )
+    return result
 
 
 def _resolve_model_api_key(db, model_config_id, tenant_id, role: str):
@@ -1436,22 +1520,16 @@ def sync_evidence_graph_document(
         knowledge_id: str,
         document_id: str,
 ):
-    try:
-        return _run_evidence_graph_document(knowledge_id, document_id)
-    except GraphPipelineConfigError:
-        raise
-    except Exception as exc:
-        logger.exception(
-            "[EvidenceGraph] document sync failed",
-            extra={
-                "knowledge_id": str(knowledge_id),
-                "document_id": str(document_id),
-            },
-        )
-        raise self.retry(
-            exc=exc,
-            countdown=_graph_task_retry_countdown(self),
-        )
+    return _run_observed_graph_task(
+        self,
+        task_name="sync_document",
+        knowledge_id=str(knowledge_id),
+        document_id=str(document_id),
+        operation=lambda: _run_evidence_graph_document(
+            knowledge_id,
+            document_id,
+        ),
+    )
 
 
 @celery_app.task(
@@ -1460,19 +1538,12 @@ def sync_evidence_graph_document(
     max_retries=5,
 )
 def rebuild_evidence_graph_knowledge(self, knowledge_id: str):
-    try:
-        return _run_evidence_graph_rebuild(knowledge_id)
-    except GraphPipelineConfigError:
-        raise
-    except Exception as exc:
-        logger.exception(
-            "[EvidenceGraph] knowledge rebuild failed",
-            extra={"knowledge_id": str(knowledge_id)},
-        )
-        raise self.retry(
-            exc=exc,
-            countdown=_graph_task_retry_countdown(self),
-        )
+    return _run_observed_graph_task(
+        self,
+        task_name="rebuild_knowledge",
+        knowledge_id=str(knowledge_id),
+        operation=lambda: _run_evidence_graph_rebuild(knowledge_id),
+    )
 
 
 @celery_app.task(
@@ -1481,19 +1552,12 @@ def rebuild_evidence_graph_knowledge(self, knowledge_id: str):
     max_retries=5,
 )
 def migrate_evidence_graph_knowledge(self, knowledge_id: str):
-    try:
-        return _run_evidence_graph_migration(knowledge_id)
-    except GraphPipelineConfigError:
-        raise
-    except Exception as exc:
-        logger.exception(
-            "[EvidenceGraph] knowledge migration failed",
-            extra={"knowledge_id": str(knowledge_id)},
-        )
-        raise self.retry(
-            exc=exc,
-            countdown=_graph_task_retry_countdown(self),
-        )
+    return _run_observed_graph_task(
+        self,
+        task_name="migrate_knowledge",
+        knowledge_id=str(knowledge_id),
+        operation=lambda: _run_evidence_graph_migration(knowledge_id),
+    )
 
 
 @celery_app.task(
@@ -1502,19 +1566,12 @@ def migrate_evidence_graph_knowledge(self, knowledge_id: str):
     max_retries=5,
 )
 def clear_all_knowledge_graph_data(self, knowledge_id: str):
-    try:
-        return _run_clear_all_knowledge_graph_data(knowledge_id)
-    except GraphPipelineConfigError:
-        raise
-    except Exception as exc:
-        logger.exception(
-            "[EvidenceGraph] clear all graph data failed",
-            extra={"knowledge_id": str(knowledge_id)},
-        )
-        raise self.retry(
-            exc=exc,
-            countdown=_graph_task_retry_countdown(self),
-        )
+    return _run_observed_graph_task(
+        self,
+        task_name="clear_knowledge",
+        knowledge_id=str(knowledge_id),
+        operation=lambda: _run_clear_all_knowledge_graph_data(knowledge_id),
+    )
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")

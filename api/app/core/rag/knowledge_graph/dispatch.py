@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -7,6 +8,32 @@ from app.core.rag.knowledge_graph.config import (
     is_graph_enabled,
     resolve_graph_pipeline,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _log_dispatched_task(
+    task: Any,
+    *,
+    scope: str,
+    pipeline: GraphPipeline,
+    task_name: str,
+    knowledge_id: str,
+    document_id: str | None = None,
+) -> None:
+    document_field = (
+        f" document_id={document_id}" if document_id is not None else ""
+    )
+    logger.info(
+        "[GraphPipeline] task_dispatched"
+        " scope=%s pipeline=%s task=%s kb_id=%s%s task_id=%s",
+        scope,
+        pipeline.value,
+        task_name,
+        str(knowledge_id),
+        document_field,
+        str(getattr(task, "id", None) or "unknown"),
+    )
 
 
 def dispatch_document_graph_sync(
@@ -23,14 +50,26 @@ def dispatch_document_graph_sync(
     if pipeline is GraphPipeline.LEGACY:
         if not dispatch_legacy:
             return None
-        return celery_app.send_task(
-            "app.core.rag.tasks.build_graphrag_for_document",
+        task_name = "app.core.rag.tasks.build_graphrag_for_document"
+        task = celery_app.send_task(
+            task_name,
             args=[str(document_id), str(knowledge_id)],
         )
-    return celery_app.send_task(
-        "app.core.rag.tasks.sync_evidence_graph_document",
-        args=[str(knowledge_id), str(document_id)],
+    else:
+        task_name = "app.core.rag.tasks.sync_evidence_graph_document"
+        task = celery_app.send_task(
+            task_name,
+            args=[str(knowledge_id), str(document_id)],
+        )
+    _log_dispatched_task(
+        task,
+        scope="document",
+        pipeline=pipeline,
+        task_name=task_name,
+        knowledge_id=str(knowledge_id),
+        document_id=str(document_id),
     )
+    return task
 
 
 def dispatch_knowledge_graph_rebuild(
@@ -46,7 +85,15 @@ def dispatch_knowledge_graph_rebuild(
         if pipeline is GraphPipeline.LEGACY
         else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
     )
-    return celery_app.send_task(task_name, args=[str(knowledge_id)])
+    task = celery_app.send_task(task_name, args=[str(knowledge_id)])
+    _log_dispatched_task(
+        task,
+        scope="knowledge",
+        pipeline=pipeline,
+        task_name=task_name,
+        knowledge_id=str(knowledge_id),
+    )
+    return task
 
 
 def dispatch_graph_enabled_transition(
@@ -62,7 +109,17 @@ def dispatch_graph_enabled_transition(
             str(knowledge_id),
             parser_config,
         )
-    return celery_app.send_task(
-        "app.core.rag.tasks.clear_all_knowledge_graph_data",
+    pipeline = resolve_graph_pipeline(parser_config)
+    task_name = "app.core.rag.tasks.clear_all_knowledge_graph_data"
+    task = celery_app.send_task(
+        task_name,
         args=[str(knowledge_id)],
     )
+    _log_dispatched_task(
+        task,
+        scope="knowledge",
+        pipeline=pipeline,
+        task_name=task_name,
+        knowledge_id=str(knowledge_id),
+    )
+    return task

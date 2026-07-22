@@ -399,11 +399,10 @@ async def create_knowledge(
         return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base has been successfully created")
     except GraphPipelineConfigError as e:
         api_logger.warning(
-            "Invalid graph pipeline configuration during knowledge creation",
-            extra={
-                "knowledge_name": create_data.name,
-                "error_type": type(e).__name__,
-            },
+            "Invalid graph pipeline configuration during knowledge creation"
+            " knowledge_name=%s error_type=%s",
+            create_data.name,
+            type(e).__name__,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -621,11 +620,10 @@ async def _update_knowledge(
                 )
             except GraphPipelineConfigError as exc:
                 api_logger.warning(
-                    "Invalid graph pipeline configuration during knowledge update",
-                    extra={
-                        "knowledge_id": str(knowledge_id),
-                        "error_type": type(exc).__name__,
-                    },
+                    "Invalid graph pipeline configuration during knowledge update"
+                    " knowledge_id=%s error_type=%s",
+                    str(knowledge_id),
+                    type(exc).__name__,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -682,18 +680,30 @@ async def _update_knowledge(
 
         if graph_enabled_before is not None:
             try:
-                dispatch_graph_enabled_transition(
+                graph_task = dispatch_graph_enabled_transition(
                     str(db_knowledge.id),
                     graph_enabled_before,
                     db_knowledge.parser_config,
                 )
+                if graph_task is not None:
+                    current_enabled = is_graph_enabled(db_knowledge.parser_config)
+                    pipeline = resolve_graph_pipeline(db_knowledge.parser_config)
+                    api_logger.info(
+                        "Knowledge graph enablement task accepted"
+                        " knowledge_id=%s previous_enabled=%s"
+                        " current_enabled=%s pipeline=%s task_id=%s",
+                        str(db_knowledge.id),
+                        str(graph_enabled_before).lower(),
+                        str(current_enabled).lower(),
+                        pipeline.value,
+                        str(getattr(graph_task, "id", None) or "unknown"),
+                    )
             except Exception as dispatch_error:
                 api_logger.error(
-                    "Failed to dispatch graph task after enablement change",
-                    extra={
-                        "knowledge_id": str(db_knowledge.id),
-                        "error_type": type(dispatch_error).__name__,
-                    },
+                    "Failed to dispatch graph task after enablement change"
+                    " knowledge_id=%s error_type=%s",
+                    str(db_knowledge.id),
+                    type(dispatch_error).__name__,
                 )
 
         if embedding_changed:
@@ -880,11 +890,10 @@ async def delete_knowledge_graph(
             args=[str(knowledge_id)],
         )
         api_logger.info(
-            "Knowledge graph cleanup task accepted",
-            extra={
-                "knowledge_id": str(knowledge_id),
-                "task_id": task.id,
-            },
+            "Knowledge graph cleanup task accepted"
+            " knowledge_id=%s task_id=%s",
+            str(knowledge_id),
+            str(task.id),
         )
         return success(
             data={"task_id": task.id},
@@ -943,6 +952,14 @@ async def rebuild_knowledge_graph(
         task = celery_app.send_task(
             task_name,
             args=[str(knowledge_id)],
+        )
+        api_logger.info(
+            "Knowledge graph rebuild task accepted"
+            " kb_id=%s pipeline=%s task=%s task_id=%s",
+            str(knowledge_id),
+            pipeline.value,
+            task_name,
+            str(task.id),
         )
         result = {
             "task_id": task.id
