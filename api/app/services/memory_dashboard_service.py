@@ -1095,11 +1095,9 @@ def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
     return result
 
 
-@redis_cache(ttl=60, prefix="active_counts", skip_args=["db"])
+@redis_cache(ttl=60, prefix="active_counts")
 async def batch_get_active_counts(
     end_user_ids: tuple[str, ...],
-    *,
-    db=None,
 ) -> dict[str, int]:
     """批量查询 Neo4j 活跃节点数（Statement + Chunk + ExtractedEntity，delete_at IS NULL）。
 

@@ -1,5 +1,3 @@
-
-import asyncio
 import uuid
 from typing import List, Optional
 
@@ -92,7 +90,7 @@ def get_workspace_total_end_users(
 
 
 @router.get("/end_users", response_model=ApiResponse)
-def get_workspace_end_users(
+async def get_workspace_end_users(
     background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
@@ -191,10 +189,9 @@ def get_workspace_end_users(
         api_logger.warning(f"获取工作空间激活配置失败: {str(e)}")
         workspace_config = {"memory_config_id": None, "memory_config_name": None}
 
-    # [NEW] 批量获取活跃节点数（Neo4j，Redis 缓存 60s）和配额上限（PG）
     try:
-        active_counts = asyncio.run(
-            memory_dashboard_service.batch_get_active_counts(tuple(end_user_ids), db=db)
+        active_counts = await memory_dashboard_service.batch_get_active_counts(
+            tuple(end_user_ids)
         )
     except Exception as e:
         api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
