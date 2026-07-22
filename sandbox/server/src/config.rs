@@ -110,6 +110,10 @@ pub struct Config {
     #[serde(default = "default_nodejs_max_as_bytes")]
     pub nodejs_max_as_bytes: u64,
 
+    /// V8 --max-old-space-size in MB (JS heap cap). Default 768 MiB.
+    #[serde(default = "default_nodejs_max_old_space_mb")]
+    pub nodejs_max_old_space_mb: u32,
+
     #[serde(default)]
     pub proxy: ProxyConfig,
 }
@@ -134,8 +138,10 @@ fn default_sandbox_uid() -> u32 { 65537 }
 /// Non-root group. Never 0.
 fn default_sandbox_gid() -> u32 { 65537 }
 
-fn default_python_max_as_bytes() -> u64 { 1024 * 1024 * 1024 } // 1 GiB
-fn default_nodejs_max_as_bytes() -> u64 { 2 * 1024 * 1024 * 1024 } // 2 GiB
+fn default_python_max_as_bytes() -> u64 { 256 * 1024 * 1024 } // 256 MiB
+fn default_nodejs_max_as_bytes() -> u64 { 512 * 1024 * 1024 } // 512 MiB (jitless)
+
+fn default_nodejs_max_old_space_mb() -> u32 { 256 }
 
 fn default_python_lib_paths() -> Vec<String> {
     vec![
@@ -203,6 +209,13 @@ impl Config {
         }
         if let Ok(v) = std::env::var("NODEJS_MAX_AS_BYTES") {
             if let Ok(n) = v.parse() { self.nodejs_max_as_bytes = n; }
+        }
+        if let Ok(v) = std::env::var("NODEJS_MAX_OLD_SPACE_MB") {
+            if let Ok(n) = v.parse() { self.nodejs_max_old_space_mb = n; }
+        }
+        // Backward compat: old env var name
+        if let Ok(v) = std::env::var("NODE_MAX_OLD_SPACE_MB") {
+            if let Ok(n) = v.parse() { self.nodejs_max_old_space_mb = n; }
         }
         if let Ok(v) = std::env::var("SOCKS5_PROXY") {
             self.proxy.socks5 = v;

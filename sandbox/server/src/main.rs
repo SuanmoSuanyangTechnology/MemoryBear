@@ -167,6 +167,7 @@ async fn main() -> std::io::Result<()> {
         privilege = config.privilege,
         python_max_as_mb = config.python_max_as_bytes / 1048576,
         nodejs_max_as_mb = config.nodejs_max_as_bytes / 1048576,
+        nodejs_max_old_space_mb = config.nodejs_max_old_space_mb,
         "Sandbox flags"
     );
 
