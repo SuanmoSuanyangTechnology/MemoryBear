@@ -133,13 +133,12 @@ def normalize_stored_user_card_tags(stored_tags: object) -> list[str]:
 
 
 async def generate_user_card_tags(
-        llm_client: Any,
-        meta_data: object,
-        *,
-        log_context: str | None = None,
+    llm_client: Any,
+    tag_input: dict[str, list[str]],
+    *,
+    log_context: str | None = None,
 ) -> list[str]:
-    """调用 LLM 生成候选 Tag，并返回通过展示规则校验的结果。"""
-    tag_input = build_user_card_tag_input(meta_data)
+    """根据已规范化的画像输入生成候选 Tag，并返回通过展示规则校验的结果。"""
     if not any(tag_input.values()):
         return []
 

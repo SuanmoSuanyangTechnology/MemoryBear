@@ -3138,6 +3138,10 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
 
     start_time = time.time()
     redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("用户名片Tag scan终止：Redis客户端不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: user tag scan requires inflight locks")
+
     after_id: uuid.UUID | None = None
     candidates_count = 0
     dispatched = 0
@@ -3157,22 +3161,30 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
         for candidate in candidates:
             end_user_id = str(candidate.end_user_id)
             inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
-            lock_acquired = False
             try:
                 # Redis 在途标记防止相邻两轮扫描为同一用户重复派发任务。
-                if redis_client is not None:
-                    lock_acquired = bool(
-                        redis_client.set(
-                            inflight_key,
-                            "1",
-                            nx=True,
-                            ex=USER_TAG_INFLIGHT_TTL_SEC,
-                        )
+                lock_acquired = bool(
+                    redis_client.set(
+                        inflight_key,
+                        "1",
+                        nx=True,
+                        ex=USER_TAG_INFLIGHT_TTL_SEC,
                     )
-                    if not lock_acquired:
-                        skip_inflight += 1
-                        continue
+                )
+            except Exception as exc:
+                logger.error(
+                    "用户名片Tag scan终止：Redis在途锁不可用 user=%s error=%s",
+                    end_user_id,
+                    str(exc),
+                    exc_info=True,
+                )
+                raise RuntimeError("Redis unavailable: failed to acquire user tag inflight lock") from exc
 
+            if not lock_acquired:
+                skip_inflight += 1
+                continue
+
+            try:
                 # 每 60 个任务分散到 5 分钟内启动，削平 LLM 和数据库的瞬时压力。
                 countdown = (dispatched % 60) * 5
                 do_refresh_user_tags.apply_async(
@@ -3192,11 +3204,10 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
                     str(exc),
                     exc_info=True,
                 )
-                if redis_client is not None and lock_acquired:
-                    try:
-                        redis_client.delete(inflight_key)
-                    except Exception:
-                        logger.warning("用户名片Tag scan回滚在途锁失败 user=%s", end_user_id, exc_info=True)
+                try:
+                    redis_client.delete(inflight_key)
+                except Exception:
+                    logger.warning("用户名片Tag scan回滚在途锁失败 user=%s", end_user_id, exc_info=True)
 
         after_id = candidates[-1].end_user_id
         if len(candidates) < USER_TAG_SCAN_PAGE_SIZE:
@@ -3231,9 +3242,9 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
     soft_time_limit=90,
 )
 def do_refresh_user_tags(
-        self,
-        end_user_id: str,
-        workspace_id: str,
+    self,
+    end_user_id: str,
+    workspace_id: str,
 ) -> Dict[str, Any]:
     """在 heavy worker 中调用记忆领域入口，刷新单个用户的名片 Tag。
 
