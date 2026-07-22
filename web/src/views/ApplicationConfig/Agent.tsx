@@ -1,52 +1,29 @@
 /*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:29:21 
+ * @Author: ZhaoYing
+ * @Date: 2026-02-03 16:29:21
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-07-02 16:40:04
  */
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
+import { forwardRef } from 'react';
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router-dom';
-import { Row, Col, Space, Form, Button, App, Flex } from 'antd'
+import { Row, Col, Space, Form, Button, Flex } from 'antd'
 
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
 import Card from './components/Card'
 import ModelConfigModal from './components/ModelConfigModal'
-import type { 
-  ModelConfigModalRef,
-  ChatData,
-  Config,
-  ModelConfig,
-  AgentRef,
-  MemoryConfig,
-  AiPromptModalRef,
-  Source,
-  ChatVariableConfigModalRef,
-  FeaturesConfigForm
-} from './types'
-import type { Variable } from './components/VariableList/types'
-import type { KnowledgeConfig, KnowledgeConfigForm } from '@/components/Knowledge/types'
-import type { Model } from '@/views/ModelManagement/types'
-import { getModelList } from '@/api/models';
-import { saveAgentConfig } from '@/api/application'
+import type { Config, AgentRef, FeaturesConfigForm } from './types'
 import Knowledge from '@/components/Knowledge'
 import VariableList from './components/VariableList/VariableList'
-import { getApplicationConfig } from '@/api/application'
-import { getMemoryConfigList } from '@/api/memory'
-import type { Memory } from '@/views/MemoryManagement/types'
 import AiPromptModal from './components/AiPromptModal'
 import ToolList from './components/ToolList/ToolList'
 import SkillList from './components/Skill'
 import ActiveMemoryConfig from '@/components/ActiveMemoryConfig'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
-import type { Skill } from '@/views/Skills/types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FeaturesConfig from './components/FeaturesConfig'
-import { getListLogoUrl } from '@/views/ModelManagement/utils';
 import Editor from './components/Editor'
-import Tag from '@/components/Tag'
-import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
+import { useAgent } from './hooks/useAgent'
 
 /**
  * Agent configuration component
@@ -54,397 +31,30 @@ import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement
  */
 const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
-  const { id } = useParams();
-  const { message, modal } = App.useApp()
-  const [form] = Form.useForm()
-  const [data, setData] = useState<Config | null>(null);
-  const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
-  const [modelList, setModelList] = useState<Model[]>([])
-  const [defaultModel, setDefaultModel] = useState<Model | null>(null)
-  const [chatList, setChatList] = useState<ChatData[]>([])
-  const values = Form.useWatch<Config>([], form) 
-  const [isSave, setIsSave] = useState(false)
-  const initialized = useRef(false)
-  
-  // Initialization flag
-  useEffect(() => {
-    if (data) {
-      initialized.current = true
-    }
-  }, [data])
-
-  useEffect(() => {
-    if (!initialized.current) return
-    if (isSave) return
-    setIsSave(true)
-  }, [values])
-
-  useEffect(() => {
-    getModels()
-    getData()
-  }, [id])
-
-  const [activeMemoryConfig, setActiveMemoryConfig] = useState<Memory | null>(null)
-  const getActiveMemoryConfig = () => {
-    getMemoryConfigList()
-      .then((res) => {
-        setActiveMemoryConfig((res as Memory[]).find(item => item.is_active) || null)
-      })
-      .catch(() => {
-        setActiveMemoryConfig(null)
-      })
-  }
-  useEffect(() => {
-    getActiveMemoryConfig()
-  }, [])
-
-
-  /**
-   * Fetch agent configuration data
-   */
-  const getData = () => {
-    getApplicationConfig(id as string).then(res => {
-      const response = res as Config
-      const { skills, variables } = response
-      const allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
-      const allTools = Array.isArray(response.tools) ? response.tools : []
-      const variableList = variables?.map((item, index) => ({
-        ...item,
-        index
-      })) || []
-      form.setFieldsValue({
-        ...response,
-        tools: allTools,
-        memory: {
-          ...response.memory,
-        },
-        skills: {
-          ...skills,
-          skill_ids: allSkills
-        },
-        variables: [...variableList]
-      })
-      updateVariableList([...variableList])
-      setData({
-        ...response,
-        tools: allTools
-      })
-      onFeaturesLoad?.(response.features)
-    })
-  }
-
-  /**
-   * Refresh configuration after model changes
-   * @param vo - Model configuration
-   * @param type - Source type (model or chat)
-   */
-  const refresh = (vo: ModelConfig, type: Source) => {
-    if (type === 'model') {
-      const { default_model_config_id, capability, ...rest } = vo
-      if (default_model_config_id !== values.default_model_config_id) {
-        const fileUpload = { ...values.features?.file_upload }
-        Object.keys(fileUpload).forEach(key => {
-          if (key.includes('enabled')) {
-            (fileUpload as Record<string, any>)[key] = false
-          }
-        })
-        form.setFieldValue(['features', 'file_upload'], fileUpload)
-        message.warning(t('application.resetFeaturesTip'))
-      }
-      form.setFieldsValue({
-        default_model_config_id,
-        capability,
-        model_parameters: {...rest}
-      })
-      if (default_model_config_id === values?.default_model_config_id) {
-        const label = defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name : vo.label || ''
-        setChatList([{
-          label: label,
-          model_config_id: default_model_config_id,
-          model_parameters: {...rest},
-          list: []
-        }])
-      }
-    } else if (type === 'chat') {
-      if (chatList.length >= 4) {
-        message.warning(t('application.maxChatCount'))
-        return
-      }
-      const { label, default_model_config_id, ...reset } = vo
-
-      setChatList((prev: ChatData[]) => {
-        const newChatItem: ChatData = {
-          label,
-          model_config_id: default_model_config_id,
-          model_parameters: {...reset},
-          list: []
-        };
-        if (prev.some(item => item.model_config_id === default_model_config_id)) return prev
-        return [
-          ...(prev || []).map(item => ({
-            ...item,
-            conversation_id: undefined,
-            list: []
-          })),
-          newChatItem
-        ];
-      })
-    }
-  }
-
-  /**
-   * Open model configuration modal
-   */
-  const handleModelConfig = () => {
-    modelConfigModalRef.current?.handleOpen('model', { ...defaultModel, model_parameters : values?.model_parameters })
-  }
-  /**
-   * Clear all debugging chat sessions
-   */
-  const handleClearDebugging = () => {
-    setChatList([])
-  }
-
-  /**
-   * Save agent configuration
-   * @param flag - Whether to show success message
-   * @returns Promise that resolves when save is complete
-   */
-  const handleSave = (flag = true) => {
-    if (!isSave || !data) return Promise.resolve()
-    const { memory, knowledge_retrieval, tools, skills, ...rest } = values
-    const { knowledge_bases = [], ...knowledgeRest } = knowledge_retrieval || {}
-    // Get other necessary properties of memory from original data
-    const originalMemory = data.memory || ({} as MemoryConfig)
-    
-    const params: Config = {
-      ...data,
-      ...rest,
-      memory: {
-        ...originalMemory,
-        ...memory,
-      },
-      knowledge_retrieval: knowledge_bases.length > 0 ? {
-        ...data.knowledge_retrieval,
-        ...knowledgeRest,
-        knowledge_bases: knowledge_bases.map((item: KnowledgeConfigForm) => {
-          const kb_config = item.config || item;
-          return {
-            kb_id: item.kb_id || item.id,
-            retrieve_type: kb_config.retrieve_type,
-            top_k: kb_config.top_k,
-            similarity_threshold: ['participle', 'semantic', 'graph'].includes(kb_config.retrieve_type || '') ? undefined : kb_config.similarity_threshold,
-            vector_similarity_weight: kb_config.vector_similarity_weight,
-            // ...(item.config || {})
-          }
-        })
-      } as KnowledgeConfig : null,
-      tools: tools.map(vo => {
-        if (!vo.operation) {
-          return {
-            tool_id: vo.tool_id,
-            enabled: vo.enabled
-          }
-        }
-        return {
-          tool_id: vo.tool_id,
-          operation: vo.operation,
-          enabled: vo.enabled
-        }
-      }),
-      skills: {
-        ...skills,
-        skill_ids: (skills?.skill_ids as Skill[])?.map(vo => vo.id)
-      }
-    }
-    
-    return new Promise((resolve, reject) => {
-      saveAgentConfig(data.app_id, params)
-      .then((res) => {
-        if (flag) {
-          message.success({ content: t('common.saveSuccess'), duration: 1 })
-        }
-        setIsSave(false)
-        resolve(res)
-      }).catch(error => {
-        reject(error)
-      })
-    })
-  }
-  /**
-   * Fetch available models list
-   */
-  const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
-      .then(res => {
-        const response = res as { items: Model[] }
-        setModelList(response.items)
-      })
-  }
-  /**
-   * Add new model for debugging
-   */
-  const handleAddModel = () => {
-    modelConfigModalRef.current?.handleOpen('chat')
-  }
-  useEffect(() => {
-    if (values?.default_model_config_id && modelList.length > 0) {
-      const filterValue = modelList.find(item => item.id === values.default_model_config_id)
-      setDefaultModel(filterValue as Model | null)
-      setChatList([{
-        label: filterValue?.name || '',
-        model_config_id: filterValue?.id,
-        model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
-        list: []
-      }])
-      form.setFieldValue('capability', filterValue?.capability)
-    }
-  }, [modelList, values?.default_model_config_id])
-
-  useImperativeHandle(ref, () => ({
+  const {
+    form,
+    values,
+    defaultModel,
+    modelLogo,
+    chatVariables,
+    activeMemoryConfig,
+    chatList,
+    setChatList,
+    modelConfigModalRef,
+    aiPromptModalRef,
+    chatVariableConfigModalRef,
+    handleModelConfig,
+    handleClearDebugging,
     handleSave,
-    features: values?.features
-  }))
-
-  const aiPromptModalRef = useRef<AiPromptModalRef>(null)
-  /**
-   * Open AI prompt generation modal
-   */
-  const handlePrompt = () => {
-    aiPromptModalRef.current?.handleOpen()
-  }
-  /**
-   * Update prompt and extract variables
-   * @param value - New prompt value
-   */
-  const updatePrompt = (value?: string) => {
-    if (!value) return
-    form.setFieldValue('system_prompt', value)
-    const variables = value.match(/\{\{([^}]+)\}\}/g)?.map(match => match.slice(2, -2)) || []
-    const uniqueVariables = [...new Set(variables)]
-    const newVariableList: Variable[] = uniqueVariables.map((name, index) => ({
-      index,
-      type: 'text',
-      name,
-      display_name: name,
-      required: false
-    }))
-    updateVariableList(newVariableList)
-  }
-
-  /**
-   * Update variable list
-   * @param list - New variable list
-   */
-  const updateVariableList = (list: Variable[]) => {
-    form.setFieldValue('variables', [...list])
-    setChatVariables([...list])
-  }
-  const chatVariableConfigModalRef = useRef<ChatVariableConfigModalRef>(null)
-  const [chatVariables, setChatVariables] = useState<Variable[]>([])
-  /**
-   * Open chat variable configuration modal
-   */
-  const handleOpenVariableConfig = () => {
-    chatVariableConfigModalRef.current?.handleOpen(chatVariables)
-  }
-
-  /**
-   * Save chat variable configuration
-   * @param values - Variable values
-   */
-  const handleSaveChatVariable = (variables: Variable[]) => {
-    setChatVariables(variables)
-  }
-  useEffect(() => {
-    setChatVariables(values?.variables || [])
-  }, [values?.variables])
-
-  const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
-    form.setFieldValue('features', value)
-    const { statement = '' } = value?.opening_statement || {}
-    onFeaturesLoad?.(value)
-
-    if (value?.opening_statement?.enabled) {
-      const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
-      const variables = values?.variables
-      const validNames = new Set(variables.map(v => v.name))
-      const invalid = usedVars.filter(v => !validNames.has(v))
-      if (invalid.length > 0) {
-        const newVars = invalid.map((name, i) => ({
-          index: variables.length + i,
-          name,
-          display_name: name,
-          type: 'text',
-          required: true,
-          max_length: 48,
-        }))
-
-        form.setFieldValue('variables', [...variables, ...newVars])
-      }
-    }
-  }
-  const modelLogo = useMemo(() => {
-    return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
-  }, [defaultModel])
-
-  useEffect(() => {
-    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
-
-    const assistantMsg = buildOpeningStatementMessage(opening_statement, { variables: chatVariables })
-    if (assistantMsg) {
-      setChatList(prev => {
-        if (prev.length === 0 && !defaultModel) return prev
-        if (defaultModel && prev.length === 1) {
-          return [{
-            label: defaultModel.name,
-            model_config_id: defaultModel.id,
-            model_parameters: defaultModel.config as unknown as ModelConfig,
-            list: [assistantMsg]
-          }]
-        }
-
-        return prev.map(vo => {
-          if (vo.list?.length === 0) {
-            return { ...vo, list: [assistantMsg] }
-          } else if (vo.list && !Array.isArray(vo.list[0]) && vo.list[0].role === 'assistant') {
-            vo.list[0] = assistantMsg
-            return { ...vo, list: [...vo.list] }
-          } else {
-            return { ...vo, list: [assistantMsg, ...(vo.list || [])] }
-          }
-        })
-      })
-    }
-  }, [defaultModel, chatList.length, form.getFieldValue(['features', 'opening_statement']), chatVariables])
-
-  const updateVariables = useCallback((value?: string) => {
-    if (!value) return
-    const usedVars = [...new Set([...value.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
-    const validNames = new Set(chatVariables.map((v: Variable) => v.name))
-    const invalid = usedVars.filter(v => !validNames.has(v))
-
-    if (invalid.length > 0) {
-      modal.confirm({
-        title: t('application.promptInvalidVariablesTitle'),
-        content: <Flex gap={8} wrap>{invalid.map((vo, index) => <Tag key={index}>{'{{'}{vo}{'}}'}</Tag>)}</Flex>,
-        okText: t('common.confirm'),
-        cancelText: t('common.cancel'),
-        onOk: () => {
-          const uniqueVariables = [...new Set(invalid)]
-          const newVariableList: Variable[] = uniqueVariables.map((name, index) => ({
-            index,
-            type: 'text',
-            name,
-            display_name: name,
-            required: false
-          }))
-
-          updateVariableList([...chatVariables, ...newVariableList])
-        },
-      })
-    }
-  }, [chatVariables])
+    handleAddModel,
+    handlePrompt,
+    handleOpenVariableConfig,
+    handleSaveChatVariable,
+    handleSaveFeaturesConfig,
+    updatePrompt,
+    updateVariables,
+    refresh,
+  } = useAgent(ref, onFeaturesLoad)
 
   return (
     <>
