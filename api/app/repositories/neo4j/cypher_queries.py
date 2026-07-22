@@ -2847,6 +2847,24 @@ FORGET_COUNT_ACTIVE_NODES = """
     RETURN count(n) AS cnt
 """
 
+FORGET_COUNT_ACTIVE_NODES_BATCH = """
+    MATCH (n)
+    WHERE n.end_user_id IN $end_user_ids
+      AND n.delete_at IS NULL
+      AND (n:Statement OR n:Chunk OR n:ExtractedEntity)
+    RETURN n.end_user_id AS end_user_id, count(n) AS cnt
+"""
+
+FORGET_QUOTA_BREAKDOWN = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+    RETURN
+      sum(CASE WHEN n:Statement THEN 1 ELSE 0 END) AS statement,
+      sum(CASE WHEN n:Chunk THEN 1 ELSE 0 END) AS chunk,
+      sum(CASE WHEN n:ExtractedEntity THEN 1 ELSE 0 END) AS entity,
+      sum(CASE WHEN n:MemorySummary THEN 1 ELSE 0 END) AS summary
+"""
+
 FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     MATCH (n {end_user_id: $end_user_id})
     WHERE n.delete_at IS NULL
