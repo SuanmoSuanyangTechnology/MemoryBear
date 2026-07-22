@@ -10,7 +10,6 @@
     "preview": "vite preview",
     "install:private": "node install-private.js",
     "install:private:dev": "node install-private.js dev",
-    "install:private:test": "node install-private.js test",
     "install:private:prod": "node install-private.js prod"
   },
   "dependencies": {

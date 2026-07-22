@@ -4,20 +4,19 @@ const PRIVATE_PACKAGE_NAME = '@redbear/memory-brick';
 const PRIVATE_REGISTRY = 'http://10.206.16.48:4873';
 
 // 版本通道降级链：稳定度递增，前一个不存在时依次降级到后一个
-// alpha（开发）→ beta（测试）→ latest（正式）
-const FALLBACK_CHAIN = ['alpha', 'beta', 'latest'];
+//  beta（开发）→ latest（正式）
+const FALLBACK_CHAIN = ['beta', 'latest'];
 
 // 各环境的首选通道，实际安装时会从此通道起沿 FALLBACK_CHAIN 依次降级
 const ENV_START_TAG = {
-  dev: 'alpha',   // 开发环境：优先 alpha
-  test: 'beta',   // 测试环境：优先 beta
-  prod: 'latest', // 生产环境：latest
+  dev: 'beta',   // 开发环境：优先 beta
+  // 测试与生产共用同一镜像，构建时安装同一版本，统一使用正式通道 latest
+  prod: 'latest',
 };
 
 // 环境别名归一化，兼容 development / production 等常见写法
 const ENV_ALIAS = {
   dev: 'dev', develop: 'dev', development: 'dev',
-  test: 'test', testing: 'test',
   prod: 'prod', prd: 'prod', production: 'prod',
 };
 
