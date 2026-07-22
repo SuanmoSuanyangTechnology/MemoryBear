@@ -8,7 +8,7 @@
  * User Memory Detail Types
  * Type definitions for user memory detail views including nodes, edges, and statistics
  */
-import type { Edge } from '@/components/Charts/GraphNetworkChart'
+import type { Edge } from '@/components/Charts/GraphNetworkChart/types'
 
 /**
  * User memory data structure

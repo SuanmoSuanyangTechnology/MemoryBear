@@ -13,7 +13,6 @@ import { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
  */
 export const useDebugChat = (
   id: string | undefined,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   abortRef: MutableRefObject<(() => void) | null>,
 ) => {
   const { t } = useTranslation()
