@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,120 +79,227 @@ class KnowledgeGraphRetrievalPipeline:
         self,
         request: GraphRetrievalRequest,
     ) -> list[DocumentChunk]:
+        started_at = time.perf_counter()
         timeout_seconds = settings.KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS / 1000
-        async with asyncio.timeout(timeout_seconds):
-            return await self._retrieve(request)
+        timeout_context = asyncio.timeout(timeout_seconds)
+        try:
+            async with timeout_context:
+                return await self._retrieve(request, started_at)
+        except TimeoutError as exc:
+            if timeout_context.expired():
+                logger.warning(
+                    "[EvidenceGraph] retrieval_failed"
+                    " kb_id=%s stage=timeout error_type=%s elapsed_ms=%d",
+                    request.runtime.knowledge_id,
+                    type(exc).__name__,
+                    self._elapsed_ms(started_at),
+                )
+            raise
 
     async def _retrieve(
         self,
         request: GraphRetrievalRequest,
+        started_at: float,
     ) -> list[DocumentChunk]:
-        if request.allowed_document_ids is not None and not request.allowed_document_ids:
-            return []
-
-        analysis = await self._analyze_query(request.query)
-        entity_text = " ".join(self._clean_terms(analysis.entity_terms)) or request.query
-        relation_text = " ".join(self._clean_terms(analysis.relation_terms)) or request.query
-
-        entity_vector, relation_vector = await asyncio.gather(
-            self._embedding.aembed_query(entity_text),
-            self._embedding.aembed_query(relation_text),
-        )
-        entity_hits, relation_hits = await asyncio.gather(
-            self._store.search_entity_projections(
-                request.runtime,
-                normalize_vector(entity_vector),
-                request.entity_top_n,
-            ),
-            self._store.search_relation_projections(
-                request.runtime,
-                normalize_vector(relation_vector),
-                request.relation_top_n,
-            ),
-        )
-
-        ranked_entities = self._deduplicate_entities(entity_hits)
-        ranked_relations = self._deduplicate_relations(relation_hits)
-        neighbor_hits = await self._store.load_neighbor_relations(
-            request.runtime,
-            tuple(hit.entity_key for hit in ranked_entities),
-            request.neighbor_top_n,
-        )
-        ranked_neighbors = self._deduplicate_relations(neighbor_hits)
-
-        entity_ranks = {
-            hit.entity_key: rank
-            for rank, hit in enumerate(ranked_entities, start=1)
+        stage = "validate_filters"
+        counts = {
+            "entity_hits": 0,
+            "relation_hits": 0,
+            "neighbor_hits": 0,
+            "evidence_hits": 0,
+            "matched_chunks": 0,
+            "hydrated_chunks": 0,
+            "scoped_chunks": 0,
+            "result_count": 0,
         }
-        relation_ranks = {
-            hit.relation_key: rank
-            for rank, hit in enumerate(ranked_relations, start=1)
-        }
-        neighbor_ranks = {
-            hit.relation_key: rank
-            for rank, hit in enumerate(ranked_neighbors, start=1)
-        }
-        relation_keys = tuple(
-            dict.fromkeys(
-                [hit.relation_key for hit in ranked_relations]
-                + [hit.relation_key for hit in ranked_neighbors]
+        try:
+            if (
+                request.allowed_document_ids is not None
+                and not request.allowed_document_ids
+            ):
+                self._log_outcome(
+                    "retrieval_empty",
+                    request,
+                    started_at,
+                    counts,
+                    reason="no_allowed_documents",
+                )
+                return []
+
+            stage = "query_analysis"
+            analysis = await self._analyze_query(
+                request.query,
+                request.runtime.knowledge_id,
             )
-        )
-        evidence_hits = await self._store.load_evidence_for_projection_keys(
-            request.runtime,
-            tuple(entity_ranks),
-            relation_keys,
-            request.evidence_per_key,
-            allowed_document_ids=request.allowed_document_ids,
-        )
-        if not evidence_hits:
-            return []
+            entity_text = (
+                " ".join(self._clean_terms(analysis.entity_terms))
+                or request.query
+            )
+            relation_text = (
+                " ".join(self._clean_terms(analysis.relation_terms))
+                or request.query
+            )
 
-        matches = self._score_evidence(
-            evidence_hits,
-            ranked_entities,
-            ranked_relations,
-            ranked_neighbors,
-            entity_ranks,
-            relation_ranks,
-            neighbor_ranks,
-            request.allowed_document_ids,
-        )
-        if not matches:
-            return []
+            stage = "query_embedding"
+            entity_vector, relation_vector = await asyncio.gather(
+                self._embedding.aembed_query(entity_text),
+                self._embedding.aembed_query(relation_text),
+            )
+            stage = "projection_search"
+            entity_hits, relation_hits = await asyncio.gather(
+                self._store.search_entity_projections(
+                    request.runtime,
+                    normalize_vector(entity_vector),
+                    request.entity_top_n,
+                ),
+                self._store.search_relation_projections(
+                    request.runtime,
+                    normalize_vector(relation_vector),
+                    request.relation_top_n,
+                ),
+            )
 
-        chunks = await self._store.hydrate_source_chunks(
-            chunk_index_name=request.runtime.chunk_index_name,
-            knowledge_id=request.runtime.knowledge_id,
-            source_chunk_ids=tuple(matches),
-            allowed_document_ids=request.allowed_document_ids,
-            file_names=request.file_names,
-        )
-        scoped_chunks = self._scope_hydrated_chunks(request, chunks, matches)
-        if not scoped_chunks:
-            return []
+            ranked_entities = self._deduplicate_entities(entity_hits)
+            ranked_relations = self._deduplicate_relations(relation_hits)
+            counts["entity_hits"] = len(ranked_entities)
+            counts["relation_hits"] = len(ranked_relations)
+            stage = "neighbor_search"
+            neighbor_hits = await self._store.load_neighbor_relations(
+                request.runtime,
+                tuple(hit.entity_key for hit in ranked_entities),
+                request.neighbor_top_n,
+            )
+            ranked_neighbors = self._deduplicate_relations(neighbor_hits)
+            counts["neighbor_hits"] = len(ranked_neighbors)
 
-        parent_matches = self._build_parent_matches(scoped_chunks, matches)
-        for chunk in scoped_chunks:
-            source_id = str((chunk.metadata or {}).get("doc_id") or "")
-            chunk.metadata["score"] = matches[source_id].raw_score
+            entity_ranks = {
+                hit.entity_key: rank
+                for rank, hit in enumerate(ranked_entities, start=1)
+            }
+            relation_ranks = {
+                hit.relation_key: rank
+                for rank, hit in enumerate(ranked_relations, start=1)
+            }
+            neighbor_ranks = {
+                hit.relation_key: rank
+                for rank, hit in enumerate(ranked_neighbors, start=1)
+            }
+            relation_keys = tuple(
+                dict.fromkeys(
+                    [hit.relation_key for hit in ranked_relations]
+                    + [hit.relation_key for hit in ranked_neighbors]
+                )
+            )
+            stage = "evidence_search"
+            evidence_hits = await self._store.load_evidence_for_projection_keys(
+                request.runtime,
+                tuple(entity_ranks),
+                relation_keys,
+                request.evidence_per_key,
+                allowed_document_ids=request.allowed_document_ids,
+            )
+            counts["evidence_hits"] = len(evidence_hits)
+            if not evidence_hits:
+                self._log_outcome(
+                    "retrieval_empty",
+                    request,
+                    started_at,
+                    counts,
+                    reason="no_evidence",
+                )
+                return []
 
-        resolved = await self._parent_resolver(
-            scoped_chunks,
-            request.runtime.chunk_index_name,
-        )
-        resolved_with_matches = self._attach_resolved_matches(
-            request,
-            resolved,
-            matches,
-            parent_matches,
-        )
-        return self._rank_and_limit(
-            resolved_with_matches,
-            request.max_chunks_per_document,
-        )
+            stage = "evidence_scoring"
+            matches = self._score_evidence(
+                evidence_hits,
+                ranked_entities,
+                ranked_relations,
+                ranked_neighbors,
+                entity_ranks,
+                relation_ranks,
+                neighbor_ranks,
+                request.allowed_document_ids,
+            )
+            counts["matched_chunks"] = len(matches)
+            if not matches:
+                self._log_outcome(
+                    "retrieval_empty",
+                    request,
+                    started_at,
+                    counts,
+                    reason="no_scored_matches",
+                )
+                return []
 
-    async def _analyze_query(self, query: str) -> GraphQueryAnalysis:
+            stage = "chunk_hydration"
+            chunks = await self._store.hydrate_source_chunks(
+                chunk_index_name=request.runtime.chunk_index_name,
+                knowledge_id=request.runtime.knowledge_id,
+                source_chunk_ids=tuple(matches),
+                allowed_document_ids=request.allowed_document_ids,
+                file_names=request.file_names,
+            )
+            counts["hydrated_chunks"] = len(chunks)
+            scoped_chunks = self._scope_hydrated_chunks(request, chunks, matches)
+            counts["scoped_chunks"] = len(scoped_chunks)
+            if not scoped_chunks:
+                self._log_outcome(
+                    "retrieval_empty",
+                    request,
+                    started_at,
+                    counts,
+                    reason="no_scoped_chunks",
+                )
+                return []
+
+            parent_matches = self._build_parent_matches(scoped_chunks, matches)
+            for chunk in scoped_chunks:
+                source_id = str((chunk.metadata or {}).get("doc_id") or "")
+                chunk.metadata["score"] = matches[source_id].raw_score
+
+            stage = "parent_resolution"
+            resolved = await self._parent_resolver(
+                scoped_chunks,
+                request.runtime.chunk_index_name,
+            )
+            resolved_with_matches = self._attach_resolved_matches(
+                request,
+                resolved,
+                matches,
+                parent_matches,
+            )
+            stage = "rank_candidates"
+            result = self._rank_and_limit(
+                resolved_with_matches,
+                request.max_chunks_per_document,
+            )
+            counts["result_count"] = len(result)
+            self._log_outcome(
+                "retrieval_done" if result else "retrieval_empty",
+                request,
+                started_at,
+                counts,
+                reason=None if result else "no_ranked_chunks",
+            )
+            return result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[EvidenceGraph] retrieval_failed"
+                " kb_id=%s stage=%s error_type=%s elapsed_ms=%d",
+                request.runtime.knowledge_id,
+                stage,
+                type(exc).__name__,
+                self._elapsed_ms(started_at),
+            )
+            raise
+
+    async def _analyze_query(
+        self,
+        query: str,
+        knowledge_id: str,
+    ) -> GraphQueryAnalysis:
         try:
             raw_result = await self._llm.call_structured(
                 [
@@ -209,13 +317,48 @@ class KnowledgeGraphRetrievalPipeline:
             return GraphQueryAnalysis.model_validate(raw_result)
         except Exception as exc:
             logger.warning(
-                "Graph query analysis failed; using the original query: %s",
-                exc,
+                "[EvidenceGraph] query_analysis_fallback"
+                " kb_id=%s error_type=%s",
+                knowledge_id,
+                type(exc).__name__,
             )
             return GraphQueryAnalysis(
                 entity_terms=[query],
                 relation_terms=[query],
             )
+
+    @staticmethod
+    def _log_outcome(
+        event: str,
+        request: GraphRetrievalRequest,
+        started_at: float,
+        counts: dict[str, int],
+        *,
+        reason: str | None,
+    ) -> None:
+        reason_field = f" reason={reason}" if reason is not None else ""
+        logger.info(
+            "[EvidenceGraph] %s kb_id=%s%s"
+            " entity_hits=%d relation_hits=%d neighbor_hits=%d"
+            " evidence_hits=%d matched_chunks=%d hydrated_chunks=%d"
+            " scoped_chunks=%d result_count=%d elapsed_ms=%d",
+            event,
+            request.runtime.knowledge_id,
+            reason_field,
+            counts["entity_hits"],
+            counts["relation_hits"],
+            counts["neighbor_hits"],
+            counts["evidence_hits"],
+            counts["matched_chunks"],
+            counts["hydrated_chunks"],
+            counts["scoped_chunks"],
+            counts["result_count"],
+            KnowledgeGraphRetrievalPipeline._elapsed_ms(started_at),
+        )
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> int:
+        return int((time.perf_counter() - started_at) * 1000)
 
     @staticmethod
     def _clean_terms(terms: list[str]) -> tuple[str, ...]:

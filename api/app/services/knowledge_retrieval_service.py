@@ -412,6 +412,7 @@ class KnowledgeRetrievalService:
                         and target.params.retrieve_type == RetrieveType.HYBRID
                     ),
                     request_reranker=preparation.request_reranker,
+                    log_id=log_id,
                     graph_target=graph_targets_by_knowledge_id.get(
                         target.knowledge_id
                     ),
@@ -453,6 +454,7 @@ class KnowledgeRetrievalService:
         *,
         use_request_reranker: bool,
         request_reranker: Any,
+        log_id: str | None = None,
         graph_target: GraphTargetSnapshot | None = None,
         timings: RetrievalTimings | None = None,
     ) -> list[DocumentChunk]:
@@ -471,6 +473,7 @@ class KnowledgeRetrievalService:
                 store,
                 started_at,
                 timings,
+                log_id,
             )
 
         full_text_options = cls._search_options(
@@ -566,6 +569,7 @@ class KnowledgeRetrievalService:
         store: AsyncElasticSearchRetrieval,
         started_at: float,
         timings: RetrievalTimings | None,
+        log_id: str | None,
     ) -> list[DocumentChunk]:
         if graph_target.knowledge_id != target.knowledge_id:
             raise ValueError("graph target does not match retrieval target")
@@ -623,10 +627,15 @@ class KnowledgeRetrievalService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            stage = "timeout" if isinstance(exc, TimeoutError) else "pipeline"
             logger.warning(
-                "[Retrieval] graph target failed kb=%s error_type=%s",
+                "[Retrieval] graph_target_failed"
+                " id=%s kb_id=%s stage=%s error_type=%s elapsed_ms=%d",
+                log_id or "unknown",
                 cls._compact_id(target.knowledge_id),
+                stage,
                 type(exc).__name__,
+                cls._elapsed_ms(graph_started_at),
             )
             chunks = []
         finally:
