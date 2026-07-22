@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-06-18 10:00:00 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-18 10:00:00
- */
 /**
  * Graph Network Utility Functions
  * 
@@ -14,7 +8,7 @@
  */
 
 import * as d3 from 'd3';
-import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3';
+import type { Node, EdgeClickData, EdgeType, D3Node, D3Link } from '../types'
 
 /**
  * Default node colors
@@ -35,74 +29,11 @@ export const regionMapping: Record<string, string[]> = {
   amygdala: ['Statement'],
 };
 
-export interface Node {
-  id: string;
-  label: string;
-  category: number;
-  symbolSize: number;
-  name: string;
-  itemStyle?: {
-    color: string;
-  };
-  caption: string;
-  properties: Record<string, any>;
-  x?: number;
-  y?: number;
-  fx?: number | null;
-  fy?: number | null;
-  vx?: number;
-  vy?: number;
-  [key: string]: any;
-}
-
-export interface EdgeClickData {
-  id: string;
-  type: string;
-  predicate: string;
-  predicate_surface: string;
-  predicate_description?: string;
-}
-
-export type EdgeType = 'SINGLE' | 'UNIDIRECTIONAL_MULTI' | 'BIDIRECTIONAL' | 'MULTI_BIDIRECTIONAL';
-
-export interface Edge {
-  node_a: string;
-  node_b: string;
-  total: number;
-  edge_type: EdgeType;
-  a_to_b: EdgeClickData[];
-  b_to_a: EdgeClickData[];
-  source: string;
-  target: string;
-}
-
-export interface D3Node extends d3.SimulationNodeDatum {
-  id: string;
-  name: string;
-  category: number;
-  symbolSize: number;
-  color: string;
-  caption: string;
-}
-
-export interface D3Link extends d3.SimulationLinkDatum<D3Node> {
-  id: string;
-  source: string | D3Node;
-  target: string | D3Node;
-  caption?: string;
-  type?: EdgeType;
-  label?: string;
-  total?: number;
-  edge_type?: EdgeType;
-  a_to_b?: EdgeClickData[];
-  b_to_a?: EdgeClickData[];
-}
-
 /**
- * 根据 edge_type 计算基础 stroke-width
- * - UNIDIRECTIONAL_MULTI 最粗
- * - BIDIRECTIONAL / MULTI_BIDIRECTIONAL 居中
- * - SINGLE 最细
+ * Calculate base stroke-width based on edge_type
+ * - UNIDIRECTIONAL_MULTI: thickest
+ * - BIDIRECTIONAL / MULTI_BIDIRECTIONAL: medium
+ * - SINGLE: thinnest
  */
 export const getBaseStrokeWidth = (edgeType?: EdgeType): number => {
   if (edgeType === 'UNIDIRECTIONAL_MULTI') return 2;
@@ -111,11 +42,11 @@ export const getBaseStrokeWidth = (edgeType?: EdgeType): number => {
 };
 
 /**
- * 恢复节点到默认状态（无选中项时）
- * @param nodeSel - 节点选择器
- * @param linkSel - 连线选择器
- * @param linkLabelSel - 连线标签选择器
- * @param g - SVG group 选择器
+ * Restore nodes to default state (when no selection)
+ * @param nodeSel - Node selector
+ * @param linkSel - Link selector
+ * @param linkLabelSel - Link label selector
+ * @param g - SVG group selector
  */
 export const resetToDefaultState = (
   nodeSel: d3.Selection<SVGGElement, D3Node, SVGGElement, unknown>,
@@ -123,7 +54,7 @@ export const resetToDefaultState = (
   linkLabelSel: d3.Selection<SVGTextElement, D3Link, SVGGElement, unknown>,
   g: d3.Selection<SVGGElement, unknown, null, undefined>
 ): void => {
-  // 恢复节点样式
+  // Restore node styles
   nodeSel.selectAll<SVGCircleElement, D3Node>('circle')
     .transition()
     .duration(200)
@@ -132,7 +63,7 @@ export const resetToDefaultState = (
     .attr('stroke', '#fff')
     .attr('stroke-width', 1.5);
 
-  // 恢复节点外圈样式
+  // Restore node outer ring styles
   nodeSel.selectAll<SVGCircleElement, D3Node>('circle.ring')
     .transition()
     .duration(200)
@@ -140,12 +71,12 @@ export const resetToDefaultState = (
     .attr('stroke', d => d.color)
     .attr('stroke-opacity', 0.3);
 
-  // 恢复节点文本样式
+  // Restore node text styles
   nodeSel.selectAll<SVGTextElement, D3Node>('text')
     .attr('fill', '#171719')
     .attr('font-weight', 'normal');
 
-  // 恢复双向边样式
+  // Restore bidirectional edge styles
   g.selectAll<SVGLineElement, D3Link>('line.bidirectional-a')
     .attr('stroke', '#A8ABB2')
     .attr('stroke-opacity', 0.4)
@@ -158,7 +89,7 @@ export const resetToDefaultState = (
     .attr('stroke-width', d => getBaseStrokeWidth(d.edge_type))
     .attr('marker-end', 'url(#arrow)');
 
-  // 恢复单向边样式
+  // Restore unidirectional edge styles
   linkSel
     .attr('stroke', '#A8ABB2')
     .attr('stroke-opacity', 0.4)
@@ -181,17 +112,17 @@ export const resetToDefaultState = (
     })
     .attr('stroke-dasharray', 'none');
 
-  // 隐藏连线标签
+  // Hide link labels
   linkLabelSel.style('display', 'none');
 };
 
 /**
- * 计算高亮的节点和连线 ID
- * @param selectedNodeId - 当前选中的节点/连线 ID
- * @param selectedCategory - 当前选中的分类
- * @param nodes - 节点列表
- * @param links - 连线列表
- * @returns 高亮的节点和连线 ID 集合
+ * Calculate highlighted node and link IDs
+ * @param selectedNodeId - Currently selected node/link ID
+ * @param selectedCategory - Currently selected category
+ * @param nodes - Node list
+ * @param links - Link list
+ * @returns Set of highlighted node and link IDs
  */
 export const calculateHighlightedIds = (
   selectedNodeId: string | null | undefined,
@@ -206,7 +137,7 @@ export const calculateHighlightedIds = (
     const isLink = links.some(link => link.id === selectedNodeId);
 
     if (isLink) {
-      // 选中边时，不添加任何节点到高亮集合（节点置灰）
+      // When link is selected, don't add any nodes to highlighted set (nodes grayed out)
       highlightedLinkIds.add(selectedNodeId);
     } else {
       highlightedNodeIds.add(selectedNodeId);
@@ -235,10 +166,10 @@ export const calculateHighlightedIds = (
 };
 
 /**
- * 根据分类计算高亮节点
- * @param nodes - 节点列表
- * @param selectedCategory - 选中的分类
- * @returns 高亮的节点 ID 集合
+ * Calculate highlighted nodes by category
+ * @param nodes - Node list
+ * @param selectedCategory - Selected category
+ * @returns Set of highlighted node IDs
  */
 export const calculateHighlightedByCategory = (
   nodes: D3Node[],
@@ -254,11 +185,11 @@ export const calculateHighlightedByCategory = (
 };
 
 /**
- * 根据区域 ID 计算高亮节点
- * @param nodes - D3 节点列表
- * @param originalNodes - 原始节点列表
- * @param regionId - 区域 ID
- * @returns 高亮的节点和连线 ID 集合
+ * Calculate highlighted nodes by region ID
+ * @param nodes - D3 node list
+ * @param originalNodes - Original node list
+ * @param regionId - Region ID
+ * @returns Set of highlighted node and link IDs
  */
 export const calculateHighlightedByRegion = (
   nodes: D3Node[],
@@ -304,11 +235,11 @@ export const calculateHighlightedByRegion = (
 };
 
 /**
- * 获取合并后的关系数组（a_to_b + b_to_a）
- * @param aToB - a_to_b 关系数组
- * @param bToA - b_to_a 关系数组
- * @param activeRelationIndex - 当前激活的关系索引
- * @returns 当前激活关系的 predicate_surface
+ * Get merged relations array (a_to_b + b_to_a)
+ * @param aToB - a_to_b relations array
+ * @param bToA - b_to_a relations array
+ * @param activeRelationIndex - Currently active relation index
+ * @returns The predicate_surface of the currently active relation
  */
 export const getActiveRelationLabel = (
   aToB: EdgeClickData[] = [],
@@ -322,11 +253,11 @@ export const getActiveRelationLabel = (
 };
 
 /**
- * 截断节点名称，支持多行显示
- * @param name - 节点名称
- * @param symbolSize - 节点大小
- * @param fontSize - 字体大小
- * @returns 截断后的名称（可能包含换行）
+ * Truncate node name with multi-line support
+ * @param name - Node name
+ * @param symbolSize - Node size
+ * @param fontSize - Font size
+ * @returns Truncated name (may contain newlines)
  */
 export const truncateNodeName = (
   name: string,
@@ -374,11 +305,11 @@ export const truncateNodeName = (
 };
 
 /**
- * 计算连线端点坐标（考虑节点大小和边距）
- * @param source - 源节点
- * @param target - 目标节点
- * @param offset - 偏移量（用于双向边分离）
- * @returns 连线端点坐标
+ * Calculate link endpoint coordinates (considering node size and margins)
+ * @param source - Source node
+ * @param target - Target node
+ * @param offset - Offset (for bidirectional edge separation)
+ * @returns Link endpoint coordinates
  */
 export const calculateLinkEndpoints = (
   source: D3Node,
@@ -400,11 +331,11 @@ export const calculateLinkEndpoints = (
 };
 
 /**
- * 计算双向边的反向端点坐标
- * @param source - 源节点
- * @param target - 目标节点
- * @param offset - 偏移量（用于双向边分离）
- * @returns 连线端点坐标（反向）
+ * Calculate reverse endpoint coordinates for bidirectional edges
+ * @param source - Source node
+ * @param target - Target node
+ * @param offset - Offset (for bidirectional edge separation)
+ * @returns Link endpoint coordinates (reversed)
  */
 export const calculateBidirectionalReverseEndpoints = (
   source: D3Node,
@@ -417,7 +348,7 @@ export const calculateBidirectionalReverseEndpoints = (
   const perpX = dy / dist;
   const perpY = -dx / dist;
 
-  // 反向边从 target 指向 source
+  // Reverse edge points from target to source
   const x1 = (target.x ?? 0) + (-dx / dist) * (target.symbolSize + 2) + perpX * offset;
   const y1 = (target.y ?? 0) + (-dy / dist) * (target.symbolSize + 2) + perpY * offset;
   const x2 = (source.x ?? 0) - (-dx / dist) * (source.symbolSize + 2) + perpX * offset;
@@ -427,11 +358,11 @@ export const calculateBidirectionalReverseEndpoints = (
 };
 
 /**
- * 计算连线标签位置和旋转角度
- * @param source - 源节点
- * @param target - 目标节点
- * @param dyOffset - Y 轴偏移量
- * @returns 标签位置和旋转角度
+ * Calculate link label position and rotation angle
+ * @param source - Source node
+ * @param target - Target node
+ * @param dyOffset - Y-axis offset
+ * @returns Label position and rotation angle
  */
 export const calculateLinkLabelPosition = (
   source: D3Node,
@@ -450,18 +381,18 @@ export const calculateLinkLabelPosition = (
 };
 
 /**
- * 判断边是否为单向边类型
- * @param edgeType - 边类型
- * @returns 是否为单向边
+ * Check if edge is unidirectional type
+ * @param edgeType - Edge type
+ * @returns Whether it is a unidirectional edge
  */
 export const isSingleDirectional = (edgeType?: EdgeType): boolean => {
   return edgeType === 'SINGLE' || edgeType === 'UNIDIRECTIONAL_MULTI';
 };
 
 /**
- * 判断边是否为双向边类型
- * @param edgeType - 边类型
- * @returns 是否为双向边
+ * Check if edge is bidirectional type
+ * @param edgeType - Edge type
+ * @returns Whether it is a bidirectional edge
  */
 export const isBidirectional = (edgeType?: EdgeType): boolean => {
   return edgeType === 'BIDIRECTIONAL' || edgeType === 'MULTI_BIDIRECTIONAL';
