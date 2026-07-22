@@ -63,6 +63,69 @@ def _dispatch_document_graph_sync_best_effort(
         return None
 
 
+def _list_all_segments(vector_service: Any, **kwargs: Any) -> list[DocumentChunk]:
+    return list(vector_service.iter_by_segment(**kwargs))
+
+
+def _load_parent_fallback_page(
+    vector_service: Any,
+    *,
+    document_id: str,
+    keywords: str | None,
+    page: int,
+    pagesize: int,
+) -> tuple[
+    int,
+    list[DocumentChunk],
+    int,
+    list[DocumentChunk],
+    list[DocumentChunk],
+]:
+    offset = (page - 1) * pagesize
+    end = offset + pagesize
+    total_all = 0
+    total_parents = 0
+    flat_page: list[DocumentChunk] = []
+    parent_page: list[DocumentChunk] = []
+
+    for item in vector_service.iter_by_segment(
+        document_id=document_id,
+        query=keywords,
+        asc=True,
+    ):
+        if offset <= total_all < end:
+            flat_page.append(item)
+        if (item.metadata or {}).get("chunk_type") == "parent":
+            if offset <= total_parents < end:
+                parent_page.append(item)
+            total_parents += 1
+        total_all += 1
+
+    if total_parents == 0 or not parent_page:
+        return total_all, flat_page, total_parents, parent_page, []
+
+    parent_doc_ids = {
+        item.metadata.get("doc_id")
+        for item in parent_page
+        if item.metadata and item.metadata.get("doc_id")
+    }
+    selected_children: list[DocumentChunk] = []
+    if parent_doc_ids:
+        for item in vector_service.iter_by_segment(
+            document_id=document_id,
+            query=keywords,
+            asc=True,
+        ):
+            metadata = item.metadata or {}
+            if (
+                metadata.get("chunk_type") == "child"
+                and metadata.get("parent_id") in parent_doc_ids
+            ):
+                selected_children.append(item)
+
+    return total_all, flat_page, total_parents, parent_page, selected_children
+
+
 def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant_id: uuid.UUID):
     if not image2text_id:
         raise HTTPException(
@@ -534,8 +597,7 @@ async def get_chunks(
         api_logger.debug("Start executing document chunk query")
         vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
         if db_document.is_parent_child_mode:
-            # 方案 1：两次查询 + parent 级分页
-            # 4.1 查询 parent chunks（按 sort_id 排序，分页）
+            # Query parent chunks first and paginate at the parent level.
             total_parents, parent_items = await asyncio.to_thread(
                 vector_service.search_by_segment,
                 document_id=str(document_id),
@@ -546,25 +608,28 @@ async def get_chunks(
                 chunk_types="parent",
             )
 
-            # fallback：如果 parent 查询为空（旧数据或 chunk_type 缺失），查所有 chunks 在内存中区分
+            # Fall back to metadata chunk types for legacy indexes.
             if not parent_items and total_parents == 0:
                 api_logger.debug("Parent query returned empty, falling back to query all chunks")
-                total_all, all_items = await asyncio.to_thread(
-                    vector_service.search_by_segment,
+                (
+                    total_all,
+                    flat_page,
+                    total_parents,
+                    parent_items,
+                    child_items_fallback,
+                ) = await asyncio.to_thread(
+                    _load_parent_fallback_page,
+                    vector_service,
                     document_id=str(document_id),
-                    query=keywords,
-                    pagesize=10000,
-                    page=1,
-                    asc=True,
+                    keywords=keywords,
+                    page=page,
+                    pagesize=pagesize,
                 )
-                parent_items = [item for item in all_items if (item.metadata or {}).get("chunk_type") == "parent"]
-                child_items_fallback = [item for item in all_items if (item.metadata or {}).get("chunk_type") == "child"]
-                total_parents = len(parent_items)
 
-                if not parent_items:
-                    # 仍然没有 parent，按普通分块模式返回
+                if total_parents == 0:
+                    # Return a flat page when the document has no parent chunks.
                     result = {
-                        "items": all_items[(page - 1) * pagesize : page * pagesize],
+                        "items": flat_page,
                         "page": {
                             "page": page,
                             "pagesize": pagesize,
@@ -574,27 +639,27 @@ async def get_chunks(
                     }
                     return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
 
-                # 内存分页 + 组装
-                paginated_parents = parent_items[(page - 1) * pagesize : page * pagesize]
                 result = _build_nested_result(
-                    paginated_parents, child_items_fallback, page, pagesize, total_parents
+                    parent_items, child_items_fallback, page, pagesize, total_parents
                 )
                 return success(data=jsonable_encoder(result), msg="Query of document chunk list succeeded")
 
             parent_doc_ids = [p.metadata["doc_id"] for p in parent_items]
 
-            # 4.2 查询这些 parent 下的所有 child chunks（按 sort_id 排序，不分页）
-            _, child_items = await asyncio.to_thread(
-                vector_service.search_by_segment,
-                document_id=str(document_id),
-                pagesize=10000,
-                page=1,
-                asc=True,
-                chunk_types="child",
-                parent_ids=parent_doc_ids,
-            )
+            # Load every child for the selected parent page.
+            if parent_doc_ids:
+                child_items = await asyncio.to_thread(
+                    _list_all_segments,
+                    vector_service,
+                    document_id=str(document_id),
+                    asc=True,
+                    chunk_types="child",
+                    parent_ids=parent_doc_ids,
+                )
+            else:
+                child_items = []
 
-            # 4.3 组装嵌套结构
+            # Assemble the parent-child response without changing its schema.
             result = _build_nested_result(parent_items, child_items, page, pagesize, total_parents)
         else:
             # 普通分块模式：原有逻辑
