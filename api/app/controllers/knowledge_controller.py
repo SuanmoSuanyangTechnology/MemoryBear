@@ -277,7 +277,8 @@ async def get_knowledge_graph_entity_types(
             model_name=config.api_keys[0].model_name,
             base_url=config.api_keys[0].api_base
         )
-        response = graph_entity_types(chat_model, scenario)
+        # response = graph_entity_types(chat_model, scenario)
+        response = await asyncio.to_thread(graph_entity_types, chat_model, scenario)
         return success(data=response, msg="Successfully obtained knowledge graph entity types")
     except HTTPException:
         raise

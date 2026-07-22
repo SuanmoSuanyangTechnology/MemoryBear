@@ -13,6 +13,9 @@ api/res/
 docs/
 examples/
 AGENTS.md
+CLAUDE.md
+api/tests/
+api/scripts/
 
 # Environment variables
 .env
