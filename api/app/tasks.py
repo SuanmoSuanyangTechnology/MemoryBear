@@ -2160,8 +2160,9 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_layer2_reflection(self, end_user_id: str, config_id: str, workspace_id: str, 
-                         iteration_period: int = 24, from_retry: bool = False) -> Dict[str, Any]:
+def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = "",
+                         workspace_id: str = "", iteration_period: int = 24,
+                         from_retry: bool = False, user_id: str | None = None) -> Dict[str, Any]:
     """对【单个用户】执行一次 Layer2 反思（实体去重 / 描述合并 / 未识别实体处理等）。
 
     由 scan_layer2_reflection 派发，每个用户一个独立任务、独立 db session，跑完即释放内存。
@@ -2171,6 +2172,11 @@ def do_layer2_reflection(self, end_user_id: str, config_id: str, workspace_id: s
         lock_timeout       抢用户写锁超时，本次放弃（下一轮 scan 会重派）
         failed             执行报错
     """
+    # HACK: 兼容旧参数 user_id，v0.3.15 后移除
+    end_user_id = end_user_id or user_id
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
     start_time = time.time()
     inflight_key = f"reflection:inflight:{end_user_id}"
 
@@ -2402,14 +2408,20 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_layer2_dedup_full_scan(self, end_user_id: str, config_id: str,
-                              workspace_id: str, from_retry: bool = False) -> Dict[str, Any]:
+def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: str = "",
+                              workspace_id: str = "", from_retry: bool = False,
+                              user_id: str | None = None) -> Dict[str, Any]:
     """对【单个用户】执行一次低频全量去重扫描。
 
     由 scan_layer2_dedup_full_scan 派发。精确的增量判断在 run_dedup_full_scan 内部
     （check_new_entities 按实体类型查 Neo4j 新增数），do 这层不重复做。
     返回 status：success / lock_timeout / failed。
     """
+    # HACK: 兼容旧参数 user_id，v0.3.15 后移除
+    end_user_id = end_user_id or user_id
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
     start_time = time.time()
     inflight_key = f"dedup:inflight:{end_user_id}"
 
