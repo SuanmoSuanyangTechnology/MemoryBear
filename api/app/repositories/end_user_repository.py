@@ -1,9 +1,10 @@
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional, Set
+from datetime import datetime
+from typing import List, NamedTuple, Optional, Set
 
 import sqlalchemy as sa
-from sqlalchemy import select, or_
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,12 @@ from app.models.workspace_model import Workspace
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+
+
+class UserTagRefreshCandidate(NamedTuple):
+    end_user_id: uuid.UUID
+    workspace_id: uuid.UUID
+    metadata_updated_at: datetime | None
 
 
 def is_uuid(value: str) -> bool:
@@ -465,9 +472,129 @@ class EndUserRepository:
                 EndUser.core_values,
                 EndUser.one_sentence_summary,
                 EndUser.user_summary_updated_at,
+                EndUser.memory_tags,
             ).where(EndUser.id == end_user_id).limit(1)
         )
         return result.mappings().one_or_none()
+
+    def get_user_tag_refresh_candidates(
+            self,
+            after_id: uuid.UUID | None,
+            limit: int,
+    ) -> List[UserTagRefreshCandidate]:
+        """分页获取需要刷新用户名片 Tag 的用户，不加载完整 metadata。"""
+        query = (
+            self.db.query(
+                EndUser.id,
+                EndUser.workspace_id,
+                EndUserInfo.updated_at,
+            )
+            .join(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                or_(
+                    EndUser.memory_tags.is_(None),
+                    EndUser.memory_tags_source_fingerprint.is_(None),
+                    EndUser.memory_tags_updated_at.is_(None),
+                    EndUserInfo.updated_at > EndUser.memory_tags_updated_at,
+                ),
+            )
+        )
+        if after_id is not None:
+            query = query.filter(EndUser.id > after_id)
+
+        rows = query.order_by(EndUser.id.asc()).limit(limit).all()
+        return [
+            UserTagRefreshCandidate(
+                end_user_id=row[0],
+                workspace_id=row[1],
+                metadata_updated_at=row[2],
+            )
+            for row in rows
+        ]
+
+    def get_scoped_user_tag_source(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+    ) -> Optional[dict]:
+        """读取有效 Workspace 下单个有效用户的 Tag 源数据。"""
+        result = self.db.execute(
+            select(
+                EndUserInfo.meta_data.label("meta_data"),
+                EndUserInfo.updated_at.label("metadata_updated_at"),
+                EndUser.memory_tags.label("memory_tags"),
+                EndUser.memory_tags_source_fingerprint.label("memory_tags_source_fingerprint"),
+            )
+            .select_from(EndUser)
+            .join(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "meta_data": row["meta_data"],
+            "metadata_updated_at": row["metadata_updated_at"],
+            "memory_tags": row["memory_tags"],
+            "memory_tags_source_fingerprint": row["memory_tags_source_fingerprint"],
+        }
+
+    def update_user_tags_if_source_unchanged(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+            expected_metadata_updated_at: datetime | None,
+            tags: List[str],
+            source_fingerprint: str,
+            refreshed_at: datetime,
+    ) -> bool:
+        """仅在 metadata 版本未变化时更新 Tag 缓存及源指纹。"""
+        timestamp_matches = (
+            EndUserInfo.updated_at.is_(None)
+            if expected_metadata_updated_at is None
+            else EndUserInfo.updated_at == expected_metadata_updated_at
+        )
+        source_unchanged = sa.exists().where(
+            EndUserInfo.end_user_id == end_user_id,
+            timestamp_matches,
+        )
+        workspace_active = sa.exists().where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True),
+        )
+
+        try:
+            result = self.db.execute(
+                sa.update(EndUser)
+                .where(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    source_unchanged,
+                    workspace_active,
+                )
+                .values(
+                    memory_tags=list(tags),
+                    memory_tags_updated_at=refreshed_at,
+                    memory_tags_source_fingerprint=source_fingerprint,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            self.db.commit()
+            return bool(result.rowcount)
+        except Exception:
+            self.db.rollback()
+            raise
 
     async def get_forgetting_threshold_async(self, end_user_id: uuid.UUID) -> Optional[float]:
         """获取用户的遗忘阈值配置。

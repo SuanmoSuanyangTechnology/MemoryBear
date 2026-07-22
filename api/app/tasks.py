@@ -3111,6 +3111,154 @@ def do_refresh_insight_summary_cache(
     result["end_user_id"] = end_user_id
     return result
 
+
+# ============================================================
+# 用户名片 Tag 刷新：独立扫描 + 单用户领域入口
+# ============================================================
+
+USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
+USER_TAG_INFLIGHT_TTL_SEC = 600
+USER_TAG_SCAN_PAGE_SIZE = 500
+
+
+@celery_app.task(
+    name="app.tasks.scan_refresh_user_tags",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_refresh_user_tags(self) -> Dict[str, Any]:
+    """扫描 metadata 已变化的用户并派发独立 Tag 刷新任务。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    start_time = time.time()
+    redis_client = get_sync_redis_client()
+    after_id: uuid.UUID | None = None
+    candidates_count = 0
+    dispatched = 0
+    skip_inflight = 0
+    failed = 0
+
+    while True:
+        with get_db_read() as db:
+            candidates = EndUserRepository(db).get_user_tag_refresh_candidates(
+                after_id=after_id,
+                limit=USER_TAG_SCAN_PAGE_SIZE,
+            )
+        if not candidates:
+            break
+
+        candidates_count += len(candidates)
+        for candidate in candidates:
+            end_user_id = str(candidate.end_user_id)
+            inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+            lock_acquired = False
+            try:
+                if redis_client is not None:
+                    lock_acquired = bool(
+                        redis_client.set(
+                            inflight_key,
+                            "1",
+                            nx=True,
+                            ex=USER_TAG_INFLIGHT_TTL_SEC,
+                        )
+                    )
+                    if not lock_acquired:
+                        skip_inflight += 1
+                        continue
+
+                countdown = (dispatched % 60) * 5
+                do_refresh_user_tags.apply_async(
+                    kwargs={
+                        "end_user_id": end_user_id,
+                        "workspace_id": str(candidate.workspace_id),
+                    },
+                    countdown=countdown,
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception as exc:
+                failed += 1
+                logger.error(
+                    "用户名片Tag scan派发失败 user=%s error=%s",
+                    end_user_id,
+                    str(exc),
+                    exc_info=True,
+                )
+                if redis_client is not None and lock_acquired:
+                    try:
+                        redis_client.delete(inflight_key)
+                    except Exception:
+                        logger.warning("用户名片Tag scan回滚在途锁失败 user=%s", end_user_id, exc_info=True)
+
+        after_id = candidates[-1].end_user_id
+        if len(candidates) < USER_TAG_SCAN_PAGE_SIZE:
+            break
+
+    result = {
+        "status": "SUCCESS",
+        "candidates": candidates_count,
+        "dispatched": dispatched,
+        "skip_inflight": skip_inflight,
+        "failed": failed,
+        "elapsed_time": time.time() - start_time,
+        "task_id": self.request.id,
+    }
+    logger.info(
+        "scan_refresh_user_tags完成 candidates=%s dispatched=%s skip_inflight=%s failed=%s",
+        candidates_count,
+        dispatched,
+        skip_inflight,
+        failed,
+    )
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.do_refresh_user_tags",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=120,
+    soft_time_limit=90,
+)
+def do_refresh_user_tags(
+        self,
+        end_user_id: str,
+        workspace_id: str,
+) -> Dict[str, Any]:
+    """调用记忆领域入口刷新单个用户的名片 Tag。"""
+    inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.memory_service import MemoryService
+
+        return await MemoryService.refresh_user_card_tags(end_user_id, workspace_id)
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    finally:
+        _shutdown_loop_gracefully(loop)
+        try:
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                redis_client.delete(inflight_key)
+        except Exception:
+            logger.warning("用户名片Tag do释放在途锁失败 user=%s", end_user_id, exc_info=True)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    result["end_user_id"] = end_user_id
+    logger.info("do_refresh_user_tags完成 user=%s status=%s", end_user_id, result["status"])
+    return result
+
+
 @celery_app.task(
     name="app.tasks.run_forgetting_cycle_task",
     bind=True,

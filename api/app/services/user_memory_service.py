@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
+from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
     _DEFAULT_FIELDS,
@@ -413,7 +414,8 @@ class UserMemoryService:
             return {
                 "user_summary": None, "personality": None,
                 "core_values": None, "one_sentence": None,
-                "updated_at": None, "is_cached": False, "message": "用户不存在"
+                "tags": [], "updated_at": None,
+                "is_cached": False, "message": "用户不存在"
             }
 
         has_cache = any([
@@ -426,6 +428,7 @@ class UserMemoryService:
             "personality": row["personality_traits"],
             "core_values": row["core_values"],
             "one_sentence": row["one_sentence_summary"],
+            "tags": normalize_stored_user_card_tags(row["memory_tags"]),
             "updated_at": to_timestamp_ms(row["user_summary_updated_at"]) if row["user_summary_updated_at"] else None,
             "is_cached": has_cache,
         }
