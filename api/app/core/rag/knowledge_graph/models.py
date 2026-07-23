@@ -116,6 +116,11 @@ class GraphEvidenceHit(BaseModel):
     relation_label: str | None = None
 
 
+class SourceChunkVectorHit(BaseModel):
+    source_chunk_id: str
+    score: float
+
+
 class ProjectionEvidenceGroup(BaseModel):
     projection_type: str
     projection_key: str

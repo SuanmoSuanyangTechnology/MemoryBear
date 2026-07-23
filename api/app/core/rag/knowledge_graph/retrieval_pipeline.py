@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,6 +15,7 @@ from app.core.rag.knowledge_graph.models import (
     GraphRetrievalRequest,
     ProjectionEvidenceGroup,
     RelationProjectionHit,
+    SourceChunkVectorHit,
 )
 from app.core.rag.knowledge_graph.prompts import (
     QUERY_ANALYSIS_SYSTEM_PROMPT,
@@ -182,6 +183,12 @@ class _SeedCandidates:
 class _SourceGroup:
     key: str
     source_chunk_ids: list[str]
+
+
+@dataclass
+class _SourceSelection:
+    source_chunk_ids: list[str] = field(default_factory=list)
+    vector_scores: dict[str, float] = field(default_factory=dict)
 
 
 class KnowledgeGraphRetrievalPipeline:
@@ -406,7 +413,7 @@ class KnowledgeGraphRetrievalPipeline:
                 group_map,
                 matches,
             )
-            entity_sequence = await self._select_source_chunks(
+            entity_selection = await self._select_source_chunks(
                 request,
                 entity_groups,
                 branch_vectors.get("query"),
@@ -417,19 +424,29 @@ class KnowledgeGraphRetrievalPipeline:
                 "relation",
                 group_map,
                 matches,
-                excluded_source_ids=set(entity_sequence),
+                excluded_source_ids=set(entity_selection.source_chunk_ids),
             )
-            relation_sequence = await self._select_source_chunks(
+            relation_selection = await self._select_source_chunks(
                 request,
                 relation_groups,
                 branch_vectors.get("query"),
                 source_type="relation",
             )
+            source_vector_scores = {
+                **entity_selection.vector_scores,
+                **relation_selection.vector_scores,
+            }
             candidate_ids = self._merge_source_types(
-                entity_sequence,
-                relation_sequence,
+                entity_selection.source_chunk_ids,
+                relation_selection.source_chunk_ids,
                 request.max_candidates,
             )
+            candidate_id_set = set(candidate_ids)
+            source_vector_scores = {
+                source_id: score
+                for source_id, score in source_vector_scores.items()
+                if source_id in candidate_id_set
+            }
             matches = {
                 source_id: matches[source_id]
                 for source_id in candidate_ids
@@ -483,16 +500,26 @@ class KnowledgeGraphRetrievalPipeline:
                 source_id: index
                 for index, source_id in enumerate(candidate_ids)
             }
-            parent_matches, parent_order = self._build_parent_matches(
-                scoped_chunks,
-                matches,
-                candidate_order,
+            parent_matches, parent_order, parent_vector_scores = (
+                self._build_parent_matches(
+                    scoped_chunks,
+                    matches,
+                    candidate_order,
+                    source_vector_scores,
+                )
             )
             for chunk in scoped_chunks:
                 source_id = str((chunk.metadata or {}).get("doc_id") or "")
                 match = matches.get(source_id)
                 if match is not None:
-                    chunk.metadata["score"] = match.graph_score
+                    vector_score = source_vector_scores.get(source_id)
+                    chunk.metadata["graph_score"] = match.graph_score
+                    if vector_score is not None:
+                        chunk.metadata["chunk_vector_score"] = vector_score
+                    chunk.metadata["score"] = self._metadata_score(
+                        match,
+                        vector_score,
+                    )
             resolved = await self._parent_resolver(
                 scoped_chunks,
                 request.runtime.chunk_index_name,
@@ -504,6 +531,8 @@ class KnowledgeGraphRetrievalPipeline:
                 parent_matches,
                 candidate_order,
                 parent_order,
+                source_vector_scores,
+                parent_vector_scores,
             )
             result = self._finalize_candidates(
                 attached,
@@ -868,9 +897,9 @@ class KnowledgeGraphRetrievalPipeline:
         query_vector: Sequence[float] | None,
         *,
         source_type: str,
-    ) -> list[str]:
+    ) -> _SourceSelection:
         if not groups:
-            return []
+            return _SourceSelection()
         candidates = [
             source_id
             for group in groups
@@ -900,21 +929,17 @@ class KnowledgeGraphRetrievalPipeline:
                 )
                 ranked = []
             allowed = set(candidates)
-            selected = [
-                source_id
-                for source_id in dict.fromkeys(ranked)
-                if source_id in allowed
-            ]
-            if selected:
+            selection = self._ranked_source_selection(ranked, allowed)
+            if selection.source_chunk_ids:
                 self._log_source_selection(
                     request,
                     source_type,
                     "vector",
                     len(groups),
                     len(candidates),
-                    len(selected),
+                    len(selection.source_chunk_ids),
                 )
-                return selected
+                return selection
         selected = self._weighted_source_poll(
             groups,
             request.related_chunk_number,
@@ -927,7 +952,51 @@ class KnowledgeGraphRetrievalPipeline:
             len(candidates),
             len(selected),
         )
-        return selected
+        return _SourceSelection(source_chunk_ids=selected)
+
+    @classmethod
+    def _ranked_source_selection(
+        cls,
+        ranked_hits: Sequence[Any],
+        allowed: set[str],
+    ) -> _SourceSelection:
+        selected: list[str] = []
+        scores: dict[str, float] = {}
+        seen: set[str] = set()
+        for hit in ranked_hits:
+            source_id, score = cls._extract_source_vector_hit(hit)
+            if not source_id or source_id not in allowed or source_id in seen:
+                continue
+            seen.add(source_id)
+            selected.append(source_id)
+            if score is not None:
+                scores[source_id] = score
+        return _SourceSelection(
+            source_chunk_ids=selected,
+            vector_scores=scores,
+        )
+
+    @staticmethod
+    def _extract_source_vector_hit(hit: Any) -> tuple[str, float | None]:
+        if isinstance(hit, SourceChunkVectorHit):
+            return hit.source_chunk_id, float(hit.score)
+        if isinstance(hit, Mapping):
+            source_id = str(
+                hit.get("source_chunk_id")
+                or hit.get("source_id")
+                or hit.get("id")
+                or ""
+            )
+            score = hit.get("score")
+        elif isinstance(hit, tuple) and len(hit) >= 2:
+            source_id = str(hit[0] or "")
+            score = hit[1]
+        else:
+            return str(hit or ""), None
+        try:
+            return source_id, float(score)
+        except (TypeError, ValueError):
+            return source_id, None
 
     @staticmethod
     def _weighted_source_poll(
@@ -1059,9 +1128,11 @@ class KnowledgeGraphRetrievalPipeline:
         chunks: Sequence[DocumentChunk],
         matches: dict[str, _ChunkMatch],
         candidate_order: dict[str, int],
-    ) -> tuple[dict[str, _ChunkMatch], dict[str, int]]:
+        source_vector_scores: dict[str, float],
+    ) -> tuple[dict[str, _ChunkMatch], dict[str, int], dict[str, float]]:
         parent_matches: dict[str, _ChunkMatch] = {}
         parent_order: dict[str, int] = {}
+        parent_vector_scores: dict[str, float] = {}
         for chunk in chunks:
             metadata = chunk.metadata or {}
             if metadata.get("chunk_type") != "child":
@@ -1076,7 +1147,12 @@ class KnowledgeGraphRetrievalPipeline:
                 parent_order.get(parent_id, 2**31 - 1),
                 candidate_order.get(source_id, 2**31 - 1),
             )
-        return parent_matches, parent_order
+            vector_score = source_vector_scores.get(source_id)
+            if vector_score is not None:
+                existing_score = parent_vector_scores.get(parent_id)
+                if existing_score is None or vector_score > existing_score:
+                    parent_vector_scores[parent_id] = vector_score
+        return parent_matches, parent_order, parent_vector_scores
 
     @classmethod
     def _attach_resolved_matches(
@@ -1087,14 +1163,16 @@ class KnowledgeGraphRetrievalPipeline:
         parent_matches: dict[str, _ChunkMatch],
         candidate_order: dict[str, int],
         parent_order: dict[str, int],
-    ) -> list[tuple[DocumentChunk, _ChunkMatch, int]]:
+        source_vector_scores: dict[str, float],
+        parent_vector_scores: dict[str, float],
+    ) -> list[tuple[DocumentChunk, _ChunkMatch, int, float | None]]:
         allowed_documents = (
             {str(item) for item in request.allowed_document_ids}
             if request.allowed_document_ids is not None
             else None
         )
         allowed_files = {str(item) for item in request.file_names}
-        attached: list[tuple[DocumentChunk, _ChunkMatch, int]] = []
+        attached: list[tuple[DocumentChunk, _ChunkMatch, int, float | None]] = []
         for chunk in chunks:
             metadata = chunk.metadata or {}
             source_id = str(metadata.get("doc_id") or "")
@@ -1120,7 +1198,16 @@ class KnowledgeGraphRetrievalPipeline:
                 candidate_order.get(source_id, 2**31 - 1),
                 parent_order.get(source_id, 2**31 - 1),
             )
-            attached.append((chunk, match, order))
+            vector_scores = [
+                score
+                for score in (
+                    source_vector_scores.get(source_id),
+                    parent_vector_scores.get(source_id),
+                )
+                if score is not None
+            ]
+            vector_score = max(vector_scores) if vector_scores else None
+            attached.append((chunk, match, order, vector_score))
         attached.sort(
             key=lambda item: (
                 item[2],
@@ -1132,36 +1219,50 @@ class KnowledgeGraphRetrievalPipeline:
 
     @staticmethod
     def _finalize_candidates(
-        attached: Sequence[tuple[DocumentChunk, _ChunkMatch, int]],
+        attached: Sequence[tuple[DocumentChunk, _ChunkMatch, int, float | None]],
         max_paths_per_chunk: int,
         max_candidates: int,
     ) -> list[DocumentChunk]:
         selected: list[DocumentChunk] = []
         seen_source_ids: set[str] = set()
-        for chunk, match, _ in attached:
+        for chunk, match, _, vector_score in attached:
             source_id = str((chunk.metadata or {}).get("doc_id") or "")
             if not source_id or source_id in seen_source_ids:
                 continue
             seen_source_ids.add(source_id)
             graph_rank = len(selected) + 1
+            chunk_score = KnowledgeGraphRetrievalPipeline._metadata_score(
+                match,
+                vector_score,
+            )
+            metadata = {
+                "retrieval_source": "graph",
+                "graph_rank": graph_rank,
+                "graph_score": match.graph_score,
+                "score": chunk_score,
+                "matched_entities": match.matched_entities(),
+                "matched_relations": match.matched_relations(),
+                "expanded_relations": match.expanded_relations(),
+                "support_count": match.support_count,
+                "evidence_confidence": match.evidence_confidence,
+                "match_paths": match.path_metadata(max_paths_per_chunk),
+            }
+            if vector_score is not None:
+                metadata["chunk_vector_score"] = vector_score
             chunk.metadata.update(
-                {
-                    "retrieval_source": "graph",
-                    "graph_rank": graph_rank,
-                    "graph_score": match.graph_score,
-                    "score": match.graph_score,
-                    "matched_entities": match.matched_entities(),
-                    "matched_relations": match.matched_relations(),
-                    "expanded_relations": match.expanded_relations(),
-                    "support_count": match.support_count,
-                    "evidence_confidence": match.evidence_confidence,
-                    "match_paths": match.path_metadata(max_paths_per_chunk),
-                }
+                metadata
             )
             selected.append(chunk)
             if len(selected) >= max(1, int(max_candidates)):
                 break
         return selected
+
+    @staticmethod
+    def _metadata_score(
+        match: _ChunkMatch,
+        vector_score: float | None,
+    ) -> float:
+        return vector_score if vector_score is not None else match.graph_score
 
     async def _analyze_query(
         self,

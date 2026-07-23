@@ -16,6 +16,7 @@ from app.core.rag.knowledge_graph.models import (
     ProjectionEvidenceGroup,
     RelationEvidence,
     RelationProjectionHit,
+    SourceChunkVectorHit,
 )
 from app.core.rag.knowledge_graph.normalizer import (
     document_map_id,
@@ -1011,7 +1012,7 @@ class GraphElasticsearchStore:
         *,
         allowed_document_ids: Sequence[str] | None,
         file_names: Sequence[str],
-    ) -> list[str]:
+    ) -> list[SourceChunkVectorHit]:
         source_ids = tuple(
             dict.fromkeys(
                 str(source_id)
@@ -1068,7 +1069,7 @@ class GraphElasticsearchStore:
         raise_on_shard_failures(result, "rank graph source chunks")
 
         allowed_sources = set(source_ids)
-        ranked: list[str] = []
+        ranked: list[SourceChunkVectorHit] = []
         seen: set[str] = set()
         for hit in self._hits(result):
             source = hit.get("_source") or {}
@@ -1083,7 +1084,14 @@ class GraphElasticsearchStore:
             ):
                 continue
             seen.add(source_id)
-            ranked.append(source_id)
+            ranked.append(
+                SourceChunkVectorHit(
+                    source_chunk_id=source_id,
+                    score=self._script_score_to_normalized_similarity(
+                        hit.get("_score")
+                    ),
+                )
+            )
         return ranked
 
     async def _projection_search(
@@ -1378,6 +1386,11 @@ class GraphElasticsearchStore:
         except (TypeError, ValueError):
             return -1.0
         return max(-1.0, min(1.0, score))
+
+    @classmethod
+    def _script_score_to_normalized_similarity(cls, raw_score: Any) -> float:
+        cosine_score = cls._script_score_to_cosine(raw_score)
+        return max(0.0, min(1.0, (cosine_score + 1.0) / 2.0))
 
     @staticmethod
     def _relation_label(source: Mapping[str, Any]) -> str:
