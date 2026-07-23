@@ -324,8 +324,10 @@ class KnowledgeRetrievalService:
         )
         return KnowledgeRetrievalResult(
             chunks=chunks,
-            entities=retrieval_result.entities,
-            relationships=retrieval_result.relationships,
+            # Top-level graph payload is intentionally suppressed while clients
+            # read the same graph data from the grouped graph chunks above.
+            # entities=retrieval_result.entities,
+            # relationships=retrieval_result.relationships,
         )
 
     @classmethod
