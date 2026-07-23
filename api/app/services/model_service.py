@@ -21,8 +21,24 @@ from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
+from app.utils.redis_cache import invalidate_workspace_model_options
 
 logger = get_business_logger()
+
+
+def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, bool]:
+    provider = getattr(model.provider, "value", model.provider)
+    public_speedbear = (
+        provider == ModelProvider.SPEEDBEAR.value and bool(model.is_public)
+    )
+    return model.tenant_id, public_speedbear
+
+
+def _invalidate_model_option_states(*states: tuple[uuid.UUID | None, bool]) -> None:
+    invalidate_workspace_model_options(
+        (tenant_id for tenant_id, _ in states),
+        public_catalog_changed=any(is_public for _, is_public in states),
+    )
 
 
 class ModelConfigService:
@@ -430,6 +446,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(model)
+        _invalidate_model_option_states(_model_option_cache_state(model))
         return model
 
     @staticmethod
@@ -439,6 +456,7 @@ class ModelConfigService:
         existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        old_cache_state = _model_option_cache_state(existing_model)
 
         if model_data.name and model_data.name != existing_model.name:
             if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
@@ -457,6 +475,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(model)
+        _invalidate_model_option_states(old_cache_state, _model_option_cache_state(model))
         return model
 
     @staticmethod
@@ -519,6 +538,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(model)
+        _invalidate_model_option_states(_model_option_cache_state(model))
         return model
 
     @staticmethod
@@ -528,6 +548,7 @@ class ModelConfigService:
         existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        old_cache_state = _model_option_cache_state(existing_model)
 
         if model_data.name and model_data.name != existing_model.name:
             if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
@@ -575,16 +596,23 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(existing_model)
+        _invalidate_model_option_states(
+            old_cache_state,
+            _model_option_cache_state(existing_model),
+        )
         return existing_model
 
     @staticmethod
     def delete_model(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> bool:
         """删除模型配置"""
-        if not ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id):
+        existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
+        if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        old_cache_state = _model_option_cache_state(existing_model)
 
         success = ModelConfigRepository.delete(db, model_id, tenant_id=tenant_id)
         db.commit()
+        _invalidate_model_option_states(old_cache_state)
         return success
 
     @staticmethod

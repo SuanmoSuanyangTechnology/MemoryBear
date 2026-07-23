@@ -45,6 +45,7 @@ from app.services.agent_config_converter import AgentConfigConverter
 from app.services.model_service import ModelApiKeyService
 from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import model_parameters_to_dict
+from app.utils.redis_cache import delete_json, workflow_config_key
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -1768,6 +1769,7 @@ class AppService:
 
         self.db.commit()
         self.db.refresh(workflow_cfg)
+        delete_json(workflow_config_key(app_id))
 
         logger.info("Workflow 配置更新成功", extra={"app_id": str(app_id)})
         return workflow_cfg

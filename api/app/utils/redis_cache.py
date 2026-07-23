@@ -29,10 +29,11 @@ import hashlib
 import inspect
 import json
 import logging
+import random
 import uuid
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from app.aioRedis import get_thread_safe_redis, get_thread_safe_sync_redis
 
@@ -291,3 +292,101 @@ async def invalidate_cache(
 
     logger.info("Invalidated %d cache keys matching '%s'", deleted, search)
     return deleted
+
+
+# Explicit-key cache-aside helpers used by database read caches.
+CACHE_MISS = object()
+WORKSPACE_MODEL_PUBLIC_VERSION_KEY = "cache:workspace-model-options:public-version:v1"
+
+
+def ttl_with_jitter(base_ttl: int) -> int:
+    """Add up to 10% positive jitter to spread cache expirations."""
+    return base_ttl + random.randint(0, max(1, base_ttl // 10))
+
+
+def workflow_config_key(app_id: Any) -> str:
+    return f"cache:workflow-config:v1:{app_id}"
+
+
+def workspace_model_options_key(tenant_id: Any, public_version: str) -> str:
+    return f"cache:workspace-model-options:v1:{public_version}:{tenant_id}"
+
+
+def get_json(key: str) -> Any:
+    try:
+        raw = get_thread_safe_sync_redis().get(key)
+        if raw is None:
+            return CACHE_MISS
+        return json.loads(raw)
+    except Exception:
+        logger.warning("Redis cache read failed: key=%s", key, exc_info=True)
+        return CACHE_MISS
+
+
+def set_json(key: str, value: Any, ttl: int) -> None:
+    try:
+        payload = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+        get_thread_safe_sync_redis().set(key, payload, ex=ttl_with_jitter(ttl))
+    except Exception:
+        logger.warning("Redis cache write failed: key=%s", key, exc_info=True)
+
+
+def delete_json(key: str) -> None:
+    try:
+        get_thread_safe_sync_redis().delete(key)
+    except Exception:
+        logger.warning("Redis cache invalidation failed: key=%s", key, exc_info=True)
+
+
+async def get_json_async(key: str) -> Any:
+    try:
+        raw = await get_thread_safe_redis().get(key)
+        if raw is None:
+            return CACHE_MISS
+        return json.loads(raw)
+    except Exception:
+        logger.warning("Redis async cache read failed: key=%s", key, exc_info=True)
+        return CACHE_MISS
+
+
+async def set_json_async(key: str, value: Any, ttl: int) -> None:
+    try:
+        payload = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+        await get_thread_safe_redis().set(key, payload, ex=ttl_with_jitter(ttl))
+    except Exception:
+        logger.warning("Redis async cache write failed: key=%s", key, exc_info=True)
+
+
+async def delete_json_async(key: str) -> None:
+    try:
+        await get_thread_safe_redis().delete(key)
+    except Exception:
+        logger.warning("Redis async cache invalidation failed: key=%s", key, exc_info=True)
+
+
+def get_workspace_model_public_version() -> str:
+    try:
+        value = get_thread_safe_sync_redis().get(WORKSPACE_MODEL_PUBLIC_VERSION_KEY)
+        return str(value or "0")
+    except Exception:
+        logger.warning("Failed to read workspace model catalog version", exc_info=True)
+        return "0"
+
+
+def invalidate_workspace_model_options(
+        tenant_ids: Iterable[Any], *, public_catalog_changed: bool = False,
+) -> None:
+    try:
+        redis = get_thread_safe_sync_redis()
+        if public_catalog_changed:
+            redis.incr(WORKSPACE_MODEL_PUBLIC_VERSION_KEY)
+            return
+        version = str(redis.get(WORKSPACE_MODEL_PUBLIC_VERSION_KEY) or "0")
+        keys = {
+            workspace_model_options_key(tenant_id, version)
+            for tenant_id in tenant_ids if tenant_id is not None
+        }
+        if keys:
+            redis.delete(*keys)
+    except Exception:
+        logger.warning("Workspace model options invalidation failed", exc_info=True)
