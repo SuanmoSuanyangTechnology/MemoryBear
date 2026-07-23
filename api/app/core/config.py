@@ -86,37 +86,88 @@ class Settings:
     KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY: int = int(
         os.getenv("KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY", "2")
     )
-    KNOWLEDGE_GRAPH_EXTRACT_BATCH_TOKENS: int = max(
-        128,
-        min(8000, int(os.getenv("KNOWLEDGE_GRAPH_EXTRACT_BATCH_TOKENS", "1200"))),
-    )
     KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY: int = max(
         1,
         min(16, int(os.getenv("KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY", "4"))),
     )
+    KNOWLEDGE_GRAPH_EXTRACTION_CACHE_TTL_SECONDS: int = max(
+        1,
+        min(
+            2592000,
+            int(
+                os.getenv(
+                    "KNOWLEDGE_GRAPH_EXTRACTION_CACHE_TTL_SECONDS",
+                    "604800",
+                )
+            ),
+        ),
+    )
     KNOWLEDGE_GRAPH_ENTITY_TOP_N: int = max(
         1,
-        min(100, int(os.getenv("KNOWLEDGE_GRAPH_ENTITY_TOP_N", "12"))),
+        min(100, int(os.getenv("KNOWLEDGE_GRAPH_ENTITY_TOP_N", "40"))),
     )
     KNOWLEDGE_GRAPH_RELATION_TOP_N: int = max(
         1,
-        min(100, int(os.getenv("KNOWLEDGE_GRAPH_RELATION_TOP_N", "12"))),
+        min(100, int(os.getenv("KNOWLEDGE_GRAPH_RELATION_TOP_N", "40"))),
+    )
+    KNOWLEDGE_GRAPH_ENTITY_SIMILARITY_THRESHOLD: float = max(
+        -1.0,
+        min(
+            1.0,
+            float(
+                os.getenv(
+                    "KNOWLEDGE_GRAPH_ENTITY_SIMILARITY_THRESHOLD",
+                    "0.20",
+                )
+            ),
+        ),
+    )
+    KNOWLEDGE_GRAPH_RELATION_SIMILARITY_THRESHOLD: float = max(
+        -1.0,
+        min(
+            1.0,
+            float(
+                os.getenv(
+                    "KNOWLEDGE_GRAPH_RELATION_SIMILARITY_THRESHOLD",
+                    "0.20",
+                )
+            ),
+        ),
     )
     KNOWLEDGE_GRAPH_NEIGHBOR_TOP_N: int = max(
         1,
         min(100, int(os.getenv("KNOWLEDGE_GRAPH_NEIGHBOR_TOP_N", "24"))),
     )
-    KNOWLEDGE_GRAPH_EVIDENCE_PER_KEY: int = max(
+    KNOWLEDGE_GRAPH_RELATED_CHUNK_NUMBER: int = max(
         1,
-        min(20, int(os.getenv("KNOWLEDGE_GRAPH_EVIDENCE_PER_KEY", "3"))),
+        min(
+            20,
+            int(os.getenv("KNOWLEDGE_GRAPH_RELATED_CHUNK_NUMBER", "5")),
+        ),
     )
-    KNOWLEDGE_GRAPH_MAX_CHUNKS_PER_DOCUMENT: int = max(
+    KNOWLEDGE_GRAPH_MAX_CANDIDATES: int = max(
         1,
-        min(20, int(os.getenv("KNOWLEDGE_GRAPH_MAX_CHUNKS_PER_DOCUMENT", "4"))),
+        min(500, int(os.getenv("KNOWLEDGE_GRAPH_MAX_CANDIDATES", "100"))),
+    )
+    KNOWLEDGE_GRAPH_MAX_PATHS_PER_CHUNK: int = max(
+        1,
+        min(20, int(os.getenv("KNOWLEDGE_GRAPH_MAX_PATHS_PER_CHUNK", "6"))),
+    )
+    KNOWLEDGE_GRAPH_QUERY_PLAN_CACHE_TTL_SECONDS: int = max(
+        1,
+        min(
+            3600,
+            int(
+                os.getenv(
+                    "KNOWLEDGE_GRAPH_QUERY_PLAN_CACHE_TTL_SECONDS",
+                    "300",
+                )
+            ),
+        ),
     )
     KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS: int = max(
         100,
-        min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "3000"))),
+        min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
     )
     KNOWLEDGE_GRAPH_LOCK_WAIT_SECONDS: int = max(
         1,

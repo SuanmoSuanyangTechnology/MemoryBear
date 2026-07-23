@@ -11,6 +11,7 @@ from app.core.rag.knowledge_graph.batching import (
     build_extraction_batches,
     select_source_chunks,
 )
+from app.core.rag.knowledge_graph.extraction_cache import GraphExtractionCache
 from app.core.rag.knowledge_graph.models import (
     EntityEvidence,
     ExtractionBatch,
@@ -38,6 +39,33 @@ def _prefer_evidence(current: Any | None, candidate: Any) -> Any:
     if current is None or candidate.confidence > current.confidence:
         return candidate
     return current
+
+
+def _clean_keywords(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                keyword
+                for value in values
+                if (keyword := _clean_display(value))
+            }
+        )
+    )
+
+
+def _bind_result_to_batch(
+    result: ExtractionResult,
+    batch: ExtractionBatch,
+) -> ExtractionResult:
+    if len(batch.source_chunk_ids) != 1:
+        raise ValueError("extraction batch must contain exactly one source chunk")
+    source_chunk_id = batch.source_chunk_ids[0]
+    bound = result.model_copy(deep=True)
+    for entity in bound.entities:
+        entity.source_chunk_ids = [source_chunk_id]
+    for relation in bound.relations:
+        relation.source_chunk_ids = [source_chunk_id]
+    return bound
 
 
 def materialize_evidence(
@@ -133,6 +161,7 @@ def materialize_evidence(
                 relation.directed,
             )
             description = _clean_display(relation.description)[:300]
+            keywords = _clean_keywords(relation.keywords)
             for source_chunk_id in dict.fromkeys(relation.source_chunk_ids):
                 source_id = str(source_chunk_id).strip()
                 if not source_id:
@@ -154,6 +183,7 @@ def materialize_evidence(
                     to_entity_name=to_entity[1],
                     predicate=predicate,
                     description=description,
+                    keywords=keywords,
                     directed=relation.directed,
                     confidence=relation.confidence,
                 )
@@ -175,11 +205,15 @@ class KnowledgeGraphIndexPipeline:
         extractor: Any,
         embedding: Any,
         lock_guard: Any,
+        extraction_cache: GraphExtractionCache | None = None,
     ) -> None:
         self._store = store
         self._extractor = extractor
         self._embedding = embedding
         self._lock_guard = lock_guard
+        self._extraction_cache = extraction_cache or GraphExtractionCache(
+            ttl_seconds=settings.KNOWLEDGE_GRAPH_EXTRACTION_CACHE_TTL_SECONDS
+        )
 
     async def sync_document(
         self,
@@ -209,10 +243,7 @@ class KnowledgeGraphIndexPipeline:
                 else []
             )
             chunks = select_source_chunks(hits)
-            batches = build_extraction_batches(
-                chunks,
-                settings.KNOWLEDGE_GRAPH_EXTRACT_BATCH_TOKENS,
-            )
+            batches = build_extraction_batches(chunks)
             logger.info(
                 "[EvidenceGraph] index_input"
                 " kb_id=%s document_id=%s active=%s"
@@ -226,7 +257,7 @@ class KnowledgeGraphIndexPipeline:
             )
 
             stage = "extract_batches"
-            results = await self._extract_batches(batches)
+            results = await self._extract_batches(batches, runtime)
             stage = "materialize_evidence"
             entity_evidence, relation_evidence = materialize_evidence(
                 runtime.knowledge_id,
@@ -357,20 +388,58 @@ class KnowledgeGraphIndexPipeline:
     async def _extract_batches(
         self,
         batches: Sequence[ExtractionBatch],
+        runtime: GraphIndexRuntime | None = None,
     ) -> list[ExtractionResult]:
         if not batches:
             return []
         semaphore = asyncio.Semaphore(
             settings.KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY
         )
+        cache_hits = 0
+        cache_misses = 0
+        llm_calls = 0
+        cache_stores = 0
 
         async def extract_one(batch: ExtractionBatch) -> ExtractionResult:
+            nonlocal cache_hits, cache_misses, llm_calls, cache_stores
             async with semaphore:
-                return await self._extractor.extract(batch)
+                cache_key = (
+                    self._extraction_cache.build_key(runtime, batch)
+                    if runtime is not None
+                    else None
+                )
+                if cache_key is not None:
+                    cached = await self._extraction_cache.get(cache_key)
+                    if cached is not None:
+                        cache_hits += 1
+                        return _bind_result_to_batch(cached, batch)
+                    cache_misses += 1
+                llm_calls += 1
+                result = _bind_result_to_batch(
+                    await self._extractor.extract(batch),
+                    batch,
+                )
+                if cache_key is not None:
+                    if await self._extraction_cache.set(cache_key, result):
+                        cache_stores += 1
+                return result
 
         tasks = [asyncio.create_task(extract_one(batch)) for batch in batches]
         try:
-            return list(await asyncio.gather(*tasks))
+            results = list(await asyncio.gather(*tasks))
+            if runtime is not None:
+                logger.info(
+                    "[EvidenceGraph] extraction_batches"
+                    " kb_id=%s batches=%d cache_hits=%d"
+                    " cache_misses=%d llm_calls=%d cache_stores=%d",
+                    runtime.knowledge_id,
+                    len(batches),
+                    cache_hits,
+                    cache_misses,
+                    llm_calls,
+                    cache_stores,
+                )
+            return results
         except BaseException:
             for task in tasks:
                 if not task.done():
@@ -407,6 +476,7 @@ class KnowledgeGraphIndexPipeline:
             to_name = self._most_common(item.to_entity_name for item in items)
             predicate = self._most_common(item.predicate for item in items)
             description = self._aggregate_descriptions(items)
+            keywords = self._aggregate_relation_keywords(items)
             projection = {
                 "relation_key_kwd": key,
                 "from_entity_key_kwd": items[0].from_entity_key,
@@ -414,6 +484,7 @@ class KnowledgeGraphIndexPipeline:
                 "to_entity_key_kwd": items[0].to_entity_key,
                 "to_entity_name_kwd": to_name,
                 "predicate_kwd": predicate,
+                "keywords_kwd": list(keywords),
                 "directed_int": int(items[0].directed),
                 "description": description,
                 "evidence_count_int": len(items),
@@ -421,7 +492,15 @@ class KnowledgeGraphIndexPipeline:
             }
             projections.append(projection)
             texts.append(
-                f"{from_name} -> {predicate} -> {to_name}\n{description}".strip()
+                "\n".join(
+                    part
+                    for part in (
+                        ", ".join(keywords),
+                        f"{from_name} -> {predicate} -> {to_name}",
+                        description,
+                    )
+                    if part
+                )
             )
 
         await self._embed_projections(runtime, projections, texts)
@@ -535,6 +614,21 @@ class KnowledgeGraphIndexPipeline:
             if len(descriptions) == 5:
                 break
         return " | ".join(descriptions)
+
+    @staticmethod
+    def _aggregate_relation_keywords(
+        items: Sequence[RelationEvidence],
+    ) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    keyword
+                    for item in items
+                    for value in item.keywords
+                    if (keyword := _clean_display(value))
+                }
+            )
+        )
 
     @staticmethod
     def _elapsed_ms(started_at: float) -> int:

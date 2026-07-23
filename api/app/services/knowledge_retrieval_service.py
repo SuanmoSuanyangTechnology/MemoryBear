@@ -435,7 +435,23 @@ class KnowledgeRetrievalService:
         chunks_by_index: list[list[DocumentChunk]] = [[] for _ in targets]
         for index, target_chunks in retrieved:
             chunks_by_index[index] = target_chunks
-        candidates = [chunk for target_chunks in chunks_by_index for chunk in target_chunks]
+        evidence_graph_only = (
+            preparation.graph is not None
+            and preparation.graph.pipeline is GraphPipeline.EVIDENCE
+            and all(
+                target.params.retrieve_type == RetrieveType.Graph
+                for target in targets
+            )
+        )
+        candidates = (
+            cls._round_robin_chunk_groups(chunks_by_index)
+            if evidence_graph_only
+            else [
+                chunk
+                for target_chunks in chunks_by_index
+                for chunk in target_chunks
+            ]
+        )
         return await cls._finalize_retrieval_chunks(
             request,
             preparation,
@@ -443,6 +459,24 @@ class KnowledgeRetrievalService:
             log_id,
             timings,
         )
+
+    @staticmethod
+    def _round_robin_chunk_groups(
+        groups: Sequence[Sequence[DocumentChunk]],
+    ) -> list[DocumentChunk]:
+        positions = [0 for _ in groups]
+        result: list[DocumentChunk] = []
+        while True:
+            progressed = False
+            for index, group in enumerate(groups):
+                if positions[index] >= len(group):
+                    continue
+                result.append(group[positions[index]])
+                positions[index] += 1
+                progressed = True
+            if not progressed:
+                break
+        return result
 
     @classmethod
     async def _retrieve_single_target(
@@ -584,7 +618,10 @@ class KnowledgeRetrievalService:
                 else ModelType.LLM
             )
             llm = RedBearLLM(
-                cls._model_config(graph_target.llm),
+                cls._model_config(
+                    graph_target.llm,
+                    extra_params={"temperature": 0},
+                ),
                 type=llm_type,
             )
             embedding = RedBearEmbeddings(
@@ -618,9 +655,22 @@ class KnowledgeRetrievalService:
                     entity_top_n=settings.KNOWLEDGE_GRAPH_ENTITY_TOP_N,
                     relation_top_n=settings.KNOWLEDGE_GRAPH_RELATION_TOP_N,
                     neighbor_top_n=settings.KNOWLEDGE_GRAPH_NEIGHBOR_TOP_N,
-                    evidence_per_key=settings.KNOWLEDGE_GRAPH_EVIDENCE_PER_KEY,
-                    max_chunks_per_document=(
-                        settings.KNOWLEDGE_GRAPH_MAX_CHUNKS_PER_DOCUMENT
+                    entity_similarity_threshold=(
+                        settings.KNOWLEDGE_GRAPH_ENTITY_SIMILARITY_THRESHOLD
+                    ),
+                    relation_similarity_threshold=(
+                        settings.KNOWLEDGE_GRAPH_RELATION_SIMILARITY_THRESHOLD
+                    ),
+                    related_chunk_number=(
+                        settings.KNOWLEDGE_GRAPH_RELATED_CHUNK_NUMBER
+                    ),
+                    max_candidates=max(
+                        settings.KNOWLEDGE_GRAPH_MAX_CANDIDATES,
+                        request.top_k,
+                        target.params.top_k,
+                    ),
+                    max_paths_per_chunk=(
+                        settings.KNOWLEDGE_GRAPH_MAX_PATHS_PER_CHUNK
                     ),
                 )
             )
@@ -712,6 +762,10 @@ class KnowledgeRetrievalService:
                 ]
             finally:
                 cls._record_timing(timings, "global_rerank_ms", global_rerank_started_at)
+        elif evidence_graph_only:
+            ranked_chunks = unique_chunks
+            threshold = None
+            filtered_chunks = ranked_chunks
         else:
             ranked_chunks = sorted(
                 unique_chunks,

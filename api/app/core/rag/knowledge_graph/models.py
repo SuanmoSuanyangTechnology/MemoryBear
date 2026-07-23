@@ -25,7 +25,7 @@ class ExtractedEntity(BaseModel):
     entity_type: str
     description: str
     aliases: list[str] = Field(default_factory=list)
-    source_chunk_ids: list[str]
+    source_chunk_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
@@ -34,8 +34,9 @@ class ExtractedRelation(BaseModel):
     to_ref: str
     predicate: str
     description: str
+    keywords: list[str] = Field(default_factory=list)
     directed: bool = True
-    source_chunk_ids: list[str]
+    source_chunk_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
@@ -44,9 +45,9 @@ class ExtractionResult(BaseModel):
     relations: list[ExtractedRelation] = Field(default_factory=list)
 
 
-class GraphQueryAnalysis(BaseModel):
-    entity_terms: list[str] = Field(default_factory=list)
-    relation_terms: list[str] = Field(default_factory=list)
+class GraphQueryPlan(BaseModel):
+    low_level_keywords: list[str] = Field(default_factory=list)
+    high_level_keywords: list[str] = Field(default_factory=list)
 
 
 class EntityEvidence(BaseModel):
@@ -74,6 +75,7 @@ class RelationEvidence(BaseModel):
     to_entity_name: str
     predicate: str
     description: str
+    keywords: tuple[str, ...] = ()
     directed: bool
     confidence: float
 
@@ -87,6 +89,9 @@ class EntityProjectionHit(BaseModel):
     entity_key: str
     entity_name: str
     score: float
+    degree: int = 0
+    evidence_count: int = 0
+    document_count: int = 0
 
 
 class RelationProjectionHit(BaseModel):
@@ -95,9 +100,13 @@ class RelationProjectionHit(BaseModel):
     to_entity_key: str
     label: str
     score: float
+    evidence_count: int = 0
+    document_count: int = 0
+    endpoint_degree: int = 0
 
 
 class GraphEvidenceHit(BaseModel):
+    evidence_id: str = ""
     source_chunk_id: str
     document_id: str
     score: float
@@ -105,6 +114,12 @@ class GraphEvidenceHit(BaseModel):
     relation_key: str | None = None
     entity_name: str | None = None
     relation_label: str | None = None
+
+
+class ProjectionEvidenceGroup(BaseModel):
+    projection_type: str
+    projection_key: str
+    evidence: tuple[GraphEvidenceHit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -128,5 +143,8 @@ class GraphRetrievalRequest:
     entity_top_n: int
     relation_top_n: int
     neighbor_top_n: int
-    evidence_per_key: int
-    max_chunks_per_document: int
+    entity_similarity_threshold: float
+    relation_similarity_threshold: float
+    related_chunk_number: int
+    max_candidates: int
+    max_paths_per_chunk: int

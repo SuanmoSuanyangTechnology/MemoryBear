@@ -1,8 +1,6 @@
 from collections.abc import Mapping, Sequence
-from html import escape
 from typing import Any
 
-from app.core.rag.common.token_utils import num_tokens_from_string
 from app.core.rag.knowledge_graph.models import ExtractionBatch, SourceChunk
 
 
@@ -58,48 +56,16 @@ def select_source_chunks(raw_hits: Sequence[Mapping[str, Any]]) -> list[SourceCh
 
 
 def _render_chunk(chunk: SourceChunk) -> str:
-    source_chunk_id = escape(chunk.source_chunk_id, quote=True)
-    return (
-        f'<source_chunk id="{source_chunk_id}">\n'
-        f"{chunk.page_content}\n"
-        "</source_chunk>"
-    )
+    return chunk.page_content
 
 
 def build_extraction_batches(
     chunks: Sequence[SourceChunk],
-    max_tokens: int,
 ) -> list[ExtractionBatch]:
-    if max_tokens <= 0:
-        raise ValueError("max_tokens must be greater than zero")
-
-    batches: list[ExtractionBatch] = []
-    current_texts: list[str] = []
-    current_ids: list[str] = []
-
-    def flush() -> None:
-        if not current_texts:
-            return
-        batches.append(
-            ExtractionBatch(
-                text="\n\n".join(current_texts),
-                source_chunk_ids=tuple(current_ids),
-            )
+    return [
+        ExtractionBatch(
+            text=_render_chunk(chunk),
+            source_chunk_ids=(chunk.source_chunk_id,),
         )
-        current_texts.clear()
-        current_ids.clear()
-
-    for chunk in chunks:
-        rendered = _render_chunk(chunk)
-        candidate = "\n\n".join((*current_texts, rendered))
-        if current_texts and num_tokens_from_string(candidate) > max_tokens:
-            flush()
-
-        current_texts.append(rendered)
-        current_ids.append(chunk.source_chunk_id)
-
-        if num_tokens_from_string(rendered) > max_tokens:
-            flush()
-
-    flush()
-    return batches
+        for chunk in chunks
+    ]

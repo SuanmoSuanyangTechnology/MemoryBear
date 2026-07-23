@@ -1,6 +1,5 @@
 import asyncio
 import json
-from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +13,7 @@ from app.core.rag.knowledge_graph.models import (
     EntityProjectionHit,
     GraphEvidenceHit,
     GraphIndexRuntime,
+    ProjectionEvidenceGroup,
     RelationEvidence,
     RelationProjectionHit,
 )
@@ -23,6 +23,7 @@ from app.core.rag.knowledge_graph.normalizer import (
 )
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import raise_on_shard_failures
+from app.core.rag.vdb.field import Field
 from app.core.utils.datetime_utils import utcnow_naive
 
 
@@ -651,6 +652,11 @@ class GraphElasticsearchStore:
             ):
                 continue
             predicate = str(source.get("predicate_kwd") or "")
+            keywords = [
+                str(value)
+                for value in (source.get("keywords_kwd") or ())
+                if str(value).strip()
+            ]
             edges.append(
                 {
                     "id": relation_key,
@@ -659,7 +665,7 @@ class GraphElasticsearchStore:
                     "source": from_key,
                     "target": to_key,
                     "description": str(source.get("description") or ""),
-                    "keywords": [predicate] if predicate else [],
+                    "keywords": keywords or ([predicate] if predicate else []),
                     "weight": int(source.get("evidence_count_int") or 1),
                     "source_id": [],
                     "directed": bool(source.get("directed_int")),
@@ -676,38 +682,94 @@ class GraphElasticsearchStore:
         runtime: GraphIndexRuntime,
         query_vector: Sequence[float],
         top_n: int,
+        min_similarity: float = -1.0,
     ) -> list[EntityProjectionHit]:
         result = await self._projection_search(
             runtime,
             query_vector,
             top_n,
             ENTITY_PROJECTION,
+            min_similarity,
         )
-        return [
-            EntityProjectionHit(
-                entity_key=str(source["entity_key_kwd"]),
-                entity_name=str(source["entity_name_kwd"]),
-                score=float(hit.get("_score") or 0.0),
+        hits: list[EntityProjectionHit] = []
+        for hit in self._hits(result):
+            source = hit.get("_source") or {}
+            if (
+                not isinstance(source, Mapping)
+                or not source.get("entity_key_kwd")
+                or not source.get("entity_name_kwd")
+            ):
+                continue
+            score = self._script_score_to_cosine(hit.get("_score"))
+            if score < min_similarity:
+                continue
+            hits.append(
+                EntityProjectionHit(
+                    entity_key=str(source["entity_key_kwd"]),
+                    entity_name=str(source["entity_name_kwd"]),
+                    score=score,
+                    degree=int(source.get("degree_int") or 0),
+                    evidence_count=int(source.get("evidence_count_int") or 0),
+                    document_count=int(source.get("document_count_int") or 0),
+                )
             )
-            for hit in self._hits(result)
-            if isinstance((source := hit.get("_source")), Mapping)
-            and source.get("entity_key_kwd")
-            and source.get("entity_name_kwd")
-        ]
+        return hits
 
     async def search_relation_projections(
         self,
         runtime: GraphIndexRuntime,
         query_vector: Sequence[float],
         top_n: int,
+        min_similarity: float = -1.0,
     ) -> list[RelationProjectionHit]:
         result = await self._projection_search(
             runtime,
             query_vector,
             top_n,
             RELATION_PROJECTION,
+            min_similarity,
         )
-        return self._relation_projection_hits(result)
+        return [
+            hit
+            for hit in self._relation_projection_hits(result, script_score=True)
+            if hit.score >= min_similarity
+        ]
+
+    async def load_entity_projections(
+        self,
+        runtime: GraphIndexRuntime,
+        entity_keys: Sequence[str],
+    ) -> list[EntityProjectionHit]:
+        keys = tuple(dict.fromkeys(str(key) for key in entity_keys if str(key)))
+        if not keys:
+            return []
+        result = await self._client.search(
+            index=runtime.graph_index_name,
+            size=len(keys),
+            query=self._graph_query(
+                runtime.knowledge_id,
+                ENTITY_PROJECTION,
+                [{"terms": {"entity_key_kwd": list(keys)}}],
+            ),
+            sort=[{"entity_key_kwd": {"order": "asc"}}],
+        )
+        raise_on_shard_failures(result, "load graph entity projections")
+        projections: list[EntityProjectionHit] = []
+        for hit in self._hits(result):
+            source = hit.get("_source") or {}
+            if not isinstance(source, Mapping) or not source.get("entity_key_kwd"):
+                continue
+            projections.append(
+                EntityProjectionHit(
+                    entity_key=str(source["entity_key_kwd"]),
+                    entity_name=str(source.get("entity_name_kwd") or ""),
+                    score=0.0,
+                    degree=int(source.get("degree_int") or 0),
+                    evidence_count=int(source.get("evidence_count_int") or 0),
+                    document_count=int(source.get("document_count_int") or 0),
+                )
+            )
+        return projections
 
     async def load_neighbor_relations(
         self,
@@ -719,7 +781,7 @@ class GraphElasticsearchStore:
             return []
         result = await self._client.search(
             index=runtime.graph_index_name,
-            size=top_n,
+            size=max(1, min(400, top_n * 4)),
             query=self._graph_query(
                 runtime.knowledge_id,
                 RELATION_PROJECTION,
@@ -735,82 +797,140 @@ class GraphElasticsearchStore:
                     }
                 ],
             ),
+            sort=[
+                {"relation_key_kwd": {"order": "asc"}},
+            ],
         )
         raise_on_shard_failures(result, "load graph neighbor relations")
-        return self._relation_projection_hits(result)
+        relations = self._relation_projection_hits(result)
+        endpoint_keys = tuple(
+            dict.fromkeys(
+                key
+                for relation in relations
+                for key in (relation.from_entity_key, relation.to_entity_key)
+                if key
+            )
+        )
+        endpoint_hits = await self.load_entity_projections(runtime, endpoint_keys)
+        degrees = {hit.entity_key: hit.degree for hit in endpoint_hits}
+        seed_positions = {
+            str(entity_key): index
+            for index, entity_key in enumerate(entity_keys)
+        }
+        missing_position = len(seed_positions)
+        decorated = [
+            relation.model_copy(
+                update={
+                    "endpoint_degree": (
+                        degrees.get(relation.from_entity_key, 0)
+                        + degrees.get(relation.to_entity_key, 0)
+                    )
+                }
+            )
+            for relation in relations
+        ]
+        decorated.sort(
+            key=lambda hit: (
+                -hit.endpoint_degree,
+                -hit.evidence_count,
+                min(
+                    seed_positions.get(
+                        hit.from_entity_key,
+                        missing_position,
+                    ),
+                    seed_positions.get(
+                        hit.to_entity_key,
+                        missing_position,
+                    ),
+                ),
+                hit.relation_key,
+            )
+        )
+        return decorated[:top_n]
 
-    async def load_evidence_for_projection_keys(
+    async def load_evidence_groups(
         self,
         runtime: GraphIndexRuntime,
         entity_keys: Sequence[str],
         relation_keys: Sequence[str],
-        evidence_per_key: int,
+        evidence_per_projection: int,
         allowed_document_ids: Sequence[str] | None = None,
-    ) -> list[GraphEvidenceHit]:
-        should: list[dict[str, Any]] = []
-        if entity_keys:
-            should.append({"terms": {"entity_key_kwd": list(entity_keys)}})
-        if relation_keys:
-            should.append({"terms": {"relation_key_kwd": list(relation_keys)}})
-        if not should:
+    ) -> list[ProjectionEvidenceGroup]:
+        if allowed_document_ids is not None and not allowed_document_ids:
+            return []
+        group_specs = [
+            ("entity", str(key), ENTITY_EVIDENCE, "entity_key_kwd")
+            for key in dict.fromkeys(entity_keys)
+            if str(key)
+        ] + [
+            ("relation", str(key), RELATION_EVIDENCE, "relation_key_kwd")
+            for key in dict.fromkeys(relation_keys)
+            if str(key)
+        ]
+        if not group_specs:
             return []
 
-        extra_filters: list[dict[str, Any]] = [
-            {"bool": {"should": should, "minimum_should_match": 1}}
-        ]
-        if allowed_document_ids is not None:
-            if not allowed_document_ids:
-                return []
-            extra_filters.append(
-                {"terms": {"document_id": list(allowed_document_ids)}}
+        searches: list[dict[str, Any]] = []
+        limit = max(1, int(evidence_per_projection))
+        for _, key, document_type, key_field in group_specs:
+            extra_filters: list[dict[str, Any]] = [{"term": {key_field: key}}]
+            if allowed_document_ids is not None:
+                extra_filters.append(
+                    {"terms": {"document_id": list(allowed_document_ids)}}
+                )
+            searches.extend(
+                [
+                    {"index": runtime.graph_index_name},
+                    {
+                        "size": limit,
+                        "query": self._graph_query(
+                            runtime.knowledge_id,
+                            document_type,
+                            extra_filters,
+                        ),
+                        "sort": [
+                            {
+                                "confidence_flt": {
+                                    "order": "desc",
+                                    "unmapped_type": "float",
+                                }
+                            },
+                            {"source_chunk_id_kwd": {"order": "asc"}},
+                        ],
+                    },
+                ]
             )
-        result = await self._client.search(
-            index=runtime.graph_index_name,
-            size=max(1, (len(entity_keys) + len(relation_keys)) * evidence_per_key * 4),
-            query=self._graph_query(
-                runtime.knowledge_id,
-                EVIDENCE_TYPES,
-                extra_filters,
-            ),
-        )
-        raise_on_shard_failures(result, "load graph projection evidence")
+        result = await self._client.msearch(searches=searches)
+        responses = result.get("responses") or []
+        if len(responses) != len(group_specs):
+            raise RuntimeError("graph evidence msearch response count mismatch")
 
-        counts: defaultdict[tuple[str, str], int] = defaultdict(int)
-        evidence_hits: list[GraphEvidenceHit] = []
-        for hit in self._hits(result):
-            source = hit.get("_source") or {}
-            document_type = source.get("knowledge_graph_kwd")
-            if document_type == ENTITY_EVIDENCE:
-                key = str(source.get("entity_key_kwd") or "")
-                group = (ENTITY_EVIDENCE, key)
-                entity_key = key
-                relation_key = None
-                entity_name = str(source.get("entity_name_kwd") or "") or None
-                relation_label = None
-            elif document_type == RELATION_EVIDENCE:
-                key = str(source.get("relation_key_kwd") or "")
-                group = (RELATION_EVIDENCE, key)
-                entity_key = None
-                relation_key = key
-                entity_name = None
-                relation_label = self._relation_label(source)
-            else:
-                continue
-            if not key or counts[group] >= evidence_per_key:
-                continue
-            counts[group] += 1
-            evidence_hits.append(
-                GraphEvidenceHit(
-                    source_chunk_id=str(source["source_chunk_id_kwd"]),
-                    document_id=str(source["document_id"]),
-                    score=float(source.get("confidence_flt") or 0.0),
-                    entity_key=entity_key,
-                    relation_key=relation_key,
-                    entity_name=entity_name,
-                    relation_label=relation_label,
+        groups: list[ProjectionEvidenceGroup] = []
+        for spec, response in zip(group_specs, responses, strict=True):
+            projection_type, projection_key, document_type, _ = spec
+            if response.get("error"):
+                raise RuntimeError("graph evidence msearch response failed")
+            raise_on_shard_failures(response, "load graph projection evidence group")
+            evidence = self._parse_group_evidence(
+                response,
+                document_type,
+                projection_key,
+            )
+            evidence.sort(
+                key=lambda hit: (
+                    -hit.score,
+                    hit.source_chunk_id,
+                    hit.evidence_id,
                 )
             )
-        return evidence_hits
+            groups.append(
+                ProjectionEvidenceGroup(
+                    projection_type=projection_type,
+                    projection_key=projection_key,
+                    evidence=tuple(evidence[:limit]),
+                )
+            )
+        return groups
 
     async def hydrate_source_chunks(
         self,
@@ -882,17 +1002,103 @@ class GraphElasticsearchStore:
             )
         return chunks
 
+    async def rank_source_chunks(
+        self,
+        runtime: GraphIndexRuntime,
+        source_chunk_ids: Sequence[str],
+        query_vector: Sequence[float],
+        limit: int,
+        *,
+        allowed_document_ids: Sequence[str] | None,
+        file_names: Sequence[str],
+    ) -> list[str]:
+        source_ids = tuple(
+            dict.fromkeys(
+                str(source_id)
+                for source_id in source_chunk_ids
+                if str(source_id)
+            )
+        )
+        maximum = min(max(0, int(limit)), len(source_ids))
+        if not source_ids or not query_vector or maximum <= 0:
+            return []
+        if allowed_document_ids is not None and not allowed_document_ids:
+            return []
+
+        vector_field = Field.VECTOR.value
+        filters: list[dict[str, Any]] = [
+            {"terms": {"metadata.doc_id": list(source_ids)}},
+            {"term": {"metadata.knowledge_id": runtime.knowledge_id}},
+            {"term": {"metadata.status": 1}},
+            {"exists": {"field": vector_field}},
+        ]
+        if allowed_document_ids is not None:
+            filters.append(
+                {
+                    "terms": {
+                        "metadata.document_id": list(allowed_document_ids)
+                    }
+                }
+            )
+        if file_names:
+            filters.append(
+                {"terms": {"metadata.file_name": list(file_names)}}
+            )
+
+        result = await self._client.search(
+            index=runtime.chunk_index_name,
+            size=maximum,
+            query={
+                "script_score": {
+                    "query": {"bool": {"filter": filters}},
+                    "script": {
+                        "source": (
+                            "cosineSimilarity(params.query_vector, "
+                            f"'{vector_field}') + 1.0"
+                        ),
+                        "params": {"query_vector": list(query_vector)},
+                    },
+                }
+            },
+            sort=[
+                {"_score": {"order": "desc"}},
+                {"metadata.doc_id": {"order": "asc"}},
+            ],
+        )
+        raise_on_shard_failures(result, "rank graph source chunks")
+
+        allowed_sources = set(source_ids)
+        ranked: list[str] = []
+        seen: set[str] = set()
+        for hit in self._hits(result):
+            source = hit.get("_source") or {}
+            metadata = source.get("metadata") or {}
+            if not isinstance(metadata, Mapping):
+                continue
+            source_id = str(metadata.get("doc_id") or "")
+            if (
+                not source_id
+                or source_id not in allowed_sources
+                or source_id in seen
+            ):
+                continue
+            seen.add(source_id)
+            ranked.append(source_id)
+        return ranked
+
     async def _projection_search(
         self,
         runtime: GraphIndexRuntime,
         query_vector: Sequence[float],
         top_n: int,
         projection_type: str,
+        min_similarity: float,
     ) -> Mapping[str, Any]:
         vector_field = f"q_{len(query_vector)}_vec"
         result = await self._client.search(
             index=runtime.graph_index_name,
             size=top_n,
+            min_score=float(min_similarity) + 1.0,
             query={
                 "script_score": {
                     "query": self._graph_query(
@@ -911,6 +1117,55 @@ class GraphElasticsearchStore:
         )
         raise_on_shard_failures(result, f"search {projection_type}")
         return result
+
+    def _parse_group_evidence(
+        self,
+        result: Mapping[str, Any],
+        document_type: str,
+        projection_key: str,
+    ) -> list[GraphEvidenceHit]:
+        evidence_hits: list[GraphEvidenceHit] = []
+        for hit in self._hits(result):
+            source = hit.get("_source") or {}
+            if not isinstance(source, Mapping):
+                continue
+            if source.get("knowledge_graph_kwd") != document_type:
+                continue
+            source_chunk_id = str(source.get("source_chunk_id_kwd") or "")
+            document_id = str(source.get("document_id") or "")
+            if not source_chunk_id or not document_id:
+                continue
+            if document_type == ENTITY_EVIDENCE:
+                entity_key = str(source.get("entity_key_kwd") or "")
+                if entity_key != projection_key:
+                    continue
+                evidence_hits.append(
+                    GraphEvidenceHit(
+                        evidence_id=str(hit.get("_id") or ""),
+                        source_chunk_id=source_chunk_id,
+                        document_id=document_id,
+                        score=float(source.get("confidence_flt") or 0.0),
+                        entity_key=entity_key,
+                        entity_name=(
+                            str(source.get("entity_name_kwd") or "") or None
+                        ),
+                    )
+                )
+            elif document_type == RELATION_EVIDENCE:
+                relation_key = str(source.get("relation_key_kwd") or "")
+                if relation_key != projection_key:
+                    continue
+                evidence_hits.append(
+                    GraphEvidenceHit(
+                        evidence_id=str(hit.get("_id") or ""),
+                        source_chunk_id=source_chunk_id,
+                        document_id=document_id,
+                        score=float(source.get("confidence_flt") or 0.0),
+                        relation_key=relation_key,
+                        relation_label=self._relation_label(source),
+                    )
+                )
+        return evidence_hits
 
     async def _load_relation_evidence_with_filters(
         self,
@@ -945,6 +1200,11 @@ class GraphElasticsearchStore:
                     to_entity_name=str(source["to_entity_name_kwd"]),
                     predicate=str(source["predicate_kwd"]),
                     description=str(source.get("description") or ""),
+                    keywords=tuple(
+                        str(value)
+                        for value in (source.get("keywords_kwd") or ())
+                        if str(value).strip()
+                    ),
                     directed=bool(source.get("directed_int")),
                     confidence=float(source.get("confidence_flt") or 0.0),
                 )
@@ -1045,6 +1305,7 @@ class GraphElasticsearchStore:
             "to_entity_key_kwd": evidence.to_entity_key,
             "to_entity_name_kwd": evidence.to_entity_name,
             "predicate_kwd": evidence.predicate,
+            "keywords_kwd": list(evidence.keywords),
             "directed_int": int(evidence.directed),
             "description": evidence.description,
             "evidence_text": evidence.description[:300],
@@ -1083,6 +1344,8 @@ class GraphElasticsearchStore:
     def _relation_projection_hits(
         cls,
         result: Mapping[str, Any],
+        *,
+        script_score: bool = False,
     ) -> list[RelationProjectionHit]:
         hits: list[RelationProjectionHit] = []
         for hit in cls._hits(result):
@@ -1097,10 +1360,24 @@ class GraphElasticsearchStore:
                     from_entity_key=str(source["from_entity_key_kwd"]),
                     to_entity_key=str(source["to_entity_key_kwd"]),
                     label=cls._relation_label(source),
-                    score=float(hit.get("_score") or 0.0),
+                    score=(
+                        cls._script_score_to_cosine(hit.get("_score"))
+                        if script_score
+                        else float(hit.get("_score") or 0.0)
+                    ),
+                    evidence_count=int(source.get("evidence_count_int") or 0),
+                    document_count=int(source.get("document_count_int") or 0),
                 )
             )
         return hits
+
+    @staticmethod
+    def _script_score_to_cosine(raw_score: Any) -> float:
+        try:
+            score = float(raw_score) - 1.0
+        except (TypeError, ValueError):
+            return -1.0
+        return max(-1.0, min(1.0, score))
 
     @staticmethod
     def _relation_label(source: Mapping[str, Any]) -> str:
