@@ -355,6 +355,8 @@ class Zygote:
             os._exit(1)
 
     def _handle_kill(self, req_id: int) -> None:
+        """Kill the sandbox child.  The kernel will close the child's fds,
+        triggering pipe EOF -> _teardown_pipe_fd -> kill+waitpid chain."""
         req = self.reqs.get(req_id)
         if not req:
             return
@@ -376,7 +378,6 @@ class Zygote:
         self._teardown_pipe_fd(fd, req_id)
 
     def _teardown_pipe_fd(self, fd: int, req_id: int) -> None:
-        """Close one child-output fd and finish the request if both are done."""
         try:
             os.close(fd)
         except OSError:
@@ -388,12 +389,13 @@ class Zygote:
         req["open"].discard(fd)
         if req["open"]:
             return
-        # Both streams closed -> child exited; reap and report.
-        # Pop the request BEFORE waitpid so that any concurrent MSG_KILL
-        # (same req_id) sees the entry is already gone and bails out,
-        # closing the PID-reuse window.
+
         pid = req["pid"]
         self.reqs.pop(req_id, None)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         try:
             _, status = os.waitpid(pid, 0)
             exit_code = os.waitstatus_to_exitcode(status)
