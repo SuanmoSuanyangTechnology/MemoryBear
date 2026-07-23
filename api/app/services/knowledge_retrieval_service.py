@@ -1126,7 +1126,7 @@ class KnowledgeRetrievalService:
         source_chunk_ids = cls._graph_items_unique_list(entities, "source_chunk_ids")
         return DocumentChunk(
             page_content="\n".join(
-                ["Graph entities:"]
+                ["Entities:"]
                 + [
                     cls._format_graph_entity_line(entity, index)
                     for index, entity in enumerate(entities, start=1)
@@ -1140,7 +1140,6 @@ class KnowledgeRetrievalService:
                 "score": 1,
                 "graph_score": 1,
                 "graph_item_count": len(entities),
-                "entities": cls._graph_items_payload(entities),
                 "source_chunk_ids": source_chunk_ids,
             },
         )
@@ -1156,7 +1155,7 @@ class KnowledgeRetrievalService:
         )
         return DocumentChunk(
             page_content="\n".join(
-                ["Graph relationships:"]
+                ["Relationships:"]
                 + [
                     cls._format_graph_relationship_line(relationship, index)
                     for index, relationship in enumerate(relationships, start=1)
@@ -1170,7 +1169,6 @@ class KnowledgeRetrievalService:
                 "score": 1,
                 "graph_score": 1,
                 "graph_item_count": len(relationships),
-                "relationships": cls._graph_items_payload(relationships),
                 "source_chunk_ids": source_chunk_ids,
             },
         )
@@ -1183,17 +1181,11 @@ class KnowledgeRetrievalService:
     ) -> str:
         entity_key = cls._graph_item_text(entity, "entity_key")
         entity_name = cls._graph_item_text(entity, "entity_name") or entity_key
-        entity_type = cls._graph_item_text(entity, "entity_type")
         description = cls._graph_item_text(entity, "description")
-        aliases = cls._graph_item_list(entity, "aliases")
-        parts = [f"{index}. {entity_name or entity_key or 'unknown'}"]
-        if entity_type:
-            parts.append(f"type={entity_type}")
-        if aliases:
-            parts.append(f"aliases={', '.join(aliases)}")
+        parts = [entity_name or entity_key or "unknown"]
         if description:
             parts.append(description)
-        return " | ".join(parts)
+        return f"{index}. " + " - ".join(parts)
 
     @classmethod
     def _format_graph_relationship_line(
@@ -1215,8 +1207,6 @@ class KnowledgeRetrievalService:
         predicate = cls._graph_item_text(relationship, "predicate")
         label = cls._graph_item_text(relationship, "label")
         description = cls._graph_item_text(relationship, "description")
-        keywords = cls._graph_item_list(relationship, "keywords")
-        source_chunk_ids = cls._graph_item_list(relationship, "source_chunk_ids")
         connector = (
             "->"
             if cls._graph_item_value(relationship, "directed") is not False
@@ -1227,27 +1217,13 @@ class KnowledgeRetrievalService:
             if from_name and to_name
             else from_name or to_name
         )
-        parts = [f"Relationship: {endpoints or relation_key}"]
+        parts = [endpoints or relation_key or "unknown"]
         relation_label = predicate or label
         if relation_label:
-            parts.append(f"Label: {relation_label}")
-        if keywords:
-            parts.append(f"Keywords: {', '.join(keywords)}")
+            parts.append(relation_label)
         if description:
-            parts.append(f"Description: {description}")
-        return f"{index}. " + " | ".join(parts)
-
-    @staticmethod
-    def _graph_items_payload(items: Sequence[Any]) -> list[Any]:
-        result: list[Any] = []
-        for item in items:
-            if isinstance(item, dict):
-                result.append(dict(item))
-            elif hasattr(item, "model_dump"):
-                result.append(item.model_dump())
-            else:
-                result.append({"value": str(item)})
-        return result
+            parts.append(description)
+        return f"{index}. " + " - ".join(parts)
 
     @classmethod
     def _graph_items_unique_list(
