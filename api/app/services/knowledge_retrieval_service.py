@@ -1110,65 +1110,96 @@ class KnowledgeRetrievalService:
         relationships: Sequence[Any],
     ) -> list[DocumentChunk]:
         chunks: list[DocumentChunk] = []
-        chunks.extend(
-            cls._graph_entity_to_chunk(entity, index)
-            for index, entity in enumerate(entities)
-        )
-        chunks.extend(
-            cls._graph_relationship_to_chunk(relationship, index)
-            for index, relationship in enumerate(relationships)
-        )
+        if entities:
+            chunks.append(cls._graph_entities_to_chunk(entities))
+        if relationships:
+            chunks.append(cls._graph_relationships_to_chunk(relationships))
         return chunks
 
     @classmethod
-    def _graph_entity_to_chunk(
+    def _graph_entities_to_chunk(
         cls,
-        entity: Any,
-        index: int,
+        entities: Sequence[Any],
     ) -> DocumentChunk:
-        entity_key = cls._graph_item_text(entity, "entity_key") or f"entity-{index}"
-        entity_name = cls._graph_item_text(entity, "entity_name") or entity_key
-        entity_type = cls._graph_item_text(entity, "entity_type")
-        description = cls._graph_item_text(entity, "description")
-        aliases = cls._graph_item_list(entity, "aliases")
-        source_chunk_ids = cls._graph_item_list(entity, "source_chunk_ids")
-        parts = [f"Entity: {entity_name}"]
-        if entity_type:
-            parts.append(f"Type: {entity_type}")
-        if aliases:
-            parts.append(f"Aliases: {', '.join(aliases)}")
-        if description:
-            parts.append(f"Description: {description}")
+        source_chunk_ids = cls._graph_items_unique_list(entities, "source_chunk_ids")
         return DocumentChunk(
-            page_content="\n".join(parts),
+            page_content="\n".join(
+                ["Graph entities:"]
+                + [
+                    cls._format_graph_entity_line(entity, index)
+                    for index, entity in enumerate(entities, start=1)
+                ]
+            ),
             metadata={
-                "doc_id": f"graph_entity:{entity_key}",
-                "chunk_type": "graph_entity",
+                "doc_id": "graph_entities",
+                "chunk_type": "graph_entities",
                 "retrieval_source": "graph",
-                "graph_item_type": "entity",
+                "graph_item_type": "entities",
                 "score": 1,
-                "graph_score": cls._graph_item_value(entity, "score"),
-                "entity_key": entity_key,
-                "entity_name": entity_name,
-                "entity_type": entity_type,
-                "aliases": aliases,
+                "graph_score": 1,
+                "graph_item_count": len(entities),
+                "entities": cls._graph_items_payload(entities),
                 "source_chunk_ids": source_chunk_ids,
-                "degree": cls._graph_item_value(entity, "degree"),
-                "evidence_count": cls._graph_item_value(entity, "evidence_count"),
-                "document_count": cls._graph_item_value(entity, "document_count"),
             },
         )
 
     @classmethod
-    def _graph_relationship_to_chunk(
+    def _graph_relationships_to_chunk(
+        cls,
+        relationships: Sequence[Any],
+    ) -> DocumentChunk:
+        source_chunk_ids = cls._graph_items_unique_list(
+            relationships,
+            "source_chunk_ids",
+        )
+        return DocumentChunk(
+            page_content="\n".join(
+                ["Graph relationships:"]
+                + [
+                    cls._format_graph_relationship_line(relationship, index)
+                    for index, relationship in enumerate(relationships, start=1)
+                ]
+            ),
+            metadata={
+                "doc_id": "graph_relationships",
+                "chunk_type": "graph_relationships",
+                "retrieval_source": "graph",
+                "graph_item_type": "relationships",
+                "score": 1,
+                "graph_score": 1,
+                "graph_item_count": len(relationships),
+                "relationships": cls._graph_items_payload(relationships),
+                "source_chunk_ids": source_chunk_ids,
+            },
+        )
+
+    @classmethod
+    def _format_graph_entity_line(
+        cls,
+        entity: Any,
+        index: int,
+    ) -> str:
+        entity_key = cls._graph_item_text(entity, "entity_key")
+        entity_name = cls._graph_item_text(entity, "entity_name") or entity_key
+        entity_type = cls._graph_item_text(entity, "entity_type")
+        description = cls._graph_item_text(entity, "description")
+        aliases = cls._graph_item_list(entity, "aliases")
+        parts = [f"{index}. {entity_name or entity_key or 'unknown'}"]
+        if entity_type:
+            parts.append(f"type={entity_type}")
+        if aliases:
+            parts.append(f"aliases={', '.join(aliases)}")
+        if description:
+            parts.append(description)
+        return " | ".join(parts)
+
+    @classmethod
+    def _format_graph_relationship_line(
         cls,
         relationship: Any,
         index: int,
-    ) -> DocumentChunk:
-        relation_key = (
-            cls._graph_item_text(relationship, "relation_key")
-            or f"relationship-{index}"
-        )
+    ) -> str:
+        relation_key = cls._graph_item_text(relationship, "relation_key")
         from_name = (
             cls._graph_item_text(relationship, "from_entity_name")
             or cls._graph_item_text(relationship, "from_entity_key")
@@ -1202,48 +1233,35 @@ class KnowledgeRetrievalService:
             parts.append(f"Keywords: {', '.join(keywords)}")
         if description:
             parts.append(f"Description: {description}")
-        return DocumentChunk(
-            page_content="\n".join(parts),
-            metadata={
-                "doc_id": f"graph_relationship:{relation_key}",
-                "chunk_type": "graph_relationship",
-                "retrieval_source": "graph",
-                "graph_item_type": "relationship",
-                "score": 1,
-                "graph_score": cls._graph_item_value(relationship, "score"),
-                "relation_key": relation_key,
-                "src_id": cls._graph_item_value(relationship, "src_id"),
-                "tgt_id": cls._graph_item_value(relationship, "tgt_id"),
-                "from_entity_key": cls._graph_item_value(
-                    relationship,
-                    "from_entity_key",
-                ),
-                "from_entity_name": from_name,
-                "to_entity_key": cls._graph_item_value(
-                    relationship,
-                    "to_entity_key",
-                ),
-                "to_entity_name": to_name,
-                "predicate": predicate,
-                "label": label,
-                "keywords": keywords,
-                "directed": cls._graph_item_value(relationship, "directed"),
-                "source_chunk_ids": source_chunk_ids,
-                "weight": cls._graph_item_value(relationship, "weight"),
-                "evidence_count": cls._graph_item_value(
-                    relationship,
-                    "evidence_count",
-                ),
-                "document_count": cls._graph_item_value(
-                    relationship,
-                    "document_count",
-                ),
-                "endpoint_degree": cls._graph_item_value(
-                    relationship,
-                    "endpoint_degree",
-                ),
-            },
-        )
+        return f"{index}. " + " | ".join(parts)
+
+    @staticmethod
+    def _graph_items_payload(items: Sequence[Any]) -> list[Any]:
+        result: list[Any] = []
+        for item in items:
+            if isinstance(item, dict):
+                result.append(dict(item))
+            elif hasattr(item, "model_dump"):
+                result.append(item.model_dump())
+            else:
+                result.append({"value": str(item)})
+        return result
+
+    @classmethod
+    def _graph_items_unique_list(
+        cls,
+        items: Sequence[Any],
+        key: str,
+    ) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in items:
+            for value in cls._graph_item_list(item, key):
+                if value in seen:
+                    continue
+                seen.add(value)
+                result.append(value)
+        return result
 
     @staticmethod
     def _graph_item_value(item: Any, key: str) -> Any:
