@@ -378,6 +378,7 @@ class Zygote:
         self._teardown_pipe_fd(fd, req_id)
 
     def _teardown_pipe_fd(self, fd: int, req_id: int) -> None:
+
         try:
             os.close(fd)
         except OSError:
@@ -391,6 +392,12 @@ class Zygote:
             return
 
         pid = req["pid"]
+        try:
+            os.kill(pid, 0)          # signal 0 = existence check
+        except ProcessLookupError:
+            pass
+        else:
+            self._send(P.MSG_STDERR, req_id, b"process terminated")
         self.reqs.pop(req_id, None)
         try:
             os.kill(pid, signal.SIGKILL)
