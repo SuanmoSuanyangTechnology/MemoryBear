@@ -31,6 +31,7 @@ _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _SELF_DIR)
 import protocol as P  # noqa: E402
 
+
 class _ReqInfo(TypedDict):
     """Bookkeeping for one in-flight sandbox request."""
     pid: int
@@ -77,7 +78,7 @@ def _xor(data: bytes, key: bytes) -> bytes:
         seg_len = end - i
         keystream = key * (seg_len // kl) + key[: seg_len % kl]
         out[i:end] = (
-            int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
+                int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
         ).to_bytes(seg_len, "big")
         i = end
     return bytes(out)
@@ -95,7 +96,8 @@ class Zygote:
 
         # Warm load of the seccomp library. Inherited by every child via COW.
         self.lib = ctypes.CDLL(lib_so)
-        self.lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64, ctypes.c_bool]
+        self.lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64,
+                                          ctypes.c_bool]
         self.lib.init_seccomp.restype = ctypes.c_int
 
         self.lib.apply_landlock.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
@@ -135,8 +137,8 @@ class Zygote:
         # "SyntaxError: UTF-8 decode error".
         try:
             import codecs
-            import encodings          # noqa: F401
-            import encodings.utf_8    # noqa: F401
+            import encodings  # noqa: F401
+            import encodings.utf_8  # noqa: F401
             import encodings.aliases  # noqa: F401
             for enc in ("utf-8", "ascii", "latin-1", "utf-16", "idna"):
                 try:
@@ -213,25 +215,35 @@ class Zygote:
     # -------------------------------------------------------------- request
     def _handle_run(self, req_id: int, payload: bytes) -> None:
         req = json.loads(payload)
-        out_r, out_w = os.pipe()
-        err_r, err_w = os.pipe()
+        out_r = out_w = err_r = err_w = -1
+        try:
+            out_r, out_w = os.pipe()
+            err_r, err_w = os.pipe()
 
-        # Flush our own buffers so children never inherit unflushed bytes.
-        sys.stdout.flush()
-        sys.stderr.flush()
+            # Flush our own buffers so children never inherit unflushed bytes.
+            sys.stdout.flush()
+            sys.stderr.flush()
 
-        pid = os.fork()
-        if pid == 0:
-            # ---- child ----
-            self._child_exec(req, out_w, err_w, out_r, err_r)
-            os._exit(127)  # unreachable
+            pid = os.fork()
+            if pid == 0:
+                # ---- child ----
+                self._child_exec(req, out_w, err_w, out_r, err_r)
+                os._exit(127)
 
-        # ---- parent (zygote) ----
-        os.close(out_w)
-        os.close(err_w)
-        self.reqs[req_id] = {"pid": pid, "out": out_r, "err": err_r, "open": {out_r, err_r}}
-        self.fd_map[out_r] = (req_id, P.MSG_STDOUT)
-        self.fd_map[err_r] = (req_id, P.MSG_STDERR)
+            # ---- parent (zygote) ----
+            os.close(out_w)
+            os.close(err_w)
+            self.reqs[req_id] = {"pid": pid, "out": out_r, "err": err_r, "open": {out_r, err_r}}
+            self.fd_map[out_r] = (req_id, P.MSG_STDOUT)
+            self.fd_map[err_r] = (req_id, P.MSG_STDERR)
+        except Exception:
+            for fd in (out_w, err_w, out_r, err_r):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            raise
 
     def _child_exec(self, req: dict, out_w: int, err_w: int, out_r: int, err_r: int) -> None:
         # Redirect stdout/stderr to the pipes; disconnect from everything else.
