@@ -236,6 +236,8 @@ export interface ChatData {
   list?: Array<ChatItem | ChatItem[]>;
   /** Conversation ID */
   conversation_id?: string | null;
+  /** Whether the model is currently streaming */
+  streamLoading?: boolean;
 }
 
 /**
