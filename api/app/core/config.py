@@ -298,6 +298,13 @@ class Settings:
     MEMORY_CACHE_REGENERATION_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="memory cache regeneration cron minute [0, 59]")]
     ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_MINUTE", "0")))
+    # 用户名片 Tag 定时刷新时间（UTC，默认 18:30，北京时间次日 02:30）
+    USER_TAG_REFRESH_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="user tag refresh cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("USER_TAG_REFRESH_HOUR", "18")))
+    USER_TAG_REFRESH_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="user tag refresh cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("USER_TAG_REFRESH_MINUTE", "30")))
     # 洞察/摘要缓存刷新新鲜度窗口（小时）：缓存上次刷新距今 < 该值则本轮跳过（限频，避免频繁重算），默认 72
     MEMORY_CACHE_FRESH_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="insight/summary cache freshness window in hours, must be >= 1")]
