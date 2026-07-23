@@ -1,32 +1,37 @@
 /*
- * @Description: 
+ * @Description:
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2026-03-16 19:01:12
  * @LastEditors: yujiangping
  * @LastEditTime: 2026-03-20 12:12:20
  */
-import { useState, useEffect, useRef, useCallback, type FC } from 'react';
-import { Spin, Alert, Button, Table, InputNumber, Image, Flex } from 'antd';
+import { type FC } from 'react';
+import { Spin, Alert, Button, Table, Image, Flex } from 'antd';
 import {
   ReloadOutlined,
   DownloadOutlined,
-  LeftOutlined,
-  RightOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import RbMarkdown from '../Markdown';
-import { cookieUtils } from '@/utils/request';
-import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
-import * as pdfjsLib from 'pdfjs-dist';
 import TextVirtualList from './TextVirtualList';
-
-// 设置 pdf.js worker - 使用 CDN 避免 Vite 打包动态 import 问题
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+import PaginationBar from './PaginationBar';
+import { useDocumentPreview } from './useDocumentPreview';
+import {
+  previewableTypes,
+  isTextExt,
+  isMarkdownExt,
+  isImageExt,
+  isPdfExt,
+  isWordExt,
+  isExcelExt,
+  isPptExt,
+  isPreviewableExt,
+  MAX_PREVIEW_ROWS,
+} from './utils';
 
 interface DocumentPreviewProps {
   fileUrl: string;
@@ -46,79 +51,29 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   className = '',
 }) => {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [textContent, setTextContent] = useState<string>('');
-  const [htmlContent, setHtmlContent] = useState<string>('');
-  const [excelData, setExcelData] = useState<{ sheetName: string; data: any[][] }[]>([]);
-
-  // PDF 状态
-  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
-  const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
-  const [pdfTotalPages, setPdfTotalPages] = useState(0);
-  const [pdfScale, setPdfScale] = useState(1.5);
-  const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
-  const pdfRenderingRef = useRef(false);
-
-  // PPT 状态
-  const [pptSlides, setPptSlides] = useState<string[]>([]);
-  const [pptCurrentPage, setPptCurrentPage] = useState(1);
-  const [pptTotalPages, setPptTotalPages] = useState(0);
-
-  // 图片状态
-  const [imageBlobUrl, setImageBlobUrl] = useState<string>('');
-
-  // 支持预览的文件类型
-  const previewableTypes = [
-    '.pdf', '.txt', '.md', '.csv',
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp',
-    '.doc', '.docx', '.xls', '.xlsx',
-    '.ppt', '.pptx',
-  ];
-
-  const getFileExtension = () => {
-    if (fileExt) {
-      return fileExt.toLowerCase().startsWith('.') ? fileExt.toLowerCase() : `.${fileExt.toLowerCase()}`;
-    }
-    const name = fileName || fileUrl;
-    const match = name.match(/\.([^.]+)$/);
-    return match ? `.${match[1].toLowerCase()}` : '';
-  };
-
-  const isTextFile = () => getFileExtension() === '.txt';
-  const isMarkdownFile = () => getFileExtension() === '.md';
-  const isImageFile = () => {
-    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
-    return imageExts.includes(getFileExtension());
-  };
-  const isPdfFile = () => getFileExtension() === '.pdf';
-  const isWordFile = () => ['.doc', '.docx'].includes(getFileExtension());
-  const isExcelFile = () => ['.xls', '.xlsx', '.csv'].includes(getFileExtension());
-  const isPptFile = () => ['.ppt', '.pptx'].includes(getFileExtension());
-  const isPreviewable = () => previewableTypes.includes(getFileExtension());
-
-  const getRequestUrl = (url: string) => {
-    if (url.includes('devapi.mem.redbearai.com')) {
-      const parsed = new URL(url);
-      return parsed.pathname;
-    }
-    return url;
-  };
-
-  const fetchFileBuffer = async (url: string): Promise<ArrayBuffer> => {
-    const requestUrl = getRequestUrl(url);
-    const response = await fetch(requestUrl, {
-      credentials: 'include',
-      headers: {
-        'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return response.arrayBuffer();
-  };
+  const {
+    ext,
+    loading,
+    error,
+    errorMessage,
+    textContent,
+    htmlContent,
+    excelData,
+    csvTruncated,
+    pdfCanvasRef,
+    pdfCurrentPage,
+    pdfTotalPages,
+    pdfScale,
+    handlePdfPageChange,
+    handlePdfZoom,
+    pptSlides,
+    pptCurrentPage,
+    pptTotalPages,
+    setPptCurrentPage,
+    imageBlobUrl,
+    handleRetry,
+    handleError,
+  } = useDocumentPreview({ fileUrl, fileName, fileExt });
 
   const handleDownload = () => {
     const link = document.createElement('a');
@@ -129,365 +84,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     document.body.removeChild(link);
   };
 
-  const handleError = (msg?: string) => {
-    setLoading(false);
-    setError(true);
-    if (msg) setErrorMessage(msg);
-  };
-
-  // ========== PDF 渲染逻辑 ==========
-  const renderPdfPage = useCallback(async (doc: pdfjsLib.PDFDocumentProxy, pageNum: number, scale: number) => {
-    if (pdfRenderingRef.current || !pdfCanvasRef.current) return;
-    pdfRenderingRef.current = true;
-    try {
-      const page = await doc.getPage(pageNum);
-      const viewport = page.getViewport({ scale });
-      const canvas = pdfCanvasRef.current;
-      const context = canvas.getContext('2d');
-      if (!context) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = viewport.width * dpr;
-      canvas.height = viewport.height * dpr;
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      await page.render({ canvasContext: context, viewport }).promise;
-    } finally {
-      pdfRenderingRef.current = false;
-    }
-  }, []);
-
-  const loadPdfFile = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    try {
-      const arrayBuffer = await fetchFileBuffer(fileUrl);
-      const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      setPdfDoc(doc);
-      setPdfTotalPages(doc.numPages);
-      setPdfCurrentPage(1);
-      await renderPdfPage(doc, 1, pdfScale);
-      setLoading(false);
-    } catch (err: any) {
-      console.error('加载 PDF 文件失败:', err);
-      handleError(err.message || t('knowledgeBase.pdfLoadFailed'));
-    }
-  }, [fileUrl, pdfScale, renderPdfPage]);
-
-  const handlePdfPageChange = async (page: number) => {
-    if (!pdfDoc || page < 1 || page > pdfTotalPages) return;
-    setPdfCurrentPage(page);
-    await renderPdfPage(pdfDoc, page, pdfScale);
-  };
-
-  const handlePdfZoom = async (delta: number) => {
-    const newScale = Math.max(0.5, Math.min(3, pdfScale + delta));
-    setPdfScale(newScale);
-    if (pdfDoc) {
-      await renderPdfPage(pdfDoc, pdfCurrentPage, newScale);
-    }
-  };
-
-  // ========== PPT/PPTX 预览逻辑（转 PDF 后用 pdfjs 渲染每页为图片） ==========
-  const loadPptFile = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    try {
-      const arrayBuffer = await fetchFileBuffer(fileUrl);
-      // 尝试用 pdfjs 直接加载（某些服务端会返回转换后的 PDF）
-      // 如果失败，则使用 Office Online Viewer 作为 fallback
-      try {
-        const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        // 成功解析为 PDF，逐页渲染为图片
-        const slides: string[] = [];
-        for (let i = 1; i <= doc.numPages; i++) {
-          const page = await doc.getPage(i);
-          const viewport = page.getViewport({ scale: 2 });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          if (!context) continue;
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          await page.render({ canvasContext: context, viewport }).promise;
-          slides.push(canvas.toDataURL('image/png'));
-        }
-        setPptSlides(slides);
-        setPptTotalPages(slides.length);
-        setPptCurrentPage(1);
-        setLoading(false);
-      } catch {
-        // 不是 PDF 格式，使用 Office Online Viewer
-        setPptSlides([]);
-        setPptTotalPages(0);
-        setLoading(false);
-      }
-    } catch (err: any) {
-      console.error('加载 PPT 文件失败:', err);
-      handleError(err.message || t('knowledgeBase.pptLoadFailedDesc'));
-    }
-  }, [fileUrl]);
-
-  // ========== 图片加载逻辑 ==========
-  const loadImageFile = async () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    try {
-      const arrayBuffer = await fetchFileBuffer(fileUrl);
-      const ext = getFileExtension().replace('.', '');
-      const mimeMap: Record<string, string> = {
-        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-        gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml',
-      };
-      const blob = new Blob([arrayBuffer], { type: mimeMap[ext] || 'image/png' });
-      const url = URL.createObjectURL(blob);
-      setImageBlobUrl(url);
-      setLoading(false);
-    } catch (err: any) {
-      console.error('加载图片文件失败:', err);
-      handleError(err.message || t('knowledgeBase.imageLoadFailed'));
-    }
-  };
-
-  // ========== 文本/Word/Excel 加载逻辑 ==========
-  const loadTextFile = async () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    try {
-      const requestUrl = getRequestUrl(fileUrl);
-      const response = await fetch(requestUrl, {
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
-        },
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      const contentType = response.headers.get('Content-Type') || '';
-      if (contentType.startsWith('image/')) {
-        handleError(t('knowledgeBase.imagePreviewFailedDesc'));
-        return;
-      }
-      const text = await response.text();
-      if (text.startsWith('\x89PNG') || text.startsWith('�PNG')) {
-        handleError(t('knowledgeBase.imagePreviewFailed'));
-        return;
-      }
-      setTextContent(text);
-      setLoading(false);
-    } catch (err: any) {
-      console.error('加载文本文件失败:', err);
-      handleError(err.message || t('knowledgeBase.textPreviewFailed'));
-    }
-  };
-
-  const loadWordFile = async () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    try {
-      // .doc 旧格式 mammoth 不支持，使用 Office Online Viewer
-      if (getFileExtension() === '.doc') {
-        setHtmlContent('');
-        setLoading(false);
-        return;
-      }
-      const arrayBuffer = await fetchFileBuffer(fileUrl);
-      // 校验是否为有效的 docx（ZIP 格式，前两字节为 PK）
-      const header = new Uint8Array(arrayBuffer.slice(0, 4));
-      if (header[0] !== 0x50 || header[1] !== 0x4B) {
-        // 不是 ZIP/docx 格式，可能是 HTML 错误页或 JSON 响应
-        const text = new TextDecoder().decode(arrayBuffer.slice(0, 200));
-        throw new Error(t('knowledgeBase.wordPreviewFailedDesc') + text.substring(0, 100));
-      }
-      const result = await mammoth.convertToHtml({ arrayBuffer });
-      setHtmlContent(result.value);
-      setLoading(false);
-    } catch (err: any) {
-      console.error('加载 Word 文件失败:', err);
-      handleError(err.message || t('knowledgeBase.wordPreviewFailed'));
-    }
-  };
-
-  const [csvTruncated, setCsvTruncated] = useState(false);
-
-  const isCsvFile = () => getFileExtension() === '.csv';
-
-  // CSV 预览大小限制：1MB
-  const CSV_PREVIEW_SIZE = 1 * 1024 * 1024;
-  // 最大预览行数
-  const MAX_PREVIEW_ROWS = 500;
-
-  const fetchFileBufferWithLimit = async (url: string, maxBytes?: number): Promise<ArrayBuffer> => {
-    const requestUrl = getRequestUrl(url);
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
-    };
-    if (maxBytes) {
-      headers['Range'] = `bytes=0-${maxBytes - 1}`;
-    }
-    const response = await fetch(requestUrl, {
-      credentials: 'include',
-      headers,
-    });
-    if (!response.ok && response.status !== 206) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return response.arrayBuffer();
-  };
-
-  const loadExcelFile = async () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    setCsvTruncated(false);
-    try {
-      // CSV 文件需要处理编码问题（可能是 GBK/GB2312），且大文件只取前 1MB
-      if (isCsvFile()) {
-        let arrayBuffer: ArrayBuffer;
-        let truncated = false;
-        try {
-          // 先尝试 Range 请求只取前 1MB
-          arrayBuffer = await fetchFileBufferWithLimit(fileUrl, CSV_PREVIEW_SIZE);
-          // 如果返回的数据刚好等于限制大小，说明可能被截断了
-          if (arrayBuffer.byteLength >= CSV_PREVIEW_SIZE) {
-            truncated = true;
-          }
-        } catch {
-          // Range 请求不支持时，全量获取后截断
-          const fullBuffer = await fetchFileBuffer(fileUrl);
-          if (fullBuffer.byteLength > CSV_PREVIEW_SIZE) {
-            arrayBuffer = fullBuffer.slice(0, CSV_PREVIEW_SIZE);
-            truncated = true;
-          } else {
-            arrayBuffer = fullBuffer;
-          }
-        }
-
-        let csvText: string;
-        const utf8Text = new TextDecoder('utf-8').decode(arrayBuffer);
-        if (utf8Text.includes('\uFFFD') || /[\x80-\xff]/.test(utf8Text.slice(0, 200))) {
-          try {
-            csvText = new TextDecoder('gbk').decode(arrayBuffer);
-          } catch {
-            csvText = utf8Text;
-          }
-        } else {
-          csvText = utf8Text;
-        }
-
-        // 如果被截断，去掉最后一行不完整的数据
-        if (truncated) {
-          const lastNewline = csvText.lastIndexOf('\n');
-          if (lastNewline > 0) {
-            csvText = csvText.substring(0, lastNewline);
-          }
-        }
-
-        const workbook = XLSX.read(csvText, { type: 'string' });
-        const sheets = workbook.SheetNames.map(sheetName => {
-          const worksheet = workbook.Sheets[sheetName];
-          let data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-          // 限制最大行数
-          if (data.length > MAX_PREVIEW_ROWS + 1) {
-            data = data.slice(0, MAX_PREVIEW_ROWS + 1); // +1 保留表头
-            truncated = true;
-          }
-          return { sheetName, data };
-        });
-        setCsvTruncated(truncated);
-        setExcelData(sheets);
-        setLoading(false);
-        return;
-      }
-
-      const arrayBuffer = await fetchFileBuffer(fileUrl);
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const sheets = workbook.SheetNames.map((sheetName: string) => {
-        const worksheet = workbook.Sheets[sheetName];
-        const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-        return { sheetName, data };
-      });
-      setExcelData(sheets);
-      setLoading(false);
-    } catch (err: any) {
-      console.error('加载 Excel 文件失败:', err);
-      handleError(err.message || t('knowledgeBase.excelPreviewFailed'));
-    }
-  };
-
-  const handleRetry = () => {
-    setLoading(true);
-    setError(false);
-    setErrorMessage('');
-    if (isTextFile() || isMarkdownFile()) loadTextFile();
-    else if (isWordFile()) loadWordFile();
-    else if (isExcelFile()) loadExcelFile();
-    else if (isPdfFile()) loadPdfFile();
-    else if (isPptFile()) loadPptFile();
-  };
-
-  useEffect(() => {
-    if (isTextFile() || isMarkdownFile()) loadTextFile();
-    else if (isWordFile()) loadWordFile();
-    else if (isExcelFile()) loadExcelFile();
-    else if (isPdfFile()) loadPdfFile();
-    else if (isPptFile()) loadPptFile();
-    else if (isImageFile()) loadImageFile();
-  }, [fileUrl]);
-
-  // PDF 翻页/缩放后重新渲染
-  useEffect(() => {
-    if (pdfDoc && isPdfFile()) {
-      renderPdfPage(pdfDoc, pdfCurrentPage, pdfScale);
-    }
-  }, [pdfCurrentPage, pdfScale, pdfDoc]);
-
-  // ========== 分页控制栏组件 ==========
-  const PaginationBar = ({
-    currentPage,
-    totalPages,
-    onPageChange,
-    extraControls,
-  }: {
-    currentPage: number;
-    totalPages: number;
-    onPageChange: (page: number) => void;
-    extraControls?: React.ReactNode;
-  }) => (
-    <Flex align="center" justify="center" gap={12} className="rb:py-2! rb:px-4! rb:bg-white rb:border-t rb:border-gray-200 rb:select-none">
-      <Button
-        size="small"
-        icon={<LeftOutlined />}
-        disabled={currentPage <= 1}
-        onClick={() => onPageChange(currentPage - 1)}
-      />
-      <Flex align="center" gap={4} className="rb:text-sm rb:text-gray-600">
-        <InputNumber
-          size="small"
-          min={1}
-          max={totalPages}
-          value={currentPage}
-          onChange={(val) => val && onPageChange(val)}
-          style={{ width: 56 }}
-        />
-        <span>/ {totalPages}</span>
-      </Flex>
-      <Button
-        size="small"
-        icon={<RightOutlined />}
-        disabled={currentPage >= totalPages}
-        onClick={() => onPageChange(currentPage + 1)}
-      />
-      {extraControls}
-    </Flex>
-  );
-
-  if (!isPreviewable()) {
+  if (!isPreviewableExt(ext)) {
     return (
       <Alert
         message={t('knowledgeBase.fileAcceptTip')}
@@ -537,8 +134,8 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         </Flex>
       )}
 
-      {/* 图片预览 */}
-      {isImageFile() && !error && !loading && (
+      {/* Image preview */}
+      {isImageExt(ext) && !error && !loading && (
         <Flex align="center" justify="center" className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-50">
           <Image
             src={imageBlobUrl}
@@ -549,22 +146,22 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         </Flex>
       )}
 
-      {/* Markdown 预览 */}
-      {isMarkdownFile() && !error && !loading && (
+      {/* Markdown preview */}
+      {isMarkdownExt(ext) && !error && !loading && (
         <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
           <RbMarkdown content={textContent} />
         </div>
       )}
 
-      {/* 文本预览 - react-window 按行虚拟滚动 */}
-      {isTextFile() && !error && !loading && (
+      {/* Text preview - line-by-line virtual scrolling with react-window */}
+      {isTextExt(ext) && !error && !loading && (
         <TextVirtualList content={textContent} />
       )}
 
-      {/* Word 预览 */}
-      {isWordFile() && !error && !loading && (
-        getFileExtension() === '.doc' ? (
-          /* .doc 旧格式前端无法解析，提示下载 */
+      {/* Word preview */}
+      {isWordExt(ext) && !error && !loading && (
+        ext === '.doc' ? (
+          /* The legacy .doc format cannot be parsed on the frontend, prompt to download */
           <Flex align="center" justify="center" className="rb:w-full rb:flex-1 rb:bg-gray-50">
             <div className="rb:text-center">
               <p className="rb:text-gray-600 rb:mb-4">{t('knowledgeBase.docFormatNotSupported')}</p>
@@ -581,8 +178,8 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         )
       )}
 
-      {/* Excel/CSV 预览 */}
-      {isExcelFile() && !error && !loading && (
+      {/* Excel/CSV preview */}
+      {isExcelExt(ext) && !error && !loading && (
         <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
           {csvTruncated && (
             <div className="rb:mb-3 rb:px-3 rb:py-2 rb:bg-yellow-50 rb:border rb:border-yellow-200 rb:rounded rb:text-sm rb:text-yellow-700">
@@ -613,8 +210,8 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         </div>
       )}
 
-      {/* PDF 预览 - 带分页和缩放 */}
-      {isPdfFile() && !error && !loading && (
+      {/* PDF preview - with pagination and zoom */}
+      {isPdfExt(ext) && !error && !loading && (
         <>
           <Flex justify="center" className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:p-4!">
             <canvas ref={pdfCanvasRef} className="rb:shadow-lg" />
@@ -648,11 +245,11 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         </>
       )}
 
-      {/* PPT/PPTX 预览 */}
-      {isPptFile() && !error && !loading && (
+      {/* PPT/PPTX preview */}
+      {isPptExt(ext) && !error && !loading && (
         <>
           {pptSlides.length > 0 ? (
-            /* 本地渲染模式（服务端返回了可解析的格式） */
+            /* Local rendering mode (the server returned a parseable format) */
             <>
               <Flex align="center" justify="center" className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:p-4!">
                 <img
@@ -679,7 +276,6 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                 title={fileName || t('knowledgeBase.pptPreview')}
                 className="rb:border-0 rb:flex-1"
                 style={{ border: 'none' }}
-                onLoad={() => setLoading(false)}
                 onError={() => handleError(t('knowledgeBase.pptPreviewFailed'))}
               />
               <Flex align="center" justify="center" gap={12} className="rb:py-2! rb:px-4! rb:bg-white rb:border-t rb:border-gray-200">
