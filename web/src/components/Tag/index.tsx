@@ -33,7 +33,7 @@ const colors = {
   processing: 'rb:text-[#155EEF] rb:border-[rgba(21,94,239,0.25)] rb:bg-[rgba(21,94,239,0.06)]',
   error: 'rb:text-[#FF5D34] rb:border-[rgba(255,138,76,0.20)] rb:bg-[rgba(255,138,76,0.08)]',
   success: 'rb:text-[#369F21] rb:border-[rgba(54,159,33,0.25)] rb:bg-[rgba(54,159,33,0.06)]',
-  warning: 'rb:text-[#FF5D34] rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)]',
+  warning: 'rb:text-[#FF8A4C] rb:border-[rgba(255,138,76,0.30)] rb:bg-[rgba(255,138,76,0.08)]',
   default: 'rb:text-[#5B6167] rb:border-[rgba(91,97,103,0.30)] rb:bg-[rgba(91,97,103,0.08)]',
   purple: 'rb:text-[#9C6FFF] rb:border-[rgba(156,111,255,0.25)] rb:bg-[rgba(156,111,255,0.06)]',
   dark: 'rb:text-[#171719] rb:border-[rgba(23,23,25,0.25)] rb:bg-[rgba(23,23,25,0.06)]'

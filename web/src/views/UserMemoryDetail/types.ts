@@ -8,7 +8,7 @@
  * User Memory Detail Types
  * Type definitions for user memory detail views including nodes, edges, and statistics
  */
-import type { Edge } from '@/components/Charts/GraphNetworkChart'
+import type { Edge } from '@/components/Charts/graphNetworkUtils'
 
 /**
  * User memory data structure
@@ -234,36 +234,34 @@ export interface EndUserProfileRef {
  * Forget engine data
  */
 export interface ForgetData {
-  activation_metrics: {
-    total_nodes: number;
-    nodes_with_activation: number;
-    nodes_without_activation: number;
-    average_activation_value: number;
-    low_activation_nodes: number;
-    timestamp: number;
-    forgetting_threshold: number;
-  },
-  node_distribution: {
-    statement_count: number;
-    entity_count: number;
-    summary_count: number;
-    chunk_count: number;
-  },
-  recent_trends: {
-    date: string;
-    merged_count: number;
-    average_activation: number;
-    total_nodes: number;
-    execution_time: number;
-  }[],
-  pending_nodes: {
-    node_id: string;
-    node_type: string;
-    content_summary: string;
-    activation_value: number;
-    last_access_time: number;
-  }[],
-  timestamp: number;
+  memory_limit: number;
+  trigger_count: number;
+  target_count: number;
+  breakdown: {
+    Statement: number;
+    Chunk: number;
+    ExtractedEntity: number;
+    MemorySummary: number;
+  };
+
+  activeCount: number;
+  activePercent: number;
+  overLimitCount: number;
+  pendingForgetCount: number;
+  quotaStatus: string;
+  quotaColorClassObj: Record<string, boolean>;
+}
+// 近7天遗忘趋势数据
+export interface ForgetTrendData {
+  date: string;
+  count: number;
+}
+// 遗忘候选
+export interface ForgetCandidate {
+  node_type: string;
+  created_at?: number;
+  delete_at?: number;
+  content: string;
 }
 /**
  * Graph detail modal ref
