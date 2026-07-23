@@ -12,7 +12,7 @@
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Divider } from 'antd';
+import { Skeleton, Divider, Flex } from 'antd';
 import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
@@ -22,6 +22,7 @@ import {
   getUserSummary,
 } from '@/api/memory'
 import type { AboutMeRef } from '../types'
+import Tag from '@/components/Tag'
 
 
 /**
@@ -32,7 +33,8 @@ export interface Data {
   personality: string;
   core_values: string;
   one_sentence: string;
-  [key: string]: string;
+  tags: string[];
+  [key: string]: string | string[];
 }
 const AboutMe = forwardRef<AboutMeRef, { className?: string; }>(({ className }, ref) => {
   const { t } = useTranslation()
@@ -73,11 +75,20 @@ const AboutMe = forwardRef<AboutMeRef, { className?: string; }>(({ className }, 
         ? <Skeleton className="rb:mt-4" />
         : Object.keys(data).filter(key => data[key] !== null).length > 0
           ? <div className="rb:overflow-y-auto rb:h-full">
-            {data.user_summary && 
+            {data.tags && data.tags.length > 0 &&<>
+              <div className="rb:font-medium rb:leading-5">{t('userMemory.userTag')}</div>
+              <Flex gap={8} wrap className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:mt-2!">
+                {data.tags.map((tag, index) => (
+                  <Tag key={index} color="default">{tag}</Tag>
+                ))}
+              </Flex>
+            </>}
+            {data.user_summary && <>
+              <Divider className="rb:my-4!" />
               <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167]">
                 {data.user_summary}
               </div>
-            }
+            </>}
             {data.personality && <>
               <Divider className="rb:my-4!" />
               <div className="rb:font-medium rb:leading-5">{t('userMemory.personality')}</div>
