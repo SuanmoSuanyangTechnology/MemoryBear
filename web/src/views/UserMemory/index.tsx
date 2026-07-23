@@ -27,6 +27,7 @@ import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollL
 import DeleteConfirmModal, { type DeleteConfirmModalRef } from './components/DeleteConfirmModal';
 import Tag from '@/components/Tag'
 import { formatQuotaStatus, StatusProgress } from './components/StatusProgress'
+import OverflowTags from '@/components/OverflowTags'
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -99,7 +100,7 @@ export default function UserMemory() {
         query={{ keyword }}
         column={3}
         renderItem={(item) => {
-          const { end_user, memory_num, memory_config } = item as Data;
+          const { end_user, memory_num, memory_config, tags = [] } = item as Data;
           const name = getUserName(item)
           const quotaStatus = formatQuotaStatus(memory_num?.active_count || 0, memory_num?.memory_limit || 0)
           return (
@@ -137,7 +138,14 @@ export default function UserMemory() {
                   <span className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
                 </Flex>
               </Flex>
-              <Row>
+
+              {tags.length > 0
+                ? <OverflowTags
+                  items={tags.map((tag: string) => <Tag key={tag} color="default">{tag}</Tag>)}
+                />
+                : <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-[22.5px]">{t('userMemory.noTags')}</div>
+              }
+              <Row className="rb:mt-2!">
                 <Col span={12}>
                   <RbStatistic title={t('userMemory.capacity')} value={memory_num?.total || 0} suffix={t('userMemory.memoryNum')} />
                 </Col>

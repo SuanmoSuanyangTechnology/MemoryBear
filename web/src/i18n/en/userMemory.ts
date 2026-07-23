@@ -275,5 +275,6 @@ export const userMemory = {
       warning_simple: 'Warning',
       normal: 'Normal',
       userTag: 'User Tag',
+      noTags: 'No tags',
     },
 }

@@ -276,5 +276,6 @@ export const userMemory = {
       warning_simple: '紧',
       normal: '常规',
       userTag: '用户标签',
+      noTags: '暂无标签',
     },
 }

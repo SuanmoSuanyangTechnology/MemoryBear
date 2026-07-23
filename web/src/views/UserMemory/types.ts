@@ -22,4 +22,5 @@ export interface Data {
     memory_config_id: string;
     memory_config_name: string;
   },
+  tags: string[];
 }
