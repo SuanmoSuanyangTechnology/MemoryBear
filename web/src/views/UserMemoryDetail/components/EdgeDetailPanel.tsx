@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Flex } from 'antd'
 
-import type { Edge, Node } from '@/components/Charts/graphNetworkUtils'
+import type { Edge, Node } from '@/components/Charts/GraphNetworkChart/types'
 import { formatDateTime } from '@/utils/format'
 
 interface EdgeDetailPanelProps {
