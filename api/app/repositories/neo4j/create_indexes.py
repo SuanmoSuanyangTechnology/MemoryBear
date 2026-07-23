@@ -17,6 +17,7 @@ FULLTEXT_DEFS: List[Tuple[str, str, List[str], str]] = [
     ("communitiesFulltext", "Community", ["name", "summary"], "cjk"),
     ("perceptualFulltext", "Perceptual", ["summary", "topic", "domain", "keywords"], "cjk"),
     ("assistantPrunedFulltext", "AssistantPruned", ["text"], "cjk"),
+    ("dialogueFulltext", "Dialogue", ["content"], "cjk"),
 ]
 
 # Vector 索引: (name, label, property, dimensions)

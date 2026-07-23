@@ -204,7 +204,7 @@ const FormFieldComponent: React.FC<{ nodeKey: NodeKey; id: string; default_value
             {initialDefaultValue}
           </div>
         )}
-        <Flex align="center" gap={8} className="rb:flex rb:gap-0 rb:shrink-0">
+        <Flex align="center" gap={8} className="rb:shrink-0">
           <div
             className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/edit.svg')]"
             

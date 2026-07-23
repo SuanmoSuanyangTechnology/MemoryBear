@@ -21,17 +21,19 @@ from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
-from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool
+from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, make_user_source_lookup_tool
 from app.core.models.llm import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
+from app.repositories.neo4j.cypher_queries import FETCH_USER_SOURCES_FOR_ENTITIES
 from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
     search_graph_by_embedding
 from app.repositories.neo4j.graph_search import search_user_metadata
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.app_schema import FileInput, FileType, TransferMethod
 
 logger = logging.getLogger(__name__)
 
@@ -69,15 +71,19 @@ class Neo4jSearchService:
         if includes is None:
             self.includes = [
                 Neo4jNodeType.STATEMENT,
+                # Neo4jNodeType.DIALOGUE,
                 Neo4jNodeType.CHUNK,
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
                 Neo4jNodeType.PERCEPTUAL,
+                Neo4jNodeType.DIALOGUE,
                 # Neo4jNodeType.COMMUNITY
             ]
 
         self.relation_search_tool = make_relation_search_tool(self.ctx)
         self.entity_search_tool = make_entity_search_tool(self.ctx)
+        self.user_source_lookup_tool = make_user_source_lookup_tool(self.ctx)
+        self._user_source_looked_up_ids = set()
 
     async def _keyword_search(
             self,
@@ -242,7 +248,7 @@ class Neo4jSearchService:
             loop_limit=RELATIONSHIP_LOOP_LIMIT - 1
         )
 
-        tools = [self.relation_search_tool, self.entity_search_tool]
+        tools = [self.relation_search_tool, self.entity_search_tool, self.user_source_lookup_tool]
         tool_map = {t.name: t for t in tools}
         llm_with_tools = self.llm.bind_tools(tools)
 
@@ -265,8 +271,8 @@ class Neo4jSearchService:
                     break
 
                 async def run_tool(tc):
-                    tool = tool_map[tc["name"]]
                     try:
+                        tool = tool_map[tc["name"]]
                         result = await tool.ainvoke(tc["args"])
                         return ToolMessage(
                             content=json.dumps(result, ensure_ascii=False),
@@ -285,6 +291,8 @@ class Neo4jSearchService:
                 messages.extend(tool_messages)
             finally:
                 var_child_runnable_config.reset(_config_token)
+
+        self._collect_user_source_lookup_ids(messages)
 
         final_message = next(
             (m for m in reversed(messages) if isinstance(m, AIMessage)),
@@ -334,6 +342,23 @@ class Neo4jSearchService:
                         pairs.append(EntityPair(source_id=source_id, target_id=target_id))
 
         return RelationSearchResult(pairs=pairs)
+
+    def _collect_user_source_lookup_ids(
+            self,
+            messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
+    ) -> None:
+        """从 agent 消息历史中收集 user_source_lookup_tool 调用过的 entity_ids。"""
+        looked_up: set[str] = set()
+        for msg in messages:
+            if not isinstance(msg, AIMessage) or not msg.tool_calls:
+                continue
+            for tc in msg.tool_calls:
+                if tc.get("name") != "user_source_lookup_tool":
+                    continue
+                entity_ids = tc.get("args", {}).get("entity_ids", [])
+                if isinstance(entity_ids, list):
+                    looked_up.update(entity_ids)
+        self._user_source_looked_up_ids = looked_up
 
     async def _fetch_relation_data(
             self,
@@ -413,6 +438,20 @@ class Neo4jSearchService:
         relation_records, entity_records = await self._fetch_relation_data(result.pairs)
         relations = self._build_relation_memories(relation_records, entity_records)
 
+        if self._user_source_looked_up_ids:
+            try:
+                user_source_map = await self.fetch_user_sources_for_entities(self._user_source_looked_up_ids)
+            except Exception as e:
+                logger.warning(f"[RelationSearch] UserSource 回溯失败: {e}")
+                user_source_map = {}
+            for rel_memory in relations:
+                if rel_memory.target_id in user_source_map:
+                    source_text = user_source_map[rel_memory.target_id]
+                    rel_memory.target_desc = (
+                        f"{rel_memory.target_desc}\n"
+                        f"<original-context>{source_text}</original-context>"
+                    )
+
         logger.info(f"[RelationSearch] resolved {len(relations)} relations from {len(result.pairs)} pairs")
         return MemorySearchResult(memories=[], relations=relations)
 
@@ -431,6 +470,148 @@ class Neo4jSearchService:
             )
 
         return memory
+
+    async def fetch_user_sources_for_entities(
+            self,
+            entity_ids: set[str],
+    ) -> dict[str, str]:
+        """给定一组 ExtractedEntity ID，查询其 HAS_ORIGINAL_CONTENT 边，返回
+        {entity_id: original_text} 映射。
+
+        若一个 entity 对应多个 UserSource（多次提及），合并所有 original_text。
+        """
+        if not entity_ids:
+            return {}
+
+        async with Neo4jConnector(shared_driver=True) as connector:
+            records = await connector.execute_query(
+                FETCH_USER_SOURCES_FOR_ENTITIES,
+                entity_ids=list(entity_ids),
+                end_user_id=self.ctx.end_user_id,
+            )
+
+        result: dict[str, list[str]] = {}
+        for rec in records:
+            eid = rec.get("entity_id", "")
+            text = rec.get("original_text", "")
+            if not eid or not text:
+                continue
+            if eid not in result:
+                result[eid] = []
+            result[eid].append(text)
+
+        return {eid: "\n---\n".join(texts) for eid, texts in result.items()}
+
+    async def resolve_perceptual_content(
+            self,
+            query: str,
+            perceptual_memories: list[Memory],
+            llm: RedBearLLM,
+    ) -> list[Memory]:
+        """对 Perceptual 类型的记忆调用多模态模型解析实际文件内容。
+
+        仅增强 memory.content（不改变 score / id / source）。
+        失败时保留原 summary，不中断主流程。
+        """
+        enhanced = []
+        for mem in perceptual_memories:
+            if mem.source != Neo4jNodeType.PERCEPTUAL:
+                enhanced.append(mem)
+                continue
+
+            file_path = mem.data.get("file_path", "")
+            file_name = mem.data.get("file_name", "")
+            file_type = mem.data.get("file_type", "")
+            perceptual_type = mem.data.get("perceptual_type", "")
+
+            if not file_path:
+                logger.debug("[Perceptual] 跳过无 file_path 的 Perceptual 记忆")
+                enhanced.append(mem)
+                continue
+
+            try:
+                parsed = await self._call_multimodal_for_query(
+                    file_path, file_name, file_type, perceptual_type, query, llm
+                )
+
+                # 增强 content：格式化为 query 相关的解析片段
+                mem.content = (
+                    f"<history-file-input>\n"
+                    f"<file-name>{file_name}</file-name>\n"
+                    f"<file-summary>{mem.data.get('summary', '')}</file-summary>\n"
+                    f"<file-analysis>{parsed}</file-analysis>\n"
+                    f"</history-file-input>\n"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[Perceptual] 多模态解析失败 file={file_name}: {e}，回退使用 summary"
+                )
+
+            enhanced.append(mem)
+
+        return enhanced
+
+    @staticmethod
+    async def _call_multimodal_for_query(
+            file_path: str,
+            file_name: str,
+            file_type: str,
+            perceptual_type: str | int,
+            query: str,
+            llm: RedBearLLM,
+    ) -> str:
+        """调用多模态 LLM，让模型针对 query 解析文件内容。
+
+        支持图片（VISION）和文档（TEXT/DOCUMENT）类型。
+        返回模型对文件的针对性分析文本。
+        """
+        from app.services.multimodal_service import MultimodalService
+
+        # 根据 perceptual_type 确定 FileInput 类型
+        # perceptual_type: 1=VISION | 2=AUDIO | 3=TEXT | 4=CONVERSATION
+        perceptual_type_int = int(perceptual_type) if perceptual_type else 0
+        if perceptual_type_int == 1:  # VISION
+            file_input_type = FileType.IMAGE
+        elif perceptual_type_int == 3:  # TEXT/DOCUMENT
+            file_input_type = FileType.DOCUMENT
+        else:
+            # AUDIO / CONVERSATION / 未知 → 跳过，返回 summary
+            return ""
+
+        file_input = FileInput(
+            type=file_input_type,
+            transfer_method=TransferMethod.REMOTE_URL,
+            url=file_path,
+            file_type=file_type or "",
+        )
+
+        # 使用 MultimodalService 格式化文件内容
+        multimodal_svc = MultimodalService(
+            db=None,
+            api_config=llm.get_config(),
+        )
+        formatted = await multimodal_svc.process_files(
+            files=[file_input],
+            document_image_recognition=True,
+        )
+
+        if not formatted:
+            return ""
+
+        # 构造 prompt：让模型关注 query 相关的文件内容
+        prompt = (
+            f"请根据以下问题，分析文件 '{file_name}' 中相关的内容：\n\n"
+            f"问题：{query}\n\n"
+            f"请仅提取与问题直接相关的信息，以简洁的要点形式回答。"
+        )
+
+        # 调用 LLM（支持多模态输入）
+        response = await llm.ainvoke([HumanMessage(content=[
+            {"type": "text", "text": prompt},
+            *formatted,
+        ])])
+
+        return response.content if hasattr(response, 'content') else str(response)
 
 
 class RAGSearchService:

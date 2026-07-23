@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.app_schema import FileInput
 
@@ -41,6 +41,28 @@ class UserInput(BaseModel):
     end_user_id: str
     session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     config_id: Optional[str] = None
+
+
+class ReadSyncInput(BaseModel):
+    """Read sync request schema — supports single end_user_id or multiple end_user_ids.
+
+    Provide exactly one of `end_user_id` (backward-compatible single-user mode)
+    or `end_user_ids` (multi-user concurrent mode).
+    """
+    message: str
+    search_switch: str
+    end_user_id: Optional[str] = None
+    end_user_ids: Optional[List[str]] = None
+    session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    config_id: Optional[str] = None
+
+    @model_validator(mode='after')
+    def check_at_least_one_id(self):
+        if not self.end_user_id and not self.end_user_ids:
+            raise ValueError('At least one of end_user_id or end_user_ids must be provided')
+        if self.end_user_id and self.end_user_ids:
+            raise ValueError('Provide exactly one of end_user_id or end_user_ids, not both')
+        return self
 
 
 class InternalReadInput(BaseModel):

@@ -193,7 +193,7 @@ class ForgetLogRepository:
         page = max(page, 1)
         offset = (page - 1) * pagesize
         result = await db.execute(
-            base_query.order_by(ForgetAuditModel.delete_at.desc()).offset(offset).limit(pagesize)
+            base_query.order_by(ForgetAuditModel.delete_at.desc(), ForgetAuditModel.id.desc()).offset(offset).limit(pagesize)
         )
         items = list(result.scalars().all())
 
@@ -271,3 +271,88 @@ class ForgetLogRepository:
             )
         )
         return int(result or 0)
+
+    @staticmethod
+    def get_forgotten_logs(
+        db: Session,
+        end_user_id: uuid.UUID,
+        page: int = 1,
+        pagesize: int = 10,
+    ) -> tuple[list[dict], int]:
+        """分页查询已遗忘日志。
+
+        Returns:
+            (items, total) — items 为 [{node_type, content, delete_at}, ...]
+        """
+        base = (
+            db.query(ForgetAuditModel)
+            .filter(ForgetAuditModel.end_user_id == end_user_id)
+        )
+        total = base.count()
+        rows = (
+            base
+            .order_by(ForgetAuditModel.delete_at.desc())
+            .offset((page - 1) * pagesize)
+            .limit(pagesize)
+            .all()
+        )
+        items = [
+            {
+                "node_type": r.node_type,
+                "content": r.content,
+                "delete_at": int(r.delete_at.timestamp() * 1000),
+            }
+            for r in rows
+        ]
+        return items, total
+
+    @staticmethod
+    async def get_daily_trend_async(
+        db: AsyncSession,
+        end_user_id: uuid.UUID,
+        start_date,
+    ) -> list[tuple[str, int]]:
+        """按天统计遗忘数量（异步版）。"""
+        rows = await db.execute(
+            select(
+                func.date(ForgetAuditModel.delete_at).label("day"),
+                func.count().label("cnt"),
+            )
+            .where(
+                ForgetAuditModel.end_user_id == end_user_id,
+                func.date(ForgetAuditModel.delete_at) >= start_date,
+            )
+            .group_by(func.date(ForgetAuditModel.delete_at))
+            .order_by("day")
+        )
+        return [(row.day.isoformat(), row.cnt) for row in rows.all()]
+
+    @staticmethod
+    async def get_forgotten_logs_async(
+        db: AsyncSession,
+        end_user_id: uuid.UUID,
+        page: int = 1,
+        pagesize: int = 10,
+    ) -> tuple[list[dict], int]:
+        """分页查询已遗忘日志（异步版）。"""
+        base = select(ForgetAuditModel).where(
+            ForgetAuditModel.end_user_id == end_user_id
+        )
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await db.execute(count_q)).scalar_one()
+
+        rows = await db.execute(
+            base
+            .order_by(ForgetAuditModel.delete_at.desc())
+            .offset((page - 1) * pagesize)
+            .limit(pagesize)
+        )
+        items = [
+            {
+                "node_type": r.node_type,
+                "content": r.content,
+                "delete_at": int(r.delete_at.timestamp() * 1000),
+            }
+            for r in rows.scalars().all()
+        ]
+        return items, total

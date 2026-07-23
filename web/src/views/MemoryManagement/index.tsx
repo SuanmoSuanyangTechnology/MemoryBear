@@ -28,6 +28,7 @@ import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
 import { formatDateTime } from '@/utils/format';
 import Tag from '@/components/Tag'
 import { MemoryEngine } from '@redbear/memory-brick';
+import PrivateWrap from '@/components/PrivateWrap'
 
 const MemoryManagement: React.FC = () => {
   const { t } = useTranslation();
@@ -220,7 +221,7 @@ const MemoryManagement: React.FC = () => {
                             ></div>
                           </Flex>
                         ))}
-                        {MemoryEngine && <MemoryEngine item={item} />}
+                        <PrivateWrap>{() => <MemoryEngine item={item} />}</PrivateWrap>
                       </div>
 
                       <Flex

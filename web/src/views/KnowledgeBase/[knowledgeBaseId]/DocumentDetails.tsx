@@ -10,7 +10,7 @@ import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
-import { Button, Spin, message, Switch, App, Divider } from 'antd';
+import { Button, Spin, message, Switch, App, Divider, Flex } from 'antd';
 import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
@@ -62,12 +62,12 @@ const DocumentDetails: FC = () => {
   // Early return if no documentId
   if (!documentId) {
     return (
-      <div className="rb:flex rb:items-center rb:justify-center rb:h-full rb:flex-col rb:gap-4">
-        <div className="rb:text-gray-500">{t('knowledgeBase.documentIdRequired') || '文档ID不能为空'}</div>
+      <Flex align="center" justify="center" gap={16} vertical className="rb:h-full!">
+        <div className="rb:text-gray-500">{t('knowledgeBase.documentIdRequired')}</div>
         <Button type="primary" onClick={() => navigate(-1)}>
-          {t('common.back') || '返回'}
+          {t('common.back')}
         </Button>
-      </div>
+      </Flex>
     );
   }
   
@@ -160,7 +160,7 @@ const DocumentDetails: FC = () => {
     ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
   };
 
-  const [isParentChildMode, setIsParentChildMode] = useState<string | boolean>('false');
+  const [isParentChildMode, setIsParentChildMode] = useState<undefined | boolean>(false);
   const fetchDocumentDetail = async () => {
     if (!documentId) return;
     setLoading(true);
@@ -176,7 +176,7 @@ const DocumentDetails: FC = () => {
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
-      message.error(t('common.loadFailed') || '加载失败');
+      message.error(t('common.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -399,78 +399,76 @@ const DocumentDetails: FC = () => {
   }
   if (loading) {
     return (
-      <div className="rb:flex rb:items-center rb:justify-center rb:h-full">
+      <Flex align="center" justify="center" className="rb:h-full!">
         <Spin size="large" />
-      </div>
+      </Flex>
     );
   }
 
   if (document?.progress !== 1) {
     return (
-      <div className="rb:flex rb:flex-col rb:h-full rb:p-4">
-          <div className='rb:flex rb:items-center rb:gap-2 rb:mb-4 rb:cursor-pointer' onClick={handleBack}>
-              <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
-              <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
+      <Flex vertical className="rb:h-full rb:p-4!">
+        <Flex align="center" gap={8} className='rb:mb-4! rb:cursor-pointer' onClick={handleBack}>
+            <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
+            <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
+        </Flex>
+        {/* Document preview */}
+        {fileUrl && (
+          <div className='rb:flex-1 rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:px-4 rb:pt-4 rb:overflow-hidden'>
+            <h3 className="rb:text-sm rb:font-medium rb:mb-3">
+              {t('knowledgeBase.documentPreview')}
+            </h3>
+            <DocumentPreview 
+              fileUrl={fileUrl}
+              fileName={document?.file_name}
+              fileExt={document?.file_ext}
+              height="calc(100% - 40px)"
+              // mode="google"
+              // showModeSwitch={true}
+            />
           </div>
-          {/* Document preview */}
-          {fileUrl && (
-            <div className='rb:flex-1 rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4 rb:overflow-hidden'>
-              <h3 className="rb:text-sm rb:font-medium rb:mb-3">
-                {t('knowledgeBase.documentPreview') || '文档预览'}
-              </h3>
-              <DocumentPreview 
-                fileUrl={fileUrl}
-                fileName={document?.file_name}
-                fileExt={document?.file_ext}
-                height="calc(100% - 40px)"
-                // mode="google"
-                // showModeSwitch={true}
-              />
-            </div>
-          )}
-      </div>
+        )}
+      </Flex>
     );
   }
 
   return (<>
-    <div className="rb:flex rb:flex-col rb:h-full rb:p-1">
+    <Flex vertical className="rb:h-full! rb:p-1!">
       {/* Header */}
-      <div className="rb:flex rb:flex-col rb:text-left rb:mb-4">
-        <div className='rb:flex rb:items-center rb:justify-between'>
-            <div className='rb:flex rb:items-center rb:gap-2 rb:mb-4 rb:cursor-pointer' onClick={handleBack}>
-                <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
-                <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
-            </div>
-            
-        </div>
-        <div className="rb:flex rb:items-center rb:justify-between rb:gap-4">
-          
-          <div className="rb:flex rb:gap-2 rb:items-center rb:text-xl rb:font-semibold rb:text-gray-800 ">
-            {document.file_name || t('knowledgeBase.documentDetails') || '文档详情'}
+      <Flex vertical className="rb:text-left rb:mb-4!">
+        <Flex align="center" justify="space-between">
+          <Flex align="center" gap={8} className='rb:mb-4! rb:cursor-pointer' onClick={handleBack}>
+              <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
+              <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
+          </Flex>
+        </Flex>
+        <Flex align="center" justify="space-between" gap={16}>
+          <Flex gap={8} align="center" className="rb:text-xl rb:font-semibold rb:text-gray-800 ">
+            {document.file_name || t('knowledgeBase.documentDetails')}
             <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} defaultChecked={document.status === 1} onChange={onChange}/>
-          </div>
-          <div className='rb:flex rb:gap-3 rb:items-center'>
-              <SearchInput 
-                placeholder={t('knowledgeBase.search')} 
-                onSearch={handleSearch}
-                defaultValue={keywords}
-              />
-              <Button type='primary' onClick={handleAdjustmentParameter}>{t('knowledgeBase.adjustmentParameter') || '调整参数'}</Button>
-              <Button type="primary" onClick={() => handleInsert()}>{t('knowledgeBase.insert') || '插入'}</Button>
-          </div>
-        </div>
-      </div>
+          </Flex>
+          <Flex gap={12} align="center">
+            <SearchInput 
+              placeholder={t('knowledgeBase.search')} 
+              onSearch={handleSearch}
+              defaultValue={keywords}
+            />
+            <Button type='primary' onClick={handleAdjustmentParameter}>{t('knowledgeBase.adjustmentParameter') || '调整参数'}</Button>
+            <Button type="primary" onClick={() => handleInsert()}>{t('knowledgeBase.insert') || '插入'}</Button>
+          </Flex>
+        </Flex>
+      </Flex>
 
       {/* Content area */}
-      <div className="rb:flex rb:h-full rb:flex-1 rb:overflow-hidden rb:bg-white rb:rounded-xl rb:border rb:border-[#DFE4ED]">
+      <Flex className="rb:h-full rb:flex-1 rb:overflow-hidden rb:bg-white rb:rounded-xl rb:border rb:border-[#DFE4ED]">
         {/* Left: Document info */}
-        <div className='rb:w-80 rb:h-full rb:flex rb:flex-col rb:gap-4 rb:overflow-hidden'>
+        <Flex vertical className='rb:w-80 rb:h-full! rb:overflow-hidden'>
           <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4 rb:overflow-y-auto'>
             <DocumentMetadata 
               documentId={documentId} 
               knowledgeBaseId={knowledgeBaseId || ''}
             />
-            <Divider />
+            <Divider className="rb:my-4!" />
             <InfoPanel 
               title={t('knowledgeBase.documentInfo')} 
               items={infoItems}
@@ -479,7 +477,7 @@ const DocumentDetails: FC = () => {
               {t('knowledgeBase.downloadOriginal')}
             </Button>
           </div>
-        </div>
+        </Flex>
         
         {/* Right: Chunk list */}
         <div 
@@ -506,7 +504,7 @@ const DocumentDetails: FC = () => {
             isParentChildMode={isParentChildMode}
           />
         </div>
-      </div>
+      </Flex>
       
       {/* Insert content modal */}
       <InsertModal 
@@ -515,7 +513,7 @@ const DocumentDetails: FC = () => {
         onInsert={handleInsertContent}
         onSuccess={handleInsertSuccess}
       />
-    </div>
+    </Flex>
   </>);
 };
 

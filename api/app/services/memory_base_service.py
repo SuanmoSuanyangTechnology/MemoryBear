@@ -3,24 +3,19 @@ Memory Base Service
 
 提供记忆服务的基础功能和共享辅助方法。
 """
-# [可移除] asyncio 未被 MemoryBaseService 使用（仅翻译相关代码使用）
-import asyncio
-# [可移除] re 模块在文件中未被使用
-import re
+import uuid
 from datetime import datetime
 from typing import Optional
-# [可移除] BaseModel 仅被 TranslationResponse 使用，TranslationResponse 未被外部引用
+
 from pydantic import BaseModel
-from app.core.utils.datetime_utils import to_timestamp_ms
+
 from app.core.logging_config import get_logger
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+from app.core.utils.datetime_utils import to_timestamp_ms
+from app.db import get_db_context
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.emotion_analytics_service import EmotionAnalyticsService
-# [可移除] ModelClientMixin 仅被 MemoryTransService 使用，MemoryTransService 未被外部引用
-from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-# [可移除] MemoryConfigService 在文件中未被使用
-from app.services.memory_config_service import MemoryConfigService
-# [可移除] get_db_context 仅被 MemoryTransService 使用，MemoryTransService 未被外部引用
-from app.db import get_db_context
+
 logger = get_logger(__name__)
 
 # [可移除] TranslationResponse 仅被以下 MemoryTransService 使用，MemoryTransService 无外部引用
@@ -525,45 +520,31 @@ class MemoryBaseService:
         forgetting_threshold: float = 0.3
     ) -> int:
         """
-        获取遗忘记忆数量
-        
-        统计激活值低于遗忘阈值的节点数量（low_activation_nodes）。
-        查询范围包括：Statement、ExtractedEntity、MemorySummary、Chunk 节点。
+        获取已遗忘记忆数量。
 
-        优化说明：
-            拆分为 4 条按 label 独立的 Cypher 查询并行执行，每条均走
-            label-property 索引（NodeIndexSeek），避免旧版 OR 多 label
-            导致的 AllNodesScan。
-        
+        从 PG ``memory_forget_log`` 表统计实际已删除的节点总数。
+        与 ``ForgetService`` 写日志时同步写入，反映真实遗忘量。
+
         Args:
-            end_user_id: 可选的终端用户ID，用于过滤特定用户的节点
-            forgetting_threshold: 遗忘阈值，默认 0.3
-            
+            end_user_id: 终端用户ID
+            forgetting_threshold: 保留参数，已不再使用
+
         Returns:
-            遗忘记忆的数量（激活值低于阈值的节点数）
+            已遗忘记忆的总数
         """
         try:
-            from app.repositories.neo4j.cypher_queries import build_forget_memory_count_query
+            from app.db import get_async_db_context
+            from app.repositories.forget_log_repository import ForgetLogRepository
 
-            labels = ["Statement", "ExtractedEntity", "MemorySummary", "Chunk"]
-            params = {"threshold": forgetting_threshold}
-            if end_user_id:
-                params["end_user_id"] = end_user_id
+            if not end_user_id:
+                return 0
 
-            async def _count_for_label(label: str) -> int:
-                query = build_forget_memory_count_query(label, with_end_user=bool(end_user_id))
-                result = await self.neo4j_connector.execute_query(query, **params)
-                return int(result[0]["cnt"]) if result else 0
+            async with get_async_db_context() as db:
+                total = await ForgetLogRepository.get_total(db, uuid.UUID(end_user_id))
 
-            counts = await asyncio.gather(*[_count_for_label(lb) for lb in labels])
-            forget_count = sum(counts)
+            logger.debug(f"已遗忘记忆数量: {total} (end_user_id={end_user_id})")
+            return total
 
-            logger.debug(
-                f"遗忘记忆数量: {forget_count} "
-                f"(threshold={forgetting_threshold}, end_user_id={end_user_id})"
-            )
-            return forget_count
-            
         except Exception as e:
             logger.error(f"获取遗忘记忆数量时出错: {str(e)}", exc_info=True)
             return 0

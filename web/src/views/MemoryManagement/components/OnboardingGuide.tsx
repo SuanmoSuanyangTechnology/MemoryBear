@@ -67,12 +67,12 @@ const OnboardingGuide: FC<OnboardingGuideProps> = ({ completed = 0, onCreate }) 
             >
               <div>
                 <Flex align="center" gap={8} className="rb:mb-2!">
-                  <span className={clsx('rb:size-5 rb:rounded-full rb:flex rb:items-center rb:justify-center rb:text-[12px] rb:font-medium', {
+                  <Flex align="center" justify="center" className={clsx('rb:size-5 rb:rounded-full rb:text-[12px] rb:font-medium', {
                     'rb:bg-[#171719] rb:text-white': isActive,
                     'rb:bg-[#F0F0F0] rb:text-[#9A9A9A]': !isActive,
                   })}>
                     {index + 1}
-                  </span>
+                  </Flex>
                   <span className="rb:text-[12px] rb:leading-4 rb:text-[#9A9A9A]">{step.index}</span>
                 </Flex>
                 <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:text-[#212332] rb:mb-1">{step.title}</div>

@@ -159,12 +159,22 @@ export const generateSuggestions = (end_user_id: string) => {
 export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory/analytics/generate_cache', { end_user_id })
 }
-// Forgetting stats
-export const getForgetStats = (end_user_id: string) => {
-  return request.get(`/memory/forget-memory/stats`, { end_user_id })
+// 遗忘记忆配额表
+export const getForgetMemoryQuota = (end_user_id: string | string) => {
+  return request.get(`/memory/forget-memory/${end_user_id}/memory_quota`)
 }
-// Get pending forgetting nodes list
-export const getForgetPendingNodesUrl = '/memory/forget-memory/pending-nodes'
+// 仅7日遗忘趋势
+export const getForgetMemoryTrend = (end_user_id: string) => {
+  return request.get(`/memory/forget-memory/${end_user_id}/forgetting_trend`)
+}
+// 遗忘候选
+export const getForgetMemoryCandidatesUrl = (end_user_id: string) => `/memory/forget-memory/${end_user_id}/forgetting_candidates`
+// 遗忘记录
+export const getForgetMemoryLogsUrl = (end_user_id: string) => `/memory/forget-memory/${end_user_id}/forgotten_logs`
+// 刷新（清除遗忘缓存）
+export const refreshForgetMemoryCache = (end_user_id: string) => {
+  return request.post(`/memory/forget-memory/${end_user_id}/refresh_cache`)
+}
 // Implicit Memory - Preferences
 export const getImplicitPreferences = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/preferences/${end_user_id}`)

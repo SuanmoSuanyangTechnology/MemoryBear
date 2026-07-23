@@ -129,6 +129,16 @@ class MemoryService:
     # ──────────────────────────────────────────────
 
     @staticmethod
+    async def refresh_user_card_tags(
+            end_user_id: str,
+            workspace_id: str,
+    ) -> Dict[str, Any]:
+        """通过统一的记忆服务入口刷新单个用户的名片 Tag 缓存。"""
+        from app.core.memory.analytics.user_card_tags import refresh_user_card_tags
+
+        return await refresh_user_card_tags(end_user_id, workspace_id)
+
+    @staticmethod
     async def ingest_agent_message(
         conversation_id: str,
         message: Any,
@@ -346,6 +356,49 @@ class MemoryService:
             skip_cursor_advance=skip_cursor_advance,
             dispatch_at=dispatch_at,
             source=source,
+        )
+
+    async def fast_write(
+            self,
+            target_message: dict,
+            conversation_id: str = "",
+            message_seq: int = 0,
+            source: str = "",
+            dispatch_at: str = "",
+    ) -> dict:
+        """快速写入记忆：清洗 → Embedding → 写入 :Dialogue 节点
+
+        与 self.write() 并列，复用 __init__/create 已加载到 self.ctx 的 memory_config，
+        构造并驱动 FastWritePipeline（不重复加载配置）。
+
+        Args:
+            target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+            conversation_id: 对话 ID（会话类入口非空，用于确定性 ID 生成）
+            message_seq: 目标消息的 message_seq
+            source: 写入来源（agent/service_api/mcp/workflow），用于节点 ID 生成
+            dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，用于 created_at 时间降级
+
+        Returns:
+            dict: {"status": "success"|"dropped", "dialog_id": str | None}
+
+        Raises:
+            RuntimeError: 当前实例未加载 memory_config
+        """
+        from app.core.memory.pipelines.fast_write_pipeline import FastWritePipeline
+
+        if self.ctx.memory_config is None:
+            raise RuntimeError("MemoryService.fast_write() 需要 memory_config，但当前实例未加载配置")
+        pipeline = FastWritePipeline(
+            memory_config=self.ctx.memory_config,
+            end_user_id=self.ctx.end_user_id,
+            language=self.ctx.language,
+        )
+        return await pipeline.run(
+            target_message=target_message,
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            source=source,
+            dispatch_at=dispatch_at,
         )
 
     async def pilot_write(

@@ -61,8 +61,8 @@ class ForgettingPipeline(BasePipeline):
         )
 
         content = (
-            row.get("content") or row.get("statement") or row.get("name")
-            or row.get("text") or ""
+            row.get("content") or row.get("statement") or row.get("text")
+            or row.get("name") or ""
         )
 
         log = ForgetLog(

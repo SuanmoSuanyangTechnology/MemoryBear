@@ -1,6 +1,6 @@
 /*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:32:07 
+ * @Author: ZhaoYing
+ * @Date: 2026-02-03 18:32:07
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-03-27 11:23:11
  */
@@ -11,20 +11,19 @@ import ReactEcharts from 'echarts-for-react';
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
 import RbCard from '@/components/RbCard/Card'
+import type { ForgetTrendData } from '../types'
 
 /**
  * Props for RecentTrendsLineCard component
- * @property {Array<Record<string, string | number>>} chartData - Trend data over time
- * @property {string[]} seriesList - List of series keys to display
+ * @property {ForgetTrendData[]} chartData - Daily forgetting trend data ({ date, count })
  * @property {boolean} [loading] - Loading state
  */
 interface RecentTrendsLineCardProps {
-  chartData: Array<Record<string, string | number>>;
-  seriesList: string[];
+  chartData: ForgetTrendData[];
   loading?: boolean;
 }
 
-const Colors = ['#155EEF', '#FF5D34']
+const BarColor = '#155EEF'
 
 const axisLabelConfig = {
   color: '#5B6167',
@@ -33,39 +32,18 @@ const axisLabelConfig = {
   fontFamily: 'PingFangSC, PingFang SC',
   formatter: '{value}'
 }
+
 /**
  * RecentTrendsLineCard Component
- * Displays forgetting trends with dual Y-axis line chart
- * Shows merged count and average activation over time
+ * Displays the 7-day forgetting trend as a single-series bar chart of daily forgetting counts.
  */
-const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, seriesList, loading }) => {
+const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, loading }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null);
 
-  const getSeries = () => {
-    return seriesList.map((key, index) => ({
-      name: key === 'merged_count' ? t('forgetDetail.merged_count') : t('forgetDetail.average_activation'),
-      type: 'line',
-      yAxisIndex: key === 'merged_count' ? 0 : 1,
-      smooth: true,
-      lineStyle: {
-        width: 3,
-        color: Colors[index]
-      },
-      itemStyle: {
-        color: Colors[index]
-      },
-      areaStyle: {
-        color: Colors[index],
-        opacity: 0.08
-      },
-      data: chartData.map(item => item[key])
-    }))
-  }
-
   return (
     <RbCard
-      title={t('forgetDetail.forgettingTrend')}
+      title={t('forgetDetail.forgetTrend7Days')}
       headerType="borderless"
       headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
       bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-46px)]"
@@ -74,16 +52,16 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
       {loading
         ? <Loading size={150} />
         : !chartData || chartData.length === 0
-        ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+        ? <Empty size={120} className="rb:h-full!" />
         : <ReactEcharts
             ref={chartRef}
             option={{
-              color: Colors,
+              color: [BarColor],
               tooltip: {
                 trigger: 'axis',
                 extraCssText: 'box-shadow: 0px 2px 6px 0px rgba(33,35,50,0.16); border-radius: 8px;',
                 axisPointer: {
-                  type: 'line',
+                  type: 'shadow',
                   crossStyle: {
                     color: '#5F6266',
                   },
@@ -108,31 +86,50 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
                 icon: 'roundRect',
                 orient: 'horizontal',
                 textStyle: axisLabelConfig,
-                data: seriesList.map((key, index) => ({
-                  name: key === 'merged_count' ? t('forgetDetail.merged_count') : t('forgetDetail.average_activation'),
+                data: [{
+                  name: t('forgetDetail.dailyForget'),
                   itemStyle: {
-                    color: Colors[index] + '14',
-                    borderColor: Colors[index],
+                    color: BarColor + '14',
+                    borderColor: BarColor,
                     borderWidth: 1,
                   }
-                }))
+                }]
               },
               grid: {
                 top: 16,
                 left: 30,
-                right: 36,
+                right: 20,
                 bottom: 48,
-                // containLabel: false
               },
               xAxis: {
                 type: 'category',
                 data: chartData.map(item => item.date),
-                boundaryGap: false,
+                boundaryGap: true,
                 axisLabel: axisLabelConfig,
                 axisLine: {
                   show: true,
                   lineStyle: {
                     color: '#DFE4ED'
+                  }
+                },
+                splitLine: {
+                  show: false,
+                },
+                axisTick: {
+                  show: false,
+                }
+              },
+              yAxis: {
+                type: 'value',
+                position: 'left',
+                minInterval: 1,
+                axisLabel: {
+                  ...axisLabelConfig,
+                  formatter: (value: number) => Math.round(value)
+                },
+                axisLine: {
+                  lineStyle: {
+                    color: BarColor
                   }
                 },
                 splitLine: {
@@ -142,47 +139,20 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
                     type: 'solid'
                   }
                 },
-                axisTick: {
-                  show: false,
-                }
               },
-              yAxis: [
-                {
-                  type: 'value',
-                  position: 'left',
-                  axisLabel: axisLabelConfig,
-                  axisLine: {
-                    lineStyle: {
-                      color: Colors[0]
-                    }
-                  },
-                  splitLine: {
-                    show: true,
-                    lineStyle: {
-                      color: '#DFE4ED',
-                      type: 'solid'
-                    }
-                  },
+              series: [{
+                name: t('forgetDetail.dailyForget'),
+                type: 'bar',
+                barWidth: 14,
+                barMaxWidth: 18,
+                itemStyle: {
+                  color: BarColor,
+                  borderRadius: [4, 4, 0, 0],
                 },
-                {
-                  type: 'value',
-                  position: 'right',
-                  axisLabel: axisLabelConfig,
-                  axisLine: {
-                    lineStyle: {
-                      color: Colors[1]
-                    }
-                  },
-                  splitLine: {
-                    show: false,
-                  },
-                  max: 1,
-                  min: 0
-                }
-              ],
-              series: getSeries()
+                data: chartData.map(item => item.count)
+              }]
             }}
-            style={{ height: '214px', width: '100%', minWidth: '100%' }}
+            style={{ height: '254px', width: '100%', minWidth: '100%' }}
             notMerge={true}
             lazyUpdate={true}
           />

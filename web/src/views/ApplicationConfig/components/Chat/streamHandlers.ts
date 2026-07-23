@@ -118,6 +118,7 @@ export const createCompareStreamHandler = (deps: CompareStreamDeps) => {
         }
         case 'compare_end':
           stopComparingSpinner()
+          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
           setLoading(false)
           break
       }
@@ -177,6 +178,7 @@ export const createRegenerateStreamHandler = (deps: RegenerateStreamDeps) => {
           break
         case 'error':
           updateChatList(prev => updateErrorAssistantMessage(prev, message_length || 0, modelConfigId, error))
+          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
           break
         case 'end': {
           stopComparingSpinner()
@@ -210,6 +212,7 @@ export const createRegenerateStreamHandler = (deps: RegenerateStreamDeps) => {
             updateChatList(prev => updateAssistantMessage(prev, content, modelConfigId, conversation_id, audio_url, citations, suggested_questions))
           }
           updateChatList(prev => updateErrorAssistantMessage(prev, message_length || 0, modelConfigId, error))
+          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
           setLoading(false)
           break
         }
@@ -259,6 +262,7 @@ export const createClusterStreamHandler = (deps: ClusterStreamDeps) => {
           break
         case 'compare_end':
           stopComparingSpinner()
+          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
           setLoading(false)
           break
       }

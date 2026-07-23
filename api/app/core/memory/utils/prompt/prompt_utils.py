@@ -100,50 +100,6 @@ async def render_statement_extraction_prompt(
     })
 
     return rendered_prompt
-# TODO temporal与statement prompt合并在一起，以下代码不需要
-async def render_temporal_extraction_prompt(
-    ref_dates: dict,
-    statement: dict,
-    temporal_guide: dict,
-    statement_guide: dict,
-    json_schema: dict,
-    language: str = "zh",
-) -> str:
-    """
-    Renders the temporal extraction prompt using the extract_temporal.jinja2 template.
-
-    Args:
-        ref_dates: Reference dates for context.
-        statement: The statement to process.
-        temporal_guide: Guidance on temporal types.
-        statement_guide: Guidance on statement types.
-        json_schema: JSON schema for the expected output format.
-        language: Language for output ("zh" for Chinese, "en" for English)
-
-    Returns:
-        Rendered prompt content as a string.
-    """
-    template = prompt_env.get_template("extract_temporal.jinja2")
-    inputs = ref_dates | statement
-    rendered_prompt = template.render(
-        inputs=inputs,
-        temporal_guide=temporal_guide,
-        statement_guide=statement_guide,
-        json_schema=json_schema,
-        language=language,
-    )
-    # 记录渲染结果到提示日志（与示例日志结构一致）
-    log_prompt_rendering('temporal extraction', rendered_prompt)
-    # 可选：记录模板渲染信息
-    log_template_rendering('extract_temporal.jinja2', {
-        'inputs': 'ref_dates|statement',
-        'temporal_guide': 'dict',
-        'statement_guide': 'dict',
-        'json_schema': 'Temporal.schema'
-    })
-
-    return rendered_prompt
-
 def render_entity_dedup_prompt(
     entity_a: dict,
     entity_b: dict,

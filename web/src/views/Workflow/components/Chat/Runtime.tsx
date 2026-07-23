@@ -94,9 +94,11 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
               key={cycleIdx}
               items={[{
                 key: cycleIdx,
-                label: <div className="rb:flex rb:items-center rb:gap-1">
-                  <span>{node_type === 'agent' ? 'ROUND': t(`workflow.runtime.${loop ? 'loop' : 'iteration'}`)} {Number(cycleIdx) + 1}</span>
-                </div>,
+                label: (
+                  <Flex align="center" gap={4}>
+                    <span>{node_type === 'agent' ? 'ROUND': t(`workflow.runtime.${loop ? 'loop' : 'iteration'}`)} {Number(cycleIdx) + 1}</span>
+                  </Flex>
+                ),
                 className: styles.collapseItem,
                 children: node_type !== 'agent'
                   ? renderChild(items, node_type)
@@ -107,14 +109,14 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
                         const data = items[0][key]
                         return (
                           <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
-                            <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
+                            <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
                               <span>{key === 'llm' ? data.model : 'TOOL CALLS'}</span>
                               <Button
                                 className="rb:py-0! rb:px-1! rb:text-[12px]!"
                                 size="small"
                                 onClick={() => handleCopy(typeof data === 'object' && data ? JSON.stringify(data, null, 2) : '{}')}
                               >{t('common.copy')}</Button>
-                            </div>
+                            </Flex>
                             <div className="rb:max-h-40 rb:overflow-auto">
                               <CodeBlock
                                 size="small"
@@ -149,24 +151,26 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
           const isLoop = vo.node_type === 'loop';
           // Render cycle variables for loop nodes without node_name
           if (typeof vo.cycle_idx === 'number' && isLoop && !vo.node_name) {
-            return <div className="rb:bg-[#F0F3F8] rb:rounded-md">
-              <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
-                {t(`workflow.config.loop.cycle_vars`)}
-                <Button
-                  className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                  size="small"
-                  onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.input ? JSON.stringify(vo.content.input, null, 2) : '{}')}
-                >{t('common.copy')}</Button>
+            return (
+              <div className="rb:bg-[#F0F3F8] rb:rounded-md">
+                <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
+                  {t(`workflow.config.loop.cycle_vars`)}
+                  <Button
+                    className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                    size="small"
+                    onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.input ? JSON.stringify(vo.content.input, null, 2) : '{}')}
+                  >{t('common.copy')}</Button>
+                </Flex>
+                <div className="rb:max-h-40 rb:overflow-auto">
+                  <CodeBlock
+                    size="small"
+                    value={typeof vo.content === 'object' && vo.content?.input ? JSON.stringify(vo.content.input, null, 2) : '{}'}
+                    needCopy={false}
+                    showLineNumbers={true}
+                  />
+                </div>
               </div>
-              <div className="rb:max-h-40 rb:overflow-auto">
-                <CodeBlock
-                  size="small"
-                  value={typeof vo.content === 'object' && vo.content?.input ? JSON.stringify(vo.content.input, null, 2) : '{}'}
-                  needCopy={false}
-                  showLineNumbers={true}
-                />
-              </div>
-            </div>
+            )
           }
 
           // Skip rendering if no node_name is present and not an agent_log iteration
@@ -179,23 +183,25 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
               className="rb:bg-[#F6F6F6]"
               items={[{
                 key: vo.node_id,
-                label: <div className={clsx("rb:flex rb:justify-between rb:items-center")}>
-                  <Flex gap={6} align="center" className="rb:flex-1!">
-                    {vo.icon && source !== 'agent' && <div className={`rb:size-6 rb:bg-cover ${vo.icon}`} />}
-                    <div className="rb:wrap-break-word rb:line-clamp-1 rb:font-medium">{vo.node_name}</div>
+                label: (
+                  <Flex align="center" justify="space-between">
+                    <Flex gap={6} align="center" className="rb:flex-1!">
+                      {vo.icon && source !== 'agent' && <div className={`rb:size-6 rb:bg-cover ${vo.icon}`} />}
+                      <div className="rb:wrap-break-word rb:line-clamp-1 rb:font-medium">{vo.node_name}</div>
+                    </Flex>
+                    <Flex align="center" gap={8} className="rb:text-[12px]">
+                      {typeof vo.elapsed_time == 'number' && <>{vo.elapsed_time?.toFixed(3)}ms</>}
+                      {vo.status === 'completed'
+                        ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
+                        : vo.status === 'failed'
+                        ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
+                        : vo.status === 'waiting_human'
+                        ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
+                        : <LoadingOutlined className={`rb:mr-1 ${getStatus(vo.status)}`} />
+                      }
+                    </Flex>
                   </Flex>
-                  <Flex align="center" gap={8} className="rb:text-[12px]">
-                    {typeof vo.elapsed_time == 'number' && <>{vo.elapsed_time?.toFixed(3)}ms</>}
-                    {vo.status === 'completed'
-                      ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                      : vo.status === 'failed'
-                      ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                      : vo.status === 'waiting_human'
-                      ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                      : <LoadingOutlined className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                    }
-                  </Flex>
-                </div>,
+                ),
                 className: styles.collapseItem,
                 children: (
                   <Flex gap={8} vertical>
@@ -227,14 +233,14 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
                       if ((source === 'agent' || !hasProcessNodes.includes(vo.node_type)) && key === 'process') return null
                       return (
                         <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
-                          <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
+                          <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
                             {isLoop ? t(`workflow.runtime.${key}_cycle_vars`) : t(`workflow.${key}_result`)}
                             <Button
                               className="rb:py-0! rb:px-1! rb:text-[12px]!"
                               size="small"
                               onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}')}
                             >{t('common.copy')}</Button>
-                          </div>
+                          </Flex>
                           <div className="rb:max-h-40 rb:overflow-auto">
                             <CodeBlock
                               size="small"

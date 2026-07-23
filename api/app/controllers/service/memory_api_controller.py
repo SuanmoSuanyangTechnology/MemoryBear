@@ -7,6 +7,8 @@
 认证方式: API Key (@require_api_key)
 """
 
+import asyncio
+
 from fastapi import APIRouter, Body, Depends, Header, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
@@ -24,7 +26,7 @@ from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
 from app.db import get_db, get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
-from app.schemas.memory_agent_schema import Write_UserInput, UserInput, InternalReadInput
+from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
@@ -55,10 +57,47 @@ async def read_memory_sync(
     Read memory synchronously.
 
     Requires API Key with 'memory' scope.
-    Input schema identical to internal POST /api/memory/read/sync (UserInput).
+
+    Supports two modes:
+    - Single user (backward-compatible): pass ``end_user_id`` (string).
+      Returns ``{"answer": "...", "intermediate_outputs": [...]}``.
+    - Multi user: pass ``end_user_ids`` (list of strings). Reads are executed
+      concurrently via ``asyncio.gather``.
+      Returns ``{"<end_user_id>": {"answer": "...", "intermediate_outputs": [...]}, ...}``.
     """
     body = await request.json()
-    payload = UserInput(**body)
+    payload = ReadSyncInput(**body)
+
+    if payload.end_user_ids:
+        # ── Multi-user mode: concurrent reads ──
+        end_user_ids = payload.end_user_ids
+
+        async with get_async_db_context() as db:
+            for euid in end_user_ids:
+                await validate_end_user_in_workspace_async(db, euid, api_key_auth.workspace_id)
+
+        logger.info(
+            f"V1 memory read (sync) - end_user_ids: {end_user_ids}, workspace: {api_key_auth.workspace_id}"
+        )
+
+        async def _read_for_user(euid: str) -> tuple[str, dict]:
+            async with get_async_db_context() as db:
+                config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(euid)
+            service = await MemoryService.create(config_id, end_user_id=euid)
+            memory = await service.read(
+                payload.message, search_switch=SearchStrategy(payload.search_switch)
+            )
+            return euid, {
+                "answer": memory.content,
+                "intermediate_outputs": [_.model_dump() for _ in memory.memories],
+            }
+
+        results = await asyncio.gather(
+            *[_read_for_user(euid) for euid in end_user_ids]
+        )
+        return success(data={euid: data for euid, data in results})
+
+    # ── Single-user mode (backward-compatible) ──
     async with get_async_db_context() as db:
         await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
