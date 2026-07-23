@@ -315,23 +315,9 @@ class Zygote:
             try:
                 code_obj = compile(code, "<sandbox>", "exec")
             except SyntaxError:
-                # Diagnostic: dump what compile actually received so we can tell
-                # byte corruption apart from genuinely non-UTF-8 user source.
-                import binascii
-                valid_utf8 = True
-                try:
-                    code.decode("utf-8")
-                except UnicodeDecodeError:
-                    valid_utf8 = False
-                sys.stderr.write(
-                    f"[zygote-child] compile failed: "
-                    f"code_len={len(code)} enc_len={len(req['code'])} "
-                    f"key_len={len(base64.b64decode(req['key']))} "
-                    f"valid_utf8={valid_utf8} "
-                    f"head={binascii.hexlify(code[:24]).decode()} "
-                    f"tail={binascii.hexlify(code[-24:]).decode()}\n"
-                )
-                sys.stderr.flush()
+                # Let the SyntaxError propagate to the BaseException handler
+                # below which writes a traceback to stderr — no extra hex dump
+                # here (the old diagnostic leaked plaintext code to the caller).
                 raise
             exec(code_obj, g)
 
@@ -378,7 +364,19 @@ class Zygote:
         self._teardown_pipe_fd(fd, req_id)
 
     def _teardown_pipe_fd(self, fd: int, req_id: int) -> None:
+        """Close one child-output fd and finish the request if both are done.
 
+        After both pipes EOF we send SIGKILL before waitpid.  This handles
+        two cases with a single code path:
+
+        1. Child already exited (normal): SIGKILL is a no-op on the zombie,
+           waitpid returns immediately.
+        2. Child closed stdio but kept running (attack / misbehaviour):
+           SIGKILL kills it, waitpid returns immediately.
+
+        The seccomp sandbox prevents D-state, so SIGKILL always takes effect
+        promptly — blocking waitpid(pid, 0) will never hang here.
+        """
         try:
             os.close(fd)
         except OSError:
@@ -392,11 +390,14 @@ class Zygote:
             return
 
         pid = req["pid"]
+        # WNOHANG returns (0,0) for a live child, (pid,status) for a zombie.
+        # os.kill(pid,0) also succeeds on zombies -> false positives on every
+        # timeout/SIGKILL.  Only flag it when the child is genuinely still alive.
         try:
-            os.kill(pid, 0)          # signal 0 = existence check
-        except ProcessLookupError:
-            pass
-        else:
+            alive = os.waitpid(pid, os.WNOHANG)[0] == 0
+        except ChildProcessError:
+            alive = False
+        if alive:
             self._send(P.MSG_STDERR, req_id, b"process terminated")
         self.reqs.pop(req_id, None)
         try:
