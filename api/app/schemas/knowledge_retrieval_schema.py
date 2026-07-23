@@ -57,5 +57,10 @@ class KnowledgeRetrievalRequest(BaseModel):
 
 class KnowledgeRetrievalResult(BaseModel):
     chunks: list[Any] = Field(default_factory=list)
+    entities: list[Any] = Field(default_factory=list)
+    relationships: list[Any] = Field(default_factory=list)
+
+    def has_graph_data(self) -> bool:
+        return bool(self.entities or self.relationships)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

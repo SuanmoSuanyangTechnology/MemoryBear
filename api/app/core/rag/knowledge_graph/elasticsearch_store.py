@@ -708,6 +708,13 @@ class GraphElasticsearchStore:
                 EntityProjectionHit(
                     entity_key=str(source["entity_key_kwd"]),
                     entity_name=str(source["entity_name_kwd"]),
+                    entity_type=str(source.get("entity_type_kwd") or ""),
+                    description=str(source.get("description") or ""),
+                    aliases=tuple(
+                        str(value)
+                        for value in (source.get("aliases_kwd") or ())
+                        if str(value).strip()
+                    ),
                     score=score,
                     degree=int(source.get("degree_int") or 0),
                     evidence_count=int(source.get("evidence_count_int") or 0),
@@ -764,6 +771,13 @@ class GraphElasticsearchStore:
                 EntityProjectionHit(
                     entity_key=str(source["entity_key_kwd"]),
                     entity_name=str(source.get("entity_name_kwd") or ""),
+                    entity_type=str(source.get("entity_type_kwd") or ""),
+                    description=str(source.get("description") or ""),
+                    aliases=tuple(
+                        str(value)
+                        for value in (source.get("aliases_kwd") or ())
+                        if str(value).strip()
+                    ),
                     score=0.0,
                     degree=int(source.get("degree_int") or 0),
                     evidence_count=int(source.get("evidence_count_int") or 0),
@@ -1362,12 +1376,23 @@ class GraphElasticsearchStore:
                 continue
             if not source.get("relation_key_kwd"):
                 continue
+            directed = source.get("directed_int")
             hits.append(
                 RelationProjectionHit(
                     relation_key=str(source["relation_key_kwd"]),
                     from_entity_key=str(source["from_entity_key_kwd"]),
+                    from_entity_name=str(source.get("from_entity_name_kwd") or ""),
                     to_entity_key=str(source["to_entity_key_kwd"]),
+                    to_entity_name=str(source.get("to_entity_name_kwd") or ""),
+                    predicate=str(source.get("predicate_kwd") or ""),
                     label=cls._relation_label(source),
+                    description=str(source.get("description") or ""),
+                    keywords=tuple(
+                        str(value)
+                        for value in (source.get("keywords_kwd") or ())
+                        if str(value).strip()
+                    ),
+                    directed=True if directed is None else bool(directed),
                     score=(
                         cls._script_score_to_cosine(hit.get("_score"))
                         if script_score

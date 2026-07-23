@@ -281,7 +281,7 @@ class KnowledgeRetrievalService:
 
         client = await AsyncElasticsearchClientProvider.get_shared_client()
         store = AsyncElasticSearchRetrieval(client, timings)
-        chunks = await cls._retrieve_targets(
+        retrieval_result = await cls._retrieve_targets(
             request,
             preparation,
             document_ids_include,
@@ -289,6 +289,7 @@ class KnowledgeRetrievalService:
             log_id,
             timings,
         )
+        chunks = retrieval_result.chunks
         if (
             preparation.graph
             and preparation.graph.pipeline is GraphPipeline.LEGACY
@@ -313,7 +314,11 @@ class KnowledgeRetrievalService:
                 | timings.as_log_fields()
             ),
         )
-        return KnowledgeRetrievalResult(chunks=chunks)
+        return KnowledgeRetrievalResult(
+            chunks=chunks,
+            entities=retrieval_result.entities,
+            relationships=retrieval_result.relationships,
+        )
 
     @classmethod
     def retrieve(cls, *args: Any, **kwargs: Any) -> KnowledgeRetrievalResult:
@@ -364,10 +369,10 @@ class KnowledgeRetrievalService:
         store: AsyncElasticSearchRetrieval,
         log_id: str,
         timings: RetrievalTimings | None = None,
-    ) -> list[DocumentChunk]:
+    ) -> KnowledgeRetrievalResult:
         targets = preparation.targets
         if not targets:
-            return []
+            return KnowledgeRetrievalResult()
 
         max_workers = max(
             1,
@@ -399,9 +404,9 @@ class KnowledgeRetrievalService:
         async def retrieve_one(
             index: int,
             target: RetrievalTarget,
-        ) -> tuple[int, list[DocumentChunk]]:
+        ) -> tuple[int, KnowledgeRetrievalResult]:
             async with semaphore:
-                chunks = await cls._retrieve_single_target(
+                result = await cls._retrieve_single_target(
                     request,
                     target,
                     document_ids_include,
@@ -418,7 +423,7 @@ class KnowledgeRetrievalService:
                     ),
                     timings=timings,
                 )
-                return index, chunks
+                return index, result
 
         tasks = [
             asyncio.create_task(retrieve_one(index, target))
@@ -433,8 +438,12 @@ class KnowledgeRetrievalService:
             raise
 
         chunks_by_index: list[list[DocumentChunk]] = [[] for _ in targets]
-        for index, target_chunks in retrieved:
-            chunks_by_index[index] = target_chunks
+        graph_entities: list[Any] = []
+        graph_relationships: list[Any] = []
+        for index, target_result in retrieved:
+            chunks_by_index[index] = target_result.chunks
+            graph_entities.extend(target_result.entities)
+            graph_relationships.extend(target_result.relationships)
         evidence_graph_only = (
             preparation.graph is not None
             and preparation.graph.pipeline is GraphPipeline.EVIDENCE
@@ -452,12 +461,37 @@ class KnowledgeRetrievalService:
                 for chunk in target_chunks
             ]
         )
-        return await cls._finalize_retrieval_chunks(
+        chunks = await cls._finalize_retrieval_chunks(
             request,
             preparation,
             candidates,
             log_id,
             timings,
+        )
+        graph_entities = cls._deduplicate_graph_items(
+            graph_entities,
+            "entity_key",
+        )
+        graph_relationships = cls._deduplicate_graph_items(
+            graph_relationships,
+            "relation_key",
+        )
+        graph_entities = cls._filter_graph_items_by_chunk_paths(
+            graph_entities,
+            chunks,
+            "entity_key",
+            "entity",
+        )
+        graph_relationships = cls._filter_graph_items_by_chunk_paths(
+            graph_relationships,
+            chunks,
+            "relation_key",
+            "relation",
+        )
+        return KnowledgeRetrievalResult(
+            chunks=chunks,
+            entities=graph_entities,
+            relationships=graph_relationships,
         )
 
     @staticmethod
@@ -491,7 +525,7 @@ class KnowledgeRetrievalService:
         log_id: str | None = None,
         graph_target: GraphTargetSnapshot | None = None,
         timings: RetrievalTimings | None = None,
-    ) -> list[DocumentChunk]:
+    ) -> KnowledgeRetrievalResult:
         started_at = time.perf_counter()
         target_type = target.params.retrieve_type
         if (
@@ -524,7 +558,7 @@ class KnowledgeRetrievalService:
         if target_type == RetrieveType.PARTICIPLE:
             chunks = await store.search_by_full_text(request.query, full_text_options)
             cls._log_target_done(target, 0, len(chunks), len(chunks), len(chunks), started_at, timings=timings)
-            return chunks
+            return KnowledgeRetrievalResult(chunks=chunks)
 
         vector_options = cls._search_options(
             target,
@@ -537,7 +571,7 @@ class KnowledgeRetrievalService:
         if target_type == RetrieveType.SEMANTIC:
             chunks = await store.search_by_vector(embedding, request.query, vector_options)
             cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at, timings=timings)
-            return chunks
+            return KnowledgeRetrievalResult(chunks=chunks)
 
         vector_task = asyncio.create_task(
             store.search_by_vector(embedding, request.query, vector_options)
@@ -591,7 +625,7 @@ class KnowledgeRetrievalService:
             local_rerank=True,
             timings=timings,
         )
-        return chunks
+        return KnowledgeRetrievalResult(chunks=chunks)
 
     @classmethod
     async def _retrieve_evidence_graph_target(
@@ -604,7 +638,7 @@ class KnowledgeRetrievalService:
         started_at: float,
         timings: RetrievalTimings | None,
         log_id: str | None,
-    ) -> list[DocumentChunk]:
+    ) -> KnowledgeRetrievalResult:
         if graph_target.knowledge_id != target.knowledge_id:
             raise ValueError("graph target does not match retrieval target")
 
@@ -633,7 +667,7 @@ class KnowledgeRetrievalService:
                 embedding,
                 store.resolve_parent_chunks,
             )
-            chunks = await pipeline.retrieve(
+            graph_result = await pipeline.retrieve_with_graph_data(
                 GraphRetrievalRequest(
                     query=request.query,
                     runtime=GraphIndexRuntime(
@@ -674,6 +708,7 @@ class KnowledgeRetrievalService:
                     ),
                 )
             )
+            chunks = graph_result.chunks
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -687,6 +722,7 @@ class KnowledgeRetrievalService:
                 type(exc).__name__,
                 cls._elapsed_ms(graph_started_at),
             )
+            graph_result = None
             chunks = []
         finally:
             cls._record_timing(timings, "graph_ms", graph_started_at)
@@ -700,7 +736,13 @@ class KnowledgeRetrievalService:
             started_at,
             timings=timings,
         )
-        return chunks
+        if graph_result is None:
+            return KnowledgeRetrievalResult(chunks=chunks)
+        return KnowledgeRetrievalResult(
+            chunks=chunks,
+            entities=graph_result.entities,
+            relationships=graph_result.relationships,
+        )
 
     @classmethod
     async def _finalize_retrieval_chunks(
@@ -1034,6 +1076,67 @@ class KnowledgeRetrievalService:
             seen_keys.add(dedupe_key)
             result.append(chunk)
         return result
+
+    @staticmethod
+    def _deduplicate_graph_items(
+        items: Sequence[Any],
+        key_field: str,
+    ) -> list[Any]:
+        seen_keys: set[str] = set()
+        result: list[Any] = []
+        for item in items:
+            if isinstance(item, dict):
+                key = str(item.get(key_field) or "")
+            else:
+                key = str(getattr(item, key_field, "") or "")
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            result.append(item)
+        return result
+
+    @classmethod
+    def _filter_graph_items_by_chunk_paths(
+        cls,
+        items: Sequence[Any],
+        chunks: Sequence[DocumentChunk],
+        key_field: str,
+        projection_type: str,
+    ) -> list[Any]:
+        keys = cls._graph_projection_keys_from_chunks(chunks, projection_type)
+        if not keys:
+            return list(items)
+        return [
+            item
+            for item in items
+            if cls._graph_item_key(item, key_field) in keys
+        ]
+
+    @staticmethod
+    def _graph_projection_keys_from_chunks(
+        chunks: Sequence[DocumentChunk],
+        projection_type: str,
+    ) -> set[str]:
+        keys: set[str] = set()
+        for chunk in chunks:
+            match_paths = (chunk.metadata or {}).get("match_paths") or []
+            if not isinstance(match_paths, list):
+                continue
+            for path in match_paths:
+                if not isinstance(path, dict):
+                    continue
+                if path.get("evidence_type") != projection_type:
+                    continue
+                key = str(path.get("evidence_key") or "")
+                if key:
+                    keys.add(key)
+        return keys
+
+    @staticmethod
+    def _graph_item_key(item: Any, key_field: str) -> str:
+        if isinstance(item, dict):
+            return str(item.get(key_field) or "")
+        return str(getattr(item, key_field, "") or "")
 
     @staticmethod
     def _include_document_ids(

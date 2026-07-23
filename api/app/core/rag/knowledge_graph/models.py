@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -88,6 +89,9 @@ class AffectedProjectionKeys(BaseModel):
 class EntityProjectionHit(BaseModel):
     entity_key: str
     entity_name: str
+    entity_type: str = ""
+    description: str = ""
+    aliases: tuple[str, ...] = ()
     score: float
     degree: int = 0
     evidence_count: int = 0
@@ -97,8 +101,14 @@ class EntityProjectionHit(BaseModel):
 class RelationProjectionHit(BaseModel):
     relation_key: str
     from_entity_key: str
+    from_entity_name: str = ""
     to_entity_key: str
+    to_entity_name: str = ""
+    predicate: str = ""
     label: str
+    description: str = ""
+    keywords: tuple[str, ...] = ()
+    directed: bool = True
     score: float
     evidence_count: int = 0
     document_count: int = 0
@@ -119,6 +129,12 @@ class GraphEvidenceHit(BaseModel):
 class SourceChunkVectorHit(BaseModel):
     source_chunk_id: str
     score: float
+
+
+class GraphRetrievalResult(BaseModel):
+    chunks: list[Any] = Field(default_factory=list)
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    relationships: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProjectionEvidenceGroup(BaseModel):

@@ -1078,7 +1078,12 @@ async def retrieve_chunks_with_caller(
             detail=str(exc),
         ) from exc
 
-    return success(data=jsonable_encoder(result.chunks), msg="retrieval successful")
+    response_data = (
+        result.model_dump()
+        if result.has_graph_data()
+        else result.chunks
+    )
+    return success(data=jsonable_encoder(response_data), msg="retrieval successful")
 
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)

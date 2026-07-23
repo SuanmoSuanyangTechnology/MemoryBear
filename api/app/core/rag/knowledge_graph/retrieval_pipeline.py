@@ -12,6 +12,7 @@ from app.core.rag.knowledge_graph.models import (
     GraphEvidenceHit,
     GraphIndexRuntime,
     GraphQueryPlan,
+    GraphRetrievalResult,
     GraphRetrievalRequest,
     ProjectionEvidenceGroup,
     RelationProjectionHit,
@@ -212,6 +213,13 @@ class KnowledgeGraphRetrievalPipeline:
         self,
         request: GraphRetrievalRequest,
     ) -> list[DocumentChunk]:
+        result = await self.retrieve_with_graph_data(request)
+        return result.chunks
+
+    async def retrieve_with_graph_data(
+        self,
+        request: GraphRetrievalRequest,
+    ) -> GraphRetrievalResult:
         started_at = time.perf_counter()
         timeout_seconds = settings.KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS / 1000
         timeout_context = asyncio.timeout(timeout_seconds)
@@ -233,7 +241,7 @@ class KnowledgeGraphRetrievalPipeline:
         self,
         request: GraphRetrievalRequest,
         started_at: float,
-    ) -> list[DocumentChunk]:
+    ) -> GraphRetrievalResult:
         stage = "validate_filters"
         timings: dict[str, int] = {}
         counts = {
@@ -263,7 +271,7 @@ class KnowledgeGraphRetrievalPipeline:
                     timings,
                     reason="no_allowed_documents",
                 )
-                return []
+                return GraphRetrievalResult()
 
             stage = "query_plan"
             stage_started = time.perf_counter()
@@ -278,7 +286,7 @@ class KnowledgeGraphRetrievalPipeline:
                     timings,
                     reason="no_query_keywords",
                 )
-                return []
+                return GraphRetrievalResult()
 
             stage = "query_embedding"
             stage_started = time.perf_counter()
@@ -332,7 +340,7 @@ class KnowledgeGraphRetrievalPipeline:
                     timings,
                     reason="no_valid_seeds",
                 )
-                return []
+                return GraphRetrievalResult()
 
             stage = "graph_expansion"
             stage_started = time.perf_counter()
@@ -382,7 +390,7 @@ class KnowledgeGraphRetrievalPipeline:
                     timings,
                     reason="no_evidence",
                 )
-                return []
+                return GraphRetrievalResult()
 
             stage = "candidate_ranking"
             stage_started = time.perf_counter()
@@ -463,7 +471,7 @@ class KnowledgeGraphRetrievalPipeline:
                     timings,
                     reason="no_source_chunks",
                 )
-                return []
+                return GraphRetrievalResult()
 
             stage = "chunk_hydration"
             stage_started = time.perf_counter()
@@ -492,7 +500,7 @@ class KnowledgeGraphRetrievalPipeline:
                     timings,
                     reason="no_scoped_chunks",
                 )
-                return []
+                return GraphRetrievalResult()
 
             stage = "parent_resolution"
             stage_started = time.perf_counter()
@@ -534,8 +542,12 @@ class KnowledgeGraphRetrievalPipeline:
                 source_vector_scores,
                 parent_vector_scores,
             )
-            result = self._finalize_candidates(
+            selected_attached = self._select_attached_candidates(
                 attached,
+                request.max_candidates,
+            )
+            result = self._finalize_candidates(
+                selected_attached,
                 request.max_paths_per_chunk,
                 request.max_candidates,
             )
@@ -549,7 +561,17 @@ class KnowledgeGraphRetrievalPipeline:
                 timings,
                 reason=None if result else "no_resolved_chunks",
             )
-            return result
+            return GraphRetrievalResult(
+                chunks=result,
+                entities=self._format_result_entities(
+                    selected_attached,
+                    final_entities,
+                ),
+                relationships=self._format_result_relationships(
+                    selected_attached,
+                    final_relations,
+                ),
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1216,6 +1238,109 @@ class KnowledgeGraphRetrievalPipeline:
             )
         )
         return attached
+
+    @staticmethod
+    def _select_attached_candidates(
+        attached: Sequence[tuple[DocumentChunk, _ChunkMatch, int, float | None]],
+        max_candidates: int,
+    ) -> list[tuple[DocumentChunk, _ChunkMatch, int, float | None]]:
+        selected: list[tuple[DocumentChunk, _ChunkMatch, int, float | None]] = []
+        seen_source_ids: set[str] = set()
+        for item in attached:
+            chunk = item[0]
+            source_id = str((chunk.metadata or {}).get("doc_id") or "")
+            if not source_id or source_id in seen_source_ids:
+                continue
+            seen_source_ids.add(source_id)
+            selected.append(item)
+            if len(selected) >= max(1, int(max_candidates)):
+                break
+        return selected
+
+    @classmethod
+    def _format_result_entities(
+        cls,
+        selected: Sequence[tuple[DocumentChunk, _ChunkMatch, int, float | None]],
+        entities: Sequence[EntityProjectionHit],
+    ) -> list[dict[str, Any]]:
+        entity_map = {entity.entity_key: entity for entity in entities}
+        source_ids_by_key = cls._projection_source_ids(selected, "entity")
+        result: list[dict[str, Any]] = []
+        for entity_key, source_ids in source_ids_by_key.items():
+            entity = entity_map.get(entity_key)
+            if entity is None:
+                continue
+            result.append(
+                {
+                    "entity_key": entity.entity_key,
+                    "entity_name": entity.entity_name,
+                    "entity_type": entity.entity_type,
+                    "description": entity.description,
+                    "aliases": list(entity.aliases),
+                    "score": entity.score,
+                    "degree": entity.degree,
+                    "evidence_count": entity.evidence_count,
+                    "document_count": entity.document_count,
+                    "source_chunk_ids": source_ids,
+                }
+            )
+        return result
+
+    @classmethod
+    def _format_result_relationships(
+        cls,
+        selected: Sequence[tuple[DocumentChunk, _ChunkMatch, int, float | None]],
+        relationships: Sequence[RelationProjectionHit],
+    ) -> list[dict[str, Any]]:
+        relationship_map = {
+            relationship.relation_key: relationship
+            for relationship in relationships
+        }
+        source_ids_by_key = cls._projection_source_ids(selected, "relation")
+        result: list[dict[str, Any]] = []
+        for relation_key, source_ids in source_ids_by_key.items():
+            relationship = relationship_map.get(relation_key)
+            if relationship is None:
+                continue
+            result.append(
+                {
+                    "relation_key": relationship.relation_key,
+                    "src_id": relationship.from_entity_key,
+                    "tgt_id": relationship.to_entity_key,
+                    "from_entity_key": relationship.from_entity_key,
+                    "from_entity_name": relationship.from_entity_name,
+                    "to_entity_key": relationship.to_entity_key,
+                    "to_entity_name": relationship.to_entity_name,
+                    "predicate": relationship.predicate,
+                    "label": relationship.label,
+                    "description": relationship.description,
+                    "keywords": list(relationship.keywords),
+                    "directed": relationship.directed,
+                    "score": relationship.score,
+                    "weight": relationship.evidence_count,
+                    "evidence_count": relationship.evidence_count,
+                    "document_count": relationship.document_count,
+                    "endpoint_degree": relationship.endpoint_degree,
+                    "source_chunk_ids": source_ids,
+                }
+            )
+        return result
+
+    @staticmethod
+    def _projection_source_ids(
+        selected: Sequence[tuple[DocumentChunk, _ChunkMatch, int, float | None]],
+        projection_type: str,
+    ) -> dict[str, list[str]]:
+        source_ids_by_key: dict[str, list[str]] = {}
+        for _, match, _, _ in selected:
+            for path in match.paths:
+                if path.evidence_type != projection_type:
+                    continue
+                key = path.evidence_key
+                source_ids = source_ids_by_key.setdefault(key, [])
+                if path.source_chunk_id not in source_ids:
+                    source_ids.append(path.source_chunk_id)
+        return source_ids_by_key
 
     @staticmethod
     def _finalize_candidates(
