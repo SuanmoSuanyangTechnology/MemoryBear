@@ -2870,6 +2870,16 @@ ON CREATE SET r.id = edge.id,
 RETURN elementId(r) AS uuid
 """
 
+# ── Entity → UserSource 回溯查询 ──
+# 通过 HAS_ORIGINAL_CONTENT 边，从 ExtractedEntity 追溯到 UserSource 节点的原始文本。
+# 边方向：UserSource -[HAS_ORIGINAL_CONTENT]-> ExtractedEntity
+FETCH_USER_SOURCES_FOR_ENTITIES = """
+MATCH (us:UserSource)-[r:HAS_ORIGINAL_CONTENT]->(e:ExtractedEntity)
+WHERE e.id IN $entity_ids
+  AND us.end_user_id = $end_user_id
+RETURN e.id AS entity_id, us.original_text AS original_text
+"""
+
 DELETE_NODE_BY_ELEMENT_ID = """
 MATCH (n)
 WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id

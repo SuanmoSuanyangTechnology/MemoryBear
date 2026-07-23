@@ -63,7 +63,6 @@ class RelationMemory(BaseModel):
 
 class QuestionSplit(BaseModel):
     questions: list = Field(default_factory=list)
-    memory_evidence: str = Field(default_factory=str)
 
 
 class EntityPair(BaseModel):
