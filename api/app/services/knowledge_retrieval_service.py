@@ -763,7 +763,11 @@ class KnowledgeRetrievalService:
             finally:
                 cls._record_timing(timings, "global_rerank_ms", global_rerank_started_at)
         elif evidence_graph_only:
-            ranked_chunks = unique_chunks
+            ranked_chunks = sorted(
+                unique_chunks,
+                key=lambda chunk: (chunk.metadata or {}).get("score", 0),
+                reverse=True,
+            )
             threshold = None
             filtered_chunks = ranked_chunks
         else:
