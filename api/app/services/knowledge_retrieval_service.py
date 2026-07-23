@@ -708,11 +708,7 @@ class KnowledgeRetrievalService:
                     related_chunk_number=(
                         settings.KNOWLEDGE_GRAPH_RELATED_CHUNK_NUMBER
                     ),
-                    max_candidates=max(
-                        settings.KNOWLEDGE_GRAPH_MAX_CANDIDATES,
-                        request.top_k,
-                        target.params.top_k,
-                    ),
+                    max_candidates=target.params.top_k,
                     max_paths_per_chunk=(
                         settings.KNOWLEDGE_GRAPH_MAX_PATHS_PER_CHUNK
                     ),
