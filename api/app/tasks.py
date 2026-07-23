@@ -413,6 +413,8 @@ def _run_clear_all_knowledge_graph_data(knowledge_id: str) -> dict[str, Any]:
     with create_knowledge_graph_lock(knowledge_id) as lock_guard:
         lock_guard.ensure_valid()
         state = _load_graph_task_state(knowledge_id)
+        if state.graph_enabled:
+            return {"status": "skipped", "reason": "graph_reenabled"}
         _execute_evidence_clear(state, lock_guard, clear_all=True)
         lock_guard.ensure_valid()
         return {"status": "cleared", "knowledge_id": knowledge_id}
