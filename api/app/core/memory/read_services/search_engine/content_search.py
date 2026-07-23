@@ -73,6 +73,7 @@ class Neo4jSearchService:
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
                 Neo4jNodeType.PERCEPTUAL,
+                Neo4jNodeType.DIALOGUE,
                 # Neo4jNodeType.COMMUNITY
             ]
 
