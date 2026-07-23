@@ -14,6 +14,7 @@ from app.models import User
 from app.models.end_user_info_model import EndUserInfo
 from app.models.end_user_model import EndUser
 from app.models.workspace_model import Workspace
+from app.utils.redis_cache import redis_cache
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
@@ -629,7 +630,7 @@ class EndUserRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-        
+
     def update_memory_insight(
             self,
             end_user_id: uuid.UUID,
@@ -1530,6 +1531,7 @@ async def get_end_user_by_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> 
     return end_user
 
 
+@redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)
@@ -1540,6 +1542,7 @@ def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optiona
     return result.scalar()
 
 
+@redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 async def get_tenant_id_by_end_user_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)

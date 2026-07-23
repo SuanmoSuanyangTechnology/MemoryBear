@@ -222,7 +222,19 @@ impl Drop for ZygoteManager {
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         self._read_task.abort();
-        // Child is killed when its handle drops.
+        // std::process::Child does NOT kill on drop (unlike tokio's Child with
+        // kill_on_drop).  Without explicit kill+wait the zygote worker becomes
+        // an orphan that turns into a zombie when it exits, permanently consuming
+        // a PID slot.  Repeated restarts can exhaust the PID namespace.
+        //
+        // kill() + wait() is safe here: the zygote worker is single-threaded,
+        // does not block signals, and exits promptly on SIGKILL.
+        if let Err(e) = self._child.kill() {
+            tracing::warn!(error = %e, "zygote: kill failed during drop");
+        }
+        if let Err(e) = self._child.wait() {
+            tracing::warn!(error = %e, "zygote: wait failed during drop");
+        }
     }
 }
 

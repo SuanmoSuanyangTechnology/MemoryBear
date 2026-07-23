@@ -1129,6 +1129,22 @@ async def forget_count_active_nodes(
     return result[0]["cnt"] if result else 0
 
 
+async def forget_count_active_nodes_batch(
+    connector: Neo4jConnector,
+    end_user_ids: list[str],
+) -> dict[str, int]:
+    """Batch count active nodes per end_user_id.
+
+    Returns a dict mapping each ``end_user_id`` to its active node count.
+    end_user_ids not found in Neo4j are absent from the result (caller should default to 0).
+    """
+    from app.repositories.neo4j.cypher_queries import FORGET_COUNT_ACTIVE_NODES_BATCH
+    result = await connector.execute_query(
+        FORGET_COUNT_ACTIVE_NODES_BATCH, end_user_ids=end_user_ids,
+    )
+    return {r["end_user_id"]: r["cnt"] for r in result}
+
+
 async def forget_get_mixed_candidates(
     connector: Neo4jConnector,
     end_user_id: str,

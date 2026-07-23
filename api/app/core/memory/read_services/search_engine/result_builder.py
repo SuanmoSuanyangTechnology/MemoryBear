@@ -198,6 +198,26 @@ class CommunityBuilder(BaseBuilder):
         return "".join(parts)
 
 
+class DialogueBuilder(BaseBuilder):
+    @property
+    def data(self) -> dict:
+        return {
+            "id": self.record.get("id"),
+            "content": self.record.get("content"),
+            "kw_score": self.record.get("kw_score", 0.0),
+            "emb_score": self.record.get("embedding_score", 0.0)
+        }
+
+    @property
+    def content(self) -> str:
+        parts = ["<dialogue>\n"]
+        value = self.record.get("content", "")
+        if value:
+            parts.append(f"<content>{value}</content>\n")
+        parts.append("</dialogue>\n")
+        return "".join(parts)
+
+
 class MetadataBuilder(BaseBuilder):
     @property
     def data(self) -> dict:
@@ -251,6 +271,8 @@ def data_builder_factory(node_type, data: dict) -> T:
             return PerceptualBuilder(data)
         case Neo4jNodeType.COMMUNITY:
             return CommunityBuilder(data)
+        case Neo4jNodeType.DIALOGUE:
+            return DialogueBuilder(data)
         case _:
             raise KeyError(f"Unknown node_type: {node_type}")
 

@@ -2161,13 +2161,52 @@ RETURN n.id AS entity_id,
        n.end_user_id AS end_user_id
 """
 
+# -------------------
+# Dialogue 检索（仅 write_mode='fast'：正写尚未接管的滞后窗口节点）
+# -------------------
+SEARCH_DIALOGUE_BY_FULLTEXT = """
+CALL db.index.fulltext.queryNodes("dialogueFulltext", $query) YIELD node AS d, score
+WHERE ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
+  AND d.write_mode = 'fast'
+RETURN d.id AS id,
+       d.content AS content,
+       d.created_at AS created_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# 向量召回的游标分页：注意别名 dialog_embedding AS embedding，
+# 对齐 search_by_embedding 读取的 "embedding" 键。
+SEARCH_DIALOGUE_BY_USER_ID = """
+MATCH (d:Dialogue)
+WHERE d.end_user_id = $end_user_id AND d.id > $last_id
+  AND d.write_mode = 'fast'
+  AND d.dialog_embedding IS NOT NULL
+RETURN d.id AS id,
+       d.dialog_embedding AS embedding
+ORDER BY d.id
+LIMIT $batch_size
+"""
+
+SEARCH_DIALOGUE_BY_IDS = """
+MATCH (d:Dialogue)
+WHERE d.id IN $ids
+  AND d.write_mode = 'fast'
+RETURN d.id AS id,
+       d.end_user_id AS end_user_id,
+       d.content AS content,
+       d.created_at AS created_at
+"""
+
 FULLTEXT_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_FULLTEXT,
     Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_FULLTEXT,
     Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_FULLTEXT,
     Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT,
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_FULLTEXT,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_FULLTEXT
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_FULLTEXT,
+    Neo4jNodeType.DIALOGUE: SEARCH_DIALOGUE_BY_FULLTEXT
 }
 USER_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_USER_ID,
@@ -2175,7 +2214,8 @@ USER_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_USER_ID,
     Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_USER_ID,
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_USER_ID,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_USER_ID
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_USER_ID,
+    Neo4jNodeType.DIALOGUE: SEARCH_DIALOGUE_BY_USER_ID
 }
 NODE_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_IDS,
@@ -2183,7 +2223,8 @@ NODE_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_IDS,
     Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_IDS,
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_IDS,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_IDS
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_IDS,
+    Neo4jNodeType.DIALOGUE: SEARCH_DIALOGUE_BY_IDS
 }
 
 # -------------------
@@ -2829,6 +2870,16 @@ ON CREATE SET r.id = edge.id,
 RETURN elementId(r) AS uuid
 """
 
+# ── Entity → UserSource 回溯查询 ──
+# 通过 HAS_ORIGINAL_CONTENT 边，从 ExtractedEntity 追溯到 UserSource 节点的原始文本。
+# 边方向：UserSource -[HAS_ORIGINAL_CONTENT]-> ExtractedEntity
+FETCH_USER_SOURCES_FOR_ENTITIES = """
+MATCH (us:UserSource)-[r:HAS_ORIGINAL_CONTENT]->(e:ExtractedEntity)
+WHERE e.id IN $entity_ids
+  AND us.end_user_id = $end_user_id
+RETURN e.id AS entity_id, us.original_text AS original_text
+"""
+
 DELETE_NODE_BY_ELEMENT_ID = """
 MATCH (n)
 WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id
@@ -2845,6 +2896,24 @@ FORGET_COUNT_ACTIVE_NODES = """
     WHERE n.delete_at IS NULL
       AND (n:Statement OR n:Chunk OR n:ExtractedEntity)
     RETURN count(n) AS cnt
+"""
+
+FORGET_COUNT_ACTIVE_NODES_BATCH = """
+    MATCH (n)
+    WHERE n.end_user_id IN $end_user_ids
+      AND n.delete_at IS NULL
+      AND (n:Statement OR n:Chunk OR n:ExtractedEntity)
+    RETURN n.end_user_id AS end_user_id, count(n) AS cnt
+"""
+
+FORGET_QUOTA_BREAKDOWN = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+    RETURN
+      sum(CASE WHEN n:Statement THEN 1 ELSE 0 END) AS statement,
+      sum(CASE WHEN n:Chunk THEN 1 ELSE 0 END) AS chunk,
+      sum(CASE WHEN n:ExtractedEntity THEN 1 ELSE 0 END) AS entity,
+      sum(CASE WHEN n:MemorySummary THEN 1 ELSE 0 END) AS summary
 """
 
 FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """

@@ -996,7 +996,7 @@ class WritePipeline:
                     with get_db_context() as db:
                         # 先查找已有的 Perceptual 记录
                         repo = MemoryPerceptualRepository(db)
-                        memories = repo.get_by_url(url)
+                        memories = repo.get_by_url(self.end_user_id, url)
 
                         if memories:
                             # 已存在，复用最新的一条

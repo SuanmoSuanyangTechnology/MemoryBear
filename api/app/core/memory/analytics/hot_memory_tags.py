@@ -68,7 +68,7 @@ async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
             },
             {
                 "role": "user",
-                "content": f"请从以下标签列表中筛选出核心名词: {tag_list_str}"
+                "content": f"请从以下标签列表中筛选出核心名词: {tag_list_str},以json形式输出，格式为{{meaningful_tags: List[str]}}"
             }
         ]
 

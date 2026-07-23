@@ -10,17 +10,23 @@
 所有接口都需要用户认证，并自动关联到当前工作空间。
 """
 
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
+from app.core.quota_manager import get_end_user_memory_limit_async
 from app.core.response_utils import fail, success
-from app.db import get_db
+from app.db import get_async_db_context, get_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
+from app.repositories.end_user_repository import get_tenant_id_by_end_user_id_async
+from app.repositories.forget_log_repository import ForgetLogRepository
+from app.repositories.memory_config_repository import MemoryConfigRepository
+from app.repositories.workspace_repository import get_workspace_memory_config_id_async
 from app.schemas.memory_storage_schema import (
     ForgettingTriggerRequest,
     ForgettingStatsResponse,
@@ -31,9 +37,11 @@ from app.schemas.memory_storage_schema import (
     PendingNodesResponse,
 )
 from app.schemas.response_schema import ApiResponse
+from app.services import memory_forget_service
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.utils.config_utils import resolve_config_id
+from app.utils.redis_cache import invalidate_cache
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -344,3 +352,168 @@ async def get_forgetting_curve(
     except Exception as e:
         api_logger.error(f"获取遗忘曲线失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取遗忘曲线失败", str(e))
+
+
+@router.get("/{end_user_id}/memory_quota", response_model=ApiResponse)
+async def get_end_user_memory_quota(
+    end_user_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """获取宿主活跃配额详情。"""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    try:
+        stats = await memory_forget_service.get_quota_breakdown(end_user_id)
+    except Exception as e:
+        api_logger.error(f"获取配额统计失败: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "获取配额统计失败", str(e))
+
+    lambda_mem = 0.5
+    memory_limit = 300
+
+    async with get_async_db_context() as db:
+        try:
+            tenant_id = await get_tenant_id_by_end_user_id_async(db, uuid.UUID(end_user_id))
+            if tenant_id:
+                limit = await get_end_user_memory_limit_async(db, tenant_id)
+                if limit:
+                    memory_limit = limit
+        except Exception:
+            pass
+
+        try:
+            active_config_id = await get_workspace_memory_config_id_async(db, workspace_id)
+            if active_config_id:
+                cfg = await MemoryConfigRepository.get_by_id_async(db, active_config_id)
+                if cfg and cfg.lambda_mem is not None:
+                    lambda_mem = float(cfg.lambda_mem)
+        except Exception:
+            pass
+
+    target_count = max(int(memory_limit * (1 - lambda_mem)), 50)
+
+    return success(data={
+        "memory_limit": memory_limit,
+        "trigger_count": memory_limit,
+        "target_count": target_count,
+        "breakdown": stats["breakdown"],
+    })
+
+
+@router.get("/{end_user_id}/forgetting_trend", response_model=ApiResponse)
+async def get_forgetting_trend(
+    end_user_id: str,
+    days: int = Query(7, ge=1, le=90),
+    current_user: User = Depends(get_current_user),
+):
+    """近 N 天遗忘记忆数量趋势。"""
+    from collections import defaultdict
+    from datetime import datetime, timedelta, timezone
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    now = datetime.now(timezone.utc)
+    start_date = now - timedelta(days=days)
+
+    async with get_async_db_context() as db:
+        rows = await ForgetLogRepository.get_daily_trend_async(db, uuid.UUID(end_user_id), start_date.date())
+
+    daily = defaultdict(int, rows)
+
+    trend = []
+    for i in range(days - 1, -1, -1):
+        d = now - timedelta(days=i)
+        day_start = d.replace(hour=0, minute=0, second=0, microsecond=0)
+        ts = int(day_start.timestamp() * 1000)
+        trend.append({"date": ts, "count": daily.get(day_start.strftime("%Y-%m-%d"), 0)})
+
+    return success(data=trend)
+
+
+@router.get("/{end_user_id}/forgetting_candidates", response_model=ApiResponse)
+async def get_forgetting_candidates(
+    end_user_id: str,
+    page: int = Query(1, ge=1),
+    pagesize: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+):
+    """获取下一批遗忘候选节点（分页，Redis 缓存 5 分钟）。"""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    try:
+        all_candidates = await memory_forget_service.compute_forgetting_candidates(end_user_id)
+    except Exception as e:
+        api_logger.error(f"获取遗忘候选失败: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "获取遗忘候选失败", str(e))
+
+    total = len(all_candidates)
+    start = (page - 1) * pagesize
+    page_items = all_candidates[start:start + pagesize]
+
+    return success(data={
+        "items": page_items,
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "hasnext": start + pagesize < total,
+        },
+    })
+
+
+@router.get("/{end_user_id}/forgotten_logs", response_model=ApiResponse)
+async def get_forgotten_logs(
+    end_user_id: str,
+    page: int = Query(1, ge=1),
+    pagesize: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+):
+    """分页查询已遗忘日志列表。"""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    try:
+        async with get_async_db_context() as db:
+            items, total = await ForgetLogRepository.get_forgotten_logs_async(
+                db, uuid.UUID(end_user_id), page=page, pagesize=pagesize,
+            )
+    except Exception as e:
+        api_logger.error(f"查询遗忘日志失败: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "查询遗忘日志失败", str(e))
+
+    return success(data={
+        "items": items,
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "hasnext": page * pagesize < total,
+        },
+    })
+
+
+@router.post("/{end_user_id}/refresh_cache", response_model=ApiResponse)
+async def refresh_forget_cache(
+    end_user_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """清除该用户在 forget-memory 下的 Redis 缓存（候选列表 + 配额统计）。"""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    try:
+        await invalidate_cache(prefix=f"quota_breakdown:{end_user_id}")
+        await invalidate_cache(prefix=f"forget_candidates:{end_user_id}")
+    except Exception as e:
+        api_logger.error(f"清除缓存失败: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "清除缓存失败", str(e))
+
+    return success(data={"refreshed": True}, msg="缓存已清除")
