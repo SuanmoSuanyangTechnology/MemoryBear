@@ -1343,6 +1343,7 @@ class EndUserRepository:
         columns = load_only(
             EndUser.id,
             EndUser.other_name,
+            EndUser.memory_tags,
             EndUser.memory_count,
             EndUser.app_id,
             EndUser.memory_config_id,
@@ -1426,6 +1427,7 @@ class EndUserRepository:
         columns = load_only(
             EndUser.id,
             EndUser.other_name,
+            EndUser.memory_tags,
             EndUser.memory_count,
             EndUser.app_id,
             EndUser.memory_config_id,
