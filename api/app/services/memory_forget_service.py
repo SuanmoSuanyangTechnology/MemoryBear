@@ -10,28 +10,28 @@
 所有业务逻辑从控制器层分离到此服务层。
 """
 
-from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
+from typing import Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.logging_config import get_api_logger
+from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
+from app.core.memory.storage_services.forgetting_engine.config_utils import (
+    load_actr_config_from_db,
+)
+from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler import ForgettingScheduler
+from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
 from app.core.utils.datetime_utils import (
     to_timestamp_ms,
     utcnow_naive,
     convert_neo4j_datetime_to_python as _convert_neo4j_datetime_to_python,
 )
-from app.core.logging_config import get_api_logger
-from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
-from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
-from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler import ForgettingScheduler
-from app.core.memory.storage_services.forgetting_engine.config_utils import (
-    load_actr_config_from_db,
-)
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.forgetting_cycle_history_repository import ForgettingCycleHistoryRepository
-
+from app.repositories.memory_config_repository import MemoryConfigRepository
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.utils.redis_cache import redis_cache
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -47,12 +47,12 @@ def convert_neo4j_datetime_to_python(value: Any) -> Optional[datetime]:
 
 class MemoryForgetService:
     """遗忘引擎服务类"""
-    
+
     def __init__(self):
         """初始化服务"""
         self.config_repository = MemoryConfigRepository()
         self.history_repository = ForgettingCycleHistoryRepository()
-    
+
     def _get_neo4j_connector(self) -> Neo4jConnector:
         """
         获取 Neo4j 连接器实例
@@ -63,11 +63,11 @@ class MemoryForgetService:
         # 这里应该从配置或依赖注入获取连接器
         # 暂时创建新实例（实际应该使用单例或连接池）
         return Neo4jConnector()
-    
+
     async def _get_forgetting_components(
-        self,
-        db: Session,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            config_id: Optional[UUID] = None
     ) -> Tuple[ACTRCalculator, ForgettingStrategy, ForgettingScheduler, Dict[str, Any]]:
         """
         获取遗忘引擎组件（计算器、策略、调度器）
@@ -81,7 +81,7 @@ class MemoryForgetService:
         """
         # 加载配置
         config = load_actr_config_from_db(db, config_id)
-        
+
         # 创建 ACT-R 计算器
         actr_calculator = ACTRCalculator(
             decay_constant=config['decay_constant'],
@@ -89,10 +89,10 @@ class MemoryForgetService:
             offset=config['offset'],
             max_history_length=config['max_history_length']
         )
-        
+
         # 获取 Neo4j 连接器
         connector = self._get_neo4j_connector()
-        
+
         # 创建遗忘策略执行器
         forgetting_strategy = ForgettingStrategy(
             connector=connector,
@@ -100,20 +100,20 @@ class MemoryForgetService:
             forgetting_threshold=config['forgetting_threshold'],
             enable_llm_summary=config['enable_llm_summary']
         )
-        
+
         # 创建遗忘调度器
         forgetting_scheduler = ForgettingScheduler(
             forgetting_strategy=forgetting_strategy,
             connector=connector
         )
-        
+
         return actr_calculator, forgetting_strategy, forgetting_scheduler, config
-    
+
     async def _get_knowledge_stats(
-        self,
-        connector: Neo4jConnector,
-        end_user_id: Optional[str] = None,
-        forgetting_threshold: float = 0.3
+            self,
+            connector: Neo4jConnector,
+            end_user_id: Optional[str] = None,
+            forgetting_threshold: float = 0.3
     ) -> Dict[str, Any]:
         """
         获取知识层统计信息
@@ -131,32 +131,42 @@ class MemoryForgetService:
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary)
         """
-        
+
         if end_user_id:
             query += " AND n.end_user_id = $end_user_id"
-        
-        query += """
-        WITH n,
-             CASE 
-               WHEN n:Statement THEN 'statement'
-               WHEN n:ExtractedEntity THEN 'entity'
-               WHEN n:MemorySummary THEN 'summary'
-             END as node_type
+
+        query += """ \
+                 WITH n, \
+                      CASE \
+                     WHEN n: Statement THEN 'statement' \
+                     WHEN n:ExtractedEntity THEN 'entity' \
+                     WHEN n:MemorySummary THEN 'summary' \
+                 END \
+                 as node_type
         RETURN 
             count(n) as total_nodes,
             sum(CASE WHEN node_type = 'statement' THEN 1 ELSE 0 END) as statement_count,
             sum(CASE WHEN node_type = 'entity' THEN 1 ELSE 0 END) as entity_count,
             sum(CASE WHEN node_type = 'summary' THEN 1 ELSE 0 END) as summary_count,
             avg(n.activation_value) as average_activation,
-            sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
+            sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < \
+                 $threshold \
+                 THEN \
+                 1 \
+                 ELSE \
+                 0 \
+                 END \
+                 ) \
+                 as \
+                 low_activation_nodes
         """
-        
+
         params = {'threshold': forgetting_threshold}
         if end_user_id:
             params['end_user_id'] = end_user_id
-        
+
         results = await connector.execute_query(query, **params)
-        
+
         if results:
             result = results[0]
             return {
@@ -167,7 +177,7 @@ class MemoryForgetService:
                 'average_activation': result['average_activation'],
                 'low_activation_nodes': result['low_activation_nodes'] or 0
             }
-        
+
         return {
             'total_nodes': 0,
             'statement_count': 0,
@@ -176,15 +186,15 @@ class MemoryForgetService:
             'average_activation': None,
             'low_activation_nodes': 0
         }
-    
+
     async def _get_pending_forgetting_nodes(
-        self,
-        connector: Neo4jConnector,
-        end_user_id: str,
-        forgetting_threshold: float,
-        min_days_since_access: int,
-        page: Optional[int] = None,
-        pagesize: Optional[int] = None
+            self,
+            connector: Neo4jConnector,
+            end_user_id: str,
+            forgetting_threshold: float,
+            min_days_since_access: int,
+            page: Optional[int] = None,
+            pagesize: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         获取待遗忘节点列表
@@ -310,14 +320,14 @@ class MemoryForgetService:
             }
 
         return result
-    
+
     async def trigger_forgetting_cycle(
-        self,
-        db: Session,
-        end_user_id: str,
-        max_merge_batch_size: Optional[int] = None,
-        min_days_since_access: Optional[int] = None,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            end_user_id: str,
+            max_merge_batch_size: Optional[int] = None,
+            min_days_since_access: Optional[int] = None,
+            config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         手动触发遗忘周期
@@ -336,16 +346,16 @@ class MemoryForgetService:
         """
         # 获取遗忘引擎组件
         _, _, forgetting_scheduler, config = await self._get_forgetting_components(db, config_id)
-        
+
         # 如果参数为 None，使用配置中的默认值
         if max_merge_batch_size is None:
             max_merge_batch_size = config.get('max_merge_batch_size', 100)
         if min_days_since_access is None:
             min_days_since_access = config.get('min_days_since_access', 30)
-        
+
         # 记录执行开始时间
         execution_time = utcnow_naive()
-        
+
         # 运行遗忘周期（LLM 客户端将在需要时由 forgetting_strategy 内部获取）
         report = await forgetting_scheduler.run_forgetting_cycle(
             end_user_id=end_user_id,
@@ -354,13 +364,13 @@ class MemoryForgetService:
             config_id=config_id,
             db=db
         )
-        
+
         api_logger.info(
             f"遗忘周期完成: 融合 {report['merged_count']} 对节点, "
             f"失败 {report['failed_count']} 对, "
             f"耗时 {report['duration_seconds']:.2f} 秒"
         )
-        
+
         # 获取当前的激活值统计（用于记录历史）
         try:
             connector = forgetting_scheduler.connector
@@ -373,13 +383,13 @@ class MemoryForgetService:
                 avg(n.activation_value) as average_activation,
                 sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
             """
-            
+
             stats_results = await connector.execute_query(
                 stats_query,
                 end_user_id=end_user_id,
                 threshold=config['forgetting_threshold']
             )
-            
+
             if stats_results:
                 stats = stats_results[0]
                 total_nodes = stats['total_nodes'] or 0
@@ -389,7 +399,7 @@ class MemoryForgetService:
                 total_nodes = 0
                 average_activation = None
                 low_activation_nodes = 0
-            
+
             # 保存历史记录到数据库
             self.history_repository.create(
                 db=db,
@@ -403,22 +413,22 @@ class MemoryForgetService:
                 duration_seconds=report['duration_seconds'],
                 trigger_type='manual'
             )
-            
+
             api_logger.info(
                 f"已保存遗忘周期历史记录: end_user_id={end_user_id}, "
                 f"merged_count={report['merged_count']}"
             )
-        
+
         except Exception as e:
             # 记录历史失败不应影响主流程
             api_logger.error(f"保存遗忘周期历史记录失败: {str(e)}")
-        
+
         return report
-    
+
     def read_forgetting_config(
-        self,
-        db: Session,
-        config_id: UUID
+            self,
+            db: Session,
+            config_id: UUID
     ) -> Dict[str, Any]:
         """
         获取遗忘引擎配置
@@ -434,19 +444,19 @@ class MemoryForgetService:
         """
         # 加载配置
         config = load_actr_config_from_db(db, config_id)
-        
+
         # 添加 config_id 到返回结果
         config['config_id'] = config_id
-        
+
         api_logger.info(f"成功读取遗忘引擎配置: config_id={config_id}")
-        
+
         return config
-    
+
     def update_forgetting_config(
-        self,
-        db: Session,
-        config_id: UUID,
-        update_fields: Dict[str, Any]
+            self,
+            db: Session,
+            config_id: UUID,
+            update_fields: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         更新遗忘引擎配置
@@ -468,34 +478,34 @@ class MemoryForgetService:
         db_config = self.config_repository.get_by_id(db, config_id)
         if db_config is None:
             raise ValueError(f"配置不存在: {config_id}")
-        
+
         # 执行更新
         if update_fields:
             for key, value in update_fields.items():
                 if hasattr(db_config, key):
                     setattr(db_config, key, value)
-            
+
             db.commit()
             db.refresh(db_config)
-            
+
             api_logger.info(
                 f"成功更新遗忘引擎配置: config_id={config_id}, "
                 f"更新字段: {list(update_fields.keys())}"
             )
         else:
             api_logger.info(f"没有字段需要更新: config_id={config_id}")
-        
+
         # 重新加载配置并返回
         config = load_actr_config_from_db(db, config_id)
         config['config_id'] = config_id
-        
+
         return config
-    
+
     async def get_forgetting_stats(
-        self,
-        db: Session,
-        end_user_id: Optional[str] = None,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            end_user_id: Optional[str] = None,
+            config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         获取遗忘引擎统计信息
@@ -512,19 +522,19 @@ class MemoryForgetService:
         """
         # 获取遗忘引擎组件
         _, _, forgetting_scheduler, config = await self._get_forgetting_components(db, config_id)
-        
+
         connector = forgetting_scheduler.connector
         forgetting_threshold = config['forgetting_threshold']
-        
+
         # 收集激活值指标
         activation_query = """
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
         """
-        
+
         if end_user_id:
             activation_query += " AND n.end_user_id = $end_user_id"
-        
+
         activation_query += """
         RETURN 
             count(n) as total_nodes,
@@ -533,20 +543,21 @@ class MemoryForgetService:
             avg(n.activation_value) as average_activation,
             sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
         """
-        
+
         params = {'threshold': forgetting_threshold}
         if end_user_id:
             params['end_user_id'] = end_user_id
-        
+
         activation_results = await connector.execute_query(activation_query, **params)
-        
+
         if activation_results:
             result = activation_results[0]
             activation_metrics = {
                 'total_nodes': result['total_nodes'] or 0,
                 'nodes_with_activation': result['nodes_with_activation'] or 0,
                 'nodes_without_activation': result['nodes_without_activation'] or 0,
-                'average_activation_value': round(result['average_activation'], 2) if result['average_activation'] is not None else None,
+                'average_activation_value': round(result['average_activation'], 2) if result[
+                                                                                          'average_activation'] is not None else None,
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
                 'forgetting_threshold': forgetting_threshold,
                 'timestamp': to_timestamp_ms(utcnow_naive())
@@ -561,37 +572,38 @@ class MemoryForgetService:
                 'forgetting_threshold': forgetting_threshold,
                 'timestamp': to_timestamp_ms(utcnow_naive())
             }
-        
+
         # 收集节点类型分布
         distribution_query = """
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
         """
-        
+
         if end_user_id:
             distribution_query += " AND n.end_user_id = $end_user_id"
-        
-        distribution_query += """
-        WITH n,
-             CASE 
-               WHEN n:Statement THEN 'statement'
-               WHEN n:ExtractedEntity THEN 'entity'
-               WHEN n:MemorySummary THEN 'summary'
-               WHEN n:Chunk THEN 'chunk'
-             END as node_type
+
+        distribution_query += """ \
+                              WITH n, \
+                                   CASE \
+                                  WHEN n: Statement THEN 'statement' \
+                                  WHEN n:ExtractedEntity THEN 'entity' \
+                                  WHEN n:MemorySummary THEN 'summary' \
+                                  WHEN n:Chunk THEN 'chunk' \
+                              END \
+                              as node_type
         RETURN 
             sum(CASE WHEN node_type = 'statement' THEN 1 ELSE 0 END) as statement_count,
             sum(CASE WHEN node_type = 'entity' THEN 1 ELSE 0 END) as entity_count,
             sum(CASE WHEN node_type = 'summary' THEN 1 ELSE 0 END) as summary_count,
             sum(CASE WHEN node_type = 'chunk' THEN 1 ELSE 0 END) as chunk_count
         """
-        
+
         dist_params = {}
         if end_user_id:
             dist_params['end_user_id'] = end_user_id
-        
+
         distribution_results = await connector.execute_query(distribution_query, **dist_params)
-        
+
         if distribution_results:
             result = distribution_results[0]
             node_distribution = {
@@ -607,7 +619,7 @@ class MemoryForgetService:
                 'summary_count': 0,
                 'chunk_count': 0
             }
-        
+
         # 获取最近7个日期的历史趋势数据（每天取最后一次执行）
         recent_trends = []
         try:
@@ -617,47 +629,48 @@ class MemoryForgetService:
                     db=db,
                     end_user_id=end_user_id
                 )
-                
+
                 # 按日期分组（一天可能有多次执行，取最后一次）
                 from collections import OrderedDict
                 daily_records = OrderedDict()
-                
+
                 # 遍历记录（已按时间降序），每个日期只保留第一次遇到的（即最后一次执行）
                 for record in history_records:
                     # 提取日期（格式: "1/1", "1/2"）- 跨平台兼容
                     month = record.execution_time.month
                     day = record.execution_time.day
                     date_str = f"{month}/{day}"
-                    
+
                     # 如果这个日期还没有记录，添加它（这是该日期最后一次执行）
                     if date_str not in daily_records:
                         daily_records[date_str] = record
-                    
+
                     # 如果已经有7个不同的日期，停止
                     if len(daily_records) >= 7:
                         break
-                
+
                 # 构建趋势数据点（按时间从旧到新排序）
                 sorted_dates = sorted(
                     daily_records.items(),
                     key=lambda x: x[1].execution_time
                 )
-                
+
                 for date_str, record in sorted_dates:
                     recent_trends.append({
                         'date': date_str,
                         'merged_count': record.merged_count,
-                        'average_activation': round(record.average_activation_value, 2) if record.average_activation_value is not None else None,
+                        'average_activation': round(record.average_activation_value,
+                                                    2) if record.average_activation_value is not None else None,
                         'total_nodes': record.total_nodes,
                         'execution_time': to_timestamp_ms(record.execution_time)
                     })
-                
+
                 api_logger.info(f"成功获取最近 {len(recent_trends)} 个日期的历史趋势数据")
-            
+
         except Exception as e:
             api_logger.error(f"获取历史趋势数据失败: {str(e)}")
             # 失败时返回空列表，不影响主流程
-        
+
         # 获取待遗忘节点列表
         pending_nodes = []
         try:
@@ -669,16 +682,16 @@ class MemoryForgetService:
                         f"min_days_since_access 配置无效: {min_days}, 使用默认值 7"
                     )
                     min_days = 7
-                
+
                 pending_nodes = await self._get_pending_forgetting_nodes(
                     connector=connector,
                     end_user_id=end_user_id,
                     forgetting_threshold=forgetting_threshold,
                     min_days_since_access=int(min_days)
                 )
-                
+
                 api_logger.info(f"成功获取 {len(pending_nodes)} 个待遗忘节点")
-        
+
         except Exception as e:
             api_logger.error(f"获取待遗忘节点失败: {str(e)}")
             # 失败时返回空列表，不影响主流程
@@ -700,12 +713,12 @@ class MemoryForgetService:
         return stats
 
     async def get_pending_nodes(
-        self,
-        db: Session,
-        end_user_id: str,
-        config_id: Optional[UUID] = None,
-        page: int = 1,
-        pagesize: int = 10
+            self,
+            db: Session,
+            end_user_id: str,
+            config_id: Optional[UUID] = None,
+            page: int = 1,
+            pagesize: int = 10
     ) -> Dict[str, Any]:
         """
         获取待遗忘节点列表（独立分页接口）
@@ -756,11 +769,11 @@ class MemoryForgetService:
         return pending_nodes_result
 
     async def get_forgetting_curve(
-        self,
-        db: Session,
-        importance_score: float,
-        days: int,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            importance_score: float,
+            days: int,
+            config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         获取遗忘曲线数据
@@ -778,7 +791,7 @@ class MemoryForgetService:
         """
         # 获取 ACT-R 计算器
         actr_calculator, _, _, config = await self._get_forgetting_components(db, config_id)
-        
+
         # 生成遗忘曲线数据
         initial_time = utcnow_naive()
         curve_data = actr_calculator.get_forgetting_curve(
@@ -786,11 +799,11 @@ class MemoryForgetService:
             importance_score=importance_score,
             days=days
         )
-        
+
         api_logger.info(
             f"成功生成遗忘曲线数据: {len(curve_data)} 个数据点"
         )
-        
+
         return {
             'curve_data': curve_data,
             'config': {
@@ -801,3 +814,91 @@ class MemoryForgetService:
                 'days': days
             }
         }
+
+
+@redis_cache(ttl=60, prefix="quota_breakdown", id_arg="end_user_id")
+async def get_quota_breakdown(end_user_id: str) -> dict:
+    """查询 Neo4j 活跃节点数 + 按 label 分类统计，Redis 缓存 60 秒。"""
+    from app.core.memory.enums import Neo4jNodeType
+    from app.repositories.neo4j.cypher_queries import FORGET_QUOTA_BREAKDOWN
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    async with Neo4jConnector() as conn:
+        rows = await conn.execute_query(FORGET_QUOTA_BREAKDOWN, end_user_id=end_user_id)
+    b = rows[0] if rows else {}
+    breakdown = {
+        Neo4jNodeType.STATEMENT.value: int(b.get("statement", 0) or 0),
+        Neo4jNodeType.CHUNK.value: int(b.get("chunk", 0) or 0),
+        Neo4jNodeType.EXTRACTEDENTITY.value: int(b.get("entity", 0) or 0),
+        Neo4jNodeType.MEMORYSUMMARY.value: int(b.get("summary", 0) or 0),
+    }
+    return {"breakdown": breakdown}
+
+
+@redis_cache(ttl=300, prefix="forget_candidates", id_arg="end_user_id")
+async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
+    """计算遗忘候选全量列表，结果 Redis 缓存 5 分钟。
+
+    内部自行获取 memory_limit 和 lambda_mem，模拟 ForgetService.run() 的 budget 逻辑。
+    分页由 controller 层处理，不参与 cache key。
+    """
+    from app.core.quota_manager import get_end_user_memory_limit_async
+    from app.db import get_async_db_context
+    from app.repositories.end_user_repository import get_tenant_id_by_end_user_id_async
+    from app.repositories.memory_config_repository import MemoryConfigRepository as _Repo
+    from app.repositories.neo4j.graph_search import forget_count_active_nodes, forget_get_mixed_candidates
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    from app.repositories.workspace_repository import get_workspace_memory_config_id_async
+
+    memory_limit = 300
+    lambda_mem = 0.5
+
+    async with get_async_db_context() as db:
+        try:
+            tenant_id = await get_tenant_id_by_end_user_id_async(db, UUID(end_user_id))
+            if tenant_id:
+                limit = await get_end_user_memory_limit_async(db, tenant_id)
+                if limit:
+                    memory_limit = limit
+        except Exception:
+            pass
+
+        try:
+            # 从 end_user 反查 workspace
+            from app.repositories.end_user_repository import get_end_user_by_id_async
+            end_user = await get_end_user_by_id_async(db, UUID(end_user_id))
+            if end_user and end_user.workspace_id:
+                active_config_id = await get_workspace_memory_config_id_async(db, end_user.workspace_id)
+                if active_config_id:
+                    cfg = await _Repo.get_by_id_async(db, active_config_id)
+                    if cfg and cfg.lambda_mem is not None:
+                        lambda_mem = float(cfg.lambda_mem)
+        except Exception:
+            pass
+
+    async with Neo4jConnector() as conn:
+        active_count = await forget_count_active_nodes(conn, end_user_id)
+        if active_count <= memory_limit:
+            return []
+
+        target_count = max(int(memory_limit * (1 - lambda_mem)), 50)
+        budget = active_count - target_count
+        if budget <= 0:
+            return []
+
+        items = await forget_get_mixed_candidates(
+            conn, end_user_id, budget, protection_threshold=10,
+        )
+
+    # 稳定排序：sort_time ASC，element_id 作 tiebreaker
+    items.sort(key=lambda c: (c["sort_time"] or "", c.get("element_id", "")))
+    items = items[:budget]
+
+    return [
+        {
+            "node_type": c["node_type"],
+            "created_at": to_timestamp_ms(convert_neo4j_datetime_to_python(c["sort_time"])),
+            "content": c["content"],
+        }
+        for c in items
+    ]

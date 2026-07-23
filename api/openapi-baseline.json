@@ -829,7 +829,7 @@
           "V1 - App Message Feedback"
         ],
         "summary": "获取会话下消息的点赞与反馈",
-        "description": "获取会话下所有消息的反馈状态（供前端渲染）\n\n返回每条消息的 like_count/dislike_count/report_count 及当前用户的 feedback_type。\n不含 is_favorite（收藏功能不在本接口范围）。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。",
+        "description": "获取会话下所有消息的反馈状态（供前端渲染）\n\n返回每条消息的反馈状态，不含 is_favorite（收藏功能不在本接口范围）。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。",
         "operationId": "get_conversation_feedback_v1_app_conversations__conversation_id__messages_feedbacks_get",
         "parameters": [
           {
@@ -3346,7 +3346,7 @@
           "V1 - Memory API"
         ],
         "summary": "Read Memory Sync",
-        "description": "Read memory synchronously.\n\nRequires API Key with 'memory' scope.\nInput schema identical to internal POST /api/memory/read/sync (UserInput).",
+        "description": "Read memory synchronously.\n\nRequires API Key with 'memory' scope.\n\nSupports two modes:\n- Single user (backward-compatible): pass ``end_user_id`` (string).\n  Returns ``{\"answer\": \"...\", \"intermediate_outputs\": [...]}``.\n- Multi user: pass ``end_user_ids`` (list of strings). Reads are executed\n  concurrently via ``asyncio.gather``.\n  Returns ``{\"<end_user_id>\": {\"answer\": \"...\", \"intermediate_outputs\": [...]}, ...}``.",
         "operationId": "read_memory_sync_v1_memory_read_sync_post",
         "requestBody": {
           "content": {
@@ -8370,50 +8370,6 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ConfigParamsCreate"
-      },
-      "ConfigPilotRun": {
-        "properties": {
-          "config_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Config Id",
-            "description": "配置ID（唯一，支持UUID、整数或字符串）"
-          },
-          "dialogue_text": {
-            "type": "string",
-            "title": "Dialogue Text",
-            "description": "前端传入的对话文本，格式如 '用户: ...\nAI: ...' 可多行，试运行必填"
-          },
-          "custom_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Custom Text",
-            "description": "自定义输入文本，当配置关联本体场景时使用此字段进行试运行"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "config_id",
-          "dialogue_text"
-        ],
-        "title": "ConfigPilotRun"
       },
       "ConfigUpdate": {
         "properties": {
@@ -13642,6 +13598,43 @@
           "Memory"
         ],
         "title": "PermissionType"
+      },
+      "PilotRunInput": {
+        "properties": {
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Config Id",
+            "description": "萃取引擎配置 ID（唯一，支持 UUID、整数或字符串）"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/WriteMessageItem"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Messages",
+            "description": "QA 格式消息列表，role 为 user/assistant，files 可选"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "config_id",
+          "messages"
+        ],
+        "title": "PilotRunInput",
+        "description": "试运行请求 — QA 格式输入。\n\n与 /api/memory-storage/write 使用同一 messages 结构，避免两套输入解析逻辑。"
       },
       "PromptOptMessage": {
         "properties": {
