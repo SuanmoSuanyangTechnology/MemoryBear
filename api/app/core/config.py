@@ -100,6 +100,11 @@ class Settings:
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
+    # Fast Write BERT 
+    FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
+    FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
+    FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
+
     # JWT Token Configuration
     SECRET_KEY: str = os.getenv("SECRET_KEY", "a_default_secret_key_that_is_long_and_random")
     ALGORITHM: str = "HS256"
