@@ -35,7 +35,7 @@ from app.core.memory.ontology_services.ontology_type_loader import (
     is_general_ontology_enabled,
 )
 
-
+# HACK （end_user_id数据类型修改）改成end_user_uuid: UUID，全局搜索end_user_id: str，全部修改
 async def get_entities_by_end_user_id(connector: Neo4jConnector, end_user_id: str) -> List[Dict[str, Any]]:
     """从 Neo4j 查询指定 end_user_id 的所有实体"""
     

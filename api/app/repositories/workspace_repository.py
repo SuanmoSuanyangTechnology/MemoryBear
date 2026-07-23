@@ -65,6 +65,24 @@ class WorkspaceRepository:
             db_logger.error(f"根据ID查询工作空间失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
+    async def get_workspace_by_id_async(self, workspace_id: uuid.UUID) -> Optional[Workspace]:
+        """异步根据ID获取工作空间"""
+        db_logger.debug(f"根据ID查询工作空间(异步): workspace_id={workspace_id}")
+
+        try:
+            result = await self.db.execute(
+                select(Workspace).where(Workspace.id == workspace_id)
+            )
+            workspace = result.scalars().first()
+            if workspace:
+                db_logger.debug(f"工作空间查询成功(异步): {workspace.name} (ID: {workspace_id})")
+            else:
+                db_logger.debug(f"工作空间不存在(异步): workspace_id={workspace_id}")
+            return workspace
+        except Exception as e:
+            db_logger.error(f"根据ID查询工作空间失败(异步): workspace_id={workspace_id} - {str(e)}")
+            raise
+
     def get_workspace_models_configs(self, workspace_id: uuid.UUID) -> Optional[dict]:
         """根据workspace_id获取模型配置（llm, embedding, rerank）
         
@@ -99,6 +117,50 @@ class WorkspaceRepository:
                 return None
         except Exception as e:
             db_logger.error(f"查询工作空间模型配置失败: workspace_id={workspace_id} - {str(e)}")
+            raise
+
+    async def get_workspace_models_configs_async(self, workspace_id: uuid.UUID) -> Optional[dict]:
+        """异步版本：按 workspace_id 查询模型配置字典。
+
+        与 sync ``get_workspace_models_configs`` 返回同样的字段结构，供
+        controller / service 直接消费。
+
+        Args:
+            workspace_id: 工作空间ID
+
+        Returns:
+            包含 llm / embedding / rerank / vision / audio / video /
+            is_default_config / default_model_notice_pending 的 dict；工作空间
+            不存在时返回 None。
+        """
+        db_logger.debug(f"异步查询工作空间模型配置: workspace_id={workspace_id}")
+
+        try:
+            result = await self.db.execute(
+                select(Workspace).where(Workspace.id == workspace_id)
+            )
+            workspace = result.scalars().first()
+            if not workspace:
+                db_logger.debug(f"工作空间不存在(异步): workspace_id={workspace_id}")
+                return None
+
+            configs = {
+                "llm": workspace.llm,
+                "embedding": workspace.embedding,
+                "rerank": workspace.rerank,
+                "vision": workspace.vision,
+                "audio": workspace.audio,
+                "video": workspace.video,
+                "is_default_config": workspace.is_default_config,
+                "default_model_notice_pending": workspace.default_model_notice_pending,
+            }
+            db_logger.debug(
+                f"工作空间模型配置查询成功(异步): workspace_id={workspace_id}, "
+                f"llm={configs['llm']}, embedding={configs['embedding']}, rerank={configs['rerank']}"
+            )
+            return configs
+        except Exception as e:
+            db_logger.error(f"异步查询工作空间模型配置失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
     def get_workspaces_by_user(self, user_id: uuid.UUID) -> List[Workspace]:
@@ -431,7 +493,7 @@ def update_member_role_by_id(
     return repo.update_member_role_by_id(id, role)
 
 
-def get_workspace_models_configs(db: Session, workspace_id: uuid.UUID) -> Optional[dict]:
+def get_workspace_models_configs(db: Session, workspace_id: uuid.UUID) -> Optional[dict]: # NOTE（乐力齐）思考reflection、storage是否真的需要同步的方法
     """根据workspace_id获取模型配置（llm, embedding, rerank）
     
     Args:

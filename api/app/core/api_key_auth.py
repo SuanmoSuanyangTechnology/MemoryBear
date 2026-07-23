@@ -57,7 +57,7 @@ async def _consume_logs():
                 for log_data in batch:
                     log_data.setdefault("id", uuid.uuid4())
                     await ApiKeyLogRepository.create_async(db, log_data)
-                    await ApiKeyRepository.update_usage_async(db, log_data["api_key_id"])
+                    await ApiKeyRepository(db).update_usage_async(log_data["api_key_id"])
                 await db.commit()
         except Exception:
             logger.error("日志批量写入失败 (batch=%d)", len(batch), exc_info=True)

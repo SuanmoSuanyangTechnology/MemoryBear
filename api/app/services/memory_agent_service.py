@@ -19,7 +19,8 @@ from uuid import UUID
 
 import redis
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
@@ -876,4 +877,90 @@ def get_end_users_connected_configs_batch(end_user_ids: List[str], db: Session) 
             result[end_user_id] = {"memory_config_id": None, "memory_config_name": None}
 
     logger.info(f"Successfully retrieved {len(result)} connected configs")
+    return result
+
+
+async def get_end_users_connected_configs_batch_async(
+    end_user_ids: List[str], db: AsyncSession
+) -> Dict[str, Dict[str, Any]]:
+    """Async version of get_end_users_connected_configs_batch."""
+    from uuid import UUID as _UUID
+
+    from app.models.app_model import App
+    from app.models.end_user_model import EndUser
+    from app.models.memory_config_model import MemoryConfig
+
+    result: Dict[str, Dict[str, Any]] = {}
+
+    if not end_user_ids:
+        return result
+
+    uids = [_UUID(uid) if isinstance(uid, str) else uid for uid in end_user_ids]
+
+    # 1) 一次 JOIN 拿齐 (end_user_id, memory_config_id, workspace_id)
+    join_result = await db.execute(
+        select(
+            EndUser.id.label("end_user_id"),
+            EndUser.memory_config_id.label("memory_config_id"),
+            EndUser.workspace_id.label("end_user_workspace_id"),
+            App.workspace_id.label("app_workspace_id"),
+        )
+        .outerjoin(App, App.id == EndUser.app_id)
+        .where(EndUser.id.in_(uids), EndUser.is_active == True)
+    )
+    rows = join_result.all()
+
+    found_ids = set()
+    workspace_ids: set = set()
+    row_index: Dict[str, Dict[str, Any]] = {}
+
+    for row in rows:
+        end_user_id = str(row.end_user_id)
+        found_ids.add(end_user_id)
+        workspace_id = row.app_workspace_id or row.end_user_workspace_id
+        row_index[end_user_id] = {"workspace_id": workspace_id}
+        if workspace_id:
+            workspace_ids.add(workspace_id)
+
+    for missing_id in set(end_user_ids) - found_ids:
+        result[missing_id] = {"memory_config_id": None, "memory_config_name": None}
+
+    # 2) 一次 MemoryConfig 查询：工作空间默认配置
+    workspace_default_configs: Dict[Any, Any] = {}
+    if workspace_ids:
+        cfg_result = await db.execute(
+            select(MemoryConfig)
+            .options(
+                load_only(
+                    MemoryConfig.config_id,
+                    MemoryConfig.config_name,
+                    MemoryConfig.workspace_id,
+                    MemoryConfig.is_default,
+                    MemoryConfig.state,
+                )
+            )
+            .where(
+                and_(
+                    MemoryConfig.workspace_id.in_(workspace_ids),
+                    MemoryConfig.is_default.is_(True),
+                    MemoryConfig.state.is_(True),
+                )
+            )
+        )
+        for cfg in cfg_result.scalars().all():
+            if cfg.is_default and cfg.state and cfg.workspace_id in workspace_ids:
+                workspace_default_configs[cfg.workspace_id] = cfg
+
+    # 3) 拼装最终结果
+    for end_user_id, data in row_index.items():
+        memory_config = workspace_default_configs.get(data["workspace_id"])
+        if memory_config:
+            result[end_user_id] = {
+                "memory_config_id": str(memory_config.config_id),
+                "memory_config_name": memory_config.config_name,
+            }
+        else:
+            result[end_user_id] = {"memory_config_id": None, "memory_config_name": None}
+
+    logger.info(f"Successfully retrieved {len(result)} connected configs (async)")
     return result

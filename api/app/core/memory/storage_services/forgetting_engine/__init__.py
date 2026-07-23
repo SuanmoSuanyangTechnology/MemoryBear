@@ -22,7 +22,7 @@ from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler imp
 from app.core.memory.storage_services.forgetting_engine.config_utils import (
     calculate_forgetting_rate,
     load_actr_config_from_db,
-    create_actr_calculator_from_config
+    load_actr_config_from_db_async,
 )
 
 __all__ = [
@@ -36,5 +36,5 @@ __all__ = [
     "ForgettingScheduler",
     "calculate_forgetting_rate",
     "load_actr_config_from_db",
-    "create_actr_calculator_from_config"
+    "load_actr_config_from_db_async",
 ]

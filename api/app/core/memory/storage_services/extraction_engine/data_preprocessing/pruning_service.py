@@ -68,7 +68,7 @@ async def prune_messages(
 
     # Step 1: 从 DB 刷新 pruned_content
     if persist:
-        _refresh_pruned_content(messages, conversation_id, end_user_id, source)
+        await _refresh_pruned_content(messages, conversation_id, end_user_id, source)
 
     # Step 2: 遍历消息，收集 LLM 任务
     result: List[Optional[dict]] = [None] * len(messages)
@@ -177,7 +177,7 @@ async def prune_messages(
 
     # Step 4: 批量回写 DB
     if persist:
-        _batch_write_db(db_updates, conversation_id, end_user_id, source)
+        await _batch_write_db(db_updates, conversation_id, end_user_id, source)
 
     return [m for m in result if m is not None], pruning_records
 
@@ -187,7 +187,7 @@ async def prune_messages(
 # ──────────────────────────────────────────────
 
 
-def _refresh_pruned_content(
+async def _refresh_pruned_content(
     messages: List[dict], conversation_id: str, end_user_id: str, source: str
 ) -> None:
     """从 DB 刷新 pruned_content 和 topic_entity_hint。"""
@@ -195,10 +195,10 @@ def _refresh_pruned_content(
     if not null_seqs:
         return
     try:
-        from app.db import get_db_context
+        from app.db import get_async_db_context
         from app.repositories.memory_message_repository import MemoryMessageRepository
-        with get_db_context() as db:
-            fresh = MemoryMessageRepository(db).batch_get_pruned_content(
+        async with get_async_db_context() as db:
+            fresh = await MemoryMessageRepository(db).batch_get_pruned_content_async(
                 seqs=null_seqs,
                 conversation_id=conversation_id or None,
                 end_user_id=end_user_id,
@@ -214,23 +214,23 @@ def _refresh_pruned_content(
         logger.warning(f"[Pruning] DB 刷新失败（不影响主流程）: {e}", exc_info=True)
 
 
-def _batch_write_db(
+async def _batch_write_db(
     updates: list, conversation_id: str, end_user_id: str, source: str
 ) -> None:
     """批量回写 pruned_content 到 DB。"""
     if not updates:
         return
     try:
-        from app.db import get_db_context
+        from app.db import get_async_db_context
         from app.repositories.memory_message_repository import MemoryMessageRepository
-        with get_db_context() as db:
-            MemoryMessageRepository(db).batch_update_pruned_content(
+        async with get_async_db_context() as db:
+            await MemoryMessageRepository(db).batch_update_pruned_content_async(
                 updates=updates,
                 conversation_id=conversation_id or None,
                 end_user_id=end_user_id,
                 source=source,
             )
-            db.commit()
+            await db.commit()
     except Exception as e:
         logger.warning(f"[Pruning] DB 批量回写失败（不影响主流程）: {e}", exc_info=True)
 

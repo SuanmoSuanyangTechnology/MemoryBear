@@ -44,6 +44,9 @@ class MemoryConfigRepository:
     - Neo4j Cypher查询常量
     """
 
+    def __init__(self, db: Session | AsyncSession):
+        self.db = db
+
     # ==================== Neo4j Cypher 查询常量 ====================
 
     # Dialogue count by group
@@ -156,7 +159,53 @@ class MemoryConfigRepository:
         stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
         memory_config_obj = db.scalars(stmt).first()
         if not memory_config_obj:
-            raise BusinessException
+            raise BusinessException(message="reflection config not found")
+        memory_config_obj.enable_self_reflexion = enable_self_reflexion
+        memory_config_obj.iteration_period = iteration_period
+        memory_config_obj.reflexion_range = reflexion_range
+        memory_config_obj.baseline = baseline
+        memory_config_obj.reflection_model_id = reflection_model_id
+        memory_config_obj.memory_verify = memory_verify
+        memory_config_obj.quality_assessment = quality_assessment
+
+        return memory_config_obj
+
+    # 思考一下为什么加静态方法
+    async def update_reflection_config_async(
+            self,
+            config_id: uuid.UUID,
+            enable_self_reflexion: bool,
+            iteration_period: str,
+            reflexion_range: str,
+            baseline: str,
+            reflection_model_id: str,
+            memory_verify: bool,
+            quality_assessment: bool
+    ) -> MemoryConfig:
+        """构建反思配置更新语句（异步版本）
+
+        Args:
+            quality_assessment:
+            memory_verify:
+            reflection_model_id:
+            baseline:
+            reflexion_range:
+            iteration_period:
+            enable_self_reflexion:
+            config_id: 配置ID
+
+        Returns:
+            MemoryConfig
+
+        Raises:
+            BusinessException: 配置未找到时抛出
+        """
+        db_logger.debug(f"构建反思配置更新语句(异步): config_id={config_id}")
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        result = await self.db.execute(stmt)
+        memory_config_obj = result.scalars().first()
+        if not memory_config_obj:
+            raise BusinessException(message="reflection config not found")
         memory_config_obj.enable_self_reflexion = enable_self_reflexion
         memory_config_obj.iteration_period = iteration_period
         memory_config_obj.reflexion_range = reflexion_range
@@ -181,6 +230,24 @@ class MemoryConfigRepository:
         db_logger.debug(f"构建反思配置查询语句: config_id={config_id}")
         stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
         memory_config = db.scalars(stmt).first()
+        if not memory_config:
+            raise RuntimeError("reflection config not found")
+        return memory_config
+
+
+    async def query_reflection_config_by_id_async(self, config_id: uuid.UUID | int | str) -> MemoryConfig:
+        """异步版本：通过 config_id 查询反思配置。
+
+        Args:
+            config_id: 配置ID
+
+        Returns:
+            MemoryConfig ORM 对象
+        """
+        db_logger.debug(f"异步构建反思配置查询语句: config_id={config_id}")
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        result = await self.db.execute(stmt)
+        memory_config = result.scalars().first()
         if not memory_config:
             raise RuntimeError("reflection config not found")
         return memory_config
@@ -508,6 +575,21 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
 
+    async def get_by_id_async(self, config_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """根据ID获取记忆配置（异步版本）。
+
+        Args:
+            config_id: 配置ID
+
+        Returns:
+            Optional[MemoryConfig]: 配置对象，不存在则返回None
+        """
+        from sqlalchemy import select as sa_select
+        result = await self.db.execute(
+            sa_select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        )
+        return result.scalars().first()
+
     @staticmethod
     async def get_by_id_async(db: AsyncSession, config_id: uuid.UUID) -> Optional[MemoryConfig]:
         """根据ID获取记忆配置（异步版）。"""
@@ -645,9 +727,9 @@ class MemoryConfigRepository:
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
+
     async def get_config_with_workspace_async(
-            db: AsyncSession,
+            self,
             config_id: uuid.UUID,
     ):
         start_time = time.perf_counter()
@@ -662,13 +744,13 @@ class MemoryConfigRepository:
                 .where(MemoryConfig.config_id == config_id)
             )
 
-            result = await db.execute(stmt)
+            result = await self.db.execute(stmt)
             row = result.first()
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             if not row:
                 # Check if config exists but workspace is missing
                 stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-                config_only = await db.scalar(stmt)
+                config_only = await self.db.scalar(stmt)
                 if config_only:
                     if config_only.workspace_id is None:
                         config_logger.error(

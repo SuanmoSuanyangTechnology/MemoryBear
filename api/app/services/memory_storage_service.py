@@ -13,6 +13,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
@@ -110,7 +111,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     # --- Create ---
     def create(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（仅名称与描述）
         # 业务层检查同一工作空间下是否已存在同名配置
-        if params.workspace_id and params.config_name:
+        if params.workspace_id and params.config_name: # NOTE(乐力齐) 这也需要更换到repository层的function
             from app.models.memory_config_model import MemoryConfig
             existing = (
                 self.db.query(MemoryConfig)
@@ -201,7 +202,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
     # --- Forget config params ---
     # 遗忘引擎配置方法已迁移到 memory_forget_service.py
-    # 使用新方法: MemoryForgetService.read_forgetting_config() 和 MemoryForgetService.update_forgetting_config()
+    # 使用异步方法: MemoryForgetService.read_forgetting_config_async() 和 MemoryForgetService.update_forgetting_config_async()
 
     # --- Read ---
     def get_extracted(self, key: ConfigKey) -> Dict[str, Any]:  # 获取萃取配置参数
@@ -472,6 +473,321 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "time": int(time.time() * 1000)
             })
 
+    # --- Async Static Methods (use AsyncSession) ---
+
+    @staticmethod
+    async def get_all_async(db: AsyncSession, workspace_id) -> List[Dict[str, Any]]:
+        """Async version of get_all.
+
+        Query all configs for a workspace using async SQLAlchemy patterns.
+        """
+        from app.models.ontology_scene import OntologyScene
+        from app.models.memory_config_model import MemoryConfig
+
+        # Query configs with scene_name via outerjoin
+        stmt = (
+            select(MemoryConfig, OntologyScene.scene_name)
+            .outerjoin(OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id)
+            .where(MemoryConfig.workspace_id == workspace_id)
+            .order_by(MemoryConfig.updated_at.desc())
+        )
+        result = await db.execute(stmt)
+        results = result.all()
+
+        # Check and fix pruning_scene mismatches
+        for config, scene_name in results:
+            if scene_name and config.pruning_scene != scene_name:
+                logger.info(
+                    f"修正 pruning_scene: config_id={config.config_id} "
+                    f"'{config.pruning_scene}' -> '{scene_name}'"
+                )
+                config.pruning_scene = scene_name
+        # Get active config id
+        activate_config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_id)
+
+        # Convert to dict list
+        data_list = []
+        for config, scene_name in results:
+            config_id_old = None
+            if config.config_id_old:
+                try:
+                    config_id_old = int(config.config_id_old)
+                except (ValueError, TypeError):
+                    config_id_old = None
+
+            config_dict = {
+                "config_id": str(config.config_id),
+                "config_name": config.config_name,
+                "config_desc": config.config_desc,
+                "workspace_id": str(config.workspace_id) if config.workspace_id else None,
+                "end_user_id": config.end_user_id,
+                "config_id_old": config_id_old,
+                "apply_id": config.apply_id,
+                "scene_id": str(config.scene_id) if config.scene_id else None,
+                "scene_name": scene_name,
+                "is_system_default": config.is_default,
+                "llm_id": config.llm_id,
+                "embedding_id": config.embedding_id,
+                "rerank_id": config.rerank_id,
+                "enable_llm_dedup_blockwise": config.enable_llm_dedup_blockwise,
+                "enable_llm_disambiguation": config.enable_llm_disambiguation,
+                "deep_retrieval": config.deep_retrieval,
+                "t_type_strict": config.t_type_strict,
+                "t_name_strict": config.t_name_strict,
+                "t_overall": config.t_overall,
+                "state": config.state,
+                "chunker_strategy": config.chunker_strategy,
+                "pruning_enabled": config.pruning_enabled,
+                "pruning_scene": config.pruning_scene,
+                "pruning_threshold": config.pruning_threshold,
+                "enable_self_reflexion": config.enable_self_reflexion,
+                "iteration_period": config.iteration_period,
+                "reflexion_range": config.reflexion_range,
+                "baseline": config.baseline,
+                "statement_granularity": config.statement_granularity,
+                "include_dialogue_context": config.include_dialogue_context,
+                "max_context": config.max_context,
+                "lambda_time": config.lambda_time,
+                "lambda_mem": config.lambda_mem,
+                "offset": config.offset,
+                "created_at": to_timestamp_ms(config.created_at),
+                "updated_at": to_timestamp_ms(config.updated_at),
+                "is_active": str(config.config_id) == str(activate_config_id),
+            }
+            data_list.append(config_dict)
+
+        return data_list
+
+    @staticmethod
+    async def create_async(db: AsyncSession, params: ConfigParamsCreate) -> Dict[str, Any]:
+        """Async version of create.
+
+        Create a new memory config using async SQLAlchemy patterns.
+        """
+        from app.models.memory_config_model import MemoryConfig
+        from app.repositories.workspace_repository import WorkspaceRepository
+
+        # Check for duplicate config name in workspace
+        if params.workspace_id and params.config_name:
+            check_stmt = select(MemoryConfig).where(
+                MemoryConfig.workspace_id == params.workspace_id,
+                MemoryConfig.config_name == params.config_name,
+            )
+            check_result = await db.execute(check_stmt)
+            existing = check_result.scalars().first()
+            if existing:
+                raise ValueError(f"DUPLICATE_CONFIG_NAME:{params.config_name}")
+
+        # Auto-fill model IDs from workspace if not specified
+        if params.workspace_id and not all([params.llm_id, params.embedding_id, params.rerank_id]):
+            configs = await WorkspaceRepository(db).get_workspace_models_configs_async(params.workspace_id)
+            if configs is None:
+                raise ValueError(f"工作空间不存在: workspace_id={params.workspace_id}")
+
+            if not params.llm_id:
+                params.llm_id = configs.get('llm')
+            if not params.embedding_id:
+                params.embedding_id = configs.get('embedding')
+            if not params.rerank_id:
+                params.rerank_id = configs.get('rerank')
+            if not params.vision_id:
+                params.vision_id = configs.get('vision')
+            if not params.audio_id:
+                params.audio_id = configs.get('audio')
+            if not params.video_id:
+                params.video_id = configs.get('video')
+
+        # reflection_model_id and emotion_model_id default to llm_id
+        if not params.reflection_model_id:
+            params.reflection_model_id = params.llm_id
+        if not params.emotion_model_id:
+            params.emotion_model_id = params.llm_id
+
+        # Derive pruning_scene from scene_id
+        if params.scene_id and not getattr(params, 'pruning_scene', None):
+            params.pruning_scene = await DataConfigService._resolve_pruning_scene_async(db, params.scene_id)
+
+        # Create config
+        db_config = MemoryConfig(
+            config_id=uuid.uuid4(),
+            config_name=params.config_name,
+            config_desc=params.config_desc,
+            workspace_id=params.workspace_id,
+            scene_id=params.scene_id,
+            pruning_scene=params.pruning_scene,
+            llm_id=params.llm_id,
+            embedding_id=params.embedding_id,
+            rerank_id=params.rerank_id,
+            reflection_model_id=params.reflection_model_id,
+            emotion_model_id=params.emotion_model_id,
+            video_id=params.video_id,
+            audio_id=params.audio_id,
+            vision_id=params.vision_id,
+        )
+        db.add(db_config)
+        await db.flush()
+
+        logger.info(f"记忆配置已创建: {db_config.config_name} (ID: {db_config.config_id})")
+        return {"affected": 1, "config_id": db_config.config_id}
+
+    @staticmethod
+    async def _resolve_pruning_scene_async(db: AsyncSession, scene_id) -> Optional[str]:
+        """Async helper: resolve pruning_scene from scene_id."""
+        try:
+            from app.models.ontology_scene import OntologyScene
+            stmt = select(OntologyScene).where(OntologyScene.scene_id == scene_id)
+            result = await db.execute(stmt)
+            scene = result.scalars().first()
+            return scene.scene_name if scene else None
+        except Exception as e:
+            logger.warning(f"_resolve_pruning_scene_async failed for scene_id={scene_id}: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    async def update_async(db: AsyncSession, update: ConfigUpdate) -> Dict[str, Any]:
+        """Async version of update.
+
+        Partially update config fields (config_name, config_desc, scene_id).
+        """
+        from app.models.memory_config_model import MemoryConfig
+
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
+        result = await db.execute(stmt)
+        db_config = result.scalars().first()
+        if not db_config:
+            raise ValueError("未找到配置")
+
+        if update.config_name is not None:
+            db_config.config_name = update.config_name
+        if update.config_desc is not None:
+            db_config.config_desc = update.config_desc
+        if update.scene_id is not None:
+            db_config.scene_id = update.scene_id
+
+        logger.info(f"记忆配置更新成功: {db_config.config_name} (ID: {update.config_id})")
+        return {"affected": 1}
+
+    @staticmethod
+    async def update_extracted_async(db: AsyncSession, update: ConfigUpdateExtracted) -> Dict[str, Any]:
+        """Async version of update_extracted.
+
+        Update extracted engine config fields.
+        """
+        from app.models.memory_config_model import MemoryConfig
+
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
+        result = await db.execute(stmt)
+        db_config = result.scalars().first()
+        if not db_config:
+            raise ValueError("未找到配置")
+
+        update_data = update.model_dump(exclude_unset=True)
+        update_data.pop("config_id", None)
+
+        for field, value in update_data.items():
+            setattr(db_config, field, value)
+
+        logger.info(f"萃取配置更新成功: config_id={update.config_id}")
+        return {"affected": 1}
+
+    @staticmethod
+    async def get_extracted_async(db: AsyncSession, key: ConfigKey) -> Dict[str, Any]:
+        """Async version of get_extracted.
+
+        Query extracted config details and return as dict.
+        """
+        from app.models.memory_config_model import MemoryConfig
+        from app.utils.config_utils import resolve_config_id_async
+
+        config_id = await resolve_config_id_async(key.config_id, db)
+
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        result = await db.execute(stmt)
+        db_config = result.scalars().first()
+        if not db_config:
+            raise ValueError("未找到配置")
+
+        return {
+            "llm_id": db_config.llm_id,
+            "embedding_id": db_config.embedding_id,
+            "rerank_id": db_config.rerank_id,
+            "vision_id": db_config.vision_id,
+            "audio_id": db_config.audio_id,
+            "video_id": db_config.video_id,
+            "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
+            "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
+            "deep_retrieval": db_config.deep_retrieval,
+            "t_type_strict": db_config.t_type_strict,
+            "t_name_strict": db_config.t_name_strict,
+            "t_overall": db_config.t_overall,
+            "chunker_strategy": db_config.chunker_strategy,
+            "statement_granularity": db_config.statement_granularity,
+            "include_dialogue_context": db_config.include_dialogue_context,
+            "max_context": db_config.max_context,
+            "pruning_enabled": db_config.pruning_enabled,
+            "pruning_scene": db_config.pruning_scene,
+            "pruning_threshold": db_config.pruning_threshold,
+            "enable_self_reflexion": db_config.enable_self_reflexion,
+            "iteration_period": db_config.iteration_period,
+            "reflexion_range": db_config.reflexion_range,
+            "baseline": db_config.baseline,
+            "is_default": bool(db_config.is_default),
+        }
+
+    @staticmethod
+    async def active_async(db: AsyncSession, workspace_id: uuid.UUID, config_id: uuid.UUID, locale: str = "zh") -> Dict[str, Any]:
+        """Async version of active.
+
+        Activate a config for a workspace using async SQLAlchemy patterns.
+        """
+        from app.models.memory_config_model import MemoryConfig
+
+        # Verify workspace exists and is active
+        stmt = select(Workspace).where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True),
+        )
+        result = await db.execute(stmt)
+        workspace = result.scalars().first()
+        if not workspace:
+            raise BusinessException(t("workspace.not_found", locale=locale))
+
+        # Verify config exists
+        config_stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        config_result = await db.execute(config_stmt)
+        config = config_result.scalars().first()
+        if not config:
+            raise BusinessException(t("memory_config.config.not_found", locale=locale, config_id=str(config_id)))
+
+        # Validate config models (collect warnings)
+        warnings: list[dict] = []
+        all_models = [
+            ("llm", config.llm_id, "extracted"),
+            ("embedding", config.embedding_id, "extracted"),
+            ("rerank", config.rerank_id, "extracted"),
+            ("vision", config.vision_id, "extracted"),
+            ("video", config.video_id, "extracted"),
+            ("audio", config.audio_id, "extracted"),
+            ("reflection", config.reflection_model_id, "reflection"),
+            ("emotion", config.emotion_model_id, "emotion"),
+        ]
+        for model_type, model_id, source in all_models:
+            if not model_id:
+                warnings.append({
+                    "model_type": model_type,
+                    "model_id": None,
+                    "source": source,
+                    "message": t("memory_config.model.not_configured", locale=locale, model_type=model_type),
+                })
+
+        # Activate the config
+        workspace.memory_config = config_id
+
+        return {
+            "config_id": config_id,
+            "warnings": warnings,
+            "success": True,
+        }
 
 # -------------------- Neo4j Search & Analytics (fused from data_search_service.py) --------------------
 # Ensure env for connector (e.g., NEO4J_PASSWORD)
