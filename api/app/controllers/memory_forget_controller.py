@@ -431,7 +431,7 @@ async def get_forgetting_trend(
         ts = int(day_start.timestamp() * 1000)
         trend.append({"date": ts, "count": daily.get(day_start.strftime("%Y-%m-%d"), 0)})
 
-    return success(data={"trend": trend})
+    return success(data=trend)
 
 
 @router.get("/{end_user_id}/forgetting_candidates", response_model=ApiResponse)
@@ -457,7 +457,7 @@ async def get_forgetting_candidates(
     page_items = all_candidates[start:start + pagesize]
 
     return success(data={
-        "candidates": page_items,
+        "items": page_items,
         "page": {
             "page": page,
             "pagesize": pagesize,
