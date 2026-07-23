@@ -220,6 +220,7 @@ class KnowledgeRetrievalService:
             "type": request.retrieve_type,
             "top_k": request.top_k,
             "top_n": request.top_n,
+            "enable_graph_retrieval": request.enable_graph_retrieval,
             "metadata_mode": request.metadata_filter_mode,
             "async_mode": "native",
         }
@@ -299,6 +300,12 @@ class KnowledgeRetrievalService:
                 chunks.insert(0, graph_document)
 
         chunks = cls._include_document_ids(chunks, document_ids_include)
+        graph_context_chunks = cls._build_graph_context_chunks(
+            retrieval_result.entities,
+            retrieval_result.relationships,
+        )
+        if graph_context_chunks:
+            chunks = graph_context_chunks + chunks
         logger.info(
             "[Retrieval] finish %s",
             cls._format_log_fields(
@@ -307,6 +314,7 @@ class KnowledgeRetrievalService:
                     "reason": "ok",
                     "target_count": len(preparation.targets),
                     "document_filter_count": len(document_ids_include or []),
+                    "graph_context_count": len(graph_context_chunks),
                     "final_count": len(chunks),
                     "elapsed_ms": cls._elapsed_ms(started_at),
                     "async_mode": "native",
@@ -1094,6 +1102,169 @@ class KnowledgeRetrievalService:
             seen_keys.add(key)
             result.append(item)
         return result
+
+    @classmethod
+    def _build_graph_context_chunks(
+        cls,
+        entities: Sequence[Any],
+        relationships: Sequence[Any],
+    ) -> list[DocumentChunk]:
+        chunks: list[DocumentChunk] = []
+        chunks.extend(
+            cls._graph_entity_to_chunk(entity, index)
+            for index, entity in enumerate(entities)
+        )
+        chunks.extend(
+            cls._graph_relationship_to_chunk(relationship, index)
+            for index, relationship in enumerate(relationships)
+        )
+        return chunks
+
+    @classmethod
+    def _graph_entity_to_chunk(
+        cls,
+        entity: Any,
+        index: int,
+    ) -> DocumentChunk:
+        entity_key = cls._graph_item_text(entity, "entity_key") or f"entity-{index}"
+        entity_name = cls._graph_item_text(entity, "entity_name") or entity_key
+        entity_type = cls._graph_item_text(entity, "entity_type")
+        description = cls._graph_item_text(entity, "description")
+        aliases = cls._graph_item_list(entity, "aliases")
+        source_chunk_ids = cls._graph_item_list(entity, "source_chunk_ids")
+        parts = [f"Entity: {entity_name}"]
+        if entity_type:
+            parts.append(f"Type: {entity_type}")
+        if aliases:
+            parts.append(f"Aliases: {', '.join(aliases)}")
+        if description:
+            parts.append(f"Description: {description}")
+        return DocumentChunk(
+            page_content="\n".join(parts),
+            metadata={
+                "doc_id": f"graph_entity:{entity_key}",
+                "chunk_type": "graph_entity",
+                "retrieval_source": "graph",
+                "graph_item_type": "entity",
+                "score": 1,
+                "graph_score": cls._graph_item_value(entity, "score"),
+                "entity_key": entity_key,
+                "entity_name": entity_name,
+                "entity_type": entity_type,
+                "aliases": aliases,
+                "source_chunk_ids": source_chunk_ids,
+                "degree": cls._graph_item_value(entity, "degree"),
+                "evidence_count": cls._graph_item_value(entity, "evidence_count"),
+                "document_count": cls._graph_item_value(entity, "document_count"),
+            },
+        )
+
+    @classmethod
+    def _graph_relationship_to_chunk(
+        cls,
+        relationship: Any,
+        index: int,
+    ) -> DocumentChunk:
+        relation_key = (
+            cls._graph_item_text(relationship, "relation_key")
+            or f"relationship-{index}"
+        )
+        from_name = (
+            cls._graph_item_text(relationship, "from_entity_name")
+            or cls._graph_item_text(relationship, "from_entity_key")
+            or cls._graph_item_text(relationship, "src_id")
+        )
+        to_name = (
+            cls._graph_item_text(relationship, "to_entity_name")
+            or cls._graph_item_text(relationship, "to_entity_key")
+            or cls._graph_item_text(relationship, "tgt_id")
+        )
+        predicate = cls._graph_item_text(relationship, "predicate")
+        label = cls._graph_item_text(relationship, "label")
+        description = cls._graph_item_text(relationship, "description")
+        keywords = cls._graph_item_list(relationship, "keywords")
+        source_chunk_ids = cls._graph_item_list(relationship, "source_chunk_ids")
+        connector = (
+            "->"
+            if cls._graph_item_value(relationship, "directed") is not False
+            else "--"
+        )
+        endpoints = (
+            f"{from_name} {connector} {to_name}"
+            if from_name and to_name
+            else from_name or to_name
+        )
+        parts = [f"Relationship: {endpoints or relation_key}"]
+        relation_label = predicate or label
+        if relation_label:
+            parts.append(f"Label: {relation_label}")
+        if keywords:
+            parts.append(f"Keywords: {', '.join(keywords)}")
+        if description:
+            parts.append(f"Description: {description}")
+        return DocumentChunk(
+            page_content="\n".join(parts),
+            metadata={
+                "doc_id": f"graph_relationship:{relation_key}",
+                "chunk_type": "graph_relationship",
+                "retrieval_source": "graph",
+                "graph_item_type": "relationship",
+                "score": 1,
+                "graph_score": cls._graph_item_value(relationship, "score"),
+                "relation_key": relation_key,
+                "src_id": cls._graph_item_value(relationship, "src_id"),
+                "tgt_id": cls._graph_item_value(relationship, "tgt_id"),
+                "from_entity_key": cls._graph_item_value(
+                    relationship,
+                    "from_entity_key",
+                ),
+                "from_entity_name": from_name,
+                "to_entity_key": cls._graph_item_value(
+                    relationship,
+                    "to_entity_key",
+                ),
+                "to_entity_name": to_name,
+                "predicate": predicate,
+                "label": label,
+                "keywords": keywords,
+                "directed": cls._graph_item_value(relationship, "directed"),
+                "source_chunk_ids": source_chunk_ids,
+                "weight": cls._graph_item_value(relationship, "weight"),
+                "evidence_count": cls._graph_item_value(
+                    relationship,
+                    "evidence_count",
+                ),
+                "document_count": cls._graph_item_value(
+                    relationship,
+                    "document_count",
+                ),
+                "endpoint_degree": cls._graph_item_value(
+                    relationship,
+                    "endpoint_degree",
+                ),
+            },
+        )
+
+    @staticmethod
+    def _graph_item_value(item: Any, key: str) -> Any:
+        if isinstance(item, dict):
+            return item.get(key)
+        return getattr(item, key, None)
+
+    @classmethod
+    def _graph_item_text(cls, item: Any, key: str) -> str:
+        value = cls._graph_item_value(item, key)
+        return str(value).strip() if value is not None else ""
+
+    @classmethod
+    def _graph_item_list(cls, item: Any, key: str) -> list[str]:
+        value = cls._graph_item_value(item, key)
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        text = str(value).strip()
+        return [text] if text else []
 
     @classmethod
     def _filter_graph_items_by_chunk_paths(

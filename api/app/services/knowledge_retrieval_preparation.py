@@ -89,13 +89,16 @@ class KnowledgeRetrievalPreparation:
                 graph=None,
             )
 
-        metadata_defs_by_kb = {
-            target.knowledge_id: await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
-                db,
-                target.knowledge_id,
+        metadata_defs_by_kb: dict[uuid.UUID, dict[str, dict]] = {}
+        for target in targets:
+            if target.knowledge_id in metadata_defs_by_kb:
+                continue
+            metadata_defs_by_kb[target.knowledge_id] = (
+                await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
+                    db,
+                    target.knowledge_id,
+                )
             )
-            for target in targets
-        }
         common_metadata_defs = cls._get_common_metadata_defs(metadata_defs_by_kb)
         metadata_llm = await cls._build_metadata_llm_snapshot(
             db,
@@ -177,10 +180,32 @@ class KnowledgeRetrievalPreparation:
             principal,
             getattr(refs[0].knowledge, "workspace_id", None),
         )
-        targets = [
-            await cls._build_retrieval_target_async(db, request, ref, tenant_id)
-            for ref in refs
-        ]
+        targets: list[RetrievalTarget] = []
+        for ref in refs:
+            params = cls._build_retrieval_params(request, ref.config)
+            targets.append(
+                await cls._build_retrieval_target_async(
+                    db,
+                    request,
+                    ref,
+                    tenant_id,
+                    params=params,
+                )
+            )
+            if cls._should_add_graph_mix_target(request, ref.knowledge, params):
+                graph_params = cls._copy_retrieval_params(
+                    params,
+                    retrieve_type=RetrieveType.Graph,
+                )
+                targets.append(
+                    await cls._build_retrieval_target_async(
+                        db,
+                        request,
+                        ref,
+                        tenant_id,
+                        params=graph_params,
+                    )
+                )
         return targets, tenant_id
 
     @staticmethod
@@ -208,9 +233,11 @@ class KnowledgeRetrievalPreparation:
         request: KnowledgeRetrievalRequest,
         ref: _KnowledgeRetrievalRef,
         tenant_id: uuid.UUID | None,
+        *,
+        params: RetrievalParams | None = None,
     ) -> RetrievalTarget:
         knowledge = ref.knowledge
-        params = cls._build_retrieval_params(request, ref.config)
+        params = params or cls._build_retrieval_params(request, ref.config)
         evidence_graph = False
         if params.retrieve_type == RetrieveType.Graph:
             try:
@@ -288,6 +315,39 @@ class KnowledgeRetrievalPreparation:
             top_n=top_n,
             retrieve_type=retrieve_type,
             rerank_score_threshold=rerank_score_threshold,
+        )
+
+    @classmethod
+    def _should_add_graph_mix_target(
+        cls,
+        request: KnowledgeRetrievalRequest,
+        knowledge: Any,
+        params: RetrievalParams,
+    ) -> bool:
+        if (
+            not request.graph_retrieval_mix_enabled
+            or params.retrieve_type != RetrieveType.HYBRID
+            or not is_graph_enabled(knowledge.parser_config)
+        ):
+            return False
+        try:
+            return resolve_graph_pipeline(knowledge.parser_config) is GraphPipeline.EVIDENCE
+        except GraphPipelineConfigError as exc:
+            raise KnowledgeRetrievalConfigError(str(exc)) from exc
+
+    @staticmethod
+    def _copy_retrieval_params(
+        params: RetrievalParams,
+        *,
+        retrieve_type: RetrieveType,
+    ) -> RetrievalParams:
+        return RetrievalParams(
+            similarity_threshold=params.similarity_threshold,
+            vector_similarity_weight=params.vector_similarity_weight,
+            top_k=params.top_k,
+            top_n=params.top_n,
+            retrieve_type=retrieve_type,
+            rerank_score_threshold=params.rerank_score_threshold,
         )
 
     @classmethod

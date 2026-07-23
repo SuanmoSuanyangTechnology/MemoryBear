@@ -19,6 +19,12 @@ class KnowledgeRetrievalRequest(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=100)
     caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL
     retrieve_type: RetrieveType = RetrieveType.HYBRID
+    enable_graph_retrieval: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+    )
     rerank_id: UUID | None = None
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
@@ -33,6 +39,11 @@ class KnowledgeRetrievalRequest(BaseModel):
     def metadata_filters_prepared(self) -> bool:
         """Whether AUTO filtering was already evaluated by an internal adapter."""
         return self._metadata_filters_prepared
+
+    @property
+    def graph_retrieval_mix_enabled(self) -> bool:
+        """Whether hybrid retrieval should add an evidence-graph route."""
+        return self.enable_graph_retrieval == 1
 
     @field_validator("query")
     @classmethod

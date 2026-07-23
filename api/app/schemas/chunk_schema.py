@@ -118,6 +118,12 @@ class ChunkRetrieve(BaseModel):
     top_k: int | None = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
+    enable_graph_retrieval: int = Field(
+        0,
+        ge=0,
+        le=1,
+        description="Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+    )
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
     metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="filter mode")
