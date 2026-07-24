@@ -7,8 +7,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.logging_config import get_api_logger
@@ -19,33 +18,54 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.models.app_model import App
 from app.models.app_release_model import AppRelease
 from app.models.workspace_model import Workspace
-from app.models.end_user_model import EndUser
 from app.repositories.end_user_repository import EndUserRepository
-from app.utils.config_utils import resolve_config_id, resolve_config_id_async
+from app.utils.config_utils import resolve_config_id
 
 api_logger = get_api_logger()
 
 
-async def get_workspace_apps_detailed_async(db: AsyncSession, workspace_id: str) -> Dict[str, Any]:
-    """Get detailed information of all applications in the workspace (async version).
+class WorkspaceAppService:
+    """Workplace Application Service Class """
+    
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def get_workspace_apps_detailed(self, workspace_id: str) -> Dict[str, Any]:
+        """
+            Get detailed information of all applications in the workspace
 
-    Args:
-        db: Async database session
-        workspace_id: Workspace ID
+            Args:
+                Workspace_id: Workspace ID
 
-    Returns:
-        Dictionary containing detailed application information
-    """# 需要repository
-    result = await db.execute(
-        select(App).where(App.workspace_id == uuid.UUID(workspace_id), App.is_active.is_(True))
-    )
-    apps = result.scalars().all()
-    app_ids = [str(app.id) for app in apps]
-
-    apps_detailed_info = []
-
-    for app in apps:
-        app_info = {
+            Returns:
+                Dictionary containing detailed application information
+        """
+        apps = self.db.query(App).filter(
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True)
+        ).all()
+        app_ids = [str(app.id) for app in apps]
+        
+        apps_detailed_info = []
+        
+        for app in apps:
+            app_info = self._build_app_info(app)
+            self._process_app_releases(app, app_info)
+            self._process_end_users(app, app_info)
+            apps_detailed_info.append(app_info)
+        
+        return {
+            "status": "成功",
+            "message": f"成功查询到 {len(app_ids)} 个应用及其详细信息",
+            "workspace_id": str(workspace_id),
+            "apps_count": len(app_ids),
+            "app_ids": app_ids,
+            "apps_detailed_info": apps_detailed_info
+        }
+    
+    def _build_app_info(self, app: App) -> Dict[str, Any]:
+        """base_infomation"""
+        return {
             "id": str(app.id),
             "name": app.name,
             "description": app.description,
@@ -58,142 +78,34 @@ async def get_workspace_apps_detailed_async(db: AsyncSession, workspace_id: str)
             "memory_configs": [],
             "end_users": []
         }
-
-        # Process releases
-        release_result = await db.execute(
-            select(AppRelease).where(AppRelease.app_id == app.id)
-        )
-        app_releases = release_result.scalars().all()
-
-        if app_releases:
-            processed_configs: Set[str] = set()
-
-            for release in app_releases:
-                memory_content = _extract_memory_content(release.config, app.type)
-                if memory_content and memory_content in processed_configs:
-                    continue
-
-                release_info = {
-                    "app_id": str(release.app_id),
-                    "config": memory_content
-                }
-
-                if memory_content:
-                    processed_configs.add(memory_content)
-                    memory_config_info = await _get_memory_config_async(db, memory_content)
-                    if memory_config_info:
-                        if not any(dc["config_id"] == memory_config_info["config_id"] for dc in app_info["memory_configs"]):
-                            app_info["memory_configs"].append(memory_config_info)
-
-                app_info["releases"].append(release_info)
-
-        # Process end_users
-        end_user_result = await db.execute(
-            select(EndUser).where(EndUser.app_id == app.id, EndUser.is_active.is_(True))
-        )
-        end_users = end_user_result.scalars().all()
-
-        for end_user in end_users:
-            end_user_info = {
-                "id": str(end_user.id),
-                "app_id": str(end_user.app_id)
-            }
-            app_info["end_users"].append(end_user_info)
-
-        apps_detailed_info.append(app_info)
-
-    return {
-        "status": "成功",
-        "message": f"成功查询到 {len(app_ids)} 个应用及其详细信息",
-        "workspace_id": str(workspace_id),
-        "apps_count": len(app_ids),
-        "app_ids": app_ids,
-        "apps_detailed_info": apps_detailed_info
-    }
-
-
-def _extract_memory_content(release_config: Any, app_type: Optional[str] = None) -> Optional[str]:
-    """Extract memory_config_id from release config (sync, no DB needed for extraction logic).
-
-    The extraction itself is purely dict-level; legacy int resolution happens later
-    via _get_memory_config_async with async DB support.
-
-    Args:
-        release_config: 发布配置字典（app_releases.config）
-        app_type: 应用类型
-
-    Returns:
-        memory_config_id 字符串，不存在时返回 None
-    """
-    if not release_config or not isinstance(release_config, dict):
-        return None
-
-    if app_type:
-        try:
-            from app.services.memory_config_service import MemoryConfigService
-            # Use None as db since we only need dict extraction (agent type)
-            # Legacy int resolution will be handled by _get_memory_config_async
-            config_id, _is_legacy = MemoryConfigService(None).extract_memory_config_id(app_type, release_config)
-            if config_id:
-                return str(config_id)
-        except Exception as e:
-            api_logger.warning(
-                f"提取 memory_config_id 失败，app_type: {app_type}, 错误: {str(e)}"
-            )
-
-    # 回退：兼容旧 agent 结构（顶层 memory 对象）
-    memory_obj = release_config.get('memory')
-    if memory_obj and isinstance(memory_obj, dict):
-        return memory_obj.get('memory_config_id') or memory_obj.get('memory_content')
-
-    return None
-
-
-async def _get_memory_config_async(db: AsyncSession, memory_content: str) -> Dict[str, Any]:
-    """Retrieve memory_config information based on memory_content (async version).
-
-    Args:
-        db: Async database session
-        memory_content: Memory config ID string
-
-    Returns:
-        Dict containing memory config info
-    """
-    try:
-        resolved_id = await resolve_config_id_async(memory_content, db)
-        memory_config_result = await MemoryConfigRepository(db).query_reflection_config_by_id_async(resolved_id)
-
-        if memory_config_result:
-            # 查询 workspace 获取 tenant_id
-            tenant_id = None
-            if memory_config_result.workspace_id:
-                workspace = await db.get(Workspace, memory_config_result.workspace_id)
-                tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
-
-            return {
-                "config_id": str(resolved_id),
-                "workspace_id": memory_config_result.workspace_id,
-                "tenant_id": tenant_id,
-                "enable_self_reflexion": memory_config_result.enable_self_reflexion,
-                "iteration_period": memory_config_result.iteration_period,
-                "reflexion_range": memory_config_result.reflexion_range,
-                "baseline": memory_config_result.baseline,
-                "reflection_model_id": memory_config_result.reflection_model_id,
-                "memory_verify": memory_config_result.memory_verify,
-                "quality_assessment": memory_config_result.quality_assessment,
-                "user_id": memory_config_result.user_id
-            }
-    except Exception as e:
-        api_logger.warning(f"查询memory_config失败，memory_content: {memory_content}, 错误: {str(e)}")
-
-    return None
-
-
-class WorkspaceAppService:
-    """Workplace Application Service Class """
     
-    def __init__(self, db: Session):
-        self.db = db
+    def _process_app_releases(self, app: App, app_info: Dict[str, Any]) -> None:
+        """Process the release version and configuration information of the application"""
+        app_releases = self.db.query(AppRelease).filter(AppRelease.app_id == app.id).all()
+        
+        if not app_releases:
+            return
+
+        processed_configs: Set[str] = set()
+        
+        for release in app_releases:
+            memory_content = self._extract_memory_content(release.config, app.type)
+            if memory_content and memory_content in processed_configs:
+                continue
+
+            release_info = {
+                "app_id": str(release.app_id),
+                "config": memory_content
+            }
+
+            if memory_content:
+                processed_configs.add(memory_content)
+                memory_config_info = self._get_memory_config(memory_content)
+                if memory_config_info:
+                    if not any(dc["config_id"] == memory_config_info["config_id"] for dc in app_info["memory_configs"]):
+                        app_info["memory_configs"].append(memory_config_info)
+
+            app_info["releases"].append(release_info)
 
     def _extract_memory_content(self, release_config: Any, app_type: Optional[str] = None) -> Optional[str]:
         """Extract memory_config_id from release config（类型感知）
@@ -270,6 +182,19 @@ class WorkspaceAppService:
             api_logger.warning(f"查询memory_config失败，memory_content: {memory_content}, 错误: {str(e)}")
 
         return None
+
+    def _process_end_users(self, app: App, app_info: Dict[str, Any]) -> None:
+        """Processing end-user information for applications"""
+        end_users = EndUserRepository(self.db).get_end_users_by_app_id(app.id)
+
+        for end_user in end_users:
+            end_user_info = {
+                "id": str(end_user.id),
+                "app_id": str(end_user.app_id)
+            }
+            app_info["end_users"].append(end_user_info)
+        # print(100*'-')
+        # print(app_info)
 
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """
@@ -362,12 +287,10 @@ class MemoryReflectionService:
     def __init__(self, db: Session):
         self.db = db
 
-    async def start_text_reflection_async(
-        self, config_data: Dict[str, Any], end_user_id: str, db: AsyncSession
-    ) -> Dict[str, Any]:
+    async def start_text_reflection(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         try:
             config_id = config_data.get("config_id")
-            api_logger.info(f"从配置数据启动反思（异步），config_id: {config_id}, end_user_id: {end_user_id}")
+            api_logger.info(f"从配置数据启动反思，config_id: {config_id}, end_user_id: {end_user_id}")
 
             if not config_data.get("enable_self_reflexion", False):
                 return {
@@ -379,9 +302,9 @@ class MemoryReflectionService:
                 }
 
             config_data_id = config_data['config_id']
-            reflection_config = await _get_memory_config_async(db, config_data_id)
+            reflection_config = WorkspaceAppService(self.db)._get_memory_config(config_data_id)
             if reflection_config is not None and reflection_config['enable_self_reflexion']:
-                reflection_config = await self._create_reflection_config_from_data(reflection_config)
+                reflection_config = self._create_reflection_config_from_data(reflection_config)
                 # 3. 执行反思引擎
                 reflection_results = await self._execute_reflection_engine(
                     reflection_config, end_user_id
@@ -435,7 +358,7 @@ class MemoryReflectionService:
             config_data_id=config_data['config_id']
             reflection_config=WorkspaceAppService(self.db)._get_memory_config(config_data_id)
             if reflection_config is not None and reflection_config['enable_self_reflexion']:
-                reflection_config = await self._create_reflection_config_from_data(reflection_config)
+                reflection_config=  self._create_reflection_config_from_data(reflection_config)
                 iteration_period = int(reflection_config.iteration_period)
                 workspace_service = WorkspaceAppService(self.db)
                 current_reflection_time = workspace_service.get_end_user_reflection_time(end_user_id)
@@ -514,23 +437,23 @@ class MemoryReflectionService:
                 "config_data": config_data
             }
 
-    async def _create_reflection_config_from_data(self, config_data: Dict[str, Any]) -> ReflectionConfig:
+    def _create_reflection_config_from_data(self, config_data: Dict[str, Any]) -> ReflectionConfig:
         """Create reflective configuration objects from configuration data
-
+        
         If reflection_model_id is not set, falls back to workspace default LLM.
-
+        
         Args:
             config_data: Dict containing reflection config including workspace_id
-
+            
         Returns:
             ReflectionConfig object with model_id resolved
         """
-        from app.repositories.workspace_repository import WorkspaceRepository
+        from app.repositories.workspace_repository import get_workspace_models_configs
 
         reflexion_range_value = config_data.get("reflexion_range")
         if reflexion_range_value is None or reflexion_range_value == "":
             reflexion_range_value = "partial"
-
+        
         # Map legacy/invalid values to valid enum values
         reflexion_range_mapping = {
             "retrieval": "partial",  # Map old 'retrieval' to 'partial'
@@ -552,21 +475,17 @@ class MemoryReflectionService:
                 iteration_period = int(iteration_period)
             except (ValueError, TypeError):
                 iteration_period = 24  # 默认24小时
-
+        
         # 获取 model_id 并转换为字符串（如果是 UUID 对象）
         reflection_model_id = config_data.get("reflection_model_id", "")
         if reflection_model_id:
             reflection_model_id = str(reflection_model_id)
-
+        
         # 如果 reflection_model_id 为空，回退到工作空间默认 LLM
         if not reflection_model_id:
             workspace_id = config_data.get("workspace_id")
             if workspace_id:
-                repo = WorkspaceRepository(self.db)
-                if isinstance(self.db, AsyncSession):
-                    workspace_models = await repo.get_workspace_models_configs_async(workspace_id)
-                else:
-                    workspace_models = repo.get_workspace_models_configs(workspace_id)
+                workspace_models = get_workspace_models_configs(self.db, workspace_id)
                 if workspace_models and workspace_models.get("llm"):
                     reflection_model_id = workspace_models["llm"]
                     api_logger.info(
@@ -597,7 +516,7 @@ class MemoryReflectionService:
             connector = Neo4jConnector()
             
             # 提前构建 LLM 客户端（不再让 ReflectionEngine 内部 lazy init）
-            llm_client = await ModelClientMixin.get_llm_client_async(
+            llm_client = ModelClientMixin.get_llm_client(
                 self.db, reflection_config.model_id, self._get_tenant_id(reflection_config)
             )
             

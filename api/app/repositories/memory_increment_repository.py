@@ -1,5 +1,4 @@
-from sqlalchemy import func, select, desc
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func
 from sqlalchemy.orm import Session, aliased
 from typing import List, Optional
 import uuid
@@ -15,7 +14,7 @@ db_logger = get_db_logger()
 
 
 class MemoryIncrementRepository:
-    def __init__(self, db: Session | AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     def get_memory_increments_by_workspace_id(self, workspace_id: uuid.UUID, limit: int) -> List[MemoryIncrement]:
@@ -93,68 +92,6 @@ class MemoryIncrementRepository:
             self.db.add(memory_increment)
             self.db.commit()
             self.db.refresh(memory_increment)
-            db_logger.info(f"成功写入内存增量: workspace_id={workspace_id}, total_num={total_num}")
-            return memory_increment
-        except Exception as e:
-            db_logger.error(f"写入内存增量失败: workspace_id={workspace_id}, total_num={total_num} - {str(e)}")
-            raise
-
-    async def get_daily_latest_async(
-        self, workspace_id: uuid.UUID, limit: int
-    ) -> List[MemoryIncrement]:
-        """异步获取每日最新的内存增量记录（使用 CTE 窗口函数）"""
-        from app.models.memory_increment_model import MemoryIncrement
-        subquery = select(
-            MemoryIncrement,
-            func.row_number().over(
-                partition_by=func.date(MemoryIncrement.created_at),
-                order_by=MemoryIncrement.created_at.desc(),
-            ).label('rn'),
-        ).where(MemoryIncrement.workspace_id == workspace_id).subquery()
-
-        stmt = (
-            select(MemoryIncrement)
-            .select_from(subquery)
-            .where(subquery.c.rn == 1)
-            .order_by(desc(MemoryIncrement.created_at))
-            .limit(limit)
-        )
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())
-
-    async def get_last_before_date_async(
-        self, workspace_id: uuid.UUID, before_date: datetime.datetime
-    ) -> Optional[MemoryIncrement]:
-        """异步获取指定日期前的最新一条内存增量记录"""
-        from app.models.memory_increment_model import MemoryIncrement
-        stmt = (
-            select(MemoryIncrement)
-            .where(
-                MemoryIncrement.workspace_id == workspace_id,
-                MemoryIncrement.created_at < before_date,
-            )
-            .order_by(desc(MemoryIncrement.created_at))
-            .limit(1)
-        )
-        result = await self.db.execute(stmt)
-        return result.scalars().first()
-
-    async def write_memory_increment_async(
-        self,
-        workspace_id: uuid.UUID,
-        total_num: int,
-    ) -> MemoryIncrement:
-        """异步写入内存增量"""
-        try:
-            memory_increment = MemoryIncrement(
-                workspace_id=workspace_id,
-                total_num=total_num,
-                created_at=utcnow_naive(),
-                updated_at=utcnow_naive(),
-            )
-            self.db.add(memory_increment)
-            await self.db.commit()
-            await self.db.refresh(memory_increment)
             db_logger.info(f"成功写入内存增量: workspace_id={workspace_id}, total_num={total_num}")
             return memory_increment
         except Exception as e:

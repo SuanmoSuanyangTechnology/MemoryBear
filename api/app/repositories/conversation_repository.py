@@ -20,28 +20,6 @@ class ConversationRepository:
     def __init__(self, db: Session | AsyncSession):
         self.db = db
 
-    async def get_workspace_id_async(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
-        """根据 conversation_id 获取 workspace_id"""
-        from app.models.conversation_model import Conversation
-        stmt = select(Conversation.workspace_id).where(Conversation.id == conversation_id)
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_flush_info_async(
-        self, conversation_id: uuid.UUID
-    ) -> tuple[int | None, str | None, str | None]:
-        """获取 Flush 所需的关键字段：write_cursor, user_id, workspace_id"""
-        from app.models.conversation_model import Conversation
-        stmt = (
-            select(Conversation.write_cursor, Conversation.user_id, Conversation.workspace_id)
-            .where(Conversation.id == conversation_id)
-        )
-        result = await self.db.execute(stmt)
-        row = result.one_or_none()
-        if row is None:
-            return None, None, None
-        return row[0], row[1], row[2]
-
     def create_conversation(
             self,
             app_id: uuid.UUID,
@@ -132,7 +110,7 @@ class ConversationRepository:
         logger.info(f"Conversation fetched successfully: {conversation_id}")
         return conversation
 
-    async def get_conversation_by_user_id_async(
+    def get_conversation_by_user_id(
             self,
             user_id: uuid.UUID,
             workspace_id: uuid.UUID = None,
@@ -140,30 +118,48 @@ class ConversationRepository:
             page: int = 1,
             page_size: int = 20
     ) -> tuple[list[Conversation], int]:
-        """异步版本：按 user_id 分页查询会话，返回 (会话列表, 总数)。"""
-        logger.info(f"[async] Fetching conversation by user_id: {user_id}")
+        """
+        Retrieve recent conversations for a specific user with pagination.
+
+        This method queries conversations associated with the given user ID,
+        optionally scoped to a specific workspace. Results are ordered by the
+        most recently updated conversations.
+
+        Args:
+            user_id (uuid.UUID): Unique identifier of the user.
+            workspace_id (uuid.UUID, optional): Workspace scope for the query.
+                If provided, only conversations under this workspace will be returned.
+            is_activate (bool): Conversation State limit.
+            page (int): Page number (1-based). Defaults to 1.
+            page_size (int): Number of items per page. Defaults to 20.
+
+        Returns:
+            tuple[list[Conversation], int]: A list of conversation entities and total count.
+        """
+        logger.info(f"Fetching conversation by user_id: {user_id}")
 
         stmt = select(Conversation).where(
             Conversation.user_id == str(user_id),
             Conversation.is_active.is_(is_activate),
-            # FIXME: 与 sync 版本保持一致，过滤 Memory API 写入产生的伪会话。
-            Conversation.app_id != "00000000-0000-0000-0000-000000000001",
+            # FIXME: Hacky workaround to filter out Memory API write requests.
+            Conversation.app_id != "00000000-0000-0000-0000-000000000001"
         )
 
         if workspace_id:
             stmt = stmt.where(Conversation.workspace_id == workspace_id)
 
-        total = int((await self.db.execute(
+        # Calculate total count
+        total = int(self.db.execute(
             select(func.count()).select_from(stmt.subquery())
-        )).scalar_one())
+        ).scalar_one())
 
+        # Apply ordering and pagination
         stmt = stmt.order_by(desc(Conversation.updated_at))
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
 
-        result = await self.db.execute(stmt)
-        conversations = list(result.scalars().all())
+        conversations = list(self.db.scalars(stmt).all())
         logger.info(
-            "[async] Conversation fetched successfully",
+            "Conversation fetched successfully",
             extra={
                 "user_id": str(user_id),
                 "workspace_id": str(workspace_id),
@@ -628,8 +624,7 @@ class MessageRepository:
         if limit:
             stmt = stmt.limit(limit)
 
-        result = await self.db.execute(stmt)
-        messages = list(result.scalars().all())
+        messages = list((await self.db.scalars(stmt)).all())
 
         logger.info(
             "Fetched messages successfully",

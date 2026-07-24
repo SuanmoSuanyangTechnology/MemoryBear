@@ -44,9 +44,6 @@ class MemoryConfigRepository:
     - Neo4j Cypher查询常量
     """
 
-    def __init__(self, db: Session | AsyncSession):
-        self.db = db
-
     # ==================== Neo4j Cypher 查询常量 ====================
 
     # Dialogue count by group
@@ -159,52 +156,7 @@ class MemoryConfigRepository:
         stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
         memory_config_obj = db.scalars(stmt).first()
         if not memory_config_obj:
-            raise BusinessException(message="reflection config not found")
-        memory_config_obj.enable_self_reflexion = enable_self_reflexion
-        memory_config_obj.iteration_period = iteration_period
-        memory_config_obj.reflexion_range = reflexion_range
-        memory_config_obj.baseline = baseline
-        memory_config_obj.reflection_model_id = reflection_model_id
-        memory_config_obj.memory_verify = memory_verify
-        memory_config_obj.quality_assessment = quality_assessment
-
-        return memory_config_obj
-
-    async def update_reflection_config_async(
-            self,
-            config_id: uuid.UUID,
-            enable_self_reflexion: bool,
-            iteration_period: str,
-            reflexion_range: str,
-            baseline: str,
-            reflection_model_id: str,
-            memory_verify: bool,
-            quality_assessment: bool
-    ) -> MemoryConfig:
-        """构建反思配置更新语句（异步版本）
-
-        Args:
-            quality_assessment:
-            memory_verify:
-            reflection_model_id:
-            baseline:
-            reflexion_range:
-            iteration_period:
-            enable_self_reflexion:
-            config_id: 配置ID
-
-        Returns:
-            MemoryConfig
-
-        Raises:
-            BusinessException: 配置未找到时抛出
-        """
-        db_logger.debug(f"构建反思配置更新语句(异步): config_id={config_id}")
-        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        result = await self.db.execute(stmt)
-        memory_config_obj = result.scalars().first()
-        if not memory_config_obj:
-            raise BusinessException(message="reflection config not found")
+            raise BusinessException
         memory_config_obj.enable_self_reflexion = enable_self_reflexion
         memory_config_obj.iteration_period = iteration_period
         memory_config_obj.reflexion_range = reflexion_range
@@ -229,24 +181,6 @@ class MemoryConfigRepository:
         db_logger.debug(f"构建反思配置查询语句: config_id={config_id}")
         stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
         memory_config = db.scalars(stmt).first()
-        if not memory_config:
-            raise RuntimeError("reflection config not found")
-        return memory_config
-
-
-    async def query_reflection_config_by_id_async(self, config_id: uuid.UUID | int | str) -> MemoryConfig:
-        """异步版本：通过 config_id 查询反思配置。
-
-        Args:
-            config_id: 配置ID
-
-        Returns:
-            MemoryConfig ORM 对象
-        """
-        db_logger.debug(f"异步构建反思配置查询语句: config_id={config_id}")
-        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        result = await self.db.execute(stmt)
-        memory_config = result.scalars().first()
         if not memory_config:
             raise RuntimeError("reflection config not found")
         return memory_config
@@ -574,21 +508,6 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
 
-    async def get_by_id_async(self, config_id: uuid.UUID) -> Optional[MemoryConfig]:
-        """根据ID获取记忆配置（异步版本）。
-
-        Args:
-            config_id: 配置ID
-
-        Returns:
-            Optional[MemoryConfig]: 配置对象，不存在则返回None
-        """
-        from sqlalchemy import select as sa_select
-        result = await self.db.execute(
-            sa_select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        )
-        return result.scalars().first()
-
     @staticmethod
     async def get_by_id_async(db: AsyncSession, config_id: uuid.UUID) -> Optional[MemoryConfig]:
         """根据ID获取记忆配置（异步版）。"""
@@ -726,9 +645,9 @@ class MemoryConfigRepository:
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
 
-
+    @staticmethod
     async def get_config_with_workspace_async(
-            self,
+            db: AsyncSession,
             config_id: uuid.UUID,
     ):
         start_time = time.perf_counter()
@@ -743,13 +662,13 @@ class MemoryConfigRepository:
                 .where(MemoryConfig.config_id == config_id)
             )
 
-            result = await self.db.execute(stmt)
+            result = await db.execute(stmt)
             row = result.first()
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             if not row:
                 # Check if config exists but workspace is missing
                 stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-                config_only = await self.db.scalar(stmt)
+                config_only = await db.scalar(stmt)
                 if config_only:
                     if config_only.workspace_id is None:
                         config_logger.error(
@@ -845,131 +764,6 @@ class MemoryConfigRepository:
         except Exception as e:
             db_logger.error(f"查询所有配置失败: workspace_id={workspace_id} - {str(e)}")
             raise
-
-    # ==================== Async Query Methods ====================
-
-    async def get_all_async(self, workspace_id: uuid.UUID) -> List[Tuple]:
-        """Async version of get_all.
-
-        Query all configs for a workspace with scene_name via outerjoin.
-
-        Args:
-            workspace_id: 工作空间ID
-
-        Returns:
-            List[Tuple[MemoryConfig, Optional[str]]]: 配置列表，每项为 (配置对象, 场景名称)
-        """
-        from app.models.ontology_scene import OntologyScene
-
-        db_logger.debug(f"查询所有配置(异步): workspace_id={workspace_id}")
-
-        try:
-            stmt = (
-                select(MemoryConfig, OntologyScene.scene_name)
-                .outerjoin(OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id)
-                .where(MemoryConfig.workspace_id == workspace_id)
-                .order_by(desc(MemoryConfig.updated_at))
-            )
-            result = await self.db.execute(stmt)
-            results = result.all()
-
-            db_logger.debug(f"配置列表查询成功(异步): 数量={len(results)}")
-            return results
-
-        except Exception as e:
-            db_logger.error(f"查询所有配置失败(异步): workspace_id={workspace_id} - {str(e)}")
-            raise
-
-    async def check_duplicate_name_async(
-        self, workspace_id: uuid.UUID, config_name: str
-    ) -> None:
-        """Check if config name already exists in workspace (async).
-
-        Raises:
-            ValueError: DUPLICATE_CONFIG_NAME if duplicate found.
-        """
-        check_stmt = select(MemoryConfig).where(
-            MemoryConfig.workspace_id == workspace_id,
-            MemoryConfig.config_name == config_name,
-        )
-        check_result = await self.db.execute(check_stmt)
-        existing = check_result.scalars().first()
-        if existing:
-            raise ValueError(f"DUPLICATE_CONFIG_NAME:{config_name}")
-
-    async def get_extracted_async(self, config_id: uuid.UUID) -> Dict:
-        """Async version of get_extracted_config.
-
-        Args:
-            config_id: 配置ID
-
-        Returns:
-            Dict: 萃取配置字典
-        """
-        from app.utils.config_utils import resolve_config_id_async
-
-        resolved_id = await resolve_config_id_async(config_id, self.db)
-        db_logger.debug(f"查询萃取配置(异步): config_id={resolved_id}")
-
-        try:
-            stmt = select(MemoryConfig).where(MemoryConfig.config_id == resolved_id)
-            result = await self.db.execute(stmt)
-            db_config = result.scalars().first()
-            if not db_config:
-                raise ValueError("未找到配置")
-
-            return {
-                "llm_id": db_config.llm_id,
-                "embedding_id": db_config.embedding_id,
-                "rerank_id": db_config.rerank_id,
-                "vision_id": db_config.vision_id,
-                "audio_id": db_config.audio_id,
-                "video_id": db_config.video_id,
-                "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
-                "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
-                "deep_retrieval": db_config.deep_retrieval,
-                "t_type_strict": db_config.t_type_strict,
-                "t_name_strict": db_config.t_name_strict,
-                "t_overall": db_config.t_overall,
-                "chunker_strategy": db_config.chunker_strategy,
-                "statement_granularity": db_config.statement_granularity,
-                "include_dialogue_context": db_config.include_dialogue_context,
-                "max_context": db_config.max_context,
-                "pruning_enabled": db_config.pruning_enabled,
-                "pruning_scene": db_config.pruning_scene,
-                "pruning_threshold": db_config.pruning_threshold,
-                "enable_self_reflexion": db_config.enable_self_reflexion,
-                "iteration_period": db_config.iteration_period,
-                "reflexion_range": db_config.reflexion_range,
-                "baseline": db_config.baseline,
-                "is_default": bool(db_config.is_default),
-            }
-
-        except Exception as e:
-            db_logger.error(f"查询萃取配置失败(异步): config_id={config_id} - {str(e)}")
-            raise
-
-    async def verify_workspace_active_async(self, workspace_id: uuid.UUID) -> Workspace:
-        """Verify workspace exists and is active (async).
-
-        Args:
-            workspace_id: 工作空间ID
-
-        Returns:
-            Workspace: 工作空间对象
-
-        Raises:
-            BusinessException: 工作空间不存在或未激活
-        """
-        stmt = select(Workspace).where(
-            Workspace.id == workspace_id,
-            Workspace.is_active.is_(True),
-        )
-        result = await self.db.execute(stmt)
-        workspace = result.scalars().first()
-        if not workspace:
-            raise BusinessException("workspace.not_found")
-        return workspace
 
     @staticmethod
     def delete(db: Session, config_id: uuid.UUID) -> bool:

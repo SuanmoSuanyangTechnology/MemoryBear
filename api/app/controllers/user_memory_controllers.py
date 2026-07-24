@@ -5,17 +5,19 @@
 终端用户信息接口已迁移至 end_user_controller。
 """
 from fastapi import APIRouter, Depends, Header, Query
+from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
-from app.core.response_utils import fail, success
-from app.db import get_async_db_context
-from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.core.response_utils import success, fail
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models.user_model import User
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.schemas.memory_storage_schema import DeleteNodeRequest
 from app.schemas.response_schema import ApiResponse
-from app.services.memory_entity_relationship_service import MemoryEmotion, MemoryEntityService, MemoryInteraction
+from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction
 from app.services.user_memory_service import UserMemoryService
 
 # Get API logger
@@ -34,25 +36,26 @@ router = APIRouter(
 # update_end_user_info 已迁移至 end_user_controller（/end_user/info/update）
 
 
-@router.get("/memory_space/timeline_memories", response_model=ApiResponse) # NOTE（乐力齐）确定这个接口还在被使用
+@router.get("/memory_space/timeline_memories", response_model=ApiResponse)
 async def memory_space_timeline_of_shared_memories(
         id: str, label: str,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
-    """共同记忆时间线（异步版本）。"""
+    # 使用集中化的语言校验
     language = get_language_from_header(language_type)
 
     workspace_id = current_user.current_workspace_id
+    workspace_repo = WorkspaceRepository(db)
+    workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
 
-    async with get_async_db_context() as db:
-        workspace_repo = WorkspaceRepository(db)
-        workspace_models = await workspace_repo.get_workspace_models_configs_async(workspace_id)
-
-    model_id = workspace_models.get("llm") if workspace_models else None
-
-    memory_entity = MemoryEntityService(id, label)
-    timeline_memories_result = await memory_entity.get_timeline_memories_server(model_id, language)
+    if workspace_models:
+        model_id = workspace_models.get("llm", None)
+    else:
+        model_id = None
+    MemoryEntity = MemoryEntityService(id, label)
+    timeline_memories_result = await MemoryEntity.get_timeline_memories_server(model_id, language)
 
     return success(data=timeline_memories_result, msg="共同记忆时间线")
 
@@ -63,7 +66,7 @@ async def memory_space_entity_event_timeline(
         label: str,
         page: int = Query(1, ge=1, description="页码，从1开始"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
 ):
     """ExtractedEntity 实体事件时间线（分页）
 
@@ -91,7 +94,7 @@ async def memory_space_entity_timeline(
         type: str = Query("all", description="来源筛选：all/key_node/statement/memory_summary"),
         page: int = Query(1, ge=1, description="页码，从1开始"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
 ):
     """ExtractedEntity 合并记忆时间线（关键节点 / 情绪记忆 / 长期沉淀），分页 + 按来源筛选。
 
@@ -118,12 +121,10 @@ async def memory_space_entity_timeline(
 
 
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
-async def memory_space_relationship_evolution(
-        id: str,
-        label: str,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-):
-    """关系演变查询（异步版本）"""
+async def memory_space_relationship_evolution(id: str, label: str,
+                                              current_user: User = Depends(get_current_user),
+                                              db: Session = Depends(get_db),
+                                              ):
     try:
         api_logger.info(f"关系演变查询请求: id={id}, table={label}, user={current_user.username}")
 
@@ -155,7 +156,7 @@ async def memory_space_relationship_evolution(
 @router.post("/node/delete", response_model=ApiResponse)
 async def delete_node_api(
         request: DeleteNodeRequest,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
 ) -> dict:
     """通过 elementId 删除 Neo4j 图节点（含关联边）。
 

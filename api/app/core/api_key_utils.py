@@ -4,17 +4,17 @@ import uuid as _uuid
 from datetime import datetime
 from typing import Optional, Union
 
-from fastapi import Response
-from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import Session as _Session
-
+from sqlalchemy.ext.asyncio.session import AsyncSession
 from app.core.error_codes import BizCode as _BizCode
 from app.core.exceptions import BusinessException as _BusinessException
-from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms
-from app.models.api_key_model import ApiKeyType
 from app.models.end_user_model import EndUser as _EndUser
 from app.repositories.end_user_repository import EndUserRepository as _EndUserRepository
+
+from app.models.api_key_model import ApiKeyType
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms
+from fastapi import Response
+from fastapi.responses import JSONResponse
 
 
 def generate_api_key(key_type: ApiKeyType) -> str:
@@ -68,7 +68,7 @@ def datetime_to_timestamp(dt: Optional[datetime]) -> Optional[int]:
 
 
 def get_current_user_from_api_key(db: _Session, api_key_auth):
-    """通过 API Key 构造 current_user 对象（同步版本）。
+    """通过 API Key 构造 current_user 对象。
 
     从 API Key 反查创建者（管理员用户），并设置其 workspace 上下文。
     与内部接口的 Depends(get_current_user) (JWT) 等价。
@@ -83,29 +83,6 @@ def get_current_user_from_api_key(db: _Session, api_key_auth):
     from app.services import api_key_service
 
     api_key = api_key_service.ApiKeyService.get_api_key(
-        db, api_key_auth.api_key_id, api_key_auth.workspace_id
-    )
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
-    return current_user
-
-
-async def get_current_user_from_api_key_async(db: AsyncSession, api_key_auth):
-    """通过 API Key 构造 current_user 对象（异步版本）。
-
-    与 get_current_user_from_api_key 语义等价，但使用异步 DB Session。
-    适用于 service API 层 async 端点。
-
-    Args:
-        db: 异步数据库会话（AsyncSession）
-        api_key_auth: API Key 认证信息（ApiKeyAuth）
-
-    Returns:
-        User ORM 对象，已设置 current_workspace_id
-    """
-    from app.services import api_key_service
-
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(
         db, api_key_auth.api_key_id, api_key_auth.workspace_id
     )
     current_user = api_key.creator
@@ -164,23 +141,6 @@ async def validate_end_user_in_workspace_async(
     end_user_id: str,
     workspace_id,
 ) -> _EndUser:
-    """校验 end_user 是否存在且属于指定 workspace（异步版本）。
-
-    与 validate_end_user_in_workspace 语义等价，但使用异步 DB Session。
-
-    Args:
-        db: 异步数据库会话（AsyncSession）
-        end_user_id: 终端用户 ID
-        workspace_id: 工作空间 ID（UUID 或字符串均可）
-
-    Returns:
-        EndUser ORM 对象（校验通过时）
-
-    Raises:
-        BusinessException(INVALID_PARAMETER): end_user_id 格式无效
-        BusinessException(USER_NOT_FOUND): end_user 不存在
-        BusinessException(PERMISSION_DENIED): end_user 不属于该 workspace
-    """
     try:
         end_user_id = _uuid.UUID(end_user_id)
     except (ValueError, AttributeError):
@@ -189,7 +149,8 @@ async def validate_end_user_in_workspace_async(
             _BizCode.INVALID_PARAMETER,
         )
 
-    end_user = await _EndUserRepository(db).get_end_user_by_id_async(end_user_id)
+    end_user_repo = _EndUserRepository(db)
+    end_user = await end_user_repo.get_end_user_by_id_async(end_user_id)
 
     if end_user is None:
         raise _BusinessException(

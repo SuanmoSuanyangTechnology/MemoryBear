@@ -18,9 +18,8 @@ Classes:
     ClassListResponse: 类型列表响应模型
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Optional
 import datetime
-import time
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_serializer, ConfigDict
@@ -295,33 +294,6 @@ class SceneListResponse(BaseModel):
     """
     items: List[SceneResponse] = Field(..., description="场景列表")
     page: Optional[PaginationInfo] = Field(None, description="分页信息")
-
-
-class SceneSimpleItem(BaseModel):
-    """场景简单信息项（轻量级，用于下拉选择）
-
-    Attributes:
-        scene_id: 场景ID
-        scene_name: 场景名称
-    """
-    scene_id: str = Field(..., description="场景ID")
-    scene_name: str = Field(..., description="场景名称")
-
-
-class SceneSimpleListResponse(BaseModel):
-    """场景简单列表响应模型
-
-    用于 /scenes/simple 接口，返回轻量级场景列表（仅 scene_id + scene_name）。
-    data 字段接受 List[SceneSimpleItem]（成功时）或 dict（错误时的 {} 兜底）。
-    """
-    code: int = Field(0, description="业务状态码，0=成功")
-    msg: str = Field("OK", description="提示信息")
-    data: Union[List[SceneSimpleItem], Dict[str, Any]] = Field(
-        default_factory=list,
-        description="场景简单列表（成功时为 SceneSimpleItem 数组，错误时为空对象 {}）",
-    )
-    error: str = Field("", description="错误信息")
-    time: int = Field(default_factory=lambda: int(time.time() * 1000), description="Unix毫秒时间戳")
 
 
 # ==================== 本体类型相关 Schema ====================

@@ -23,7 +23,6 @@ from app.models.workspace_model import (
 )
 from app.repositories import workspace_repository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
-from app.repositories.workspace_repository import WorkspaceRepository
 from app.schemas.workspace_schema import (
     InviteAcceptRequest,
     InviteValidateResponse,
@@ -1230,6 +1229,7 @@ def update_workspace_member_roles(
         update_ids.add(upd.id)
 
     # 检查是否至少保留一个 manager
+    current_managers = [m for m in all_members if m.role == WorkspaceRole.manager]
     managers_after_update = [
         m for m in all_members
         if m.id not in update_ids and m.role == WorkspaceRole.manager
@@ -1425,11 +1425,14 @@ async def get_workspace_models_configs_async(
     Returns:
         dict: 包含 llm, embedding, rerank 的字典
     """
+    from app.models.workspace_model import Workspace
+
     business_logger.info(f"用户 {user.username} 请求获取工作空间 {workspace_id} 的模型配置")
 
     await _check_workspace_member_permission_async(db, workspace_id, user)
-    workspace_repo = WorkspaceRepository(db)
-    workspace = await workspace_repo.get_workspace_by_id_async(workspace_id)
+
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = result.scalars().first()
 
     if workspace is None:
         business_logger.error(f"工作空间不存在: workspace_id={workspace_id}")
