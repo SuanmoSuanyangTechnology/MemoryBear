@@ -1126,6 +1126,7 @@ class GraphElasticsearchStore:
                     "query": self._graph_query(
                         runtime.knowledge_id,
                         projection_type,
+                        [{"exists": {"field": vector_field}}],
                     ),
                     "script": {
                         "source": (
