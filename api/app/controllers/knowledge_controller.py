@@ -889,6 +889,7 @@ async def delete_knowledge_graph(
         task = celery_app.send_task(
             "app.core.rag.tasks.clear_all_knowledge_graph_data",
             args=[str(knowledge_id)],
+            kwargs={"force": True},
         )
         api_logger.info(
             "Knowledge graph cleanup task accepted"

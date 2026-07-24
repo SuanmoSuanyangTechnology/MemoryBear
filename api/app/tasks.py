@@ -408,12 +408,16 @@ def _run_evidence_graph_migration(knowledge_id: str) -> dict[str, Any]:
         return {"status": "migrated", "knowledge_id": knowledge_id}
 
 
-def _run_clear_all_knowledge_graph_data(knowledge_id: str) -> dict[str, Any]:
+def _run_clear_all_knowledge_graph_data(
+        knowledge_id: str,
+        *,
+        force: bool = False,
+) -> dict[str, Any]:
     knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
     with create_knowledge_graph_lock(knowledge_id) as lock_guard:
         lock_guard.ensure_valid()
         state = _load_graph_task_state(knowledge_id)
-        if state.graph_enabled:
+        if state.graph_enabled and not force:
             return {"status": "skipped", "reason": "graph_reenabled"}
         _execute_evidence_clear(state, lock_guard, clear_all=True)
         lock_guard.ensure_valid()
@@ -1567,12 +1571,19 @@ def migrate_evidence_graph_knowledge(self, knowledge_id: str):
     name="app.core.rag.tasks.clear_all_knowledge_graph_data",
     max_retries=5,
 )
-def clear_all_knowledge_graph_data(self, knowledge_id: str):
+def clear_all_knowledge_graph_data(
+        self,
+        knowledge_id: str,
+        force: bool = False,
+):
     return _run_observed_graph_task(
         self,
         task_name="clear_knowledge",
         knowledge_id=str(knowledge_id),
-        operation=lambda: _run_clear_all_knowledge_graph_data(knowledge_id),
+        operation=lambda: _run_clear_all_knowledge_graph_data(
+            knowledge_id,
+            force=force,
+        ),
     )
 
 
