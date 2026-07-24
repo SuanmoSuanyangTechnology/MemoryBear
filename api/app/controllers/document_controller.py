@@ -383,21 +383,7 @@ async def delete_document(
         REDIS_CONN.set(_PARSE_CANCEL_KEY.format(doc_id=document_id), "1", exp=_PARSE_CANCEL_TTL)
         REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
 
-        # 3. Delete vector index (non-404 failures raise, caught by except below)
-        await asyncio.to_thread(
-            ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field,
-            key="document_id",
-            value=str(document_id),
-        )
-
-        # 4. Delete file (storage errors are swallowed internally)
-        await _delete_file_record_async(db=db, file_id=file_id, storage_service=storage_service)
-
-        # 5. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
-        api_logger.debug(f"Delete metadata bindings for document: {document_id}")
-        await KnowledgeMetadataService.delete_document_metadata_async(db, document_id)
-
-        # 6. Persist graph cleanup before hard-deleting the document record.
+        # 3. Persist graph cleanup before deleting any document resources.
         await enqueue_document_graph_sync(
             graph_knowledge_id,
             str(document_id),
@@ -405,6 +391,20 @@ async def delete_document(
             dispatch_legacy=False,
             document_deleted=True,
         )
+
+        # 4. Delete vector index (non-404 failures raise, caught by except below)
+        await asyncio.to_thread(
+            ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field,
+            key="document_id",
+            value=str(document_id),
+        )
+
+        # 5. Delete file (storage errors are swallowed internally)
+        await _delete_file_record_async(db=db, file_id=file_id, storage_service=storage_service)
+
+        # 6. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
+        api_logger.debug(f"Delete metadata bindings for document: {document_id}")
+        await KnowledgeMetadataService.delete_document_metadata_async(db, document_id)
 
         # 7. Delete document from DB only after graph cleanup is recoverable.
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")

@@ -118,6 +118,16 @@ class _GraphTaskState:
     fingerprint: str
 
 
+class _GraphDocumentDeletionPending(RuntimeError):
+    """The graph cleanup must wait until the document deletion is committed."""
+
+
+def _document_active_state(document: Document | None) -> bool | None:
+    if document is None:
+        return None
+    return document.status == 1
+
+
 def _canonical_graph_uuid(value: object, field_name: str) -> str:
     try:
         return str(uuid.UUID(str(value)))
@@ -185,7 +195,7 @@ def _load_graph_task_state(
                 Document.id == document_uuid,
                 Document.kb_id == knowledge_uuid,
             ).first()
-            document_active = document is not None and document.status == 1
+            document_active = _document_active_state(document)
 
         active_document_ids: tuple[str, ...] = ()
         if include_active_documents:
@@ -365,6 +375,10 @@ def _run_evidence_graph_document(
             return {"status": "skipped", "reason": "pipeline_changed"}
         if not state.graph_enabled:
             return {"status": "skipped", "reason": "graph_disabled"}
+        if document_deleted and state.document_active is not None:
+            raise _GraphDocumentDeletionPending(
+                "document deletion has not been committed"
+            )
         _execute_evidence_document(
             state,
             document_id,
@@ -485,6 +499,9 @@ def _run_observed_graph_task(
         raise
     except Exception as exc:
         countdown = _graph_task_retry_countdown(task)
+        retry_options = {}
+        if isinstance(exc, _GraphDocumentDeletionPending):
+            retry_options["max_retries"] = 8
         logger.warning(
             "[EvidenceGraph] task_retry"
             " task=%s task_id=%s kb_id=%s%s"
@@ -499,7 +516,11 @@ def _run_observed_graph_task(
             int((time.perf_counter() - started_at) * 1000),
             exc_info=_redacted_graph_exc_info(exc),
         )
-        raise task.retry(exc=exc, countdown=countdown)
+        raise task.retry(
+            exc=exc,
+            countdown=countdown,
+            **retry_options,
+        )
 
     status_value = str(result.get("status") or "completed")
     is_skip = status_value in {"skipped", "already_evidence"}
