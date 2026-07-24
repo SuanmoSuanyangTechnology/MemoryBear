@@ -589,21 +589,63 @@ class KnowledgeRetrievalService:
         full_text_task = asyncio.create_task(
             store.search_by_full_text(request.query, full_text_options)
         )
-        try:
-            vector_chunks, full_text_chunks = await asyncio.gather(
-                vector_task,
-                full_text_task,
+        graph_task = (
+            asyncio.create_task(
+                cls._retrieve_evidence_graph_channel(
+                    request,
+                    target,
+                    graph_target,
+                    document_ids_include,
+                    store,
+                    timings,
+                    log_id,
+                )
             )
-        except BaseException:
-            vector_task.cancel()
-            full_text_task.cancel()
-            await asyncio.gather(
-                vector_task,
-                full_text_task,
-                return_exceptions=True,
+            if (
+                target_type == RetrieveType.HYBRID
+                and target.params.enable_graph_retrieval
+                and graph_target is not None
+                and graph_target.pipeline is GraphPipeline.EVIDENCE
             )
-            raise
-        candidates = cls._deduplicate_chunks(vector_chunks + full_text_chunks)
+            else None
+        )
+        if graph_task is None:
+            try:
+                vector_chunks, full_text_chunks = await asyncio.gather(
+                    vector_task,
+                    full_text_task,
+                )
+            except BaseException:
+                vector_task.cancel()
+                full_text_task.cancel()
+                await asyncio.gather(
+                    vector_task,
+                    full_text_task,
+                    return_exceptions=True,
+                )
+                raise
+            graph_result = KnowledgeRetrievalResult()
+        else:
+            try:
+                vector_chunks, full_text_chunks, graph_result = await asyncio.gather(
+                    vector_task,
+                    full_text_task,
+                    graph_task,
+                )
+            except BaseException:
+                vector_task.cancel()
+                full_text_task.cancel()
+                graph_task.cancel()
+                await asyncio.gather(
+                    vector_task,
+                    full_text_task,
+                    graph_task,
+                    return_exceptions=True,
+                )
+                raise
+        candidates = cls._deduplicate_chunks(
+            vector_chunks + full_text_chunks + graph_result.chunks
+        )
         reranker = request_reranker if use_request_reranker else target.reranker
         local_rerank_started_at = time.perf_counter()
         try:

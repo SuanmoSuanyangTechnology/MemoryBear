@@ -192,20 +192,6 @@ class KnowledgeRetrievalPreparation:
                     params=params,
                 )
             )
-            if cls._should_add_graph_mix_target(ref.knowledge, params):
-                graph_params = cls._copy_retrieval_params(
-                    params,
-                    retrieve_type=RetrieveType.Graph,
-                )
-                targets.append(
-                    await cls._build_retrieval_target_async(
-                        db,
-                        request,
-                        ref,
-                        tenant_id,
-                        params=graph_params,
-                    )
-                )
         return targets, tenant_id
 
     @staticmethod
@@ -320,39 +306,6 @@ class KnowledgeRetrievalPreparation:
                 if retrieve_type == RetrieveType.HYBRID
                 else False
             ),
-        )
-
-    @classmethod
-    def _should_add_graph_mix_target(
-        cls,
-        knowledge: Any,
-        params: RetrievalParams,
-    ) -> bool:
-        if (
-            not params.enable_graph_retrieval
-            or params.retrieve_type != RetrieveType.HYBRID
-            or not is_graph_enabled(knowledge.parser_config)
-        ):
-            return False
-        try:
-            return resolve_graph_pipeline(knowledge.parser_config) is GraphPipeline.EVIDENCE
-        except GraphPipelineConfigError as exc:
-            raise KnowledgeRetrievalConfigError(str(exc)) from exc
-
-    @staticmethod
-    def _copy_retrieval_params(
-        params: RetrievalParams,
-        *,
-        retrieve_type: RetrieveType,
-    ) -> RetrievalParams:
-        return RetrievalParams(
-            similarity_threshold=params.similarity_threshold,
-            vector_similarity_weight=params.vector_similarity_weight,
-            top_k=params.top_k,
-            top_n=params.top_n,
-            retrieve_type=retrieve_type,
-            rerank_score_threshold=params.rerank_score_threshold,
-            enable_graph_retrieval=params.enable_graph_retrieval,
         )
 
     @classmethod
@@ -619,12 +572,18 @@ class KnowledgeRetrievalPreparation:
         targets: list[RetrievalTarget],
         tenant_id: uuid.UUID | None,
     ) -> GraphRetrievalSnapshot | None:
-        graph_targets = [
+        graph_candidates = [
             target
             for target in targets
-            if target.params.retrieve_type == RetrieveType.Graph
+            if (
+                target.params.retrieve_type == RetrieveType.Graph
+                or (
+                    target.params.retrieve_type == RetrieveType.HYBRID
+                    and target.params.enable_graph_retrieval
+                )
+            )
         ]
-        if not graph_targets:
+        if not graph_candidates:
             return None
 
         refs_by_knowledge_id = {
@@ -635,7 +594,7 @@ class KnowledgeRetrievalPreparation:
             tuple[RetrievalTarget, Any, GraphPipeline]
         ] = []
         pipelines: set[GraphPipeline] = set()
-        for target in graph_targets:
+        for target in graph_candidates:
             ref = refs_by_knowledge_id.get(target.knowledge_id)
             if ref is None:
                 raise KnowledgeRetrievalConfigError(
@@ -643,16 +602,25 @@ class KnowledgeRetrievalPreparation:
                 )
             knowledge = ref.knowledge
             if not is_graph_enabled(knowledge.parser_config):
-                raise KnowledgeRetrievalConfigError(
-                    f"knowledge graph is disabled: {knowledge.id}"
-                )
+                if target.params.retrieve_type == RetrieveType.Graph:
+                    raise KnowledgeRetrievalConfigError(
+                        f"knowledge graph is disabled: {knowledge.id}"
+                    )
+                continue
             try:
                 pipeline = resolve_graph_pipeline(knowledge.parser_config)
             except GraphPipelineConfigError as exc:
                 raise KnowledgeRetrievalConfigError(str(exc)) from exc
+            if (
+                target.params.retrieve_type == RetrieveType.HYBRID
+                and pipeline is not GraphPipeline.EVIDENCE
+            ):
+                continue
             pipelines.add(pipeline)
             resolved_targets.append((target, knowledge, pipeline))
 
+        if not resolved_targets:
+            return None
         if len(pipelines) != 1:
             raise KnowledgeRetrievalConfigError(
                 "all graph targets must use the same graph pipeline"
