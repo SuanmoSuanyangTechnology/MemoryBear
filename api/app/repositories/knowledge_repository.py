@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
@@ -624,88 +623,4 @@ def get_non_user_kb_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> 
         return count
     except Exception as e:
         db_logger.error(f"Failed to query non-user KB count: workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-async def get_total_doc_count_async(db: AsyncSession, workspace_id: uuid.UUID) -> int:
-    """Async: get total doc_num sum for a workspace."""
-    try:
-        result = await db.execute(
-            select(func.sum(Knowledge.doc_num)).where(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(f"Failed to get total doc count (async): workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-async def get_total_chunk_count_async(db: AsyncSession, workspace_id: uuid.UUID) -> int:
-    """Async: get total chunk_num sum for a workspace."""
-    try:
-        result = await db.execute(
-            select(func.sum(Knowledge.chunk_num)).where(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(f"Failed to get total chunk count (async): workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-async def get_total_kb_count_async(db: AsyncSession, workspace_id: uuid.UUID) -> int:
-    """Async: get total knowledge base count for a workspace, excluding Memory permission."""
-    try:
-        result = await db.execute(
-            select(func.count(Knowledge.id)).where(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-                Knowledge.permission_id != "Memory",
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(f"Failed to get total KB count (async): workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-async def get_active_top_level_kb_count_async(db: AsyncSession, workspace_id: uuid.UUID) -> int:
-    """Async: get count of active top-level knowledge bases (parent_id == workspace_id)."""
-    try:
-        result = await db.execute(
-            select(func.count(Knowledge.id)).where(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-                Knowledge.parent_id == workspace_id,
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(f"Failed to get active top-level KB count (async): workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-async def get_active_top_level_kb_count_before_date_async(
-    db: AsyncSession, workspace_id: uuid.UUID, before_date: datetime,
-) -> int:
-    """Async: get count of active top-level knowledge bases created before a given date."""
-    try:
-        result = await db.execute(
-            select(func.count(Knowledge.id)).where(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-                Knowledge.parent_id == workspace_id,
-                Knowledge.created_at < before_date,
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(
-            f"Failed to get active top-level KB count before date (async): "
-            f"workspace_id={workspace_id} - {str(e)}"
-        )
         raise
