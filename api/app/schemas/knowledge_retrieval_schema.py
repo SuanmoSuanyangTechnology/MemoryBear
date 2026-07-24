@@ -45,6 +45,19 @@ class KnowledgeRetrievalRequest(BaseModel):
         """Whether hybrid retrieval should add an evidence-graph route."""
         return self.enable_graph_retrieval == 1
 
+    def graph_retrieval_mix_enabled_for(
+        self,
+        config: KnowledgeBaseConfig | None,
+    ) -> bool:
+        """Resolve the hybrid Evidence Graph flag for one knowledge base."""
+        if (
+            config is not None
+            and "enable_graph_retrieval" in config.model_fields_set
+            and config.enable_graph_retrieval is not None
+        ):
+            return config.enable_graph_retrieval == 1
+        return self.graph_retrieval_mix_enabled
+
     @field_validator("query")
     @classmethod
     def validate_query(cls, value: str) -> str:

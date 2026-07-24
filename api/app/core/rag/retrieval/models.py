@@ -158,6 +158,7 @@ class RetrievalParams:
     top_n: int
     retrieve_type: RetrieveType
     rerank_score_threshold: float = 0.1
+    enable_graph_retrieval: bool = False
 
 
 @dataclass(frozen=True)

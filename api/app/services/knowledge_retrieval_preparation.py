@@ -192,7 +192,7 @@ class KnowledgeRetrievalPreparation:
                     params=params,
                 )
             )
-            if cls._should_add_graph_mix_target(request, ref.knowledge, params):
+            if cls._should_add_graph_mix_target(ref.knowledge, params):
                 graph_params = cls._copy_retrieval_params(
                     params,
                     retrieve_type=RetrieveType.Graph,
@@ -315,17 +315,21 @@ class KnowledgeRetrievalPreparation:
             top_n=top_n,
             retrieve_type=retrieve_type,
             rerank_score_threshold=rerank_score_threshold,
+            enable_graph_retrieval=(
+                request.graph_retrieval_mix_enabled_for(config)
+                if retrieve_type == RetrieveType.HYBRID
+                else False
+            ),
         )
 
     @classmethod
     def _should_add_graph_mix_target(
         cls,
-        request: KnowledgeRetrievalRequest,
         knowledge: Any,
         params: RetrievalParams,
     ) -> bool:
         if (
-            not request.graph_retrieval_mix_enabled
+            not params.enable_graph_retrieval
             or params.retrieve_type != RetrieveType.HYBRID
             or not is_graph_enabled(knowledge.parser_config)
         ):
@@ -348,6 +352,7 @@ class KnowledgeRetrievalPreparation:
             top_n=params.top_n,
             retrieve_type=retrieve_type,
             rerank_score_threshold=params.rerank_score_threshold,
+            enable_graph_retrieval=params.enable_graph_retrieval,
         )
 
     @classmethod
