@@ -33,6 +33,17 @@ Redis 查询结果缓存装饰器
     async def expensive_query(user_id):
         ...
 
+    # return_type：指定 Pydantic model，自动序列化并重建对象
+    @redis_cache(ttl=300, prefix="mem_cfg", skip_args=["self"],
+                 return_type=MemoryConfig)
+    async def load_config(self, config_id) -> MemoryConfig:
+        ...
+
+    # 不指定 return_type 时返回普通 dict/list（CacheJSONEncoder 自动处理内部类型）
+    @redis_cache(ttl=300, prefix="auto")
+    async def get_dict(self, ...) -> dict:
+        ...
+
 参数按签名归一化（``sig.bind``）后再计算 key，因此位置传参与关键字传参
 （``f(db, 1)`` 与 ``f(db, user_id=1)``）会命中同一个缓存。
 
@@ -41,20 +52,43 @@ Key 格式：
 - 有 id_arg： ``cache:{prefix}:{id_value}:{qualname}:{args_hash}``
 """
 
-import hashlib
+import asyncio
+import dataclasses
 import inspect
 import json
 import logging
+import threading
 import uuid
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable
 
+import orjson
+import xxhash
+
 from app.aioRedis import get_thread_safe_redis, get_thread_safe_sync_redis
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TTL = 300  # 默认 5 分钟
+DEFAULT_TTL = 300
+
+_in_flight: dict[str, asyncio.Task] = {}
+_in_flight_lock = asyncio.Lock()
+
+_sync_locks: dict[str, threading.Lock] = {}
+_sync_locks_guard = threading.Lock()
+
+
+def _orjson_default(o: Any) -> Any:
+    if hasattr(o, "model_dump"):
+        return o.model_dump(mode="json")
+    if isinstance(o, set):
+        return list(o)
+    if hasattr(o, "to_dict") and callable(o.to_dict):
+        return o.to_dict()
+    if hasattr(o, "dict") and callable(o.dict):
+        return o.dict()
+    raise TypeError(f"Type not serializable: {type(o).__name__}")
 
 
 def _resolve_param_names(
@@ -119,6 +153,7 @@ def redis_cache(
         id_arg: int | str | None = None,
         key_builder: Callable[..., str] | None = None,
         cache_none: bool = False,
+        return_type: type | None = None,
 ) -> Callable:
     """函数返回值 Redis 缓存装饰器，同时支持同步和异步函数。
 
@@ -131,10 +166,14 @@ def redis_cache(
                 可通过 ``invalidate_cache(prefix=f"{prefix}:{value}")`` 精确清除。
         key_builder: 自定义 key 构建函数。
         cache_none: 是否缓存 ``None`` 返回值。
+        return_type: 返回值 Pydantic model 类型。
+                     序列化时自动调 ``model_dump(mode='json')``，
+                     反序列化时自动调 ``model_validate(data)`` 重建对象。
+                     不支持 dataclass（会抛 TypeError）。
+                     未指定时返回 JSON dict/list。
     """
 
     def deco(func: Callable):
-        # 只内省一次签名，装饰期把 skip/id 统一归一化为参数名
         try:
             sig = inspect.signature(func)
         except (ValueError, TypeError):
@@ -144,6 +183,17 @@ def redis_cache(
         _id_name: str | None = None
         if id_arg is not None:
             _id_name = next(iter(_resolve_param_names(func, [id_arg])), None)
+
+        _deserializer = None
+        if return_type is not None:
+            if hasattr(return_type, "model_validate"):
+                def _deserializer(data):
+                    return return_type.model_validate(data)
+            elif dataclasses.is_dataclass(return_type):
+                raise TypeError(
+                    f"return_type={return_type.__name__} is a dataclass, not supported. "
+                    f"Use a Pydantic BaseModel instead."
+                )
 
         def _build_key(fn: Callable, args: tuple, kwargs: dict) -> str:
             if key_builder is not None:
@@ -170,17 +220,15 @@ def redis_cache(
                 raw = _make_hashable(args, kwargs)
 
             payload = json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str)
-            digest = hashlib.md5(payload.encode()).hexdigest()[:12]
-            qualname = getattr(fn, "__qualname__", fn.__name__)
+            digest = xxhash.xxh64(payload.encode()).hexdigest()
             if id_value is not None:
-                return f"cache:{prefix}:{id_value}:{qualname}:{digest}"
-            return f"cache:{prefix}:{qualname}:{digest}"
+                return f"cache:{prefix}:{id_value}:{fn.__qualname__}:{digest}"
+            return f"cache:{prefix}:{fn.__qualname__}:{digest}"
 
         async def _cache_read_write(cache_key: str, compute):
             """共享的缓存读取→回退计算→写入逻辑（异步）。"""
             redis = get_thread_safe_redis()
 
-            # 尝试读取缓存
             try:
                 cached = await redis.get(cache_key)
             except Exception:
@@ -189,23 +237,37 @@ def redis_cache(
 
             if cached is not None:
                 try:
-                    result = json.loads(cached)
+                    result = orjson.loads(cached)
+                    if _deserializer is not None:
+                        result = _deserializer(result)
                     logger.debug("Cache HIT: %s", cache_key)
                     return result
-                except json.JSONDecodeError:
+                except (orjson.JSONDecodeError, TypeError, ValueError):
                     logger.warning(
                         "Corrupted cache data for key=%s, will recompute", cache_key,
                     )
 
-            # 缓存未命中，执行原函数
-            result = await compute()
+            async with _in_flight_lock:
+                task = _in_flight.get(cache_key)
+                if task is None or task.done():
+                    task = asyncio.create_task(compute())
+                    _in_flight[cache_key] = task
 
-            # 决定是否写入缓存
+            try:
+                if task.done():
+                    result = task.result()
+                else:
+                    result = await task
+            finally:
+                async with _in_flight_lock:
+                    if _in_flight.get(cache_key) is task:
+                        del _in_flight[cache_key]
+
             if result is None and not cache_none:
                 return None
 
             try:
-                value = json.dumps(result, ensure_ascii=False, default=str)
+                value = orjson.dumps(result, default=_orjson_default)
                 await redis.set(cache_key, value, ex=ttl)
                 logger.debug("Cache SET: %s (ttl=%ds)", cache_key, ttl)
             except Exception:
@@ -236,35 +298,51 @@ def redis_cache(
                 cache_key = _build_key(func, args, kwargs)
                 redis = get_thread_safe_sync_redis()
 
-                # 读取缓存
-                try:
-                    cached = redis.get(cache_key)
-                except Exception:
-                    logger.warning("Redis GET failed for key=%s", cache_key, exc_info=True)
-                    cached = None
-
-                if cached is not None:
+                def _try_read_cache():
                     try:
-                        result = json.loads(cached)
+                        cached = redis.get(cache_key)
+                        if cached is None:
+                            return None
+                        result = orjson.loads(cached)
+                        if _deserializer is not None:
+                            result = _deserializer(result)
                         logger.debug("Cache HIT: %s", cache_key)
                         return result
-                    except json.JSONDecodeError:
+                    except (orjson.JSONDecodeError, TypeError, ValueError):
                         logger.warning(
                             "Corrupted cache data for key=%s, will recompute", cache_key,
                         )
+                        return None
+                    except Exception:
+                        logger.warning("Redis GET failed for key=%s", cache_key, exc_info=True)
+                        return None
 
-                # 缓存未命中
-                result = func(*args, **kwargs)
+                result = _try_read_cache()
+                if result is not None:
+                    return result
 
-                if result is None and not cache_none:
-                    return None
+                with _sync_locks_guard:
+                    key_lock = _sync_locks.get(cache_key)
+                    if key_lock is None:
+                        key_lock = threading.Lock()
+                        _sync_locks[cache_key] = key_lock
 
-                try:
-                    value = json.dumps(result, ensure_ascii=False, default=str)
-                    redis.set(cache_key, value, ex=ttl)
-                    logger.debug("Cache SET: %s (ttl=%ds)", cache_key, ttl)
-                except Exception:
-                    logger.warning("Redis SET failed for key=%s", cache_key, exc_info=True)
+                with key_lock:
+                    result = _try_read_cache()
+                    if result is not None:
+                        return result
+
+                    result = func(*args, **kwargs)
+
+                    if result is None and not cache_none:
+                        return None
+
+                    try:
+                        value = orjson.dumps(result, default=_orjson_default)
+                        redis.set(cache_key, value, ex=ttl)
+                        logger.debug("Cache SET: %s (ttl=%ds)", cache_key, ttl)
+                    except Exception:
+                        logger.warning("Redis SET failed for key=%s", cache_key, exc_info=True)
 
                 return result
 
@@ -281,6 +359,7 @@ async def invalidate_cache(
         *,
         prefix: str | None = None,
         pattern: str | None = None,
+        batch_size: int = 1000,
 ) -> int:
     """主动删除缓存。
 
@@ -290,12 +369,21 @@ async def invalidate_cache(
         await invalidate_cache(prefix="user")           # 删除 cache:user:* 开头的所有 key
         await invalidate_cache(pattern="cache:user:*")  # 自定义 glob 模式
 
+    Args:
+        key: 精确删除单个 key。
+        prefix: 删除 ``cache:{prefix}:*`` 开头的所有 key。
+        pattern: 自定义 glob 匹配模式。
+        batch_size: 每批最多删除的 key 数量，避免大规模删除阻塞 Redis。默认 1000。
+
     Returns:
         已删除的 key 数量。
 
     Raises:
-        ValueError: 未提供任何匹配条件。
+        ValueError: 未提供任何匹配条件，或 batch_size <= 0。
     """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+
     redis = get_thread_safe_redis()
 
     if key is not None:
@@ -305,14 +393,18 @@ async def invalidate_cache(
     if search is None:
         raise ValueError("Provide key=, prefix=, or pattern=")
 
+    scan_hint = max(1, min(batch_size, 500))
     deleted = 0
     cursor = 0
     while True:
-        cursor, keys = await redis.scan(cursor, match=search, count=500)
+        cursor, keys = await redis.scan(cursor, match=search, count=scan_hint)
         if keys:
-            deleted += await redis.unlink(*keys)
+            for i in range(0, len(keys), batch_size):
+                chunk = keys[i:i + batch_size]
+                deleted += await redis.unlink(*chunk)
         if cursor == 0:
             break
 
-    logger.info("Invalidated %d cache keys matching '%s'", deleted, search)
+    if deleted:
+        logger.info("Invalidated %d cache keys matching '%s'", deleted, search)
     return deleted

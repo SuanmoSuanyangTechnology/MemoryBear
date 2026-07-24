@@ -2,29 +2,34 @@
 会话和消息模型
 """
 import uuid
-import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Integer, Text, JSON, BigInteger, UniqueConstraint
+from sqlalchemy import (
+    Column, String, DateTime, ForeignKey, Boolean, Integer,
+    Text, JSON, BigInteger, UniqueConstraint, Index
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class Conversation(Base):
     """会话表
-    
+
     会话类型说明：
     - 草稿会话 (is_draft=True): 使用应用的当前草稿配置，用于开发和测试
     - 发布会话 (is_draft=False): 使用应用的当前发布版本配置，用于生产环境
-    
+
     工作空间隔离：
     - 每个会话属于一个工作空间（workspace_id）
     - 同一个应用在不同工作空间有独立的会话记录
     - 支持应用分享后的会话隔离
     """
     __tablename__ = "conversations"
+    __table_args__ = (
+        Index("idx_conversations_user_updated", "user_id", "updated_at"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
@@ -47,7 +52,8 @@ class Conversation(Base):
     message_count = Column(Integer, default=0, comment="消息数量")
 
     # 滑动窗口写入游标：最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进
-    write_cursor = Column(Integer, nullable=False, default=0, server_default="0", comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
+    write_cursor = Column(Integer, nullable=False, default=0, server_default="0",
+                          comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
 
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否活跃")

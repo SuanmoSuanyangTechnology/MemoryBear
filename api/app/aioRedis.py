@@ -20,7 +20,7 @@ pool = ConnectionPool.from_url(
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD,
     decode_responses=True,
-    max_connections=30
+    max_connections=settings.REDIS_POOL_SIZE
 )
 aio_redis = redis.StrictRedis(connection_pool=pool)
 
@@ -72,7 +72,7 @@ def get_thread_safe_redis() -> redis.StrictRedis:
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
             decode_responses=True,
-            max_connections=5,
+            max_connections=settings.REDIS_POOL_SIZE,
             health_check_interval=30,
         )
 
@@ -100,7 +100,7 @@ def get_thread_safe_sync_redis() -> sync_redis.StrictRedis:
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
             decode_responses=True,
-            max_connections=5,
+            max_connections=settings.REDIS_POOL_SIZE,
             health_check_interval=30,
         )
 
