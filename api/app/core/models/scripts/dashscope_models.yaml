@@ -1092,3 +1092,222 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
+- name: qwen3.7-max
+  type: llm
+  provider: dashscope
+  description: Qwen3.7系列中规模最大、综合能力最强的Max模型，支持深度思考、Function Calling与联网搜索，适用于编程、办公生产力和长周期自主执行任务
+  is_deprecated: false
+  is_official: true
+  capability:
+  - thinking
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - agent-thought
+  logo: dashscope
+- name: qwen3.7-plus
+  type: chat
+  provider: dashscope
+  description: Qwen3.7系列高性价比Plus模型，支持文本、图片和视频理解、深度思考、Function Calling、结构化输出与联网搜索，适用于编程、工具使用、生产力工作流和GUI操作
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.6-flash
+  type: chat
+  provider: dashscope
+  description: Qwen3.6原生视觉语言系列Flash模型，相较Qwen3.5-Flash显著提升Agentic Coding、数学与代码推理能力，并增强空间智能、物体定位和目标检测能力
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.6-plus
+  type: chat
+  provider: dashscope
+  description: Qwen3.6原生视觉语言系列Plus模型，支持文本、图片和视频理解、深度思考、Function Calling、结构化输出与联网搜索，提供1M上下文窗口
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: deepseek-v4-pro
+  type: llm
+  provider: dashscope
+  description: DeepSeek V4旗舰级MoE大模型，总参数1.6T、激活参数49B，原生支持百万级超长上下文，擅长数学逻辑、复杂推理、专业代码和长文本深度解析，适用于高阶科研、复杂办公及深度智能代理等高难度场景
+  is_deprecated: false
+  is_official: true
+  capability:
+  - thinking
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - agent-thought
+  logo: dashscope
+- name: deepseek-v4-flash
+  type: llm
+  provider: dashscope
+  description: DeepSeek V4高效率轻量化MoE模型，总参数284B、激活参数13B，原生支持百万级超长上下文，推理速度快、延迟低且调用成本低，适用于日常对话、内容创作、基础RAG和批量文案处理等高并发轻量化任务
+  is_deprecated: false
+  is_official: true
+  capability:
+  - thinking
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - agent-thought
+  logo: dashscope
+- name: glm-5.2
+  type: llm
+  provider: dashscope
+  description: GLM-5.2是面向长程任务设计的新旗舰模型，支持1M超长上下文，具备强大逻辑推理、长文本理解与代码生成能力，在多任务基准中表现优秀，适用于智能交互、企业应用和开发辅助等场景
+  is_deprecated: false
+  is_official: true
+  capability:
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - agent-thought
+  logo: dashscope
+- name: qwen3.5-plus
+  type: chat
+  provider: dashscope
+  description: Qwen3.5系列Plus模型，原生支持文本、图片和视频理解，提供1M上下文窗口，支持深度思考、Function Calling、内置工具和结构化输出
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.5-flash
+  type: chat
+  provider: dashscope
+  description: Qwen3.5系列高性价比Flash模型，原生支持文本、图片和视频理解，提供1M上下文窗口，支持深度思考、Function Calling、内置工具和结构化输出
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.5-397b-a17b
+  type: chat
+  provider: dashscope
+  description: Qwen3.5系列397B总参数、17B激活参数的MoE模型，原生支持文本、图片和视频理解，提供256K上下文窗口，支持深度思考、Function Calling、内置工具和结构化输出
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.5-122b-a10b
+  type: chat
+  provider: dashscope
+  description: Qwen3.5系列122B总参数、10B激活参数的MoE模型，原生支持文本、图片和视频理解，提供256K上下文窗口，支持深度思考、Function Calling、内置工具和结构化输出
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.5-27b
+  type: chat
+  provider: dashscope
+  description: Qwen3.5系列27B参数模型，原生支持文本、图片和视频理解，提供256K上下文窗口，支持深度思考、Function Calling、内置工具和结构化输出
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
+- name: qwen3.5-35b-a3b
+  type: chat
+  provider: dashscope
+  description: Qwen3.5系列35B总参数、3B激活参数的MoE模型，原生支持文本、图片和视频理解，提供256K上下文窗口，支持深度思考、Function Calling、内置工具和结构化输出
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态
+  - agent-thought
+  logo: dashscope
