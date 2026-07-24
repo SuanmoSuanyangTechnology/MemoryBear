@@ -1,6 +1,4 @@
 import uuid
-from datetime import datetime
-from typing import List
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -273,64 +271,4 @@ async def delete_document_by_id_async(db: AsyncSession, document_id: uuid.UUID):
     except Exception as e:
         db_logger.error(f"Failed to delete document record (async): document_id={document_id} - {str(e)}")
         await db.rollback()
-        raise
-
-
-async def get_total_chunk_by_file_names_async(db: AsyncSession, file_names: List[str]) -> int:
-    """Async: get total chunk_num sum for given file names."""
-    try:
-        result = await db.execute(
-            select(func.sum(Document.chunk_num)).where(
-                Document.file_name.in_(file_names),
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(f"Failed to get total chunk by file names (async): count={len(file_names)} - {str(e)}")
-        raise
-
-
-async def get_total_chunk_by_file_names_before_date_async(
-    db: AsyncSession, file_names: List[str], before_date: datetime,
-) -> int:
-    """Async: get total chunk_num sum for given file names created before a date."""
-    try:
-        result = await db.execute(
-            select(func.sum(Document.chunk_num)).where(
-                Document.file_name.in_(file_names),
-                Document.created_at < before_date,
-            )
-        )
-        return int(result.scalar() or 0)
-    except Exception as e:
-        db_logger.error(
-            f"Failed to get total chunk by file names before date (async): "
-            f"count={len(file_names)} - {str(e)}"
-        )
-        raise
-
-
-async def get_documents_by_file_name_async(db: AsyncSession, file_name: str) -> List[Document]:
-    """Async: get all documents with a given file name."""
-    try:
-        result = await db.execute(
-            select(Document).where(Document.file_name == file_name)
-        )
-        return list(result.scalars().all())
-    except Exception as e:
-        db_logger.error(f"Failed to get documents by file name (async): file_name={file_name} - {str(e)}")
-        raise
-
-
-async def get_users_total_chunk_batch_async(db: AsyncSession, file_names: List[str]) -> dict:
-    """Async: get total chunk_num grouped by file_name for given file names."""
-    try:
-        result = await db.execute(
-            select(Document.file_name, func.sum(Document.chunk_num))
-            .where(Document.file_name.in_(file_names))
-            .group_by(Document.file_name)
-        )
-        return {file_name: int(total_chunk) for file_name, total_chunk in result.all()}
-    except Exception as e:
-        db_logger.error(f"Failed to get users total chunk batch (async): count={len(file_names)} - {str(e)}")
         raise

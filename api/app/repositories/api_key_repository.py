@@ -15,9 +15,6 @@ from app.schemas import api_key_schema
 class ApiKeyRepository:
     """API Key 数据访问层"""
 
-    def __init__(self, db: Session | AsyncSession):
-        self.db = db
-
     @staticmethod
     def create(db: Session, api_key_data: dict) -> ApiKey:
         """创建 API Key"""
@@ -31,10 +28,11 @@ class ApiKeyRepository:
         """根据 ID 获取 API Key"""
         return db.get(ApiKey, api_key_id)
 
-    async def get_by_id_async(self, api_key_id: uuid.UUID) -> Optional[ApiKey]:
+    @staticmethod
+    async def get_by_id_async(db: AsyncSession, api_key_id: uuid.UUID) -> Optional[ApiKey]:
         """Async version of get_by_id with creator eager-loaded."""
         stmt = select(ApiKey).options(joinedload(ApiKey.creator)).where(ApiKey.id == api_key_id)
-        result = await self.db.execute(stmt)
+        result = await db.execute(stmt)
         return result.scalars().first()
 
     @staticmethod
@@ -43,10 +41,11 @@ class ApiKeyRepository:
         stmt = select(ApiKey).where(ApiKey.api_key == api_key)
         return db.scalars(stmt).first()
 
-    async def get_by_api_key_async(self, api_key: str) -> Optional[ApiKey]:
+    @staticmethod
+    async def get_by_api_key_async(db: AsyncSession, api_key: str) -> Optional[ApiKey]:
         """Async version of get_by_api_key."""
         stmt = select(ApiKey).where(ApiKey.api_key == api_key)
-        result = await self.db.execute(stmt)
+        result = await db.execute(stmt)
         return result.scalars().first()
 
     @staticmethod
@@ -114,14 +113,15 @@ class ApiKeyRepository:
             return True
         return False
 
-    async def update_usage_async(self, api_key_id: uuid.UUID) -> bool:
+    @staticmethod
+    async def update_usage_async(db: AsyncSession, api_key_id: uuid.UUID) -> bool:
         """Async version of update_usage."""
-        api_key = await self.db.get(ApiKey, api_key_id)
+        api_key = await db.get(ApiKey, api_key_id)
         if api_key:
             api_key.usage_count += 1
             api_key.quota_used += 1
             api_key.last_used_at = utcnow_naive()
-            await self.db.flush()
+            await db.flush()
             return True
         return False
 
@@ -157,27 +157,6 @@ class ApiKeyRepository:
             "rate_limit": api_key.rate_limit,
             "avg_response_time": float(avg_response_time) if avg_response_time else None
         }
-
-
-    async def get_ids_by_workspace_async(self, workspace_id: uuid.UUID) -> List:
-        """获取工作空间下所有 API Key 的 ID 列表"""
-        from app.models.api_key_model import ApiKey
-        stmt = select(ApiKey.id).where(ApiKey.workspace_id == workspace_id)
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())
-
-    async def count_logs_by_key_ids_async(
-        self, api_key_ids: List, before_date: Optional[datetime.datetime] = None
-    ) -> int:
-        """统计指定 API Key ID 列表的日志数量"""
-        from app.models.api_key_model import ApiKeyLog
-        stmt = select(func.count(ApiKeyLog.id)).where(
-            ApiKeyLog.api_key_id.in_(api_key_ids)
-        )
-        if before_date is not None:
-            stmt = stmt.where(ApiKeyLog.created_at < before_date)
-        result = await self.db.execute(stmt)
-        return result.scalar() or 0
 
 
 class ApiKeyLogRepository:
