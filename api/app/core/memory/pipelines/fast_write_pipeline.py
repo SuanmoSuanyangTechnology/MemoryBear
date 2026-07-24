@@ -55,6 +55,8 @@ class FastWritePipeline:
     # Embedding 单步硬上限（秒）。底层 LangChain client 自带 max_retries * timeout，
     # 导致 worker 被 SIGKILL 而非降级。此处用 asyncio.wait_for 兜底，超时即降级为 None。
     EMBED_TIMEOUT_SEC = 15
+    # BERT 情绪单步硬上限（秒），超时即降级为 None，不重试。
+    EMOTION_TIMEOUT_SEC = 2
 
     def __init__(self, memory_config: "MemoryConfig", end_user_id: str, language: str = "zh"):
         self.memory_config = memory_config
@@ -107,10 +109,16 @@ class FastWritePipeline:
                 if drop_reason:
                     return {"status": "dropped", "reason": drop_reason, "dialog_id": None}
 
-                # Step 2/3 — Embedding（失败降级为 None，不重试）
-                async with bear.step(2, 3, "Embedding", "向量化") as s:
-                    embedding = await self._embed(cleaned)
-                    s.metadata(has_embedding=embedding is not None)
+                # Step 2/3 — Embedding + BERT 情绪（并行，各自内部降级为 None，不重试）
+                async with bear.step(2, 3, "并行处理", "Embedding + 情绪") as s:
+                    embedding, emotion_result = await asyncio.gather(
+                        self._embed(cleaned),
+                        self._extract_emotion(cleaned),
+                    )
+                    s.metadata(
+                        has_embedding=embedding is not None,
+                        has_emotion=emotion_result is not None,
+                    )
 
                 # 时间来源降级：dialog_at → dispatch_at → 当前时间（ensure_dialog_at 兜底）
                 created_at = as_utc_aware(
@@ -128,6 +136,7 @@ class FastWritePipeline:
                         message_seq=message_seq,
                         source=source,
                         created_at=created_at,
+                        emotion_result=emotion_result,
                     )
                     dialog_id = await self._persist(node)
                     s.metadata(dialog_id=dialog_id)
@@ -224,6 +233,49 @@ class FastWritePipeline:
             )
             return None
 
+    async def _extract_emotion(self, text: str):
+        """Step 2 并行分支 — 调用已部署 BERT /v1/rerank 获取 top 情绪。
+
+        - text 为空、或未配置（URL/API_KEY/MODEL 任一缺失）→ 直接返回 None，不发请求、不空等超时。
+        - 已配置时才调用；硬超时 EMOTION_TIMEOUT_SEC，超时/异常一律降级为 None，不重试。
+        - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
+          与服务失败(emotion=None)必须可区分。
+        """
+        if not text:
+            return None
+        # 未配置（URL / API_KEY / MODEL 任一缺失）直接跳过，不发请求、不空等超时
+        from app.core.config import settings
+        if (
+            not settings.FAST_WRITE_EMOTION_URL
+            or not settings.FAST_WRITE_EMOTION_API_KEY
+            or not settings.FAST_WRITE_EMOTION_MODEL
+        ):
+            return None
+        try:
+            from app.services.fast_write_emotion_client import predict as _predict_emotion
+            return await asyncio.wait_for(
+                _predict_emotion(text),
+                timeout=self.EMOTION_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[FastWrite] emotion timed out, degrading to None: text_len=%s, "
+                "timeout=%ss, end_user_id=%s",
+                len(text),
+                self.EMOTION_TIMEOUT_SEC,
+                self.end_user_id,
+            )
+            return None
+        except Exception as e:
+            logger.warning(
+                "[FastWrite] emotion failed, degrading to None: text_len=%s, "
+                "end_user_id=%s, error=%s",
+                len(text),
+                self.end_user_id,
+                e,
+            )
+            return None
+
     def _build_dialogue_node(
         self,
         content: str,
@@ -232,6 +284,7 @@ class FastWritePipeline:
         message_seq: int,
         source: str,
         created_at: "datetime",
+        emotion_result=None,
     ) -> DialogueNode:
         """Step 3 — 构造 DialogueNode。
 
@@ -242,7 +295,8 @@ class FastWritePipeline:
         - config_id 取自 memory_config.config_id（UUID → str）。
         - created_at 为消息真实发生时间（dialog_at → dispatch_at → 当前时间降级结果），
           不再使用 worker 执行时刻，保证可回溯。
-        - 固定属性：write_mode="fast"、emotion=None。
+        - 固定属性：write_mode="fast"。
+        - emotion/emotion_score 来自并行 BERT 分支（emotion_result）；失败/超时时为 None。
         """
         dialog_id = build_dialogue_id(
             conversation_id, message_seq, source, self.end_user_id
@@ -258,7 +312,8 @@ class FastWritePipeline:
             dialog_embedding=embedding,
             config_id=str(self.memory_config.config_id),
             write_mode="fast",
-            emotion=None,
+            emotion=emotion_result.emotion if emotion_result else None,
+            emotion_score=emotion_result.emotion_score if emotion_result else None,
         )
 
     async def _persist(self, dialog_node: DialogueNode) -> str:

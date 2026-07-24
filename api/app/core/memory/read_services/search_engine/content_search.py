@@ -179,29 +179,37 @@ class Neo4jSearchService:
             self.connector = connector
             kw_results = await self._keyword_search(query, limit)
 
-        if isinstance(kw_results, Exception):
-            logger.warning(f"[MemorySearch] keyword search error: {kw_results}")
-            kw_results = {}
+        all_records = []
+        for node_type in self.includes:
+            for record in kw_results.get(node_type, []):
+                record["_node_type"] = node_type
+                all_records.append(record)
+
+        if not all_records:
+            return MemorySearchResult(memories=[])
+
+        all_records = self._normalize_kw_scores(all_records)
+
+        for r in all_records:
+            cs = float(r.get("normalized_kw_score", 0))
+            r["content_score"] = cs
+            r["score"] = cs
+
+        all_records.sort(key=lambda x: x["score"], reverse=True)
 
         memories = []
-        for node_type in self.includes:
-            records = kw_results.get(node_type, [])
-            records = self._normalize_kw_scores(records)
-            for record in records:
-                record["content_score"] = float(record.get("normalized_kw_score", 0))
-            records.sort(key=lambda x: x["content_score"], reverse=True)
-            for record in records[:limit]:
-                memory = data_builder_factory(node_type, record)
-                memories.append(Memory(
-                    score=memory.score,
-                    content=memory.content,
-                    data=memory.data,
-                    source=node_type,
-                    query=query,
-                    id=memory.id
-                ))
-        memories.sort(key=lambda x: x.score, reverse=True)
-        return MemorySearchResult(memories=memories[:limit])
+        for record in all_records[:limit]:
+            node_type = record.pop("_node_type")
+            memory = data_builder_factory(node_type, record)
+            memories.append(Memory(
+                score=memory.score,
+                content=memory.content,
+                data=memory.data,
+                source=node_type,
+                query=query,
+                id=memory.id
+            ))
+        return MemorySearchResult(memories=memories)
 
     async def hybrid_search(
             self,
