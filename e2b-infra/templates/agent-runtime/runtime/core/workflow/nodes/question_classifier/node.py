@@ -1,0 +1,245 @@
+import logging
+from typing import Any
+
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
+from app.core.workflow.variable.base_variable import VariableType
+from app.db import get_db_read
+from app.models import ModelType
+from app.schemas.model_schema import ModelInfo
+from app.services.model_service import ModelConfigService
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_CASE_PREFIX = "CASE"
+DEFAULT_EMPTY_QUESTION_CASE = f"{DEFAULT_CASE_PREFIX}1"
+
+
+class QuestionClassifierNode(BaseNode):
+    """问题分类器节点"""
+
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
+        self.typed_config: QuestionClassifierNodeConfig | None = None
+        self.category_to_case_map = {}
+        self.response_metadata = {}
+        self._last_messages: list = []
+        self._classification_result: str = ""
+
+    def _get_typed_config(self) -> QuestionClassifierNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = QuestionClassifierNodeConfig(**self.config)
+        return self.typed_config
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {
+            "messages": self._last_messages,
+            "classification_result": self._classification_result,
+            "model_id": str(self._get_typed_config().model_id),
+        }}
+
+    def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
+        if self.response_metadata:
+            usage = self.response_metadata.get('token_usage')
+            if usage:
+                return {
+                    "prompt_tokens": usage.get('input_tokens', 0),
+                    "completion_tokens": usage.get('output_tokens', 0),
+                    "total_tokens": usage.get('total_tokens', 0)
+                }
+        return None
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "class_name": VariableType.STRING,
+            "output": VariableType.STRING
+        }
+
+    def _get_llm_instance(self, variable_pool: VariablePool) -> RedBearLLM:
+        """获取LLM实例"""
+        with get_db_read() as db:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
+
+            if not config:
+                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
+
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
+            model_name = api_config.model_name
+            provider = api_config.provider
+            api_key = api_config.api_key
+            base_url = api_config.api_base
+            is_omni = api_config.is_omni
+            capability = api_config.capability
+            model_type = config.type
+
+        return RedBearLLM(
+            RedBearModelConfig(
+                model_name=model_name,
+                provider=provider,
+                api_key=api_key,
+                base_url=base_url,
+                is_omni=is_omni
+            ),
+            type=ModelType(model_type)
+        )
+
+    def _build_category_case_map(self) -> dict[str, str]:
+        """
+        预构建 分类名称 -> CASE标识 的映射字典
+        示例：{"产品咨询": "CASE1", "售后问题": "CASE2"}
+        """
+        category_map = {}
+        categories = self.typed_config.categories or []
+        for idx, class_item in enumerate(categories, start=1):
+            category_name = class_item.class_name.strip()
+            case_tag = f"{DEFAULT_CASE_PREFIX}{idx}"
+            category_map[category_name] = case_tag
+        return category_map
+
+    def _get_model_info(self, variable_pool: VariablePool) -> ModelInfo:
+        """获取模型信息（用于视觉处理）"""
+        with get_db_read() as db:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
+            if not config:
+                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
+            
+            api_config = self.get_runtime_api_config(db, config, variable_pool)
+            return ModelInfo(
+                model_name=api_config.model_name,
+                model_type=ModelType(config.type),
+                api_key=api_config.api_key,
+                api_base=api_config.api_base,
+                provider=api_config.provider,
+                is_omni=api_config.is_omni,
+                capability=api_config.capability
+            )
+
+    async def _build_vision_message(
+        self, 
+        model_info: ModelInfo, 
+        user_prompt: str, 
+        variable_pool: VariablePool
+    ) -> str | list:
+        """构建视觉消息
+        
+        如果启用视觉且配置了视觉输入变量，将文件与文本组合成多模态消息。
+        否则返回纯文本消息。
+        """
+        if not self.typed_config.vision or not self.typed_config.vision_input:
+            return user_prompt
+        
+        try:
+            files_variable = variable_pool.get_instance(self.typed_config.vision_input)
+            if not files_variable or not files_variable.value:
+                return user_prompt
+        except Exception:
+            logger.warning(f"节点 {self.node_id} 获取视觉变量失败: {self.typed_config.vision_input}")
+            return user_prompt
+        
+        content = [{"type": "text", "text": user_prompt}]
+        
+        for file in files_variable.value:
+            file_content = await self.process_message(model_info, file.value, self.typed_config.vision)
+            if file_content:
+                if isinstance(file_content, list):
+                    content.extend(file_content)
+                else:
+                    content.append(file_content)
+        
+        return content
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict:
+        """执行问题分类"""
+        self.typed_config = self._get_typed_config()
+        self.category_to_case_map = self._build_category_case_map()
+        question = self.typed_config.input_variable
+        supplement_prompt = self.typed_config.user_supplement_prompt or ""
+        categories = self.typed_config.categories or []
+        category_names = [class_item.class_name.strip() for class_item in categories]
+        category_count = len(category_names)
+
+        if not question:
+            logger.warning(
+                f"节点 {self.node_id} 未获取到输入问题，使用默认分支"
+                f"(默认分支:{DEFAULT_EMPTY_QUESTION_CASE}"
+                f"分类总数: {category_count})"
+            )
+            # 若分类列表为空，返回默认unknown分支，否则返回CASE1
+            if category_count > 0:
+                return {
+                    "class_name": category_names[0],
+                    "output": DEFAULT_EMPTY_QUESTION_CASE
+                }
+            return {
+                "class_name": "unknown",
+                "output": DEFAULT_EMPTY_QUESTION_CASE
+            }
+
+        try:
+            llm = self._get_llm_instance(variable_pool)
+            model_info = self._get_model_info(variable_pool)
+
+            # 渲染用户提示词模板，支持工作流变量
+            user_prompt = self._render_template(
+                self.typed_config.user_prompt.format(
+                    question=question,
+                    categories=", ".join(category_names),
+                    supplement_prompt=supplement_prompt
+                ),
+                variable_pool
+            )
+
+            # 构建视觉消息
+            user_content = await self._build_vision_message(
+                model_info, 
+                user_prompt, 
+                variable_pool
+            )
+
+            messages = [
+                ("system", self.typed_config.system_prompt),
+                ("user", user_content),
+            ]
+            self._last_messages = [{"role": r, "content": c} for r, c in messages]
+
+            response = await llm.ainvoke(messages)
+            result = self.process_model_output(response.content)
+            self._classification_result = result
+            self.response_metadata = {
+                **response.response_metadata,
+                "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
+            }
+
+            if result in category_names:
+                category = result
+            else:
+                logger.warning(f"LLM返回了未知类别: {result}")
+                category = category_names[0] if category_names else "unknown"
+
+            log_supplement = supplement_prompt if supplement_prompt else "无"
+            logger.info(f"节点 {self.node_id} 分类结果: {category}, 用户补充提示词：{log_supplement}")
+
+            return {
+                "class_name": category,
+                "output": f"CASE{category_names.index(category) + 1}",
+            }
+        except Exception as e:
+            logger.error(
+                f"节点 {self.node_id} 分类执行异常：{str(e)}",
+                exc_info=True  # 打印堆栈信息，便于调试
+            )
+            # 异常时返回默认分支，保证工作流容错性
+            if category_count > 0:
+                return {
+                    "class_name": category_names[0],
+                    "output": DEFAULT_EMPTY_QUESTION_CASE
+                }
+            return {
+                "class_name": "unknown",
+                "output": DEFAULT_EMPTY_QUESTION_CASE
+            }
