@@ -970,17 +970,17 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
 
     api_ops_limit = quota_config.get("api_ops_rate_limit")
     return {
-        "workspace": {
+        "workspace_quota": {
             "used": workspace_count,
             "limit": quota_config.get("workspace_quota"),
             "percentage": pct(workspace_count, quota_config.get("workspace_quota")),
         },
-        "skill": {
+        "skill_quota": {
             "used": skill_count,
             "limit": quota_config.get("skill_quota"),
             "percentage": pct(skill_count, quota_config.get("skill_quota")),
         },
-        "app": {
+        "app_quota": {
             "used": app_count,
             "limit": app_effective_limit,
             "percentage": pct(app_count, app_effective_limit),
@@ -988,7 +988,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
                 repo.count_apps, app_quota_per_workspace
             ),
         },
-        "knowledge_capacity": {
+        "knowledge_capacity_quota": {
             "used": round(knowledge_gb, 2),
             "limit": knowledge_effective_limit,
             "percentage": pct(knowledge_gb, knowledge_effective_limit),
@@ -997,7 +997,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
                 repo.sum_knowledge_capacity_gb, knowledge_quota_per_workspace
             ),
         },
-        "memory_engine": {
+        "memory_engine_quota": {
             "used": memory_count,
             "limit": memory_effective_limit,
             "percentage": pct(memory_count, memory_effective_limit),
@@ -1005,7 +1005,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
                 repo.count_memory_engines, memory_quota_per_workspace
             ),
         },
-        "end_user": {
+        "end_user_quota": {
             "used": end_user_count,
             "limit": end_user_effective_limit,
             "percentage": pct(end_user_count, end_user_effective_limit),
@@ -1013,7 +1013,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
                 repo.count_end_users, end_user_quota_per_workspace
             ),
         },
-        "ontology_project": {
+        "ontology_project_quota": {
             "used": ontology_count,
             "limit": ontology_effective_limit,
             "percentage": pct(ontology_count, ontology_effective_limit),
@@ -1021,7 +1021,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
                 repo.count_ontology_projects, ontology_quota_per_workspace
             ),
         },
-        "model": {
+        "model_quota": {
             "used": model_count,
             "limit": quota_config.get("model_quota"),
             "percentage": pct(model_count, quota_config.get("model_quota")),
