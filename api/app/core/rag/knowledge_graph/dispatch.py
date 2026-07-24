@@ -72,6 +72,52 @@ def dispatch_document_graph_sync(
     return task
 
 
+async def enqueue_document_graph_sync(
+    knowledge_id: str,
+    document_id: str,
+    parser_config: Mapping[str, Any] | None,
+    *,
+    dispatch_legacy: bool = True,
+) -> str | None:
+    if not is_graph_enabled(parser_config):
+        return None
+
+    pipeline = resolve_graph_pipeline(parser_config)
+    if pipeline is GraphPipeline.LEGACY:
+        if not dispatch_legacy:
+            return None
+        task_name = "app.core.rag.tasks.build_graphrag_for_document"
+        params = {
+            "document_id": str(document_id),
+            "knowledge_id": str(knowledge_id),
+        }
+    else:
+        task_name = "app.core.rag.tasks.sync_evidence_graph_document"
+        params = {
+            "knowledge_id": str(knowledge_id),
+            "document_id": str(document_id),
+        }
+
+    from app.celery_task_scheduler import scheduler as celery_scheduler
+
+    msg_id = await celery_scheduler.push_task(
+        task_name,
+        str(knowledge_id),
+        params,
+    )
+    logger.info(
+        "[GraphPipeline] task_persisted"
+        " scope=document pipeline=%s task=%s kb_id=%s"
+        " document_id=%s msg_id=%s",
+        pipeline.value,
+        task_name,
+        str(knowledge_id),
+        str(document_id),
+        str(msg_id),
+    )
+    return str(msg_id)
+
+
 def dispatch_knowledge_graph_rebuild(
     knowledge_id: str,
     parser_config: Mapping[str, Any] | None,
