@@ -114,16 +114,14 @@ class KnowledgeRetrievalPreparation:
             targets,
             tenant_id,
         )
-        evidence_graph_only = (
+        single_evidence_graph_target = (
             graph is not None
             and graph.pipeline is GraphPipeline.EVIDENCE
-            and all(
-                target.params.retrieve_type == RetrieveType.Graph
-                for target in targets
-            )
+            and len(targets) == 1
+            and targets[0].params.retrieve_type == RetrieveType.Graph
         )
         request_reranker = None
-        if not evidence_graph_only:
+        if not single_evidence_graph_target:
             request_reranker = await cls._snapshot_model_runtime(
                 db,
                 request.rerank_id,

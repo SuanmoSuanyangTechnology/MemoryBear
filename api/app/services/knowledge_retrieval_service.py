@@ -831,15 +831,13 @@ class KnowledgeRetrievalService:
             and len(targets) == 1
             and targets[0].params.retrieve_type == RetrieveType.HYBRID
         )
-        evidence_graph_only = (
+        single_evidence_graph_target = (
             preparation.graph is not None
             and preparation.graph.pipeline is GraphPipeline.EVIDENCE
-            and all(
-                target.params.retrieve_type == RetrieveType.Graph
-                for target in targets
-            )
+            and len(targets) == 1
+            and targets[0].params.retrieve_type == RetrieveType.Graph
         )
-        needs_global_rerank = not evidence_graph_only and (
+        needs_global_rerank = not single_evidence_graph_target and (
             len(targets) > 1
             or (
                 request.rerank_id is not None
@@ -871,7 +869,7 @@ class KnowledgeRetrievalService:
                 ]
             finally:
                 cls._record_timing(timings, "global_rerank_ms", global_rerank_started_at)
-        elif evidence_graph_only:
+        elif single_evidence_graph_target:
             ranked_chunks = sorted(
                 unique_chunks,
                 key=lambda chunk: (chunk.metadata or {}).get("score", 0),
