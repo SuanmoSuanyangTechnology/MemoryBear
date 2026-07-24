@@ -25,13 +25,13 @@ Remove tags that do NOT suggest any hobby or interest:
 - Pure abstract metrics with no clear hobby link (e.g., '完成时间', '日期', '自我评分')
 - Location names with no clear hobby link (e.g., '青城山后山' alone — but if combined with photography context, infer '摄影')
 
-**Output format**: Return a list of concise interest activity names in Chinese.
+**Output format**: Return a strict JSON object with a single key `interest_tags`, whose value is a list of concise interest activity names in Chinese. Do NOT return a bare list. Do NOT include any prose, markdown fences, or extra keys.
 
 **Example**:
 Input: ['攀岩', '攀岩者数据仪表盘', '路线解锁地图', '指力', '风光摄影元数据增强器', 'EXIF数据', '晨间冥想坚持天数', '川味可视化', '可视化', '助手', '完成时间']
-Output: ['攀岩', '摄影', '冥想', '烹饪', '编程']
+Output: {"interest_tags": ["攀岩", "摄影", "冥想", "烹饪", "编程"]}
 
-Now process the following tag list and return the inferred interest activities in Chinese: {{ tag_list }}
+Now process the following tag list and return the inferred interest activities in Chinese as the specified JSON object: {{ tag_list }}
 {% else %}
 You are a user interest analysis expert. Your task is to infer and extract the user's core hobby/interest activities from a tag list. The tags may be specific project names, tool names, or compound nouns — your job is to identify the underlying interest they represent.
 
@@ -57,11 +57,11 @@ Remove tags that do NOT suggest any hobby or interest:
 - Generic system/assistant terms (e.g., 'assistant', 'user', 'AI')
 - Pure abstract metrics with no clear hobby link (e.g., 'completion time', 'date', 'self-rating')
 
-**Output format**: Return a list of concise interest activity names in English.
+**Output format**: Return a strict JSON object with a single key `interest_tags`, whose value is a list of concise interest activity names in English. Do NOT return a bare list. Do NOT include any prose, markdown fences, or extra keys.
 
 **Example**:
 Input: ['rock climbing', 'climber dashboard', 'route map', 'finger strength', 'landscape photography metadata enhancer', 'EXIF data', 'morning meditation streak', 'Sichuan cuisine visualization', 'visualization', 'assistant', 'completion time']
-Output: ['rock climbing', 'photography', 'meditation', 'cooking', 'programming']
+Output: {"interest_tags": ["rock climbing", "photography", "meditation", "cooking", "programming"]}
 
-Now process the following tag list and return the inferred interest activities in English: {{ tag_list }}
+Now process the following tag list and return the inferred interest activities in English as the specified JSON object: {{ tag_list }}
 {% endif %}

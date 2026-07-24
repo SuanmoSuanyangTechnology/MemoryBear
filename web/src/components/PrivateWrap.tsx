@@ -1,27 +1,23 @@
-/*
- * @Author: zhaoying zhaoyingyz@126.com
- * @Date: 2026-05-13 15:22:48
- * @LastEditors: zhaoying zhaoyingyz@126.com
- * @LastEditTime: 2026-05-13 15:26:44
- * @FilePath: /web/src/components/PrivateWrap.jsx
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
- */
-import { useState, useEffect } from 'react'
-// 私有组件通用包裹容器
-const PrivateWrap = ({ children }) => {
-  const [hasPrivate, setHasPrivate] = useState(false)
-  useEffect(() => {
-    const checkPackage = async () => {
-      try {
-        await import('@redbear/memory-brick')
-        setHasPrivate(true)
-      } catch {
-        setHasPrivate(false)
-      }
-    }
-    checkPackage()
-  }, [])
-  // 无私有包返回空，不渲染
-  return hasPrivate ? children : null
+import { type FC, type ReactNode } from 'react'
+import { isPrivateAvailable } from '@/utils/private'
+
+interface PrivateWrapProps {
+  /**
+   * Content to render when the private package is available.
+   * When the content is a private component, use the function form `() => <PrivateComp />`:
+   * this defers JSX creation until the private package is confirmed available, avoiding the
+   * React "type is invalid ... got: null" warning when the component is null because the package
+   * is missing (JSX has its type validated synchronously at creation time).
+   */
+  children: ReactNode | (() => ReactNode)
+  /** Fallback content when the private package is unavailable; renders nothing by default */
+  fallback?: ReactNode
 }
+
+// Generic wrapper for private components: renders children only when the real private package is available, otherwise renders fallback
+const PrivateWrap: FC<PrivateWrapProps> = ({ children, fallback = null }) => {
+  if (!isPrivateAvailable) return <>{fallback}</>
+  return <>{typeof children === 'function' ? children() : children}</>
+}
+
 export default PrivateWrap

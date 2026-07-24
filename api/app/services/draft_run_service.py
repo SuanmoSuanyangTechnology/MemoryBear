@@ -975,10 +975,8 @@ class AgentRunService:
         enabled = bool(memory_config and memory_config.get("enabled"))
         config_id = None
         if enabled and workspace_id:
-            if isinstance(self.db, AsyncSession):
-                config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
-            else:
-                config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
+            async with get_async_db_context() as db:
+                config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_id)
 
         tool = create_long_term_memory_tool(
             memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,

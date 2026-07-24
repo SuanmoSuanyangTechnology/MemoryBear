@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
+from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
     _DEFAULT_FIELDS,
@@ -413,7 +414,8 @@ class UserMemoryService:
             return {
                 "user_summary": None, "personality": None,
                 "core_values": None, "one_sentence": None,
-                "updated_at": None, "is_cached": False, "message": "用户不存在"
+                "tags": [], "updated_at": None,
+                "is_cached": False, "message": "用户不存在"
             }
 
         has_cache = any([
@@ -426,105 +428,12 @@ class UserMemoryService:
             "personality": row["personality_traits"],
             "core_values": row["core_values"],
             "one_sentence": row["one_sentence_summary"],
+            "tags": normalize_stored_user_card_tags(row["memory_tags"]),
             "updated_at": to_timestamp_ms(row["user_summary_updated_at"]) if row["user_summary_updated_at"] else None,
             "is_cached": has_cache,
         }
 
     # ======================== 用户别名及信息 ========================    
-    def get_end_user_info( #TODO(乐力齐):[910]清除旧有无用代码(v0.3.14)
-        self,
-        db: Session,
-        end_user_id: str
-    ) -> Dict[str, Any]:
-        """
-        查询单个终端用户信息记录
-        
-        Args:
-            db: 数据库会话
-            end_user_id: 终端用户ID (UUID)
-            
-        Returns:
-            {
-                "success": bool,
-                "data": dict,
-                "error": Optional[str]
-            }
-        """
-        try:
-            from app.repositories.end_user_info_repository import EndUserInfoRepository
-            from app.core.api_key_utils import datetime_to_timestamp
-            
-            # 转换为UUID并查询
-            user_uuid = uuid.UUID(end_user_id)
-            end_user_info_record = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
-            
-            if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
-                return {
-                    "success": False,
-                    "data": None,
-                    "error": "终端用户信息记录不存在"
-                }
-            
-            # 构建响应数据（转换时间为毫秒时间戳）
-            # 字段优先级：other_name > aliases > relations > goals > core_facts
-            # > interests > traits > beliefs_or_stances > anchors > events
-            # 默认最多展示 6 个非空字段；other_name 即使为空也必显示并占 1 个名额。
-            TOP_FIELDS = ("other_name", "aliases")
-            META_FIELDS = (
-                "relations", "goals", "core_facts", "interests",
-                "traits", "beliefs_or_stances", "anchors", "events",
-            )
-            ALWAYS_INCLUDE = {"other_name"}
-            MAX_VISIBLE = 6
-
-            raw_meta = end_user_info_record.meta_data or {}
-            candidates = (
-                [(f, getattr(end_user_info_record, f), True) for f in TOP_FIELDS]
-                + [(f, raw_meta.get(f), False) for f in META_FIELDS]
-            )
-
-            selected_top: Dict[str, Any] = {}
-            filtered_meta: Dict[str, Any] = {}
-            for field, value, is_top in candidates:
-                if len(selected_top) + len(filtered_meta) >= MAX_VISIBLE:
-                    break
-                if not value and field not in ALWAYS_INCLUDE:
-                    continue
-                (selected_top if is_top else filtered_meta)[field] = value
-
-            response_data = {
-                "end_user_info_id": str(end_user_info_record.id),
-                "end_user_id": str(end_user_info_record.end_user_id),
-                **selected_top,
-                "meta_data": filtered_meta,
-                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
-                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at),
-            }
-            
-            logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
-            
-            return {
-                "success": True,
-                "data": response_data,
-                "error": None
-            }
-            
-        except ValueError:
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-            return {
-                "success": False,
-                "data": None,
-                "error": "无效的终端用户ID格式"
-            }
-        except Exception as e:
-            logger.error(f"查询终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
-            return {
-                "success": False,
-                "data": None,
-                "error": str(e)
-            }
-    
     def update_end_user_info(
         self,
         db: Session,

@@ -205,14 +205,14 @@ const RecallTestResult = ({
   // Show skeleton when initial loading
   if (loading && data.length === 0) {
     return (
-      <div className='rb:flex rb:flex-col'>
-        <div className='rb:flex rb:items-center rb:justify-start rb:gap-2 rb:mb-4'>
+      <Flex vertical>
+        <Flex align="center" justify="start" gap={8} className='rb:mb-4!'>
           <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
-        </div>
+        </Flex>
         <Skeleton active paragraph={{ rows: 3 }} />
         <Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />
         <Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />
-      </div>
+      </Flex>
     );
   }
 
@@ -313,7 +313,7 @@ const RecallTestResult = ({
   }
 
   const renderContent = () => (
-    <div className='rb:flex rb:flex-col rb:mt-4'>
+    <Flex vertical gap={16}>
       {data.map((item, index) => {
         const score = item.metadata?.score ?? 1;
         const scorePercentage = score * 100;
@@ -321,9 +321,10 @@ const RecallTestResult = ({
         const showScore = item.metadata?.score !== null && item.metadata?.score !== undefined;
         const children = item.children || [];
         return (
-          <div
+          <Flex
             key={`${item.metadata?.sort_id || index}-${index}`}
-            className={`rb:flex rb:flex-col rb:mb-4 rb:rounded-xl rb:bg-[#F6F6F6] rb:p-4 rb:pt-2 rb:pb-3 rb:relative rb:group ${editable ? 'rb:cursor-pointer rb:transition-all hover:rb:border-[#155EEF] hover:rb:shadow-md' : ''}`}
+            vertical
+            className={`rb:rounded-xl rb:bg-[#F6F6F6] rb:p-4! rb:pt-2! rb:pb-3! rb:relative rb:group ${editable ? 'rb:cursor-pointer rb:transition-all hover:rb:border-[#155EEF] hover:rb:shadow-md' : ''}`}
             onClick={(e) => handleItemClick(e, item, index)}
           >
             {editable && (
@@ -331,13 +332,13 @@ const RecallTestResult = ({
                 <EditOutlined className='rb:text-[#155EEF] rb:text-base' />
               </div>
             )}
-            <div className='rb:flex rb:items-center rb:justify-between'>
+            <Flex align="center" justify={showScore ? "space-between" : 'end'}>
               {showScore && (
                 <span className={`${colorClass} rb:text-xl rb:font-semibold`}>
                   {scorePercentage.toFixed(1)}% {t('knowledgeBase.similarity')}
                 </span>
               )}
-              <div className={`rb:flex rb:mt-2 rb:items-end rb:justify-end rb:gap-4 ${!showScore ? 'rb:w-full' : ''}`}>
+              <Flex align="end" justify="end" gap={16}>
                 <span className='rb:text-gray-800'>
                   <FileOutlined /> {item.metadata?.file_name || '-'}
                 </span>
@@ -348,9 +349,9 @@ const RecallTestResult = ({
                   className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
                   onClick={(e) => handleDelete(e, item)}
                 ></div>
-              </div>
-            </div>
-            <div className='rb:flex rb:text-left rb:px-4 rb:py-3 rb:bg-white rb:rounded-lg rb:mt-2'>
+              </Flex>
+            </Flex>
+            <Flex className='rb:text-left rb:px-4! rb:py-3! rb:bg-white rb:rounded-lg rb:mt-2!'>
               <div className='rb:text-gray-800 rb:text-sm rb:whitespace-pre-wrap rb:wrap-break-word rb:w-full'>
                 {(() => {
                   const qaContent = parseQAContent(item.page_content);
@@ -366,14 +367,14 @@ const RecallTestResult = ({
                 })()}
                 {renderChild(children, item, index)}
               </div>
-            </div>
+            </Flex>
             <Flex align="center" justify={item.metadata?.file_created_at ? 'space-between' : 'end'} className="rb:mt-3!">
               {item.metadata?.file_created_at && (
-                <div className='rb:flex rb:items-center rb:justify-start'>
+                <Flex align="center" justify="start">
                   <span className='rb:text-gray-500 rb:text-xs'>
                     <FieldTimeOutlined /> {formatDateTime(item.metadata.file_created_at)}
                   </span>
-                </div>
+                </Flex>
               )}
               <Space align="center" className='rb:text-gray-500 rb:text-xs' onClick={() => handleCopy?.(item.metadata?.doc_id)}>
                 ID: {item.metadata?.doc_id}
@@ -382,7 +383,7 @@ const RecallTestResult = ({
                 ></span>
               </Space>
             </Flex>
-          </div>
+          </Flex>
         );
       })}
       {loading && (
@@ -390,44 +391,44 @@ const RecallTestResult = ({
           <Skeleton active paragraph={{ rows: 3 }} />
         </div>
       )}
-    </div>
+    </Flex>
   );
 
   // If loadMore and hasMore are provided, use InfiniteScroll
   if (loadMore && hasMore !== undefined) {
     return (
-      <div className='rb:flex rb:h-full rb:flex-col'>
-        <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>
+      <Flex vertical gap={16} className='rb:h-full'>
+        <Flex align="center" justify="start" gap={8}>
           <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
           <span className='rb:text-gray-500 rb:text-xs rb:pt-0.5'>
             (<span className='rb:text-[#155EEF]'>{total || data.length}</span> results)
           </span>
-        </div>
+        </Flex>
         <InfiniteScroll
           dataLength={data.length}
           next={loadMore}
           hasMore={hasMore}
-          loader={<Skeleton active paragraph={{ rows: 3 }} className='rb:mt-4' />}
+          loader={<Skeleton active paragraph={{ rows: 3 }} />}
           scrollableTarget={scrollableTarget}
         >
           {renderContent()}
         </InfiniteScroll>
-      </div>
+      </Flex>
     );
   }
 
 
   // Otherwise use normal rendering
   return (
-    <div className='rb:flex rb:flex-col'>
-      <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>
+    <Flex vertical gap={16}>
+      <Flex align="center" justify="start" gap={8}>
         <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
         <span className='rb:text-gray-500 rb:text-xs rb:pt-0.5'>
           (<span className='rb:text-[#155EEF]'>{data.length}</span> results)
         </span>
-      </div>
+      </Flex>
       {renderContent()}
-    </div>
+    </Flex>
   );
 };
 

@@ -1,7 +1,8 @@
 import { useState, useEffect, type FC } from 'react';
 import { Form,
   // TimePicker, Button,
-  Input
+  Input,
+  Flex
 } from 'antd';
 // import { CalendarOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -57,7 +58,7 @@ const Schedule: FC = () => {
     const monthField = hasSeconds ? fields[4] : fields[3];
     const weekdayField = hasSeconds ? fields[5] : fields[4];
 
-    const parseField = (field: string, min: number, max: number, is_weekday = false): number[] => {
+    const parseField = (field: string, min: number, max: number): number[] => {
       const result: number[] = [];
       const parts = field.split(',');
       
@@ -100,7 +101,7 @@ const Schedule: FC = () => {
       return [...new Set(result)].sort((a, b) => a - b);
     };
 
-    const weekdays = parseField(weekdayField, 0, 7, true).map(d => d === 7 ? 0 : d);
+    const weekdays = parseField(weekdayField, 0, 7).map(d => d === 7 ? 0 : d);
     
     return {
       minutes: parseField(minuteField, 0, 59),
@@ -425,9 +426,11 @@ const Schedule: FC = () => {
         </label>
         <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:overflow-hidden">
           {nextSchedules.map((schedule, index) => (
-            <div
+            <Flex
               key={index}
-              className="rb:flex rb:items-center rb:gap-3 rb:px-3 rb:py-2 rb:border-b rb:border-[#EBEBEB] last:border-b-0"
+              align="center"
+              gap={12}
+              className="rb:px-3! rb:py-2! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
             >
               <span className="rb:w-4 rb:text-[10px] rb:text-[#9CA3AF]">
                 {String(index + 1).padStart(2, '0')}
@@ -435,7 +438,7 @@ const Schedule: FC = () => {
               <span className="rb:text-[12px] rb:text-[#212332]">
                 {schedule.display}
               </span>
-            </div>
+            </Flex>
           ))}
           {nextSchedules.length === 0 && (
             <div className="rb:px-3 rb:py-4 rb:text-center rb:text-[12px] rb:text-[#9CA3AF]">

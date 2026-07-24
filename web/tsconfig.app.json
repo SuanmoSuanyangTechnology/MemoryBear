@@ -29,6 +29,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "src/views/Workflow/components/Properties/.tsx"],
-  "exclude": ["**/*copy*"]
+  "include": ["src"],
 }

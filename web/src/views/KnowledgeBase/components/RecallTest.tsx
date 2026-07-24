@@ -1,6 +1,6 @@
 
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Input,  Select, Button, InputNumber } from 'antd';
+import { Form, Input,  Select, Button, InputNumber, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '@/views/KnowledgeBase/types';
 // import refreshIcon from '@/assets/images/knowledgeBase/refresh-blue.png';
@@ -99,14 +99,14 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         handleOpen,
     }));
   return (
-    <div className='rb:w-full rb:h-full rb:flex rb:flex-col rb:overflow-hidden'>
+    <Flex vertical className='rb:w-full rb:h-full rb:overflow-hidden'>
       <div className='rb:shrink-0'>
         <div className='rb:flexx rb:mb-2 rb:items-center rb:justify-between'>
           <span className='rb:font-medium'>{ t('knowledgeBase.testQuestion')}</span>
-          {/* <div className='rb:flex rb:items-center rb:justify-end'>
+          {/* <Flex align="center" justify="end">
               <img src={refreshIcon} alt="refresh" className='rb:w-4 rb:h-4 rb:mr-2' />
               <span className='rb:text-[#155eef]'>{ t('knowledgeBase.loadSampleQuestions')}</span>
-          </div> */}
+          </Flex> */}
         </div>
         <Form form={form} layout="vertical">
           <Form.Item name="query">
@@ -183,16 +183,16 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                   <Button type="primary" onClick={handleStartTest} loading={loading}>{ t('knowledgeBase.startTesting')}</Button>
               </Form.Item> 
           </div>
-          {/* <div className='rb:flex rb:items-center rb:justify-end'>
+          {/* <Flex align="center" justify="end">
               
-          </div> */}
+          </Flex> */}
         </Form>
       </div>
       <div className='rb:flex-1 rb:overflow-y-auto rb:min-h-0'>
           <RecallTestResult data={data} showEmpty={true} />
       </div>
       
-    </div>
+    </Flex>
   );
 });
 

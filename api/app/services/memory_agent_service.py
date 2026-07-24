@@ -352,6 +352,8 @@ class MemoryAgentService:
                     provider=model_config["provider"],
                     api_key=model_config["api_key"],
                     base_url=model_config["base_url"],
+                    is_omni=model_config["is_omni"],
+                    capability=model_config["capability"],
                 ),
                 type=ModelType.CHAT
             )
@@ -489,7 +491,7 @@ class MemoryAgentService:
 
     async def get_user_profile(
             self,
-            end_user_id: Optional[str] = None,
+            end_user_id,
             current_user_id: Optional[str] = None,
             llm_id: Optional[str] = None,
             tenant_id=None,

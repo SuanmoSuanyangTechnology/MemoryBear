@@ -243,26 +243,28 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
     const isSelected = selectedVariable?.name === key && selectedVariable?.nodeKey === nodeKey;
 
     return (
-      <div
+      <Flex
         key={`${nodeKey || ''}-${key}`}
         onClick={() => handleSelectVariable({
           ...variable,
           name: key,
           nodeKey,
         })}
+        align="center"
+        justify="space-between"
         className={clsx(
-          "rb:flex rb:items-center rb:justify-between rb:p-2 rb:rounded-lg rb:cursor-pointer rb:transition-all",
+          "rb:p-2! rb:rounded-lg rb:cursor-pointer rb:transition-all",
           isSelected
             ? "rb:bg-[rgba(21,93,233,0.06)]"
             : "rb:hover:bg-[#F7F8FA]"
         )}
       >
-        <div className="rb:flex rb:items-center rb:gap-2 rb:flex-1 rb:min-w-0">
+        <Flex align="center" gap={8} className="rb:flex-1 rb:min-w-0">
           {/* {getVariableIcon(variable.name)} */}
           <span className="rb:text-sm rb:text-[#1D2129] truncate">{key}</span>
-        </div>
+        </Flex>
         <span className="rb:text-xs rb:text-[#8F959E] rb:shrink-0 rb:ml-2">{variable.type}</span>
-      </div>
+      </Flex>
     );
   };
 
@@ -296,10 +298,12 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
     return (
       <Collapse.Panel
         header={
-          <div className="rb:flex rb:items-center rb:gap-2">
-            {nodeInfo?.icon !== 'conversation' && nodeInfo?.icon && <div className={clsx("rb:size-5 rb:bg-cover", nodeInfo.icon)} />}
+          <Flex align="center" gap={8}>
+            {nodeInfo?.icon !== 'conversation' && nodeInfo?.icon &&
+              <div className={clsx("rb:size-5 rb:bg-cover rb:shrink-0", nodeInfo.icon)} />
+            }
             <span className="rb:text-sm rb:text-[#1D2129]">{nodeInfo?.name || nodeKey.toUpperCase()}</span>
-          </div>
+          </Flex>
         }
         key={nodeKey}
         className="rb:border-none rb:bg-transparent"
@@ -327,7 +331,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
   };
 
   return (
-    <div className={clsx("rb:absolute rb:bottom-5 rb:right-8 rb:h-80 rb:bg-white rb:rounded-xl rb:shadow-lg rb:border rb:border-[#E5E6EB] rb:flex rb:flex-col rb:z-999", {
+    <Flex vertical className={clsx("rb:absolute rb:bottom-5 rb:right-8 rb:h-80 rb:bg-white rb:rounded-xl rb:shadow-lg rb:border rb:border-[#E5E6EB] rb:z-999", {
       'rb:left-73': !collapsed,
       'rb:left-22': collapsed,
       'rb:right-8': !selectedNode,
@@ -358,7 +362,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
               <Form form={form} layout="vertical" size="middle" className="rb:h-full!">
                 <Flex vertical gap={12} className="rb:h-full!">
                   <Flex align="center" justify="space-between">
-                    <div className="rb:flex rb:items-center rb:gap-2">
+                    <Flex align="center" gap={8}>
                       {selectedVariable.nodeKey && (
                         <>
                           {getNodeIcon(selectedVariable.nodeKey) && (
@@ -371,7 +375,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
                       <span className="rb:text-[10px] rb:px-1.5 rb:py-0.5 rb:bg-[rgba(21,93,233,0.1)] rb:text-[#155DE9] rb:rounded">
                         {selectedVariable.type}
                       </span>
-                    </div>
+                    </Flex>
 
                     <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/close_grey.svg')]"
                       onClick={onClose}
@@ -394,9 +398,9 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
                 </Flex>
 
                 <Flex vertical align="center" justify="center" className="rb:flex-1 rb:text-center">
-                  <div className="rb:w-12 rb:h-12 rb:bg-[#F0F1F5] rb:rounded-full rb:flex rb:items-center rb:justify-center rb:mb-3">
+                  <Flex align="center" justify="center" className="rb:size-12 rb:bg-[#F0F1F5] rb:rounded-full rb:mb-3!">
                     <CodeOutlined className="rb:text-[#BBBFC4] rb:text-xl" />
-                  </div>
+                  </Flex>
                   <div className="rb:text-xs rb:text-[#BBBFC4]">
                     {t('workflow.selectVariable')}
                   </div>
@@ -416,7 +420,7 @@ const VariableInspector = forwardRef<VariableInspectorRef, VariableInspectorProp
             <Empty className="rb:flex-1!" />
         </Flex>
       }
-    </div>
+    </Flex>
   );
 });
 

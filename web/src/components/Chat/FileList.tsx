@@ -1,4 +1,5 @@
 import { type FC, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Flex, Spin } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
@@ -135,9 +136,11 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
         })}
       </Flex>
 
-      {playingFile && (
-        <div
-          className="rb:fixed rb:inset-0 rb:z-1000 rb:bg-black/80 rb:flex rb:items-center rb:justify-center"
+      {playingFile && createPortal(
+        <Flex
+          align="center"
+          justify="center"
+          className="rb:fixed rb:inset-1 rb:z-1000 rb:bg-black/80"
           onClick={handleClose}
         >
           <button className="ant-image-preview-close"><CloseOutlined /></button>
@@ -159,7 +162,8 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
               onClick={e => e.stopPropagation()}
             />
           )}
-        </div>
+        </Flex>,
+        document.body
       )}
     </>
   )

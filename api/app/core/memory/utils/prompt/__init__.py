@@ -8,7 +8,6 @@
 from .prompt_utils import (
     get_prompts,
     render_statement_extraction_prompt,
-    render_temporal_extraction_prompt,
     render_entity_dedup_prompt,
     render_triplet_extraction_prompt,
     render_memory_summary_prompt,
@@ -23,7 +22,6 @@ __all__ = [
     # prompt_utils
     "get_prompts",
     "render_statement_extraction_prompt",
-    "render_temporal_extraction_prompt",
     "render_entity_dedup_prompt",
     "render_triplet_extraction_prompt",
     "render_memory_summary_prompt",

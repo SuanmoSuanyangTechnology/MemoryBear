@@ -39,6 +39,7 @@ async def prune_messages(
     conversation_id: str = "",
     source: str = "",
     language: str = "zh",
+    persist: bool = True,
 ) -> Tuple[List[dict], list]:
     """对滑动窗口覆盖的所有消息执行剪枝/规整。
 
@@ -49,6 +50,8 @@ async def prune_messages(
         conversation_id: 对话 ID
         source: 写入来源（agent/service_api/mcp/workflow）
         language: 语言
+        persist: 是否将剪枝结果持久化到 DB。试运行(pilot)模式应传 False，
+                 避免污染 PG 中的 pruned_content 字段。
 
     Returns:
         (pruned_messages, pruning_records) 元组：
@@ -64,7 +67,8 @@ async def prune_messages(
         return list(messages), pruning_records
 
     # Step 1: 从 DB 刷新 pruned_content
-    _refresh_pruned_content(messages, conversation_id, end_user_id, source)
+    if persist:
+        _refresh_pruned_content(messages, conversation_id, end_user_id, source)
 
     # Step 2: 遍历消息，收集 LLM 任务
     result: List[Optional[dict]] = [None] * len(messages)
@@ -172,7 +176,8 @@ async def prune_messages(
                 })
 
     # Step 4: 批量回写 DB
-    _batch_write_db(db_updates, conversation_id, end_user_id, source)
+    if persist:
+        _batch_write_db(db_updates, conversation_id, end_user_id, source)
 
     return [m for m in result if m is not None], pruning_records
 

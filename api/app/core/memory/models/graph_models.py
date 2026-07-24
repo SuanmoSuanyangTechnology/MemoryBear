@@ -177,9 +177,25 @@ class EntityEntityEdge(Edge):
 
 
 class PerceptualEdge(Edge):
-    """Edge connecting perceptual nodes to their source chunks
     """
-    pass
+    Edge connecting ExtractedEntity to PerceptualNode (HAS_PERCEPTUAL).
+    Edge connecting Chunk to PerceptualNode (HAS_PERCEPTUAL).
+    语义：一个 Entity 关联到一个语义相似度 ≥ 阈值（或作为兜底选中的最高相似度）的感知记忆。
+         一个 Chunk 关联到一个感知记忆（多模态文件）。
+
+    Attributes:
+        perceptual_type: 感知记忆模态类型 (image/video/audio/document)
+        perceptual_type_id: 模态类型数字枚举 (101=image, 102=video, 103=audio, 104=document)
+        source_type: 源节点类型判别符，用于写库时选择对应 Cypher
+                     - "chunk"  : source 为 Chunk.id
+                     - "entity" : source 为 ExtractedEntity.id（默认）
+    """
+    perceptual_type: str = Field(..., description="感知记忆模态类型: image/video/audio/document")
+    perceptual_type_id: int = Field(..., description="模态类型数字枚举: 101=image, 102=video, 103=audio, 104=document")
+    source_type: str = Field(
+        default="entity",
+        description="源节点类型判别符：'chunk' 表示 Chunk→Perceptual，'entity' 表示 ExtractedEntity→Perceptual",
+    )
 
 
 class Node(BaseModel):
@@ -207,12 +223,24 @@ class DialogueNode(Node):
         content: Full dialogue content as text
         dialog_embedding: Optional embedding vector for the entire dialogue
         config_id: Configuration ID used to process this dialogue
+        write_mode: Write pipeline marker ('fast' | 'normal')
+        emotion: BERT top_emotion label written by Fast Write; None when the emotion service fails/times out or is unconfigured
+        emotion_score: BERT top_score (sigmoid probability, 0.0-1.0) paired with `emotion`; None under the same degraded conditions
     """
     ref_id: str = Field(..., description="Reference identifier of the dialog")
     content: str = Field(..., description="Dialogue content")
     dialog_embedding: Optional[List[float]] = Field(None, description="Dialog embedding vector")
     config_id: Optional[int | str] = Field(None,
                                            description="Configuration ID used to process this dialogue (integer or string)")
+    
+    write_mode: str = Field(default="normal",description="写入管线标识：'fast' | 'normal'")
+    emotion: Optional[str] = Field(default=None,description="BERT top_emotion；服务失败时为 None")
+    emotion_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="BERT top_score（sigmoid 概率）；服务失败时为 None",
+    )
 
 
 class StatementNode(Node):

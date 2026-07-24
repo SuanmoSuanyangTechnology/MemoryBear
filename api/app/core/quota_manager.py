@@ -181,7 +181,7 @@ async def get_api_ops_rate_limit_async(db, tenant_id: UUID) -> Optional[int]:
     return None
 
 
-@redis_cache(ttl=300, prefix='quota', skip_args=['db'])
+@redis_cache(ttl=300, prefix='quota', skip_args=['db'], id_arg='tenant_id')
 def get_end_user_memory_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     quota_config = _get_quota_config(db, tenant_id)
     if quota_config:
@@ -189,7 +189,15 @@ def get_end_user_memory_limit(db: Session, tenant_id: UUID) -> Optional[int]:
     return None
 
 
-@redis_cache(ttl=300, prefix='quota', skip_args=['db'])
+@redis_cache(ttl=300, prefix='quota', skip_args=['db'], id_arg='tenant_id')
+async def get_end_user_memory_limit_async(db: AsyncSession, tenant_id: UUID) -> Optional[int]:
+    quota_config = await _get_quota_config_async(db, tenant_id)
+    if quota_config:
+        return quota_config.get("end_user_memory_limit")
+    return None
+
+
+@redis_cache(ttl=300, prefix='quota', skip_args=['db'], id_arg='tenant_id')
 async def get_pre_user_memory_write_ops_limit(db: AsyncSession, tenant_id: UUID) -> Optional[int]:
     quota_config = await _get_quota_config_async(db, tenant_id)
     if quota_config:

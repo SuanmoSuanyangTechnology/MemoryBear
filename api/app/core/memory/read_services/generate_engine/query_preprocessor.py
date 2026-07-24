@@ -22,7 +22,7 @@ class QueryPreprocessor:
         return text
 
     @staticmethod
-    async def split(query: str, history: list, memory_l0_str: str, llm_client: RedBearLLM) -> tuple[list, str]:
+    async def split(query: str, history: list, memory_l0_str: str, llm_client: RedBearLLM) -> list:
         system_prompt = prompt_manager.render(
             name="problem_split",
             datetime=utcnow_naive().strftime("%Y-%m-%d"),
@@ -38,9 +38,7 @@ class QueryPreprocessor:
                 "callbacks": []
             }) | StructResponse(QuestionSplit)
             queries = sub_queries.questions
-            memory_evidence = sub_queries.memory_evidence
         except Exception as e:
             logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")
             queries = [query]
-            memory_evidence = ""
-        return queries, memory_evidence
+        return queries

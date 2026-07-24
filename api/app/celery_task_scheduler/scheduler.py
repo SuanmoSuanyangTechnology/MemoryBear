@@ -181,6 +181,12 @@ class RedisTaskScheduler:
             try:
                 meta = json.loads(all_pending[task_id])
                 lock_key = meta["lock_key"]
+                task_name = meta.get("task_name")
+                user_id = meta.get("user_id")
+                if not task_name or not user_id:
+                    # 兼容升级前写入的 pending 元数据。lock_key 格式固定为
+                    # ``{task_name}:{user_id}``，从右侧切分可避免影响任务名。
+                    task_name, _, user_id = lock_key.rpartition(":")
                 dispatched_at = meta.get("dispatched_at", 0)
                 age = now - dispatched_at
 
@@ -192,14 +198,16 @@ class RedisTaskScheduler:
                     if result_data.get("status") in ("SUCCESS", "FAILURE", "REVOKED"):
                         should_cleanup = True
                         logger.info(
-                            "Task finished: %s state=%s", task_id,
+                            "Task finished: task=%s user=%s task_id=%s msg_id=%s state=%s",
+                            task_name, user_id, task_id, meta.get("msg_id"),
                             result_data.get("status"),
                         )
                 elif age > TASK_TIMEOUT:
                     should_cleanup = True
                     logger.warning(
-                        "Task expired or lost: %s age=%.0fs, force cleanup",
-                        task_id, age,
+                        "Task expired or lost: task=%s user=%s task_id=%s msg_id=%s "
+                        "age=%.0fs, force cleanup",
+                        task_name, user_id, task_id, meta.get("msg_id"), age,
                     )
 
                 if should_cleanup:
@@ -279,13 +287,17 @@ class RedisTaskScheduler:
         user_id = unit_key.split(":", 1)[1] if ":" in unit_key else unit_key
         return stable_hash(user_id) % self._shard_count == self._shard_index
 
-    def _commit_post_dispatch(self, lock_key, task, msg_id, dispatch_lock):
+    def _commit_post_dispatch(
+        self, lock_key, task, msg_id, dispatch_lock, task_name, user_id,
+    ):
         pipe = self.redis.pipeline()
         pipe.set(lock_key, task.id, ex=3600)
         pipe.hset(PENDING_HASH, task.id, json.dumps({
             "lock_key": lock_key,
             "dispatched_at": time.time(),
             "msg_id": msg_id,
+            "task_name": task_name,
+            "user_id": user_id,
         }))
         pipe.delete(dispatch_lock)
         pipe.set(
@@ -329,7 +341,9 @@ class RedisTaskScheduler:
             return False
         for attempt in range(2):
             try:
-                self._commit_post_dispatch(lock_key, task, msg_id, dispatch_lock)
+                self._commit_post_dispatch(
+                    lock_key, task, msg_id, dispatch_lock, task_name, user_id,
+                )
                 break
             except Exception as e:
                 logger.error(
@@ -340,7 +354,10 @@ class RedisTaskScheduler:
                 self.errors += 1
 
         self.dispatched += 1
-        logger.info("Task dispatched: %s (msg=%s)", task.id, msg_id)
+        logger.info(
+            "Task dispatched: task=%s user=%s task_id=%s msg_id=%s",
+            task_name, user_id, task.id, msg_id,
+        )
         return True
 
     def _process_batch(self, unit_keys):
@@ -436,132 +453,6 @@ class RedisTaskScheduler:
             self.redis.sadd(READY_SET, *ready_units)
             logger.info("Full scan found %d ready units", len(ready_units))
 
-    def migrate_legacy_queues(self):
-        """One-time migration from per-user queues (scheduler:uq:{user_id})
-        to per-unit queues (scheduler:uq:{task_name}:{user_id}).
-
-        Idempotent and restartable: each message is moved atomically, so a
-        crash mid-run only leaves the remaining messages in the legacy queue
-        to be picked up on the next startup. Guarded by a single-flight lock
-        so only one instance runs it. Call this at process startup BEFORE
-        run_server (and never at import time, since the singleton is also
-        imported by the API process).
-        """
-        # single-flight guard across instances
-        if not self.redis.set(MIGRATION_LOCK, self.instance_id, nx=True, ex=600):
-            logger.info("[Migrate] Another instance holds the migration lock, skip")
-            return
-
-        migrated_msgs = 0
-        migrated_users = 0
-        try:
-            legacy_users = self.redis.smembers(LEGACY_ACTIVE_USERS) or set()
-            if not legacy_users:
-                # Nothing queued under the old scheme; drop any stray ready set.
-                self.redis.delete(LEGACY_READY_SET)
-                logger.info("[Migrate] No legacy per-user queues found")
-                return
-
-            for user_id in legacy_users:
-                legacy_queue = f"{USER_QUEUE_PREFIX}{user_id}"
-                while True:
-                    peek = self.redis.lindex(legacy_queue, 0)
-                    if peek is None:
-                        break
-                    try:
-                        msg = json.loads(peek)
-                        task_name = msg["task_name"]
-                        msg_user = msg.get("user_id", user_id)
-                    except (json.JSONDecodeError, TypeError, KeyError) as e:
-                        logger.error(
-                            "[Migrate] Bad legacy message for %s, dropping: %s",
-                            user_id, e,
-                        )
-                        self.redis.lpop(legacy_queue)  # discard to make progress
-                        continue
-
-                    unit_key = f"{task_name}:{msg_user}"
-                    new_queue = f"{USER_QUEUE_PREFIX}{unit_key}"
-
-                    moved = self.redis.eval(
-                        _LUA_MIGRATE_HEAD, 2, legacy_queue, new_queue,
-                    )
-                    if moved is None:  # queue drained concurrently
-                        break
-
-                    self.redis.sadd(ACTIVE_UNITS, unit_key)
-                    if not self.redis.exists(unit_key):
-                        self.redis.sadd(READY_SET, unit_key)
-                    migrated_msgs += 1
-
-                self.redis.delete(legacy_queue)
-                self.redis.srem(LEGACY_ACTIVE_USERS, user_id)
-                migrated_users += 1
-
-            self.redis.delete(LEGACY_ACTIVE_USERS)
-            self.redis.delete(LEGACY_READY_SET)
-            logger.info(
-                "[Migrate] Legacy migration done: users=%d messages=%d",
-                migrated_users, migrated_msgs,
-            )
-        except Exception as e:
-            logger.error("[Migrate] Legacy migration failed: %s", e, exc_info=True)
-        finally:
-            self.redis.eval(_LUA_SAFE_DELETE, 1, MIGRATION_LOCK, self.instance_id)
-
-    def migrate_legacy_tracker_keys(self):
-        """One-time migration of task-status tracker keys from the old
-        un-namespaced form ``task_tracker:{msg_id}`` to ``scheduler:tracker:{msg_id}``.
-
-        Preserves TTL (via RENAME) and never clobbers a newer value: if the
-        namespaced key already exists (e.g. an in-flight task was dispatched
-        after deploy and wrote the new key), the stale old key is dropped.
-        Idempotent, restartable, and guarded by a single-flight lock.
-
-        The ephemeral ``dispatch:{msg_id}`` lock is intentionally NOT migrated:
-        it lives only during an active dispatch (300s TTL) and any stale entry
-        expires harmlessly on its own.
-        """
-        if not self.redis.set(TRACKER_MIGRATION_LOCK, self.instance_id, nx=True, ex=600):
-            logger.info("[Migrate] Another instance holds the tracker migration lock, skip")
-            return
-
-        renamed = 0
-        dropped = 0
-        prefix_len = len(LEGACY_TRACKER_PREFIX)
-        try:
-            cursor = 0
-            while True:
-                cursor, keys = self.redis.scan(
-                    cursor=cursor, match=f"{LEGACY_TRACKER_PREFIX}*", count=500,
-                )
-                for old_key in keys:
-                    msg_id = old_key[prefix_len:]
-                    new_key = f"{TRACKER_PREFIX}{msg_id}"
-                    try:
-                        res = self.redis.eval(
-                            _LUA_MIGRATE_TRACKER, 2, old_key, new_key,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "[Migrate] Tracker key migrate failed %s: %s", old_key, e,
-                        )
-                        continue
-                    if res == 1:
-                        renamed += 1
-                    elif res == 0:
-                        dropped += 1
-                if cursor == 0:
-                    break
-            logger.info(
-                "[Migrate] Tracker keys migrated: renamed=%d dropped_stale=%d",
-                renamed, dropped,
-            )
-        except Exception as e:
-            logger.error("[Migrate] Tracker migration failed: %s", e, exc_info=True)
-        finally:
-            self.redis.eval(_LUA_SAFE_DELETE, 1, TRACKER_MIGRATION_LOCK, self.instance_id)
-
     def run_server(self):
         health_check_server(self)
         self.running = True
@@ -615,4 +506,4 @@ class RedisTaskScheduler:
             logger.error("Shutdown cleanup error: %s", e)
 
 
-scheduler = RedisTaskScheduler()
+scheduler: RedisTaskScheduler = RedisTaskScheduler()

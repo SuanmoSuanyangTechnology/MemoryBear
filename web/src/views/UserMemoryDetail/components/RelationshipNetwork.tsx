@@ -22,7 +22,8 @@ import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import GraphNetworkChart from '@/components/Charts/GraphNetworkChart'
-import { type Node, type Edge, type EdgeClickData, Colors } from '@/components/Charts/graphNetworkUtils'
+import { Colors } from '@/components/Charts/GraphNetworkChart/utils/utils'
+import type { Node, Edge, EdgeClickData } from '@/components/Charts/GraphNetworkChart/types'
 import CommunityNetwork from './CommunityNetwork'
 import PageTabs from '@/components/PageTabs'
 import NodeDetailPanel from './NodeDetailPanel'

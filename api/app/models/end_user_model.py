@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -70,6 +70,17 @@ class EndUser(Base):
     core_values = Column(Text, nullable=True, comment="核心价值观")
     one_sentence_summary = Column(Text, nullable=True, comment="一句话总结")
     user_summary_updated_at = Column(DateTime, nullable=True, comment="用户摘要最后更新时间")
+    memory_tags = Column(JSONB, nullable=True, comment="用户名片Tag字符串数组")
+    memory_tags_updated_at = Column(
+        DateTime,
+        nullable=True,
+        comment="用户名片Tag最后成功生成或源指纹检查时间",
+    )
+    memory_tags_source_fingerprint = Column(
+        String(64),
+        nullable=True,
+        comment="用户名片Tag清洗后源数据SHA-256指纹",
+    )
     
     # 记忆洞察四个维度 - Memory Insight Four Dimensions
     memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告（总体概述）")

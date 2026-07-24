@@ -61,11 +61,6 @@ const COOKIE_FLAGS = new Set(['-b', '--cookie'])
 const USER_FLAGS = new Set(['-u', '--user'])
 const GET_FLAGS = new Set(['-G', '--get'])
 
-/** 解析时忽略的请求头（仅 Cookie，其余请求头一律保留）。 */
-const IGNORED_HEADERS = ['cookie']
-
-/** 判断某个请求头是否需要被忽略。 */
-const isIgnoredHeader = (key: string) => IGNORED_HEADERS.includes(key.trim().toLowerCase())
 
 /** 去掉字符串首尾成对的引号。 */
 const stripWrappedQuotes = (value: string) => value.replace(/^['"]|['"]$/g, '')
@@ -118,7 +113,7 @@ const applyHeaderArg = (ctx: ParseContext, args: string[], index: number): Parse
   const next = getNextArg(args, index, missingArgError('-H / --header'))
   if (next.error !== null) return { error: next.error, nextIndex: index }
   const header = splitHeader(next.value)
-  if (header && !isIgnoredHeader(header.key)) ctx.headers.push(header)
+  if (header) ctx.headers.push(header)
   return { error: null, nextIndex: index + 1 }
 }
 
@@ -176,7 +171,7 @@ const applyFormArg = (ctx: ParseContext, args: string[], index: number): ParseSt
     ctx.headers.push({ key: 'Content-Type', value: typeMatch[2] })
   }
 
-  ctx.formParts.push({ key, value })
+  ctx.formParts.push({ key, value, type: 'text' })
   ctx.hasBody = true
   return { error: null, nextIndex: index + 1 }
 }

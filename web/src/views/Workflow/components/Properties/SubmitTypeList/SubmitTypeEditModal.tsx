@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useState, useEffect, useRef } from 'react';
 import { Form, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx'
 
 import type { SubmitTypeItem, SubmitTypeEditModalRef } from './types'
 import type { EmailConfig, EmailConfigModalRef } from './EmailConfigModal'
@@ -16,31 +17,31 @@ interface SubmitTypeEditModalProps {
 const submitTypes = [
   {
     type: 'webapp',
-    icon: 'rb:bg-[#1677FF] rb:rounded-md rb:size-4 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[10px]',
+    icon: 'rb:bg-[#1677FF]',
     iconText: 'W',
   },
   {
     type: 'email',
-    icon: 'rb:bg-[#722ED1] rb:rounded-md rb:size-4 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[10px]',
+    icon: 'rb:bg-[#722ED1]',
     iconText: 'E',
     hasConfig: true,
     disabled: true
   },
   // {
   //   type: 'slack',
-  //   icon: 'rb:bg-[#E01E5A] rb:rounded-md rb:size-4 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[10px]',
+  //   icon: 'rb:bg-[#E01E5A]',
   //   iconText: 'S',
   //   disabled: true
   // },
   // {
   //   type: 'teams',
-  //   icon: 'rb:bg-[#464EB8] rb:rounded-md rb:size-4 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[10px]',
+  //   icon: 'rb:bg-[#464EB8]',
   //   iconText: 'T',
   //   disabled: true
   // },
   // {
   //   type: 'discord',
-  //   icon: 'rb:bg-[#5865F2] rb:rounded-md rb:size-4 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[10px]',
+  //   icon: 'rb:bg-[#5865F2]',
   //   iconText: 'D',
   //   disabled: true
   // }
@@ -143,7 +144,9 @@ const SubmitTypeEditModal = forwardRef<SubmitTypeEditModalRef, SubmitTypeEditMod
                 value: item.type,
                 label: (
                   <Flex align="center" gap={8} className={item.disabled ? 'rb:opacity-65' : ''}>
-                    <div className={item.icon}>{item.iconText}</div>
+                    <Flex align="center" justify="center" className={clsx('rb:rounded-md rb:size-4 rb:text-white rb:text-[10px]', item.icon)}>
+                      {item.iconText}
+                    </Flex>
                     <span>{t(`workflow.config.human-intervention.submitTypes.${item.type}`)}</span>
                     {item.disabled && <span className="rb:text-[12px] rb:text-[#999]">COMING SOON</span>}
                   </Flex>

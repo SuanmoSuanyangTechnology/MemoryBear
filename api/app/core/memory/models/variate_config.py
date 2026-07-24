@@ -2,13 +2,12 @@
 
 This module contains Pydantic models for configuring various aspects
 of the extraction pipeline, including statement extraction, triplet extraction,
-temporal extraction, deduplication, and forgetting mechanisms.
+deduplication, and forgetting mechanisms.
 
 Classes:
     StatementExtractionConfig: Configuration for statement extraction
     ForgettingEngineConfig: Configuration for forgetting engine
     TripletExtractionConfig: Configuration for triplet extraction
-    TemporalExtractionConfig: Configuration for temporal extraction
     DedupConfig: Configuration for entity deduplication
     ExtractionPipelineConfig: Combined configuration for entire pipeline
 """
@@ -62,15 +61,6 @@ class TripletExtractionConfig(BaseModel):
     temperature: Optional[float] = Field(0.1, ge=0, le=2, description="LLM temperature for triplet extraction")
     enable_entity_normalization: bool = Field(True, description="Whether to normalize entity names")
     confidence_threshold: Optional[float] = Field(0.7, ge=0, le=1, description="Minimum confidence threshold for extracted triplets")
-
-
-class TemporalExtractionConfig(BaseModel):
-    """Configuration for temporal extraction behavior.
-
-    Attributes:
-        temperature: LLM temperature for temporal extraction (0-2, default: 0.1)
-    """
-    temperature: Optional[float] = Field(0.1, ge=0, le=2, description="LLM temperature for temporal extraction")
 
 
 class DedupConfig(BaseModel):
@@ -135,18 +125,16 @@ class ExtractionPipelineConfig(BaseModel):
 
     This model combines all configuration components for the complete
     extraction pipeline, including statement extraction, triplet extraction,
-    temporal extraction, deduplication, and forgetting mechanisms.
+    deduplication, and forgetting mechanisms.
 
     Attributes:
         statement_extraction: Configuration for statement extraction
         triplet_extraction: Configuration for triplet extraction
-        temporal_extraction: Configuration for temporal extraction
         deduplication: Configuration for entity deduplication
         forgetting_engine: Configuration for forgetting engine
     """
     statement_extraction: StatementExtractionConfig = Field(default_factory=StatementExtractionConfig)
     triplet_extraction: TripletExtractionConfig = Field(default_factory=TripletExtractionConfig)
-    temporal_extraction: TemporalExtractionConfig = Field(default_factory=TemporalExtractionConfig)
     deduplication: DedupConfig = Field(default_factory=DedupConfig)
     forgetting_engine: ForgettingEngineConfig = Field(default_factory=ForgettingEngineConfig)
     # 情绪引擎（旁路模块，SidecarStepFactory 通过此字段判断是否启用）

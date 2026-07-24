@@ -3,14 +3,12 @@ import { Account } from '@redbear/memory-brick'
 
 import NotFound from '@/views/NotFound'
 import { request } from '@/utils/request'
-
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
+import PrivateWrap from '@/components/PrivateWrap'
 const AccountPage: React.FC = () => {
-  if (isSaas && Account) {
-    return <Account request={request} />
-  }
   return (
-    <NotFound />
+    <PrivateWrap fallback={<NotFound />}>
+      {() => <Account request={request} />}
+    </PrivateWrap>
   )
 };
 

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import redis
-from celery.exceptions import SoftTimeLimitExceeded
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
@@ -1201,7 +1200,7 @@ def import_qa_chunks(
             }
             chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
 
-        batch_size = 50
+        batch_size = min(EMBEDDING_BATCH_SIZE or 10, 20)
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
             vector_service.add_chunks(batch)
@@ -1920,6 +1919,103 @@ def write_message_task(
             _shutdown_loop_gracefully(loop)
 
 
+@celery_app.task(
+    name="app.core.memory.fast_write_message",
+    bind=True,
+    acks_late=False,
+    max_retries=0
+)
+def fast_write_message_task(
+        self,
+        end_user_id: str,
+        target_message: Optional[dict] = None,
+        config_id: str = "",
+        workspace_id: str = "",
+        conversation_id: str = "",
+        message_seq: int = 0,
+        language: str = "zh",
+        dispatch_at: str = "",
+        source: str = "",
+) -> Dict[str, Any]:
+    """快速写入任务 — 构造 MemoryService 并驱动 fast_write。
+
+    职责：提供事件循环 + 计时 + backend 状态映射，不夹带业务加载逻辑。
+
+    backend 状态与业务结果分层：
+    - ``success`` / ``dropped`` 是 Pipeline 业务结果，放在返回值的 ``result`` 中；
+      任务正常返回时 backend 为 ``SUCCESS``。
+    - 持久化 / 配置 / 代码异常必须抛出任务函数，backend 才会标记 ``FAILURE``，
+      scheduler tracker 与失败率监控才能拿到真实状态。
+    - ``max_retries=0``：不做 Celery 层重试；Neo4j deadlock 的有界重试在 Pipeline 内完成。
+
+    Args:
+        end_user_id: 终端用户 ID（分片键）
+        target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+        config_id: 记忆配置 ID
+        workspace_id: 工作空间 ID
+        conversation_id: 对话 ID（会话类入口非空，用于确定性 ID 生成）
+        message_seq: 消息序号
+        language: 语言
+        dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+        source: 写入来源（agent/service_api/mcp/workflow）
+
+    Returns:
+        Dict containing status, result, task_id
+    """
+    logger.info(
+        f"[CELERY FAST WRITE] Starting - end_user_id={end_user_id}, "
+        f"config_id={config_id}, conv={conversation_id or '-'}, "
+        f"seq={message_seq}, language={language}, source={source or '-'}"
+    )
+    start_time = time.time()
+
+    async def _run() -> dict:
+        from app.core.memory.memory_service import MemoryService
+
+        service = MemoryService(
+            config_id=uuid.UUID(config_id),
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+        return await service.fast_write(
+            target_message=target_message or {"role": "user", "content": ""},
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            source=source,
+            dispatch_at=dispatch_at,
+        )
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
+        elapsed_time = time.time() - start_time
+
+        logger.info(f"[CELERY FAST WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
+
+        try:
+            safe_result = jsonable_encoder(result)
+        except Exception:
+            safe_result = str(result)
+
+        return {
+            "status": "SUCCESS",
+            "result": safe_result,
+            "task_id": self.request.id,
+        }
+    except BaseException:
+        elapsed_time = time.time() - start_time
+        logger.exception(f"[CELERY FAST WRITE] Failed - elapsed_time={elapsed_time:.2f}s")
+        # 异常必须逃出任务函数，Celery backend 才会标记 FAILURE
+        raise
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
 def _is_active_recently(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
     """用户是否活跃：end_user.write_time 距今 < inactive_hours 小时（NULL 或读取失败视为不活跃）。
 
@@ -2023,7 +2119,7 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                             continue
                     do_layer2_reflection.apply_async(
                         kwargs={
-                            "user_id": uid,
+                            "end_user_id": uid,
                             "config_id": str(config_id),
                             "workspace_id": ws_id,
                             "iteration_period": iteration_period,
@@ -2064,8 +2160,9 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
-                         iteration_period: int = 24, from_retry: bool = False) -> Dict[str, Any]:
+def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = "",
+                         workspace_id: str = "", iteration_period: int = 24,
+                         from_retry: bool = False, user_id: str | None = None) -> Dict[str, Any]:
     """对【单个用户】执行一次 Layer2 反思（实体去重 / 描述合并 / 未识别实体处理等）。
 
     由 scan_layer2_reflection 派发，每个用户一个独立任务、独立 db session，跑完即释放内存。
@@ -2075,8 +2172,13 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         lock_timeout       抢用户写锁超时，本次放弃（下一轮 scan 会重派）
         failed             执行报错
     """
+    # HACK: 兼容旧参数 user_id，v0.3.15 后移除
+    end_user_id = end_user_id or user_id
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
     start_time = time.time()
-    inflight_key = f"reflection:inflight:{user_id}"
+    inflight_key = f"reflection:inflight:{end_user_id}"
 
     async def _run() -> Dict[str, Any]:
         from app.services.memory_reflection_service import WorkspaceAppService
@@ -2089,8 +2191,8 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         if not from_retry:
             with get_db_read() as db:
                 ws_svc = WorkspaceAppService(db)
-                rt = ws_svc.get_end_user_reflection_time(user_id)
-                if not _should_reflect_now(db, user_id, rt, iteration_period):
+                rt = ws_svc.get_end_user_reflection_time(end_user_id)
+                if not _should_reflect_now(db, end_user_id, rt, iteration_period):
                     return {"status": "skipped_idempotent"}
 
         # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
@@ -2099,12 +2201,12 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         redis_client = get_sync_redis_client()
         if redis_client is not None:
             write_lock = RedisFairLock(
-                key=f"memory_write:{user_id}",
+                key=f"memory_write:{end_user_id}",
                 redis_client=redis_client,
                 expire=600, timeout=30, auto_renewal=True,
             )
             if not await asyncio.to_thread(write_lock.acquire):
-                logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
+                logger.warning(f"反思高频do 获取写锁超时，跳过 user={end_user_id}")
                 return {"status": "lock_timeout"}
         try:
             # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
@@ -2114,14 +2216,14 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             if not from_retry:
                 with get_db_read() as db:
                     ws_svc = WorkspaceAppService(db)
-                    rt_recheck = ws_svc.get_end_user_reflection_time(user_id)
-                    if not _should_reflect_now(db, user_id, rt_recheck, iteration_period):
-                        logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={user_id}")
+                    rt_recheck = ws_svc.get_end_user_reflection_time(end_user_id)
+                    if not _should_reflect_now(db, end_user_id, rt_recheck, iteration_period):
+                        logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={end_user_id}")
                         return {"status": "skipped_idempotent"}
 
             # 步骤2.8 开工租约：通过幂等门 + 抢到写锁后、run() 前登记，进程被硬杀也能被租约兜底重派。
             _rc = get_sync_redis_client()
-            rr.lease(_rc, "high_freq", user_id,
+            rr.lease(_rc, "high_freq", end_user_id,
                      {"config_id": config_id, "workspace_id": workspace_id,
                       "iteration_period": iteration_period},
                      from_retry=from_retry)
@@ -2129,7 +2231,8 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
             memory_service = MemoryService(
                 config_id=uuid.UUID(config_id),
-                end_user_id=user_id, workspace_id=workspace_id,
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
             )
             r = await memory_service.run_reflection_layer2()
 
@@ -2145,10 +2248,10 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             if completion == "full":
                 # 步骤4 完整跑完：刷新"上次反思时间"，注销重试登记
                 with get_db_context() as db:
-                    WorkspaceAppService(db).update_end_user_reflection_time(user_id)
-                rr.resolve(_rc, "high_freq", user_id)
+                    WorkspaceAppService(db).update_end_user_reflection_time(end_user_id)
+                rr.resolve(_rc, "high_freq", end_user_id)
                 logger.info(
-                    f"反思高频do 完成 user={user_id} status=success "
+                    f"反思高频do 完成 user={end_user_id} status=success "
                     f"未识别解析={unresolved_info.get('resolved', 0)}/{unresolved_info.get('total', 0)} "
                     f"别名归并={alias_info.get('alias_merged', 0)} "
                     f"实体去重={dedup_info.get('merged_count', 0)}(候选{dedup_info.get('candidate_count', 0)}) "
@@ -2170,12 +2273,12 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             # failed 不会到这里（真异常冒到外层 except 处理）。
             if completion == "partial":
                 with get_db_context() as db:
-                    WorkspaceAppService(db).update_end_user_reflection_time(user_id)
+                    WorkspaceAppService(db).update_end_user_reflection_time(end_user_id)
             skipped_steps = rr.skipped_steps_of_layer2(r)
-            rr.record(_rc, "high_freq", user_id, completion, progressed,
+            rr.record(_rc, "high_freq", end_user_id, completion, progressed,
                       skipped_steps=skipped_steps)
             logger.warning(
-                f"反思高频do 未完整完成 user={user_id} completion={completion} "
+                f"反思高频do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} skipped={skipped_steps} "
                 f"耗时={time.time() - start_time:.1f}s"
             )
@@ -2197,10 +2300,10 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         result = loop.run_until_complete(_run())
     except Exception as e:
         # 真异常：run() 抛出未达 completion 逻辑，补登记 failed（无推进），再 re-raise（FAILURE + traceback，需排查）
-        logger.error(f"反思高频do 失败 user={user_id}: {e}", exc_info=True)
+        logger.error(f"反思高频do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "high_freq", user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(_rc, "high_freq", end_user_id, "failed", progressed=False, last_error=str(e))
         except Exception:
             pass
         raise
@@ -2271,7 +2374,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                             continue
                     do_layer2_dedup_full_scan.apply_async(
                         kwargs={
-                            "user_id": uid,
+                            "end_user_id": uid,
                             "config_id": str(config_id),
                             "workspace_id": ws_id,
                         },
@@ -2305,16 +2408,22 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
-                              workspace_id: str, from_retry: bool = False) -> Dict[str, Any]:
+def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: str = "",
+                              workspace_id: str = "", from_retry: bool = False,
+                              user_id: str | None = None) -> Dict[str, Any]:
     """对【单个用户】执行一次低频全量去重扫描。
 
     由 scan_layer2_dedup_full_scan 派发。精确的增量判断在 run_dedup_full_scan 内部
     （check_new_entities 按实体类型查 Neo4j 新增数），do 这层不重复做。
     返回 status：success / lock_timeout / failed。
     """
+    # HACK: 兼容旧参数 user_id，v0.3.15 后移除
+    end_user_id = end_user_id or user_id
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
     start_time = time.time()
-    inflight_key = f"dedup:inflight:{user_id}"
+    inflight_key = f"dedup:inflight:{end_user_id}"
 
     async def _run() -> Dict[str, Any]:
         from app.core.memory.memory_service import MemoryService
@@ -2325,22 +2434,23 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
         redis_client = get_sync_redis_client()
         if redis_client is not None:
             write_lock = RedisFairLock(
-                key=f"memory_write:{user_id}",
+                key=f"memory_write:{end_user_id}",
                 redis_client=redis_client,
                 expire=600, timeout=120, auto_renewal=True,
             )
             if not await asyncio.to_thread(write_lock.acquire):
-                logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
+                logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={end_user_id}")
                 return {"status": "lock_timeout"}
         try:
             _rc = get_sync_redis_client()
-            rr.lease(_rc, "dedup", user_id,
+            rr.lease(_rc, "dedup", end_user_id,
                      {"config_id": config_id, "workspace_id": workspace_id},
                      from_retry=from_retry)
 
             memory_service = MemoryService(
                 config_id=uuid.UUID(config_id),
-                end_user_id=user_id, workspace_id=workspace_id,
+                end_user_id=end_user_id, 
+                workspace_id=workspace_id,
             )
             r = await memory_service.run_dedup_full_scan()
             completion = rr.completion_of_dedup(r)
@@ -2348,18 +2458,18 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
             merged = r.get("merged_count", 0)
 
             if completion == "full":
-                rr.resolve(_rc, "dedup", user_id)
+                rr.resolve(_rc, "dedup", end_user_id)
                 logger.info(
-                    f"反思低频去重do 完成 user={user_id} status=success "
+                    f"反思低频去重do 完成 user={end_user_id} status=success "
                     f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
                     f"耗时={time.time() - start_time:.1f}s"
                 )
                 return {"status": "success", "merged_count": merged}
 
             # partial：truncated / had_type_error。低频不刷 reflection_time（靠 update_scan_time 续扫）。
-            rr.record(_rc, "dedup", user_id, completion, progressed)
+            rr.record(_rc, "dedup", end_user_id, completion, progressed)
             logger.warning(
-                f"反思低频去重do 未完整完成 user={user_id} completion={completion} "
+                f"反思低频去重do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} truncated={r.get('truncated')} "
                 f"had_type_error={r.get('had_type_error')} 合并={merged} "
                 f"耗时={time.time() - start_time:.1f}s"
@@ -2381,10 +2491,10 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
     try:
         result = loop.run_until_complete(_run())
     except Exception as e:
-        logger.error(f"反思低频去重do 失败 user={user_id}: {e}", exc_info=True)
+        logger.error(f"反思低频去重do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "dedup", user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(_rc, "dedup", end_user_id, "failed", progressed=False, last_error=str(e))
         except Exception:
             pass
         raise
@@ -2426,6 +2536,8 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
     batch = rr.RETRY_BATCH
     dispatched = 0
     cleaned = 0
+    dispatched_uids: Dict[str, List[str]] = {"high_freq": [], "dedup": []}
+
     for task_type, do_task, inflight_prefix in (
         ("high_freq", do_layer2_reflection, "reflection:inflight"),
         ("dedup", do_layer2_dedup_full_scan, "dedup:inflight"),
@@ -2453,18 +2565,24 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车
                 if not rc.set(f"{inflight_prefix}:{uid}", "1", nx=True, ex=1500):
                     continue
-                kwargs = {"user_id": uid, "config_id": meta["config_id"],
+                kwargs = {"end_user_id": uid, "config_id": meta["config_id"],
                           "workspace_id": meta["workspace_id"], "from_retry": True}
                 if task_type == "high_freq":
                     kwargs["iteration_period"] = meta.get("iteration_period", 24)
                 do_task.apply_async(kwargs=kwargs, queue="reflection_tasks")
                 dispatched += 1
+                dispatched_uids[task_type].append(uid)
             except Exception as e:
                 logger.error(f"scan_reflection_retry 处理用户失败 task_type={task_type} uid={uid}: {e}")
 
     logger.info(f"scan_reflection_retry 完成: 派发 {dispatched}, 清理孤儿 {cleaned}, "
                 f"耗时 {time.time() - start_time:.1f}s")
-    return {"status": "SUCCESS", "dispatched": dispatched, "cleaned": cleaned}
+    return {
+        "status": "SUCCESS",
+        "dispatched": dispatched,
+        "cleaned": cleaned,
+        "dispatched_uids": dispatched_uids,
+    }
 
 
 # unused task
@@ -2921,12 +3039,8 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     name="app.tasks.do_refresh_insight_summary_cache",
     bind=True,
     ignore_result=False,
-    max_retries=2,                          # LLM 偶发失败/软超时允许重试
-    autoretry_for=(SoftTimeLimitExceeded,),
-    retry_backoff=True,
-    retry_backoff_max=300,
-    retry_jitter=True,
-    acks_late=False,                        # 避免 worker 崩溃后被重投跑两次
+    max_retries=0,
+    acks_late=False,
     time_limit=900,                         # 15 分钟硬超时
     soft_time_limit=840,                    # 14 分钟软超时
 )
@@ -2964,9 +3078,15 @@ def do_refresh_insight_summary_cache(
         }
 
     loop = set_asyncio_event_loop()
-    will_retry = False
     try:
         result = loop.run_until_complete(_run())
+        # 双失败 = 完全失败：raise 让 Celery 标记 FAILURE（便于 Flower 一眼发现）
+        if not result["insight_success"] and not result["summary_success"]:
+            raise RuntimeError(
+                f"insight and summary both failed: "
+                f"insight_error={result.get('insight_error')}, "
+                f"summary_error={result.get('summary_error')}"
+            )
         result["status"] = (
             "success" if (result["insight_success"] and result["summary_success"]) else "partial"
         )
@@ -2975,31 +3095,189 @@ def do_refresh_insight_summary_cache(
             f"insight={result['insight_success']} summary={result['summary_success']} "
             f"耗时={time.time() - start_time:.1f}s"
         )
-    except SoftTimeLimitExceeded:
-        # 还有重试次数则交给 autoretry_for 重试；标记 will_retry，避免提前删除在途锁
-        will_retry = self.request.retries < self.max_retries
-        raise
-    except Exception as e:
-        logger.error(
-            f"do_refresh_insight_summary_cache 失败 user={end_user_id}: {e}", exc_info=True
-        )
-        result = {"status": "failed", "error": str(e)}
+    # 异常不再 catch，直接冒出 → Celery FAILURE
     finally:
         _shutdown_loop_gracefully(loop)
         # 删除在途标记：放行下一轮 scan 对该用户的派发。
-        # 但若本次因软超时将要重试，则保留 key 直到重试结束，避免退避窗口内被 scan 重复派发。
-        if not will_retry:
-            try:
-                _rc = get_sync_redis_client()
-                if _rc is not None:
-                    _rc.delete(inflight_key)
-            except Exception:
-                pass
+        try:
+            _rc = get_sync_redis_client()
+            if _rc is not None:
+                _rc.delete(inflight_key)
+        except Exception:
+            pass
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
     result["end_user_id"] = end_user_id
     return result
+
+
+# 用户名片 Tag 定时刷新任务
+
+USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
+USER_TAG_INFLIGHT_TTL_SEC = 600
+USER_TAG_SCAN_PAGE_SIZE = 500
+
+
+@celery_app.task(
+    name="app.tasks.scan_refresh_user_tags",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_refresh_user_tags(self) -> Dict[str, Any]:
+    """分页扫描待刷新用户，并为每个用户派发独立的 Tag 刷新任务。
+
+    扫描任务只负责筛选和派发，不读取完整 metadata，也不调用 LLM，避免一个长任务持续
+    占用数据库连接。实际生成由 ``do_refresh_user_tags`` 在 heavy worker 中完成。
+    """
+    from app.repositories.end_user_repository import EndUserRepository
+
+    start_time = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("用户名片Tag scan终止：Redis客户端不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: user tag scan requires inflight locks")
+
+    after_id: uuid.UUID | None = None
+    candidates_count = 0
+    dispatched = 0
+    skip_inflight = 0
+    failed = 0
+
+    while True:
+        with get_db_read() as db:
+            candidates = EndUserRepository(db).get_user_tag_refresh_candidates(
+                after_id=after_id,
+                limit=USER_TAG_SCAN_PAGE_SIZE,
+            )
+        if not candidates:
+            break
+
+        candidates_count += len(candidates)
+        for candidate in candidates:
+            end_user_id = str(candidate.end_user_id)
+            inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+            try:
+                # Redis 在途标记防止相邻两轮扫描为同一用户重复派发任务。
+                lock_acquired = bool(
+                    redis_client.set(
+                        inflight_key,
+                        "1",
+                        nx=True,
+                        ex=USER_TAG_INFLIGHT_TTL_SEC,
+                    )
+                )
+            except Exception as exc:
+                logger.error(
+                    "用户名片Tag scan终止：Redis在途锁不可用 user=%s error=%s",
+                    end_user_id,
+                    str(exc),
+                    exc_info=True,
+                )
+                raise RuntimeError("Redis unavailable: failed to acquire user tag inflight lock") from exc
+
+            if not lock_acquired:
+                skip_inflight += 1
+                continue
+
+            try:
+                # 每 60 个任务分散到 5 分钟内启动，削平 LLM 和数据库的瞬时压力。
+                countdown = (dispatched % 60) * 5
+                do_refresh_user_tags.apply_async(
+                    kwargs={
+                        "end_user_id": end_user_id,
+                        "workspace_id": str(candidate.workspace_id),
+                    },
+                    countdown=countdown,
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception as exc:
+                failed += 1
+                logger.error(
+                    "用户名片Tag scan派发失败 user=%s error=%s",
+                    end_user_id,
+                    str(exc),
+                    exc_info=True,
+                )
+                try:
+                    redis_client.delete(inflight_key)
+                except Exception:
+                    logger.warning("用户名片Tag scan回滚在途锁失败 user=%s", end_user_id, exc_info=True)
+
+        after_id = candidates[-1].end_user_id
+        if len(candidates) < USER_TAG_SCAN_PAGE_SIZE:
+            break
+
+    result = {
+        "status": "SUCCESS",
+        "candidates": candidates_count,
+        "dispatched": dispatched,
+        "skip_inflight": skip_inflight,
+        "failed": failed,
+        "elapsed_time": time.time() - start_time,
+        "task_id": self.request.id,
+    }
+    logger.info(
+        "scan_refresh_user_tags完成 candidates=%s dispatched=%s skip_inflight=%s failed=%s",
+        candidates_count,
+        dispatched,
+        skip_inflight,
+        failed,
+    )
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.do_refresh_user_tags",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=120,
+    soft_time_limit=90,
+)
+def do_refresh_user_tags(
+    self,
+    end_user_id: str,
+    workspace_id: str,
+) -> Dict[str, Any]:
+    """在 heavy worker 中调用记忆领域入口，刷新单个用户的名片 Tag。
+
+    Celery 任务本身是同步函数，新事件循环只用于驱动异步 LLM 调用；领域层中的 PostgreSQL
+    操作仍使用同步短会话，并且不会在等待 LLM 时持有数据库连接。
+    """
+    inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.memory_service import MemoryService
+
+        return await MemoryService.refresh_user_card_tags(end_user_id, workspace_id)
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 无论任务成功还是异常都释放在途标记，让后续扫描可以再次处理该用户。
+        try:
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                redis_client.delete(inflight_key)
+        except Exception:
+            logger.warning("用户名片Tag do释放在途锁失败 user=%s", end_user_id, exc_info=True)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    result["end_user_id"] = end_user_id
+    logger.info("do_refresh_user_tags完成 user=%s status=%s", end_user_id, result["status"])
+    return result
+
 
 @celery_app.task(
     name="app.tasks.run_forgetting_cycle_task",
@@ -3068,16 +3346,13 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
                 "duration_seconds": duration
             }
 
-    # 运行异步函数
-    try:
-        return asyncio.run(_process_users())
-    except Exception as e:
-        logger.error(f"遗忘周期任务失败: {e}", exc_info=True)
-        return {
-            "status": "FAILED",
-            "message": f"任务失败: {str(e)}",
-            "duration_seconds": time.time() - start_time
-        }
+    # 直接运行异步函数，全局异常自然冒出 → Celery FAILURE；
+    # 内层逐用户 try/except 已在 _process_users 中隔离单用户失败。
+    # asyncio.run 自行管理 event loop 生命周期，无需手动清理。
+    result = asyncio.run(_process_users())
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    return result
 
 
 _FORGET_CANDIDATES_KEY = "forget:candidates"
@@ -3264,240 +3539,216 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
         user_results = []
 
         with get_db_context() as db:
+            repo = ImplicitEmotionsStorageRepository(db)
+
+            # 先统计总数用于日志
+            from sqlalchemy import func
+            total_users = db.execute(
+                select(func.count()).select_from(ImplicitEmotionsStorage)
+            ).scalar() or 0
+            logger.info(f"表中存量用户总数: {total_users}，开始时间轴筛选")
+
+            # 构建 Redis 同步客户端，用于时间轴筛选
+            _redis_client = get_sync_redis_client()
+
+            # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
+            # Redis 不可用时回退到全量处理
             try:
-                repo = ImplicitEmotionsStorageRepository(db)
+                refresh_iter = repo.get_users_needing_refresh(_redis_client, batch_size=100)
+            except TimeFilterUnavailableError as e:
+                logger.warning(f"时间轴筛选不可用，回退到全量刷新: {e}")
+                refresh_iter = repo.get_all_user_ids(batch_size=100)
 
-                # 先统计总数用于日志
-                from sqlalchemy import func
-                total_users = db.execute(
-                    select(func.count()).select_from(ImplicitEmotionsStorage)
-                ).scalar() or 0
-                logger.info(f"表中存量用户总数: {total_users}，开始时间轴筛选")
+            for end_user_id in refresh_iter:
+                logger.info(f"开始处理用户: {end_user_id}")
+                user_start_time = time.time()
 
-                # 构建 Redis 同步客户端，用于时间轴筛选
-                _redis_client = get_sync_redis_client()
+                implicit_success = False
+                emotion_success = False
+                errors = []
 
-                # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
-                # Redis 不可用时回退到全量处理
                 try:
-                    refresh_iter = repo.get_users_needing_refresh(_redis_client, batch_size=100)
-                except TimeFilterUnavailableError as e:
-                    logger.warning(f"时间轴筛选不可用，回退到全量刷新: {e}")
-                    refresh_iter = repo.get_all_user_ids(batch_size=100)
-
-                for end_user_id in refresh_iter:
-                    logger.info(f"开始处理用户: {end_user_id}")
-                    user_start_time = time.time()
-
-                    implicit_success = False
-                    emotion_success = False
-                    errors = []
-
+                    # 更新隐性记忆画像
                     try:
-                        # 更新隐性记忆画像
-                        try:
-                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
-                            await implicit_service.save_profile_cache(
-                                end_user_id=end_user_id,
-                                profile_data=profile_data,
-                                db=db
-                            )
-                            implicit_success = True
-                            logger.info(f"成功更新用户 {end_user_id} 的隐性记忆画像")
-                        except Exception as e:
-                            error_msg = f"隐性记忆更新失败: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(f"用户 {end_user_id} {error_msg}")
-
-                        # 更新情绪建议
-                        try:
-                            emotion_service = EmotionAnalyticsService()
-                            suggestions_data = await emotion_service.generate_emotion_suggestions(
-                                end_user_id=end_user_id,
-                                db=db,
-                                language="zh"
-                            )
-                            await emotion_service.save_suggestions_cache(
-                                end_user_id=end_user_id,
-                                suggestions_data=suggestions_data,
-                                db=db
-                            )
-                            emotion_success = True
-                            logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
-                        except Exception as e:
-                            error_msg = f"情绪建议更新失败: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(f"用户 {end_user_id} {error_msg}")
-
-                        # 统计结果
-                        if implicit_success:
-                            successful_implicit += 1
-                        if emotion_success:
-                            successful_emotion += 1
-                        if not implicit_success and not emotion_success:
-                            failed += 1
-
-                        user_elapsed = time.time() - user_start_time
-
-                        # 记录用户处理结果
-                        user_result = {
-                            "end_user_id": end_user_id,
-                            "implicit_success": implicit_success,
-                            "emotion_success": emotion_success,
-                            "errors": errors,
-                            "elapsed_time": user_elapsed
-                        }
-                        user_results.append(user_result)
-
-                        logger.info(
-                            f"用户 {end_user_id} 处理完成: "
-                            f"隐性记忆={'成功' if implicit_success else '失败'}, "
-                            f"情绪建议={'成功' if emotion_success else '失败'}, "
-                            f"耗时={user_elapsed:.2f}秒"
+                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                        profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                        await implicit_service.save_profile_cache(
+                            end_user_id=end_user_id,
+                            profile_data=profile_data,
+                            db=db
                         )
-
+                        implicit_success = True
+                        logger.info(f"成功更新用户 {end_user_id} 的隐性记忆画像")
                     except Exception as e:
-                        # 单个用户失败不影响其他用户（错误隔离）
+                        error_msg = f"隐性记忆更新失败: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(f"用户 {end_user_id} {error_msg}")
+
+                    # 更新情绪建议
+                    try:
+                        emotion_service = EmotionAnalyticsService()
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id,
+                            db=db,
+                            language="zh"
+                        )
+                        await emotion_service.save_suggestions_cache(
+                            end_user_id=end_user_id,
+                            suggestions_data=suggestions_data,
+                            db=db
+                        )
+                        emotion_success = True
+                        logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+                    except Exception as e:
+                        error_msg = f"情绪建议更新失败: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(f"用户 {end_user_id} {error_msg}")
+
+                    # 统计结果
+                    if implicit_success:
+                        successful_implicit += 1
+                    if emotion_success:
+                        successful_emotion += 1
+                    if not implicit_success and not emotion_success:
                         failed += 1
-                        user_elapsed = time.time() - user_start_time
-                        error_info = {
-                            "end_user_id": end_user_id,
-                            "implicit_success": False,
-                            "emotion_success": False,
-                            "errors": [str(e)],
-                            "elapsed_time": user_elapsed
-                        }
-                        user_results.append(error_info)
-                        logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
 
-                # ---- 当天新增用户兜底初始化 ----
-                new_users_initialized = 0
-                new_users_failed = 0
-                logger.info("开始处理当天新增用户的兜底初始化")
+                    user_elapsed = time.time() - user_start_time
 
-                for end_user_id in repo.get_new_user_ids_today(batch_size=100):
-                    logger.info(f"开始初始化新用户: {end_user_id}")
-                    user_start_time = time.time()
-                    implicit_success = False
-                    emotion_success = False
-                    errors = []
+                    # 记录用户处理结果
+                    user_result = {
+                        "end_user_id": end_user_id,
+                        "implicit_success": implicit_success,
+                        "emotion_success": emotion_success,
+                        "errors": errors,
+                        "elapsed_time": user_elapsed
+                    }
+                    user_results.append(user_result)
+
+                    logger.info(
+                        f"用户 {end_user_id} 处理完成: "
+                        f"隐性记忆={'成功' if implicit_success else '失败'}, "
+                        f"情绪建议={'成功' if emotion_success else '失败'}, "
+                        f"耗时={user_elapsed:.2f}秒"
+                    )
+
+                except Exception as e:
+                    # 单个用户失败不影响其他用户（错误隔离）
+                    failed += 1
+                    user_elapsed = time.time() - user_start_time
+                    error_info = {
+                        "end_user_id": end_user_id,
+                        "implicit_success": False,
+                        "emotion_success": False,
+                        "errors": [str(e)],
+                        "elapsed_time": user_elapsed
+                    }
+                    user_results.append(error_info)
+                    logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
+
+            # ---- 当天新增用户兜底初始化 ----
+            new_users_initialized = 0
+            new_users_failed = 0
+            logger.info("开始处理当天新增用户的兜底初始化")
+
+            for end_user_id in repo.get_new_user_ids_today(batch_size=100):
+                logger.info(f"开始初始化新用户: {end_user_id}")
+                user_start_time = time.time()
+                implicit_success = False
+                emotion_success = False
+                errors = []
+
+                try:
+                    try:
+                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                        profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                        await implicit_service.save_profile_cache(
+                            end_user_id=end_user_id, profile_data=profile_data, db=db
+                        )
+                        implicit_success = True
+                        logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
+                    except Exception as e:
+                        errors.append(f"隐性记忆初始化失败: {str(e)}")
+                        logger.error(f"新用户 {end_user_id} 隐性记忆初始化失败: {e}")
 
                     try:
-                        try:
-                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
-                            await implicit_service.save_profile_cache(
-                                end_user_id=end_user_id, profile_data=profile_data, db=db
-                            )
-                            implicit_success = True
-                            logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
-                        except Exception as e:
-                            errors.append(f"隐性记忆初始化失败: {str(e)}")
-                            logger.error(f"新用户 {end_user_id} 隐性记忆初始化失败: {e}")
-
-                        try:
-                            emotion_service = EmotionAnalyticsService()
-                            suggestions_data = await emotion_service.generate_emotion_suggestions(
-                                end_user_id=end_user_id, db=db, language="zh"
-                            )
-                            await emotion_service.save_suggestions_cache(
-                                end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
-                            )
-                            emotion_success = True
-                            logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
-                        except Exception as e:
-                            errors.append(f"情绪建议初始化失败: {str(e)}")
-                            logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
-
-                        if implicit_success or emotion_success:
-                            new_users_initialized += 1
-                        else:
-                            new_users_failed += 1
-
-                        user_elapsed = time.time() - user_start_time
-                        user_results.append({
-                            "end_user_id": end_user_id,
-                            "type": "new_user_init",
-                            "implicit_success": implicit_success,
-                            "emotion_success": emotion_success,
-                            "errors": errors,
-                            "elapsed_time": user_elapsed
-                        })
-
+                        emotion_service = EmotionAnalyticsService()
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id, db=db, language="zh"
+                        )
+                        await emotion_service.save_suggestions_cache(
+                            end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                        )
+                        emotion_success = True
+                        logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
                     except Exception as e:
+                        errors.append(f"情绪建议初始化失败: {str(e)}")
+                        logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
+
+                    if implicit_success or emotion_success:
+                        new_users_initialized += 1
+                    else:
                         new_users_failed += 1
-                        user_elapsed = time.time() - user_start_time
-                        user_results.append({
-                            "end_user_id": end_user_id,
-                            "type": "new_user_init",
-                            "implicit_success": False,
-                            "emotion_success": False,
-                            "errors": [str(e)],
-                            "elapsed_time": user_elapsed
-                        })
-                        logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
 
-                logger.info(f"当天新增用户兜底初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}")
-                # ---- 新增用户兜底初始化结束 ----
+                    user_elapsed = time.time() - user_start_time
+                    user_results.append({
+                        "end_user_id": end_user_id,
+                        "type": "new_user_init",
+                        "implicit_success": implicit_success,
+                        "emotion_success": emotion_success,
+                        "errors": errors,
+                        "elapsed_time": user_elapsed
+                    })
 
-                logger.info(
-                    f"隐性记忆和情绪数据更新定时任务完成: "
-                    f"存量用户总数={total_users}, "
-                    f"隐性记忆成功={successful_implicit}, "
-                    f"情绪建议成功={successful_emotion}, "
-                    f"存量失败={failed}, "
-                    f"新增用户初始化成功={new_users_initialized}, "
-                    f"新增用户初始化失败={new_users_failed}"
-                )
+                except Exception as e:
+                    new_users_failed += 1
+                    user_elapsed = time.time() - user_start_time
+                    user_results.append({
+                        "end_user_id": end_user_id,
+                        "type": "new_user_init",
+                        "implicit_success": False,
+                        "emotion_success": False,
+                        "errors": [str(e)],
+                        "elapsed_time": user_elapsed
+                    })
+                    logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
 
-                return {
-                    "status": "SUCCESS",
-                    "message": (
-                        f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
-                        f"当天新增用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
-                    ),
-                    "total_users": total_users,
-                    "successful_implicit": successful_implicit,
-                    "successful_emotion": successful_emotion,
-                    "failed": failed,
-                    "new_users_initialized": new_users_initialized,
-                    "new_users_failed": new_users_failed,
-                    "user_results": user_results[:50]
-                }
+            logger.info(f"当天新增用户兜底初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}")
+            # ---- 新增用户兜底初始化结束 ----
 
-            except Exception as e:
-                logger.error(f"隐性记忆和情绪数据更新定时任务执行失败: {str(e)}")
-                return {
-                    "status": "FAILURE",
-                    "error": str(e),
-                    "total_users": total_users,
-                    "successful_implicit": successful_implicit,
-                    "successful_emotion": successful_emotion,
-                    "failed": failed,
-                    "new_users_initialized": 0,
-                    "new_users_failed": 0,
-                    "user_results": user_results[:50]
-                }
+            logger.info(
+                f"隐性记忆和情绪数据更新定时任务完成: "
+                f"存量用户总数={total_users}, "
+                f"隐性记忆成功={successful_implicit}, "
+                f"情绪建议成功={successful_emotion}, "
+                f"存量失败={failed}, "
+                f"新增用户初始化成功={new_users_initialized}, "
+                f"新增用户初始化失败={new_users_failed}"
+            )
 
+            return {
+                "status": "SUCCESS",
+                "message": (
+                    f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
+                    f"当天新增用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
+                ),
+                "total_users": total_users,
+                "successful_implicit": successful_implicit,
+                "successful_emotion": successful_emotion,
+                "failed": failed,
+                "new_users_initialized": new_users_initialized,
+                "new_users_failed": new_users_failed,
+                "user_results": user_results[:50]
+            }
+
+    loop = set_asyncio_event_loop()
     try:
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        loop = set_asyncio_event_loop()
-
         result = loop.run_until_complete(_run())
-        elapsed_time = time.time() - start_time
-        result["elapsed_time"] = elapsed_time
+        result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
-
         return result
-    except Exception as e:
-        elapsed_time = time.time() - start_time
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 # =============================================================================
@@ -3591,20 +3842,20 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
             "failed": failed,
         }
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
-
         result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed to initialize implicit emotions"
+            )
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
         return result
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 # =============================================================================
@@ -3646,7 +3897,29 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
         service = MemoryAgentService()
 
+        # 预校验：逐个解析 UUID，无效格式直接记 failed 跳过
+        valid_uuids: list[uuid.UUID] = []
+        invalid_ids: list[str] = []
+        for eid in end_user_ids:
+            try:
+                valid_uuids.append(uuid.UUID(eid))
+            except (ValueError, AttributeError):
+                invalid_ids.append(eid)
+                failed += 1
+                logger.warning(f"用户 {eid} UUID 格式无效，跳过兴趣分布初始化")
+
+        # 查询 DB 中实际存在的 end_user_id
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+            existing_ids = EndUserRepository(db).filter_existing_ids(valid_uuids)
+
         for end_user_id in end_user_ids:
+            # 存在性校验：不存在的用户直接记失败
+            if end_user_id not in existing_ids:
+                failed += 1
+                logger.warning(f"用户 {end_user_id} 不存在，跳过兴趣分布初始化")
+                continue
+
             # 存在性检查：缓存有数据则跳过
             cached = await InterestMemoryCache.get_interest_distribution(
                 end_user_id=end_user_id,
@@ -3683,20 +3956,20 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
             "failed": failed,
         }
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
-
         result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed to initialize interest distribution"
+            )
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
         return result
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 @celery_app.task(
@@ -3806,7 +4079,7 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     name="app.tasks.run_incremental_clustering",
     bind=True,
     ignore_result=False,
-    max_retries=2,
+    max_retries=0,
     acks_late=False,
     time_limit=1800,  # 30分钟硬超时
     soft_time_limit=1700,
@@ -3875,8 +4148,8 @@ def run_incremental_clustering(
         finally:
             await connector.close()
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
@@ -3887,20 +4160,9 @@ def run_incremental_clustering(
         )
 
         return result
-    except Exception as e:
-        elapsed_time = time.time() - start_time
-        logger.error(
-            f"[IncrementalClustering] 任务失败 - task_id={self.request.id}, "
-            f"elapsed_time={elapsed_time:.2f}s, error={str(e)}",
-            exc_info=True
-        )
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "end_user_id": end_user_id,
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 @celery_app.task(
@@ -4044,20 +4306,21 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             "failed": failed,
         }
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed in community clustering"
+            )
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
         return result
-
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE；
+    # 内层 _run() 中 connector.close() 已由 try/finally 保证释放。
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 # ─── User Metadata Extraction Task ───────────────────────────────────────────

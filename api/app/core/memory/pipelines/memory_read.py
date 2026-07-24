@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from app.core.memory.enums import SearchStrategy, StorageType
+from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
 from app.core.memory.pipelines.base_pipeline import BasePipeline, ModelClientMixin
 from app.core.memory.read_services.generate_engine.query_preprocessor import QueryPreprocessor
@@ -39,6 +39,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         super().__init__(ctx)
         self._embedding_client = None
         self._llm_client = None
+        self._vision_llm_client = None
+        self._audio_llm_client = None
 
     async def run(
             self,
@@ -112,6 +114,31 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 )
         return self._embedding_client
 
+    async def _get_perceptual_llm_client(self, perceptual_type: int):
+        cfg = self.ctx.memory_config
+        if perceptual_type == 1:  # VISION
+            if not cfg.vision_model_id:
+                return None
+            if self._vision_llm_client is None:
+                async with get_async_db_context() as db:
+                    self._vision_llm_client = await self.get_llm_client_async(
+                        db, cfg.vision_model_id, tenant_id=cfg.tenant_id,
+                    )
+            return self._vision_llm_client
+        elif perceptual_type == 2:  # AUDIO
+            if not cfg.audio_model_id:
+                return None
+            if self._audio_llm_client is None:
+                async with get_async_db_context() as db:
+                    self._audio_llm_client = await self.get_llm_client_async(
+                        db, cfg.audio_model_id, tenant_id=cfg.tenant_id,
+                    )
+            return self._audio_llm_client
+        elif perceptual_type == 3:  # TEXT
+            return await self._get_llm_client()
+        else:
+            return None
+
     async def _deep_read(
             self,
             query: str,
@@ -122,17 +149,12 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     ) -> MemorySearchResult:
         search_service = await self._get_search_service(includes)
         memory_l0 = await self._user_meta()
-        questions, memory_evidence = await QueryPreprocessor.split(
+        questions = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
             await self._get_llm_client()
         )
-        if memory_evidence:
-            memory_l0.content_str = memory_evidence
-            if memory_l0.memories:
-                memory_l0.memories[0].query = query
-            return memory_l0
         all_tasks = []
         for question in questions:
             all_tasks.append(_run_with_semaphore(search_service.hybrid_search(question, limit)))
@@ -145,6 +167,56 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         hybrid_search_res = _safe_merge_results(hybrid_results, "hybrid")
         relation_res = _safe_merge_results(relation_results, "relation")
+
+        perceptual_memories = [
+            m for m in hybrid_search_res.memories
+            if m.source == Neo4jNodeType.PERCEPTUAL
+        ]
+        if perceptual_memories:
+            parse_tasks = []
+            type_llm_cache: dict[int, object] = {}
+
+            async def _get_llm_for_type(pt: int):
+                if pt not in type_llm_cache:
+                    type_llm_cache[pt] = await self._get_perceptual_llm_client(pt)
+                return type_llm_cache[pt]
+
+            for i, question in enumerate(questions):
+                if i >= len(hybrid_results) or isinstance(hybrid_results[i], Exception):
+                    continue
+                sub_percep = [
+                    m for m in hybrid_results[i].memories
+                    if m.source == Neo4jNodeType.PERCEPTUAL
+                ]
+                if not sub_percep:
+                    continue
+
+                by_type: dict[int, list] = {}
+                for mem in sub_percep:
+                    pt = int(mem.data.get("perceptual_type", 0))
+                    if pt not in by_type:
+                        by_type[pt] = []
+                    by_type[pt].append(mem)
+
+                for pt, mems in by_type.items():
+                    llm = await _get_llm_for_type(pt)
+                    if llm is None:
+                        continue
+                    parse_tasks.append(
+                        search_service.resolve_perceptual_content(
+                            question, mems, llm
+                        )
+                    )
+
+            if parse_tasks:
+                parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)
+                for parse_res in parse_results:
+                    if not isinstance(parse_res, Exception):
+                        for mem in parse_res:
+                            for existing in hybrid_search_res.memories:
+                                if existing.id == mem.id:
+                                    existing.content = mem.content
+                                    break
 
         results = hybrid_search_res + relation_res
 
@@ -169,17 +241,12 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         search_service = await self._get_search_service(includes)
 
         memory_l0 = await self._user_meta()
-        questions, memory_evidence = await QueryPreprocessor.split(
+        questions = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
             await self._get_llm_client()
         )
-        if memory_evidence:
-            memory_l0.content_str = memory_evidence
-            if memory_l0.memories:
-                memory_l0.memories[0].query = query
-            return memory_l0
         all_results = list(await asyncio.gather(*(
             _run_with_semaphore(search_service.hybrid_search(question, limit)) for question in questions
         ), return_exceptions=True))

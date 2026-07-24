@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Steps, Button, Select } from 'antd';
+import { Form, Input, App, Steps, Button, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceModalData, SpaceModalRef, Space, StorageType } from '../types'
@@ -23,6 +23,7 @@ import ragIcon from '@/assets/images/space/rag.png'
 import neo4jIcon from '@/assets/images/space/neo4j.png'
 import { stringRegExp } from '@/utils/validator';
 import type { ModelListItem } from '@/views/ModelManagement/types'
+import { isPrivateAvailable } from '@/utils/private'
 
 const FormItem = Form.Item;
 
@@ -53,7 +54,6 @@ const customModelFields: { name: 'llm' | 'embedding' | 'rerank' | 'vision' | 'au
   { name: 'video', label: 'videoModel' },
 ]
 
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   refresh
 }, ref) => {
@@ -81,7 +81,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
     setCurrentStep(prev => prev - 1)
   }
   const handleGetDefaultModels = () => {
-    if (!isSaas) {
+    if (!isPrivateAvailable) {
       return
     }
     getDefaultWorkspaceModel().then(res => {
@@ -118,7 +118,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           setCurrentStep(1)
         } else {
           const { icon, is_default_config, ...rest } = values
-          const isDefaultConfig = is_default_config === '1' && isSaas && Object.keys(defaultModels).length > 0
+          const isDefaultConfig = is_default_config === '1' && isPrivateAvailable && Object.keys(defaultModels).length > 0
           let formData: SpaceModalData = {
             ...rest,
             is_default_config: isDefaultConfig,
@@ -201,7 +201,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         layout="vertical"
         initialValues={{
           storage_type: types[0],
-          is_default_config: isSaas ? '1' : '0',
+          is_default_config: isPrivateAvailable ? '1' : '0',
         }}
       >
         <Form.Item
@@ -246,7 +246,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
 
 
         {currentStep === 1 && <>
-          {isSaas && Object.keys(defaultModels).length > 0 &&
+          {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
             <Form.Item name="is_default_config" className="rb:mb-6!">
               <RadioGroupCard
                 allowClear={false}
@@ -268,7 +268,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
             </Form.Item>
           }
 
-          {!isSaas || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
+          {!isPrivateAvailable || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
             customModelFields.map(field => (
               <Form.Item
                 key={field.name}
@@ -289,13 +289,15 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
           ) : (
             <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4">
               {customModelFields.map(field => (
-                <div
+                <Flex
                   key={field.name}
-                  className="rb:flex rb:items-center rb:justify-between rb:py-3.5 rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
+                  align="center"
+                  justify="space-between"
+                  className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
                 >
                   <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
                   <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
-                </div>
+                </Flex>
               ))}
             </div>
           )}

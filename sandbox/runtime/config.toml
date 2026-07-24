@@ -1,0 +1,46 @@
+# ── Sandbox runtime ──
+max_workers = 4
+worker_timeout = 15
+
+enable_network = true
+enable_preload = false
+
+# When false, pip install and chroot jail setup are skipped at startup
+# (must be pre-baked into the container image during docker build).
+privilege = true
+
+# Pre-warmed Python zygote — fork() child per request, avoids interpreter
+# cold start. Linux-only; set to false on macOS/Windows dev machines.
+python_zygote = true
+
+python_path = "/usr/local/bin/python3"
+nodejs_path = "/usr/bin/node"
+
+sandbox_user = "sandbox"
+sandbox_uid = 65537
+# Dedicated non-privileged group. MUST NOT be 0 (the root group), otherwise the
+# sandboxed process runs with the root group and can access group-root files.
+sandbox_gid = 65537
+
+# Per-request virtual address space cap (RLIMIT_AS), in bytes, passed to
+# init_seccomp. Bounds a single execution's memory. 0 disables.
+# Node uses --jitless so V8 virtual-space reservation is much lower.
+python_max_as_bytes = 268435456    # 256 MiB
+nodejs_max_as_bytes = 536870912    # 512 MiB (jitless)
+
+# V8 --max-old-space-size in MiB. Caps JS heap below RLIMIT_AS so heap-OOM
+# produces a clean JS error instead of SIGKILL / ENOMEM panic.
+# Default: 256 MiB.
+nodejs_max_old_space_mb = 256
+
+# ── Server ──
+[app]
+port = 8194
+debug = false
+key = "sandbox"
+
+# ── Proxy ──
+[proxy]
+socks5 = ""
+http = ""
+https = ""

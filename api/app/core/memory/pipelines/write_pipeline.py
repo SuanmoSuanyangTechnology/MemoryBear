@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
@@ -121,6 +122,26 @@ def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: s
         })
 
     return result
+
+
+@dataclass
+class _PerceptualSnapshot:
+    """MemoryPerceptualModel 的 Session 无关快照。
+
+    在 _preprocess_files 内部（DB Session 活跃期）从 ORM 实例拷贝生成，
+    切断与 SQLAlchemy Session 的绑定；供下游异步步骤（如 graph_build_step）
+    安全访问属性。
+    """
+
+    id: Any
+    end_user_id: str
+    perceptual_type: str
+    file_path: str
+    file_name: str
+    file_ext: str
+    summary: str
+    meta_data: Any
+    created_time: Any
 
 
 class ExtractionResult(BaseModel):
@@ -360,6 +381,7 @@ class WritePipeline:
                         conversation_id=conversation_id,
                         source=source,
                         language=self.language,
+                        persist=not is_pilot_run,
                     )
 
                     # 拆回三部分
@@ -438,6 +460,11 @@ class WritePipeline:
                         snapshot=snapshot,
                         context_before=context_before_pruned,
                         context_after=context_after_pruned,
+                        # 传入分组信息，让 target dialog 出生即用与快写统一的确定性 id
+                        # （api/mcp 路径 conversation_id 为空、走 source 分支），实现覆盖升级。
+                        conversation_id=conversation_id,
+                        message_seq=message_seq,
+                        source=source,
                     )
                     # 注入剪枝记录到 dialog_data.metadata
                     if pruning_records:
@@ -931,7 +958,6 @@ class WritePipeline:
     # ──────────────────────────────────────────────
     # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
     # ──────────────────────────────────────────────
-
     async def _preprocess_files(self, messages: List[dict]) -> None:
         """处理消息中附带的文件，生成 Perceptual 记录并注入 summary 到 content。
 
@@ -970,7 +996,7 @@ class WritePipeline:
                     with get_db_context() as db:
                         # 先查找已有的 Perceptual 记录
                         repo = MemoryPerceptualRepository(db)
-                        memories = repo.get_by_url(url)
+                        memories = repo.get_by_url(self.end_user_id, url)
 
                         if memories:
                             # 已存在，复用最新的一条
@@ -979,19 +1005,18 @@ class WritePipeline:
                                 key=lambda m: m.created_time if m.created_time else datetime.min,
                             )
                             # 在 Session 内提取所有需要的属性到一个简单对象中，
-                            # 彻底避免 DetachedInstanceError
-                            class _PerceptualSnapshot:
-                                pass
-                            snap = _PerceptualSnapshot()
-                            snap.id = memory.id
-                            snap.summary = memory.summary
-                            snap.meta_data = memory.meta_data
-                            snap.file_path = memory.file_path
-                            snap.file_name = memory.file_name
-                            snap.file_ext = memory.file_ext
-                            snap.perceptual_type = memory.perceptual_type
-                            snap.end_user_id = self.end_user_id  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
-                            snap.created_time = memory.created_time
+                            # 彻底避免 DetachedInstanceError（使用模块级 _PerceptualSnapshot）
+                            snap = _PerceptualSnapshot(
+                                id=memory.id,
+                                end_user_id=self.end_user_id,  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
+                                perceptual_type=memory.perceptual_type,
+                                file_path=memory.file_path,
+                                file_name=memory.file_name,
+                                file_ext=memory.file_ext,
+                                summary=memory.summary,
+                                meta_data=memory.meta_data,
+                                created_time=memory.created_time,
+                            )
                             file_object = snap
                         else:
                             # 不存在，创建 Perceptual 记录

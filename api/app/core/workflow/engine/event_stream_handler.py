@@ -19,10 +19,16 @@ class EventStreamHandler:
             output_coordinator: StreamOutputCoordinator,
             variable_pool: VariablePool,
             execution_id: str,
+            multi_answer_mode_enabled: bool = False,
     ):
         self.coordinator = output_coordinator
         self.variable_pool = variable_pool
         self.execution_id = execution_id
+        self.multi_answer_mode_enabled = multi_answer_mode_enabled
+        # 普通模式下，如果某个上游节点开始流式输出时还没有轮到它对应的
+        # 回复节点，则整条流都延后到节点完成后从变量池一次性输出。
+        # 不能在中途切换为实时输出，否则切换前的 chunk 会丢失。
+        self._deferred_serial_streams: set[tuple[str, str]] = set()
 
     def _mask(self, value):
         return value
@@ -116,15 +122,21 @@ class EventStreamHandler:
         activate = state.values.get("activate", {}) if state.values else {}
 
         self.update_stream_output_status(activate, data)
-        wait = False
-        while self.coordinator.activate_end and not wait:
-            async for msg_event in self.coordinator.emit_activate_chunk(self.variable_pool):
+        if self.multi_answer_mode_enabled:
+            # 一问多答模式下，每个回复节点独立推进，允许兄弟分支的消息事件交错输出。
+            async for msg_event in self.coordinator.emit_all_active_chunks(self.variable_pool):
                 yield msg_event
+        else:
+            # 普通模式保持原有串行语义：当前回复节点没有完成前，不推进队列中的下一个节点。
+            wait = False
+            while self.coordinator.activate_end and not wait:
+                async for msg_event in self.coordinator.emit_activate_chunk(self.variable_pool):
+                    yield msg_event
 
-            if self.coordinator.activate_end:
-                wait = True
-            else:
-                self.update_stream_output_status(activate, data)
+                if self.coordinator.activate_end:
+                    wait = True
+                else:
+                    self.update_stream_output_status(activate, data)
 
         logger.debug(f"[UPDATES] Received state update from nodes: {list(data.keys())} "
                      f"- execution_id: {self.execution_id}")
@@ -156,65 +168,96 @@ class EventStreamHandler:
         node_id = data.get("node_id")
         chunk = data.get("chunk")
         done = data.get("done")
+        chunk_field = data.get("field", "output")
 
-        if self.coordinator.activate_end:
-            end_info = self.coordinator.current_activate_end_info
-            if not end_info or end_info.cursor >= len(end_info.outputs):
+        if not self.multi_answer_mode_enabled:
+            stream_key = (node_id, chunk_field)
+            dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
+            belongs_to_current_end = any(
+                end_id == self.coordinator.activate_end
+                for end_id, _ in dependent_ends
+            )
+
+            # 一旦该流在尚未轮到时被抑制，后续 chunk（包括轮到之后到达的）
+            # 也必须全部抑制。done 事件不能 mark_scope_streamed，确保 updates
+            # 最终会从变量池读取并发送完整结果。
+            if stream_key in self._deferred_serial_streams:
                 return
 
-            # Scan from cursor to find the variable segment that depends on node_id.
-            # If there are literal segments before it, emit them first (literal prefix handling).
-            # This handles templates like "Result: {{llm.output}}"
-            target_segment_idx = None
-            for i in range(end_info.cursor, len(end_info.outputs)):
-                seg = end_info.outputs[i]
-                if seg.is_variable and seg.depends_on_scope(node_id):
-                    target_segment_idx = i
-                    break
+            if dependent_ends and not belongs_to_current_end:
+                self._deferred_serial_streams.add(stream_key)
+                return
 
-            if target_segment_idx is not None and target_segment_idx > end_info.cursor:
-                # Emit literal/variable segments between cursor and target
-                for i in range(end_info.cursor, target_segment_idx):
+        active_end_ids = (
+            self.coordinator.active_end_ids()
+            if self.multi_answer_mode_enabled
+            else ([self.coordinator.activate_end] if self.coordinator.activate_end else [])
+        )
+        if active_end_ids:
+            for end_id in active_end_ids:
+                if end_id not in self.coordinator.end_outputs:
+                    continue
+                self.coordinator.activate_end = end_id
+                end_info = self.coordinator.current_activate_end_info
+                if not end_info or end_info.cursor >= len(end_info.outputs):
+                    continue
+
+                # Find the next segment driven by this node.  Every active
+                # End node has its own cursor, so sibling branches can be
+                # advanced independently and their events can interleave.
+                target_segment_idx = None
+                for i in range(end_info.cursor, len(end_info.outputs)):
                     seg = end_info.outputs[i]
-                    if not seg.is_variable:
-                        yield {"event": "message", "data": {"content": self._mask(seg.literal)}}
-                    else:
-                        # Another variable segment before our target - resolve from pool
+                    if seg.is_variable and seg.depends_on_scope(node_id):
+                        target_segment_idx = i
+                        break
+                if target_segment_idx is None:
+                    continue
+
+                if target_segment_idx > end_info.cursor:
+                    for i in range(end_info.cursor, target_segment_idx):
+                        seg = end_info.outputs[i]
                         try:
-                            val = self.variable_pool.get_literal(seg.literal)
-                            yield {"event": "message", "data": {"content": self._mask(val)}}
+                            value = seg.literal if not seg.is_variable else self.variable_pool.get_literal(seg.literal)
+                            msg_data = {"content": self._mask(value)}
+                            if self.multi_answer_mode_enabled:
+                                msg_data["node_id"] = end_id
+                            yield {"event": "message", "data": msg_data}
                         except Exception:
                             pass
-                # Advance cursor to the target variable segment
-                end_info.cursor = target_segment_idx
+                    end_info.cursor = target_segment_idx
 
-            current_output = end_info.outputs[end_info.cursor]
-            if current_output.is_variable and current_output.depends_on_scope(node_id):
-                # Field-level matching: route real-time chunks only to the segment
-                # that references the same field. Chunks carrying "reasoning_content"
-                # flow to {{node.reasoning_content}}, "output" to {{node.output}}.
-                chunk_field = data.get("field", "output")
-                segment_field = current_output.get_field() or "output"
-                if chunk_field != segment_field:
-                    return
+                current_output = end_info.outputs[end_info.cursor]
+                if not current_output.is_variable or not current_output.depends_on_scope(node_id):
+                    continue
+                if chunk_field != (current_output.get_field() or "output"):
+                    continue
 
                 if done:
-                    # Mark scope as streamed to prevent duplicate emission in emit_activate_chunk
                     self.coordinator.mark_scope_streamed(node_id, chunk_field)
                     end_info.cursor += 1
                     if end_info.cursor >= len(end_info.outputs):
                         self.coordinator.pop_current_activate_end()
-                else:
+                elif chunk:
+                    msg_data = {"content": self._mask(chunk)}
+                    if self.multi_answer_mode_enabled:
+                        msg_data["node_id"] = end_id
                     yield {
                         "event": "message",
-                        "data": {
-                            "content": self._mask(chunk)
-                        }
+                        "data": msg_data,
                     }
+            if self.multi_answer_mode_enabled:
+                self.coordinator.activate_end = None
         else:
             # Fallback: No active End node, but chunks are arriving.
             # Only emit directly for End nodes that are already activated (no branch control).
             # End nodes still waiting for branch routing must NOT receive chunks here.
+            # 普通模式下不能走该直通路径，否则多个并行 LLM 在回复节点进入串行队列前，
+            # chunk 会被直接交错发送。此时等待 updates 事件，再按 output_queue 顺序
+            # 从变量池发出完整结果即可；只有一问多答模式允许 fallback 并行输出。
+            if not self.multi_answer_mode_enabled:
+                return
+
             dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
             active_dependent_ends = [(eid, einfo) for eid, einfo in dependent_ends if einfo.activate]
             if active_dependent_ends:
@@ -231,11 +274,12 @@ class EventStreamHandler:
                 if done:
                     self.coordinator.mark_scope_streamed(node_id, chunk_field)
                 elif chunk:
+                    msg_data = {"content": self._mask(chunk)}
+                    if self.multi_answer_mode_enabled:
+                        msg_data["node_id"] = active_dependent_ends[0][0]
                     yield {
                         "event": "message",
-                        "data": {
-                            "content": self._mask(chunk)
-                        }
+                        "data": msg_data
                     }
 
     async def handle_node_error_event(self, data: dict):

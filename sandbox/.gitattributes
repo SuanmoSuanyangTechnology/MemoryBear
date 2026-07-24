@@ -1,0 +1,6 @@
+# Force LF line endings for files that run inside Linux Docker containers.
+# Windows git core.autocrlf=true would otherwise convert to CRLF on checkout.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.toml text eol=lf

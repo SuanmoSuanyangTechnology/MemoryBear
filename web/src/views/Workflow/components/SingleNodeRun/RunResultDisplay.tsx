@@ -70,7 +70,7 @@ const RunResultDisplay: FC<RunResultDisplayProps> = ({ result, loading, nodeData
         const content = typeof result[key as keyof RunResult] === 'object' && result[key as keyof RunResult] ? JSON.stringify(result[key as keyof RunResult], null, 2) : result[key as keyof RunResult] ? result[key as keyof RunResult] : '{}'
         return (
           <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
-            <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
+            <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
               {t(`workflow.${key}_result`)}
               {!loading &&
                 <Button
@@ -79,7 +79,7 @@ const RunResultDisplay: FC<RunResultDisplayProps> = ({ result, loading, nodeData
                   onClick={() => handleCopy(content)}
                 >{t('common.copy')}</Button>
               }
-            </div>
+            </Flex>
             <div className="rb:max-h-40 rb:overflow-auto">
               {loading
                 ? <Skeleton active title={false} className="rb:m-3! rb:w-[calc(100%-24px)]!" />

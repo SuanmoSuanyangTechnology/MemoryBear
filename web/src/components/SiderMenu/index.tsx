@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-26 11:32:26
+ * @Last Modified time: 2026-07-21 17:55:31
  */
 /**
  * SiderMenu Component
@@ -23,7 +23,6 @@ import clsx from 'clsx';
 import { useEffect, useRef, useState, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Account } from '@redbear/memory-brick'
 
 import { getTenantSubscription } from '@/api/user';
 import logo from '@/assets/images/logo.png';
@@ -34,6 +33,7 @@ import styles from './index.module.css';
 import SubscriptionDetailModal, { type SubscriptionDetailModalRef } from './SubscriptionDetailModal';
 import SwitchSpaceModal, { type SwitchSpaceModalRef } from './SwitchSpaceModal';
 import { formatDateTime } from '@/utils/format'
+import { isPrivateAvailable } from '@/utils/private'
 
 export interface PackagePlan {
   id: string
@@ -83,7 +83,6 @@ export interface Subscription {
 
 const { Sider } = Layout;
 
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 /** Sidebar menu component with collapsible navigation */
 const Menu: FC<{
   /** Menu display mode */
@@ -113,14 +112,14 @@ const Menu: FC<{
       menuList = allMenus[source] || []
     }
 
-    // account permission depends on pricing and isSaas: if has pricing and isSaas, then has account
+    // account permission depends on pricing and private package: if has pricing and private package available, then has account
     const hasPricing = user.permissions?.includes('pricing') || user.permissions?.includes('all')
     const noAuthList = ['user'].filter(vo =>
       (Array.isArray(user.permissions) && !user.permissions?.includes(vo) && !user.permissions?.includes('all')) || !Array.isArray(user.permissions)
     )
     if (!hasPricing) {
       noAuthList.push('pricing', 'account')
-    } else if ((!isSaas || !Account) && !noAuthList.includes('account')) {
+    } else if (!isPrivateAvailable && !noAuthList.includes('account')) {
       noAuthList.push('account')
     }
 
