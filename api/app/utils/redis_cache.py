@@ -57,11 +57,8 @@ import dataclasses
 import inspect
 import json
 import logging
-<<<<<<< HEAD
-import random
-=======
 import threading
->>>>>>> origin/develop
+import random
 import uuid
 from enum import Enum
 from functools import wraps
