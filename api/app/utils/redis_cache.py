@@ -253,14 +253,15 @@ def redis_cache(
                     task = asyncio.create_task(compute())
                     _in_flight[cache_key] = task
 
-            if task.done():
-                result = task.result()
-            else:
-                result = await task
-
-            async with _in_flight_lock:
-                if _in_flight.get(cache_key) is task:
-                    del _in_flight[cache_key]
+            try:
+                if task.done():
+                    result = task.result()
+                else:
+                    result = await task
+            finally:
+                async with _in_flight_lock:
+                    if _in_flight.get(cache_key) is task:
+                        del _in_flight[cache_key]
 
             if result is None and not cache_none:
                 return None
@@ -375,8 +376,11 @@ async def invalidate_cache(
         已删除的 key 数量。
 
     Raises:
-        ValueError: 未提供任何匹配条件。
+        ValueError: 未提供任何匹配条件，或 batch_size <= 0。
     """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+
     redis = get_thread_safe_redis()
 
     if key is not None:
@@ -386,10 +390,11 @@ async def invalidate_cache(
     if search is None:
         raise ValueError("Provide key=, prefix=, or pattern=")
 
+    scan_hint = max(1, min(batch_size, 500))
     deleted = 0
     cursor = 0
     while True:
-        cursor, keys = await redis.scan(cursor, match=search, count=min(batch_size, 500))
+        cursor, keys = await redis.scan(cursor, match=search, count=scan_hint)
         if keys:
             for i in range(0, len(keys), batch_size):
                 chunk = keys[i:i + batch_size]
