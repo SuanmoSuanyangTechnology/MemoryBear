@@ -78,6 +78,7 @@ async def enqueue_document_graph_sync(
     parser_config: Mapping[str, Any] | None,
     *,
     dispatch_legacy: bool = True,
+    document_deleted: bool = False,
 ) -> str | None:
     if not is_graph_enabled(parser_config):
         return None
@@ -97,6 +98,8 @@ async def enqueue_document_graph_sync(
             "knowledge_id": str(knowledge_id),
             "document_id": str(document_id),
         }
+        if document_deleted:
+            params["document_deleted"] = True
 
     from app.celery_task_scheduler import scheduler as celery_scheduler
 

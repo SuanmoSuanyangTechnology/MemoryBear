@@ -281,13 +281,15 @@ def _execute_evidence_document(
         state: _GraphTaskState,
         document_id: str,
         lock_guard,
+        *,
+        document_active: bool,
 ) -> None:
     runtime = snapshot_graph_runtime(state.knowledge_id)
     asyncio.run(
         _run_evidence_document_async(
             runtime,
             str(document_id),
-            bool(state.document_active),
+            document_active,
             lock_guard,
         )
     )
@@ -351,6 +353,8 @@ def _commit_evidence_pipeline(
 def _run_evidence_graph_document(
         knowledge_id: str,
         document_id: str,
+        *,
+        document_deleted: bool = False,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
     document_id = _canonical_graph_uuid(document_id, "document id")
@@ -361,7 +365,14 @@ def _run_evidence_graph_document(
             return {"status": "skipped", "reason": "pipeline_changed"}
         if not state.graph_enabled:
             return {"status": "skipped", "reason": "graph_disabled"}
-        _execute_evidence_document(state, document_id, lock_guard)
+        _execute_evidence_document(
+            state,
+            document_id,
+            lock_guard,
+            document_active=(
+                False if document_deleted else bool(state.document_active)
+            ),
+        )
         lock_guard.ensure_valid()
         return {
             "status": "completed",
@@ -1525,15 +1536,24 @@ def sync_evidence_graph_document(
         self,
         knowledge_id: str,
         document_id: str,
+        document_deleted: bool = False,
 ):
     return _run_observed_graph_task(
         self,
         task_name="sync_document",
         knowledge_id=str(knowledge_id),
         document_id=str(document_id),
-        operation=lambda: _run_evidence_graph_document(
-            knowledge_id,
-            document_id,
+        operation=lambda: (
+            _run_evidence_graph_document(
+                knowledge_id,
+                document_id,
+                document_deleted=True,
+            )
+            if document_deleted
+            else _run_evidence_graph_document(
+                knowledge_id,
+                document_id,
+            )
         ),
     )
 
