@@ -322,7 +322,10 @@ def redis_cache(
                     return result
 
                 with _sync_locks_guard:
-                    key_lock = _sync_locks.setdefault(cache_key, threading.Lock())
+                    key_lock = _sync_locks.get(cache_key)
+                    if key_lock is None:
+                        key_lock = threading.Lock()
+                        _sync_locks[cache_key] = key_lock
 
                 with key_lock:
                     result = _try_read_cache()
