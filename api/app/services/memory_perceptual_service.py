@@ -7,19 +7,17 @@ import json_repair
 import langid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
-from app.db import get_db_read
 from app.models import FileMetadata, ModelApiKey, ModelType
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
-from app.repositories.end_user_repository import get_end_user_by_id
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
-from app.repositories.workspace_repository import get_workspace_by_id
 from app.schemas import FileType, FileInput
 from app.schemas.memory_config_schema import MemoryConfig
 from app.schemas.memory_perceptual_schema import (
@@ -55,9 +53,10 @@ class _PerceptualSnapshot:
 
 
 class MemoryPerceptualService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
-        self.repository = MemoryPerceptualRepository(db)
+        # Repository 仅用于同步 Session 场景
+        self.repository = MemoryPerceptualRepository(db) if isinstance(db, Session) else None
 
     def get_memory_count(self, end_user_id: uuid.UUID) -> Dict[str, Any]:
         """Retrieve perceptual memory statistics for a user."""
@@ -283,10 +282,15 @@ class MemoryPerceptualService:
                             直接从 memory_config.tenant_id 取。
         """
         if persist:
-            with get_db_read() as db:
-                end_user = get_end_user_by_id(db, end_user_id)
+            from app.db import get_async_db_context
+            from app.repositories.end_user_repository import get_end_user_by_id_async
+            from app.repositories.workspace_repository import WorkspaceRepository
+
+            async with get_async_db_context() as db:
+                end_user = await get_end_user_by_id_async(db, end_user_id)
                 workspace_id = end_user.workspace_id
-                workspace = get_workspace_by_id(db, workspace_id)
+                workspace_repo = WorkspaceRepository(db)
+                workspace = await workspace_repo.get_workspace_by_id_async(workspace_id)
                 tenant_id = workspace.tenant_id
         else:
             tenant_id = memory_config.tenant_id

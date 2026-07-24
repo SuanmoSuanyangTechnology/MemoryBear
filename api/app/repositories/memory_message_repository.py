@@ -1,5 +1,5 @@
 """
-MemoryMessageRepository — memory_messages 表的数据访问层
+MemoryMessageRepository — memory_messages 表的数据访问层（异步）
 
 职责：
 - 封装 memory_messages 表的 CRUD 操作
@@ -7,17 +7,18 @@ MemoryMessageRepository — memory_messages 表的数据访问层
 - 提供批量写入能力，支持两条独立的 seq 序列：
     * agent / workflow：按 conversation_id 分组
     * service_api / mcp：按 (end_user_id, source) 分组，用 pg_advisory_xact_lock 串行化
-- 供 MemoryWriteDispatcher 共用
+
+所有方法均为异步（_async 后缀），接受 AsyncSession，供 Dispatcher / Controller 等使用。
 """
 
 import logging
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 import sqlalchemy as sa
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import MemoryMessageSource
 from app.core.utils.datetime_utils import ensure_dialog_at, to_iso_z, utcnow_naive
@@ -28,21 +29,23 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryMessageRepository:
-    """memory_messages 表的数据访问层。
+    """memory_messages 表的数据访问层（全异步）。
 
-    提供消息写入、查询、游标推进等操作，供各入口点（API Service、Agent、
-    Workflow、Flush、MCP）复用。
+    用法：
+        async with get_async_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            result = await repo.write_batch_async(...)
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
 
     # ──────────────────────────────────────────────
     # 内部工具：seq 分配与并发锁
     # ──────────────────────────────────────────────
 
-    @contextmanager
-    def _acquire_mm_seq_lock(
+    @asynccontextmanager
+    async def _acquire_mm_seq_lock(
         self,
         conversation_id: Optional[str],
         end_user_id: str,
@@ -53,31 +56,25 @@ class MemoryMessageRepository:
         使用 pg_advisory_xact_lock，事务提交/回滚时自动释放：
         - 有 conversation_id（agent/workflow）→ 锁 key 按 conversation_id
         - 无 conversation_id（service_api/mcp）→ 锁 key 按 (end_user_id, source)
-
-        不同分组之间互不阻塞。详见设计文档 §3.3。
         """
         if conversation_id is not None:
             lock_key = f"mm_seq:conv:{conversation_id}"
         else:
             lock_key = f"mm_seq:{end_user_id}:{source.value}"
-        self.db.execute(
+        await self.db.execute(
             sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": lock_key},
         )
         yield
 
-    def _next_seq(
+    async def _next_seq(
         self,
         *,
         conversation_id: Optional[str],
         end_user_id: str,
         source: MemoryMessageSource,
     ) -> int:
-        """按写入路径分流查询 max(message_seq)。
-
-        - 有 conversation_id：按 conversation_id 查（agent/workflow 原逻辑）
-        - conversation_id 为 NULL：按 (end_user_id, source) 查（API/MCP 新逻辑）
-        """
+        """按写入路径分流查询 max(message_seq)。"""
         stmt = select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
         if conversation_id is not None:
             stmt = stmt.where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
@@ -87,13 +84,22 @@ class MemoryMessageRepository:
                 MemoryMessage.end_user_id == end_user_id,
                 MemoryMessage.source == source.value,
             )
-        return int(self.db.execute(stmt).scalar() or 0)
+        result = await self.db.execute(stmt)
+        return int(result.scalar() or 0)
+
+    async def _get_max_seq(self, conversation_id: str) -> Optional[int]:
+        """获取对话中最大的 message_seq（仅内部使用）。"""
+        result = await self.db.execute(
+            select(func.max(MemoryMessage.message_seq))
+            .where(MemoryMessage.conversation_id == conversation_id)
+        )
+        return result.scalar()
 
     # ──────────────────────────────────────────────
     # 消息写入
     # ──────────────────────────────────────────────
 
-    def write_batch(
+    async def write_batch_async(
         self,
         conversation_id: Optional[str],
         messages: List[dict],
@@ -105,24 +111,13 @@ class MemoryMessageRepository:
 
         在单个 DB 事务中完成：查询 max(message_seq) → 逐条分配 + 写入。
         调用方需自行 commit。
-
-        Args:
-            conversation_id: 对话 ID。agent/workflow 传字符串；service_api/mcp 传 None
-            messages: 消息列表，每条格式 {"role": "user"|"assistant", "content": "...", "files": [...]}
-            end_user_id: 终端用户 ID（必填）
-            source: 写入来源枚举，决定 seq 分组键与 memory_messages.source 字段值
-
-        Returns:
-            成功写入的消息摘要列表 [{"role": "user", "message_seq": 1, "content": "..."}, ...]
-            （跳过 content 为空的消息）
         """
-        # 所有路径统一持锁分配 seq，防止同一分组的并发请求抢到重复 seq
-        with self._acquire_mm_seq_lock(conversation_id, end_user_id, source):
-            return self._write_batch_inner(
+        async with self._acquire_mm_seq_lock(conversation_id, end_user_id, source):
+            return await self._write_batch_inner(
                 conversation_id, messages, end_user_id, source,
             )
 
-    def _write_batch_inner(
+    async def _write_batch_inner(
         self,
         conversation_id: Optional[str],
         messages: List[dict],
@@ -130,7 +125,7 @@ class MemoryMessageRepository:
         source: MemoryMessageSource,
     ) -> List[dict]:
         written: List[dict] = []
-        next_seq = self._next_seq(
+        next_seq = await self._next_seq(
             conversation_id=conversation_id,
             end_user_id=end_user_id,
             source=source,
@@ -179,21 +174,22 @@ class MemoryMessageRepository:
     # 消息查询
     # ──────────────────────────────────────────────
 
-    def get_by_seq(
+    async def get_by_seq_async(
         self,
         conversation_id: str,
         message_seq: int,
     ) -> Optional[MemoryMessage]:
         """按 message_seq 查询单条消息。"""
-        return self.db.execute(
+        result = await self.db.execute(
             select(MemoryMessage)
             .where(
                 MemoryMessage.conversation_id == conversation_id,
                 MemoryMessage.message_seq == message_seq,
             )
-        ).scalar_one_or_none()
+        )
+        return result.scalar_one_or_none()
 
-    def get_pending_messages(
+    async def get_pending_messages_async(
         self,
         conversation_id: str,
         write_cursor: int,
@@ -211,26 +207,21 @@ class MemoryMessageRepository:
         if role:
             stmt = stmt.where(MemoryMessage.role == role)
 
-        return list(self.db.scalars(stmt).all())
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
 
-    def get_user_seqs(self, conversation_id: str) -> List[int]:
+    async def get_user_seqs_async(self, conversation_id: str) -> List[int]:
         """获取对话中所有 role=user 的 message_seq 升序列表。"""
-        rows = self.db.execute(
+        result = await self.db.execute(
             select(MemoryMessage.message_seq)
             .where(
                 MemoryMessage.conversation_id == conversation_id,
                 MemoryMessage.role == "user",
             )
             .order_by(MemoryMessage.message_seq.asc())
-        ).scalars().all()
+        )
+        rows = result.scalars().all()
         return [int(s) for s in rows if s is not None]
-
-    def get_max_seq(self, conversation_id: str) -> Optional[int]:
-        """获取对话中最大的 message_seq。"""
-        return self.db.execute(
-            select(func.max(MemoryMessage.message_seq))
-            .where(MemoryMessage.conversation_id == conversation_id)
-        ).scalar()
 
     # ──────────────────────────────────────────────
     # 工作记忆查询（API/MCP 展示接口）
@@ -238,13 +229,9 @@ class MemoryMessageRepository:
 
     _API_MCP_SOURCES = ("service_api", "mcp")
 
-    def get_working_memory_sources(self, end_user_id: str) -> List[dict]:
-        """返回该用户 API/MCP 各来源的记忆摘要（每 source 一行）。
-
-        Returns:
-            [{"source": "service_api", "message_count": 30, "latest_at": datetime}, ...]
-        """
-        rows = self.db.execute(
+    async def get_working_memory_sources_async(self, end_user_id: str) -> List[dict]:
+        """返回该用户 API/MCP 各来源的记忆摘要（每 source 一行）。"""
+        result = await self.db.execute(
             select(
                 MemoryMessage.source,
                 func.count().label("message_count"),
@@ -256,18 +243,16 @@ class MemoryMessageRepository:
                 MemoryMessage.source.in_(self._API_MCP_SOURCES),
             )
             .group_by(MemoryMessage.source)
-        ).all()
+        )
+        rows = result.all()
         return [
             {"source": r.source, "message_count": int(r.message_count), "latest_at": r.latest_at}
             for r in rows
         ]
 
     async def get_working_memory_source_count_async(self, end_user_id: str) -> int:
-        """统计该用户 API/MCP 来源的 distinct source 数量（异步版本）。
-
-        返回值等价于 len(get_working_memory_sources(...))。
-        """
-        rows = await self.db.execute(
+        """统计该用户 API/MCP 来源的 distinct source 数量。"""
+        result = await self.db.execute(
             select(MemoryMessage.source)
             .where(
                 MemoryMessage.end_user_id == end_user_id,
@@ -276,22 +261,9 @@ class MemoryMessageRepository:
             )
             .group_by(MemoryMessage.source)
         )
-        return len(rows.all())
+        return len(result.all())
 
-    def has_api_mcp_messages(self, end_user_id: str) -> bool:
-        """判断该用户是否有任何 API/MCP 来源的记忆消息（用于 work_count +1 判断）。"""
-        exists = self.db.execute(
-            select(MemoryMessage.id)
-            .where(
-                MemoryMessage.end_user_id == end_user_id,
-                MemoryMessage.conversation_id.is_(None),
-                MemoryMessage.source.in_(self._API_MCP_SOURCES),
-            )
-            .limit(1)
-        ).scalar_one_or_none()
-        return exists is not None
-
-    def list_recent_messages_by_source(
+    async def list_recent_messages_by_source_async(
         self,
         end_user_id: str,
         source: str,
@@ -307,30 +279,31 @@ class MemoryMessageRepository:
             MemoryMessage.source == source,
         ]
 
-        total = int(self.db.execute(
+        total_result = await self.db.execute(
             select(func.count(MemoryMessage.id)).where(*base_filter)
-        ).scalar_one())
+        )
+        total = int(total_result.scalar_one())
 
         if total == 0:
             return [], 0
 
-        # 取最新 limit 条的 ID
-        recent_ids = list(self.db.execute(
+        recent_ids_result = await self.db.execute(
             select(MemoryMessage.id)
             .where(*base_filter)
             .order_by(MemoryMessage.created_at.desc())
             .limit(limit)
-        ).scalars().all())
+        )
+        recent_ids = list(recent_ids_result.scalars().all())
 
         if not recent_ids:
             return [], total
 
-        # 按 created_at ASC 排序返回完整行（从旧到新）
-        rows = list(self.db.execute(
+        rows_result = await self.db.execute(
             select(MemoryMessage)
             .where(MemoryMessage.id.in_(recent_ids))
             .order_by(MemoryMessage.created_at.asc())
-        ).scalars().all())
+        )
+        rows = list(rows_result.scalars().all())
 
         return rows, total
 
@@ -338,14 +311,15 @@ class MemoryMessageRepository:
     # write_cursor 操作（仅服务 agent/workflow 路径）
     # ──────────────────────────────────────────────
 
-    def get_write_cursor(self, conversation_id: str) -> Optional[int]:
+    async def get_write_cursor_async(self, conversation_id: str) -> Optional[int]:
         """查询对话的 write_cursor。"""
-        return self.db.execute(
+        result = await self.db.execute(
             select(Conversation.write_cursor)
             .where(Conversation.id == conversation_id)
-        ).scalar_one_or_none()
+        )
+        return result.scalar_one_or_none()
 
-    def advance_write_cursor(
+    async def advance_write_cursor_async(
         self,
         conversation_id: str,
         message_seq: int,
@@ -354,11 +328,8 @@ class MemoryMessageRepository:
 
         UPDATE conversations SET write_cursor = :seq
         WHERE id = :conv_id AND write_cursor < :seq
-
-        Returns:
-            是否成功推进（True 表示推进了，False 表示 cursor 已 >= seq 或 conversation 不存在）
         """
-        result = self.db.execute(
+        result = await self.db.execute(
             update(Conversation)
             .where(
                 Conversation.id == conversation_id,
@@ -368,17 +339,17 @@ class MemoryMessageRepository:
         )
         return result.rowcount > 0
 
-    def verify_cursor_complete(self, conversation_id: str) -> bool:
+    async def verify_cursor_complete_async(self, conversation_id: str) -> bool:
         """验证 write_cursor >= max(message_seq)，即所有消息都已处理。"""
-        max_seq = self.get_max_seq(conversation_id)
-        cursor = self.get_write_cursor(conversation_id) or 0
+        max_seq = await self._get_max_seq(conversation_id)
+        cursor = await self.get_write_cursor_async(conversation_id) or 0
         return max_seq is None or max_seq <= cursor
 
     # ──────────────────────────────────────────────
     # 上下文窗口查询（agent/workflow 滑动窗口路径使用）
     # ──────────────────────────────────────────────
 
-    def build_context_before(
+    async def build_context_before_async(
         self,
         conversation_id: str,
         target_seq: int,
@@ -389,8 +360,7 @@ class MemoryMessageRepository:
         向前查找最多 window_size 个 user 消息，取最小 message_seq 作为上边界，
         查询 [upper_bound, target_seq) 范围内所有消息。
         """
-        # 向前查找 user 消息 seq
-        upstream_q_seqs = self.db.execute(
+        result = await self.db.execute(
             select(MemoryMessage.message_seq)
             .where(
                 MemoryMessage.conversation_id == conversation_id,
@@ -399,26 +369,26 @@ class MemoryMessageRepository:
             )
             .order_by(MemoryMessage.message_seq.desc())
             .limit(window_size)
-        ).scalars().all()
+        )
+        upstream_q_seqs = result.scalars().all()
 
         if not upstream_q_seqs:
             return []
 
         upper_bound = min(upstream_q_seqs)
 
-        return list(
-            self.db.execute(
-                select(MemoryMessage)
-                .where(
-                    MemoryMessage.conversation_id == conversation_id,
-                    MemoryMessage.message_seq >= upper_bound,
-                    MemoryMessage.message_seq < target_seq,
-                )
-                .order_by(MemoryMessage.message_seq.asc())
-            ).scalars().all()
+        result = await self.db.execute(
+            select(MemoryMessage)
+            .where(
+                MemoryMessage.conversation_id == conversation_id,
+                MemoryMessage.message_seq >= upper_bound,
+                MemoryMessage.message_seq < target_seq,
+            )
+            .order_by(MemoryMessage.message_seq.asc())
         )
+        return list(result.scalars().all())
 
-    def build_context_after(
+    async def build_context_after_async(
         self,
         conversation_id: str,
         target_seq: int,
@@ -428,10 +398,9 @@ class MemoryMessageRepository:
 
         向后查找最多 window_size 个 user 消息，取最大 message_seq 作为下边界，
         查询 (target_seq, lower_bound] 范围内所有消息。若下游无 user 消息，
-        则返回 target_seq 之后的所有消息（包含尾部 assistant 消息），
-        确保最后一条 assistant 消息也能作为上下文被处理。
+        则返回 target_seq 之后的所有消息（包含尾部 assistant 消息）。
         """
-        downstream_q_seqs = self.db.execute(
+        result = await self.db.execute(
             select(MemoryMessage.message_seq)
             .where(
                 MemoryMessage.conversation_id == conversation_id,
@@ -440,36 +409,38 @@ class MemoryMessageRepository:
             )
             .order_by(MemoryMessage.message_seq.asc())
             .limit(window_size)
-        ).scalars().all()
+        )
+        downstream_q_seqs = result.scalars().all()
 
         if not downstream_q_seqs:
-            # 下游无 user 消息，返回 target_seq 之后的所有消息（尾部 assistant 消息）
-            return list(
-                self.db.execute(
-                    select(MemoryMessage)
-                    .where(
-                        MemoryMessage.conversation_id == conversation_id,
-                        MemoryMessage.message_seq > target_seq,
-                    )
-                    .order_by(MemoryMessage.message_seq.asc())
-                ).scalars().all()
-            )
-
-        lower_bound = max(downstream_q_seqs)
-
-        return list(
-            self.db.execute(
+            result = await self.db.execute(
                 select(MemoryMessage)
                 .where(
                     MemoryMessage.conversation_id == conversation_id,
                     MemoryMessage.message_seq > target_seq,
-                    MemoryMessage.message_seq <= lower_bound,
                 )
                 .order_by(MemoryMessage.message_seq.asc())
-            ).scalars().all()
-        )
+            )
+            return list(result.scalars().all())
 
-    def batch_update_pruned_content(
+        lower_bound = max(downstream_q_seqs)
+
+        result = await self.db.execute(
+            select(MemoryMessage)
+            .where(
+                MemoryMessage.conversation_id == conversation_id,
+                MemoryMessage.message_seq > target_seq,
+                MemoryMessage.message_seq <= lower_bound,
+            )
+            .order_by(MemoryMessage.message_seq.asc())
+        )
+        return list(result.scalars().all())
+
+    # ──────────────────────────────────────────────
+    # pruned_content 批量操作
+    # ──────────────────────────────────────────────
+
+    async def batch_update_pruned_content_async(
         self,
         updates: List[tuple],
         conversation_id: Optional[str] = None,
@@ -479,30 +450,15 @@ class MemoryMessageRepository:
         """批量回写 pruned_content 和 topic_entity_hint 到 memory_messages 表。
 
         使用 CASE WHEN 单条 SQL 完成多行更新，避免 N 次 roundtrip。
-
-        Args:
-            updates: [(message_seq, pruned_content, topic_entity_hint), ...] 列表
-                     兼容旧格式 (message_seq, pruned_content) — topic_entity_hint 视为 None
-            conversation_id: 对话 ID（agent/workflow 路径）
-            end_user_id: 终端用户 ID（API/MCP 路径）
-            source: 写入来源（API/MCP 路径）
         """
         if not updates:
             return
 
         seqs = [u[0] for u in updates]
-
-        # 构建 pruned_content CASE WHEN 表达式
         content_whens = {u[0]: u[1] for u in updates}
-        content_case = sa.case(
-            content_whens,
-            value=MemoryMessage.message_seq,
-        )
-
-        # 构建 topic_entity_hint CASE WHEN 表达式（只包含非 None 的值，避免冗余 WHEN seq THEN NULL）
+        content_case = sa.case(content_whens, value=MemoryMessage.message_seq)
         hint_whens = {u[0]: u[2] for u in updates if len(u) > 2 and u[2] is not None}
 
-        # 构建 WHERE 条件
         if conversation_id:
             conv_uuid = uuid.UUID(conversation_id)
             where_clause = sa.and_(
@@ -519,19 +475,13 @@ class MemoryMessageRepository:
 
         values = {"pruned_content": content_case}
         if hint_whens:
-            hint_case = sa.case(
-                hint_whens,
-                value=MemoryMessage.message_seq,
-            )
-            values["topic_entity_hint"] = hint_case
+            values["topic_entity_hint"] = sa.case(hint_whens, value=MemoryMessage.message_seq)
 
-        self.db.execute(
-            update(MemoryMessage)
-            .where(where_clause)
-            .values(**values)
+        await self.db.execute(
+            update(MemoryMessage).where(where_clause).values(**values)
         )
 
-    def batch_get_pruned_content(
+    async def batch_get_pruned_content_async(
         self,
         seqs: List[int],
         conversation_id: Optional[str] = None,
@@ -541,16 +491,6 @@ class MemoryMessageRepository:
         """批量查询指定消息的 pruned_content 和 topic_entity_hint（仅返回非 NULL 的结果）。
 
         用于 WritePipeline 执行时刷新 dispatcher 快照中尚未回写的 pruned_content。
-
-        Args:
-            seqs: 需要查询的 message_seq 列表
-            conversation_id: 对话 ID（agent/workflow 路径）
-            end_user_id: 终端用户 ID（API/MCP 路径）
-            source: 写入来源（API/MCP 路径）
-
-        Returns:
-            {message_seq: {"pruned_content": str, "topic_entity_hint": str|None}} 字典，
-            只包含 pruned_content 非 NULL 的行
         """
         if not seqs:
             return {}
@@ -571,10 +511,11 @@ class MemoryMessageRepository:
                 MemoryMessage.pruned_content.isnot(None),
             )
 
-        rows = self.db.execute(
+        result = await self.db.execute(
             select(MemoryMessage.message_seq, MemoryMessage.pruned_content, MemoryMessage.topic_entity_hint)
             .where(where_clause)
-        ).all()
+        )
+        rows = result.all()
 
         return {
             row.message_seq: {

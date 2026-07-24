@@ -9,7 +9,6 @@
 import html
 
 from fastapi import APIRouter, Depends, Header
-from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
@@ -17,8 +16,8 @@ from app.core.logging_config import get_api_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
-from app.db import get_db, get_async_db_context
-from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user
+from app.db import get_async_db_context
+from app.dependencies import CurrentUserSnapshot, cur_workspace_access_guard_async, get_current_user_async
 from app.models.user_model import User
 from app.repositories import knowledge_repository
 from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput
@@ -39,15 +38,14 @@ router = APIRouter(
 
 
 @router.post("/write", response_model=ApiResponse)
-@cur_workspace_access_guard()
+@cur_workspace_access_guard_async()
 async def write_server_async(
         user_input: Write_UserInput,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
-    Async write service endpoint - enqueues write processing to Celery
+    Async write service endpoint - enqueues write processing to Celery (纯异步版本).
 
     Args:
         user_input: Write request containing message and end_user_id
@@ -59,28 +57,33 @@ async def write_server_async(
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
 
-    config_id = MemoryConfigService(db).get_config_id_by_end_user(user_input.end_user_id)
     workspace_id = current_user.current_workspace_id
-    api_logger.info(
-        f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
 
-    # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
-    if storage_type is None: storage_type = 'neo4j'
-    user_rag_memory_id = ''
-    if workspace_id:
-
-        knowledge = knowledge_repository.get_knowledge_by_name(
+    # 全部前置元数据查询走 async session：config_id / storage_type / user_rag_memory_id
+    async with get_async_db_context() as db: # NOTE：此处修改为异步db，俊男的异步方法更改回来
+        config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(user_input.end_user_id)
+        storage_type = await workspace_service.get_workspace_storage_type_async(
             db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            user=current_user,
         )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
-    api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
+        if storage_type is None:
+            storage_type = 'neo4j'
+
+        user_rag_memory_id = ''
+        if workspace_id:
+            knowledge = await knowledge_repository.get_knowledge_by_name_async(
+                db=db,
+                name="USER_RAG_MERORY",
+                workspace_id=workspace_id,
+            )
+            if knowledge:
+                user_rag_memory_id = str(knowledge.id)
+
+    api_logger.info(
+        f"Async write service: workspace_id={workspace_id}, config_id={config_id}, "
+        f"language_type={language}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}"
+    )
     try:
         # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
         if storage_type and storage_type.lower() == StorageType.RAG.value:
@@ -116,10 +119,10 @@ async def write_server_async(
 
 
 @router.post("/read/sync", response_model=ApiResponse)
-@cur_workspace_access_guard_self_db()
+@cur_workspace_access_guard_async()
 async def read_server(
         user_input: UserInput,
-        current_user: User = Depends(get_current_user)
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     Read service endpoint - processes read operations synchronously
@@ -150,7 +153,10 @@ async def read_server(
     session_id = user_input.session_id.hex
 
     api_logger.info(
-        f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, session_id={session_id}")
+        f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, "
+        f"user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, "
+        f"session_id={session_id}"
+    )
     try:
         service = await MemoryService.create(
             memory_config_id,

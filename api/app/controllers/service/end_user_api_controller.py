@@ -6,38 +6,39 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.controllers import end_user_controller
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key, require_api_key_self_db
+from app.core.api_key_utils import get_current_user_from_api_key_async
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_async_db_context, get_db
+from app.dependencies import CurrentUserSnapshot
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
 from app.schemas.memory_api_schema import CreateEndUserRequest, CreateEndUserResponse
-from app.services import api_key_service
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/end_user", tags=["V1 - End User API"])
 logger = get_business_logger()
 
 
-def _get_current_user(api_key_auth: ApiKeyAuth, db: Session):
-    """Build a current_user object from API key auth
-
-    Args:
-        api_key_auth: Validated API key auth info
-        db: Database session
-
-    Returns:
-        User object with current_workspace_id set
-    """
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
-    return current_user
+async def _resolve_current_user(api_key_auth: ApiKeyAuth) -> CurrentUserSnapshot:
+    """异步版本：从 API Key 反查 creator，转为 CurrentUserSnapshot 快照。"""
+    async with get_async_db_context() as db:
+        user = await get_current_user_from_api_key_async(db, api_key_auth)
+        return CurrentUserSnapshot(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            is_active=user.is_active,
+            is_superuser=user.is_superuser,
+            current_workspace_id=getattr(user, "current_workspace_id", api_key_auth.workspace_id),
+            tenant_id=user.tenant_id,
+            preferred_language=getattr(user, "preferred_language", None),
+        )
 
 
 @router.post("/create")
@@ -203,12 +204,11 @@ async def get_end_user_mapping(
 
 
 @router.get("/info")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_end_user_info(
     request: Request,
     end_user_id: str,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """
     Get end user info.
@@ -216,16 +216,15 @@ async def get_end_user_info(
     Retrieves the info record (aliases, meta_data, etc.) for the specified end user.
     Delegates to the manager-side controller for shared logic.
     """
-    current_user = _get_current_user(api_key_auth, db)
+    current_user = await _resolve_current_user(api_key_auth)
     return await end_user_controller.get_end_user_info(
-        end_user_id=end_user_id,
+        end_user_id=uuid.UUID(end_user_id),
         current_user=current_user,
-        db=db,
     )
 
 
 @router.post("/info/update")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def update_end_user_info(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -241,9 +240,8 @@ async def update_end_user_info(
     body = await request.json()
     payload = EndUserInfoUpdate(**body)
 
-    current_user = _get_current_user(api_key_auth, db)
+    current_user = await _resolve_current_user(api_key_auth)
     return await end_user_controller.update_end_user_info(
         info_update=payload,
         current_user=current_user,
-        db=db,
     )

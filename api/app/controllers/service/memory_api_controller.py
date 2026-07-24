@@ -7,26 +7,25 @@
 认证方式: API Key (@require_api_key)
 """
 
-import asyncio
-
-from fastapi import APIRouter, Body, Depends, Header, Request
+from fastapi import APIRouter, Body, Header, Request
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 # 包装内部 controller
 from app.controllers import memory_controller
-from app.core.api_key_auth import require_api_key, require_api_key_self_db
-from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace, \
-    validate_end_user_in_workspace_async
+from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_utils import (
+    get_current_user_from_api_key_async,
+    validate_end_user_in_workspace_async,
+)
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
-from app.core.quota_stub import check_end_user_quota
+from app.core.quota_manager import _check_quota_async
 from app.core.response_utils import success
-from app.db import get_db, get_async_db_context
+from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
-from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
+from app.schemas.memory_agent_schema import InternalReadInput, UserInput, Write_UserInput
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
@@ -157,32 +156,46 @@ async def read_memory_internal(
 
 
 @router.post("/write")
-@require_api_key(scopes=["memory"])
-@check_end_user_quota
+@require_api_key_self_db(scopes=["memory"])
 async def write_memory_async(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """
-    Write memory asynchronously (Celery task).
+    Write memory asynchronously (Celery task, 纯异步版本).
 
     Requires API Key with 'memory' scope.
     """
     body = await request.json()
     payload = Write_UserInput(**body)
 
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as db:
+        # 异步改造后 db 不在函数参数中，配额检查内联执行
+        from sqlalchemy import select
+        from app.models.workspace import Workspace
+        workspace_id = api_key_auth.workspace_id
+        result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+        workspace = result.scalars().first()
+        if workspace:
+            await _check_quota_async(db, workspace.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
 
-    logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
+        current_user = await get_current_user_from_api_key_async(db, api_key_auth)
+        await validate_end_user_in_workspace_async(
+            db, payload.end_user_id, api_key_auth.workspace_id
+        )
 
+    logger.info(
+        f"V1 memory write (async) - end_user_id: {payload.end_user_id}, "
+        f"workspace: {api_key_auth.workspace_id}"
+    )
+
+    # 委托到 manager-side controller。write_server_async 已在 P1 改为纯异步端点，
+    # 不再需要 db 参数注入。
     result = await memory_controller.write_server_async(
         user_input=payload,
         language_type=language_type,
-        db=db,
         current_user=current_user,
     )
     return _encode_result(result)

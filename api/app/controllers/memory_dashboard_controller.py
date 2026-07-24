@@ -6,14 +6,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
-from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.response_utils import success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
-from app.db import get_db
-from app.dependencies import get_current_user
-from app.models.user_model import User
+from app.db import get_async_db_context, get_db
+from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.response_schema import ApiResponse
 from app.services import memory_dashboard_service, workspace_service
+from app.services.memory_agent_service import get_end_users_connected_configs_batch_async
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -64,28 +63,28 @@ def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[s
             exc_info=True,
         )
 
+
 router = APIRouter(
     prefix="/dashboard",
     tags=["Dashboard"],
-    dependencies=[Depends(get_current_user)] # Apply auth to all routes in this controller
+    dependencies=[Depends(get_current_user_async)],  # 所有路由都需要认证
 )
 
-
 @router.get("/total_end_users", response_model=ApiResponse)
-def get_workspace_total_end_users(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+async def get_workspace_total_end_users(
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    获取用户列表的总用户数
-    """
+    """获取用户列表的总用户数（异步版本）。"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表")
-    total_end_users = memory_dashboard_service.get_workspace_total_end_users(
-        db=db,
-        workspace_id=workspace_id,
-        current_user=current_user
-    )
+
+    async with get_async_db_context() as db:
+        total_end_users = await memory_dashboard_service.get_workspace_total_end_users_async(
+            db=db,
+            workspace_id=workspace_id,
+            current_user=current_user,
+        )
+
     api_logger.info(f"成功获取最新用户总数: total_num={total_end_users.get('total_num', 0)}")
     return success(data=total_end_users, msg="用户数量获取成功")
 
@@ -96,150 +95,100 @@ async def get_workspace_end_users(
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
     page: int = Query(1, ge=1, description="页码，从1开始"),
-    pagesize: int = Query(10, ge=1, description="每页数量"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    获取工作空间的宿主列表（分页查询，支持模糊搜索）
-    
-    新增：记忆数量过滤：
-        Neo4j 模式：
-        - 使用 end_users.memory_count 过滤 memory_count > 0 的宿主
-        - memory_num.total 直接取 end_user.memory_count
-
-        RAG 模式：
-        - 使用 documents.chunk_num 聚合过滤 chunk 总数 > 0 的宿主
-        - memory_num.total 取聚合后的 chunk 总数
-
-    返回工作空间下的宿主列表，支持分页查询和模糊搜索。
-    通过 keyword 参数同时模糊匹配 other_name 和 id 字段。
-
-    Args:
-        workspace_id: 工作空间ID（可选，默认当前用户工作空间）
-        keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-        page: 页码（从1开始，默认1）
-        pagesize: 每页数量（默认10）
-        db: 数据库会话
-        current_user: 当前用户
-
-    Returns:
-        ApiResponse: 包含宿主列表和分页信息
-    """
-    # 如果未提供 workspace_id，使用当前用户的工作空间
+    """获取工作空间的宿主列表（分页查询，支持模糊搜索，异步版本）。"""
     if workspace_id is None:
         workspace_id = current_user.current_workspace_id
 
-    # 获取当前空间类型
-    current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
-
-    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
-
-    if current_workspace_type == "rag":
-        end_users_result = memory_dashboard_service.get_workspace_end_users_paginated_rag(
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-            page=page,
-            pagesize=pagesize,
-            keyword=keyword,
+    async with get_async_db_context() as db:
+        current_workspace_type = await memory_dashboard_service.get_current_workspace_type_async(
+            db, workspace_id, current_user
         )
-        raw_items = end_users_result.get("items", [])
-        end_users = [item["end_user"] for item in raw_items]
-    else:
-        end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-            page=page,
-            pagesize=pagesize,
-            keyword=keyword,
+        api_logger.info(
+            f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, "
+            f"类型: {current_workspace_type}"
         )
-        raw_items = end_users_result.get("items", [])
-        end_users = raw_items
-
-    total = end_users_result.get("total", 0)
-
-    if not end_users:
-        api_logger.info(f"工作空间下没有宿主或当前页无数据: total={total}, page={page}")
-        return success(data={
-            "items": [],
-            "page": {
-                "page": page,
-                "pagesize": pagesize,
-                "total": total,
-                "hasnext": (page * pagesize) < total,
-            },
-        }, msg="宿主列表获取成功")
-
-    end_user_ids = [str(user.id) for user in end_users]
-
-    try:
-        from app.repositories.workspace_repository import get_workspace_memory_config_id
-        from app.models.memory_config_model import MemoryConfig
-        active_config_id = get_workspace_memory_config_id(db, workspace_id)
-        if active_config_id:
-            cfg = db.query(MemoryConfig).filter(MemoryConfig.config_id == active_config_id).first()
-            workspace_config = {
-                "memory_config_id": str(active_config_id),
-                "memory_config_name": cfg.config_name if cfg else None,
-            }
-        else:
-            workspace_config = {"memory_config_id": None, "memory_config_name": None}
-    except Exception as e:
-        api_logger.warning(f"获取工作空间激活配置失败: {str(e)}")
-        workspace_config = {"memory_config_id": None, "memory_config_name": None}
-
-    try:
-        active_counts = await memory_dashboard_service.batch_get_active_counts(
-            tuple(end_user_ids)
-        )
-    except Exception as e:
-        api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
-        active_counts = {}
-    try:
-        memory_limits = memory_dashboard_service.batch_get_memory_limits(db, end_user_ids)
-    except Exception as e:
-        api_logger.warning(f"批量获取配额上限失败，降级为默认值: {str(e)}")
-        memory_limits = {}
-
-    # 构建响应数据（先返回给用户，Redis/Celery 操作放后台）
-    items = []
-    for index, end_user in enumerate(end_users):
-        user_id = str(end_user.id) # NOTE:此处user_id是end_user_id
 
         if current_workspace_type == "rag":
-            memory_total = int(raw_items[index].get("memory_count", 0) or 0)
+            end_users_result = await memory_dashboard_service.get_workspace_end_users_paginated_rag_async(
+                db=db,
+                workspace_id=workspace_id,
+                current_user=current_user,
+                page=page,
+                pagesize=pagesize,
+                keyword=keyword,
+            )
+            raw_items = end_users_result.get("items", [])
+            end_users = [item["end_user"] for item in raw_items]
         else:
-            memory_total = int(getattr(end_user, "memory_count", 0) or 0)
+            end_users_result = await memory_dashboard_service.get_workspace_end_users_paginated_async(
+                db=db,
+                workspace_id=workspace_id,
+                current_user=current_user,
+                page=page,
+                pagesize=pagesize,
+                keyword=keyword,
+            )
+            raw_items = end_users_result.get("items", [])
+            end_users = raw_items
 
-        items.append({
-            "end_user_id": user_id,
-            "end_user": {
-                "id": user_id,
-                "other_name": end_user.other_name,
-            },
-            "tags": normalize_stored_user_card_tags(getattr(end_user, "memory_tags", None)),
-            "memory_num": {
-                "total": memory_total,
-                "active_count": active_counts.get(user_id, 0),
-                "memory_limit": memory_limits.get(user_id, 300),
-            },
-            "memory_config": workspace_config,
-        })
+        total = end_users_result.get("total", 0)
 
-    # 构建分页响应
+        if not end_users:
+            api_logger.info(f"工作空间下没有宿主或当前页无数据: total={total}, page={page}")
+            return success(data={
+                "items": [],
+                "page": {
+                    "page": page,
+                    "pagesize": pagesize,
+                    "total": total,
+                    "hasnext": (page * pagesize) < total,
+                },
+            }, msg="宿主列表获取成功")
+
+        end_user_ids = [str(user.id) for user in end_users]
+
+        try:
+            memory_configs_map = await get_end_users_connected_configs_batch_async(end_user_ids, db)
+        except Exception as e:
+            api_logger.error(f"批量获取记忆配置失败: {str(e)}")
+            memory_configs_map = {}
+
+        items = []
+        for index, end_user in enumerate(end_users):
+            user_id = str(end_user.id)  # NOTE: 此处 user_id 是 end_user_id
+            config_info = memory_configs_map.get(user_id, {})
+
+            if current_workspace_type == "rag":
+                memory_total = int(raw_items[index].get("memory_count", 0) or 0)
+            else:
+                memory_total = int(getattr(end_user, "memory_count", 0) or 0)
+
+            items.append({
+                "end_user_id": user_id,
+                "end_user": {
+                    "id": user_id,
+                    "other_name": end_user.other_name,
+                },
+                "memory_num": {"total": memory_total},
+                "memory_config": {
+                    "memory_config_id": config_info.get("memory_config_id"),
+                    "memory_config_name": config_info.get("memory_config_name"),
+                },
+            })
+
     result = {
         "items": items,
         "page": {
             "page": page,
             "pagesize": pagesize,
             "total": total,
-            "hasnext": (page * pagesize) < total
-        }
+            "hasnext": (page * pagesize) < total,
+        },
     }
 
-    # Redis 节流 + Celery 任务派发：放到响应返回之后执行，避免阻塞接口
     background_tasks.add_task(_dispatch_dashboard_async_jobs, workspace_id, end_user_ids)
 
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
@@ -247,20 +196,22 @@ async def get_workspace_end_users(
 
 
 @router.get("/memory_increment", response_model=ApiResponse)
-def get_workspace_memory_increment(
+async def get_workspace_memory_increment(
     limit: int = Query(7, description="返回记录数"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取工作空间的记忆增量"""
+    """获取工作空间的记忆增量（异步版本）。"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的记忆增量")
-    memory_increment = memory_dashboard_service.get_workspace_memory_increment(
-        db=db,
-        workspace_id=workspace_id,
-        current_user=current_user,
-        limit=limit
-    )
+
+    async with get_async_db_context() as db:
+        memory_increment = await memory_dashboard_service.get_workspace_memory_increment_async(
+            db=db,
+            workspace_id=workspace_id,
+            limit=limit,
+            current_user=current_user,
+        )
+
     api_logger.info(f"成功获取 {len(memory_increment)} 条记忆增量记录")
     return success(data=memory_increment, msg="记忆增量获取成功")
 
@@ -268,114 +219,89 @@ def get_workspace_memory_increment(
 @router.get("/api_increment", response_model=ApiResponse)
 def get_workspace_api_increment(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取API调用趋势"""
+    """获取工作空间的API调用增量"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的API调用增量")
+
     api_increment = memory_dashboard_service.get_workspace_api_increment(
-        db=db,
-        workspace_id=workspace_id,
-        current_user=current_user
+        db, workspace_id, current_user
     )
+
     api_logger.info(f"成功获取 {api_increment} API调用增量")
     return success(data=api_increment, msg="API调用增量获取成功")
 
 
 @router.post("/total_memory", response_model=ApiResponse)
-def write_workspace_total_memory(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+async def write_workspace_total_memory(
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """工作空间记忆总量的写入（异步任务）"""
+    """工作空间记忆总量的写入（异步任务，异步端点版本）。"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求写入工作空间 {workspace_id} 的记忆总量")
-    
-    # 触发 Celery 异步任务
+
     from app.celery_app import celery_app
     task = celery_app.send_task(
         "app.controllers.memory_storage_controller.search_all",
-        kwargs={"workspace_id": str(workspace_id)}
+        kwargs={"workspace_id": str(workspace_id)},
     )
-    
+
     api_logger.info(f"已触发记忆总量统计任务，task_id: {task.id}")
     return success(
         data={"task_id": task.id, "workspace_id": str(workspace_id)},
-        msg="记忆总量统计任务已启动"
+        msg="记忆总量统计任务已启动",
     )
 
 
 @router.get("/task_status/{task_id}", response_model=ApiResponse)
-def get_task_status(
+async def get_task_status(
     task_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """查询异步任务的执行状态和结果"""
+    """查询异步任务的执行状态和结果（异步端点版本）。"""
     api_logger.info(f"用户 {current_user.username} 查询任务状态: task_id={task_id}")
-    
+
     from app.celery_app import celery_app
     from celery.result import AsyncResult
-    
-    # 获取任务结果
+
     task_result = AsyncResult(task_id, app=celery_app)
-    
+
     response_data = {
         "task_id": task_id,
-        "status": task_result.state,  # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+        "status": task_result.state,
     }
-    
-    # 如果任务完成，返回结果
+
     if task_result.ready():
         if task_result.successful():
             response_data["result"] = task_result.result
             api_logger.info(f"任务 {task_id} 执行成功")
             return success(data=response_data, msg="任务执行成功")
-        else:
-            # 任务失败
-            response_data["error"] = str(task_result.result)
-            api_logger.error(f"任务 {task_id} 执行失败: {task_result.result}")
-            return success(data=response_data, msg="任务执行失败")
-    else:
-        # 任务还在执行中
-        api_logger.info(f"任务 {task_id} 状态: {task_result.state}")
-        return success(data=response_data, msg=f"任务状态: {task_result.state}")
+        response_data["error"] = str(task_result.result)
+        api_logger.error(f"任务 {task_id} 执行失败: {task_result.result}")
+        return success(data=response_data, msg="任务执行失败")
+
+    api_logger.info(f"任务 {task_id} 状态: {task_result.state}")
+    return success(data=response_data, msg=f"任务状态: {task_result.state}")
 
 
 @router.get("/memory_list", response_model=ApiResponse)
-def get_workspace_memory_list(
+async def get_workspace_memory_list(
     limit: int = Query(7, description="记忆增量返回记录数"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    用户记忆列表整合接口
-    
-    整合以下三个接口的数据：
-    1. total_memory - 工作空间记忆总量
-    2. memory_increment - 工作空间记忆增量
-    3. hosts - 工作空间宿主列表
-    
-    返回格式：
-    {
-        "total_memory": float,
-        "memory_increment": [
-            {"date": "2024-01-01", "count": 100},
-            ...
-        ],
-        "hosts": [
-            {"id": "uuid", "name": "宿主名", ...},
-            ...
-        ]
-    }
-    """
+    """用户记忆列表整合接口（异步版本）。"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的记忆列表")
-    memory_list = memory_dashboard_service.get_workspace_memory_list(
-        db=db,
-        workspace_id=workspace_id,
-        current_user=current_user,
-        limit=limit
-    )
+
+    async with get_async_db_context() as db:
+        memory_list = await memory_dashboard_service.get_workspace_memory_list_async(
+            db=db,
+            workspace_id=workspace_id,
+            current_user=current_user,
+            limit=limit,
+        )
+
     api_logger.info("成功获取记忆列表")
     return success(data=memory_list, msg="记忆列表获取成功")
 
@@ -383,69 +309,58 @@ def get_workspace_memory_list(
 @router.get("/total_memory_count", response_model=ApiResponse)
 async def get_workspace_total_memory_count(
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    获取工作空间的记忆总量（通过聚合所有host的记忆数）
-    
-    逻辑：
-    1. 从 memory_list 获取所有 host_id
-    2. 对每个 host_id 调用 search_all 获取 total
-    3. 将所有 total 求和返回
-    
-    返回格式：
-    {
-        "total_memory_count": int,
-        "host_count": int,
-        "details": [
-            {"end_user_id": "uuid", "count": 100, "name": "用户名称"},
-            ...
-        ]
-    }
-    """
+    """获取工作空间的记忆总量（异步版本）。"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的记忆总量")
-    total_memory_count = await memory_dashboard_service.get_workspace_total_memory_count(
-        db=db,
-        workspace_id=workspace_id,
-        current_user=current_user,
-        end_user_id=end_user_id
-    )
+
+    async with get_async_db_context() as db:
+        total_memory_count = await memory_dashboard_service.get_workspace_total_memory_count_async(
+            db=db,
+            workspace_id=workspace_id,
+            current_user=current_user,
+            end_user_id=end_user_id,
+        )
+
     api_logger.info(f"成功获取记忆总量: {total_memory_count.get('total_memory_count', 0)}")
     return success(data=total_memory_count, msg="记忆总量获取成功")
 
 
 # ======== RAG 数据统计 ========
+
 @router.get("/total_rag_count", response_model=ApiResponse)
 def get_workspace_total_rag_count(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    获取 rag 的总文档数、总chunk数、总知识库数量、总api调用数量
-    """
+    """获取 rag 的总文档数、总chunk数、总知识库数量、总api调用数量"""
     total_documents = memory_dashboard_service.get_rag_total_doc(db, current_user)
     total_chunk = memory_dashboard_service.get_rag_total_chunk(db, current_user)
     total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
+    api_increment = memory_dashboard_service.get_workspace_api_increment(
+        db, current_user.current_workspace_id, current_user
+    )
+
     data = {
-        'total_documents':total_documents,
-        'total_chunk':total_chunk,
-        'total_kb':total_kb,
-        'total_api':1024
+        "total_documents": total_documents,
+        "total_chunk": total_chunk,
+        "total_kb": total_kb,
+        "total_api": api_increment,
     }
     return success(data=data, msg="RAG相关数据获取成功")
+
 
 @router.get("/current_user_rag_total_num", response_model=ApiResponse)
 def get_current_user_rag_total_num(
     end_user_id: str = Query(..., description="宿主ID"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    获取当前宿主的 RAG 的总chunk数量
-    """
-    total_chunk = memory_dashboard_service.get_current_user_total_chunk(end_user_id, db, current_user)
+    """获取当前宿主的 RAG 的总chunk数量"""
+    total_chunk = memory_dashboard_service.get_current_user_total_chunk(
+        end_user_id, db, current_user
+    )
     return success(data=total_chunk, msg="宿主RAG知识数据获取成功")
 
 
@@ -455,12 +370,12 @@ def get_rag_content(
     page: int = Query(1, gt=0, description="页码，从1开始"),
     pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    获取当前宿主知识库中的chunk内容（分页）
-    """
-    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
+    """获取当前宿主知识库中的chunk内容（分页）"""
+    data = memory_dashboard_service.get_rag_content(
+        end_user_id, page, pagesize, db, current_user
+    )
     return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 
@@ -469,29 +384,19 @@ async def get_chunk_summary_tag(
     end_user_id: str = Query(..., description="宿主ID"),
     limit: int = Query(15, description="返回记录数"),
     max_tags: int = Query(10, description="最大标签数量"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    读取RAG摘要、标签和人物形象（纯读库，不触发生成）。
-
-    返回格式：
-    {
-        "summary": "用户摘要",
-        "tags": [{"tag": "标签1", "frequency": 5}, ...],
-        "personas": ["产品设计师", ...],
-        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
-    }
-    """
+    """读取 RAG 摘要、标签和人物形象（异步版本）。"""
     api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG摘要/标签/人物形象")
 
-    data = await memory_dashboard_service.get_chunk_summary_and_tags(
-        end_user_id=end_user_id,
-        limit=limit,
-        max_tags=max_tags,
-        db=db,
-        current_user=current_user
-    )
+    async with get_async_db_context() as db:
+        data = await memory_dashboard_service.get_chunk_summary_and_tags_async(
+            end_user_id=end_user_id,
+            limit=limit,
+            max_tags=max_tags,
+            db=db,
+            current_user=current_user,
+        )
 
     return success(data=data, msg="获取成功")
 
@@ -500,29 +405,18 @@ async def get_chunk_summary_tag(
 async def get_chunk_insight(
     end_user_id: str = Query(..., description="宿主ID"),
     limit: int = Query(15, description="返回记录数"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    读取RAG洞察报告（纯读库，不触发生成）。
-
-    返回格式：
-    {
-        "insight": "总体概述",
-        "behavior_pattern": "行为模式",
-        "key_findings": "关键发现",
-        "growth_trajectory": "成长轨迹",
-        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
-    }
-    """
+    """读取 RAG 洞察报告（异步版本）。"""
     api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG洞察")
 
-    data = await memory_dashboard_service.get_chunk_insight(
-        end_user_id=end_user_id,
-        limit=limit,
-        db=db,
-        current_user=current_user
-    )
+    async with get_async_db_context() as db:
+        data = await memory_dashboard_service.get_chunk_insight_async(
+            end_user_id=end_user_id,
+            limit=limit,
+            db=db,
+            current_user=current_user,
+        )
 
     return success(data=data, msg="获取成功")
 
@@ -536,22 +430,19 @@ class GenerateRagProfileRequest(BaseModel):
 @router.post("/generate_rag_profile", response_model=ApiResponse)
 async def generate_rag_profile(
     body: GenerateRagProfileRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    生产接口：为RAG存储模式的宿主全量重新生成完整画像并持久化到end_user表。
-    每次请求都会重新生成，覆盖已有数据。
-    """
+    """为 RAG 存储模式的宿主全量重新生成完整画像（异步版本）。"""
     api_logger.info(f"用户 {current_user.username} 触发RAG画像生产: end_user_id={body.end_user_id}")
 
-    data = await memory_dashboard_service.generate_rag_profile(
-        end_user_id=body.end_user_id,
-        limit=body.limit,
-        max_tags=body.max_tags,
-        db=db,
-        current_user=current_user,
-    )
+    async with get_async_db_context() as db:
+        data = await memory_dashboard_service.generate_rag_profile_async(
+            end_user_id=body.end_user_id,
+            limit=body.limit,
+            max_tags=body.max_tags,
+            db=db,
+            current_user=current_user,
+        )
 
     api_logger.info(f"RAG画像生产完成: {data}")
     return success(data=data, msg="RAG画像生产完成")
@@ -562,41 +453,17 @@ async def dashboard_data(
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
     start_date: Optional[int] = Query(None, description="开始时间戳（毫秒）"),
     end_date: Optional[int] = Query(None, description="结束时间戳（毫秒）"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """
-    整合dashboard数据接口
-    
-    整合以下接口的数据：
-    1. /dashboard/total_memory_count - 记忆总量
-    2. /dashboard/api_increment - API调用增量
-    3. /memory/stats/types - 知识库类型统计（只要total数据）
-    4. /dashboard/total_rag_count - RAG相关数据
-    
-    根据 storage_type 判断调用不同的接口
-    
-    返回格式：
-    {
-        "storage_type": str,
-        "neo4j_data": {
-            "total_memory": int,
-            "total_app": int,
-            "total_knowledge": int,
-            "total_api_call": int
-        } | null,
-        "rag_data": {
-            "total_memory": int,
-            "total_app": int,
-            "total_knowledge": int,
-            "total_api_call": int
-        } | null
-    }
+    """整合 dashboard 数据接口（异步版本）。
+
+    - storage_type 查询走 async workspace_service（非阻塞）
+    - dashboard service 全部走 async Session
     """
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的dashboard整合数据")
-    
-    # 如果没有提供时间范围，默认使用最近30天
+
+    # 默认时间范围：最近 30 天
     if start_date is None or end_date is None:
         from datetime import timedelta
         end_dt = utcnow_naive()
@@ -604,120 +471,128 @@ async def dashboard_data(
         end_date = to_timestamp_ms(end_dt)
         start_date = to_timestamp_ms(start_dt)
         api_logger.info(f"使用默认时间范围: {start_dt} 到 {end_dt}")
-    
-    # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
-    if storage_type is None:
-        storage_type = 'neo4j'
-    
-    
-    # 根据 storage_type 决定返回哪个数据对象
-    # 如果是 'rag'，neo4j_data 为 null；否则 rag_data 为 null
+
     result = {
-        "storage_type": storage_type,
+        "storage_type": None,
         "neo4j_data": None,
-        "rag_data": None
+        "rag_data": None,
     }
-    
+
     try:
-        # 如果 storage_type 为 'neo4j' 或空，获取 neo4j_data
-        if storage_type == 'neo4j':
-            neo4j_data = {
-                "total_memory": None,
-                "total_app": None,
-                "total_knowledge": None,
-                "total_api_call": None
-            }
-            
-            # 1. 获取记忆总量（total_memory）—— neo4j 独有逻辑：查询 neo4j 存储节点
-            try:
-                total_memory_data = await memory_dashboard_service.get_workspace_total_memory_count(
-                    db=db,
-                    workspace_id=workspace_id,
-                    current_user=current_user,
-                    end_user_id=end_user_id
-                )
-                neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
-                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}")
-            except Exception as e:
-                api_logger.warning(f"获取记忆总量失败: {str(e)}")
-            
-            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
-            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
-            neo4j_data.update(common_stats)
-            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
-            
-            # 计算昨日对比
-            try:
-                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
-                    db=db,
-                    workspace_id=workspace_id,
-                    storage_type=storage_type,
-                    today_data=neo4j_data
-                )
-                neo4j_data.update(changes)
-            except Exception as e:
-                api_logger.warning(f"计算neo4j昨日对比失败: {str(e)}")
-                neo4j_data.update({
-                    "total_memory_change": None,
-                    "total_app_change": None,
-                    "total_knowledge_change": None,
-                    "total_api_call_change": None,
-                })
+        async with get_async_db_context() as db:
+            storage_type = await workspace_service.get_workspace_storage_type_async(
+                db=db,
+                workspace_id=workspace_id,
+                user=current_user,
+            )
+            if storage_type is None:
+                storage_type = "neo4j"
+            result["storage_type"] = storage_type
 
-            result["neo4j_data"] = neo4j_data
-            api_logger.info("成功获取neo4j_data")
-        
-        # 如果 storage_type 为 'rag'，获取 rag_data
-        elif storage_type == 'rag':
-            rag_data = {
-                "total_memory": None,
-                "total_app": None,
-                "total_knowledge": None,
-                "total_api_call": None
-            }
-            
-            # 1. 获取记忆总量（total_memory）—— rag 独有逻辑：查询 document 表的 chunk_num
-            try:
-                total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
-                rag_data["total_memory"] = total_chunk
-                api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
-            except Exception as e:
-                api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
-            
-            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
-            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
-            rag_data.update(common_stats)
-            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
-            
-            # 计算昨日对比
-            try:
-                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
-                    db=db,
-                    workspace_id=workspace_id,
-                    storage_type=storage_type,
-                    today_data=rag_data
-                )
-                rag_data.update(changes)
-            except Exception as e:
-                api_logger.warning(f"计算RAG昨日对比失败: {str(e)}")
-                rag_data.update({
-                    "total_memory_change": None,
-                    "total_app_change": None,
-                    "total_knowledge_change": None,
-                    "total_api_call_change": None,
-                })
+            if storage_type == "neo4j":
+                neo4j_data = {
+                    "total_memory": None,
+                    "total_app": None,
+                    "total_knowledge": None,
+                    "total_api_call": None,
+                }
 
-            result["rag_data"] = rag_data
-            api_logger.info("成功获取rag_data")
-        
+                # 记忆总量
+                try:
+                    total_memory_data = await memory_dashboard_service.get_workspace_total_memory_count_async(
+                        db=db,
+                        workspace_id=workspace_id,
+                        current_user=current_user,
+                        end_user_id=end_user_id,
+                    )
+                    neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
+                    api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}")
+                except Exception as e:
+                    api_logger.warning(f"获取记忆总量失败: {str(e)}")
+
+                # 共享统计
+                common_stats = await db.run_sync(
+                    lambda s: memory_dashboard_service.get_dashboard_common_stats(s, workspace_id)
+                )
+                neo4j_data.update(common_stats)
+                api_logger.info(
+                    f"成功获取共享统计: app={common_stats['total_app']}, "
+                    f"knowledge={common_stats['total_knowledge']}, "
+                    f"api_call={common_stats['total_api_call']}"
+                )
+
+                # 昨日对比
+                try:
+                    changes = await db.run_sync(
+                        lambda s: memory_dashboard_service.get_dashboard_yesterday_changes(
+                            s, workspace_id, storage_type, neo4j_data
+                        )
+                    )
+                    neo4j_data.update(changes)
+                except Exception as e:
+                    api_logger.warning(f"计算neo4j昨日对比失败: {str(e)}")
+                    neo4j_data.update({
+                        "total_memory_change": None,
+                        "total_app_change": None,
+                        "total_knowledge_change": None,
+                        "total_api_call_change": None,
+                    })
+
+                result["neo4j_data"] = neo4j_data
+                api_logger.info("成功获取neo4j_data")
+
+            elif storage_type == "rag":
+                rag_data = {
+                    "total_memory": None,
+                    "total_app": None,
+                    "total_knowledge": None,
+                    "total_api_call": None,
+                }
+
+                # 记忆总量（RAG）
+                try:
+                    total_chunk = await db.run_sync(
+                        lambda s: memory_dashboard_service.get_rag_user_kb_total_chunk(s, current_user)
+                    )
+                    rag_data["total_memory"] = total_chunk
+                    api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
+                except Exception as e:
+                    api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
+
+                # 共享统计
+                common_stats = await db.run_sync(
+                    lambda s: memory_dashboard_service.get_dashboard_common_stats(s, workspace_id)
+                )
+                rag_data.update(common_stats)
+                api_logger.info(
+                    f"成功获取共享统计: app={common_stats['total_app']}, "
+                    f"knowledge={common_stats['total_knowledge']}, "
+                    f"api_call={common_stats['total_api_call']}"
+                )
+
+                # 昨日对比
+                try:
+                    changes = await db.run_sync(
+                        lambda s: memory_dashboard_service.get_dashboard_yesterday_changes(
+                            s, workspace_id, storage_type, rag_data
+                        )
+                    )
+                    rag_data.update(changes)
+                except Exception as e:
+                    api_logger.warning(f"计算RAG昨日对比失败: {str(e)}")
+                    rag_data.update({
+                        "total_memory_change": None,
+                        "total_app_change": None,
+                        "total_knowledge_change": None,
+                        "total_api_call_change": None,
+                    })
+
+                result["rag_data"] = rag_data
+                api_logger.info("成功获取rag_data")
+
         api_logger.info("成功获取dashboard整合数据")
         return success(data=result, msg="Dashboard数据获取成功")
-        
+
     except Exception as e:
         api_logger.error(f"获取dashboard整合数据失败: {str(e)}")
         raise HTTPException(

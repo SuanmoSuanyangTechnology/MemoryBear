@@ -1,17 +1,15 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
-from app.db import get_db, get_db_context
-from app.dependencies import get_current_user
-from app.models.user_model import User
+from app.db import get_async_db_context
+from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.memory_storage_schema import (
     PilotRunInput,
 )
@@ -31,8 +29,6 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
-from fastapi import Header
-
 from app.utils.config_utils import resolve_config_id
 
 # Get API logger
@@ -50,7 +46,7 @@ router = APIRouter(
 @router.get("/info", response_model=ApiResponse)
 async def get_storage_info(
         storage_id: str,
-        current_user: User = Depends(get_current_user)
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     Example wrapper endpoint - retrieves storage information
@@ -76,11 +72,24 @@ async def get_storage_info(
 # （前缀 /memory_config），此处不再保留。
 
 
-@router.post("/pilot_run", response_model=None)
+@router.post(
+    "/pilot_run",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "SSE stream of extraction results",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        },
+        422: {
+            "description": "Validation Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
+        },
+    },
+)
 async def pilot_run(
         payload: PilotRunInput,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> StreamingResponse:
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
@@ -111,7 +120,7 @@ async def pilot_run(
 @router.get("/search/kb_type_distribution", response_model=ApiResponse)
 async def get_kb_type_distribution(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"KB type distribution requested for end_user_id: {end_user_id}")
     try:
@@ -125,7 +134,7 @@ async def get_kb_type_distribution(
 @router.get("/search/dialogue", response_model=ApiResponse)
 async def search_dialogues_num(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search dialogue requested for end_user_id: {end_user_id}")
     try:
@@ -139,7 +148,7 @@ async def search_dialogues_num(
 @router.get("/search/chunk", response_model=ApiResponse)
 async def search_chunks_num(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search chunk requested for end_user_id: {end_user_id}")
     try:
@@ -153,7 +162,7 @@ async def search_chunks_num(
 @router.get("/search/statement", response_model=ApiResponse)
 async def search_statements_num(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search statement requested for end_user_id: {end_user_id}")
     try:
@@ -167,7 +176,7 @@ async def search_statements_num(
 @router.get("/search/entity", response_model=ApiResponse)
 async def search_entities_num(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search entity requested for end_user_id: {end_user_id}")
     try:
@@ -181,7 +190,7 @@ async def search_entities_num(
 @router.get("/search", response_model=ApiResponse)
 async def search_all_num(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search all requested for end_user_id: {end_user_id}")
     try:
@@ -198,7 +207,7 @@ async def search_all_num(
 @router.get("/search/detials", response_model=ApiResponse)
 async def search_entities_detials(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search details requested for end_user_id: {end_user_id}")
     try:
@@ -212,7 +221,7 @@ async def search_entities_detials(
 @router.get("/search/edges", response_model=ApiResponse)
 async def search_entity_edges(
         end_user_id: Optional[str] = None,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     api_logger.info(f"Search edges requested for end_user_id: {end_user_id}")
     try:
@@ -226,29 +235,21 @@ async def search_entity_edges(
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
 async def get_hot_memory_tags_api(
         limit: int = 10,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """
-    获取热门记忆标签（带Redis缓存）
-    
-    缓存策略：
-    - 缓存键：workspace_id + limit
-    - 过期时间：28小时（HOT_MEMORY_TAGS_CACHE_EXPIRE），由每日定时任务预热刷新
-    - 缓存命中：~50ms
-    - 缓存未命中：~600-800ms（取决于LLM速度），实时查询后回写缓存作为兜底
+    获取热门记忆标签（带 Redis 缓存，异步版本）。
+
+    缓存命中：仅 Redis 访问，完全异步。
+    缓存未命中：异步查询数据库。
     """
     workspace_id = current_user.current_workspace_id
-
-    # 构建缓存键
     cache_key = f"hot_memory_tags:{workspace_id}:{limit}"
 
     api_logger.info(f"Hot memory tags requested for workspace: {workspace_id}, limit: {limit}")
 
     try:
-        # 尝试从Redis缓存获取
         import json
-
         from app.aioRedis import aio_redis_get, aio_redis_set
 
         cached_result = await aio_redis_get(cache_key)
@@ -258,20 +259,18 @@ async def get_hot_memory_tags_api(
                 data = json.loads(cached_result)
                 return success(data=data, msg="查询成功（缓存）")
             except json.JSONDecodeError:
-                api_logger.warning(f"Failed to parse cached data, will refresh")
+                api_logger.warning("Failed to parse cached data, will refresh")
 
-        # 缓存未命中，执行查询
+        # 缓存未命中：异步查询数据库。
         api_logger.info(f"Cache miss for key: {cache_key}, executing query")
-        result = await analytics_hot_memory_tags(db, current_user, limit)
+        async with get_async_db_context() as db:
+            result = await analytics_hot_memory_tags(db, current_user, limit)
 
-        # 写入缓存（过期时间：28小时）
-        # 注意：result是列表，需要转换为JSON字符串
         try:
             cache_data = json.dumps(result, ensure_ascii=False)
             await aio_redis_set(cache_key, cache_data, expire=HOT_MEMORY_TAGS_CACHE_EXPIRE)
             api_logger.info(f"Cached result for key: {cache_key}")
         except Exception as cache_error:
-            # 缓存写入失败不影响主流程
             api_logger.warning(f"Failed to cache result: {str(cache_error)}")
 
         return success(data=result, msg="查询成功")
@@ -283,7 +282,7 @@ async def get_hot_memory_tags_api(
 
 @router.delete("/analytics/hot_memory_tags/cache", response_model=ApiResponse)
 async def clear_hot_memory_tags_cache(
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """
     清除热门标签缓存
@@ -321,7 +320,7 @@ async def clear_hot_memory_tags_cache(
 
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)
 async def get_recent_activity_stats_api(
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     workspace_id = str(current_user.current_workspace_id) if current_user.current_workspace_id else None
     api_logger.info(f"Recent activity stats requested: workspace_id={workspace_id}")
@@ -336,9 +335,9 @@ async def get_recent_activity_stats_api(
 @router.delete("/end-users/{end_user_id}", response_model=ApiResponse)
 async def delete_end_user(
         end_user_id: UUID,
-        current_user: User = Depends(get_current_user),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
-    """删除终端用户的全部记忆数据（Neo4j 节点 + PostgreSQL 记录）。
+    """删除终端用户的全部记忆数据（Neo4j 节点 + PostgreSQL 记录，异步版本）。
 
     1. DETACH DELETE 清除 Neo4j 中该用户所有节点和边
     2. memory_count 归零
@@ -361,8 +360,11 @@ async def delete_end_user(
     try:
         from app.repositories.end_user_repository import EndUserRepository
 
-        with get_db_context() as db:
-            end_user = EndUserRepository(db).get_end_user_by_id(end_user_id)
+        from app.core.memory.memory_service import MemoryService
+
+        # 归属校验 + memory_count / 软删除共用同一 async session
+        async with get_async_db_context() as db:
+            end_user = await EndUserRepository(db).get_end_user_by_id_async(end_user_id)
             if not end_user:
                 api_logger.warning(f"终端用户不存在或已删除: end_user_id={end_user_id_str}")
                 return fail(BizCode.NOT_FOUND, "终端用户不存在或已删除", f"end_user_id={end_user_id_str}")
@@ -372,17 +374,14 @@ async def delete_end_user(
                 )
                 return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
 
-        from app.core.memory.memory_service import MemoryService
+            total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id_str)
 
-        total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id_str)
-
-        try:
-            with get_db_context() as db:
-                repo = EndUserRepository(db)
-                repo.update_memory_count(end_user_id, 0)
-                repo.soft_delete_by_end_user_id(end_user_id)
-        except Exception as sync_err:
-            api_logger.warning(f"同步 end_user 失败（不影响 Neo4j 删除结果）: {sync_err}")
+            try:
+                await EndUserRepository(db).update_memory_count_async(end_user_id, 0)
+                await EndUserRepository(db).soft_delete_by_end_user_id_async(end_user_id)
+                await db.commit()
+            except Exception as sync_err:
+                api_logger.warning(f"同步 end_user 失败（不影响 Neo4j 删除结果）: {sync_err}")
 
         api_logger.info(
             f"终端用户删除完成: end_user_id={end_user_id_str}, total_deleted={total_deleted}"

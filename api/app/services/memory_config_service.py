@@ -711,9 +711,7 @@ class MemoryConfigService:
 
         try:
             # Step 1: load config row + workspace in a single JOIN query
-            result = await MemoryConfigRepository.get_config_with_workspace_async(
-                self.db, config_id
-            )
+            result = await MemoryConfigRepository(self.db).get_config_with_workspace_async(config_id)
             if not result:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 config_logger.error(
@@ -1243,6 +1241,120 @@ class MemoryConfigService:
         except IntegrityError as e:
             self.db.rollback()
 
+            # Handle foreign key violation gracefully
+            error_str = str(e.orig) if e.orig else str(e)
+            if "ForeignKeyViolation" in error_str or "foreign key constraint" in error_str.lower():
+                logger.warning(
+                    "Delete failed due to foreign key constraint",
+                    extra={
+                        "config_id": str(config_id),
+                        "error": error_str
+                    }
+                )
+                return {
+                    "status": "error",
+                    "message": "无法删除记忆配置：仍有终端用户引用此配置，请使用 force=true 强制删除",
+                    "force_required": True
+                }
+
+            # Re-raise other integrity errors
+            logger.error(
+                "Delete failed due to integrity error",
+                extra={
+                    "config_id": str(config_id),
+                    "error": error_str
+                },
+                exc_info=True
+            )
+            raise
+
+    @staticmethod
+    async def delete_config_async(
+            db: AsyncSession,
+            config_id: UUID | int,
+            workspace_id: uuid.UUID,
+    ) -> dict:
+        """Async version of delete_config.
+
+        Delete memory config with protection against in-use configs.
+
+        Args:
+            db: Async database session
+            config_id: Memory config ID to delete (UUID or legacy int)
+            workspace_id: Workspace ID
+
+        Returns:
+            Dict with status, message, and affected_users count
+
+        Raises:
+            ResourceNotFoundException: If config doesn't exist
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.core.exceptions import ResourceNotFoundException
+
+        # 处理旧格式 int 类型的 config_id
+        if isinstance(config_id, int):
+            logger.warning(
+                "Attempted to delete legacy int config_id",
+                extra={"config_id": config_id}
+            )
+            return {
+                "status": "error",
+                "message": "旧格式配置ID不支持删除操作，请使用新版配置",
+                "legacy_int_id": config_id
+            }
+
+        config = await db.get(MemoryConfigModel, config_id)
+        if not config:
+            raise ResourceNotFoundException("MemoryConfig", str(config_id))
+
+        # Check if this is the default config - default configs cannot be deleted
+        if config.is_default:
+            logger.warning(
+                "Attempted to delete default memory config",
+                extra={"config_id": str(config_id)}
+            )
+            return {
+                "status": "error",
+                "message": "默认配置不允许删除",
+                "is_default": True
+            }
+
+        active_config_id = await get_workspace_memory_config_id_async(db, workspace_id)
+        if not active_config_id:
+            raise BusinessException(f"空间{workspace_id}无启用的记忆配置")
+
+        if str(config.config_id) == str(active_config_id):
+            logger.warning(
+                "Attempted to delete memory config with connected end users",
+                extra={
+                    "config_id": str(config_id),
+                }
+            )
+
+            return {
+                "status": "warning",
+                "message": f"无法删除记忆配置：当前空间正在使用此配置",
+                "force_required": True
+            }
+
+        try:
+            await db.delete(config)
+
+            logger.info(
+                "Memory config deleted",
+                extra={
+                    "config_id": str(config_id),
+                }
+            )
+
+            return {
+                "status": "success",
+                "message": "记忆配置删除成功",
+            }
+
+        except IntegrityError as e:
             # Handle foreign key violation gracefully
             error_str = str(e.orig) if e.orig else str(e)
             if "ForeignKeyViolation" in error_str or "foreign key constraint" in error_str.lower():
