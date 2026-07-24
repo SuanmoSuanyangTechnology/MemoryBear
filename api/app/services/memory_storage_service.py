@@ -473,26 +473,18 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "time": int(time.time() * 1000)
             })
 
-    # --- Async Static Methods (use AsyncSession) ---
+    # --- Async Static Methods (use AsyncSession, delegate SQL to Repository) ---
 
     @staticmethod
     async def get_all_async(db: AsyncSession, workspace_id) -> List[Dict[str, Any]]:
         """Async version of get_all.
 
-        Query all configs for a workspace using async SQLAlchemy patterns.
+        Query all configs for a workspace via MemoryConfigRepository.
         """
-        from app.models.ontology_scene import OntologyScene
-        from app.models.memory_config_model import MemoryConfig
+        from app.repositories.memory_config_repository import MemoryConfigRepository
 
-        # Query configs with scene_name via outerjoin
-        stmt = (
-            select(MemoryConfig, OntologyScene.scene_name)
-            .outerjoin(OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id)
-            .where(MemoryConfig.workspace_id == workspace_id)
-            .order_by(MemoryConfig.updated_at.desc())
-        )
-        result = await db.execute(stmt)
-        results = result.all()
+        repo = MemoryConfigRepository(db)
+        results = await repo.get_all_async(workspace_id)
 
         # Check and fix pruning_scene mismatches
         for config, scene_name in results:
@@ -562,21 +554,18 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     async def create_async(db: AsyncSession, params: ConfigParamsCreate) -> Dict[str, Any]:
         """Async version of create.
 
-        Create a new memory config using async SQLAlchemy patterns.
+        Create a new memory config via MemoryConfigRepository.
         """
         from app.models.memory_config_model import MemoryConfig
+        from app.repositories.memory_config_repository import MemoryConfigRepository
         from app.repositories.workspace_repository import WorkspaceRepository
 
         # Check for duplicate config name in workspace
         if params.workspace_id and params.config_name:
-            check_stmt = select(MemoryConfig).where(
-                MemoryConfig.workspace_id == params.workspace_id,
-                MemoryConfig.config_name == params.config_name,
+            repo = MemoryConfigRepository(db)
+            await repo.check_duplicate_name_async(
+                params.workspace_id, params.config_name
             )
-            check_result = await db.execute(check_stmt)
-            existing = check_result.scalars().first()
-            if existing:
-                raise ValueError(f"DUPLICATE_CONFIG_NAME:{params.config_name}")
 
         # Auto-fill model IDs from workspace if not specified
         if params.workspace_id and not all([params.llm_id, params.embedding_id, params.rerank_id]):
@@ -632,12 +621,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
     @staticmethod
     async def _resolve_pruning_scene_async(db: AsyncSession, scene_id) -> Optional[str]:
-        """Async helper: resolve pruning_scene from scene_id."""
+        """Async helper: resolve pruning_scene from scene_id via OntologySceneRepository."""
         try:
-            from app.models.ontology_scene import OntologyScene
-            stmt = select(OntologyScene).where(OntologyScene.scene_id == scene_id)
-            result = await db.execute(stmt)
-            scene = result.scalars().first()
+            from app.repositories.ontology_scene_repository import OntologySceneRepository
+            scene = await OntologySceneRepository(db).get_by_id_async(scene_id)
             return scene.scene_name if scene else None
         except Exception as e:
             logger.warning(f"_resolve_pruning_scene_async failed for scene_id={scene_id}: {e}", exc_info=True)
@@ -647,13 +634,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     async def update_async(db: AsyncSession, update: ConfigUpdate) -> Dict[str, Any]:
         """Async version of update.
 
-        Partially update config fields (config_name, config_desc, scene_id).
+        Partially update config fields via MemoryConfigRepository.
         """
-        from app.models.memory_config_model import MemoryConfig
+        from app.repositories.memory_config_repository import MemoryConfigRepository
 
-        stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
-        result = await db.execute(stmt)
-        db_config = result.scalars().first()
+        repo = MemoryConfigRepository(db)
+        db_config = await repo.get_by_id_async(update.config_id)
         if not db_config:
             raise ValueError("未找到配置")
 
@@ -671,13 +657,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     async def update_extracted_async(db: AsyncSession, update: ConfigUpdateExtracted) -> Dict[str, Any]:
         """Async version of update_extracted.
 
-        Update extracted engine config fields.
+        Update extracted engine config fields via MemoryConfigRepository.
         """
-        from app.models.memory_config_model import MemoryConfig
+        from app.repositories.memory_config_repository import MemoryConfigRepository
 
-        stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
-        result = await db.execute(stmt)
-        db_config = result.scalars().first()
+        repo = MemoryConfigRepository(db)
+        db_config = await repo.get_by_id_async(update.config_id)
         if not db_config:
             raise ValueError("未找到配置")
 
@@ -694,68 +679,27 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     async def get_extracted_async(db: AsyncSession, key: ConfigKey) -> Dict[str, Any]:
         """Async version of get_extracted.
 
-        Query extracted config details and return as dict.
+        Query extracted config details via MemoryConfigRepository.
         """
-        from app.models.memory_config_model import MemoryConfig
-        from app.utils.config_utils import resolve_config_id_async
+        from app.repositories.memory_config_repository import MemoryConfigRepository
 
-        config_id = await resolve_config_id_async(key.config_id, db)
-
-        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        result = await db.execute(stmt)
-        db_config = result.scalars().first()
-        if not db_config:
-            raise ValueError("未找到配置")
-
-        return {
-            "llm_id": db_config.llm_id,
-            "embedding_id": db_config.embedding_id,
-            "rerank_id": db_config.rerank_id,
-            "vision_id": db_config.vision_id,
-            "audio_id": db_config.audio_id,
-            "video_id": db_config.video_id,
-            "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
-            "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
-            "deep_retrieval": db_config.deep_retrieval,
-            "t_type_strict": db_config.t_type_strict,
-            "t_name_strict": db_config.t_name_strict,
-            "t_overall": db_config.t_overall,
-            "chunker_strategy": db_config.chunker_strategy,
-            "statement_granularity": db_config.statement_granularity,
-            "include_dialogue_context": db_config.include_dialogue_context,
-            "max_context": db_config.max_context,
-            "pruning_enabled": db_config.pruning_enabled,
-            "pruning_scene": db_config.pruning_scene,
-            "pruning_threshold": db_config.pruning_threshold,
-            "enable_self_reflexion": db_config.enable_self_reflexion,
-            "iteration_period": db_config.iteration_period,
-            "reflexion_range": db_config.reflexion_range,
-            "baseline": db_config.baseline,
-            "is_default": bool(db_config.is_default),
-        }
+        repo = MemoryConfigRepository(db)
+        return await repo.get_extracted_async(key.config_id)
 
     @staticmethod
     async def active_async(db: AsyncSession, workspace_id: uuid.UUID, config_id: uuid.UUID, locale: str = "zh") -> Dict[str, Any]:
         """Async version of active.
 
-        Activate a config for a workspace using async SQLAlchemy patterns.
+        Activate a config for a workspace via MemoryConfigRepository.
         """
-        from app.models.memory_config_model import MemoryConfig
+        from app.repositories.memory_config_repository import MemoryConfigRepository
 
+        repo = MemoryConfigRepository(db)
         # Verify workspace exists and is active
-        stmt = select(Workspace).where(
-            Workspace.id == workspace_id,
-            Workspace.is_active.is_(True),
-        )
-        result = await db.execute(stmt)
-        workspace = result.scalars().first()
-        if not workspace:
-            raise BusinessException(t("workspace.not_found", locale=locale))
+        workspace = await repo.verify_workspace_active_async(workspace_id)
 
         # Verify config exists
-        config_stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        config_result = await db.execute(config_stmt)
-        config = config_result.scalars().first()
+        config = await repo.get_by_id_async(config_id)
         if not config:
             raise BusinessException(t("memory_config.config.not_found", locale=locale, config_id=str(config_id)))
 

@@ -170,7 +170,6 @@ class MemoryConfigRepository:
 
         return memory_config_obj
 
-    # 思考一下为什么加静态方法
     async def update_reflection_config_async(
             self,
             config_id: uuid.UUID,
@@ -846,6 +845,131 @@ class MemoryConfigRepository:
         except Exception as e:
             db_logger.error(f"查询所有配置失败: workspace_id={workspace_id} - {str(e)}")
             raise
+
+    # ==================== Async Query Methods ====================
+
+    async def get_all_async(self, workspace_id: uuid.UUID) -> List[Tuple]:
+        """Async version of get_all.
+
+        Query all configs for a workspace with scene_name via outerjoin.
+
+        Args:
+            workspace_id: 工作空间ID
+
+        Returns:
+            List[Tuple[MemoryConfig, Optional[str]]]: 配置列表，每项为 (配置对象, 场景名称)
+        """
+        from app.models.ontology_scene import OntologyScene
+
+        db_logger.debug(f"查询所有配置(异步): workspace_id={workspace_id}")
+
+        try:
+            stmt = (
+                select(MemoryConfig, OntologyScene.scene_name)
+                .outerjoin(OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id)
+                .where(MemoryConfig.workspace_id == workspace_id)
+                .order_by(desc(MemoryConfig.updated_at))
+            )
+            result = await self.db.execute(stmt)
+            results = result.all()
+
+            db_logger.debug(f"配置列表查询成功(异步): 数量={len(results)}")
+            return results
+
+        except Exception as e:
+            db_logger.error(f"查询所有配置失败(异步): workspace_id={workspace_id} - {str(e)}")
+            raise
+
+    async def check_duplicate_name_async(
+        self, workspace_id: uuid.UUID, config_name: str
+    ) -> None:
+        """Check if config name already exists in workspace (async).
+
+        Raises:
+            ValueError: DUPLICATE_CONFIG_NAME if duplicate found.
+        """
+        check_stmt = select(MemoryConfig).where(
+            MemoryConfig.workspace_id == workspace_id,
+            MemoryConfig.config_name == config_name,
+        )
+        check_result = await self.db.execute(check_stmt)
+        existing = check_result.scalars().first()
+        if existing:
+            raise ValueError(f"DUPLICATE_CONFIG_NAME:{config_name}")
+
+    async def get_extracted_async(self, config_id: uuid.UUID) -> Dict:
+        """Async version of get_extracted_config.
+
+        Args:
+            config_id: 配置ID
+
+        Returns:
+            Dict: 萃取配置字典
+        """
+        from app.utils.config_utils import resolve_config_id_async
+
+        resolved_id = await resolve_config_id_async(config_id, self.db)
+        db_logger.debug(f"查询萃取配置(异步): config_id={resolved_id}")
+
+        try:
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == resolved_id)
+            result = await self.db.execute(stmt)
+            db_config = result.scalars().first()
+            if not db_config:
+                raise ValueError("未找到配置")
+
+            return {
+                "llm_id": db_config.llm_id,
+                "embedding_id": db_config.embedding_id,
+                "rerank_id": db_config.rerank_id,
+                "vision_id": db_config.vision_id,
+                "audio_id": db_config.audio_id,
+                "video_id": db_config.video_id,
+                "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
+                "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
+                "deep_retrieval": db_config.deep_retrieval,
+                "t_type_strict": db_config.t_type_strict,
+                "t_name_strict": db_config.t_name_strict,
+                "t_overall": db_config.t_overall,
+                "chunker_strategy": db_config.chunker_strategy,
+                "statement_granularity": db_config.statement_granularity,
+                "include_dialogue_context": db_config.include_dialogue_context,
+                "max_context": db_config.max_context,
+                "pruning_enabled": db_config.pruning_enabled,
+                "pruning_scene": db_config.pruning_scene,
+                "pruning_threshold": db_config.pruning_threshold,
+                "enable_self_reflexion": db_config.enable_self_reflexion,
+                "iteration_period": db_config.iteration_period,
+                "reflexion_range": db_config.reflexion_range,
+                "baseline": db_config.baseline,
+                "is_default": bool(db_config.is_default),
+            }
+
+        except Exception as e:
+            db_logger.error(f"查询萃取配置失败(异步): config_id={config_id} - {str(e)}")
+            raise
+
+    async def verify_workspace_active_async(self, workspace_id: uuid.UUID) -> Workspace:
+        """Verify workspace exists and is active (async).
+
+        Args:
+            workspace_id: 工作空间ID
+
+        Returns:
+            Workspace: 工作空间对象
+
+        Raises:
+            BusinessException: 工作空间不存在或未激活
+        """
+        stmt = select(Workspace).where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True),
+        )
+        result = await self.db.execute(stmt)
+        workspace = result.scalars().first()
+        if not workspace:
+            raise BusinessException("workspace.not_found")
+        return workspace
 
     @staticmethod
     def delete(db: Session, config_id: uuid.UUID) -> bool:
