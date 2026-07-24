@@ -224,13 +224,9 @@ class KnowledgeRetrievalPreparation:
     ) -> RetrievalTarget:
         knowledge = ref.knowledge
         params = params or cls._build_retrieval_params(request, ref.config)
-        evidence_graph = False
         if params.retrieve_type == RetrieveType.Graph:
             try:
-                evidence_graph = (
-                    resolve_graph_pipeline(knowledge.parser_config)
-                    is GraphPipeline.EVIDENCE
-                )
+                resolve_graph_pipeline(knowledge.parser_config)
             except GraphPipelineConfigError as exc:
                 raise KnowledgeRetrievalConfigError(str(exc)) from exc
         if not knowledge.embedding_id:
@@ -240,13 +236,11 @@ class KnowledgeRetrievalPreparation:
         if not embedding:
             raise KnowledgeRetrievalConfigError(f"No embedding api key found for knowledge {knowledge.id}")
 
-        reranker = None
-        if not evidence_graph:
-            if not knowledge.reranker_id:
-                raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
-            reranker = await cls._snapshot_model_runtime(db, knowledge.reranker_id, tenant_id)
-            if not reranker:
-                raise KnowledgeRetrievalConfigError(f"No reranker api key found for knowledge {knowledge.id}")
+        if not knowledge.reranker_id:
+            raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
+        reranker = await cls._snapshot_model_runtime(db, knowledge.reranker_id, tenant_id)
+        if not reranker:
+            raise KnowledgeRetrievalConfigError(f"No reranker api key found for knowledge {knowledge.id}")
 
         return RetrievalTarget(
             knowledge_id=knowledge.id,

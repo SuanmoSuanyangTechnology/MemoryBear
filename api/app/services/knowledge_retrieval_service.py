@@ -498,10 +498,24 @@ class KnowledgeRetrievalService:
             "relation_key",
             "relation",
         )
+        if not cls._preserves_evidence_graph_context(preparation):
+            graph_entities = []
+            graph_relationships = []
         return KnowledgeRetrievalResult(
             chunks=chunks,
             entities=graph_entities,
             relationships=graph_relationships,
+        )
+
+    @staticmethod
+    def _preserves_evidence_graph_context(
+        preparation: RetrievalPreparation,
+    ) -> bool:
+        return (
+            len(preparation.targets) == 1
+            and preparation.targets[0].params.retrieve_type == RetrieveType.Graph
+            and preparation.graph is not None
+            and preparation.graph.pipeline is GraphPipeline.EVIDENCE
         )
 
     @staticmethod
@@ -1315,7 +1329,7 @@ class KnowledgeRetrievalService:
     ) -> list[Any]:
         keys = cls._graph_projection_keys_from_chunks(chunks, projection_type)
         if not keys:
-            return list(items)
+            return []
         return [
             item
             for item in items
