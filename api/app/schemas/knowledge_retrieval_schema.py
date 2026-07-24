@@ -19,6 +19,12 @@ class KnowledgeRetrievalRequest(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=100)
     caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL
     retrieve_type: RetrieveType = RetrieveType.HYBRID
+    enable_graph_retrieval: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+    )
     rerank_id: UUID | None = None
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
@@ -33,6 +39,24 @@ class KnowledgeRetrievalRequest(BaseModel):
     def metadata_filters_prepared(self) -> bool:
         """Whether AUTO filtering was already evaluated by an internal adapter."""
         return self._metadata_filters_prepared
+
+    @property
+    def graph_retrieval_mix_enabled(self) -> bool:
+        """Whether hybrid retrieval should add an evidence-graph route."""
+        return self.enable_graph_retrieval == 1
+
+    def graph_retrieval_mix_enabled_for(
+        self,
+        config: KnowledgeBaseConfig | None,
+    ) -> bool:
+        """Resolve the hybrid Evidence Graph flag for one knowledge base."""
+        if (
+            config is not None
+            and "enable_graph_retrieval" in config.model_fields_set
+            and config.enable_graph_retrieval is not None
+        ):
+            return config.enable_graph_retrieval == 1
+        return self.graph_retrieval_mix_enabled
 
     @field_validator("query")
     @classmethod
@@ -57,5 +81,10 @@ class KnowledgeRetrievalRequest(BaseModel):
 
 class KnowledgeRetrievalResult(BaseModel):
     chunks: list[Any] = Field(default_factory=list)
+    entities: list[Any] = Field(default_factory=list)
+    relationships: list[Any] = Field(default_factory=list)
+
+    def has_graph_data(self) -> bool:
+        return bool(self.entities or self.relationships)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

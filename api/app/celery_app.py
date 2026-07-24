@@ -111,6 +111,10 @@ celery_app.conf.update(
         # GraphRAG tasks → graphrag_tasks queue (独立队列，避免阻塞文档解析)
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'graphrag_tasks'},
         'app.core.rag.tasks.build_graphrag_for_document': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.sync_evidence_graph_document': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.rebuild_evidence_graph_knowledge': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.migrate_evidence_graph_knowledge': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.clear_all_knowledge_graph_data': {'queue': 'graphrag_tasks'},
 
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},

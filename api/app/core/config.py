@@ -87,6 +87,14 @@ class Settings:
     KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY: int = int(
         os.getenv("KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY", "2")
     )
+    KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY: int = max(
+        1,
+        min(16, int(os.getenv("KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY", "4"))),
+    )
+    KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS: int = max(
+        100,
+        min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
+    )
 
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.chunk.metadata import merge_parser_metadata
+from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.models import RetrievalPrincipal
@@ -37,6 +38,29 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
+
+
+def _dispatch_document_graph_sync_best_effort(
+    knowledge_id: str,
+    document_id: str,
+    parser_config: dict[str, Any] | None,
+) -> Any | None:
+    try:
+        return dispatch_document_graph_sync(
+            knowledge_id,
+            document_id,
+            parser_config,
+            dispatch_legacy=False,
+        )
+    except Exception as exc:
+        api_logger.error(
+            "Failed to dispatch graph sync after chunk mutation"
+            " knowledge_id=%s document_id=%s error_type=%s",
+            knowledge_id,
+            document_id,
+            type(exc).__name__,
+        )
+        return None
 
 
 def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant_id: uuid.UUID):
@@ -683,6 +707,11 @@ async def create_chunk(
     # 4.update chunk_num
     db_document.chunk_num += 1
     await db.commit()
+    _dispatch_document_graph_sync_best_effort(
+        str(kb_id),
+        str(document_id),
+        db_knowledge.parser_config,
+    )
 
     return success(data=jsonable_encoder(chunk), msg="Document chunk creation successful")
 
@@ -772,6 +801,11 @@ async def create_chunks_batch(
 
     db_document.chunk_num += len(chunks)
     await db.commit()
+    _dispatch_document_graph_sync_best_effort(
+        str(kb_id),
+        str(document_id),
+        db_knowledge.parser_config,
+    )
 
     return success(data=jsonable_encoder(chunks), msg=f"Batch created {len(chunks)} chunks successfully")
 
@@ -967,6 +1001,11 @@ async def update_chunk(
         if update_data.is_qa:
             chunk.metadata.update(update_data.qa_metadata)
         await asyncio.to_thread(vector_service.update_by_segment, chunk)
+        _dispatch_document_graph_sync_best_effort(
+            str(kb_id),
+            str(document_id),
+            db_knowledge.parser_config,
+        )
         return success(data=jsonable_encoder(chunk), msg="The document chunk has been successfully updated")
     else:
         raise HTTPException(
@@ -1003,6 +1042,11 @@ async def delete_chunk(
         db_document = await db.get(Document, document_id)
         db_document.chunk_num -= 1
         await db.commit()
+        _dispatch_document_graph_sync_best_effort(
+            str(kb_id),
+            str(document_id),
+            db_knowledge.parser_config,
+        )
         return success(msg="The document chunk has been successfully deleted")
     else:
         raise HTTPException(
@@ -1053,7 +1097,12 @@ async def retrieve_chunks_with_caller(
             detail=str(exc),
         ) from exc
 
-    return success(data=jsonable_encoder(result.chunks), msg="retrieval successful")
+    response_data = (
+        result.model_dump()
+        if result.has_graph_data()
+        else result.chunks
+    )
+    return success(data=jsonable_encoder(response_data), msg="retrieval successful")
 
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)

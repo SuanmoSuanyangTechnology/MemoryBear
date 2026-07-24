@@ -21,8 +21,24 @@ from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.llm.chat_model import Base
+from app.core.rag.knowledge_graph.config import (
+    GraphPipeline,
+    GraphPipelineConfigError,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
+from app.core.rag.knowledge_graph.dispatch import (
+    dispatch_graph_enabled_transition,
+)
+from app.core.rag.knowledge_graph.elasticsearch_store import (
+    GraphElasticsearchStore,
+)
+from app.core.rag.parser_config import normalize_knowledge_parser_config_update
 from app.core.rag.nlp import rag_tokenizer, search
 from app.core.rag.prompts.generator import graph_entity_types
+from app.core.rag.retrieval.async_elasticsearch import (
+    AsyncElasticsearchClientProvider,
+)
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
@@ -261,7 +277,8 @@ async def get_knowledge_graph_entity_types(
             model_name=config.api_keys[0].model_name,
             base_url=config.api_keys[0].api_base
         )
-        response = graph_entity_types(chat_model, scenario)
+        # response = graph_entity_types(chat_model, scenario)
+        response = await asyncio.to_thread(graph_entity_types, chat_model, scenario)
         return success(data=response, msg="Successfully obtained knowledge graph entity types")
     except HTTPException:
         raise
@@ -381,6 +398,19 @@ async def create_knowledge(
         db_knowledge = await knowledge_service.create_knowledge_async(db=db, knowledge=create_data, current_user=current_user)
         api_logger.info(f"The knowledge base has been successfully created: {db_knowledge.name} (ID: {db_knowledge.id})")
         return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base has been successfully created")
+    except GraphPipelineConfigError as e:
+        api_logger.warning(
+            "Invalid graph pipeline configuration during knowledge creation"
+            " knowledge_name=%s error_type=%s",
+            create_data.name,
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except HTTPException:
+        raise
     except Exception as e:
         api_logger.error(f"The creation of the knowledge base failed: {create_data.name} - {str(e)}")
         raise
@@ -578,7 +608,28 @@ async def _update_knowledge(
             )
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
-        update_dict = update_data.dict(exclude_unset=True)
+        update_dict = update_data.model_dump(exclude_unset=True)
+        graph_enabled_before: bool | None = None
+        if "parser_config" in update_dict:
+            try:
+                graph_enabled_before = is_graph_enabled(
+                    db_knowledge.parser_config
+                )
+                update_dict["parser_config"] = normalize_knowledge_parser_config_update(
+                    db_knowledge.parser_config,
+                    update_dict["parser_config"],
+                )
+            except GraphPipelineConfigError as exc:
+                api_logger.warning(
+                    "Invalid graph pipeline configuration during knowledge update"
+                    " knowledge_id=%s error_type=%s",
+                    str(knowledge_id),
+                    type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
         embedding_changed = False
         if "name" in update_dict:
             name = update_dict["name"]
@@ -602,13 +653,16 @@ async def _update_knowledge(
         # 2. Update fields (only update non-null fields)
         api_logger.debug(f"Start updating the knowledge base fields: {knowledge_id}")
         updated_fields = []
-        for field, value in update_data.dict(exclude_unset=True).items():
+        for field, value in update_dict.items():
             if hasattr(db_knowledge, field):
                 old_value = getattr(db_knowledge, field)
                 if old_value != value:
                     # update value
                     setattr(db_knowledge, field, value)
-                    updated_fields.append(f"{field}: {old_value} -> {value}")
+                    if field == "parser_config":
+                        updated_fields.append("parser_config: changed")
+                    else:
+                        updated_fields.append(f"{field}: {old_value} -> {value}")
 
         if embedding_changed and db_knowledge.chunk_num != 0:
             old_chunk_num = db_knowledge.chunk_num
@@ -624,6 +678,34 @@ async def _update_knowledge(
         await db.commit()
         await db.refresh(db_knowledge)
         api_logger.info(f"The knowledge base has been successfully updated: {db_knowledge.name} (ID: {db_knowledge.id})")
+
+        if graph_enabled_before is not None:
+            try:
+                graph_task = dispatch_graph_enabled_transition(
+                    str(db_knowledge.id),
+                    graph_enabled_before,
+                    db_knowledge.parser_config,
+                )
+                if graph_task is not None:
+                    current_enabled = is_graph_enabled(db_knowledge.parser_config)
+                    pipeline = resolve_graph_pipeline(db_knowledge.parser_config)
+                    api_logger.info(
+                        "Knowledge graph enablement task accepted"
+                        " knowledge_id=%s previous_enabled=%s"
+                        " current_enabled=%s pipeline=%s task_id=%s",
+                        str(db_knowledge.id),
+                        str(graph_enabled_before).lower(),
+                        str(current_enabled).lower(),
+                        pipeline.value,
+                        str(getattr(graph_task, "id", None) or "unknown"),
+                    )
+            except Exception as dispatch_error:
+                api_logger.error(
+                    "Failed to dispatch graph task after enablement change"
+                    " knowledge_id=%s error_type=%s",
+                    str(db_knowledge.id),
+                    type(dispatch_error).__name__,
+                )
 
         if embedding_changed:
             try:
@@ -714,6 +796,23 @@ async def get_knowledge_graph(
                 detail="The knowledge base does not exist or access is denied"
             )
 
+        if resolve_graph_pipeline(
+            db_knowledge.parser_config
+        ) is GraphPipeline.EVIDENCE:
+            client = await AsyncElasticsearchClientProvider.get_shared_client()
+            graph = await GraphElasticsearchStore(
+                client
+            ).load_projection_graph(
+                search.index_name(str(db_knowledge.workspace_id)),
+                str(db_knowledge.id),
+                node_limit=256,
+                edge_limit=128,
+            )
+            return success(
+                data={"graph": graph, "mind_map": {}},
+                msg="Successfully obtained knowledge graph information",
+            )
+
         req = {
             "kb_id": [str(db_knowledge.id)],
             "knowledge_graph_kwd": ["graph"]
@@ -752,6 +851,11 @@ async def get_knowledge_graph(
                 filtered_edges = [o for o in obj["graph"]["edges"] if o["source"] != o["target"] and o["source"] in node_id_set and o["target"] in node_id_set]
                 obj["graph"]["edges"] = sorted(filtered_edges, key=lambda x: x.get("weight", 0), reverse=True)[:128]
         return success(data=obj, msg="Successfully obtained knowledge graph information")
+    except GraphPipelineConfigError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -782,15 +886,21 @@ async def delete_knowledge_graph(
                 detail="The knowledge base does not exist or you do not have permission to access it"
             )
 
-        # 2. delete knowledge graph
-        await asyncio.to_thread(
-            settings.docStoreConn.delete,
-            {"knowledge_graph_kwd": ["graph", "subgraph", "entity", "relation"]},
-            search.index_name(str(db_knowledge.workspace_id)),
-            str(db_knowledge.id),
+        task = celery_app.send_task(
+            "app.core.rag.tasks.clear_all_knowledge_graph_data",
+            args=[str(knowledge_id)],
+            kwargs={"force": True},
         )
-        api_logger.info(f"The knowledge graph has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
-        return success(msg="The knowledge graph has been successfully deleted")
+        api_logger.info(
+            "Knowledge graph cleanup task accepted"
+            " knowledge_id=%s task_id=%s",
+            str(knowledge_id),
+            str(task.id),
+        )
+        return success(
+            data={"task_id": task.id},
+            msg="Task accepted. Knowledge graph cleanup is being processed in the background.",
+        )
     except Exception as e:
         api_logger.error(f"Failed to delete from the knowledge base: knowledge_id={knowledge_id} - {str(e)}")
         raise
@@ -820,22 +930,48 @@ async def rebuild_knowledge_graph(
                 detail="The knowledge base does not exist or you do not have permission to access it"
             )
 
-        # 2. delete knowledge graph
-        await asyncio.to_thread(
-            settings.docStoreConn.delete,
-            {"knowledge_graph_kwd": ["graph", "subgraph", "entity", "relation"]},
-            search.index_name(str(db_knowledge.workspace_id)),
-            str(db_knowledge.id),
-        )
+        pipeline = resolve_graph_pipeline(db_knowledge.parser_config)
+        if pipeline is GraphPipeline.LEGACY:
+            await asyncio.to_thread(
+                settings.docStoreConn.delete,
+                {
+                    "knowledge_graph_kwd": [
+                        "graph",
+                        "subgraph",
+                        "entity",
+                        "relation",
+                    ]
+                },
+                search.index_name(str(db_knowledge.workspace_id)),
+                str(db_knowledge.id),
+            )
 
-        # 3. build knowledge graph
-        # from app.tasks import build_graphrag_for_kb
-        # build_graphrag_for_kb(kb_id)
-        task = celery_app.send_task("app.core.rag.tasks.build_graphrag_for_kb", args=[knowledge_id])
+        task_name = (
+            "app.core.rag.tasks.build_graphrag_for_kb"
+            if pipeline is GraphPipeline.LEGACY
+            else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
+        )
+        task = celery_app.send_task(
+            task_name,
+            args=[str(knowledge_id)],
+        )
+        api_logger.info(
+            "Knowledge graph rebuild task accepted"
+            " kb_id=%s pipeline=%s task=%s task_id=%s",
+            str(knowledge_id),
+            pipeline.value,
+            task_name,
+            str(task.id),
+        )
         result = {
             "task_id": task.id
         }
         return success(data=result, msg="Task accepted. rebuild knowledge graph is being processed in the background.")
+    except GraphPipelineConfigError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
         api_logger.error(f"Failed to rebuild knowledge graph: knowledge_id={knowledge_id} - {str(e)}")
         raise

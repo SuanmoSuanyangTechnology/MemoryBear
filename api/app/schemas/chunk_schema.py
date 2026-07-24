@@ -29,6 +29,15 @@ class KnowledgeBaseConfig(BaseModel):
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1, description="Knowledge base rerank score threshold")
     top_k: int = Field(default=4, ge=1, le=100, description="Knowledge base top k")
     retrieve_type: RetrieveType = Field(default=RetrieveType.PARTICIPLE, description="Retrieve type")
+    enable_graph_retrieval: int | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "Whether this knowledge base adds the Evidence Graph channel "
+            "during hybrid retrieval. Falls back to the request value when omitted."
+        ),
+    )
 
 
 class ChunkType(StrEnum):
@@ -118,6 +127,12 @@ class ChunkRetrieve(BaseModel):
     top_k: int | None = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
+    enable_graph_retrieval: int = Field(
+        0,
+        ge=0,
+        le=1,
+        description="Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+    )
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
     metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="filter mode")

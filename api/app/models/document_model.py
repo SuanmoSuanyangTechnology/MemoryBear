@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.core.rag.parser_config import build_default_document_parser_config
 
 
 def _parse_bool_config(value: Any) -> bool:
@@ -33,31 +34,8 @@ class Document(Base):
                        comment="{field_name: value}")
     parser_id = Column(String, index=True, nullable=False, comment="default parser ID")
     parser_config = Column(JSON, nullable=False,
-                           default={
-                               "layout_recognize": "DeepDOC",
-                               "chunk_token_num": 130,
-                               "delimiter": "\n",
-                               "auto_keywords": 0,
-                               "auto_questions": 0,
-                               "html4excel": False,
-                               "parent_child_mode": False,
-                               "parent_chunk_token_num": 1024,
-                               "parent_chunk_delimiter": "\n\n",
-                               "graphrag": {
-                                   "use_graphrag": False,
-                                   "scene_name": "",
-                                   "entity_types": [
-                                       "organization",
-                                       "person",
-                                       "geo",
-                                       "event",
-                                       "category"
-                                   ],
-                                   "method": "general",
-                                   "resolution": True,
-                                   "community": True
-                               }
-                           }, comment="default parser config")
+                           default=build_default_document_parser_config,
+                           comment="default parser config")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     progress = Column(Float, default=0)
     progress_msg = Column(String, default="", comment="process message")

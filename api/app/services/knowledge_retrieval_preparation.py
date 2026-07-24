@@ -6,10 +6,17 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rag.knowledge_graph.config import (
+    GraphPipeline,
+    GraphPipelineConfigError,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
 from app.core.rag.metadata.filter_engine import FilterGroup as EngineFilterGroup, MetadataFilterEngine
 from app.core.rag.retrieval.exceptions import KnowledgeRetrievalConfigError
 from app.core.rag.retrieval.models import (
     GraphRetrievalSnapshot,
+    GraphTargetSnapshot,
     ModelRuntimeSnapshot,
     RetrievalParams,
     RetrievalPreparation,
@@ -82,19 +89,17 @@ class KnowledgeRetrievalPreparation:
                 graph=None,
             )
 
-        metadata_defs_by_kb = {
-            target.knowledge_id: await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
-                db,
-                target.knowledge_id,
+        metadata_defs_by_kb: dict[uuid.UUID, dict[str, dict]] = {}
+        for target in targets:
+            if target.knowledge_id in metadata_defs_by_kb:
+                continue
+            metadata_defs_by_kb[target.knowledge_id] = (
+                await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
+                    db,
+                    target.knowledge_id,
+                )
             )
-            for target in targets
-        }
         common_metadata_defs = cls._get_common_metadata_defs(metadata_defs_by_kb)
-        request_reranker = await cls._snapshot_model_runtime(
-            db,
-            request.rerank_id,
-            tenant_id,
-        )
         metadata_llm = await cls._build_metadata_llm_snapshot(
             db,
             request,
@@ -109,6 +114,19 @@ class KnowledgeRetrievalPreparation:
             targets,
             tenant_id,
         )
+        single_evidence_graph_target = (
+            graph is not None
+            and graph.pipeline is GraphPipeline.EVIDENCE
+            and len(targets) == 1
+            and targets[0].params.retrieve_type == RetrieveType.Graph
+        )
+        request_reranker = None
+        if not single_evidence_graph_target:
+            request_reranker = await cls._snapshot_model_runtime(
+                db,
+                request.rerank_id,
+                tenant_id,
+            )
         return RetrievalPreparation(
             targets=tuple(targets),
             tenant_id=tenant_id,
@@ -160,10 +178,18 @@ class KnowledgeRetrievalPreparation:
             principal,
             getattr(refs[0].knowledge, "workspace_id", None),
         )
-        targets = [
-            await cls._build_retrieval_target_async(db, request, ref, tenant_id)
-            for ref in refs
-        ]
+        targets: list[RetrievalTarget] = []
+        for ref in refs:
+            params = cls._build_retrieval_params(request, ref.config)
+            targets.append(
+                await cls._build_retrieval_target_async(
+                    db,
+                    request,
+                    ref,
+                    tenant_id,
+                    params=params,
+                )
+            )
         return targets, tenant_id
 
     @staticmethod
@@ -191,17 +217,26 @@ class KnowledgeRetrievalPreparation:
         request: KnowledgeRetrievalRequest,
         ref: _KnowledgeRetrievalRef,
         tenant_id: uuid.UUID | None,
+        *,
+        params: RetrievalParams | None = None,
     ) -> RetrievalTarget:
         knowledge = ref.knowledge
+        params = params or cls._build_retrieval_params(request, ref.config)
+        if params.retrieve_type == RetrieveType.Graph:
+            try:
+                resolve_graph_pipeline(knowledge.parser_config)
+            except GraphPipelineConfigError as exc:
+                raise KnowledgeRetrievalConfigError(str(exc)) from exc
         if not knowledge.embedding_id:
             raise KnowledgeRetrievalConfigError(f"embedding_id config error: {knowledge.id}")
-        if not knowledge.reranker_id:
-            raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
 
         embedding = await cls._snapshot_model_runtime(db, knowledge.embedding_id, tenant_id)
-        reranker = await cls._snapshot_model_runtime(db, knowledge.reranker_id, tenant_id)
         if not embedding:
             raise KnowledgeRetrievalConfigError(f"No embedding api key found for knowledge {knowledge.id}")
+
+        if not knowledge.reranker_id:
+            raise KnowledgeRetrievalConfigError(f"reranker_id config error: {knowledge.id}")
+        reranker = await cls._snapshot_model_runtime(db, knowledge.reranker_id, tenant_id)
         if not reranker:
             raise KnowledgeRetrievalConfigError(f"No reranker api key found for knowledge {knowledge.id}")
 
@@ -209,7 +244,7 @@ class KnowledgeRetrievalPreparation:
             knowledge_id=knowledge.id,
             workspace_id=knowledge.workspace_id,
             index_name=ElasticSearchVectorIndexOps.collection_name_for_knowledge(knowledge.id),
-            params=cls._build_retrieval_params(request, ref.config),
+            params=params,
             embedding=embedding,
             reranker=reranker,
         )
@@ -258,6 +293,11 @@ class KnowledgeRetrievalPreparation:
             top_n=top_n,
             retrieve_type=retrieve_type,
             rerank_score_threshold=rerank_score_threshold,
+            enable_graph_retrieval=(
+                request.graph_retrieval_mix_enabled_for(config)
+                if retrieve_type == RetrieveType.HYBRID
+                else False
+            ),
         )
 
     @classmethod
@@ -524,17 +564,86 @@ class KnowledgeRetrievalPreparation:
         targets: list[RetrievalTarget],
         tenant_id: uuid.UUID | None,
     ) -> GraphRetrievalSnapshot | None:
-        if not any(target.params.retrieve_type == RetrieveType.Graph for target in targets):
-            return None
-        llm = await cls._snapshot_model_runtime(db, refs[0].knowledge.llm_id, tenant_id)
-        if not llm:
-            raise KnowledgeRetrievalConfigError(
-                f"No LLM api key found for knowledge {refs[0].knowledge.id}",
+        graph_candidates = [
+            target
+            for target in targets
+            if (
+                target.params.retrieve_type == RetrieveType.Graph
+                or (
+                    target.params.retrieve_type == RetrieveType.HYBRID
+                    and target.params.enable_graph_retrieval
+                )
             )
+        ]
+        if not graph_candidates:
+            return None
+
+        refs_by_knowledge_id = {
+            ref.knowledge.id: ref
+            for ref in refs
+        }
+        resolved_targets: list[
+            tuple[RetrievalTarget, Any, GraphPipeline]
+        ] = []
+        pipelines: set[GraphPipeline] = set()
+        for target in graph_candidates:
+            ref = refs_by_knowledge_id.get(target.knowledge_id)
+            if ref is None:
+                raise KnowledgeRetrievalConfigError(
+                    f"knowledge snapshot is missing for graph target {target.knowledge_id}"
+                )
+            knowledge = ref.knowledge
+            if not is_graph_enabled(knowledge.parser_config):
+                if target.params.retrieve_type == RetrieveType.Graph:
+                    raise KnowledgeRetrievalConfigError(
+                        f"knowledge graph is disabled: {knowledge.id}"
+                    )
+                continue
+            try:
+                pipeline = resolve_graph_pipeline(knowledge.parser_config)
+            except GraphPipelineConfigError as exc:
+                raise KnowledgeRetrievalConfigError(str(exc)) from exc
+            if (
+                target.params.retrieve_type == RetrieveType.HYBRID
+                and pipeline is not GraphPipeline.EVIDENCE
+            ):
+                continue
+            pipelines.add(pipeline)
+            resolved_targets.append((target, knowledge, pipeline))
+
+        if not resolved_targets:
+            return None
+        if len(pipelines) != 1:
+            raise KnowledgeRetrievalConfigError(
+                "all graph targets must use the same graph pipeline"
+            )
+
+        target_snapshots: list[GraphTargetSnapshot] = []
+        for target, knowledge, pipeline in resolved_targets:
+            llm = await cls._snapshot_model_runtime(
+                db,
+                knowledge.llm_id,
+                tenant_id,
+            )
+            if not llm:
+                raise KnowledgeRetrievalConfigError(
+                    f"No LLM api key found for knowledge {knowledge.id}",
+                )
+            target_snapshots.append(
+                GraphTargetSnapshot(
+                    knowledge_id=target.knowledge_id,
+                    workspace_id=target.workspace_id,
+                    chunk_index_name=target.index_name,
+                    graph_index_name=f"graphrag_{target.workspace_id}",
+                    pipeline=pipeline,
+                    llm=llm,
+                    embedding=target.embedding,
+                )
+            )
+
+        pipeline = target_snapshots[0].pipeline
         return GraphRetrievalSnapshot(
             query=request.query,
-            workspace_ids=tuple(str(target.workspace_id) for target in targets),
-            knowledge_ids=tuple(str(target.knowledge_id) for target in targets),
-            llm=llm,
-            embedding=targets[0].embedding,
+            pipeline=pipeline,
+            targets=tuple(target_snapshots),
         )

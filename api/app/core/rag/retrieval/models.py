@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, NoReturn, TypeAlias
 
+from app.core.rag.knowledge_graph.config import GraphPipeline
 from app.schemas.chunk_schema import RetrieveType
 
 
@@ -157,6 +158,7 @@ class RetrievalParams:
     top_n: int
     retrieve_type: RetrieveType
     rerank_score_threshold: float = 0.1
+    enable_graph_retrieval: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,12 +214,43 @@ class RetrievalTimings:
 
 
 @dataclass(frozen=True)
-class GraphRetrievalSnapshot:
-    query: str
-    workspace_ids: tuple[str, ...]
-    knowledge_ids: tuple[str, ...]
+class GraphTargetSnapshot:
+    knowledge_id: uuid.UUID
+    workspace_id: uuid.UUID
+    chunk_index_name: str
+    graph_index_name: str
+    pipeline: GraphPipeline
     llm: ModelRuntimeSnapshot
     embedding: ModelRuntimeSnapshot
+
+
+@dataclass(frozen=True)
+class GraphRetrievalSnapshot:
+    query: str
+    pipeline: GraphPipeline
+    targets: tuple[GraphTargetSnapshot, ...]
+
+    def __post_init__(self) -> None:
+        if not self.targets:
+            raise ValueError("graph retrieval snapshot requires at least one target")
+        if any(target.pipeline is not self.pipeline for target in self.targets):
+            raise ValueError("graph retrieval targets must use the selected pipeline")
+
+    @property
+    def workspace_ids(self) -> tuple[str, ...]:
+        return tuple(str(target.workspace_id) for target in self.targets)
+
+    @property
+    def knowledge_ids(self) -> tuple[str, ...]:
+        return tuple(str(target.knowledge_id) for target in self.targets)
+
+    @property
+    def llm(self) -> ModelRuntimeSnapshot:
+        return self.targets[0].llm
+
+    @property
+    def embedding(self) -> ModelRuntimeSnapshot:
+        return self.targets[0].embedding
 
 
 @dataclass(frozen=True)
