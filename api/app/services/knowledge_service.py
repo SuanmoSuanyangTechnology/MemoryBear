@@ -399,7 +399,9 @@ def create_knowledge(
 
         business_logger.debug(f"Start creating the knowledge base: {knowledge.name}")
         db_knowledge = knowledge_repository.create_knowledge(
-            db=db, knowledge=knowledge
+            db=db,
+            knowledge=knowledge,
+            preserve_source_parser_config=preserve_source_parser_config,
         )
         business_logger.info(f"The knowledge base has been successfully created: {knowledge.name} (ID: {db_knowledge.id}), creator: {current_user.username}")
         return db_knowledge
@@ -484,7 +486,9 @@ async def create_knowledge_async(
             business_logger.debug(f"Auto-bind image2text model: {model.id}")
 
         db_knowledge = await knowledge_repository.create_knowledge_async(
-            db=db, knowledge=knowledge
+            db=db,
+            knowledge=knowledge,
+            preserve_source_parser_config=preserve_source_parser_config,
         )
         business_logger.info(
             f"The knowledge base has been successfully created (async): "

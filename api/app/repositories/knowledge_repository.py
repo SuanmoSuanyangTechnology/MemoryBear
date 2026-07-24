@@ -7,18 +7,28 @@ from app.models.knowledge_model import Knowledge, PermissionType
 from app.models.models_model import ModelApiKey, ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
-from app.core.rag.parser_config import build_default_knowledge_parser_config
+from app.core.rag.parser_config import (
+    build_default_knowledge_parser_config,
+    normalize_new_knowledge_parser_config,
+)
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
 
 
 def _knowledge_values(
-        knowledge: knowledge_schema.KnowledgeCreate
+        knowledge: knowledge_schema.KnowledgeCreate,
+        *,
+        preserve_source_parser_config: bool = False,
 ) -> dict:
     values = knowledge.model_dump()
-    if values.get("parser_config") is None:
-        values["parser_config"] = build_default_knowledge_parser_config()
+    if preserve_source_parser_config:
+        if values.get("parser_config") is None:
+            values["parser_config"] = build_default_knowledge_parser_config()
+    else:
+        values["parser_config"] = normalize_new_knowledge_parser_config(
+            values.get("parser_config")
+        )
     return values
 
 
@@ -171,11 +181,21 @@ async def get_chunked_knowledgeids_async(
         raise
 
 
-def create_knowledge(db: Session, knowledge: knowledge_schema.KnowledgeCreate) -> Knowledge:
+def create_knowledge(
+        db: Session,
+        knowledge: knowledge_schema.KnowledgeCreate,
+        *,
+        preserve_source_parser_config: bool = False,
+) -> Knowledge:
     db_logger.debug(f"Create a knowledge base record: name={knowledge.name}")
     
     try:
-        db_knowledge = Knowledge(**_knowledge_values(knowledge))
+        db_knowledge = Knowledge(
+            **_knowledge_values(
+                knowledge,
+                preserve_source_parser_config=preserve_source_parser_config,
+            )
+        )
         db.add(db_knowledge)
         db.commit()
         db_logger.info(f"knowledge base record created successfully: {knowledge.name} (ID: {db_knowledge.id})")
@@ -186,12 +206,22 @@ def create_knowledge(db: Session, knowledge: knowledge_schema.KnowledgeCreate) -
         raise
 
 
-async def create_knowledge_async(db: AsyncSession, knowledge: knowledge_schema.KnowledgeCreate) -> Knowledge:
+async def create_knowledge_async(
+        db: AsyncSession,
+        knowledge: knowledge_schema.KnowledgeCreate,
+        *,
+        preserve_source_parser_config: bool = False,
+) -> Knowledge:
     """Async version of create_knowledge."""
     db_logger.debug(f"Create a knowledge base record (async): name={knowledge.name}")
 
     try:
-        db_knowledge = Knowledge(**_knowledge_values(knowledge))
+        db_knowledge = Knowledge(
+            **_knowledge_values(
+                knowledge,
+                preserve_source_parser_config=preserve_source_parser_config,
+            )
+        )
         db.add(db_knowledge)
         await db.commit()
         await db.refresh(db_knowledge)
