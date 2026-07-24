@@ -34,6 +34,7 @@ from app.core.workflow.triggers import (
     TRIGGER_NODES_PREPARED_FLAG,
 )
 from app.core.error_codes import BizCode
+from app.core.config import settings
 from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
@@ -58,8 +59,86 @@ from app.services.multi_agent_service import convert_uuids_to_str
 from app.models.annotation_model import HitLogSource
 from app.services.multimodal_service import MultimodalService
 from app.services.workspace_service import get_workspace_storage_type_without_auth
+from app.utils.redis_cache import (
+    CACHE_MISS,
+    delete_json,
+    get_json,
+    get_json_async,
+    set_json,
+    set_json_async,
+    workflow_config_key,
+)
 
 logger = logging.getLogger(__name__)
+
+WORKFLOW_CONFIG_CACHE_TTL = 600
+
+
+def _workflow_config_cache_safe(config: WorkflowConfig) -> bool:
+    """Do not place workflow snapshots containing secret environment values in Redis."""
+    return not any(
+        item.get("value_type") == "secret"
+        for item in (config.environment_variables or [])
+        if isinstance(item, dict)
+    )
+
+
+def _serialize_workflow_config(config: WorkflowConfig) -> dict[str, Any]:
+    return {
+        "id": str(config.id),
+        "app_id": str(config.app_id),
+        "nodes": config.nodes or [],
+        "edges": config.edges or [],
+        "variables": config.variables or [],
+        "environment_variables": config.environment_variables or [],
+        "execution_config": config.execution_config or {},
+        "features": config.features or {},
+        "triggers": config.triggers or [],
+        "workflow_type": config.workflow_type,
+        "is_active": bool(config.is_active),
+        "created_at": config.created_at.isoformat() if config.created_at else None,
+        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+    }
+
+
+def _deserialize_workflow_config(payload: Any) -> WorkflowConfig | None:
+    if not isinstance(payload, dict) or not payload.get("id") or not payload.get("app_id"):
+        return None
+    environment_variables = payload.get("environment_variables") or []
+    if any(
+        item.get("value_type") == "secret"
+        for item in environment_variables
+        if isinstance(item, dict)
+    ):
+        return None
+    try:
+        created_at = (
+            datetime.datetime.fromisoformat(payload["created_at"])
+            if payload.get("created_at") else utcnow_naive()
+        )
+        updated_at = (
+            datetime.datetime.fromisoformat(payload["updated_at"])
+            if payload.get("updated_at") else created_at
+        )
+        return WorkflowConfig(
+            id=uuid.UUID(payload["id"]),
+            app_id=uuid.UUID(payload["app_id"]),
+            nodes=payload.get("nodes") or [],
+            edges=payload.get("edges") or [],
+            variables=payload.get("variables") or [],
+            environment_variables=payload.get("environment_variables") or [],
+            execution_config=payload.get("execution_config") or {},
+            features=payload.get("features") or {},
+            triggers=payload.get("triggers") or [],
+            workflow_type=payload.get("workflow_type") or "workflow",
+            is_active=bool(payload.get("is_active", True)),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+    except (TypeError, ValueError):
+        logger.warning("Invalid workflow config cache payload", exc_info=True)
+        return None
+
 
 @dataclass
 class WorkflowExecutionRef:
@@ -620,7 +699,10 @@ class WorkflowService:
         trigger_id: str,
         runtime: dict[str, Any],
     ) -> WorkflowConfig | None:
-        return self.config_repo.update_trigger_runtime(app_id, trigger_id, runtime)
+        config = self.config_repo.update_trigger_runtime(app_id, trigger_id, runtime)
+        if config is not None:
+            delete_json(workflow_config_key(app_id))
+        return config
 
     def update_release_trigger_runtime_state(
         self,
@@ -1133,25 +1215,60 @@ class WorkflowService:
             triggers=normalized_triggers,
             workflow_type=workflow_type
         )
+        delete_json(workflow_config_key(app_id))
 
         logger.info(f"创建工作流配置成功: app_id={app_id}, config_id={config.id}")
         return config
 
     def get_workflow_config(self, app_id: uuid.UUID) -> WorkflowConfig | None:
-        """获取工作流配置
-
-        Args:
-            app_id: 应用 ID
-
-        Returns:
-            工作流配置或 None
-        """
+        """获取工作流配置（ORM，供修改路径使用）。"""
         return self.config_repo.get_by_app_id(app_id)
 
+    def get_workflow_config_snapshot(self, app_id: uuid.UUID) -> WorkflowConfig | None:
+        """Return a transient WorkflowConfig reconstructed from a JSON cache snapshot."""
+        cache_key = workflow_config_key(app_id)
+        cached = _deserialize_workflow_config(get_json(cache_key))
+        if cached is not None:
+            return cached
+
+        config = self.config_repo.get_by_app_id(app_id)
+        if config and _workflow_config_cache_safe(config):
+            set_json(cache_key, _serialize_workflow_config(config), WORKFLOW_CONFIG_CACHE_TTL)
+        return config
+
     async def get_workflow_config_async(self, app_id: uuid.UUID) -> WorkflowConfig | None:
-        """异步获取工作流配置"""
+        """异步获取工作流配置（ORM 兼容入口）。"""
         async with get_async_db_context() as db:
             return await WorkflowConfigRepository(db).get_by_app_id_async(app_id)
+
+    async def get_workflow_config_snapshot_async(self, app_id: uuid.UUID) -> WorkflowConfig | None:
+        """Async JSON cache-aside lookup for read-only workflow execution."""
+        cache_key = workflow_config_key(app_id)
+        cached_payload = await get_json_async(cache_key)
+        if cached_payload is not CACHE_MISS:
+            cached = _deserialize_workflow_config(cached_payload)
+            if cached is not None:
+                return cached
+
+        cache_payload = None
+        async with get_async_db_context() as db:
+            config = await WorkflowConfigRepository(db).get_by_app_id_async(app_id)
+            if config is not None:
+                # The context manager rolls back read transactions on exit, which
+                # expires session-bound attributes. Materialize every field and
+                # detach the snapshot before that rollback.
+                payload = _serialize_workflow_config(config)
+                if _workflow_config_cache_safe(config):
+                    cache_payload = payload
+                db.expunge(config)
+
+        if cache_payload is not None:
+            await set_json_async(
+                cache_key,
+                cache_payload,
+                WORKFLOW_CONFIG_CACHE_TTL,
+            )
+        return config
 
     def update_workflow_config(
             self,
@@ -1235,6 +1352,7 @@ class WorkflowService:
             triggers=updated_triggers,
             workflow_type=updated_workflow_type
         )
+        delete_json(workflow_config_key(app_id))
 
         logger.info(f"更新工作流配置成功: app_id={app_id}, config_id={config.id}")
         return config
@@ -1252,6 +1370,8 @@ class WorkflowService:
         if not config:
             return False
         config.is_active = False
+        self.db.commit()
+        delete_json(workflow_config_key(app_id))
         logger.info(f"删除工作流配置成功: app_id={app_id}, config_id={config.id}")
         return True
 
@@ -6030,7 +6150,7 @@ class WorkflowService:
         """
         # 1. 获取工作流配置
         if not config:
-            config = await self.get_workflow_config_async(app_id)
+            config = await self.get_workflow_config_snapshot_async(app_id)
         if not config:
             raise BusinessException(
                 code=BizCode.CONFIG_MISSING,
@@ -6594,7 +6714,7 @@ class WorkflowService:
 
         # 1. 获取工作流配置
         if not config:
-            config = self.get_workflow_config(app_id)
+            config = await self.get_workflow_config_snapshot_async(app_id)
         if not config:
             raise BusinessException(
                 code=BizCode.CONFIG_MISSING,

@@ -302,31 +302,25 @@ async def _load_workflow_runtime_config(
             updated_at=now,
         ), True
 
-    async with get_async_db_context() as db:
-        config = await db.scalar(
-            select(WorkflowConfig).where(
-                WorkflowConfig.app_id == app_id,
-                WorkflowConfig.is_active.is_(True),
-            ).limit(1)
-        )
-        if not config:
-            raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
+    config = await workflow_service.get_workflow_config_snapshot_async(app_id)
+    if not config:
+        raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
 
-        config_id = config.id
-        config_app_id = config.app_id
-        config_is_active = config.is_active
-        config_created_at = config.created_at
-        config_updated_at = config.updated_at
-        config_dict = workflow_service._prepare_workflow_config_dict(
-            nodes=config.nodes,
-            edges=config.edges,
-            variables=config.variables,
-            environment_variables=config.environment_variables,
-            execution_config=config.execution_config,
-            features=config.features,
-            triggers=config.triggers,
-            workflow_type=config.workflow_type,
-        )
+    config_id = config.id
+    config_app_id = config.app_id
+    config_is_active = config.is_active
+    config_created_at = config.created_at
+    config_updated_at = config.updated_at
+    config_dict = workflow_service._prepare_workflow_config_dict(
+        nodes=config.nodes,
+        edges=config.edges,
+        variables=config.variables,
+        environment_variables=config.environment_variables,
+        execution_config=config.execution_config,
+        features=config.features,
+        triggers=config.triggers,
+        workflow_type=config.workflow_type,
+    )
 
     is_valid, errors = validate_workflow_config(config_dict, for_publish=False)
     if not is_valid:
