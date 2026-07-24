@@ -211,9 +211,7 @@ class KnowledgeGraphIndexPipeline:
         self._extractor = extractor
         self._embedding = embedding
         self._lock_guard = lock_guard
-        self._extraction_cache = extraction_cache or GraphExtractionCache(
-            ttl_seconds=settings.KNOWLEDGE_GRAPH_EXTRACTION_CACHE_TTL_SECONDS
-        )
+        self._extraction_cache = extraction_cache or GraphExtractionCache()
 
     async def sync_document(
         self,

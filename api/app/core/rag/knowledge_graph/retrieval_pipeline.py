@@ -205,9 +205,7 @@ class KnowledgeGraphRetrievalPipeline:
         self._llm = llm
         self._embedding = embedding
         self._parent_resolver = parent_resolver
-        self._query_plan_cache = query_plan_cache or GraphQueryPlanCache(
-            ttl_seconds=settings.KNOWLEDGE_GRAPH_QUERY_PLAN_CACHE_TTL_SECONDS,
-        )
+        self._query_plan_cache = query_plan_cache or GraphQueryPlanCache()
 
     async def retrieve(
         self,

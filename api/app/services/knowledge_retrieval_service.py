@@ -696,22 +696,7 @@ class KnowledgeRetrievalService:
                         else None
                     ),
                     file_names=tuple(request.file_names_filter),
-                    entity_top_n=settings.KNOWLEDGE_GRAPH_ENTITY_TOP_N,
-                    relation_top_n=settings.KNOWLEDGE_GRAPH_RELATION_TOP_N,
-                    neighbor_top_n=settings.KNOWLEDGE_GRAPH_NEIGHBOR_TOP_N,
-                    entity_similarity_threshold=(
-                        settings.KNOWLEDGE_GRAPH_ENTITY_SIMILARITY_THRESHOLD
-                    ),
-                    relation_similarity_threshold=(
-                        settings.KNOWLEDGE_GRAPH_RELATION_SIMILARITY_THRESHOLD
-                    ),
-                    related_chunk_number=(
-                        settings.KNOWLEDGE_GRAPH_RELATED_CHUNK_NUMBER
-                    ),
                     max_candidates=target.params.top_k,
-                    max_paths_per_chunk=(
-                        settings.KNOWLEDGE_GRAPH_MAX_PATHS_PER_CHUNK
-                    ),
                 )
             )
             chunks = graph_result.chunks

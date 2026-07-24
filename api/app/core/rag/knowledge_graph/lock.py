@@ -11,6 +11,7 @@ from app.utils.redis_lock import RedisFairLock
 _CLIENT_INIT_LOCK = threading.Lock()
 _GRAPH_LOCK_POOL: redis.ConnectionPool | None = None
 _GRAPH_LOCK_CLIENT: redis.Redis | None = None
+_GRAPH_LOCK_WAIT_SECONDS = 10 * 60
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +102,6 @@ def create_knowledge_graph_lock(knowledge_id: str) -> KnowledgeGraphLock:
         redis_client=get_graph_lock_redis_client(),
         expire=120,
         retry_interval=1,
-        timeout=settings.KNOWLEDGE_GRAPH_LOCK_WAIT_SECONDS,
+        timeout=_GRAPH_LOCK_WAIT_SECONDS,
         auto_renewal=True,
     )

@@ -16,6 +16,7 @@ from app.core.rag.knowledge_graph.prompts import EXTRACTION_PROMPT_VERSION
 logger = logging.getLogger(__name__)
 
 _CACHE_SCHEMA_VERSION = "1"
+_DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 class GraphExtractionCache:
@@ -23,7 +24,7 @@ class GraphExtractionCache:
         self,
         redis_factory: Callable[[], Any] = get_thread_safe_redis,
         *,
-        ttl_seconds: int,
+        ttl_seconds: int = _DEFAULT_TTL_SECONDS,
     ) -> None:
         self._redis_factory = redis_factory
         self._ttl_seconds = max(1, int(ttl_seconds))

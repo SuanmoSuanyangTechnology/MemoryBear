@@ -161,11 +161,11 @@ class GraphRetrievalRequest:
     runtime: GraphIndexRuntime
     allowed_document_ids: tuple[str, ...] | None
     file_names: tuple[str, ...]
-    entity_top_n: int
-    relation_top_n: int
-    neighbor_top_n: int
-    entity_similarity_threshold: float
-    relation_similarity_threshold: float
-    related_chunk_number: int
     max_candidates: int
-    max_paths_per_chunk: int
+    entity_top_n: int = 40
+    relation_top_n: int = 40
+    neighbor_top_n: int = 24
+    entity_similarity_threshold: float = 0.20
+    relation_similarity_threshold: float = 0.20
+    related_chunk_number: int = 5
+    max_paths_per_chunk: int = 6
