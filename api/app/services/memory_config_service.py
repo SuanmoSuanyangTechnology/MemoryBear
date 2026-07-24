@@ -37,6 +37,7 @@ from app.schemas.memory_config_schema import (
     ModelInactiveError,
     ModelNotFoundError,
 )
+from app.utils.redis_cache import redis_cache
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
@@ -531,6 +532,7 @@ class MemoryConfigService:
 
         return result
 
+    @redis_cache(ttl=300, prefix="memory", skip_args=["self"], return_type=MemoryConfig)
     def load_memory_config(
             self,
             config_id: UUID
@@ -697,6 +699,7 @@ class MemoryConfigService:
             else:
                 raise ConfigurationError(f"Failed to load configuration {config_id}: {e}")
 
+    @redis_cache(ttl=300, prefix="memory", skip_args=["self"], return_type=MemoryConfig)
     async def load_memory_config_async(self, config_id: UUID) -> MemoryConfig:
         """Async version of load_memory_config — uses true async DB calls via AsyncSession.
 

@@ -57,8 +57,10 @@ from . import (
     workspace_controller,
     ontology_controller,
     skill_controller,
+    tenant_quota_controller,
     tenant_subscription_controller,
 )
+from .internal import internal_sandbox_controller
 
 # 创建管理端 API 路由器
 manager_router = APIRouter()
@@ -114,10 +116,12 @@ manager_router.include_router(file_storage_controller.router)
 manager_router.include_router(ontology_controller.router)
 manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
+manager_router.include_router(tenant_quota_controller.router)
 manager_router.include_router(tenant_subscription_controller.router)
 manager_router.include_router(tenant_subscription_controller.public_router)
 manager_router.include_router(message_interaction_controller.router)  # 消息交互功能
 manager_router.include_router(workflow_trigger_controller.router)
 manager_router.include_router(human_intervention_controller.router)  # 人工介入功能
+manager_router.include_router(internal_sandbox_controller.router)
 
 __all__ = ["manager_router"]

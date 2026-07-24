@@ -460,6 +460,11 @@ class WritePipeline:
                         snapshot=snapshot,
                         context_before=context_before_pruned,
                         context_after=context_after_pruned,
+                        # 传入分组信息，让 target dialog 出生即用与快写统一的确定性 id
+                        # （api/mcp 路径 conversation_id 为空、走 source 分支），实现覆盖升级。
+                        conversation_id=conversation_id,
+                        message_seq=message_seq,
+                        source=source,
                     )
                     # 注入剪枝记录到 dialog_data.metadata
                     if pruning_records:
@@ -991,7 +996,7 @@ class WritePipeline:
                     with get_db_context() as db:
                         # 先查找已有的 Perceptual 记录
                         repo = MemoryPerceptualRepository(db)
-                        memories = repo.get_by_url(url)
+                        memories = repo.get_by_url(self.end_user_id, url)
 
                         if memories:
                             # 已存在，复用最新的一条

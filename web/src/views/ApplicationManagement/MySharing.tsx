@@ -131,9 +131,9 @@ const MySharing: React.FC = () => {
                 <Flex align="center" gap={12}>
                   {workspace.target_workspace_icon
                     ? <img src={workspace.target_workspace_icon} alt={workspace.target_workspace_icon} className="rb:size-8.5 rb:rounded-lg rb:object-cover" />
-                    : <div className="rb:size-8.5 rb:rounded-lg rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[14px] rb:text-white">
+                    : <Flex align="center" justify="center" className="rb:size-8.5 rb:rounded-lg rb:bg-[#155eef] rb:text-[14px] rb:text-white">
                       {workspace.target_workspace_name[0]}
-                    </div>
+                    </Flex>
                   }
                   <div>
                     <span className="rb:font-medium rb:text-[16px] rb:leading-5.5">{workspace.target_workspace_name}</span>

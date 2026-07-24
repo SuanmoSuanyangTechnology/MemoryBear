@@ -1,14 +1,14 @@
-import { useState, useEffect, forwardRef, useImperativeHandle, useRef } from 'react';
-import { Upload, Button, Modal, Progress, App } from 'antd';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { Upload, Button, Flex, Progress, App } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import type { UploadProps, UploadFile } from 'antd';
-import type { UploadRequestOption } from 'rc-upload/lib/interface';
+// import type { UploadRequestOption } from 'rc-upload/lib/interface';
 // import { request } from '@/utils/request';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
-import CloudUploadOutlined from '@/assets/images/CloudUploadOutlined.png'
+// import CloudUploadOutlined from '@/assets/images/CloudUploadOutlined.png'
 import { useTranslation } from 'react-i18next';
 import { cookieUtils } from '@/utils/request'
-import { fileUpload } from '@/api/fileStorage'
+// import { fileUpload } from '@/api/fileStorage'
 
 const { Dragger } = Upload;
 
@@ -217,11 +217,11 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     },
     itemRender: (_, file, __, actions) => {
       return (
-        <div key={file.uid} className="rb:relative rb:w-full rb:pt-2 rb:pl-2.5 rb:pr-2.5 rb-pb-[10px] rb:border rb:border-[#EBEBEB] rb:rounded rb:p-2 rb:mt-2 rb:bg-white">
-          <div className="rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:mb-0.5">
+        <div key={file.uid} className="rb:relative rb:w-full rb:pt-2 rb:pl-2.5 rb:pr-2.5 rb-pb-[10px] rb:border rb:border-[#EBEBEB] rb:rounded-xl rb:p-2 rb:mt-2 rb:bg-white">
+          <Flex align="center" justify="space-between" className="rb:text-[12px] rb:mb-0.5!">
             {file.name}
             <span className="rb:text-[#5B6167] rb:cursor-pointer" onClick={() => actions?.remove()}>{t('common.cancel')}</span>
-          </div>
+          </Flex>
           {isAutoUpload && <Progress percent={file.percent || 0} strokeColor={file.status === 'error' ? '#FF5D34' : '#155EEF'} size="small" showInfo={false} />}
         </div>
       );
@@ -241,13 +241,13 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     return (
       <div className="rb:mb-6 rb:w-full  rb:border rb:border-dashed rb:border-gray-900 rb:rounded-xl">
         <Dragger {...uploadProps} style={{ height: '270px' }}>
-          <div className="rb:flex rb:justify-center rb:flex-col rb:items-center">
+          <Flex vertical align="center" justify="center">
             <div className="rb:size-12 rb:bg-cover rb:bg-[url('@/assets/images/CloudUploadOutlined.svg')]"></div>
-            {(!isAutoUpload || !hasProgress && (!fileList || !fileList.length)) &&
+            {(!isAutoUpload || !hasProgress) &&
               <>
-                <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-2 rb:leading-5">
+                <Flex align="center" className="rb:text-base rb:text-[14px] rb:font-medium rb:mt-2! rb:leading-5">
                   {t('common.dragUploadTip')}<span className="rb:ml-1 rb:text-[#155EEF]">{t('common.uploadClickTip')}</span>
-                </div>
+                </Flex>
                 {fileType && <div className="rb:text-[12px] rb:text-[#A8A9AA] rb:leading-3.5 rb:mt-2 rb:cursor-pointer">{t('common.supportedFileTypes', { types: fileType.join(',') })}</div>}
                 {(fileSize || fileType || maxCount > 1) && (
                   <div className='rb:text-xs rb:mt-2 rb:text-[#A8A9AA]'>
@@ -256,8 +256,8 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
                 )}
               </>
             }
-            {hasProgress && <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-2 rb:mb-6 rb:leading-5">{t('common.uploading')}</div>}
-          </div>
+            {hasProgress && <Flex align="center" className="rb:text-base rb:text-[14px] rb:font-medium rb:mt-2! rb:mb-6! rb:leading-5">{t('common.uploading')}</Flex>}
+          </Flex>
         </Dragger>
       </div>
     );

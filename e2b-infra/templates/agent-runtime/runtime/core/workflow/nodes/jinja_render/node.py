@@ -1,0 +1,61 @@
+import logging
+from typing import Any
+
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.jinja_render.config import JinjaRenderNodeConfig
+from app.core.workflow.utils.template_renderer import TemplateRenderer
+from app.core.workflow.variable.base_variable import VariableType
+
+logger = logging.getLogger(__name__)
+
+
+class JinjaRenderNode(BaseNode):
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
+        self.typed_config: JinjaRenderNodeConfig | None = None
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "output": VariableType.STRING
+        }
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
+        """
+        Execute the node: render the Jinja2 template with mapped variables.
+
+        The rendered result is returned in a structure compatible with WorkflowState
+        merging, so that downstream nodes can access it via node_outputs.
+
+        Args:
+            state (WorkflowState): Current workflow state containing variables,
+                node outputs, and runtime variables.
+            variable_pool: Variable Pool
+
+        Returns:
+            dict[str, Any]: Node output dictionary containing the rendered result
+                under `node_outputs[self.node_id]["output"]["rendered"]` and a
+                status flag "completed".
+
+        Raises:
+            RuntimeError: If Jinja2 template rendering fails due to invalid template
+                syntax or missing variables.
+        """
+        self.typed_config = JinjaRenderNodeConfig(**self.config)
+        render = TemplateRenderer(strict=False)
+
+        context = {}
+        for variable in self.typed_config.mapping:
+            try:
+                context[variable.name] = self.get_variable(variable.value, variable_pool)
+            except Exception:
+                logger.info(f"variable not found, var: {variable.value}")
+                continue
+
+        try:
+            res = render.env.from_string(self.typed_config.template).render(**context)
+        except Exception as e:
+            raise RuntimeError(f"JinjaRender Node {self.node_name} render failed: {e}") from e
+        logger.info(f"Node {self.node_id}: Jinja template rendering completed")
+        return res

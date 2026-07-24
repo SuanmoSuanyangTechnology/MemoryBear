@@ -129,7 +129,6 @@ async def get_user_summary(
         end_user_id=end_user_id,
         language_type=language_type,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -227,5 +226,4 @@ async def generate_cache(
         current_user=current_user,
         db=db,
     )
-
 

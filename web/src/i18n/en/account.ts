@@ -232,5 +232,6 @@ export const account = {
       number: 'number',
       or: 'or',
       variable: 'variable',
+      loadFailed: 'Load Failed',
     },
 }

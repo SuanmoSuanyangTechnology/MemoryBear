@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-03-13 15:17:06 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-24 12:19:57 
- */
 import React, { useState, useRef, useMemo, useEffect, type FC } from 'react'
 
 import { GRAPH_COLORS, initCommunityGraph } from './utils'

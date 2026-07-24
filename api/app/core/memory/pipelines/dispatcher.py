@@ -178,6 +178,57 @@ async def push_write_task(
     return msg_id
 
 
+async def push_fast_write_task(
+    end_user_id: str,
+    target_message: dict,
+    config_id: str,
+    workspace_id: str,
+    conversation_id: str = "",
+    message_seq: int = 0,
+    language: str = "zh",
+    source: str = "",
+) -> str:
+    """派发 Fast Write 任务，与正路径 push_write_task 并列。
+    Args:
+        end_user_id: 终端用户 ID（分片键）
+        target_message: 目标消息
+        config_id: 记忆配置 ID
+        workspace_id: 工作空间 ID
+        conversation_id: 对话 ID；API/MCP 场景传空字符串
+        message_seq: 消息序号
+        language: 语言
+        source: 写入来源（agent/service_api/mcp/workflow）
+
+    Returns:
+        任务 msg_id
+    """
+    from app.celery_task_scheduler import scheduler as celery_scheduler
+
+    # 记录任务派发时刻，作为 pipeline 内 dialog_at 的第二级兜底
+    dispatch_at = datetime.now(timezone.utc).isoformat()
+
+    msg_id = await celery_scheduler.push_task(
+        "app.core.memory.fast_write_message",
+        end_user_id,
+        {
+            "end_user_id": end_user_id,
+            "target_message": target_message,
+            "config_id": config_id,
+            "workspace_id": workspace_id,
+            "conversation_id": conversation_id or "",
+            "message_seq": message_seq,
+            "language": language,
+            "dispatch_at": dispatch_at,
+            "source": source,
+        },
+    )
+    logger.info(
+        f"[FastDispatcher] 快速写入任务已推送: end_user={end_user_id}, "
+        f"conv={conversation_id or '-'}, seq={message_seq}, msg_id={msg_id}"
+    )
+    return msg_id
+
+
 # ──────────────────────────────────────────────
 # 应用级记忆门禁检查
 # ──────────────────────────────────────────────
@@ -205,6 +256,74 @@ async def check_memory_enabled(app_id: str) -> bool:
     except Exception as e:
         logger.warning(f"[Dispatcher] 检查 memory.enabled 失败: app={app_id}, err={e}")
         return False
+
+
+async def check_fast_write_permission(
+    *,
+    role: str,
+    should_memorize: bool,
+    app_id: Optional[str] = None,
+    require_app_gate: bool = False,
+) -> bool:
+    """Fast Write 独立重做当前入口的 Normal 写入前置判定。
+    agent：appid（require_app_gate=true），should_memorize,role;
+    workflow:should_memorize,role;
+    api:role;
+    mcp:无;
+    """
+    if role != "user" or not should_memorize:
+        return False
+
+    if require_app_gate:
+        if not app_id:
+            return False
+        if not await check_memory_enabled(app_id):
+            return False
+
+    return True
+
+
+async def safe_push_fast_write(
+    *,
+    role: str,
+    should_memorize: bool,
+    app_id: Optional[str] = None,
+    require_app_gate: bool = False,
+    end_user_id: str,
+    target_message: dict,
+    config_id: str,
+    workspace_id: str,
+    conversation_id: str = "",
+    message_seq: int = 0,
+    language: str = "zh",
+    source: str = "",
+) -> None:
+    """Fast Write 派发的入口层隔离包装：权限判定 + 派发全程 best-effort。"""
+    try:
+        if not await check_fast_write_permission(
+            role=role,
+            should_memorize=should_memorize,
+            app_id=app_id,
+            require_app_gate=require_app_gate,
+        ):
+            return
+        await push_fast_write_task(
+            end_user_id=end_user_id,
+            target_message=target_message,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            language=language,
+            source=source,
+        )
+    except Exception as e:
+        # 隔离：Fast 派发失败不影响 Normal 主流程；记录失败便于失败率监控采集
+        logger.warning(
+            "[FastDispatcher] fast write dispatch failed (isolated, normal flow unaffected): "
+            "end_user_id=%s, source=%s, conv=%s, seq=%s, err=%s",
+            end_user_id, source, conversation_id or "-", message_seq, e,
+        )
 
 
 # ──────────────────────────────────────────────
@@ -301,6 +420,24 @@ async def dispatch_api_service_async(
         )
         task_ids.append(msg_id)
 
+        # Fast Write 派发（隔离：失败不阻断上面的 Normal 派发循环）。
+        # role 直接取 written_mms[idx]（=msg）：write_batch 原样保留 role，且上面
+        # user_indices 已在用同一 role 值；API Normal 路径不过滤 should_memorize，
+        # 故 should_memorize=True；无 app_id 门禁。
+        await safe_push_fast_write(
+            role=str(msg.get("role", "user")),
+            should_memorize=True,
+            require_app_gate=False,
+            end_user_id=end_user_id,
+            target_message=msg,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            conversation_id="",
+            message_seq=msg["message_seq"],
+            language=language,
+            source=MemoryMessageSource.SERVICE_API.value,
+        )
+
     return task_ids
 
 
@@ -365,6 +502,25 @@ async def ingest_agent_message(
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
 
+    # Fast Write 派发（隔离：失败不阻断下面的滑动窗口派发）。
+    # 权限取原始 message.role / should_memorize；Agent 有应用级门禁 require_app_gate=True。
+    _target_msg = written[0] if written else None
+    if _target_msg:
+        await safe_push_fast_write(
+            role=str(message.role),
+            should_memorize=should_memorize,
+            app_id=app_id,
+            require_app_gate=True,
+            end_user_id=end_user_id,
+            target_message=_target_msg,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            conversation_id=str(conversation_id),
+            message_seq=_target_msg["message_seq"],
+            language=language,
+            source=MemoryMessageSource.AGENT.value,
+        )
+
     await check_sliding_window_and_dispatch(
         conversation_id=str(conversation_id),
         config_id=config_id,
@@ -395,9 +551,15 @@ async def ingest_workflow_messages(
     的假设一致）。pure_workflow（策略工作流）没有记忆存储节点、无会话，不会走到这里。
     因此直接走 conversation 通道，无需空值守卫或哨兵兜底。
     """
+    # 按 write_batch 的空内容过滤规则构造原始消息列表，保证与返回值一一对齐
+    _persistable_inputs = [
+        msg for msg in messages
+        if str(msg.get("content", "") or "").strip()
+    ]
+
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        repo.write_batch(
+        written_mms = repo.write_batch(
             conversation_id=conversation_id,
             messages=messages,
             end_user_id=end_user_id,
@@ -407,6 +569,34 @@ async def ingest_workflow_messages(
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
+
+    # Fast Write 派发（隔离：任一条失败不阻断整批循环，也不阻断下面的滑动窗口派发）。
+    # 权限取原始消息 role/should_memorize；Workflow 无 app_id 门禁 require_app_gate=False。
+    # 整段（含 zip strict 迭代）包 try：safe_push_fast_write 已吞单条异常，但 zip(strict=True)
+    # 长度不一致会抛 ValueError；此处兜底，确保 Fast 的任何问题都不会冒泡拖垮下面的 Normal 派发。
+    try:
+        for _raw_mm, _written_mm in zip(_persistable_inputs, written_mms, strict=True):
+            await safe_push_fast_write(
+                role=str(_raw_mm.get("role", "user")),
+                should_memorize=bool(_raw_mm.get("should_memorize", True)),
+                require_app_gate=False,
+                end_user_id=end_user_id,
+                target_message=_written_mm,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                message_seq=_written_mm["message_seq"],
+                language=language,
+                source=MemoryMessageSource.WORKFLOW.value,
+            )
+    except Exception as e:
+        logger.warning(
+            "[FastDispatcher] workflow fast write dispatch loop failed "
+            "(isolated, normal flow unaffected): conv=%s, end_user_id=%s, "
+            "persistable=%s, written=%s, err=%s",
+            conversation_id, end_user_id,
+            len(_persistable_inputs), len(written_mms), e,
+        )
 
     await check_sliding_window_and_dispatch(
         conversation_id=conversation_id,
@@ -750,4 +940,20 @@ async def dispatch_mcp_write(
         f"[Dispatcher] MCP 写入任务已推送: end_user={end_user_id}, "
         f"source=mcp, seq={target_seq}, msg_id={msg_id}"
     )
+
+    # Fast Write 派发（隔离：失败不影响已派发的 Normal，也不改变本函数向调用方的返回）。
+    # MCP 固定单条 user 消息语义，should_memorize 恒为 True，无 app_id 门禁。
+    await safe_push_fast_write(
+        role="user",
+        should_memorize=True,
+        require_app_gate=False,
+        end_user_id=end_user_id,
+        target_message=target_msg,
+        config_id=str(config_id),
+        workspace_id=workspace_id,
+        conversation_id="",
+        message_seq=target_seq,
+        source=MemoryMessageSource.MCP.value,
+    )
+
     return msg_id

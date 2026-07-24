@@ -12,7 +12,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Form, App } from 'antd';
+import { Button, Input, Form, App, Flex } from 'antd';
 import type { FormProps } from 'antd';
 import clsx from 'clsx';
 
@@ -71,7 +71,7 @@ const inputClassName = "login-input rb:rounded-[8px]! rb:p-[12px]! rb:h-[44px]! 
 
 
   return (
-    <div className="rb:min-h-screen rb:flex rb:h-screen rb:bg-[#0A0A0A] rb:text-[#FFFFFF]">
+    <Flex className="rb:min-h-screen rb:h-screen rb:bg-[#0A0A0A] rb:text-[#FFFFFF]">
       <div className="rb:relative rb:w-1/2 rb:h-screen rb:overflow-hidden">
         <video src={loginBg} loop autoPlay playsInline muted className="rb:w-full rb:h-full rb:object-cover"></video>
         <div className="rb:absolute rb:top-10 rb:left-12">
@@ -95,7 +95,7 @@ const inputClassName = "login-input rb:rounded-[8px]! rb:p-[12px]! rb:h-[44px]! 
         </div>
       </div>
 
-      <div className="rb:flex rb:items-center rb:justify-center rb:flex-[1_1_auto]">
+      <Flex align="center" justify="center" className="rb:flex-[1_1_auto]">
         <div className="rb:w-110 rb:mx-auto">
           <div className="rb:text-center rb:text-[24px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-8 rb:mb-12">{t('login.welcome')}</div>
           <Form
@@ -131,8 +131,8 @@ const inputClassName = "login-input rb:rounded-[8px]! rb:p-[12px]! rb:h-[44px]! 
             </Button>
           </Form>
         </div>
-      </div>
-    </div>
+      </Flex>
+    </Flex>
   );
 };
 

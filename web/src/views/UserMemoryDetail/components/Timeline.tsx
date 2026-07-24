@@ -7,7 +7,7 @@
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Row, Col, Flex } from 'antd';
+import { Skeleton, Flex } from 'antd';
 import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
@@ -94,16 +94,16 @@ const Timeline: FC = () => {
         ? <Empty />
         : <Flex gap={12} vertical>
             {data.map((vo, index) => (
-              <Row key={vo.id} wrap={false} className="rb:flex rb:gap-6 rb:min-h-16">
-                <Col flex="90px" className="rb:leading-5 rb:font-semibold">
+              <Flex key={vo.id} wrap={false} gap={12} className="rb:min-h-16">
+                <div className="rb:w-[90px] rb:leading-5 rb:font-semibold">
                   <Flex vertical gap={12} align="center" justify="center" className="rb:h-full!">
                     <span className="rb:text-center">{formatDateTime(vo.created_time)}</span>
                     <div className={clsx("rb:flex-1 rb:w-px", {
                       'rb:bg-[#5B6167]!': index !== data.length - 1
                     })} />
                   </Flex>
-                </Col>
-                <Col flex="1" className="rb:mb-1! rb:bg-[#F6F6F6] rb:rounded-xl rb:py-3 rb:px-4">
+                </div>
+                <div className="rb:flex-1 rb:mb-1! rb:bg-[#F6F6F6] rb:rounded-xl rb:py-3 rb:px-4">
                   <div className="rb:leading-4.5 rb:font-bold rb:text-[12px] rb:font-[MiSans-Bold]">{t(`perceptualDetail.${perceptual_type[vo.perceptual_type]}`)}</div>
                   
                   <div className="rb:leading-5 rb:mt-2">{vo.summary}</div>
@@ -112,8 +112,8 @@ const Timeline: FC = () => {
                   <Flex gap={8} wrap className="rb:mt-2!">
                     {vo.keywords.map((tag, index) => <div key={index} className="rb:bg-white rb:rounded-[13px] rb:py-1 rb:px-2 rb:font-medium rb:leading-4.5 rb:text-[12px]">{tag}</div>)}
                   </Flex>
-                </Col>
-              </Row>
+                </div>
+              </Flex>
             ))}
           </Flex>
         }

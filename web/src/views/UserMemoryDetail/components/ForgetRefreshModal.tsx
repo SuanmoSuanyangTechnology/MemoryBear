@@ -6,7 +6,7 @@
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useParams } from 'react-router-dom'
-import { Form, Slider } from 'antd';
+import { Form, Slider, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal'
@@ -110,10 +110,10 @@ const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalP
           >
             <Slider tooltip={{ open: false }} max={1000} min={1} step={1} style={{ margin: '0' }} />
           </Form.Item>
-          <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
+          <Flex align="center" justify="space-between" className="rb:text-[12px] rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
             <span>{t(`forgettingEngine.range`)}: {[1, 1000]?.join('-')}</span>
-            {t('forgettingEngine.CurrentValue')}: {values?.min_days_since_access || 0}
-          </div>
+            {t('forgettingEngine.CurrentValue')}: {values?.max_merge_batch_size || 0}
+          </Flex>
         </div>
         <div className="rb:pl-3 rb:mt-4">
           <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
@@ -125,10 +125,10 @@ const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalP
           >
             <Slider tooltip={{ open: false }} max={365} min={1} step={1} style={{ margin: '0' }} />
           </Form.Item>
-          <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
+          <Flex align="center" justify="space-between" className="rb:text-[12px] rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
             <span>{t(`forgettingEngine.range`)}: {[1, 365]?.join('-')}</span>
             {t('forgettingEngine.CurrentValue')}: {values?.min_days_since_access || 0}
-          </div>
+          </Flex>
         </div>
       </Form>
     </RbModal>

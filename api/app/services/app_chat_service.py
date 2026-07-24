@@ -4,7 +4,7 @@ import json
 import time
 import uuid
 from types import SimpleNamespace
-from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
+from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List, Literal
 from datetime import datetime
 
 from fastapi import Depends
@@ -537,6 +537,7 @@ class AppChatService:
             skip_save: bool = False,
             parent_message_id: Optional[uuid.UUID] = None,
             version: int = 1,
+            execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
@@ -745,76 +746,154 @@ class AppChatService:
             )
             tools = []
 
-        # 创建 LangChain Agent
-        agent = LangChainAgent(
-            model_name=api_key_obj.model_name,
-            api_key=api_key_obj.api_key,
-            provider=api_key_obj.provider,
-            api_base=api_key_obj.api_base,
-            is_omni=api_key_obj.is_omni,
-            temperature=model_parameters.get("temperature", 0.7),
-            max_tokens=model_parameters.get("max_tokens", 2000),
-            system_prompt=system_prompt,
-            tools=tools,
-            deep_thinking=model_parameters.get("deep_thinking", False),
-            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
-            json_output=model_parameters.get("json_output", False),
-            capability=capability,
-            context_query=message,
-            context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
-            context_evidence_loader=load_annotation_context,
-        )
+        # Branch: sandbox vs in-process execution
+        _sandbox_adapter = None
+        if execution_mode == "sandbox":
+            from app.services.sandbox_executor import build_sandbox_payload
+            from app.services.e2b_agent_adapter import E2BAgentAdapter
 
-        # 为需要运行时上下文的工具注入上下文
-        for t in tools:
-            if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
-                t.tool_instance.set_runtime_context(
-                    user_id=user_id or "anonymous",
-                    conversation_id=str(conversation_id) if conversation_id else None,
-                    uploaded_files=processed_files or []
-                )
-
-        # 创建 Agent 执行记录（pending 状态，对齐工作流行为）
-        from app.models.app_model import App
-        agent_exec_repo = AgentExecutionRepository(self.db)
-        app_obj = await self._db_get(App, config.app_id)
-        agent_execution = AgentExecution(
-            app_id=config.app_id,
-            conversation_id=conversation_id,
-            message_id=None,
-            agent_config_id=config.id,
-            release_id=app_obj.current_release_id if app_obj else None,
-            triggered_by=None,
-            steps=[],
-            status="running",
-            started_at=parse_timestamp_to_utc_naive(start_time),
-            meta_data={
-                "model": api_key_obj.model_name,
-                "provider": api_key_obj.provider,
-            },
-        )
-        agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
-
-        try:
-            # 调用 Agent（支持多模态）
-            result = await agent.chat(
+            _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+            sandbox_payload = await build_sandbox_payload(
+                agent_config=config,
+                model_config=None,
+                api_key_config=_api_key_config,
+                effective_params=model_parameters,
                 message=message,
+                system_prompt=system_prompt,
+                workspace_id=_ws_id,
+                user_id=user_id,
+                conversation_id=str(conversation_id),
+                tools=tools,
                 history=history,
                 context=None,
-                files=processed_files
+                variables=variables,
             )
-        except Exception as e:
-            # Agent 执行失败，更新记录为 failed
-            elapsed_time = time.time() - start_time
-            await self._update_agent_execution(
-                agent_exec_repo,
-                execution_id=agent_execution_id,
+            _sandbox_adapter = E2BAgentAdapter(self.db)
+
+            # Create agent execution record
+            from app.models.app_model import App
+            agent_exec_repo = AgentExecutionRepository(self.db)
+            app_obj = await self._db_get(App, config.app_id)
+            agent_execution = AgentExecution(
+                app_id=config.app_id,
+                conversation_id=conversation_id,
+                message_id=None,
+                agent_config_id=config.id,
+                release_id=app_obj.current_release_id if app_obj else None,
+                triggered_by=None,
                 steps=[],
-                status="failed",
-                elapsed_time=elapsed_time,
-                error_message=str(e)[:2000],
+                status="running",
+                started_at=parse_timestamp_to_utc_naive(start_time),
+                meta_data={
+                    "model": api_key_obj.model_name,
+                    "provider": api_key_obj.provider,
+                },
             )
-            raise
+            agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
+
+            try:
+                raw_result = await _sandbox_adapter.run(
+                    agent_config=config,
+                    model_config=None,
+                    api_key_config=_api_key_config,
+                    message=message,
+                    workspace_id=str(_ws_id),
+                    user_id=user_id,
+                    conversation_id=str(conversation_id),
+                    system_prompt=system_prompt,
+                    tools_serialized=sandbox_payload["agent_config"]["tools"],
+                    history=history,
+                    context=None,
+                    variables=variables,
+                )
+                result = {
+                    "content": raw_result.get("content", ""),
+                    "reasoning_content": "",
+                    "usage": raw_result.get("usage", {}),
+                    "node_executions": raw_result.get("node_executions", []),
+                }
+            except Exception as e:
+                elapsed_time = time.time() - start_time
+                await self._update_agent_execution(
+                    agent_exec_repo,
+                    execution_id=agent_execution_id,
+                    steps=[],
+                    status="failed",
+                    elapsed_time=elapsed_time,
+                    error_message=str(e)[:2000],
+                )
+                raise
+        else:
+            # 创建 LangChain Agent
+            agent = LangChainAgent(
+                model_name=api_key_obj.model_name,
+                api_key=api_key_obj.api_key,
+                provider=api_key_obj.provider,
+                api_base=api_key_obj.api_base,
+                is_omni=api_key_obj.is_omni,
+                temperature=model_parameters.get("temperature", 0.7),
+                max_tokens=model_parameters.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                json_output=model_parameters.get("json_output", False),
+                capability=capability,
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
+            )
+
+            # 为需要运行时上下文的工具注入上下文
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
+
+            # 创建 Agent 执行记录（pending 状态，对齐工作流行为）
+            from app.models.app_model import App
+            agent_exec_repo = AgentExecutionRepository(self.db)
+            app_obj = await self._db_get(App, config.app_id)
+            agent_execution = AgentExecution(
+                app_id=config.app_id,
+                conversation_id=conversation_id,
+                message_id=None,
+                agent_config_id=config.id,
+                release_id=app_obj.current_release_id if app_obj else None,
+                triggered_by=None,
+                steps=[],
+                status="running",
+                started_at=parse_timestamp_to_utc_naive(start_time),
+                meta_data={
+                    "model": api_key_obj.model_name,
+                    "provider": api_key_obj.provider,
+                },
+            )
+            agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
+
+            try:
+                # 调用 Agent（支持多模态）
+                result = await agent.chat(
+                    message=message,
+                    history=history,
+                    context=None,
+                    files=processed_files
+                )
+            except Exception as e:
+                # Agent 执行失败，更新记录为 failed
+                elapsed_time = time.time() - start_time
+                await self._update_agent_execution(
+                    agent_exec_repo,
+                    execution_id=agent_execution_id,
+                    steps=[],
+                    status="failed",
+                    elapsed_time=elapsed_time,
+                    error_message=str(e)[:2000],
+                )
+                raise
 
         await self._record_api_key_usage(api_key_obj.id)
 
@@ -835,6 +914,24 @@ class AppChatService:
              "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
             tenant_id=tenant_id, workspace_id=workspace_id
         )
+
+        # Merge sandbox citations into collector
+        if _sandbox_adapter is not None:
+            sandbox_cits = getattr(_sandbox_adapter, "_sandbox_citations", [])
+            if sandbox_cits:
+                from app.schemas.app_schema import Citation
+                seen_ids = {c.get("document_id") for c in citations_collector}
+                for cit in sandbox_cits:
+                    doc_id = cit.get("document_id")
+                    if doc_id and doc_id not in seen_ids:
+                        seen_ids.add(doc_id)
+                        citations_collector.append(Citation(
+                            document_id=str(doc_id),
+                            doc_id=cit.get("doc_id", ""),
+                            file_name=cit.get("file_name", ""),
+                            knowledge_id=str(cit.get("knowledge_id", "")),
+                            score=cit.get("score", 0),
+                        ))
 
         # 过滤 citations（只调用一次）
         filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
@@ -983,6 +1080,7 @@ class AppChatService:
             skip_save: bool = False,
             parent_message_id: Optional[uuid.UUID] = None,
             version: int = 1,
+            execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
@@ -1182,35 +1280,73 @@ class AppChatService:
                     yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
 
-            # 创建 LangChain Agent
-            agent = LangChainAgent(
-                model_name=api_key_obj.model_name,
-                api_key=api_key_obj.api_key,
-                provider=api_key_obj.provider,
-                api_base=api_key_obj.api_base,
-                is_omni=api_key_obj.is_omni,
-                temperature=model_parameters.get("temperature", 0.7),
-                max_tokens=model_parameters.get("max_tokens", 2000),
-                system_prompt=system_prompt,
-                tools=tools,
-                streaming=True,
-                deep_thinking=model_parameters.get("deep_thinking", False),
-                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
-                json_output=model_parameters.get("json_output", False),
-                capability=capability,
-                context_query=message,
-                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
-                context_evidence_loader=load_annotation_context,
-            )
+            # Branch: sandbox vs in-process execution
+            _sandbox_adapter = None
+            if execution_mode == "sandbox":
+                from app.services.sandbox_executor import build_sandbox_payload, run_sandbox_stream
+                from app.services.e2b_agent_adapter import E2BAgentAdapter
 
-            # 为需要运行时上下文的工具注入上下文
-            for t in tools:
-                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
-                    t.tool_instance.set_runtime_context(
-                        user_id=user_id or "anonymous",
-                        conversation_id=str(conversation_id) if conversation_id else None,
-                        uploaded_files=processed_files or []
-                    )
+                _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+                sandbox_payload = await build_sandbox_payload(
+                    agent_config=config,
+                    model_config=None,
+                    api_key_config=_api_key_config,
+                    effective_params=model_parameters,
+                    message=message,
+                    system_prompt=system_prompt,
+                    workspace_id=_ws_id,
+                    user_id=user_id,
+                    conversation_id=str(conversation_id),
+                    tools=tools,
+                    history=history,
+                    context=None,
+                    variables=variables,
+                )
+                _sandbox_adapter = E2BAgentAdapter(self.db)
+                _chunk_stream = run_sandbox_stream(
+                    payload=sandbox_payload,
+                    workspace_id=str(_ws_id),
+                    user_id=user_id or "",
+                    conversation_id=str(conversation_id),
+                    adapter=_sandbox_adapter,
+                )
+            else:
+                # 创建 LangChain Agent
+                agent = LangChainAgent(
+                    model_name=api_key_obj.model_name,
+                    api_key=api_key_obj.api_key,
+                    provider=api_key_obj.provider,
+                    api_base=api_key_obj.api_base,
+                    is_omni=api_key_obj.is_omni,
+                    temperature=model_parameters.get("temperature", 0.7),
+                    max_tokens=model_parameters.get("max_tokens", 2000),
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    streaming=True,
+                    deep_thinking=model_parameters.get("deep_thinking", False),
+                    thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                    json_output=model_parameters.get("json_output", False),
+                    capability=capability,
+                    context_query=message,
+                    context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                    context_evidence_loader=load_annotation_context,
+                )
+
+                # 为需要运行时上下文的工具注入上下文
+                for t in tools:
+                    if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                        t.tool_instance.set_runtime_context(
+                            user_id=user_id or "anonymous",
+                            conversation_id=str(conversation_id) if conversation_id else None,
+                            uploaded_files=processed_files or []
+                        )
+
+                _chunk_stream = agent.chat_stream(
+                    message=message,
+                    history=history,
+                    context=None,
+                    files=processed_files,
+                )
 
             # close() 前预读 ORM 属性，防止 close 后触发 DetachedInstanceError
             _api_key_id = api_key_obj.id
@@ -1239,12 +1375,7 @@ class AppChatService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
 
-            async for chunk in agent.chat_stream(
-                    message=message,
-                    history=history,
-                    context=None,
-                    files=processed_files
-            ):
+            async for chunk in _chunk_stream:
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
@@ -1271,6 +1402,24 @@ class AppChatService:
 
             if tts_task is not None:
                 await text_queue.put(None)
+
+            # Merge sandbox citations into collector
+            if _sandbox_adapter is not None:
+                sandbox_cits = getattr(_sandbox_adapter, "_sandbox_citations", [])
+                if sandbox_cits:
+                    from app.schemas.app_schema import Citation
+                    seen_ids = {c.get("document_id") for c in citations_collector}
+                    for cit in sandbox_cits:
+                        doc_id = cit.get("document_id")
+                        if doc_id and doc_id not in seen_ids:
+                            seen_ids.add(doc_id)
+                            citations_collector.append(Citation(
+                                document_id=str(doc_id),
+                                doc_id=cit.get("doc_id", ""),
+                                file_name=cit.get("file_name", ""),
+                                knowledge_id=str(cit.get("knowledge_id", "")),
+                                score=cit.get("score", 0),
+                            ))
 
             elapsed_time = time.time() - start_time
             await self._record_api_key_usage(_api_key_id)

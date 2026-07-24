@@ -1,0 +1,156 @@
+"""
+节点工厂
+
+根据节点类型创建相应的节点实例。
+"""
+
+import logging
+from typing import Any, Union
+
+from app.core.workflow.nodes.agent import AgentNode
+from app.core.workflow.nodes.assigner import AssignerNode
+from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.code import CodeNode
+from app.core.workflow.nodes.cycle_graph.node import CycleGraphNode
+from app.core.workflow.nodes.end import EndNode
+from app.core.workflow.nodes.enums import NodeType
+from app.core.workflow.nodes.http_request import HttpRequestNode
+from app.core.workflow.nodes.human_intervention import HumanInterventionNode
+from app.core.workflow.nodes.if_else import IfElseNode
+from app.core.workflow.nodes.jinja_render import JinjaRenderNode
+from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNode
+from app.core.workflow.nodes.llm import LLMNode
+from app.core.workflow.nodes.memory import MemoryReadNode, MemoryWriteNode
+from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
+from app.core.workflow.nodes.start import StartNode
+from app.core.workflow.nodes.trigger import TriggerNode
+from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
+from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
+from app.core.workflow.nodes.breaker import BreakNode
+from app.core.workflow.nodes.tool import ToolNode
+from app.core.workflow.nodes.document_extractor import DocExtractorNode
+from app.core.workflow.nodes.list_operator import ListOperatorNode
+from app.core.workflow.nodes.output import OutputNode
+
+logger = logging.getLogger(__name__)
+
+WorkflowNode = Union[
+    BaseNode,
+    StartNode,
+    TriggerNode,
+    EndNode,
+    LLMNode,
+    IfElseNode,
+    AgentNode,
+    AssignerNode,
+    HttpRequestNode,
+    KnowledgeRetrievalNode,
+    JinjaRenderNode,
+    VariableAggregatorNode,
+    ParameterExtractorNode,
+    CycleGraphNode,
+    BreakNode,
+    ParameterExtractorNode,
+    QuestionClassifierNode,
+    ToolNode,
+    MemoryReadNode,
+    MemoryWriteNode,
+    CodeNode,
+    DocExtractorNode,
+    ListOperatorNode,
+    OutputNode,
+    HumanInterventionNode,
+]
+
+
+class NodeFactory:
+    """节点工厂
+
+    使用工厂模式创建节点实例，便于扩展和维护。
+    """
+
+    # 节点类型注册表
+    _node_types: dict[str, type[WorkflowNode]] = {
+        NodeType.START: StartNode,
+        NodeType.TRIGGER: TriggerNode,
+        NodeType.END: EndNode,
+        NodeType.LLM: LLMNode,
+        NodeType.AGENT: AgentNode,
+        NodeType.IF_ELSE: IfElseNode,
+        NodeType.KNOWLEDGE_RETRIEVAL: KnowledgeRetrievalNode,
+        NodeType.ASSIGNER: AssignerNode,
+        NodeType.HTTP_REQUEST: HttpRequestNode,
+        NodeType.JINJARENDER: JinjaRenderNode,
+        NodeType.VAR_AGGREGATOR: VariableAggregatorNode,
+        NodeType.PARAMETER_EXTRACTOR: ParameterExtractorNode,
+        NodeType.QUESTION_CLASSIFIER: QuestionClassifierNode,
+        NodeType.LOOP: CycleGraphNode,
+        NodeType.ITERATION: CycleGraphNode,
+        NodeType.BREAK: BreakNode,
+        NodeType.CYCLE_START: StartNode,
+        NodeType.TOOL: ToolNode,
+        NodeType.MEMORY_READ: MemoryReadNode,
+        NodeType.MEMORY_WRITE: MemoryWriteNode,
+        NodeType.CODE: CodeNode,
+        NodeType.DOCUMENT_EXTRACTOR: DocExtractorNode,
+        NodeType.LIST_OPERATOR: ListOperatorNode,
+        NodeType.OUTPUT: OutputNode,
+        NodeType.HUMAN_INTERVENTION: HumanInterventionNode,
+    }
+
+    @classmethod
+    def register_node_type(cls, node_type: str, node_class: type[WorkflowNode]):
+        """注册新的节点类型
+
+        Args:
+            node_type: 节点类型名称
+            node_class: 节点类
+
+        Examples:
+            >>> class CustomNode(BaseNode):
+            ...     async def execute(self, state):
+            ...         return {"node_outputs": {self.node_id: {"output": "custom"}}}
+            >>> NodeFactory.register_node_type("custom", CustomNode)
+        """
+        cls._node_types[node_type] = node_class
+        logger.info(f"注册节点类型: {node_type} -> {node_class.__name__}")
+
+    @classmethod
+    def create_node(
+            cls,
+            node_config: dict[str, Any],
+            workflow_config: dict[str, Any],
+            down_stream_nodes: list[str]
+    ) -> WorkflowNode | None:
+        """创建节点实例
+
+        Args:
+            node_config: 节点配置
+            workflow_config: 工作流配置
+            down_stream_nodes: 下游节点
+
+        Returns:
+            节点实例或 None（对于不支持的节点类型）
+
+        Raises:
+            ValueError: 不支持的节点类型
+        """
+        node_type = node_config.get("type")
+
+        # 获取节点类
+        node_class = cls._node_types.get(node_type)
+        if not node_class:
+            raise ValueError(f"Unsupported node type: {node_type}")
+
+        # 创建节点实例
+        logger.debug(f"create node instance: {node_config.get('id')} (type={node_type})")
+        return node_class(node_config, workflow_config, down_stream_nodes)
+
+    @classmethod
+    def get_supported_types(cls) -> list[str]:
+        """获取支持的节点类型列表
+
+        Returns:
+            节点类型列表
+        """
+        return list(cls._node_types.keys())

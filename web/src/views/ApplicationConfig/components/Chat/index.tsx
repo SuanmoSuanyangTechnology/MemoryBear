@@ -154,6 +154,7 @@ const Chat: FC<ChatProps> = ({
         toolbarRef.current?.setFiles([])
         setFileList([])
         updateChatList(prev => addAssistantMessage(prev))
+        updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: true })))
 
         const handleStreamMessage = createCompareStreamHandler({
           updateChatList,
@@ -183,6 +184,7 @@ const Chat: FC<ChatProps> = ({
               setLoading(false)
               compareLoadingRef.current = false
               updateChatList(prev => updateClusterErrorAssistantMessage(prev, 0))
+              updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
             })
             .finally(() => {
               setLoading(false)
@@ -193,6 +195,7 @@ const Chat: FC<ChatProps> = ({
       .catch(() => {
         setLoading(false)
         compareLoadingRef.current = false
+        updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
       })
   }
 
@@ -211,6 +214,7 @@ const Chat: FC<ChatProps> = ({
         toolbarRef.current?.setFiles([])
         setFileList([])
         updateChatList(prev => addAssistantMessage(prev))
+        updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: true })))
 
         const handleStreamMessage = createClusterStreamHandler({
           updateChatList,
@@ -235,6 +239,7 @@ const Chat: FC<ChatProps> = ({
               setLoading(false)
               compareLoadingRef.current = false
               updateChatList(prev => updateClusterErrorAssistantMessage(prev, 0))
+              updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
             })
             .finally(() => {
               setLoading(false)
@@ -245,6 +250,7 @@ const Chat: FC<ChatProps> = ({
       .catch(() => {
         setLoading(false)
         compareLoadingRef.current = false
+        updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
       })
   }
 
@@ -276,6 +282,10 @@ const Chat: FC<ChatProps> = ({
     })
     setLoading(true)
     compareLoadingRef.current = true
+    updateChatList(prev => prev.map(chat => ({
+      ...chat,
+      streamLoading: chat.model_config_id === column.model_config_id,
+    })))
 
     const handleStreamMessage = createRegenerateStreamHandler({
       modelConfigId: column.model_config_id,
@@ -296,6 +306,7 @@ const Chat: FC<ChatProps> = ({
         .finally(() => {
           setLoading(false)
           compareLoadingRef.current = false
+          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
         })
     }, 0)
   }
@@ -416,13 +427,13 @@ const Chat: FC<ChatProps> = ({
                   />}
                   onSend={isCluster ? handleClusterSend : handleSend}
                   data={chat.list || []}
-                  streamLoading={compareLoadingRef.current}
+                  streamLoading={chat.streamLoading || compareLoadingRef.current}
                   labelPosition="top"
                   labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label || t(`application.ai`)}
                   renderRuntime={(item, index) => <Runtime source={source} item={item} index={index} />}
                   isSupportTools={!isCluster}
                   isAlwaysShowAssistantTools={!isCluster}
-                  isEnded={!loading}
+                  isEnded={!loading || !chat.streamLoading}
                   handleFeedback={isCluster ? undefined : handleFeedback}
                   handleFavorite={isCluster ? undefined : handleFavorite}
                   deleteMsg={isCluster ? undefined : deleteMsg}
@@ -434,7 +445,7 @@ const Chat: FC<ChatProps> = ({
               </Flex>
             ))}
           </div>
-          <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:mt-4">
+          <Flex align="center" className="rb:relative rb:mt-4!">
             <ChatInput
               message={message}
               className="rb:relative! rb:bottom-0!"
@@ -467,7 +478,7 @@ const Chat: FC<ChatProps> = ({
                 }
               />
             </ChatInput>
-          </div>
+          </Flex>
         </>
       }
       {id && <ReportModal ref={reportModalRef} appId={id} />}

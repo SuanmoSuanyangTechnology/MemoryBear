@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Popover } from 'antd';
+import { Popover, Flex, Spin } from 'antd';
+
 import type { KnowledgeBaseListItem, RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
 import RecallTest from '../components/RecallTest';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
@@ -12,11 +13,13 @@ import kbNameIcon from '@/assets/images/knowledgeBase/kb-name.png';
 import kbDataIcon from '@/assets/images/knowledgeBase/kb-data.png';
 import kbSizeIcon from '@/assets/images/knowledgeBase/kb-size.png';
 import kbModelIcon from '@/assets/images/knowledgeBase/kb-model.png';
+import NoData from '@/assets/images/knowledgeBase/noData.png'
 
 import kbHistoryIcon from '@/assets/images/knowledgeBase/kb-history.png';
 import { getKnowledgeBaseDetail } from '@/api/knowledgeBase';
 import { formatDateTime } from '@/utils/format';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
+import Empty from '@/components/Empty'
 
 const Share: FC = () => {
   const { t } = useTranslation();
@@ -152,17 +155,27 @@ const Share: FC = () => {
   // };
 
   if (loading) {
-    return <div>加载中...</div>;
+    return (
+      <Flex align="center" justify="center" className="rb:h-full">
+        <Spin tip={t('common.loading')}><div className="rb:size-32" /></Spin>
+      </Flex>
+    )
   }
 
   if (!knowledgeBase) {
-    return <div>知识库不存在</div>;
+    return (
+      <Empty
+        url={NoData}
+        subTitle={t('knowledgeBase.knowledgeBaseNotFound')}
+        size={[260, 180]}
+        className="rb:h-full!"
+      />
+    );
   }
 
   return (
-    <div className="rb:flex rb:flex-col rb:h-full rb:max-h-full rb:overflow-hidden">
-      
-      <div className="rb:flex rb:w-full rb:items-center rb:mb-2 rb:gap-2">
+    <Flex vertical className="rb:h-full rb:max-h-full rb:overflow-hidden">
+      <Flex align="center" gap={8} className="rb:w-full rb:mb-2!">
         <h1 className="rb:text-xl rb:font-bold">{knowledgeBase.name}
           <span className='rb:text-gray-500 rb:text-sm rb:ml-2 rb:font-normal'>(ID: {knowledgeBase.id})</span></h1>
         
@@ -178,29 +191,29 @@ const Share: FC = () => {
             className='rb:border rb:border-[#171719] rb:px-1 rb:py-0.5 rb:rounded rb:text-gray-900 rb:text-xs rb:cursor-pointer'
           >{t('knowledgeBase.viewBasicInfo')}</span>
         </Popover>
-      </div>
-      <div className="rb:flex rb:w-full rb:items-center rb:mb-5 rb:gap-2">
-          <img src={shareUserIcon} className='rb:size-4 rb:ml-2' />
+      </Flex>
+      <Flex align="center" gap={8} className="rb:w-full rb:mb-5!">
+        <img src={shareUserIcon} className='rb:size-4 rb:ml-2' />
           <span className='rb:text-gray-500 rb:text-xs'>{knowledgeBase.created_by}</span>
           <img src={timestampIcon} className='rb:size-4 rb:ml-2' />
           <span className='rb:text-gray-500 rb:text-xs'>{formatDateTime(knowledgeBase.created_at)}</span>
-      </div>
-      <div className="rb:flex rb:flex-1 rb:gap-4 rb:min-h-0">
-        <div className="rb:flex-1 rb:p-4 rb:border rb:flex rb:flex-col rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:overflow-hidden">
-          <div className='rb:flex rb:flex-col rb:txt-left rb:mb-5 rb:gap-2 rb:shrink-0'>
+      </Flex>
+      <Flex gap={16} className="rb:flex-1 rb:min-h-0">
+        <Flex vertical className="rb:flex-1 rb:p-4! rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:overflow-hidden">
+          <Flex vertical gap={8} className='rb:txt-left rb:mb-5! rb:shrink-0'>
             <h1 className="rb:text-lg rb:font-bold">{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.recallTest')}</h1>
             <span className='rb:text-gray-500 rb:text-xs'>{t('knowledgeBase.recallTestDescription')}</span>
-          </div>
+          </Flex>
           <div className='rb:flex-1 rb:min-h-0'>
             <RecallTest  ref={recallTestRef} />
           </div>
-        </div>
+        </Flex>
         {/* <div className='rb:w-80 rb:border rb:overflow-y-auto rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4'>
          
         </div> */}
-      </div>
+      </Flex>
 
-    </div>
+    </Flex>
   );
 };
 

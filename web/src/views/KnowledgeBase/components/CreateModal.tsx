@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button, App, Flex } from 'antd';
+import { Form, Input, Select, Tabs, Switch, Radio, Button, App, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { KnowledgeBaseListItem, KnowledgeBaseFormData, CreateModalRef, CreateModalRefProps } from '@/views/KnowledgeBase/types';
 import { 
@@ -18,7 +18,6 @@ import SliderInput from '@/components/SliderInput'
 import { stringRegExp } from '@/utils/validator'
 import Tag from '@/components/Tag'
 const { TextArea } = Input;
-const { confirm } = Modal
 
 // Global model data constant
 let models: any = null;
@@ -245,7 +244,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     };
 
     // If entity_types exists, convert to newline-separated format for TextArea display
-    if (baseValues.parser_config.graphrag.entity_types) {
+    if (baseValues?.parser_config?.graphrag?.entity_types) {
       if (Array.isArray(baseValues.parser_config.graphrag.entity_types)) {
         // If array format, convert to newline-separated string
         (baseValues.parser_config.graphrag as any).entity_types = baseValues.parser_config.graphrag.entity_types.join('\n');
@@ -715,19 +714,19 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   // Knowledge graph configuration form content
   const renderKnowledgeGraphConfig = () => (
     <>
-      <div className={`rb:flex rb:w-full rb:items-center rb:p-4 rb:border-1 rb:rounded-lg rb:mb-4 ${
+      <Flex align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
         enableKnowledgeGraph 
           ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
           : 'rb:border-[#EBEBEB]'
       }`}>
-        <div className='rb:flex rb:flex-col rb:flex-1'>
+        <Flex vertical className='rb:flex-1'>
           <div className='rb:text-[#212332] rb:text-base rb:font-medium'>
             {t('knowledgeBase.enableKnowledgeGraph')}
           </div>
           <div className='rb:text-xs rb:text-[#5B6167] rb:mt-2'>
             {t('knowledgeBase.enableKnowledgeGraphTips')}
           </div>
-        </div>
+        </Flex>
         <Form.Item
           name={['parser_config', 'graphrag', 'use_graphrag']}
           label=''
@@ -736,7 +735,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         >
           <Switch />
         </Form.Item>
-      </div>
+      </Flex>
 
       {enableKnowledgeGraph && (
         <>
@@ -744,27 +743,27 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             {t('knowledgeBase.graphConfig')}
           </div>
           {/* Scene name */}
-          <div className='rb:flex rb:items-center rb:gap-2'>
-              <Form.Item
-                name={['parser_config', 'graphrag', 'scene_name']}
-                label={t('knowledgeBase.sceneName')}
-                className='rb:w-full rb:min-w-[240px]'
-                rules={[{ required: true, message: t('common.pleaseEnter') + t('knowledgeBase.sceneName') }]}
-              >
-                <Input  placeholder={t('knowledgeBase.sceneNamePlaceholder')} />
-              </Form.Item>
-                <Button 
-                  type="primary" 
-                  loading={generatingEntityTypes}
-                  onClick={generateEntityTypes}
-                  className='rb:mt-1'
-                >
-                  {!(entityTypes as any as string) || (entityTypes as any as string).trim() === '' 
-                    ? t('knowledgeBase.generateEntityTypes')
-                    : t('knowledgeBase.regenerateEntityTypes')
-                  }
-                </Button> 
-          </div>
+          <Flex align="center" gap={8}>
+            <Form.Item
+              name={['parser_config', 'graphrag', 'scene_name']}
+              label={t('knowledgeBase.sceneName')}
+              className='rb:w-full rb:min-w-[240px]'
+              rules={[{ required: true, message: t('common.pleaseEnter') + t('knowledgeBase.sceneName') }]}
+            >
+              <Input  placeholder={t('knowledgeBase.sceneNamePlaceholder')} />
+            </Form.Item>
+            <Button 
+              type="primary" 
+              loading={generatingEntityTypes}
+              onClick={generateEntityTypes}
+              className='rb:mt-3'
+            >
+              {!(entityTypes as any as string) || (entityTypes as any as string).trim() === '' 
+                ? t('knowledgeBase.generateEntityTypes')
+                : t('knowledgeBase.regenerateEntityTypes')
+              }
+            </Button> 
+          </Flex>
           
 
           {/* Entity types */}
@@ -779,19 +778,19 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Entity normalization */}
-          <div className={`rb:flex rb:w-full rb:gap-2 rb:items-center rb:p-4 rb:border-1 rb:rounded-lg rb:mb-4 ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
             entityNormalization 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'
           }`}>
-            <div className='rb:flex rb:flex-col rb:flex-1'>
+            <Flex vertical className='rb:flex-1'>
               <div className='rb:text-[#212332] rb:text-base rb:font-medium'>
                 {t('knowledgeBase.entityNormalization')}
               </div>
               <div className='rb:text-xs rb:text-[#5B6167] rb:mt-2'>
                 {t('knowledgeBase.entityNormalizationTips')}
               </div>
-            </div>
+            </Flex>
              <Form.Item
               name={['parser_config', 'graphrag', 'resolution']}
               valuePropName="checked"
@@ -799,7 +798,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             >
               <Switch />
             </Form.Item>
-          </div>
+          </Flex>
          
 
           {/* Entity method */}
@@ -815,19 +814,19 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Community report generation */}
-          <div className={`rb:flex rb:w-full rb:gap-2 rb:items-center rb:p-4 rb:border-1 rb:rounded-lg rb:mb-4 ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
             communityReportGeneration 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'
           }`}>
-            <div className='rb:flex rb:flex-col rb:flex-1'>
+            <Flex vertical className='rb:flex-1'>
               <div className='rb:text-[#212332] rb:text-base rb:font-medium'>
                 {t('knowledgeBase.communityReportGeneration')}
               </div>
               <div className='rb:text-xs rb:text-[#5B6167] rb:mt-2'>
                 {t('knowledgeBase.communityReportGenerationTips')}
               </div>
-            </div>
+            </Flex>
             <Form.Item
               name={['parser_config', 'graphrag', 'community']}
               valuePropName="checked"
@@ -835,7 +834,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             >
               <Switch />
             </Form.Item>
-          </div>
+          </Flex>
         </>
       )}
     </>

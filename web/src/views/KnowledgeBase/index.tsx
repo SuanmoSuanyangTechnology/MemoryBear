@@ -535,7 +535,7 @@ const KnowledgeBaseManagement: FC = () => {
 
   return (
     <>
-      <div className="rb:flex rb:justify-between rb:px-2 rb:mb-4">
+      <Flex justify="space-between" className="rb:mb-4!">
         <SearchInput
           placeholder={t('knowledgeBase.searchPlaceholder')}
           onSearch={handleSearch}
@@ -545,7 +545,7 @@ const KnowledgeBaseManagement: FC = () => {
         <Dropdown menu={{ items: createItems }} trigger={['click']}>
           <Button type="primary">+ {t('knowledgeBase.createKnowledgeBase')}</Button>
         </Dropdown>
-      </div>
+      </Flex>
       <div id="scrollableDiv" style={{ height: 'calc(100vh - 120px)', overflowY: 'auto', overflowX: 'hidden' }}>
       <InfiniteScroll
         dataLength={data.length}
@@ -578,6 +578,7 @@ const KnowledgeBaseManagement: FC = () => {
                       <RbCard
                         title={item.name}
                         headerType="borderless"
+                        bodyClassName="rb:px-4! rb:pt-0! rb:pb-4!"
                         headerClassName="rb:py-3!"
                         className="rb:cursor-pointer"
                         onClick={() => handleToDetail(item)}
@@ -592,14 +593,14 @@ const KnowledgeBaseManagement: FC = () => {
                           </div>
                         }
                       >
-                        <div className=''>
-                          <div className="rb:flex rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3">
+                        <div>
+                          <Flex className="rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3!">
                               {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
                               <Tooltip title={item.description}>
                                   <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:wrap-break-word rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
                               </Tooltip>
-                          </div>
-                          <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3'>
+                          </Flex>
+                          <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3!'>
                             <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
                               <div className="rb:text-gray-800 rb:font-medium">ID:</div>
                               <Flex align="center" className="rb:text-[#5B6167]">
@@ -622,31 +623,32 @@ const KnowledgeBaseManagement: FC = () => {
                           </Flex>
                           {hasModelInfo && (
                             <div onClick={(e) => e.stopPropagation()}>
-                              <div
-                                className="rb:flex rb:items-center rb:pt-2 rb:px-2 rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded  rb:transition-colors"
+                              <Flex
+                                align="center"
+                                justify="space-between"
+                                className="rb:pt-2! rb:pr-1! rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded rb:transition-colors"
                                 onClick={() => {
                                   setData(prev => prev.map(d => d.id === item.id ? { ...d, _expanded: !d._expanded } : d));
                                 }}
                               >
-                                {/* <span className='rb:text-gray-500'>{t('knowledgeBase.models')}:</span> */}
-                                <span className="rb:ml-1 rb:truncate rb:flex-1 rb:text-gray-500">
+                                <span className="rb:truncate rb:flex-1 rb:text-gray-500">
                                   {modelInfo.summary[0].split(':')[0]}:<span className="rb:text-gray-900">{modelInfo.summary[0].split(':').slice(1).join(':')}</span>
                                 </span>
-                                <span className="rb:ml-auto rb:text-gray-400 rb:text-[10px]">
+                                <span className="rb:text-gray-400 rb:text-[10px]">
                                   {item._expanded ? <DownOutlined /> : <RightOutlined />}
                                 </span>
-                              </div>
+                              </Flex>
                               {item._expanded && (
-                                <div className="rb:py-1 rb:px-2 rb:text-[12px]">
+                                <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
                                   {modelInfo.summary.slice(1).map((text, idx) => {
                                     const [label, value] = text.split(':');
                                     return (
-                                      <div key={idx} className="rb:py-1 rb:text-gray-500">
+                                      <div key={idx} className="rb:text-gray-500">
                                         {label}:<span className="rb:text-gray-900">{value}</span>
                                       </div>
                                     );
                                   })}
-                                </div>
+                                </Flex>
                               )}
                             </div>
                           )}
