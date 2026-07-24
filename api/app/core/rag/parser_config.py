@@ -83,6 +83,14 @@ def normalize_new_knowledge_parser_config(
     parser_config: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     requested = _copy_parser_config(parser_config)
+    chunk_mode_requested = any(
+        key in requested
+        for key in (
+            "auto_questions",
+            "parent_child_mode",
+            "parent_chunk_mode",
+        )
+    )
     requested_graph = require_graph_mapping(requested)
     if "pipeline" in requested_graph:
         requested_pipeline = resolve_graph_pipeline(
@@ -100,6 +108,9 @@ def normalize_new_knowledge_parser_config(
     graph_config = normalized["graphrag"]
     graph_config.update(deepcopy(dict(requested_graph)))
     graph_config["pipeline"] = GraphPipeline.EVIDENCE.value
+    if not chunk_mode_requested:
+        normalized.pop("auto_questions", None)
+        normalized.pop("parent_child_mode", None)
     return normalized
 
 
