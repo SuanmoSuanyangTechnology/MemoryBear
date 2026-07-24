@@ -50,6 +50,8 @@ class AppLogService:
         pagesize: int = 20,
         is_draft: Optional[bool] = None,
         keyword: Optional[str] = None,
+        start_date: Optional[dt.datetime] = None,
+        end_date: Optional[dt.datetime] = None,
     ) -> Tuple[list[Conversation], int]:
         """
         查询应用日志会话列表
@@ -61,6 +63,8 @@ class AppLogService:
             pagesize: 每页数量
             is_draft: 是否草稿会话（None表示返回全部）
             keyword: 搜索关键词（匹配 messages 表消息内容）
+            start_date: 开始时间（筛选 created_at >= start_date）
+            end_date: 结束时间（筛选 created_at <= end_date）
 
         Returns:
             Tuple[list[Conversation], int]: (会话列表，总数)
@@ -74,6 +78,8 @@ class AppLogService:
                 "pagesize": pagesize,
                 "is_draft": is_draft,
                 "keyword": keyword,
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
             }
         )
 
@@ -83,6 +89,8 @@ class AppLogService:
             workspace_id=workspace_id,
             is_draft=is_draft,
             keyword=keyword,
+            start_date=start_date,
+            end_date=end_date,
             page=page,
             pagesize=pagesize,
         )
@@ -421,6 +429,9 @@ class AppLogService:
                 else:
                     output_content = _extract_text(execution.output_data)
                 meta = {"usage": execution.token_usage or {}, "elapsed_time": execution.elapsed_time}
+                logical_outputs = _extract_workflow_outputs(execution.output_data)
+                if logical_outputs:
+                    meta["outputs"] = logical_outputs
             elif execution.status == "waiting_human":
                 # waiting_human 状态下工作流暂停等待人工介入，没有 AI 输出文本。
                 # 不应将 output_data 原始 JSON dump 为 content（包含 node_outputs 等内部数据）。
@@ -669,6 +680,39 @@ def _extract_text(data: Optional[dict]) -> str:
         if key == "output" and val is not None:
             return str(val)
     return ""
+
+
+def _extract_workflow_outputs(data: Optional[dict]) -> list[dict]:
+    """Return logical Answer/End outputs without flattening them together.
+
+    New executions store ``output_data.outputs`` directly.  The fallback reads
+    completed End/Output node results so older executions can still expose
+    separate replies in the log API.
+    """
+    if not isinstance(data, dict):
+        return []
+
+    outputs = data.get("outputs")
+    if isinstance(outputs, list):
+        return [item for item in outputs if isinstance(item, dict) and item.get("node_id")]
+
+    node_outputs = data.get("node_outputs") or {}
+    result: list[dict] = []
+    for node_id, node_data in node_outputs.items():
+        if not isinstance(node_data, dict):
+            continue
+        node_type = node_data.get("node_type")
+        if node_type not in ("end", "output", "answer"):
+            continue
+        content = node_data.get("output", "")
+        if isinstance(content, dict):
+            content = content.get("output") or content.get("text") or content.get("content") or ""
+        result.append({
+            "node_id": node_id,
+            "content": str(content) if content is not None else "",
+            "status": node_data.get("status", "completed"),
+        })
+    return result
 
 
 def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNodeExecution]:

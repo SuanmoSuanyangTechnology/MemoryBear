@@ -4,10 +4,43 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.rag.retrieval.models import RetrievalPrincipal
+from app.db import get_async_db_context
+from app.models.api_key_model import ApiKey
 from app.models import document_model, knowledge_model
 from app.models.user_model import User
 from app.models.workspace_model import Workspace, WorkspaceMember
 from app.repositories import workspace_repository
+from app.schemas.api_key_schema import ApiKeyAuth
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
+
+
+async def get_api_key_retrieval_principal_async(
+    api_key_auth: ApiKeyAuth,
+) -> RetrievalPrincipal:
+    """Read the API Key creator into a retrieval-safe principal snapshot."""
+
+    async with get_async_db_context() as db:
+        result = await db.execute(
+            select(User.id, User.username, User.tenant_id, User.is_superuser)
+            .join(ApiKey, ApiKey.created_by == User.id)
+            .where(
+                ApiKey.id == api_key_auth.api_key_id,
+                ApiKey.workspace_id == api_key_auth.workspace_id,
+            )
+        )
+        creator = result.one_or_none()
+
+    if creator is None:
+        raise KnowledgeRetrievalAccessDenied("API Key creator is unavailable")
+
+    return RetrievalPrincipal(
+        id=creator.id,
+        username=creator.username,
+        tenant_id=creator.tenant_id,
+        current_workspace_id=api_key_auth.workspace_id,
+        is_superuser=bool(creator.is_superuser),
+    )
 
 
 def has_current_workspace_access(

@@ -1,4 +1,8 @@
-from app.core.memory.constants.graph_data_constants import SUPPORTED_NODE_TYPES
+from app.core.memory.constants.graph_data_constants import (
+    NODE_PROPERTY_WHITELIST,
+    SUPPORTED_NODE_TYPES,
+    _DEFAULT_FIELDS,
+)
 from app.core.memory.enums import Neo4jNodeType
 
 DIALOGUE_NODE_SAVE = """
@@ -1195,23 +1199,29 @@ RETURN DISTINCT
 def build_graph_nodes_by_type_query(node_type: str) -> str:
     """构建「按单个 Node_Type 检索节点」的 Cypher（Q1），label 字面量内联以命中索引。
 
-    Neo4j 不允许 ``LIMIT`` 引用运行期变量，故 ``$limit`` 仍以静态参数下发；
-    service 层 helper 对每个非零 ``Per_Type_Limit`` 类型循环调用一次本 builder，
-    整体调用次数与节点总数 N 无关（最多 = 类型数，常数级），符合 Requirement 6.4。
+    优化：不再使用 ``properties(n)`` 拉取全部属性（包含 embedding 等大字段），
+    而是仅 SELECT 白名单字段，大幅减少网络传输和序列化开销。
+    使用 CASE 过滤 null 值，保持与 properties(n) 行为一致（仅返回存在的属性）。
 
     Args:
         node_type: 节点 label，必须属于 :data:`SUPPORTED_NODE_TYPES`。
 
     Returns:
-        把 ``node_type`` 内联进 ``MATCH (n:<label>)`` 后的 Cypher 字符串；
-        运行期参数为 ``$end_user_id`` (STRING) 与 ``$limit`` (INTEGER)。
+        Cypher 字符串；运行期参数为 ``$end_user_id`` (STRING) 与 ``$limit`` (INTEGER)。
 
     Raises:
-        ValueError: 当 ``node_type`` 不在 :data:`SUPPORTED_NODE_TYPES` 中时
-            （防止任何未经白名单校验的字符串被内联进 Cypher）。
+        ValueError: 当 ``node_type`` 不在 :data:`SUPPORTED_NODE_TYPES` 中时。
     """
     if node_type not in SUPPORTED_NODE_TYPES:
         raise ValueError(f"不支持的 Node_Type，拒绝内联进 Cypher: {node_type!r}")
+
+    # 从白名单获取该类型需要返回的字段
+    fields = NODE_PROPERTY_WHITELIST.get(node_type, _DEFAULT_FIELDS)
+
+    # 使用 Cypher map projection + 后续在 Python 中过滤 null
+    # Neo4j map literal {k: n.k} 会保留 null 值，需要在应用层过滤
+    props_entries = ", ".join(f"{f}: n.{f}" for f in fields)
+
     return f"""
 // GRAPH_NODES_BY_TYPE_LIMITS({node_type})
 MATCH (n:{node_type})
@@ -1220,7 +1230,7 @@ WHERE n.end_user_id = $end_user_id
 RETURN
     elementId(n)        AS id,
     labels(n)           AS labels,
-    properties(n)       AS properties
+    {{{props_entries}}} AS properties
 LIMIT $limit
 """
 
@@ -1271,6 +1281,98 @@ MATCH (n) WHERE elementId(n) = nid
   AND n.delete_at IS NULL
 RETURN nid AS id, COUNT { (n)--() } AS rel_count
 """
+
+
+def build_forget_memory_count_query(label: str, with_end_user: bool = True) -> str:
+    """构建「按单个 label 统计激活值低于阈值的节点数」的 Cypher。
+
+    用于遗忘记忆计数，每个 label 独立查询以命中 label-property 索引。
+
+    Args:
+        label: 节点 label（Statement / ExtractedEntity / MemorySummary / Chunk）
+        with_end_user: 是否按 end_user_id 过滤
+
+    Returns:
+        Cypher 字符串；运行期参数为 ``$threshold`` (FLOAT)，
+        如果 with_end_user=True 还需要 ``$end_user_id`` (STRING)。
+    """
+    _ALLOWED_LABELS = frozenset({"Statement", "ExtractedEntity", "MemorySummary", "Chunk"})
+    if label not in _ALLOWED_LABELS:
+        raise ValueError(f"不支持的 label: {label!r}")
+
+    if with_end_user:
+        return f"""
+MATCH (n:{label})
+WHERE n.end_user_id = $end_user_id
+  AND n.activation_value IS NOT NULL
+  AND n.activation_value < $threshold
+RETURN count(n) AS cnt
+"""
+    else:
+        return f"""
+MATCH (n:{label})
+WHERE n.activation_value IS NOT NULL
+  AND n.activation_value < $threshold
+RETURN count(n) AS cnt
+"""
+
+
+def build_node_count_query(node_type: str, with_end_user: bool = True) -> str:
+    """构建按 label 统计节点数的 Cypher（用于 analytics_node_statistics）。
+
+    Args:
+        node_type: 节点 label
+        with_end_user: 是否按 end_user_id 过滤
+    """
+    if with_end_user:
+        return f"""
+MATCH (n:{node_type})
+WHERE n.end_user_id = $end_user_id
+RETURN count(n) as count
+"""
+    else:
+        return f"""
+MATCH (n:{node_type})
+RETURN count(n) as count
+"""
+
+
+def build_center_node_neighbors_query(depth: int) -> str:
+    """构建中心节点邻居查询 Cypher（Center_Mode）。
+
+    Args:
+        depth: 邻居跳数（已被调用方钳制为 1-3）
+    """
+    from app.core.memory.constants.graph_data_constants import DEPTH_HARD_MAX
+    safe_depth = max(1, min(int(depth), DEPTH_HARD_MAX))
+    return f"""
+MATCH path = (center)-[*1..{safe_depth}]-(connected)
+WHERE center.end_user_id = $end_user_id
+  AND elementId(center) = $center_node_id
+WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
+UNWIND all_nodes as n
+RETURN DISTINCT
+    elementId(n) as id,
+    labels(n) as labels,
+    properties(n) as properties
+LIMIT $limit
+"""
+
+
+# Q3：查询若干节点之间的有向关系
+# 参数：$node_ids (LIST<STRING>)
+GRAPH_EDGES_AMONG_NODES = """
+MATCH (n)-[r]->(m)
+WHERE elementId(n) IN $node_ids
+  AND elementId(m) IN $node_ids
+RETURN
+    elementId(r) as id,
+    elementId(n) as source,
+    elementId(m) as target,
+    type(r) as rel_type,
+    properties(r) as properties
+"""
+
 
 # DEPRECATED: Graph_Node_query 已被 build_graph_nodes_by_type_query() 取代，
 # 后者按 SUPPORTED_NODE_TYPES 内联 label 字面量，可命中 end_user_id 索引并支持
@@ -1684,7 +1786,8 @@ SET n += {
 RETURN n.id AS uuid
 """
 
-# 感知记忆与对话的关联边
+# 感知记忆与分块的关联边（Chunk→Perceptual）
+# 与 PERCEPTUAL_ENTITY_EDGE_SAVE 共存：前者按对话上下文建边，后者按语义相似度建边。
 PERCEPTUAL_CHUNK_EDGE_SAVE = """
 UNWIND $edges AS edge
 MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
@@ -1692,7 +1795,27 @@ MATCH (c:Chunk {id: edge.chunk_id, end_user_id: edge.end_user_id})
 WHERE c.delete_at IS NULL
 MERGE (c)-[r:HAS_PERCEPTUAL]->(p)
 ON CREATE SET r.end_user_id = edge.end_user_id,
-    r.created_at = edge.created_at
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at,
+    r.perceptual_type = edge.perceptual_type,
+    r.perceptual_type_id = edge.perceptual_type_id
+RETURN elementId(r) AS uuid
+"""
+
+# 感知记忆与实体的语义关联边（ExtractedEntity→Perceptual）
+# 与 PERCEPTUAL_CHUNK_EDGE_SAVE 共存，两者采用相同的关系属性 schema。
+# 方向：(ExtractedEntity)-[:HAS_PERCEPTUAL]->(Perceptual)
+PERCEPTUAL_ENTITY_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
+MATCH (e:ExtractedEntity {id: edge.entity_id, end_user_id: edge.end_user_id})
+WHERE e.delete_at IS NULL
+MERGE (e)-[r:HAS_PERCEPTUAL]->(p)
+ON CREATE SET r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at,
+    r.perceptual_type = edge.perceptual_type,
+    r.perceptual_type_id = edge.perceptual_type_id
 RETURN elementId(r) AS uuid
 """
 
@@ -2697,8 +2820,10 @@ RETURN elementId(r) AS uuid
 DELETE_NODE_BY_ELEMENT_ID = """
 MATCH (n)
 WHERE elementId(n) = $element_id AND n.end_user_id = $end_user_id
+WITH n, elementId(n) AS node_id, n.content AS content, n.statement AS statement,
+     n.name AS name, n.text AS text, labels(n) AS labels
 DETACH DELETE n
-RETURN count(n) AS deleted
+RETURN count(n) AS deleted, node_id, content, statement, name, text, labels
 """
 
 # ── Forgetting engine (soft-delete) ────────────────────────────────────
@@ -2718,11 +2843,18 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     RETURN count(n) AS deleted
 """
 
+FORGET_RECOVER_BY_ELEMENT_ID = """
+    MATCH (n)
+    WHERE elementId(n) = $element_id
+    SET n.delete_at = NULL, n.created_at = datetime($now)
+    RETURN n.id AS node_id, labels(n) AS labels
+"""
+
 FORGET_MIXED_CANDIDATES = """
 CALL () {
     MATCH (c:Chunk {end_user_id: $end_user_id})
     WHERE c.delete_at IS NULL
-    RETURN 'chunk' AS node_type, elementId(c) AS element_id, c.id AS node_id,
+    RETURN 'Chunk' AS node_type, elementId(c) AS element_id, c.content AS content,
            coalesce(c.created_at) AS sort_time, 0 AS extraction_count,
            null AS name, null AS _type
     ORDER BY sort_time ASC
@@ -2730,7 +2862,7 @@ CALL () {
     UNION ALL
     MATCH (s:Statement {end_user_id: $end_user_id})
     WHERE s.delete_at IS NULL
-    RETURN 'statement' AS node_type, elementId(s) AS element_id, s.id AS node_id,
+    RETURN 'Statement' AS node_type, elementId(s) AS element_id, s.statement AS content,
            coalesce(s.created_at) AS sort_time, 0 AS extraction_count,
            null AS name, null AS _type
     ORDER BY sort_time ASC
@@ -2739,7 +2871,7 @@ CALL () {
     MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
     WHERE e.delete_at IS NULL
       AND coalesce(e.extraction_count, 0) < $protection_threshold
-    RETURN 'entity' AS node_type, elementId(e) AS element_id, e.id AS node_id,
+    RETURN 'ExtractedEntity' AS node_type, elementId(e) AS element_id, e.name AS content,
            coalesce(e.created_at) AS sort_time,
            coalesce(e.extraction_count, 0) AS extraction_count,
            e.name AS name, e.entity_type AS _type

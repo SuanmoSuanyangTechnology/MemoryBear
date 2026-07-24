@@ -7003,6 +7003,10 @@ class WorkflowService:
             )
 
             accumulated_content = ""
+            # One workflow execution owns one assistant message.  Individual
+            # Answer/End outputs are kept as logical responses inside that
+            # message and are addressed by node_id.
+            output_contents: dict[str, str] = {}
             queued_intervention_events = []
 
             moderation_flagged = False
@@ -7038,7 +7042,11 @@ class WorkflowService:
                     if output_moderation.accumulate(chunk):
                         moderation_flagged = True
                         yield {"event": "message_replace",
-                               "data": {"content": output_moderation.preset_response}}
+                               "data": {
+                                   "message_id": str(message_id),
+                                   "node_id": event_data.get("node_id"),
+                                   "content": output_moderation.preset_response,
+                               }}
 
                         # 审查触发后，立即保存对话、更新执行状态，合成结束事件并退出循环
                         preset_response = output_moderation.preset_response
@@ -7120,7 +7128,11 @@ class WorkflowService:
                     if first_message_at is None:
                         first_message_at = time.perf_counter()
                         _log_run_stream_timing("first_message_chunk", content_len=len(event_data.get("content", "") or ""))
-                    accumulated_content += event_data.get("content", "") or ""
+                    chunk = event_data.get("content", "") or ""
+                    accumulated_content += chunk
+                    output_node_id = event_data.get("node_id")
+                    if output_node_id:
+                        output_contents[output_node_id] = output_contents.get(output_node_id, "") + chunk
 
                 if event_type == "cycle_item":
                     cycle_id = event_data.get("cycle_id")
@@ -7176,8 +7188,26 @@ class WorkflowService:
                         assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
+                        if output_contents:
+                            assistant_meta["outputs"] = [
+                                {
+                                    "node_id": output_node_id,
+                                    "content": content,
+                                    "status": "completed",
+                                }
+                                for output_node_id, content in output_contents.items()
+                            ]
                         # 输出审查触发时，将 moderation 信息写入 execution output_data
                         workflow_output_data = event.get("data") or {}
+                        if output_contents:
+                            workflow_output_data["outputs"] = [
+                                {
+                                    "node_id": output_node_id,
+                                    "content": content,
+                                    "status": "completed",
+                                }
+                                for output_node_id, content in output_contents.items()
+                            ]
                         if output_moderation and output_moderation.is_flagged:
                             workflow_output_data["moderation_flagged"] = True
                             workflow_output_data["preset_response"] = output_moderation.preset_response
@@ -7521,8 +7551,8 @@ class WorkflowService:
                                 ],
                             },
                         }
-                        # ★ 修复：execution 在 5787 close 后 detached，ORM 赋值 context 不落库，
-                        # 改用 Core query.update 显式更新 context，确保 resolved_interventions 持久化
+                        # ★ 修复：execution 在 5787 close 后 detached，通过异步 helper 重新开独立 Session
+                        # 持久化 context，确保 resolved_interventions 能落库。
                         execution = await self._patch_execution_async(
                             execution.execution_id,
                             context=_new_ctx,
@@ -9269,7 +9299,8 @@ class WorkflowService:
                     event_type = data.get("type", "node_chunk")
                     if event_type == "node_chunk":
                         async for msg_event in executor.event_handler.handle_node_chunk_event(data):
-                            full_content += msg_event["data"]["content"]
+                            if msg_event.get("event") == "message":
+                                full_content += msg_event["data"].get("content", "")
                             yield msg_event
                     elif event_type == "node_error":
                         async for error_event in executor.event_handler.handle_node_error_event(data):
@@ -9309,7 +9340,8 @@ class WorkflowService:
                         async for msg_event in executor.event_handler.handle_updates_event(
                             filtered_data, graph, execution_context.checkpoint_config
                         ):
-                            full_content += msg_event["data"]["content"]
+                            if msg_event.get("event") == "message":
+                                full_content += msg_event["data"].get("content", "")
                             yield msg_event
 
             logger.info(
@@ -9318,7 +9350,8 @@ class WorkflowService:
             )
 
             async for msg_event in executor.stream_coordinator.flush_remaining_chunk(executor.variable_pool):
-                full_content += msg_event["data"]["content"]
+                if msg_event.get("event") == "message":
+                    full_content += msg_event["data"].get("content", "")
                 yield msg_event
 
             graph_state = await graph.aget_state(execution_context.checkpoint_config)

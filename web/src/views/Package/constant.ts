@@ -36,6 +36,16 @@ export const billingUnits = [
     icon: 'end_user',
   },
   {
+    key: 'end_user_memory_limit',
+    unit: 'pcs', placeholder: 'numberPlaceholder',
+    icon: 'user_memory_limit',
+  },
+  {
+    key: 'pre_user_memory_write_qps_limit',
+    unit: 'ops', placeholder: 'numberPlaceholder',
+    icon: 'memory_write_qps',
+  },
+  {
     key: 'ontology_project_quota',
     unit: 'pcs', placeholder: 'numberPlaceholder',
     icon: 'ontology',

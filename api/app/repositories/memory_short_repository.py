@@ -81,6 +81,20 @@ class ShortTermMemoryRepository:
             db_logger.error(f"查询短期记忆记录 {count} 时出错: {str(e)}")
             raise
 
+    async def count_by_user_id_async(self, end_user_id: str) -> int:
+        """统计用户的短期记忆数量（异步版本）"""
+        from sqlalchemy import select, func
+        try:
+            result = await self.db.execute(
+                select(func.count()).select_from(ShortTermMemory).where(
+                    ShortTermMemory.end_user_id == end_user_id
+                )
+            )
+            return int(result.scalar_one() or 0)
+        except Exception as e:
+            db_logger.error(f"异步查询短期记忆数量出错: end_user_id={end_user_id}, error={str(e)}")
+            raise
+
 
     def get_latest_by_user_id(self, end_user_id: str, limit: int = 5) -> List[ShortTermMemory]:
         """获取用户最新的短期记忆记录

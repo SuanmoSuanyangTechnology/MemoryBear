@@ -105,19 +105,18 @@ class StartNode(BaseNode):
             var_type = var_def.type
             ui_type = var_def.ui_type
 
+            # 布尔(boolean/checkbox)类型：前端未勾选时提交的是 `false` 而非 `None`，
+            # 而 API 调用方可能完全省略该字段，或显式传 `null`。
+            # `false` 是布尔的合法必填值，因此“字段缺失/为 null”应回退到默认值
+            # （通常为 `False`），而不是当作“缺少必需变量”报错，保持与前端行为一致。
+            provided = var_name in input_variables
+            value = input_variables.get(var_name) if provided else None
+            if var_type == VariableType.BOOLEAN and value is None:
+                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(VariableType.BOOLEAN)
+                provided = True
+
             # 检查变量是否存在
-            if var_name in input_variables:
-                value = input_variables[var_name]
-
-                # None 值按类型回退到默认值，避免写入 StringVariable(None) 等报错
-                if value is None:
-                    if var_def.required and var_def.default is None:
-                        raise ValueError(
-                            f"缺少必需的输入变量: {var_name}"
-                            + (f" ({var_def.description})" if var_def.description else "")
-                        )
-                    value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
-
+            if provided:
                 # select: 值必须在 options 列表中
                 if ui_type == "select" and var_def.options:
                     if value not in var_def.options:

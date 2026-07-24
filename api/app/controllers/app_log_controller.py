@@ -1,5 +1,6 @@
 """应用日志（消息记录）接口"""
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -26,6 +27,8 @@ def list_app_logs(
         pagesize: int = Query(20, ge=1, le=100),
         is_draft: Optional[bool] = Query(None, description="是否草稿会话（不传则返回全部）"),
         keyword: Optional[str] = Query(None, description="搜索关键词（匹配消息内容）"),
+        start_date: Optional[datetime] = Query(None, description="开始时间（ISO 8601，UTC）"),
+        end_date: Optional[datetime] = Query(None, description="结束时间（ISO 8601，UTC）"),
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -35,6 +38,7 @@ def list_app_logs(
     - is_draft=True 只返回草稿会话
     - is_draft=False 只返回发布会话
     - 支持按 keyword 搜索（匹配消息内容）
+    - 支持 start_date / end_date 时间范围筛选（基于会话创建时间，走索引）
     - 按最新更新时间倒序排列
     """
     workspace_id = current_user.current_workspace_id
@@ -52,6 +56,8 @@ def list_app_logs(
         pagesize=pagesize,
         is_draft=is_draft,
         keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
     )
 
     items = [AppLogConversation.model_validate(c) for c in conversations]

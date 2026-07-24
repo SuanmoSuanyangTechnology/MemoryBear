@@ -13,7 +13,7 @@ from app.db import get_db, get_db_context
 from app.dependencies import get_current_user
 from app.models.user_model import User
 from app.schemas.memory_storage_schema import (
-    ConfigPilotRun,
+    PilotRunInput,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
@@ -78,17 +78,18 @@ async def get_storage_info(
 
 @router.post("/pilot_run", response_model=None)
 async def pilot_run(
-        payload: ConfigPilotRun,
+        payload: PilotRunInput,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
 
+    # v0.3.13: 入参改为 QA 格式 messages（与 /write 接口对齐），不再接收 dialogue_text / custom_text
+    total_files = sum(len(m.files) for m in payload.messages if m.files)
     api_logger.info(
         f"Pilot run requested: config_id={payload.config_id}, "
-        f"dialogue_text_length={len(payload.dialogue_text)}, "
-        f"custom_text_length={len(payload.custom_text) if payload.custom_text else 0}"
+        f"messages_count={len(payload.messages)}, files_count={total_files}"
     )
     # resolve_config_id 在 pilot_run_stream 内部的短 session 里执行
     # controller 层不再注入 db，避免 session 跨越整个流式响应生命周期

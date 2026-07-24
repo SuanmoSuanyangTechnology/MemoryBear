@@ -114,7 +114,7 @@ def verify_unmark_safe(conversation_id: str) -> bool:
 # 派发函数：各入口点使用
 # ──────────────────────────────────────────────
 
-def push_write_task(
+async def push_write_task(
     end_user_id: str,
     target_message: dict,
     context_before: List[dict],
@@ -153,7 +153,7 @@ def push_write_task(
     # 记录任务派发时刻，作为 pipeline 内 dialog_at 的第二级兜底
     dispatch_at = datetime.now(timezone.utc).isoformat()
 
-    msg_id = celery_scheduler.push_task(
+    msg_id = await celery_scheduler.push_task(
         "app.core.memory.agent.write_message",
         end_user_id,
         {
@@ -286,7 +286,7 @@ async def dispatch_api_service_async(
             after_end = user_indices[after_user_p] + 1
             context_after = written_mms[idx + 1:after_end]
 
-        msg_id = push_write_task(
+        msg_id = await push_write_task(
             end_user_id=end_user_id,
             target_message=msg,
             context_before=context_before,
@@ -452,7 +452,7 @@ def _resolve_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
         return None
 
 
-def dispatch_flush_conversation(conversation_id: str) -> int:
+async def dispatch_flush_conversation(conversation_id: str) -> int:
     """Flush 兜底任务派发：处理单个对话的所有未写入消息。
 
     仅服务 agent/workflow 路径。API/MCP 消息 conversation_id=NULL 不会被扫到。
@@ -525,7 +525,7 @@ def dispatch_flush_conversation(conversation_id: str) -> int:
                 skipped_non_user += 1
                 continue
 
-            if dispatch_single_message(
+            if await dispatch_single_message(
                 conversation_id=conversation_id,
                 target_seq=target_seq,
                 end_user_id=end_user_id,
@@ -624,7 +624,7 @@ async def check_sliding_window_and_dispatch(
             context_after = [message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)]
 
         # 派发写入任务
-        push_write_task(
+        await push_write_task(
             end_user_id=end_user_id,
             target_message=msg,
             context_before=context_before,
@@ -641,7 +641,7 @@ async def check_sliding_window_and_dispatch(
         return
 
 
-def dispatch_single_message(
+async def dispatch_single_message(
     conversation_id: str,
     target_seq: int,
     end_user_id: str,
@@ -673,7 +673,7 @@ def dispatch_single_message(
         )
         return False
 
-    push_write_task(
+    await push_write_task(
         end_user_id=end_user_id,
         target_message=msg_dict,
         context_before=context_before,
@@ -733,7 +733,7 @@ async def dispatch_mcp_write(
     target_msg = written[0]
     target_seq = target_msg["message_seq"]
 
-    msg_id = push_write_task(
+    msg_id = await push_write_task(
         end_user_id=end_user_id,
         target_message=target_msg,
         context_before=[],

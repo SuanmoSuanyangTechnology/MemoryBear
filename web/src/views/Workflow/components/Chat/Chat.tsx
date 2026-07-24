@@ -210,6 +210,10 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
     setChatList(prev => mapLastVersion(prev, (current) => ({
       ...current,
       content,
+      meta_data: {
+        ...(current.meta_data || {}),
+        outputs: undefined
+      }
     })))
   }, [])
 

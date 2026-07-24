@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import redis
-from celery.exceptions import SoftTimeLimitExceeded
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
@@ -2921,12 +2920,8 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     name="app.tasks.do_refresh_insight_summary_cache",
     bind=True,
     ignore_result=False,
-    max_retries=2,                          # LLM 偶发失败/软超时允许重试
-    autoretry_for=(SoftTimeLimitExceeded,),
-    retry_backoff=True,
-    retry_backoff_max=300,
-    retry_jitter=True,
-    acks_late=False,                        # 避免 worker 崩溃后被重投跑两次
+    max_retries=0,
+    acks_late=False,
     time_limit=900,                         # 15 分钟硬超时
     soft_time_limit=840,                    # 14 分钟软超时
 )
@@ -2964,9 +2959,15 @@ def do_refresh_insight_summary_cache(
         }
 
     loop = set_asyncio_event_loop()
-    will_retry = False
     try:
         result = loop.run_until_complete(_run())
+        # 双失败 = 完全失败：raise 让 Celery 标记 FAILURE（便于 Flower 一眼发现）
+        if not result["insight_success"] and not result["summary_success"]:
+            raise RuntimeError(
+                f"insight and summary both failed: "
+                f"insight_error={result.get('insight_error')}, "
+                f"summary_error={result.get('summary_error')}"
+            )
         result["status"] = (
             "success" if (result["insight_success"] and result["summary_success"]) else "partial"
         )
@@ -2975,26 +2976,16 @@ def do_refresh_insight_summary_cache(
             f"insight={result['insight_success']} summary={result['summary_success']} "
             f"耗时={time.time() - start_time:.1f}s"
         )
-    except SoftTimeLimitExceeded:
-        # 还有重试次数则交给 autoretry_for 重试；标记 will_retry，避免提前删除在途锁
-        will_retry = self.request.retries < self.max_retries
-        raise
-    except Exception as e:
-        logger.error(
-            f"do_refresh_insight_summary_cache 失败 user={end_user_id}: {e}", exc_info=True
-        )
-        result = {"status": "failed", "error": str(e)}
+    # 异常不再 catch，直接冒出 → Celery FAILURE
     finally:
         _shutdown_loop_gracefully(loop)
         # 删除在途标记：放行下一轮 scan 对该用户的派发。
-        # 但若本次因软超时将要重试，则保留 key 直到重试结束，避免退避窗口内被 scan 重复派发。
-        if not will_retry:
-            try:
-                _rc = get_sync_redis_client()
-                if _rc is not None:
-                    _rc.delete(inflight_key)
-            except Exception:
-                pass
+        try:
+            _rc = get_sync_redis_client()
+            if _rc is not None:
+                _rc.delete(inflight_key)
+        except Exception:
+            pass
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
@@ -3068,16 +3059,13 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
                 "duration_seconds": duration
             }
 
-    # 运行异步函数
-    try:
-        return asyncio.run(_process_users())
-    except Exception as e:
-        logger.error(f"遗忘周期任务失败: {e}", exc_info=True)
-        return {
-            "status": "FAILED",
-            "message": f"任务失败: {str(e)}",
-            "duration_seconds": time.time() - start_time
-        }
+    # 直接运行异步函数，全局异常自然冒出 → Celery FAILURE；
+    # 内层逐用户 try/except 已在 _process_users 中隔离单用户失败。
+    # asyncio.run 自行管理 event loop 生命周期，无需手动清理。
+    result = asyncio.run(_process_users())
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    return result
 
 
 _FORGET_CANDIDATES_KEY = "forget:candidates"
@@ -3264,240 +3252,216 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
         user_results = []
 
         with get_db_context() as db:
+            repo = ImplicitEmotionsStorageRepository(db)
+
+            # 先统计总数用于日志
+            from sqlalchemy import func
+            total_users = db.execute(
+                select(func.count()).select_from(ImplicitEmotionsStorage)
+            ).scalar() or 0
+            logger.info(f"表中存量用户总数: {total_users}，开始时间轴筛选")
+
+            # 构建 Redis 同步客户端，用于时间轴筛选
+            _redis_client = get_sync_redis_client()
+
+            # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
+            # Redis 不可用时回退到全量处理
             try:
-                repo = ImplicitEmotionsStorageRepository(db)
+                refresh_iter = repo.get_users_needing_refresh(_redis_client, batch_size=100)
+            except TimeFilterUnavailableError as e:
+                logger.warning(f"时间轴筛选不可用，回退到全量刷新: {e}")
+                refresh_iter = repo.get_all_user_ids(batch_size=100)
 
-                # 先统计总数用于日志
-                from sqlalchemy import func
-                total_users = db.execute(
-                    select(func.count()).select_from(ImplicitEmotionsStorage)
-                ).scalar() or 0
-                logger.info(f"表中存量用户总数: {total_users}，开始时间轴筛选")
+            for end_user_id in refresh_iter:
+                logger.info(f"开始处理用户: {end_user_id}")
+                user_start_time = time.time()
 
-                # 构建 Redis 同步客户端，用于时间轴筛选
-                _redis_client = get_sync_redis_client()
+                implicit_success = False
+                emotion_success = False
+                errors = []
 
-                # 只处理 last_done > updated_at 的用户（有新记忆写入的用户）
-                # Redis 不可用时回退到全量处理
                 try:
-                    refresh_iter = repo.get_users_needing_refresh(_redis_client, batch_size=100)
-                except TimeFilterUnavailableError as e:
-                    logger.warning(f"时间轴筛选不可用，回退到全量刷新: {e}")
-                    refresh_iter = repo.get_all_user_ids(batch_size=100)
-
-                for end_user_id in refresh_iter:
-                    logger.info(f"开始处理用户: {end_user_id}")
-                    user_start_time = time.time()
-
-                    implicit_success = False
-                    emotion_success = False
-                    errors = []
-
+                    # 更新隐性记忆画像
                     try:
-                        # 更新隐性记忆画像
-                        try:
-                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
-                            await implicit_service.save_profile_cache(
-                                end_user_id=end_user_id,
-                                profile_data=profile_data,
-                                db=db
-                            )
-                            implicit_success = True
-                            logger.info(f"成功更新用户 {end_user_id} 的隐性记忆画像")
-                        except Exception as e:
-                            error_msg = f"隐性记忆更新失败: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(f"用户 {end_user_id} {error_msg}")
-
-                        # 更新情绪建议
-                        try:
-                            emotion_service = EmotionAnalyticsService()
-                            suggestions_data = await emotion_service.generate_emotion_suggestions(
-                                end_user_id=end_user_id,
-                                db=db,
-                                language="zh"
-                            )
-                            await emotion_service.save_suggestions_cache(
-                                end_user_id=end_user_id,
-                                suggestions_data=suggestions_data,
-                                db=db
-                            )
-                            emotion_success = True
-                            logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
-                        except Exception as e:
-                            error_msg = f"情绪建议更新失败: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(f"用户 {end_user_id} {error_msg}")
-
-                        # 统计结果
-                        if implicit_success:
-                            successful_implicit += 1
-                        if emotion_success:
-                            successful_emotion += 1
-                        if not implicit_success and not emotion_success:
-                            failed += 1
-
-                        user_elapsed = time.time() - user_start_time
-
-                        # 记录用户处理结果
-                        user_result = {
-                            "end_user_id": end_user_id,
-                            "implicit_success": implicit_success,
-                            "emotion_success": emotion_success,
-                            "errors": errors,
-                            "elapsed_time": user_elapsed
-                        }
-                        user_results.append(user_result)
-
-                        logger.info(
-                            f"用户 {end_user_id} 处理完成: "
-                            f"隐性记忆={'成功' if implicit_success else '失败'}, "
-                            f"情绪建议={'成功' if emotion_success else '失败'}, "
-                            f"耗时={user_elapsed:.2f}秒"
+                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                        profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                        await implicit_service.save_profile_cache(
+                            end_user_id=end_user_id,
+                            profile_data=profile_data,
+                            db=db
                         )
-
+                        implicit_success = True
+                        logger.info(f"成功更新用户 {end_user_id} 的隐性记忆画像")
                     except Exception as e:
-                        # 单个用户失败不影响其他用户（错误隔离）
+                        error_msg = f"隐性记忆更新失败: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(f"用户 {end_user_id} {error_msg}")
+
+                    # 更新情绪建议
+                    try:
+                        emotion_service = EmotionAnalyticsService()
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id,
+                            db=db,
+                            language="zh"
+                        )
+                        await emotion_service.save_suggestions_cache(
+                            end_user_id=end_user_id,
+                            suggestions_data=suggestions_data,
+                            db=db
+                        )
+                        emotion_success = True
+                        logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+                    except Exception as e:
+                        error_msg = f"情绪建议更新失败: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(f"用户 {end_user_id} {error_msg}")
+
+                    # 统计结果
+                    if implicit_success:
+                        successful_implicit += 1
+                    if emotion_success:
+                        successful_emotion += 1
+                    if not implicit_success and not emotion_success:
                         failed += 1
-                        user_elapsed = time.time() - user_start_time
-                        error_info = {
-                            "end_user_id": end_user_id,
-                            "implicit_success": False,
-                            "emotion_success": False,
-                            "errors": [str(e)],
-                            "elapsed_time": user_elapsed
-                        }
-                        user_results.append(error_info)
-                        logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
 
-                # ---- 当天新增用户兜底初始化 ----
-                new_users_initialized = 0
-                new_users_failed = 0
-                logger.info("开始处理当天新增用户的兜底初始化")
+                    user_elapsed = time.time() - user_start_time
 
-                for end_user_id in repo.get_new_user_ids_today(batch_size=100):
-                    logger.info(f"开始初始化新用户: {end_user_id}")
-                    user_start_time = time.time()
-                    implicit_success = False
-                    emotion_success = False
-                    errors = []
+                    # 记录用户处理结果
+                    user_result = {
+                        "end_user_id": end_user_id,
+                        "implicit_success": implicit_success,
+                        "emotion_success": emotion_success,
+                        "errors": errors,
+                        "elapsed_time": user_elapsed
+                    }
+                    user_results.append(user_result)
+
+                    logger.info(
+                        f"用户 {end_user_id} 处理完成: "
+                        f"隐性记忆={'成功' if implicit_success else '失败'}, "
+                        f"情绪建议={'成功' if emotion_success else '失败'}, "
+                        f"耗时={user_elapsed:.2f}秒"
+                    )
+
+                except Exception as e:
+                    # 单个用户失败不影响其他用户（错误隔离）
+                    failed += 1
+                    user_elapsed = time.time() - user_start_time
+                    error_info = {
+                        "end_user_id": end_user_id,
+                        "implicit_success": False,
+                        "emotion_success": False,
+                        "errors": [str(e)],
+                        "elapsed_time": user_elapsed
+                    }
+                    user_results.append(error_info)
+                    logger.error(f"处理用户 {end_user_id} 时出错: {str(e)}")
+
+            # ---- 当天新增用户兜底初始化 ----
+            new_users_initialized = 0
+            new_users_failed = 0
+            logger.info("开始处理当天新增用户的兜底初始化")
+
+            for end_user_id in repo.get_new_user_ids_today(batch_size=100):
+                logger.info(f"开始初始化新用户: {end_user_id}")
+                user_start_time = time.time()
+                implicit_success = False
+                emotion_success = False
+                errors = []
+
+                try:
+                    try:
+                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
+                        profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                        await implicit_service.save_profile_cache(
+                            end_user_id=end_user_id, profile_data=profile_data, db=db
+                        )
+                        implicit_success = True
+                        logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
+                    except Exception as e:
+                        errors.append(f"隐性记忆初始化失败: {str(e)}")
+                        logger.error(f"新用户 {end_user_id} 隐性记忆初始化失败: {e}")
 
                     try:
-                        try:
-                            implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-                            profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
-                            await implicit_service.save_profile_cache(
-                                end_user_id=end_user_id, profile_data=profile_data, db=db
-                            )
-                            implicit_success = True
-                            logger.info(f"成功初始化新用户 {end_user_id} 的隐性记忆画像")
-                        except Exception as e:
-                            errors.append(f"隐性记忆初始化失败: {str(e)}")
-                            logger.error(f"新用户 {end_user_id} 隐性记忆初始化失败: {e}")
-
-                        try:
-                            emotion_service = EmotionAnalyticsService()
-                            suggestions_data = await emotion_service.generate_emotion_suggestions(
-                                end_user_id=end_user_id, db=db, language="zh"
-                            )
-                            await emotion_service.save_suggestions_cache(
-                                end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
-                            )
-                            emotion_success = True
-                            logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
-                        except Exception as e:
-                            errors.append(f"情绪建议初始化失败: {str(e)}")
-                            logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
-
-                        if implicit_success or emotion_success:
-                            new_users_initialized += 1
-                        else:
-                            new_users_failed += 1
-
-                        user_elapsed = time.time() - user_start_time
-                        user_results.append({
-                            "end_user_id": end_user_id,
-                            "type": "new_user_init",
-                            "implicit_success": implicit_success,
-                            "emotion_success": emotion_success,
-                            "errors": errors,
-                            "elapsed_time": user_elapsed
-                        })
-
+                        emotion_service = EmotionAnalyticsService()
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id, db=db, language="zh"
+                        )
+                        await emotion_service.save_suggestions_cache(
+                            end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                        )
+                        emotion_success = True
+                        logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
                     except Exception as e:
+                        errors.append(f"情绪建议初始化失败: {str(e)}")
+                        logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
+
+                    if implicit_success or emotion_success:
+                        new_users_initialized += 1
+                    else:
                         new_users_failed += 1
-                        user_elapsed = time.time() - user_start_time
-                        user_results.append({
-                            "end_user_id": end_user_id,
-                            "type": "new_user_init",
-                            "implicit_success": False,
-                            "emotion_success": False,
-                            "errors": [str(e)],
-                            "elapsed_time": user_elapsed
-                        })
-                        logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
 
-                logger.info(f"当天新增用户兜底初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}")
-                # ---- 新增用户兜底初始化结束 ----
+                    user_elapsed = time.time() - user_start_time
+                    user_results.append({
+                        "end_user_id": end_user_id,
+                        "type": "new_user_init",
+                        "implicit_success": implicit_success,
+                        "emotion_success": emotion_success,
+                        "errors": errors,
+                        "elapsed_time": user_elapsed
+                    })
 
-                logger.info(
-                    f"隐性记忆和情绪数据更新定时任务完成: "
-                    f"存量用户总数={total_users}, "
-                    f"隐性记忆成功={successful_implicit}, "
-                    f"情绪建议成功={successful_emotion}, "
-                    f"存量失败={failed}, "
-                    f"新增用户初始化成功={new_users_initialized}, "
-                    f"新增用户初始化失败={new_users_failed}"
-                )
+                except Exception as e:
+                    new_users_failed += 1
+                    user_elapsed = time.time() - user_start_time
+                    user_results.append({
+                        "end_user_id": end_user_id,
+                        "type": "new_user_init",
+                        "implicit_success": False,
+                        "emotion_success": False,
+                        "errors": [str(e)],
+                        "elapsed_time": user_elapsed
+                    })
+                    logger.error(f"初始化新用户 {end_user_id} 时出错: {str(e)}")
 
-                return {
-                    "status": "SUCCESS",
-                    "message": (
-                        f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
-                        f"当天新增用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
-                    ),
-                    "total_users": total_users,
-                    "successful_implicit": successful_implicit,
-                    "successful_emotion": successful_emotion,
-                    "failed": failed,
-                    "new_users_initialized": new_users_initialized,
-                    "new_users_failed": new_users_failed,
-                    "user_results": user_results[:50]
-                }
+            logger.info(f"当天新增用户兜底初始化完成: 成功={new_users_initialized}, 失败={new_users_failed}")
+            # ---- 新增用户兜底初始化结束 ----
 
-            except Exception as e:
-                logger.error(f"隐性记忆和情绪数据更新定时任务执行失败: {str(e)}")
-                return {
-                    "status": "FAILURE",
-                    "error": str(e),
-                    "total_users": total_users,
-                    "successful_implicit": successful_implicit,
-                    "successful_emotion": successful_emotion,
-                    "failed": failed,
-                    "new_users_initialized": 0,
-                    "new_users_failed": 0,
-                    "user_results": user_results[:50]
-                }
+            logger.info(
+                f"隐性记忆和情绪数据更新定时任务完成: "
+                f"存量用户总数={total_users}, "
+                f"隐性记忆成功={successful_implicit}, "
+                f"情绪建议成功={successful_emotion}, "
+                f"存量失败={failed}, "
+                f"新增用户初始化成功={new_users_initialized}, "
+                f"新增用户初始化失败={new_users_failed}"
+            )
 
+            return {
+                "status": "SUCCESS",
+                "message": (
+                    f"存量用户 {total_users} 个，隐性记忆 {successful_implicit} 个成功，情绪建议 {successful_emotion} 个成功；"
+                    f"当天新增用户初始化 {new_users_initialized} 个成功，{new_users_failed} 个失败"
+                ),
+                "total_users": total_users,
+                "successful_implicit": successful_implicit,
+                "successful_emotion": successful_emotion,
+                "failed": failed,
+                "new_users_initialized": new_users_initialized,
+                "new_users_failed": new_users_failed,
+                "user_results": user_results[:50]
+            }
+
+    loop = set_asyncio_event_loop()
     try:
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        loop = set_asyncio_event_loop()
-
         result = loop.run_until_complete(_run())
-        elapsed_time = time.time() - start_time
-        result["elapsed_time"] = elapsed_time
+        result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
-
         return result
-    except Exception as e:
-        elapsed_time = time.time() - start_time
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 # =============================================================================
@@ -3591,20 +3555,20 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
             "failed": failed,
         }
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
-
         result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed to initialize implicit emotions"
+            )
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
         return result
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 # =============================================================================
@@ -3646,7 +3610,29 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
         service = MemoryAgentService()
 
+        # 预校验：逐个解析 UUID，无效格式直接记 failed 跳过
+        valid_uuids: list[uuid.UUID] = []
+        invalid_ids: list[str] = []
+        for eid in end_user_ids:
+            try:
+                valid_uuids.append(uuid.UUID(eid))
+            except (ValueError, AttributeError):
+                invalid_ids.append(eid)
+                failed += 1
+                logger.warning(f"用户 {eid} UUID 格式无效，跳过兴趣分布初始化")
+
+        # 查询 DB 中实际存在的 end_user_id
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+            existing_ids = EndUserRepository(db).filter_existing_ids(valid_uuids)
+
         for end_user_id in end_user_ids:
+            # 存在性校验：不存在的用户直接记失败
+            if end_user_id not in existing_ids:
+                failed += 1
+                logger.warning(f"用户 {end_user_id} 不存在，跳过兴趣分布初始化")
+                continue
+
             # 存在性检查：缓存有数据则跳过
             cached = await InterestMemoryCache.get_interest_distribution(
                 end_user_id=end_user_id,
@@ -3683,20 +3669,20 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
             "failed": failed,
         }
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
-
         result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed to initialize interest distribution"
+            )
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
         return result
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 @celery_app.task(
@@ -3806,7 +3792,7 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     name="app.tasks.run_incremental_clustering",
     bind=True,
     ignore_result=False,
-    max_retries=2,
+    max_retries=0,
     acks_late=False,
     time_limit=1800,  # 30分钟硬超时
     soft_time_limit=1700,
@@ -3875,8 +3861,8 @@ def run_incremental_clustering(
         finally:
             await connector.close()
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
@@ -3887,20 +3873,9 @@ def run_incremental_clustering(
         )
 
         return result
-    except Exception as e:
-        elapsed_time = time.time() - start_time
-        logger.error(
-            f"[IncrementalClustering] 任务失败 - task_id={self.request.id}, "
-            f"elapsed_time={elapsed_time:.2f}s, error={str(e)}",
-            exc_info=True
-        )
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "end_user_id": end_user_id,
-            "elapsed_time": elapsed_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 @celery_app.task(
@@ -4044,20 +4019,21 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             "failed": failed,
         }
 
+    loop = set_asyncio_event_loop()
     try:
-        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed in community clustering"
+            )
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
         return result
-
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE；
+    # 内层 _run() 中 connector.close() 已由 try/finally 保证释放。
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 # ─── User Metadata Extraction Task ───────────────────────────────────────────
@@ -4101,6 +4077,9 @@ def flush_conversation_task(self) -> None:
     from app.core.memory.memory_service import MemoryService as _MS
     _dispatch_flush = _MS.dispatch_flush_conversation
     from app.models.conversation_model import Conversation
+
+    # Ensure an event loop is available for awaiting the async dispatch function.
+    _loop = set_asyncio_event_loop()
 
     redis_client = get_sync_redis_client()
     if redis_client is None:
@@ -4215,7 +4194,7 @@ def flush_conversation_task(self) -> None:
 
             # 派发单个对话的兜底写入
             try:
-                _dispatch_flush(conv_id_str)
+                _loop.run_until_complete(_dispatch_flush(conv_id_str))
                 dispatched += 1
                 logger.info(f"[FlushScan] 已处理: conv={conv_id_str}")
             except Exception as e:

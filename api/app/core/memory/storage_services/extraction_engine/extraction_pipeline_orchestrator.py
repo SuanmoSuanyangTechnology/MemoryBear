@@ -328,33 +328,6 @@ class NewExtractionOrchestrator:
             "embedding_output": None,
         }
 
-        if self.progress_callback:
-            statements_count = sum(
-                len(stmts)
-                for chunk_stmts in all_stmt_results.values()
-                for stmts in chunk_stmts.values()
-            )
-            entities_count = sum(
-                len(t_out.entities)
-                for stmt_triplets in all_triplet_results.values()
-                for t_out in stmt_triplets.values()
-            )
-            triplets_count = sum(
-                len(t_out.triplets)
-                for stmt_triplets in all_triplet_results.values()
-                for t_out in stmt_triplets.values()
-            )
-            await self.progress_callback(
-                "knowledge_extraction_complete",
-                "知识抽取完成",
-                {
-                    "entities_count": entities_count,
-                    "statements_count": statements_count,
-                    "temporal_ranges_count": 0,
-                    "triplets_count": triplets_count,
-                },
-            )
-
         logger.debug("Pilot extraction complete")
         return dialog_data_list
 
@@ -568,7 +541,25 @@ class NewExtractionOrchestrator:
                     (dialog.id, chunk.id, chunk_speaker, ctx, inp)
                 )
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # 开始陈述句提取（事件开始）
+        if self.progress_callback:
+            await self.progress_callback(
+                "extract_statement",
+                "开始提取陈述句",
+                {"chunk_count": len(tasks)},
+            )
+
+        # 使用 as_completed 替代 gather：每个 chunk 一完成就立刻 emit SSE，避免长时 LLM 调用期间 SSE 通道静默导致的代理/前端超时（原 gather 版本会等
+        async def _run_one_stmt(idx: int, coro: Any) -> Tuple[int, Any]:
+            try:
+                res = await coro
+            except BaseException as exc:  # noqa: BLE001 — 保留异常供下游 critical-step 语义处理
+                return idx, exc
+            return idx, res
+
+        wrapped_stmt_futs = [
+            asyncio.ensure_future(_run_one_stmt(i, t)) for i, t in enumerate(tasks)
+        ]
 
         # Organise into nested dict;同时记录每个 chunk 的输入上下文，供 snapshot 落盘核查。
         stmt_map: Dict[str, Dict[str, List[StatementStepOutput]]] = {}
@@ -577,7 +568,8 @@ class NewExtractionOrchestrator:
         # 流程并向上抛出。否则异常会在此被静默吞掉（设为 []），导致 WriteResult.status
         # 仍为 "success"，最终 Celery 任务被错误标记为 SUCCESS（Flower 显示成功）。
         first_error: BaseException | None = None
-        for i, result in enumerate(results):
+        for fut in asyncio.as_completed(wrapped_stmt_futs):
+            i, result = await fut
             dialog_id, chunk_id, speaker, _, inp = task_meta[i]
             if dialog_id not in stmt_map:
                 stmt_map[dialog_id] = {}
@@ -595,18 +587,27 @@ class NewExtractionOrchestrator:
                     s.speaker = speaker
                 stmt_map[dialog_id][chunk_id] = stmts
                 if self.progress_callback:
-                    # Frontend consumes knowledge_extraction_result with data.statement.
+                    # Frontend consumes extract_statement_result with data.statement.
                     # Emit one event per statement to keep payload contract simple.
                     for s in stmts:
                         await self.progress_callback(
-                            "knowledge_extraction_result",
-                            "知识抽取中",
+                            "extract_statement_result",
+                            "陈述句提取中",
                             {"statement": s.statement_text},
                         )
 
         # Stash the inputs map so the orchestrator can attach it to
         # ``_last_stage_outputs`` for snapshot/debugging.
         self._last_statement_inputs = stmt_inputs_map
+
+        # 陈述句提取完成（事件结束）
+        if self.progress_callback:
+            _stmt_count = sum(len(stmts) for dchunks in stmt_map.values() for stmts in dchunks.values())
+            await self.progress_callback(
+                "extract_statement_complete",
+                "陈述句提取完成",
+                {"statements_count": _stmt_count},
+            )
 
         # critical step 失败 → 中断 pipeline，让上层（WritePipeline → MemoryService.write
         # → write_message_task）感知失败并将 Celery 任务标记为 FAILURE / 触发重试。
@@ -641,10 +642,29 @@ class NewExtractionOrchestrator:
                     tasks.append(self.triplet_step.run(inp))
                     task_meta.append((dialog.id, stmt.statement_id))
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # 开始三元组提取（事件开始）
+        if self.progress_callback:
+            await self.progress_callback(
+                "extract_triplet",
+                "开始提取三元组",
+                {"statement_count": len(tasks)},
+            )
+
+        # 使用 as_completed 替代 gather：每个 statement 一完成就立刻 emit SSE，避免慢 statement 拖住整批进度反馈
+        async def _run_one_triplet(idx: int, coro: Any) -> Tuple[int, Any]:
+            try:
+                res = await coro
+            except BaseException as exc:  # noqa: BLE001 — 失败降级为默认输出，不上抛
+                return idx, exc
+            return idx, res
+
+        wrapped_triplet_futs = [
+            asyncio.ensure_future(_run_one_triplet(i, t)) for i, t in enumerate(tasks)
+        ]
 
         triplet_map: Dict[str, Dict[str, TripletStepOutput]] = {}
-        for i, result in enumerate(results):
+        for fut in asyncio.as_completed(wrapped_triplet_futs):
+            i, result = await fut
             dialog_id, stmt_id = task_meta[i]
             if dialog_id not in triplet_map:
                 triplet_map[dialog_id] = {}
@@ -659,23 +679,58 @@ class NewExtractionOrchestrator:
             else:
                 triplet_map[dialog_id][stmt_id] = result
                 if self.progress_callback:
+                    # 截断防护：单个 statement 可能抽出 >100 实体，全量 emit 会使 SSE
+                    _ENTITY_EMIT_LIMIT = 20
+                    _RELATION_EMIT_LIMIT = 10
                     await self.progress_callback(
                         "extract_triplet_result",
                         f"statement {stmt_id} 提取完成",
                         {
                             "statement_id": stmt_id,
-                            "triplet_count": len(result.triplets),
-                            "entity_count": len(result.entities),
-                            "triplets": [
+                            "entity_creation": [
                                 {
-                                    "subject_name": t.subject_name,
-                                    "predicate": t.predicate,
-                                    "object_name": t.object_name,
+                                    "entity_index": idx + 1,
+                                    "name": e.name,
+                                    "type": e.type,
+                                    "description": e.description,
                                 }
-                                for t in result.triplets[:5]
+                                for idx, e in enumerate(result.entities[:_ENTITY_EMIT_LIMIT])
                             ],
+                            "entity_total": len(result.entities),
+                            "relationship_creation": [
+                                {
+                                    "relationship_index": idx + 1,
+                                    "source_entity": t.subject_name,
+                                    "relation_type": t.predicate,
+                                    "target_entity": t.object_name,
+                                    "relationship_text": f"{t.subject_name} -[{t.predicate}]-> {t.object_name}",
+                                }
+                                for idx, t in enumerate(result.triplets[:_RELATION_EMIT_LIMIT])
+                            ],
+                            "relationship_total": len(result.triplets),
                         },
                     )
+
+        # 三元组提取完成（事件结束）
+        if self.progress_callback:
+            _entities_count = sum(
+                len(t_out.entities)
+                for stmt_triplets in triplet_map.values()
+                for t_out in stmt_triplets.values()
+            )
+            _triplets_count = sum(
+                len(t_out.triplets)
+                for stmt_triplets in triplet_map.values()
+                for t_out in stmt_triplets.values()
+            )
+            await self.progress_callback(
+                "extract_triplet_complete",
+                "三元组提取完成",
+                {
+                    "entities_count": _entities_count,
+                    "triplets_count": _triplets_count,
+                },
+            )
 
         return triplet_map
 

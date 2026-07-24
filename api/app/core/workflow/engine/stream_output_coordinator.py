@@ -268,14 +268,19 @@ class StreamOutputConfig(BaseModel):
 
 
 class StreamOutputCoordinator:
-    def __init__(self):
+    def __init__(self, multi_answer_mode_enabled: bool = False):
         self.end_outputs: dict[str, StreamOutputConfig] = {}
         self.activate_end: str | None = None
         self.output_queue: deque[str] = deque()
         self.processed_outputs = []
         # Track node scopes whose output was fully streamed via node_chunk events.
         # Used to prevent duplicate emission in emit_activate_chunk().
-        self._streamed_scopes: set[tuple[str, str]] = set()
+        # Streaming is tracked per output node.  The same upstream LLM can be
+        # referenced by multiple Answer nodes, and completing one must not
+        # suppress the sibling's final value.
+        self._streamed_scopes: set[tuple[str, str, str]] = set()
+        # 一问多答模式开关
+        self.multi_answer_mode_enabled = multi_answer_mode_enabled
 
     def initialize_end_outputs(
             self,
@@ -291,11 +296,41 @@ class StreamOutputCoordinator:
     def current_activate_end_info(self):
         return self.end_outputs.get(self.activate_end)
 
+    def active_end_ids(self) -> list[str]:
+        """Return all activated output nodes that still have pending data."""
+        return [
+            node_id for node_id, info in self.end_outputs.items()
+            if info.activate and info.cursor < len(info.outputs)
+        ]
+
+    async def emit_all_active_chunks(
+            self,
+            variable_pool: VariablePool,
+    ) -> AsyncGenerator[dict[str, str | dict], None]:
+        """Emit ready chunks for every active End/Answer node.
+
+        Each output node keeps its own cursor.  We intentionally iterate over
+        a snapshot: a node may finish and be removed while its sibling remains
+        active, allowing later graph events to interleave their chunks.
+        """
+        for node_id in list(self.active_end_ids()):
+            if node_id not in self.end_outputs:
+                continue
+            self.activate_end = node_id
+            async for event in self.emit_activate_chunk(variable_pool):
+                yield event
+        self.activate_end = None
+
     def pop_current_activate_end(self):
         self.end_outputs.pop(self.activate_end)
         self.activate_end = None
 
-    def mark_scope_streamed(self, scope: str, field: str = "output"):
+    def mark_scope_streamed(
+            self,
+            scope: str,
+            field: str = "output",
+            end_id: str | None = None,
+    ):
         """Mark a node scope as fully streamed via node_chunk events.
 
         When a scope is marked as streamed, emit_activate_chunk() will skip
@@ -307,8 +342,19 @@ class StreamOutputCoordinator:
             scope (str): The node ID whose output was fully streamed via chunks.
             field (str): The output field that was streamed.
         """
-        self._streamed_scopes.add((scope, field))
-        logger.debug(f"[STREAM] Marked scope '{scope}.{field}' as streamed via node_chunk events")
+        target_end_ids = [end_id] if end_id else (
+            [self.activate_end] if self.activate_end else [
+                node_id for node_id, info in self.end_outputs.items()
+                if any(seg.is_variable and seg.depends_on_scope(scope) for seg in info.outputs)
+            ]
+        )
+        for target_id in target_end_ids:
+            if target_id:
+                self._streamed_scopes.add((target_id, scope, field))
+        logger.debug(
+            f"[STREAM] Marked scope '{scope}.{field}' for End '{self.activate_end}' "
+            "as streamed via node_chunk events"
+        )
 
     def find_ends_dependent_on_scope(self, scope: str) -> list[tuple[str, StreamOutputConfig]]:
         """Find all End nodes that have variable segments depending on the given scope.
@@ -424,7 +470,7 @@ class StreamOutputCoordinator:
                 # If so, skip emission to prevent duplicate message events.
                 scope = current_segment.get_scope()
                 field = current_segment.get_field() or "output"
-                if scope and (scope, field) in self._streamed_scopes:
+                if scope and (self.activate_end, scope, field) in self._streamed_scopes:
                     logger.debug(
                         f"[STREAM] Skipping already-streamed variable segment "
                         f"'{current_segment.literal}' (scope={scope}, field={field}) for End node '{self.activate_end}'"
@@ -443,11 +489,12 @@ class StreamOutputCoordinator:
 
             if final_chunk:
                 logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk_length:{len(final_chunk)}")
+                msg_data = {"content": final_chunk}
+                if self.multi_answer_mode_enabled:
+                    msg_data["node_id"] = self.activate_end
                 yield {
                     "event": "message",
-                    "data": {
-                        "content": final_chunk
-                    }
+                    "data": msg_data
                 }
 
             # Advance cursor after processing
