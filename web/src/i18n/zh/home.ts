@@ -125,7 +125,7 @@ export const home = {
       platformManagement: '平台管理',
       systemSettings: '系统设置',
       upgradePackage: '套餐升级',
-      account: '账户',
+      account: '账户中心',
     },
     dashboard: {
       total_models: '可用模型总数',
